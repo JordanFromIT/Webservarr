@@ -312,12 +312,13 @@ async def create_issue_comment(
 @router.get("/upcoming-releases")
 async def get_upcoming_releases(
     days: int = 14,
+    start: str = "",
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get upcoming TV episodes and movies from Sonarr/Radarr. Requires authentication."""
-    sonarr_items = await sonarr.get_calendar(db, days=days)
-    radarr_items = await radarr.get_calendar(db, days=days)
+    sonarr_items = await sonarr.get_calendar(db, days=days, start=start)
+    radarr_items = await radarr.get_calendar(db, days=days, start=start)
 
     # Merge and sort by air_date
     combined = sonarr_items + radarr_items

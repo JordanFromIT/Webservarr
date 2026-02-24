@@ -203,6 +203,17 @@ async def issues_page(
     return _serve_page("/app/app/static/issues.html", "Issues page")
 
 
+# Calendar page
+@app.get("/calendar", response_class=HTMLResponse, tags=["Pages"])
+async def calendar_page(
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve the combined Radarr/Sonarr calendar page."""
+    if not await _require_session(session_id):
+        return RedirectResponse(url="/login", status_code=302)
+    return _serve_page("/app/app/static/calendar.html", "Calendar page")
+
+
 # Settings page (admin)
 @app.get("/settings", response_class=HTMLResponse, tags=["Pages"])
 async def settings_page(

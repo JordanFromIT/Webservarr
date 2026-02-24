@@ -24,7 +24,7 @@ def _get_config(db: Session) -> dict:
     }
 
 
-async def get_calendar(db: Session, days: int = 14) -> list:
+async def get_calendar(db: Session, days: int = 14, start: str = "") -> list:
     """
     Fetch upcoming episodes from Sonarr's calendar.
     Returns list of dicts with series title, episode info, and air date.
@@ -33,14 +33,14 @@ async def get_calendar(db: Session, days: int = 14) -> list:
     if not config["url"] or not config["api_key"]:
         return []
 
-    start = datetime.utcnow().strftime("%Y-%m-%d")
-    end = (datetime.utcnow() + timedelta(days=days)).strftime("%Y-%m-%d")
+    start_date = start if start else datetime.utcnow().strftime("%Y-%m-%d")
+    end_date = (datetime.strptime(start_date, "%Y-%m-%d") + timedelta(days=days)).strftime("%Y-%m-%d")
 
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
             resp = await client.get(
                 f"{config['url']}/api/v3/calendar",
-                params={"start": start, "end": end, "includeSeries": "true"},
+                params={"start": start_date, "end": end_date, "includeSeries": "true"},
                 headers={"X-Api-Key": config["api_key"]},
             )
             if resp.status_code != 200:
