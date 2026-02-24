@@ -32,10 +32,17 @@ PLEX_PRODUCT = "HMS Dashboard"
 
 async def _is_plex_server_owner(email: str, db: Session) -> bool:
     """
-    Check if the authenticated user is the Plex server owner.
-    Uses the admin's Plex token from settings to query the server identity,
-    then compares the server owner's email to the authenticated user's email.
+    Check if the authenticated user is the Plex server owner / admin.
+    First checks system.admin_email setting (explicit admin override),
+    then falls back to comparing against the Plex token owner's email.
     """
+    # Check explicit admin email setting first
+    admin_email_setting = db.query(Setting).filter(Setting.key == "system.admin_email").first()
+    if admin_email_setting and admin_email_setting.value:
+        if email.lower() == admin_email_setting.value.lower():
+            return True
+
+    # Fall back to Plex token owner comparison
     token_setting = db.query(Setting).filter(Setting.key == "integration.plex.token").first()
     url_setting = db.query(Setting).filter(Setting.key == "integration.plex.url").first()
 
@@ -286,6 +293,7 @@ async def plex_callback(state: str, db: Session = Depends(get_db)):
     user_email = user_info.get("email", "")
     username = user_info.get("username", "")
     display_name = user_info.get("title", username)
+    avatar_url = user_info.get("thumb", "")
 
     # Determine admin status: Plex server owner = admin
     is_admin = await _is_plex_server_owner(user_email, db)
@@ -300,6 +308,7 @@ async def plex_callback(state: str, db: Session = Depends(get_db)):
         "auth_method": "plex",
         "id_token": "",
         "plex_token": auth_token,
+        "avatar_url": avatar_url,
     }
 
     session_id = session_manager.generate_session_id()
@@ -355,4 +364,5 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
         "display_name": current_user.get("name", current_user.get("display_name", "")),
         "email": current_user.get("email", ""),
         "is_admin": current_user.get("is_admin") == "true",
+        "avatar_url": current_user.get("avatar_url", ""),
     }

@@ -12,7 +12,7 @@ Last verified: 2026-02-24
 |------|-----------|------|-------------|
 | `/login` | `app/static/login.html` | None | Login form (simple auth + Plex OAuth). Branding from theme engine. |
 | `/` | `app/static/index.html` | Session | Main dashboard. Plex streams (quality warnings, "More info" expander), service status, news. |
-| `/settings` | `app/static/settings.html` | Session (admin) | Four tabs: Integrations (monitors from Uptime Kuma + config), System, Theme, News. |
+| `/settings` | `app/static/settings.html` | Session (admin) | Four tabs: Integrations (monitors from Uptime Kuma + config), System, Customization, News. |
 | `/requests` | `app/static/requests.html` | Session | Overseerr iframe embed with Plex SSO. Calls re-auth before loading iframe. |
 | `/requests2` | `app/static/requests2.html` | Session | Native media request page. Search TMDB, create requests, view existing requests with poster grid and filter tabs. Alternative to iframe approach. |
 | `/issues` | `app/static/issues.html` | Session | Report and view media issues (audio, video, subtitle). Per-user Plex auth for writes. |
@@ -24,7 +24,7 @@ Last verified: 2026-02-24
 - **Plex OAuth via Authentik (legacy, still functional):** `GET /auth/login` → Authentik OIDC → Plex OAuth. Desktop uses popup (postMessage to close). Mobile uses full-page redirect. No longer used by default.
 - **Simple auth (fallback):** Username/password form → `POST /auth/simple-login`.
 
-**Admin determination:** OIDC callback checks if authenticated user's email matches the Plex server owner's email (via `plex.tv/api/v2/user` with admin token from `integration.plex.token` setting).
+**Admin determination:** First checks if user's email matches `system.admin_email` setting (if configured). Falls back to checking if email matches the Plex server owner's email (via `plex.tv/api/v2/user` with admin token from `integration.plex.token` setting).
 
 **Session fields:** `user_id`, `email`, `name`, `username`, `is_admin`, `auth_method` (plex/oidc/simple), `id_token` (for OIDC logout), `plex_token` (for Overseerr SSO).
 
@@ -91,13 +91,12 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
   "app_name": "HMS Dashboard",
   "tagline": "Home Media Server Management",
   "logo_url": "",
-  "show_default_credentials": true,
   "colors": { "primary": "#125793", "secondary": "#2C6DA1", "accent": "#4684B0", "text": "#BEEEF4", "background": "#000000" },
   "font": "Spline Sans",
-  "dark_mode": true,
   "custom_css": "",
   "features": { "show_requests": false },
-  "sidebar_labels": { "home": "Home", "requests": "Requests", "requests2": "Requests", "issues": "Issues", "settings": "Settings" }
+  "sidebar_labels": { "home": "Home", "requests": "Requests", "requests2": "Requests", "issues": "Issues", "settings": "Settings" },
+  "icons": { "sidebar_logo": "dashboard", "nav_home": "home", "nav_requests": "download", "nav_requests2": "movie", "nav_issues": "report_problem", "nav_settings": "settings", "section_streams": "play_circle", "section_services": "health_metrics", "section_requests": "movie", "section_news": "newspaper" }
 }
 ```
 
@@ -128,6 +127,7 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 | GET | `/api/admin/settings/{key}` | Admin | Get single setting |
 | PUT | `/api/admin/settings` | Admin | Update single setting |
 | PUT | `/api/admin/settings/bulk` | Admin | Update multiple settings |
+| POST | `/api/admin/upload-logo` | Admin | Upload logo image (PNG, JPEG, GIF, SVG, WebP; 2MB max). Saves to `/static/uploads/` and updates `branding.logo_url` setting. |
 | POST | `/api/admin/test-connection` | Admin | Test integration credentials |
 | POST | `/api/admin/restart-container` | Admin | Restart hms-dashboard container via Docker API |
 | POST | `/api/admin/shutdown-container` | Admin | Stop hms-dashboard container via Docker API |
@@ -187,15 +187,13 @@ Stored in `settings` table, seeded on first startup:
 |-----|---------|-------------|
 | `branding.app_name` | `HMS Dashboard` | App name shown in sidebar and login |
 | `branding.tagline` | `Home Media Server Management` | Shown on login page |
-| `branding.logo_url` | `""` | Custom logo URL |
-| `branding.show_default_credentials` | `true` | Show credential hints on login |
+| `branding.logo_url` | `""` | Custom logo URL (or path from upload) |
 | `theme.color_primary` | `#125793` | Primary color (Baltic Blue) |
 | `theme.color_secondary` | `#2C6DA1` | Secondary color (Cornflower Ocean) |
 | `theme.color_accent` | `#4684B0` | Accent color (Steel Blue) |
 | `theme.color_text` | `#BEEEF4` | Text color (Frosted Blue) |
 | `theme.color_background` | `#000000` | Background color |
-| `theme.font` | `Spline Sans` | Google Font family |
-| `theme.dark_mode` | `true` | Dark mode enabled |
+| `theme.font` | `Spline Sans` | Google Font family (30 curated fonts in dropdown + custom entry) |
 | `theme.custom_css` | `""` | Custom CSS injected on all pages |
 | `features.show_requests` | `false` | Show Overseerr iframe Requests page in sidebar |
 | `sidebar.label_home` | `Home` | Sidebar label for Home page |
@@ -203,6 +201,17 @@ Stored in `settings` table, seeded on first startup:
 | `sidebar.label_requests2` | `Requests` | Sidebar label for native Requests page |
 | `sidebar.label_issues` | `Issues` | Sidebar label for Issues page |
 | `sidebar.label_settings` | `Settings` | Sidebar label for Settings page |
+| `icon.sidebar_logo` | `dashboard` | Material Symbol for sidebar logo (when no logo image) |
+| `icon.nav_home` | `home` | Material Symbol for Home nav item |
+| `icon.nav_requests` | `download` | Material Symbol for Requests iframe nav item |
+| `icon.nav_requests2` | `movie` | Material Symbol for native Requests nav item |
+| `icon.nav_issues` | `report_problem` | Material Symbol for Issues nav item |
+| `icon.nav_settings` | `settings` | Material Symbol for Settings nav item |
+| `icon.section_streams` | `play_circle` | Material Symbol for Active Streams section |
+| `icon.section_services` | `health_metrics` | Material Symbol for Service Health section |
+| `icon.section_requests` | `movie` | Material Symbol for Recent Requests section |
+| `icon.section_news` | `newspaper` | Material Symbol for Latest News section |
+| `system.admin_email` | `""` | Admin email (priority check for Plex admin determination) |
 
 ---
 

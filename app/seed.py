@@ -17,14 +17,12 @@ DEFAULT_SETTINGS = {
     "branding.app_name": ("HMS Dashboard", "Application display name"),
     "branding.tagline": ("Home Media Server Management", "Tagline shown on login page"),
     "branding.logo_url": ("", "URL to custom logo image"),
-    "branding.show_default_credentials": ("true", "Show default credentials hint on login page"),
     "theme.color_primary": ("#125793", "Primary brand color (Baltic Blue)"),
     "theme.color_secondary": ("#2C6DA1", "Secondary brand color (Cornflower Ocean)"),
     "theme.color_accent": ("#4684B0", "Accent color (Steel Blue)"),
     "theme.color_text": ("#BEEEF4", "Text color (Frosted Blue)"),
     "theme.color_background": ("#000000", "Background color"),
     "theme.font": ("Spline Sans", "Google Font family name"),
-    "theme.dark_mode": ("true", "Enable dark mode"),
     "theme.custom_css": ("", "Custom CSS injected into all pages"),
     # Feature flags
     "features.show_requests": ("false", "Show Overseerr iframe Requests page in sidebar"),
@@ -34,6 +32,17 @@ DEFAULT_SETTINGS = {
     "sidebar.label_requests2": ("Requests", "Sidebar label for native Requests page"),
     "sidebar.label_issues": ("Issues", "Sidebar label for Issues page"),
     "sidebar.label_settings": ("Settings", "Sidebar label for Settings page"),
+    # Configurable icons (Material Symbols icon names)
+    "icon.nav_home": ("home", "Sidebar icon for Home page"),
+    "icon.nav_requests": ("download", "Sidebar icon for Requests iframe page"),
+    "icon.nav_requests2": ("movie", "Sidebar icon for native Requests page"),
+    "icon.nav_issues": ("report_problem", "Sidebar icon for Issues page"),
+    "icon.nav_settings": ("settings", "Sidebar icon for Settings page"),
+    "icon.sidebar_logo": ("settings_input_component", "Icon shown in sidebar logo area"),
+    "icon.section_services": ("health_metrics", "Homepage icon for Service Health section"),
+    "icon.section_news": ("newspaper", "Homepage icon for News & Updates section"),
+    "icon.section_streams": ("play_circle", "Homepage icon for Active Streams section"),
+    "icon.section_releases": ("calendar_month", "Homepage icon for Upcoming Releases section"),
 }
 
 

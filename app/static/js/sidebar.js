@@ -27,15 +27,22 @@ function _buildSidebarHTML(currentPage) {
   var appName = theme.app_name || 'HMS DASHBOARD';
   var features = theme.features || {};
   var labels = theme.sidebar_labels || {};
+  var icons = theme.icons || {};
+  var logoIcon = icons.sidebar_logo || 'settings_input_component';
+  var logoUrl = theme.logo_url || '';
 
-  // Filter by feature flags and apply label overrides
+  // Filter by feature flags and apply label/icon overrides
   var visibleItems = NAV_ITEMS.filter(function (item) {
     if (item.feature && !features[item.feature]) return false;
     return true;
   }).map(function (item) {
+    var overrides = {};
     var customLabel = labels[item.id];
-    if (customLabel) {
-      return Object.assign({}, item, { label: customLabel });
+    if (customLabel) overrides.label = customLabel;
+    var customIcon = icons['nav_' + item.id];
+    if (customIcon) overrides.icon = customIcon;
+    if (Object.keys(overrides).length > 0) {
+      return Object.assign({}, item, overrides);
     }
     return item;
   });
@@ -58,17 +65,19 @@ function _buildSidebarHTML(currentPage) {
       '<span>' + item.label + '</span>' + badge + '</a>';
   }).join('\n');
 
+  // Logo: image if logo_url set, otherwise icon
+  var logoHtml = logoUrl
+    ? '<img src="' + escapeHtml(logoUrl) + '" alt="Logo" class="size-12 rounded-lg object-contain shadow-lg shadow-baltic-blue/20 mb-3">'
+    : '<div class="size-12 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-baltic-blue/20 mb-3">' +
+        '<span class="material-symbols-outlined text-background-dark font-bold text-2xl">' + escapeHtml(logoIcon) + '</span>' +
+      '</div>';
+
   // Desktop sidebar
   var desktopSidebar = '' +
     '<aside id="desktopSidebar" class="hidden lg:flex w-64 bg-baltic-blue/20 border-r border-steel-blue/30 flex-col h-screen shrink-0">' +
-      '<div class="p-6 flex items-center gap-3">' +
-        '<div class="size-10 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-baltic-blue/20">' +
-          '<span class="material-symbols-outlined text-background-dark font-bold">settings_input_component</span>' +
-        '</div>' +
-        '<div>' +
-          '<h1 class="text-white font-bold text-lg leading-none">' + escapeHtml(appName) + '</h1>' +
-          '<p id="appVersion" class="text-steel-blue text-xs mt-1"></p>' +
-        '</div>' +
+      '<div class="p-6 flex flex-col items-center">' +
+        logoHtml +
+        '<h1 class="text-white font-bold text-lg leading-none text-center">' + escapeHtml(appName) + '</h1>' +
       '</div>' +
       '<nav class="flex-1 px-4 py-6 space-y-2">' + navLinks + '</nav>' +
       '<div id="serverLoadWidget" class="px-4 py-4 border-t border-steel-blue/20">' +
@@ -91,6 +100,7 @@ function _buildSidebarHTML(currentPage) {
         '<button id="logoutBtn" class="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-steel-blue hover:text-white transition-colors">' +
           '<span class="material-symbols-outlined text-sm">logout</span> Sign Out' +
         '</button>' +
+        '<p id="appVersion" class="text-steel-blue text-[10px] text-center mt-2" data-admin-only="true" style="display:none"></p>' +
       '</div>' +
     '</aside>';
 
@@ -113,22 +123,24 @@ function _buildSidebarHTML(currentPage) {
   var mobileDrawer = '' +
     '<div id="drawerOverlay" class="lg:hidden fixed inset-0 z-50 bg-black/60 hidden" style="backdrop-filter:blur(2px)">' +
       '<aside id="drawerPanel" class="w-72 bg-background-dark border-r border-steel-blue/30 h-full flex flex-col transform -translate-x-full transition-transform duration-300">' +
-        '<div class="p-6 flex items-center justify-between">' +
-          '<div class="flex items-center gap-3">' +
-            '<div class="size-10 bg-primary rounded-lg flex items-center justify-center">' +
-              '<span class="material-symbols-outlined text-background-dark font-bold">settings_input_component</span>' +
-            '</div>' +
-            '<h1 class="text-white font-bold text-lg leading-none">' + escapeHtml(appName) + '</h1>' +
+        '<div class="p-6">' +
+          '<div class="flex items-center justify-between mb-3">' +
+            '<div class="flex-1"></div>' +
+            '<button id="drawerCloseBtn" class="p-1 text-steel-blue hover:text-white transition-colors">' +
+              '<span class="material-symbols-outlined">close</span>' +
+            '</button>' +
           '</div>' +
-          '<button id="drawerCloseBtn" class="p-1 text-steel-blue hover:text-white transition-colors">' +
-            '<span class="material-symbols-outlined">close</span>' +
-          '</button>' +
+          '<div class="flex flex-col items-center">' +
+            logoHtml +
+            '<h1 class="text-white font-bold text-lg leading-none text-center">' + escapeHtml(appName) + '</h1>' +
+          '</div>' +
         '</div>' +
         '<nav class="flex-1 px-4 py-4 space-y-2">' + navLinks + '</nav>' +
         '<div class="p-4 border-t border-steel-blue/20">' +
           '<button data-logout class="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-steel-blue hover:text-white transition-colors">' +
             '<span class="material-symbols-outlined text-sm">logout</span> Sign Out' +
           '</button>' +
+          '<p class="appVersionMobile text-steel-blue text-[10px] text-center mt-2" data-admin-only="true" style="display:none"></p>' +
         '</div>' +
       '</aside>' +
     '</div>';

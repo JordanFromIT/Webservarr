@@ -60,6 +60,9 @@ authentik-templates/
 backup/
 *.backup
 
+# User uploads
+app/static/uploads/
+
 # Moat task system
 .moat/
 

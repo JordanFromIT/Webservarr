@@ -3,7 +3,9 @@ Admin API routes - Service management, settings, etc.
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+import os
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -254,6 +256,61 @@ async def test_connection(
         return {"success": False, "message": f"Could not connect to {url}"}
     except Exception as e:
         return {"success": False, "message": f"Connection error: {str(e)}"}
+
+
+# --- Logo Upload ---
+
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "uploads")
+ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/svg+xml", "image/webp"}
+MAX_LOGO_SIZE = 2 * 1024 * 1024  # 2MB
+
+
+@router.post("/upload-logo")
+async def upload_logo(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload a logo image file. Saves to /static/uploads/ and updates branding.logo_url.
+    Accepts PNG, JPEG, GIF, SVG, WebP up to 2MB.
+    """
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type: {file.content_type}. Allowed: PNG, JPEG, GIF, SVG, WebP",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_LOGO_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File too large. Maximum size is 2MB.",
+        )
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+    # Generate unique filename preserving extension
+    ext = os.path.splitext(file.filename or "logo.png")[1].lower()
+    if ext not in {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}:
+        ext = ".png"
+    filename = f"logo-{uuid.uuid4().hex[:8]}{ext}"
+    filepath = os.path.join(UPLOAD_DIR, filename)
+
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    logo_url = f"/static/uploads/{filename}"
+
+    # Update branding.logo_url setting
+    setting = db.query(Setting).filter(Setting.key == "branding.logo_url").first()
+    if setting:
+        setting.value = logo_url
+    else:
+        db.add(Setting(key="branding.logo_url", value=logo_url, description="URL to custom logo image"))
+    db.commit()
+
+    return {"url": logo_url}
 
 
 # --- Container Management ---

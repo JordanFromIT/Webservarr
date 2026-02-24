@@ -16,14 +16,12 @@ DEFAULTS = {
     "branding.app_name": "HMS Dashboard",
     "branding.tagline": "Home Media Server Management",
     "branding.logo_url": "",
-    "branding.show_default_credentials": "true",
     "theme.color_primary": "#125793",
     "theme.color_secondary": "#2C6DA1",
     "theme.color_accent": "#4684B0",
     "theme.color_text": "#BEEEF4",
     "theme.color_background": "#000000",
     "theme.font": "Spline Sans",
-    "theme.dark_mode": "true",
     "theme.custom_css": "",
     # Feature flags
     "features.show_requests": "false",
@@ -33,6 +31,17 @@ DEFAULTS = {
     "sidebar.label_requests2": "Requests",
     "sidebar.label_issues": "Issues",
     "sidebar.label_settings": "Settings",
+    # Configurable icons
+    "icon.nav_home": "home",
+    "icon.nav_requests": "download",
+    "icon.nav_requests2": "movie",
+    "icon.nav_issues": "report_problem",
+    "icon.nav_settings": "settings",
+    "icon.sidebar_logo": "settings_input_component",
+    "icon.section_services": "health_metrics",
+    "icon.section_news": "newspaper",
+    "icon.section_streams": "play_circle",
+    "icon.section_releases": "calendar_month",
 }
 
 
@@ -55,7 +64,6 @@ async def get_branding(db: Session = Depends(get_db)):
         "app_name": get("branding.app_name"),
         "tagline": get("branding.tagline"),
         "logo_url": get("branding.logo_url"),
-        "show_default_credentials": get("branding.show_default_credentials") == "true",
         "colors": {
             "primary": get("theme.color_primary"),
             "secondary": get("theme.color_secondary"),
@@ -64,7 +72,6 @@ async def get_branding(db: Session = Depends(get_db)):
             "background": get("theme.color_background"),
         },
         "font": get("theme.font"),
-        "dark_mode": get("theme.dark_mode") == "true",
         "custom_css": get("theme.custom_css"),
         "features": {
             "show_requests": get("features.show_requests") == "true",
@@ -75,5 +82,17 @@ async def get_branding(db: Session = Depends(get_db)):
             "requests2": get("sidebar.label_requests2"),
             "issues": get("sidebar.label_issues"),
             "settings": get("sidebar.label_settings"),
+        },
+        "icons": {
+            "nav_home": get("icon.nav_home"),
+            "nav_requests": get("icon.nav_requests"),
+            "nav_requests2": get("icon.nav_requests2"),
+            "nav_issues": get("icon.nav_issues"),
+            "nav_settings": get("icon.nav_settings"),
+            "sidebar_logo": get("icon.sidebar_logo"),
+            "section_services": get("icon.section_services"),
+            "section_news": get("icon.section_news"),
+            "section_streams": get("icon.section_streams"),
+            "section_releases": get("icon.section_releases"),
         },
     }

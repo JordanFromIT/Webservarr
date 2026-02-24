@@ -155,5 +155,6 @@ async def check_session(
             "username": current_user.get("username", ""),
             "display_name": current_user.get("display_name", ""),
             "is_admin": current_user.get("is_admin", "false") == "true",
+            "avatar_url": current_user.get("avatar_url", ""),
         },
     }

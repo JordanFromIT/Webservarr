@@ -4,10 +4,10 @@
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>HMS Dashboard - Settings</title>
-    <script src="/static/js/theme-loader.js"></script>
+    <script src="/static/js/theme-loader.js?v=2"></script>
     <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-    <link href="/static/css/theme.css" rel="stylesheet"/>
+    <link href="/static/css/theme.css?v=2" rel="stylesheet"/>
     <script>tailwind.config = {
       darkMode: "class",
       theme: {
@@ -167,7 +167,7 @@
                     System
                 </button>
                 <button id="tabTheme" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue">
-                    Theme
+                    Customization
                 </button>
                 <button id="tabNews" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue">
                     News
@@ -177,32 +177,6 @@
 
         <!-- Integrations Section (Services + Integration Configs) -->
         <div id="integrationsSection">
-
-            <!-- Services (auto-populated from Uptime Kuma) -->
-            <div class="flex items-center justify-between mb-4">
-                <div class="flex items-center gap-3">
-                    <span class="material-symbols-outlined text-2xl text-frosted-blue">dns</span>
-                    <h2 class="text-xl font-bold text-frosted-blue">Services</h2>
-                </div>
-                <button id="btnRefreshMonitors" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2">
-                    <span class="material-symbols-outlined text-sm">refresh</span>
-                    Refresh
-                </button>
-            </div>
-            <p class="text-sm text-steel-blue mb-4">Services are pulled from Uptime Kuma. Toggle which ones appear on the homepage.</p>
-
-            <!-- Monitor List -->
-            <div id="monitorsList" class="space-y-3">
-                <div class="text-center text-steel-blue py-12">
-                    <span class="material-symbols-outlined text-6xl mb-4 block opacity-50">dns</span>
-                    <p>Loading monitors...</p>
-                </div>
-            </div>
-
-            <!-- Divider -->
-            <div class="border-t border-steel-blue/20 my-8"></div>
-
-            <!-- Integration Configurations -->
 
             <!-- Uptime Kuma -->
             <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
@@ -239,6 +213,28 @@
                             Test Connection
                         </button>
                         <div id="statusUptimeKuma" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                    <p class="text-xs text-steel-blue/70 mt-2">Test checks connectivity to the status page endpoint. API key is only required if your status page is not public.</p>
+                </div>
+
+                <!-- Services (monitors from Uptime Kuma) -->
+                <div class="border-t border-steel-blue/20 mt-6 pt-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-xl text-frosted-blue">dns</span>
+                            <h3 class="text-lg font-bold text-frosted-blue">Services</h3>
+                        </div>
+                        <button id="btnRefreshMonitors" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-sm">refresh</span>
+                            Refresh
+                        </button>
+                    </div>
+                    <p class="text-xs text-steel-blue/70 mb-4">Toggle which monitors appear on the homepage.</p>
+                    <div id="monitorsList" class="space-y-3">
+                        <div class="text-center text-steel-blue py-8">
+                            <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span>
+                            <p class="text-sm">Loading monitors...</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -426,17 +422,11 @@
 
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">Site Title</label>
-                        <input type="text" id="systemSiteTitle" value="HMS Dashboard"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="HMS Dashboard">
-                    </div>
-
-                    <div>
                         <label class="block text-sm font-semibold text-steel-blue mb-2">Admin Email</label>
-                        <input type="email" id="systemAdminEmail" value="admin@hmserver.tv"
+                        <input type="email" id="systemAdminEmail"
                             class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                             placeholder="admin@example.com">
+                        <p class="text-xs text-steel-blue/70 mt-1">Plex users who log in with this email will be granted admin access. Also falls back to comparing against the Plex server owner's email.</p>
                     </div>
 
                     <div class="flex items-center gap-4 pt-4">
@@ -459,29 +449,45 @@
                     <div class="space-y-4">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <label class="block text-sm font-semibold text-steel-blue mb-2">App Name</label>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Site Title</label>
                                 <input type="text" id="themeAppName"
                                     class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                     placeholder="HMS Dashboard">
+                                <p class="text-xs text-steel-blue/70 mt-1">Shown in the sidebar, browser tab, and login page</p>
                             </div>
                             <div>
                                 <label class="block text-sm font-semibold text-steel-blue mb-2">Tagline</label>
                                 <input type="text" id="themeTagline"
                                     class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                     placeholder="Home Media Server Management">
+                                <p class="text-xs text-steel-blue/70 mt-1">Shown below the title on the login page</p>
                             </div>
                         </div>
                         <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Logo URL</label>
-                            <input type="url" id="themeLogoUrl"
-                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                                placeholder="https://example.com/logo.png">
-                            <p class="text-xs text-steel-blue mt-1">Leave empty for default icon</p>
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <input type="checkbox" id="themeShowDefaultCreds"
-                                class="rounded border-steel-blue/30 bg-black/50 text-primary focus:ring-primary">
-                            <label for="themeShowDefaultCreds" class="text-sm text-frosted-blue">Show default credentials hint on login page</label>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Logo</label>
+                            <div class="flex items-start gap-4">
+                                <div id="logoPreview" class="size-16 bg-primary/20 border border-steel-blue/30 rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
+                                    <span class="material-symbols-outlined text-steel-blue text-2xl">image</span>
+                                </div>
+                                <div class="flex-1 space-y-2">
+                                    <input type="text" id="themeLogoUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="https://example.com/logo.png or /static/uploads/logo.png">
+                                    <div class="flex items-center gap-2">
+                                        <label class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5">
+                                            <span class="material-symbols-outlined text-sm">upload_file</span>
+                                            Upload File
+                                            <input type="file" id="logoFileInput" accept="image/png,image/jpeg,image/gif,image/svg+xml,image/webp" class="hidden">
+                                        </label>
+                                        <button type="button" id="btnClearLogo" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5">
+                                            <span class="material-symbols-outlined text-sm">delete</span>
+                                            Clear
+                                        </button>
+                                        <span id="logoUploadStatus" class="text-xs"></span>
+                                    </div>
+                                    <p class="text-xs text-steel-blue/70">Shown in the sidebar. Accepts URL, uploaded file (max 2MB), or server path. Leave empty for default icon.</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -520,6 +526,110 @@
                             <input type="text" id="sidebarLabelSettings"
                                 class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Settings">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Icons -->
+                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                    <h2 class="text-xl font-bold mb-2 text-frosted-blue">Icons</h2>
+                    <p class="text-xs text-steel-blue/70 mb-6">Customize icons using <a href="https://fonts.google.com/icons" target="_blank" class="text-primary hover:underline">Material Symbols</a> names</p>
+                    <div class="space-y-4">
+                        <h3 class="text-sm font-semibold text-steel-blue uppercase tracking-wider">Sidebar Navigation</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Sidebar Logo</label>
+                                <div class="flex items-center gap-2">
+                                    <span id="iconPreviewSidebarLogo" class="material-symbols-outlined text-frosted-blue">settings_input_component</span>
+                                    <input type="text" id="iconSidebarLogo"
+                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                        placeholder="settings_input_component">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Home</label>
+                                <div class="flex items-center gap-2">
+                                    <span id="iconPreviewNavHome" class="material-symbols-outlined text-frosted-blue">home</span>
+                                    <input type="text" id="iconNavHome"
+                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                        placeholder="home">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Requests (iframe)</label>
+                                <div class="flex items-center gap-2">
+                                    <span id="iconPreviewNavRequests" class="material-symbols-outlined text-frosted-blue">download</span>
+                                    <input type="text" id="iconNavRequests"
+                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                        placeholder="download">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Requests (native)</label>
+                                <div class="flex items-center gap-2">
+                                    <span id="iconPreviewNavRequests2" class="material-symbols-outlined text-frosted-blue">movie</span>
+                                    <input type="text" id="iconNavRequests2"
+                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                        placeholder="movie">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Issues</label>
+                                <div class="flex items-center gap-2">
+                                    <span id="iconPreviewNavIssues" class="material-symbols-outlined text-frosted-blue">report_problem</span>
+                                    <input type="text" id="iconNavIssues"
+                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                        placeholder="report_problem">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Settings</label>
+                                <div class="flex items-center gap-2">
+                                    <span id="iconPreviewNavSettings" class="material-symbols-outlined text-frosted-blue">settings</span>
+                                    <input type="text" id="iconNavSettings"
+                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                        placeholder="settings">
+                                </div>
+                            </div>
+                        </div>
+                        <h3 class="text-sm font-semibold text-steel-blue uppercase tracking-wider pt-4">Homepage Sections</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Service Health</label>
+                                <div class="flex items-center gap-2">
+                                    <span id="iconPreviewSectionServices" class="material-symbols-outlined text-frosted-blue">health_metrics</span>
+                                    <input type="text" id="iconSectionServices"
+                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                        placeholder="health_metrics">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">News &amp; Updates</label>
+                                <div class="flex items-center gap-2">
+                                    <span id="iconPreviewSectionNews" class="material-symbols-outlined text-frosted-blue">newspaper</span>
+                                    <input type="text" id="iconSectionNews"
+                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                        placeholder="newspaper">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Active Streams</label>
+                                <div class="flex items-center gap-2">
+                                    <span id="iconPreviewSectionStreams" class="material-symbols-outlined text-frosted-blue">play_circle</span>
+                                    <input type="text" id="iconSectionStreams"
+                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                        placeholder="play_circle">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Upcoming Releases</label>
+                                <div class="flex items-center gap-2">
+                                    <span id="iconPreviewSectionReleases" class="material-symbols-outlined text-frosted-blue">calendar_month</span>
+                                    <input type="text" id="iconSectionReleases"
+                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+                                        placeholder="calendar_month">
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -581,32 +691,27 @@
                     </div>
                 </div>
 
-                <!-- Font & Mode -->
+                <!-- Font -->
                 <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
-                    <h2 class="text-xl font-bold mb-6 text-frosted-blue">Font & Mode</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Google Font Family</label>
-                            <input type="text" id="themeFont"
-                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                                placeholder="Spline Sans">
-                            <p class="text-xs text-steel-blue mt-1">Any Google Fonts family name</p>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Mode</label>
-                            <div class="flex items-center gap-4 mt-2">
-                                <label class="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name="themeMode" value="true" checked
-                                        class="text-primary focus:ring-primary border-steel-blue/30 bg-black/50">
-                                    <span class="text-frosted-blue">Dark</span>
-                                </label>
-                                <label class="flex items-center gap-2 cursor-pointer">
-                                    <input type="radio" name="themeMode" value="false"
-                                        class="text-primary focus:ring-primary border-steel-blue/30 bg-black/50">
-                                    <span class="text-frosted-blue">Light</span>
-                                </label>
+                    <h2 class="text-xl font-bold mb-6 text-frosted-blue">Font</h2>
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">Google Font Family</label>
+                        <input type="hidden" id="themeFont" value="Spline Sans">
+                        <div class="relative" id="fontDropdownContainer">
+                            <button type="button" id="fontDropdownBtn"
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white text-left focus:outline-none focus:ring-2 focus:ring-primary flex items-center justify-between">
+                                <span id="fontDropdownLabel" class="truncate">Spline Sans</span>
+                                <span class="material-symbols-outlined text-steel-blue text-sm ml-2 shrink-0">expand_more</span>
+                            </button>
+                            <div id="fontDropdownPanel" class="hidden absolute z-50 w-full mt-1 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl max-h-72 overflow-hidden flex flex-col">
+                                <div class="p-2 border-b border-steel-blue/20">
+                                    <input type="text" id="fontSearch" placeholder="Search or enter custom font..."
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                                </div>
+                                <div id="fontOptionsList" class="overflow-y-auto custom-scrollbar flex-1"></div>
                             </div>
                         </div>
+                        <p class="text-xs text-steel-blue mt-1">Select a font or type a custom Google Fonts family name</p>
                     </div>
                 </div>
 
@@ -796,7 +901,7 @@
     </div><!-- end scrollable wrapper -->
     </main>
 
-    <script src="/static/js/auth.js"></script>
+    <script src="/static/js/auth.js?v=2"></script>
     <script src="/static/js/sidebar.js?v=5"></script>
     <script>
         // Initialize sidebar and auth
@@ -865,9 +970,6 @@
                     var uptime = m.uptime_24h != null ? m.uptime_24h + '%' : '--';
 
                     return '<div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl px-5 py-4 flex items-center gap-4">' +
-                        '<div class="size-10 rounded-lg bg-black flex items-center justify-center border border-steel-blue/20 shrink-0">' +
-                            '<span class="material-symbols-outlined text-2xl text-frosted-blue">' + escapeHtml(m.icon || 'dns') + '</span>' +
-                        '</div>' +
                         '<div class="flex-1 min-w-0">' +
                             '<div class="flex items-center gap-2">' +
                                 '<span class="size-2 rounded-full ' + statusDot + ' shrink-0"></span>' +
@@ -876,9 +978,6 @@
                             '<p class="text-xs text-steel-blue mt-0.5">' + statusLabel + ' &middot; ' + ping + ' &middot; ' + uptime + ' uptime (24h)</p>' +
                         '</div>' +
                         '<div class="flex items-center gap-3 shrink-0">' +
-                            '<input type="text" data-monitor-id="' + m.id + '" data-field="icon" value="' + escapeHtml(m.icon || '') + '"' +
-                                ' placeholder="icon name" title="Material icon name"' +
-                                ' class="w-28 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary">' +
                             '<label class="relative inline-flex items-center cursor-pointer">' +
                                 '<input type="checkbox" data-monitor-id="' + m.id + '" data-field="enabled"' +
                                     (m.enabled ? ' checked' : '') +
@@ -894,16 +993,6 @@
                 list.querySelectorAll('input[data-field="enabled"]').forEach(function(toggle) {
                     toggle.addEventListener('change', function() {
                         updateMonitorPref(this.dataset.monitorId, { enabled: this.checked });
-                    });
-                });
-                list.querySelectorAll('input[data-field="icon"]').forEach(function(input) {
-                    var debounce;
-                    input.addEventListener('input', function() {
-                        var el = this;
-                        clearTimeout(debounce);
-                        debounce = setTimeout(function() {
-                            updateMonitorPref(el.dataset.monitorId, { icon: el.value });
-                        }, 600);
                     });
                 });
             } catch (error) {
@@ -1001,9 +1090,6 @@
                 }
 
                 // Populate system fields
-                if (settingsMap['system.site_title']) {
-                    document.getElementById('systemSiteTitle').value = settingsMap['system.site_title'];
-                }
                 if (settingsMap['system.admin_email']) {
                     document.getElementById('systemAdminEmail').value = settingsMap['system.admin_email'];
                 }
@@ -1112,7 +1198,6 @@
         // --- System Settings ---
 
         document.getElementById('btnSaveSystem').addEventListener('click', async () => {
-            const siteTitle = document.getElementById('systemSiteTitle').value;
             const adminEmail = document.getElementById('systemAdminEmail').value;
             const statusDiv = document.getElementById('statusSystem');
 
@@ -1122,7 +1207,6 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         settings: [
-                            { key: 'system.site_title', value: siteTitle, description: 'Site title' },
                             { key: 'system.admin_email', value: adminEmail, description: 'Admin email' }
                         ]
                     })
@@ -1154,20 +1238,28 @@
             'branding.app_name': 'HMS Dashboard',
             'branding.tagline': 'Home Media Server Management',
             'branding.logo_url': '',
-            'branding.show_default_credentials': 'true',
             'theme.color_primary': '#125793',
             'theme.color_secondary': '#2C6DA1',
             'theme.color_accent': '#4684B0',
             'theme.color_text': '#BEEEF4',
             'theme.color_background': '#000000',
             'theme.font': 'Spline Sans',
-            'theme.dark_mode': 'true',
             'theme.custom_css': '',
             'sidebar.label_home': 'Home',
             'sidebar.label_requests': 'Requests',
             'sidebar.label_requests2': 'Requests',
             'sidebar.label_issues': 'Issues',
             'sidebar.label_settings': 'Settings',
+            'icon.sidebar_logo': 'settings_input_component',
+            'icon.nav_home': 'home',
+            'icon.nav_requests': 'download',
+            'icon.nav_requests2': 'movie',
+            'icon.nav_issues': 'report_problem',
+            'icon.nav_settings': 'settings',
+            'icon.section_services': 'health_metrics',
+            'icon.section_news': 'newspaper',
+            'icon.section_streams': 'play_circle',
+            'icon.section_releases': 'calendar_month',
         };
 
         function hexToRgb(hex) {
@@ -1200,6 +1292,167 @@
             });
         });
 
+        // --- Logo Upload & Preview ---
+        function _updateLogoPreview(url) {
+            var preview = document.getElementById('logoPreview');
+            while (preview.firstChild) preview.removeChild(preview.firstChild);
+            if (url) {
+                var img = document.createElement('img');
+                img.src = url;
+                img.alt = 'Logo';
+                img.className = 'w-full h-full object-contain';
+                preview.appendChild(img);
+            } else {
+                var icon = document.createElement('span');
+                icon.className = 'material-symbols-outlined text-steel-blue text-2xl';
+                icon.textContent = 'image';
+                preview.appendChild(icon);
+            }
+        }
+
+        document.getElementById('themeLogoUrl').addEventListener('input', function() {
+            _updateLogoPreview(this.value.trim());
+        });
+
+        document.getElementById('btnClearLogo').addEventListener('click', function() {
+            document.getElementById('themeLogoUrl').value = '';
+            _updateLogoPreview('');
+        });
+
+        document.getElementById('logoFileInput').addEventListener('change', async function() {
+            var file = this.files[0];
+            if (!file) return;
+            var statusEl = document.getElementById('logoUploadStatus');
+            statusEl.textContent = 'Uploading...';
+            statusEl.className = 'text-xs text-steel-blue';
+
+            var formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                var resp = await fetch('/api/admin/upload-logo', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (resp.ok) {
+                    var data = await resp.json();
+                    document.getElementById('themeLogoUrl').value = data.url;
+                    _updateLogoPreview(data.url);
+                    statusEl.textContent = 'Uploaded!';
+                    statusEl.className = 'text-xs text-green-400';
+                } else {
+                    var err = await resp.json();
+                    statusEl.textContent = err.detail || 'Upload failed';
+                    statusEl.className = 'text-xs text-red-400';
+                }
+            } catch (e) {
+                statusEl.textContent = 'Error: ' + e.message;
+                statusEl.className = 'text-xs text-red-400';
+            }
+            this.value = '';
+            setTimeout(function() { statusEl.textContent = ''; }, 5000);
+        });
+
+        // Wire icon input live preview
+        document.querySelectorAll('[id^="icon"][id$="Logo"],[id^="iconNav"],[id^="iconSection"]').forEach(function(input) {
+            if (input.tagName !== 'INPUT') return;
+            input.addEventListener('input', function() {
+                var previewId = 'iconPreview' + input.id.replace('icon', '');
+                var preview = document.getElementById(previewId);
+                if (preview) preview.textContent = input.value || input.placeholder;
+            });
+        });
+
+        // --- Font Dropdown ---
+        var FONT_LIST = [
+            'Spline Sans', 'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat',
+            'Poppins', 'Nunito', 'Raleway', 'Source Sans 3', 'Ubuntu', 'Outfit',
+            'Space Grotesk', 'DM Sans', 'Manrope', 'Plus Jakarta Sans', 'Sora',
+            'Lexend', 'Figtree', 'Work Sans', 'Jost', 'Albert Sans', 'Barlow',
+            'Red Hat Display', 'Rubik', 'Nunito Sans', 'Cabin', 'Karla',
+            'Quicksand', 'Exo 2'
+        ];
+        var _loadedFonts = {};
+
+        function _loadFontPreview(fontName) {
+            if (_loadedFonts[fontName]) return;
+            _loadedFonts[fontName] = true;
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(fontName) + '&display=swap';
+            document.head.appendChild(link);
+        }
+
+        function _createFontBtn(fontName, isActive) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'w-full text-left px-4 py-2.5 text-sm transition-colors ' +
+                (isActive ? 'bg-primary/30 text-white' : 'text-frosted-blue hover:bg-primary/20');
+            btn.style.fontFamily = "'" + fontName + "', sans-serif";
+            btn.dataset.font = fontName;
+            btn.textContent = fontName;
+            btn.addEventListener('click', function() { _selectFont(fontName); });
+            return btn;
+        }
+
+        function _buildFontOptions(filter) {
+            var list = document.getElementById('fontOptionsList');
+            var currentVal = document.getElementById('themeFont').value;
+            var lowerFilter = (filter || '').toLowerCase();
+            var filtered = FONT_LIST.filter(function(f) {
+                return !lowerFilter || f.toLowerCase().indexOf(lowerFilter) !== -1;
+            });
+
+            filtered.forEach(_loadFontPreview);
+            while (list.firstChild) list.removeChild(list.firstChild);
+
+            filtered.forEach(function(fontName) {
+                list.appendChild(_createFontBtn(fontName, fontName === currentVal));
+            });
+
+            // Custom entry option
+            if (lowerFilter && !FONT_LIST.some(function(f) { return f.toLowerCase() === lowerFilter; })) {
+                var customBtn = document.createElement('button');
+                customBtn.type = 'button';
+                customBtn.className = 'w-full text-left px-4 py-2.5 text-sm text-steel-blue hover:bg-primary/20 transition-colors border-t border-steel-blue/20';
+                customBtn.dataset.font = filter;
+                customBtn.textContent = 'Use custom: "' + filter + '"';
+                customBtn.addEventListener('click', function() { _selectFont(filter); });
+                list.appendChild(customBtn);
+            }
+        }
+
+        function _selectFont(fontName) {
+            document.getElementById('themeFont').value = fontName;
+            var label = document.getElementById('fontDropdownLabel');
+            label.textContent = fontName;
+            _loadFontPreview(fontName);
+            label.style.fontFamily = "'" + fontName + "', sans-serif";
+            document.getElementById('fontDropdownPanel').classList.add('hidden');
+            document.getElementById('fontSearch').value = '';
+        }
+
+        document.getElementById('fontDropdownBtn').addEventListener('click', function() {
+            var panel = document.getElementById('fontDropdownPanel');
+            var isHidden = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden');
+            if (isHidden) {
+                _buildFontOptions('');
+                document.getElementById('fontSearch').focus();
+            }
+        });
+
+        document.getElementById('fontSearch').addEventListener('input', function() {
+            _buildFontOptions(this.value.trim());
+        });
+
+        document.addEventListener('click', function(e) {
+            var container = document.getElementById('fontDropdownContainer');
+            if (!container.contains(e.target)) {
+                document.getElementById('fontDropdownPanel').classList.add('hidden');
+            }
+        });
+
         // Load current theme values from branding API
         async function loadThemeSettings() {
             try {
@@ -1210,8 +1463,7 @@
                 document.getElementById('themeAppName').value = data.app_name || '';
                 document.getElementById('themeTagline').value = data.tagline || '';
                 document.getElementById('themeLogoUrl').value = data.logo_url || '';
-                document.getElementById('themeShowDefaultCreds').checked = data.show_default_credentials !== false;
-
+                _updateLogoPreview(data.logo_url || '');
                 const colors = data.colors || {};
                 const colorMap = {
                     primary: colors.primary || '#125793',
@@ -1228,12 +1480,12 @@
                     document.getElementById(field.hex).value = colorVal;
                 });
 
-                document.getElementById('themeFont').value = data.font || '';
-                if (data.dark_mode) {
-                    document.querySelector('input[name="themeMode"][value="true"]').checked = true;
-                } else {
-                    document.querySelector('input[name="themeMode"][value="false"]').checked = true;
-                }
+                var fontVal = data.font || 'Spline Sans';
+                document.getElementById('themeFont').value = fontVal;
+                var fontLabel = document.getElementById('fontDropdownLabel');
+                fontLabel.textContent = fontVal;
+                _loadFontPreview(fontVal);
+                fontLabel.style.fontFamily = "'" + fontVal + "', sans-serif";
 
                 document.getElementById('themeCustomCss').value = data.custom_css || '';
 
@@ -1244,6 +1496,27 @@
                 document.getElementById('sidebarLabelRequests2').value = sidebarLabels.requests2 || '';
                 document.getElementById('sidebarLabelIssues').value = sidebarLabels.issues || '';
                 document.getElementById('sidebarLabelSettings').value = sidebarLabels.settings || '';
+
+                // Icons
+                var iconsData = data.icons || {};
+                var iconFields = {
+                    iconSidebarLogo: iconsData.sidebar_logo || '',
+                    iconNavHome: iconsData.nav_home || '',
+                    iconNavRequests: iconsData.nav_requests || '',
+                    iconNavRequests2: iconsData.nav_requests2 || '',
+                    iconNavIssues: iconsData.nav_issues || '',
+                    iconNavSettings: iconsData.nav_settings || '',
+                    iconSectionServices: iconsData.section_services || '',
+                    iconSectionNews: iconsData.section_news || '',
+                    iconSectionStreams: iconsData.section_streams || '',
+                    iconSectionReleases: iconsData.section_releases || '',
+                };
+                for (var fieldId in iconFields) {
+                    var input = document.getElementById(fieldId);
+                    if (input) input.value = iconFields[fieldId];
+                    var preview = document.getElementById('iconPreview' + fieldId.replace('icon', ''));
+                    if (preview && iconFields[fieldId]) preview.textContent = iconFields[fieldId];
+                }
             } catch (e) {
                 console.error('Error loading theme settings:', e);
             }
@@ -1259,7 +1532,6 @@
                 { key: 'branding.app_name', value: document.getElementById('themeAppName').value, description: 'App name' },
                 { key: 'branding.tagline', value: document.getElementById('themeTagline').value, description: 'App tagline' },
                 { key: 'branding.logo_url', value: document.getElementById('themeLogoUrl').value, description: 'Logo URL' },
-                { key: 'branding.show_default_credentials', value: document.getElementById('themeShowDefaultCreds').checked ? 'true' : 'false', description: 'Show default credentials on login' },
             ];
 
             themeColorFields.forEach(function(field) {
@@ -1271,7 +1543,6 @@
             });
 
             settings.push({ key: 'theme.font', value: document.getElementById('themeFont').value, description: 'Google Font family' });
-            settings.push({ key: 'theme.dark_mode', value: document.querySelector('input[name="themeMode"]:checked').value, description: 'Dark mode enabled' });
             settings.push({ key: 'theme.custom_css', value: document.getElementById('themeCustomCss').value, description: 'Custom CSS' });
 
             // Sidebar labels
@@ -1280,6 +1551,24 @@
             settings.push({ key: 'sidebar.label_requests2', value: document.getElementById('sidebarLabelRequests2').value || 'Requests', description: 'Sidebar label for native Requests' });
             settings.push({ key: 'sidebar.label_issues', value: document.getElementById('sidebarLabelIssues').value || 'Issues', description: 'Sidebar label for Issues' });
             settings.push({ key: 'sidebar.label_settings', value: document.getElementById('sidebarLabelSettings').value || 'Settings', description: 'Sidebar label for Settings' });
+
+            // Icons
+            var iconSaveMap = {
+                'icon.sidebar_logo': { input: 'iconSidebarLogo', fallback: 'settings_input_component' },
+                'icon.nav_home': { input: 'iconNavHome', fallback: 'home' },
+                'icon.nav_requests': { input: 'iconNavRequests', fallback: 'download' },
+                'icon.nav_requests2': { input: 'iconNavRequests2', fallback: 'movie' },
+                'icon.nav_issues': { input: 'iconNavIssues', fallback: 'report_problem' },
+                'icon.nav_settings': { input: 'iconNavSettings', fallback: 'settings' },
+                'icon.section_services': { input: 'iconSectionServices', fallback: 'health_metrics' },
+                'icon.section_news': { input: 'iconSectionNews', fallback: 'newspaper' },
+                'icon.section_streams': { input: 'iconSectionStreams', fallback: 'play_circle' },
+                'icon.section_releases': { input: 'iconSectionReleases', fallback: 'calendar_month' },
+            };
+            for (var iconKey in iconSaveMap) {
+                var iconDef = iconSaveMap[iconKey];
+                settings.push({ key: iconKey, value: document.getElementById(iconDef.input).value || iconDef.fallback, description: iconKey });
+            }
 
             try {
                 var resp = await fetch('/api/admin/settings/bulk', {
@@ -1308,7 +1597,7 @@
             document.getElementById('themeAppName').value = THEME_DEFAULTS['branding.app_name'];
             document.getElementById('themeTagline').value = THEME_DEFAULTS['branding.tagline'];
             document.getElementById('themeLogoUrl').value = THEME_DEFAULTS['branding.logo_url'];
-            document.getElementById('themeShowDefaultCreds').checked = THEME_DEFAULTS['branding.show_default_credentials'] === 'true';
+            _updateLogoPreview('');
 
             themeColorFields.forEach(function(field) {
                 var val = THEME_DEFAULTS[field.key];
@@ -1318,8 +1607,7 @@
                 document.documentElement.style.setProperty(field.cssVar.replace('--color-', '--hex-'), val);
             });
 
-            document.getElementById('themeFont').value = THEME_DEFAULTS['theme.font'];
-            document.querySelector('input[name="themeMode"][value="' + THEME_DEFAULTS['theme.dark_mode'] + '"]').checked = true;
+            _selectFont(THEME_DEFAULTS['theme.font']);
             document.getElementById('themeCustomCss').value = THEME_DEFAULTS['theme.custom_css'];
 
             // Sidebar labels
@@ -1328,6 +1616,26 @@
             document.getElementById('sidebarLabelRequests2').value = THEME_DEFAULTS['sidebar.label_requests2'];
             document.getElementById('sidebarLabelIssues').value = THEME_DEFAULTS['sidebar.label_issues'];
             document.getElementById('sidebarLabelSettings').value = THEME_DEFAULTS['sidebar.label_settings'];
+
+            // Icons
+            var iconResetMap = {
+                iconSidebarLogo: 'icon.sidebar_logo',
+                iconNavHome: 'icon.nav_home',
+                iconNavRequests: 'icon.nav_requests',
+                iconNavRequests2: 'icon.nav_requests2',
+                iconNavIssues: 'icon.nav_issues',
+                iconNavSettings: 'icon.nav_settings',
+                iconSectionServices: 'icon.section_services',
+                iconSectionNews: 'icon.section_news',
+                iconSectionStreams: 'icon.section_streams',
+                iconSectionReleases: 'icon.section_releases',
+            };
+            for (var resetId in iconResetMap) {
+                var resetVal = THEME_DEFAULTS[iconResetMap[resetId]];
+                document.getElementById(resetId).value = resetVal;
+                var resetPreview = document.getElementById('iconPreview' + resetId.replace('icon', ''));
+                if (resetPreview) resetPreview.textContent = resetVal;
+            }
 
             // Auto-save the defaults
             document.getElementById('btnSaveTheme').click();

@@ -4,10 +4,10 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>HMS Dashboard - Control Center</title>
-<script src="/static/js/theme-loader.js"></script>
+<script src="/static/js/theme-loader.js?v=2"></script>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="/static/css/theme.css" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=2" rel="stylesheet"/>
 <script>tailwind.config = {
   darkMode: "class",
   theme: {
@@ -44,12 +44,24 @@
 <button class="relative p-2 text-steel-blue hover:text-frosted-blue transition-colors group" title="Notifications - Coming soon">
 <span class="material-symbols-outlined">notifications</span>
 </button>
-<div class="flex items-center gap-3 pl-4">
+<div class="relative">
+<button id="userMenuBtn" class="flex items-center gap-3 pl-4 cursor-pointer hover:opacity-80 transition-opacity">
 <div class="text-right">
 <p id="headerUsername" class="text-sm font-bold text-white leading-none"></p>
 <p id="headerRole" class="text-[10px] text-steel-blue mt-1"></p>
 </div>
-<div class="size-9 rounded-full bg-gradient-to-br from-baltic-blue to-cornflower-ocean border border-steel-blue/40"></div>
+<div id="headerAvatar" class="size-9 rounded-full bg-gradient-to-br from-baltic-blue to-cornflower-ocean border border-steel-blue/40"></div>
+</button>
+<div id="userMenuDropdown" class="hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
+<a href="/settings" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors" data-admin-only="true" style="display:none">
+<span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>
+Account Settings
+</a>
+<button data-logout class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors text-left">
+<span class="material-symbols-outlined text-steel-blue text-sm">logout</span>
+Sign Out
+</button>
+</div>
 </div>
 </div>
 </header>
@@ -60,7 +72,7 @@
 <!-- Service Health -->
 <section>
 <div class="flex items-center gap-3 mb-4">
-<span class="material-symbols-outlined text-steel-blue">health_metrics</span>
+<span id="iconSectionServices" class="material-symbols-outlined text-steel-blue">health_metrics</span>
 <h3 class="text-xl font-bold text-white">Service Health</h3>
 </div>
 <div id="servicesContainer" class="grid gap-3">
@@ -74,7 +86,7 @@
 <!-- News & Updates -->
 <section>
 <div class="flex items-center gap-3 mb-4">
-<span class="material-symbols-outlined text-steel-blue">newspaper</span>
+<span id="iconSectionNews" class="material-symbols-outlined text-steel-blue">newspaper</span>
 <h3 class="text-xl font-bold text-white">News &amp; Updates</h3>
 </div>
 <div id="newsContainer" class="grid gap-3">
@@ -90,7 +102,7 @@
 <section>
 <div class="flex items-center justify-between mb-6">
 <div class="flex items-center gap-3">
-<span class="material-symbols-outlined text-steel-blue">play_circle</span>
+<span id="iconSectionStreams" class="material-symbols-outlined text-steel-blue">play_circle</span>
 <h3 class="text-xl font-bold text-white">Active Streams</h3>
 </div>
 <div id="streamChevrons" class="flex items-center gap-2 hidden">
@@ -114,7 +126,7 @@
 <section id="upcomingReleasesSection">
 <div class="flex items-center justify-between mb-6">
 <div class="flex items-center gap-3">
-<span class="material-symbols-outlined text-steel-blue">calendar_month</span>
+<span id="iconSectionReleases" class="material-symbols-outlined text-steel-blue">calendar_month</span>
 <h3 class="text-xl font-bold text-white">Upcoming Releases</h3>
 </div>
 </div>
@@ -184,18 +196,34 @@ RAM: --
 </footer>
 </main>
 
-<script src="/static/js/auth.js"></script>
+<script src="/static/js/auth.js?v=2"></script>
 <script src="/static/js/sidebar.js?v=5"></script>
 <script>
 // HMS Dashboard - Main Page
 document.addEventListener('DOMContentLoaded', async function() {
     initSidebar('home');
 
+    // Apply configurable section icons from branding
+    var icons = (window.HMS_THEME || {}).icons || {};
+    var iconMap = {
+        iconSectionServices: icons.section_services,
+        iconSectionNews: icons.section_news,
+        iconSectionStreams: icons.section_streams,
+        iconSectionReleases: icons.section_releases,
+    };
+    for (var elId in iconMap) {
+        if (iconMap[elId]) {
+            var el = document.getElementById(elId);
+            if (el) el.textContent = iconMap[elId];
+        }
+    }
+
     const user = await checkAuth();
     if (!user) return;
     showAdminNav(user.is_admin);
 
     // Load all dynamic sections
+    loadSystemStatus();
     loadNews();
     loadServices();
     loadActiveStreams();
@@ -206,6 +234,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Auto-refresh dynamic sections every 30 seconds
     setInterval(function() {
+        loadSystemStatus();
         loadServices();
         loadActiveStreams();
         loadRecentRequests();
@@ -213,6 +242,14 @@ document.addEventListener('DOMContentLoaded', async function() {
         loadSystemStats();
         loadUpcomingReleases();
     }, 30000);
+
+    // Live-update "Checked X ago" timers every 10 seconds
+    setInterval(function() {
+        document.querySelectorAll('.last-check-timer[data-last-check]').forEach(function(el) {
+            var iso = el.dataset.lastCheck;
+            if (iso) el.textContent = 'Checked ' + getTimeAgo(new Date(iso));
+        });
+    }, 10000);
 });
 
 // Load news from API
@@ -518,7 +555,6 @@ async function loadRecentRequests() {
 // Load services from Uptime Kuma (only enabled monitors)
 async function loadServices() {
     const servicesContainer = document.getElementById('servicesContainer');
-    const statusBanner = document.getElementById('systemStatus');
     let services = [];
 
     try {
@@ -546,30 +582,7 @@ async function loadServices() {
         return;
     }
 
-    // Update the system status banner based on actual service health
-    if (services.length > 0) {
-        const hasDown = services.some(s => s.status === 'down');
-        const hasDegraded = services.some(s => s.status === 'degraded');
-        if (hasDown) {
-            statusBanner.innerHTML = `
-                <span class="flex size-2 rounded-full bg-red-500"></span>
-                <span class="text-red-500 text-xs font-bold uppercase tracking-widest">System Issues Detected</span>
-            `;
-            statusBanner.className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/30';
-        } else if (hasDegraded) {
-            statusBanner.innerHTML = `
-                <span class="flex size-2 rounded-full bg-yellow-500"></span>
-                <span class="text-yellow-500 text-xs font-bold uppercase tracking-widest">Degraded Performance</span>
-            `;
-            statusBanner.className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-yellow-500/10 border border-yellow-500/30';
-        } else {
-            statusBanner.innerHTML = `
-                <span class="flex size-2 rounded-full bg-green-500 animate-pulse"></span>
-                <span class="text-green-500 text-xs font-bold uppercase tracking-widest">All Systems Online</span>
-            `;
-            statusBanner.className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30';
-        }
-    }
+    // System status banner is handled by loadSystemStatus() in auth.js
 
     if (services.length === 0) {
         servicesContainer.innerHTML = `
@@ -621,17 +634,14 @@ async function loadServices() {
                 dotColor = 'bg-steel-blue';
         }
 
-        const icon = service.icon || 'dns';
         const ping = service.response_time != null ? service.response_time + 'ms' : '--';
         const uptime = service.uptime_24h != null ? service.uptime_24h + '%' : '--';
-        const lastCheck = service.last_check ? getTimeAgo(new Date(service.last_check + 'Z')) : '';
+        const lastCheckIso = service.last_check ? service.last_check + 'Z' : '';
+        const lastCheck = lastCheckIso ? getTimeAgo(new Date(lastCheckIso)) : '';
 
         return `
             <div class="bg-baltic-blue/10 border ${borderColor} p-4 rounded-xl hover:border-primary/50 transition-all">
                 <div class="flex items-center gap-3 mb-2">
-                    <div class="size-9 rounded-lg bg-black flex items-center justify-center border ${borderColor} shrink-0">
-                        <span class="material-symbols-outlined text-xl ${iconColor}">${icon}</span>
-                    </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2">
                             <span class="size-2 rounded-full ${dotColor} shrink-0"></span>
@@ -640,9 +650,9 @@ async function loadServices() {
                         <p class="text-[11px] ${statusColor} font-medium">${statusLabel} &middot; ${ping}</p>
                     </div>
                 </div>
-                <div class="flex items-center justify-between text-[10px] text-steel-blue mt-1 pl-12">
+                <div class="flex items-center justify-between text-[10px] text-steel-blue mt-1">
                     <span>Uptime (24h): <span class="text-frosted-blue font-semibold">${uptime}</span></span>
-                    <span>${lastCheck ? 'Checked ' + escapeHtml(lastCheck) : ''}</span>
+                    <span class="last-check-timer" data-last-check="${escapeHtml(lastCheckIso)}">${lastCheck ? 'Checked ' + escapeHtml(lastCheck) : ''}</span>
                 </div>
             </div>
         `;

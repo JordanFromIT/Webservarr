@@ -59,14 +59,9 @@
       }
     }
 
-    // Dark/light mode
-    if (data.dark_mode) {
-      root.classList.add('dark');
-      root.classList.remove('light');
-    } else {
-      root.classList.add('light');
-      root.classList.remove('dark');
-    }
+    // Always dark mode
+    root.classList.add('dark');
+    root.classList.remove('light');
 
     // Custom CSS injection
     if (data.custom_css) {

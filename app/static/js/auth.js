@@ -32,6 +32,27 @@ async function checkAuth(options) {
     if (usernameEl) usernameEl.textContent = user.display_name || user.username;
     if (roleEl) roleEl.textContent = user.is_admin ? 'Admin' : 'User';
 
+    // Populate avatar if available
+    var avatarEl = document.getElementById('headerAvatar');
+    if (avatarEl && user.avatar_url) {
+      avatarEl.style.backgroundImage = 'url(' + user.avatar_url + ')';
+      avatarEl.style.backgroundSize = 'cover';
+      avatarEl.style.backgroundPosition = 'center';
+    }
+
+    // Wire user menu dropdown if present
+    var userMenuBtn = document.getElementById('userMenuBtn');
+    var userMenuDropdown = document.getElementById('userMenuDropdown');
+    if (userMenuBtn && userMenuDropdown) {
+      userMenuBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        userMenuDropdown.classList.toggle('hidden');
+      });
+      document.addEventListener('click', function() {
+        userMenuDropdown.classList.add('hidden');
+      });
+    }
+
     return user;
   } catch (e) {
     window.location.href = '/login';
@@ -66,11 +87,12 @@ function escapeHtml(text) {
  */
 function getTimeAgo(date) {
   var seconds = Math.floor((new Date() - date) / 1000);
-  if (seconds < 60) return 'JUST NOW';
-  if (seconds < 3600) return Math.floor(seconds / 60) + ' MIN AGO';
-  if (seconds < 86400) return Math.floor(seconds / 3600) + ' HOURS AGO';
+  if (seconds < 5) return 'JUST NOW';
+  if (seconds < 60) return seconds + 'S AGO';
+  if (seconds < 3600) return Math.floor(seconds / 60) + 'M AGO';
+  if (seconds < 86400) return Math.floor(seconds / 3600) + 'H AGO';
   if (seconds < 172800) return 'YESTERDAY';
-  if (seconds < 604800) return Math.floor(seconds / 86400) + ' DAYS AGO';
+  if (seconds < 604800) return Math.floor(seconds / 86400) + 'D AGO';
   return date.toLocaleDateString();
 }
 
@@ -87,6 +109,52 @@ function formatUptime(seconds) {
 }
 
 /**
+ * Load system status from Uptime Kuma and update the status banner.
+ * Can be called from any page that has a #systemStatus element.
+ */
+async function loadSystemStatus() {
+  var banner = document.getElementById('systemStatus');
+  if (!banner) return;
+  try {
+    var resp = await fetch('/api/integrations/service-status');
+    if (!resp.ok) return;
+    var services = await resp.json();
+    if (!Array.isArray(services) || services.length === 0) return;
+
+    var hasDown = services.some(function(s) { return s.status === 'down'; });
+    var hasDegraded = services.some(function(s) { return s.status === 'degraded'; });
+
+    var dotColor, textColor, label, bgClass;
+    if (hasDown) {
+      dotColor = 'bg-red-500'; textColor = 'text-red-500';
+      label = 'System Issues Detected';
+      bgClass = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/30';
+    } else if (hasDegraded) {
+      dotColor = 'bg-yellow-500'; textColor = 'text-yellow-500';
+      label = 'Degraded Performance';
+      bgClass = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-yellow-500/10 border border-yellow-500/30';
+    } else {
+      dotColor = 'bg-green-500 animate-pulse'; textColor = 'text-green-500';
+      label = 'All Systems Online';
+      bgClass = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30';
+    }
+
+    // Build using DOM methods (no innerHTML with dynamic content)
+    banner.className = bgClass;
+    while (banner.firstChild) banner.removeChild(banner.firstChild);
+    var dot = document.createElement('span');
+    dot.className = 'flex size-2 rounded-full ' + dotColor;
+    var text = document.createElement('span');
+    text.className = textColor + ' text-xs font-bold uppercase tracking-widest';
+    text.textContent = label;
+    banner.appendChild(dot);
+    banner.appendChild(text);
+  } catch (e) {
+    // silently fail — status stays at "Loading..."
+  }
+}
+
+/**
  * Load app version from /health and display it.
  * @param {string} [elementId="appVersion"]
  */
@@ -95,8 +163,14 @@ async function loadAppVersion(elementId) {
   try {
     var resp = await fetch('/health');
     var data = await resp.json();
+    if (!data.version) return;
+    var versionText = 'v' + data.version;
     var el = document.getElementById(elementId);
-    if (el && data.version) el.textContent = 'v' + data.version;
+    if (el) el.textContent = versionText;
+    // Also populate mobile version elements
+    document.querySelectorAll('.appVersionMobile').forEach(function(m) {
+      m.textContent = versionText;
+    });
   } catch (e) {
     // silently fail
   }

@@ -4,10 +4,10 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>HMS Dashboard - Login</title>
-<script src="/static/js/theme-loader.js"></script>
+<script src="/static/js/theme-loader.js?v=2"></script>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="/static/css/theme.css" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=2" rel="stylesheet"/>
 <script>tailwind.config = {
   darkMode: "class",
   theme: {
@@ -87,7 +87,6 @@
 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-primary text-[20px]">lock</span>
 <input id="password" name="password" class="w-full bg-white/5 border border-white/10 rounded-lg py-3 pl-10 pr-4 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="••••••••" type="password" required/>
 </div>
-<p id="loginDefaultCreds" class="text-xs text-steel-blue px-1 mt-1">Default: admin / admin123</p>
 </div>
 <button type="submit" class="w-full bg-primary hover:bg-primary/90 text-white font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98]">
                     Sign In
@@ -139,10 +138,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (theme.tagline) {
         var el = document.getElementById('loginTagline');
         if (el) el.textContent = theme.tagline;
-    }
-    if (theme.show_default_credentials === false) {
-        var el = document.getElementById('loginDefaultCreds');
-        if (el) el.style.display = 'none';
     }
 
     // If already authenticated, redirect to dashboard
