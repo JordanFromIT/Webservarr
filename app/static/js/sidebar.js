@@ -14,6 +14,7 @@ var NAV_ITEMS = [
   { id: 'requests', label: 'Requests',    icon: 'download',              href: '/requests', badgeId: 'requestsBadge', feature: 'show_requests' },
   { id: 'requests2', label: 'Requests2',  icon: 'movie',                 href: '/requests2' },
   { id: 'issues',    label: 'Issues',     icon: 'report_problem',        href: '/issues' },
+  { id: 'calendar',  label: 'Calendar',    icon: 'calendar_month',        href: '/calendar' },
   { id: 'settings', label: 'Settings',    icon: 'settings',              href: '/settings', adminOnly: true },
 ];
 
@@ -80,22 +81,6 @@ function _buildSidebarHTML(currentPage) {
         '<h1 class="text-white font-bold text-lg leading-none text-center">' + escapeHtml(appName) + '</h1>' +
       '</div>' +
       '<nav class="flex-1 px-4 py-6 space-y-2">' + navLinks + '</nav>' +
-      '<div id="serverLoadWidget" class="px-4 py-4 border-t border-steel-blue/20">' +
-        '<div class="flex items-center gap-2 mb-3">' +
-          '<span class="material-symbols-outlined text-sm text-steel-blue">monitoring</span>' +
-          '<span class="text-xs font-bold text-steel-blue uppercase tracking-wider">Server Load</span>' +
-        '</div>' +
-        '<div class="space-y-3">' +
-          '<div>' +
-            '<div class="flex justify-between text-[10px] text-steel-blue mb-1"><span>CPU</span><span id="cpuPercent">--</span></div>' +
-            '<div class="h-1.5 bg-white/10 rounded-full overflow-hidden"><div id="cpuBar" class="h-full bg-primary rounded-full transition-all duration-500" style="width:0%"></div></div>' +
-          '</div>' +
-          '<div>' +
-            '<div class="flex justify-between text-[10px] text-steel-blue mb-1"><span>RAM</span><span id="ramPercent">--</span></div>' +
-            '<div class="h-1.5 bg-white/10 rounded-full overflow-hidden"><div id="ramBar" class="h-full bg-cornflower-ocean rounded-full transition-all duration-500" style="width:0%"></div></div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
       '<div class="p-4 border-t border-steel-blue/20">' +
         '<button id="logoutBtn" class="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-steel-blue hover:text-white transition-colors">' +
           '<span class="material-symbols-outlined text-sm">logout</span> Sign Out' +
