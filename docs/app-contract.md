@@ -12,7 +12,7 @@ Last verified: 2026-02-24
 |------|-----------|------|-------------|
 | `/login` | `app/static/login.html` | None | Login form (simple auth + Plex OAuth). Branding from theme engine. |
 | `/` | `app/static/index.html` | Session | Main dashboard. Plex streams (quality warnings, "More info" expander), service status, news. |
-| `/settings` | `app/static/settings.html` | Session (admin) | Four tabs: Integrations (monitors from Uptime Kuma + config), System, Customization, News. |
+| `/settings` | `app/static/settings.html` | Session (admin) | Four tabs: Integrations (accordion with Plex/Kuma/Overseerr/Sonarr/Radarr/Netdata), System, Customization (icon picker, theme, sidebar labels), News. |
 | `/requests` | `app/static/requests.html` | Session | Overseerr iframe embed with Plex SSO. Calls re-auth before loading iframe. |
 | `/requests2` | `app/static/requests2.html` | Session | Native media request page. Search TMDB, create requests, view existing requests with poster grid and filter tabs. Alternative to iframe approach. |
 | `/issues` | `app/static/issues.html` | Session | Report and view media issues (audio, video, subtitle). Per-user Plex auth for writes. |
@@ -40,7 +40,7 @@ All pages (except login) use a shared sidebar component and theme system:
 |------|---------|
 | `app/static/js/theme-loader.js` | Fetches `/api/branding`, sets CSS custom properties (RGB triplets), injects Google Font, applies dark/light mode. Cached in localStorage to prevent FOUC. Loaded in `<head>` before Tailwind. |
 | `app/static/js/auth.js` | `checkAuth()`, `wireLogout()`, `escapeHtml()`, `getTimeAgo()`, `formatUptime()`, `loadAppVersion()` |
-| `app/static/js/sidebar.js` | `initSidebar(page)` — injects sidebar HTML into `<div id="sidebar-root">`. Desktop: persistent 256px sidebar. Mobile: hamburger drawer. `showAdminNav(isAdmin)` reveals admin-only items. |
+| `app/static/js/sidebar.js` | `initSidebar(page)` — injects sidebar HTML into `<div id="sidebar-root">`. Desktop: persistent 256px sidebar. Mobile: hamburger drawer. `showAdminNav(isAdmin)` reveals admin-only items. Logo auto-sizes to sidebar width. |
 | `app/static/css/theme.css` | CSS custom property defaults, glass-card styles, custom scrollbar. |
 
 ### Tailwind + CSS Custom Properties
@@ -250,7 +250,7 @@ Storage: SQLite at `/app/data/hms.db` (container path) / `data/hms.db` (host pat
 | Section | Data Source | Status |
 |---------|------------|--------|
 | Active Streams | Plex API via `/api/integrations/active-streams` | Working |
-| Service Health | Uptime Kuma via `/api/integrations/service-status` (enabled monitors only) | Working |
+| Service Health | Uptime Kuma via `/api/integrations/service-status` (enabled monitors only, compact single-line rows) | Working |
 | Recent Requests | Overseerr via `/api/integrations/recent-requests` | Working |
 | News | Local DB via `/api/news/` | Working |
 | Upcoming Releases | Hardcoded placeholder | **Not wired to real data** |

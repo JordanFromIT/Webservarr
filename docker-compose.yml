@@ -40,6 +40,8 @@ services:
     volumes:
       # SQLite database persistence
       - ./data:/app/data
+      # Uploaded assets (logos, etc.) persistence
+      - ./uploads:/app/app/static/uploads
       # Docker socket for container management (admin restart/shutdown)
       - /var/run/docker.sock:/var/run/docker.sock
 

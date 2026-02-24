@@ -31,8 +31,9 @@ app/integrations/netdata.py       # Netdata API client (exists, not fully wired)
 
 app/static/login.html        # Login page
 app/static/index.html        # Main dashboard
-app/static/settings.html      # Integrations, System, Theme, News tabs
+app/static/settings.html      # Integrations (accordion), System, Customization (icons, theme, labels), News tabs
 
+uploads/                      # Uploaded assets (logos) — volume-mounted, persists across rebuilds
 docker-compose.yml            # 5 containers (all active: hms-dashboard, redis, authentik-server, authentik-worker, postgresql)
 Dockerfile                    # Python 3.11-slim image
 requirements.txt              # Python dependencies

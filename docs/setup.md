@@ -42,13 +42,14 @@ AUTHENTIK_CLIENT_SECRET=
 
 The `AUTHENTIK_CLIENT_ID` and `AUTHENTIK_CLIENT_SECRET` fields can be left blank. Authentik/OIDC integration is not active in the current version.
 
-## 3. Create the Data Directory
+## 3. Create the Data Directories
 
 ```bash
-mkdir -p data
+mkdir -p data uploads
 ```
 
-The SQLite database (`hms.db`) will be created here on first startup.
+- `data/` — SQLite database (`hms.db`), created on first startup
+- `uploads/` — Uploaded assets (logos), volume-mounted into the container
 
 ## 4. Start the Containers
 
@@ -181,6 +182,7 @@ This will recreate the database with a fresh admin user and clear all sessions.
 
 Back up these files regularly:
 - `data/hms.db` - All application data (users, news, services, settings)
+- `uploads/` - Uploaded assets (logos)
 - `.env` - Secrets and configuration
 
 No automated backup is currently configured.

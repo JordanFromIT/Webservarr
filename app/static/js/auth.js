@@ -87,12 +87,12 @@ function escapeHtml(text) {
  */
 function getTimeAgo(date) {
   var seconds = Math.floor((new Date() - date) / 1000);
-  if (seconds < 5) return 'JUST NOW';
-  if (seconds < 60) return seconds + 'S AGO';
-  if (seconds < 3600) return Math.floor(seconds / 60) + 'M AGO';
-  if (seconds < 86400) return Math.floor(seconds / 3600) + 'H AGO';
-  if (seconds < 172800) return 'YESTERDAY';
-  if (seconds < 604800) return Math.floor(seconds / 86400) + 'D AGO';
+  if (seconds < 5) return 'just now';
+  if (seconds < 60) return seconds + 's ago';
+  if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+  if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+  if (seconds < 172800) return 'yesterday';
+  if (seconds < 604800) return Math.floor(seconds / 86400) + 'd ago';
   return date.toLocaleDateString();
 }
 

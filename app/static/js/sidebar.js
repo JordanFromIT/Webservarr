@@ -67,9 +67,9 @@ function _buildSidebarHTML(currentPage) {
 
   // Logo: image if logo_url set, otherwise icon
   var logoHtml = logoUrl
-    ? '<img src="' + escapeHtml(logoUrl) + '" alt="Logo" class="size-12 rounded-lg object-contain shadow-lg shadow-baltic-blue/20 mb-3">'
-    : '<div class="size-12 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-baltic-blue/20 mb-3">' +
-        '<span class="material-symbols-outlined text-background-dark font-bold text-2xl">' + escapeHtml(logoIcon) + '</span>' +
+    ? '<img src="' + escapeHtml(logoUrl) + '" alt="Logo" class="w-full h-auto rounded-lg object-contain shadow-lg shadow-baltic-blue/20 mb-3">'
+    : '<div class="size-14 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-baltic-blue/20 mb-3">' +
+        '<span class="material-symbols-outlined text-background-dark font-bold text-3xl">' + escapeHtml(logoIcon) + '</span>' +
       '</div>';
 
   // Desktop sidebar

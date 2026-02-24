@@ -4,10 +4,10 @@
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>HMS Dashboard - Settings</title>
-    <script src="/static/js/theme-loader.js?v=2"></script>
+    <script src="/static/js/theme-loader.js"></script>
     <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-    <link href="/static/css/theme.css?v=2" rel="stylesheet"/>
+    <link href="/static/css/theme.css" rel="stylesheet"/>
     <script>tailwind.config = {
       darkMode: "class",
       theme: {
@@ -149,6 +149,19 @@
         .heading-dropdown.open {
             display: block;
         }
+        /* Accordion active state */
+        .accordion-item .accordion-trigger:has(+ .accordion-body:not(.hidden)) {
+            background: rgba(44, 109, 161, 0.08);
+        }
+        /* Color swatch circle inputs */
+        input[type="color"] {
+            -webkit-appearance: none;
+            padding: 0;
+        }
+        input[type="color"]::-moz-color-swatch {
+            border: none;
+            border-radius: 9999px;
+        }
     </style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row overflow-hidden">
@@ -175,244 +188,277 @@
             </nav>
         </div>
 
-        <!-- Integrations Section (Services + Integration Configs) -->
+        <!-- Integrations Section (Accordion) -->
         <div id="integrationsSection">
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl overflow-hidden" id="integrationsAccordion">
 
-            <!-- Uptime Kuma -->
-            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
-                <div class="flex items-center gap-3 mb-6">
-                    <span class="material-symbols-outlined text-3xl text-frosted-blue">monitor_heart</span>
-                    <h2 class="text-xl font-bold text-frosted-blue">Uptime Kuma</h2>
-                </div>
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
-                        <input type="url" id="integrationUptimeKumaUrl"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="https://uptime.example.com">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">Status Page Slug</label>
-                        <input type="text" id="integrationUptimeKumaSlug"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="default">
-                        <p class="text-xs text-steel-blue/70 mt-1">The slug of your public status page (found in URL: /status/[slug])</p>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Key</label>
-                        <input type="password" id="integrationUptimeKumaApiKey"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="Enter API key (optional for public status pages)">
-                    </div>
-                    <div class="flex items-center gap-4 pt-2">
-                        <button onclick="saveIntegration('uptime_kuma')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
-                            Save
-                        </button>
-                        <button onclick="testConnection('uptime_kuma')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
-                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
-                            Test Connection
-                        </button>
-                        <div id="statusUptimeKuma" class="flex items-center gap-2 text-sm"></div>
-                    </div>
-                    <p class="text-xs text-steel-blue/70 mt-2">Test checks connectivity to the status page endpoint. API key is only required if your status page is not public.</p>
-                </div>
+                <!-- Uptime Kuma -->
+                <div class="accordion-item border-b border-steel-blue/20 last:border-b-0" data-accordion="uptime_kuma">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('uptime_kuma')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">monitor_heart</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Uptime Kuma</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotUptimeKuma"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyUptimeKuma">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL</label>
+                                    <input type="url" id="integrationUptimeKumaUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="https://uptime.example.com">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Status Page Slug</label>
+                                    <input type="text" id="integrationUptimeKumaSlug"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="default">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key</label>
+                                <input type="password" id="integrationUptimeKumaApiKey"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                    placeholder="Optional — only for private status pages">
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('uptime_kuma')" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('uptime_kuma')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <div id="statusUptimeKuma" class="flex items-center gap-2 text-sm"></div>
+                            </div>
 
-                <!-- Services (monitors from Uptime Kuma) -->
-                <div class="border-t border-steel-blue/20 mt-6 pt-6">
-                    <div class="flex items-center justify-between mb-4">
-                        <div class="flex items-center gap-3">
-                            <span class="material-symbols-outlined text-xl text-frosted-blue">dns</span>
-                            <h3 class="text-lg font-bold text-frosted-blue">Services</h3>
-                        </div>
-                        <button id="btnRefreshMonitors" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5">
-                            <span class="material-symbols-outlined text-sm">refresh</span>
-                            Refresh
-                        </button>
-                    </div>
-                    <p class="text-xs text-steel-blue/70 mb-4">Toggle which monitors appear on the homepage.</p>
-                    <div id="monitorsList" class="space-y-3">
-                        <div class="text-center text-steel-blue py-8">
-                            <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span>
-                            <p class="text-sm">Loading monitors...</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Plex -->
-            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
-                <div class="flex items-center gap-3 mb-6">
-                    <span class="material-symbols-outlined text-3xl text-frosted-blue">play_circle</span>
-                    <h2 class="text-xl font-bold text-frosted-blue">Plex</h2>
-                </div>
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
-                        <input type="url" id="integrationPlexUrl"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="https://plex.example.com:32400">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Token</label>
-                        <input type="password" id="integrationPlexToken"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="Enter Plex token">
-                    </div>
-                    <div class="flex items-center gap-4 pt-2">
-                        <button onclick="saveIntegration('plex')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
-                            Save
-                        </button>
-                        <button onclick="testConnection('plex')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
-                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
-                            Test Connection
-                        </button>
-                        <div id="statusPlex" class="flex items-center gap-2 text-sm"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Overseerr -->
-            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
-                <div class="flex items-center gap-3 mb-6">
-                    <span class="material-symbols-outlined text-3xl text-frosted-blue">movie_filter</span>
-                    <h2 class="text-xl font-bold text-frosted-blue">Overseerr</h2>
-                </div>
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
-                        <input type="url" id="integrationOverseerrUrl"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="https://overseerr.example.com">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Key</label>
-                        <input type="password" id="integrationOverseerrApiKey"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="Enter API key">
-                    </div>
-                    <div class="flex items-center gap-4 pt-2">
-                        <button onclick="saveIntegration('overseerr')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
-                            Save
-                        </button>
-                        <button onclick="testConnection('overseerr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
-                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
-                            Test Connection
-                        </button>
-                        <div id="statusOverseerr" class="flex items-center gap-2 text-sm"></div>
-                    </div>
-                    <div class="flex items-center gap-3 mt-4 pt-4 border-t border-steel-blue/20">
-                        <label class="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" id="featureShowRequests" class="sr-only peer">
-                            <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
-                            <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
-                        </label>
-                        <div>
-                            <span class="text-sm text-frosted-blue">Show Overseerr iframe page in sidebar</span>
-                            <p class="text-xs text-steel-blue/70 mt-0.5">Enables a separate page that embeds Overseerr directly</p>
+                            <!-- Services sub-section -->
+                            <div class="border-t border-steel-blue/20 mt-3 pt-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="material-symbols-outlined text-lg text-steel-blue">dns</span>
+                                        <h3 class="text-sm font-bold text-frosted-blue">Homepage Services</h3>
+                                    </div>
+                                    <button id="btnRefreshMonitors" class="text-steel-blue hover:text-frosted-blue transition-colors" title="Refresh monitors">
+                                        <span class="material-symbols-outlined text-lg">refresh</span>
+                                    </button>
+                                </div>
+                                <p class="text-xs text-steel-blue/70 mb-3">Toggle which monitors appear on the homepage.</p>
+                                <div id="monitorsList" class="space-y-2">
+                                    <div class="text-center text-steel-blue py-6">
+                                        <span class="material-symbols-outlined text-3xl mb-2 block opacity-50">dns</span>
+                                        <p class="text-xs">Loading monitors...</p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Netdata -->
-            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
-                <div class="flex items-center gap-3 mb-6">
-                    <span class="material-symbols-outlined text-3xl text-frosted-blue">monitoring</span>
-                    <h2 class="text-xl font-bold text-frosted-blue">Netdata</h2>
+                <!-- Plex -->
+                <div class="accordion-item border-b border-steel-blue/20" data-accordion="plex">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('plex')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">play_circle</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Plex</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotPlex"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyPlex">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL</label>
+                                    <input type="url" id="integrationPlexUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="https://plex.example.com:32400">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Token</label>
+                                    <input type="password" id="integrationPlexToken"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="Enter Plex token">
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('plex')" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('plex')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <div id="statusPlex" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
-                        <input type="url" id="integrationNetdataUrl"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="http://192.168.1.100:19999">
-                        <p class="text-xs text-steel-blue/70 mt-1">Full URL including port (default Netdata port is 19999)</p>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Key (optional)</label>
-                        <input type="password" id="integrationNetdataApiKey"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="Enter API key (if authentication is enabled)">
-                    </div>
-                    <div class="flex items-center gap-4 pt-2">
-                        <button onclick="saveIntegration('netdata')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
-                            Save
-                        </button>
-                        <button onclick="testConnection('netdata')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
-                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
-                            Test Connection
-                        </button>
-                        <div id="statusNetdata" class="flex items-center gap-2 text-sm"></div>
-                    </div>
-                </div>
-            </div>
 
-            <!-- Sonarr -->
-            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
-                <div class="flex items-center gap-3 mb-6">
-                    <span class="material-symbols-outlined text-3xl text-frosted-blue">tv</span>
-                    <h2 class="text-xl font-bold text-frosted-blue">Sonarr</h2>
+                <!-- Overseerr -->
+                <div class="accordion-item border-b border-steel-blue/20" data-accordion="overseerr">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('overseerr')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">movie_filter</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Overseerr</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotOverseerr"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyOverseerr">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL</label>
+                                    <input type="url" id="integrationOverseerrUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="https://overseerr.example.com">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key</label>
+                                    <input type="password" id="integrationOverseerrApiKey"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="Enter API key">
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('overseerr')" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('overseerr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <div id="statusOverseerr" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-3 border-t border-steel-blue/20">
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="featureShowRequests" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                                    <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                                </label>
+                                <div>
+                                    <span class="text-sm text-frosted-blue">Show iframe page in sidebar</span>
+                                    <p class="text-xs text-steel-blue/70 mt-0.5">Embeds Overseerr directly in a dashboard page</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
-                        <input type="url" id="integrationSonarrUrl"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="http://192.168.1.100:8989">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Key</label>
-                        <input type="password" id="integrationSonarrApiKey"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="Enter Sonarr API key">
-                        <p class="text-xs text-steel-blue/70 mt-1">Found in Sonarr under Settings &gt; General &gt; API Key</p>
-                    </div>
-                    <div class="flex items-center gap-4 pt-2">
-                        <button onclick="saveIntegration('sonarr')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
-                            Save
-                        </button>
-                        <button onclick="testConnection('sonarr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
-                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
-                            Test Connection
-                        </button>
-                        <div id="statusSonarr" class="flex items-center gap-2 text-sm"></div>
-                    </div>
-                </div>
-            </div>
 
-            <!-- Radarr -->
-            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
-                <div class="flex items-center gap-3 mb-6">
-                    <span class="material-symbols-outlined text-3xl text-frosted-blue">movie</span>
-                    <h2 class="text-xl font-bold text-frosted-blue">Radarr</h2>
+                <!-- Netdata -->
+                <div class="accordion-item border-b border-steel-blue/20" data-accordion="netdata">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('netdata')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">monitoring</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Netdata</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotNetdata"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyNetdata">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL</label>
+                                    <input type="url" id="integrationNetdataUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="http://192.168.1.100:19999">
+                                    <p class="text-xs text-steel-blue/50 mt-1">Default port: 19999</p>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key (optional)</label>
+                                    <input type="password" id="integrationNetdataApiKey"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="If authentication is enabled">
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('netdata')" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('netdata')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <div id="statusNetdata" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
-                        <input type="url" id="integrationRadarrUrl"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="http://192.168.1.100:7878">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Key</label>
-                        <input type="password" id="integrationRadarrApiKey"
-                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                            placeholder="Enter Radarr API key">
-                        <p class="text-xs text-steel-blue/70 mt-1">Found in Radarr under Settings &gt; General &gt; API Key</p>
-                    </div>
-                    <div class="flex items-center gap-4 pt-2">
-                        <button onclick="saveIntegration('radarr')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
-                            Save
-                        </button>
-                        <button onclick="testConnection('radarr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
-                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
-                            Test Connection
-                        </button>
-                        <div id="statusRadarr" class="flex items-center gap-2 text-sm"></div>
-                    </div>
-                </div>
-            </div>
 
+                <!-- Sonarr -->
+                <div class="accordion-item border-b border-steel-blue/20" data-accordion="sonarr">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('sonarr')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">tv</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Sonarr</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotSonarr"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodySonarr">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL</label>
+                                    <input type="url" id="integrationSonarrUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="http://192.168.1.100:8989">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key</label>
+                                    <input type="password" id="integrationSonarrApiKey"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="Settings > General > API Key">
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('sonarr')" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('sonarr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <div id="statusSonarr" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Radarr -->
+                <div class="accordion-item" data-accordion="radarr">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('radarr')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">movie</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Radarr</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotRadarr"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyRadarr">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL</label>
+                                    <input type="url" id="integrationRadarrUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="http://192.168.1.100:7878">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key</label>
+                                    <input type="password" id="integrationRadarrApiKey"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="Settings > General > API Key">
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('radarr')" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('radarr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <div id="statusRadarr" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
         </div>
 
         <!-- System Section -->
@@ -492,218 +538,210 @@
                     </div>
                 </div>
 
-                <!-- Sidebar Labels -->
+                <!-- Sidebar Labels — compact inline layout -->
                 <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
                     <h2 class="text-xl font-bold mb-2 text-frosted-blue">Sidebar Labels</h2>
-                    <p class="text-xs text-steel-blue/70 mb-6">Customize the names shown in the navigation sidebar</p>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Home</label>
+                    <p class="text-xs text-steel-blue/70 mb-5">Rename navigation items in the sidebar</p>
+                    <div class="space-y-2.5">
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconHome">home</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Home</label>
                             <input type="text" id="sidebarLabelHome"
-                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Home">
                         </div>
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Requests (iframe)</label>
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconRequests">download</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Requests <span class="text-steel-blue/50 text-xs">(iframe)</span></label>
                             <input type="text" id="sidebarLabelRequests"
-                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Requests">
                         </div>
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Requests (native)</label>
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconRequests2">movie</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Requests <span class="text-steel-blue/50 text-xs">(native)</span></label>
                             <input type="text" id="sidebarLabelRequests2"
-                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Requests">
                         </div>
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Issues</label>
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconIssues">report_problem</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Issues</label>
                             <input type="text" id="sidebarLabelIssues"
-                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Issues">
                         </div>
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Settings</label>
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconSettings">settings</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Settings</label>
                             <input type="text" id="sidebarLabelSettings"
-                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Settings">
                         </div>
                     </div>
                 </div>
 
-                <!-- Icons -->
+                <!-- Icons — visual icon picker buttons -->
                 <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
                     <h2 class="text-xl font-bold mb-2 text-frosted-blue">Icons</h2>
-                    <p class="text-xs text-steel-blue/70 mb-6">Customize icons using <a href="https://fonts.google.com/icons" target="_blank" class="text-primary hover:underline">Material Symbols</a> names</p>
-                    <div class="space-y-4">
-                        <h3 class="text-sm font-semibold text-steel-blue uppercase tracking-wider">Sidebar Navigation</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            <div>
-                                <label class="block text-sm font-semibold text-steel-blue mb-2">Sidebar Logo</label>
-                                <div class="flex items-center gap-2">
-                                    <span id="iconPreviewSidebarLogo" class="material-symbols-outlined text-frosted-blue">settings_input_component</span>
-                                    <input type="text" id="iconSidebarLogo"
-                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                                        placeholder="settings_input_component">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-semibold text-steel-blue mb-2">Home</label>
-                                <div class="flex items-center gap-2">
-                                    <span id="iconPreviewNavHome" class="material-symbols-outlined text-frosted-blue">home</span>
-                                    <input type="text" id="iconNavHome"
-                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                                        placeholder="home">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-semibold text-steel-blue mb-2">Requests (iframe)</label>
-                                <div class="flex items-center gap-2">
-                                    <span id="iconPreviewNavRequests" class="material-symbols-outlined text-frosted-blue">download</span>
-                                    <input type="text" id="iconNavRequests"
-                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                                        placeholder="download">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-semibold text-steel-blue mb-2">Requests (native)</label>
-                                <div class="flex items-center gap-2">
-                                    <span id="iconPreviewNavRequests2" class="material-symbols-outlined text-frosted-blue">movie</span>
-                                    <input type="text" id="iconNavRequests2"
-                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                                        placeholder="movie">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-semibold text-steel-blue mb-2">Issues</label>
-                                <div class="flex items-center gap-2">
-                                    <span id="iconPreviewNavIssues" class="material-symbols-outlined text-frosted-blue">report_problem</span>
-                                    <input type="text" id="iconNavIssues"
-                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                                        placeholder="report_problem">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-semibold text-steel-blue mb-2">Settings</label>
-                                <div class="flex items-center gap-2">
-                                    <span id="iconPreviewNavSettings" class="material-symbols-outlined text-frosted-blue">settings</span>
-                                    <input type="text" id="iconNavSettings"
-                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                                        placeholder="settings">
-                                </div>
-                            </div>
+                    <p class="text-xs text-steel-blue/70 mb-5">Click an icon to change it. Uses <a href="https://fonts.google.com/icons" target="_blank" class="text-primary hover:underline">Material Symbols</a>.</p>
+
+                    <!-- Hidden inputs that store the actual values -->
+                    <input type="hidden" id="iconSidebarLogo" value="">
+                    <input type="hidden" id="iconNavHome" value="">
+                    <input type="hidden" id="iconNavRequests" value="">
+                    <input type="hidden" id="iconNavRequests2" value="">
+                    <input type="hidden" id="iconNavIssues" value="">
+                    <input type="hidden" id="iconNavSettings" value="">
+                    <input type="hidden" id="iconSectionServices" value="">
+                    <input type="hidden" id="iconSectionNews" value="">
+                    <input type="hidden" id="iconSectionStreams" value="">
+                    <input type="hidden" id="iconSectionReleases" value="">
+
+                    <h3 class="text-xs font-semibold text-steel-blue uppercase tracking-wider mb-3">Sidebar Navigation</h3>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mb-6">
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconSidebarLogo">
+                            <span id="iconPreviewSidebarLogo" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">settings_input_component</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Logo</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavHome">
+                            <span id="iconPreviewNavHome" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">home</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Home</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavRequests">
+                            <span id="iconPreviewNavRequests" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">download</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Requests</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavRequests2">
+                            <span id="iconPreviewNavRequests2" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">movie</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Requests 2</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavIssues">
+                            <span id="iconPreviewNavIssues" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">report_problem</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Issues</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavSettings">
+                            <span id="iconPreviewNavSettings" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">settings</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Settings</span>
+                        </button>
+                    </div>
+
+                    <h3 class="text-xs font-semibold text-steel-blue uppercase tracking-wider mb-3">Homepage Sections</h3>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconSectionServices">
+                            <span id="iconPreviewSectionServices" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">health_metrics</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Services</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconSectionNews">
+                            <span id="iconPreviewSectionNews" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">newspaper</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">News</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconSectionStreams">
+                            <span id="iconPreviewSectionStreams" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">play_circle</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Streams</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconSectionReleases">
+                            <span id="iconPreviewSectionReleases" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">calendar_month</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Releases</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Icon Picker Modal -->
+                <div id="iconPickerModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                    <div class="bg-background-dark border border-steel-blue/30 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+                        <div class="flex items-center justify-between px-5 py-4 border-b border-steel-blue/20">
+                            <h3 class="text-lg font-bold text-frosted-blue">Choose Icon</h3>
+                            <button type="button" id="iconPickerClose" class="text-steel-blue hover:text-white transition-colors">
+                                <span class="material-symbols-outlined">close</span>
+                            </button>
                         </div>
-                        <h3 class="text-sm font-semibold text-steel-blue uppercase tracking-wider pt-4">Homepage Sections</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-semibold text-steel-blue mb-2">Service Health</label>
-                                <div class="flex items-center gap-2">
-                                    <span id="iconPreviewSectionServices" class="material-symbols-outlined text-frosted-blue">health_metrics</span>
-                                    <input type="text" id="iconSectionServices"
-                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                                        placeholder="health_metrics">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-semibold text-steel-blue mb-2">News &amp; Updates</label>
-                                <div class="flex items-center gap-2">
-                                    <span id="iconPreviewSectionNews" class="material-symbols-outlined text-frosted-blue">newspaper</span>
-                                    <input type="text" id="iconSectionNews"
-                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                                        placeholder="newspaper">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-semibold text-steel-blue mb-2">Active Streams</label>
-                                <div class="flex items-center gap-2">
-                                    <span id="iconPreviewSectionStreams" class="material-symbols-outlined text-frosted-blue">play_circle</span>
-                                    <input type="text" id="iconSectionStreams"
-                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                                        placeholder="play_circle">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-semibold text-steel-blue mb-2">Upcoming Releases</label>
-                                <div class="flex items-center gap-2">
-                                    <span id="iconPreviewSectionReleases" class="material-symbols-outlined text-frosted-blue">calendar_month</span>
-                                    <input type="text" id="iconSectionReleases"
-                                        class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary text-sm"
-                                        placeholder="calendar_month">
-                                </div>
-                            </div>
+                        <div class="px-5 py-3 border-b border-steel-blue/20">
+                            <input type="text" id="iconPickerSearch" placeholder="Search icons..."
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                        </div>
+                        <div id="iconPickerGrid" class="flex-1 overflow-y-auto custom-scrollbar p-4 grid grid-cols-6 sm:grid-cols-8 gap-2">
+                        </div>
+                        <div class="px-5 py-3 border-t border-steel-blue/20 flex items-center gap-3">
+                            <span class="text-xs text-steel-blue/70">Or type manually:</span>
+                            <input type="text" id="iconPickerManual" placeholder="icon_name"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                            <button type="button" id="iconPickerManualApply" class="bg-primary hover:bg-primary/90 text-white px-3 py-2 rounded-lg text-sm font-semibold transition-all">
+                                Apply
+                            </button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Colors -->
+                <!-- Theme — Colors, Font, Custom CSS combined -->
                 <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
-                    <h2 class="text-xl font-bold mb-6 text-frosted-blue">Colors</h2>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Primary</label>
-                            <div class="flex items-center gap-3">
+                    <h2 class="text-xl font-bold mb-5 text-frosted-blue">Theme</h2>
+
+                    <!-- Color palette row -->
+                    <div class="flex flex-wrap items-end gap-4 mb-6">
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Primary</label>
+                            <div class="relative group">
                                 <input type="color" id="themeColorPrimary" value="#125793"
-                                    class="w-12 h-10 rounded cursor-pointer border border-steel-blue/30 bg-transparent">
-                                <input type="text" id="themeColorPrimaryHex"
-                                    class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
-                                    placeholder="#125793" maxlength="7">
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
                             </div>
+                            <input type="text" id="themeColorPrimaryHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-white"
+                                placeholder="#125793" maxlength="7">
                         </div>
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Secondary</label>
-                            <div class="flex items-center gap-3">
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Secondary</label>
+                            <div class="relative group">
                                 <input type="color" id="themeColorSecondary" value="#2C6DA1"
-                                    class="w-12 h-10 rounded cursor-pointer border border-steel-blue/30 bg-transparent">
-                                <input type="text" id="themeColorSecondaryHex"
-                                    class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
-                                    placeholder="#2C6DA1" maxlength="7">
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
                             </div>
+                            <input type="text" id="themeColorSecondaryHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-white"
+                                placeholder="#2C6DA1" maxlength="7">
                         </div>
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Accent</label>
-                            <div class="flex items-center gap-3">
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Accent</label>
+                            <div class="relative group">
                                 <input type="color" id="themeColorAccent" value="#4684B0"
-                                    class="w-12 h-10 rounded cursor-pointer border border-steel-blue/30 bg-transparent">
-                                <input type="text" id="themeColorAccentHex"
-                                    class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
-                                    placeholder="#4684B0" maxlength="7">
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
                             </div>
+                            <input type="text" id="themeColorAccentHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-white"
+                                placeholder="#4684B0" maxlength="7">
                         </div>
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Text</label>
-                            <div class="flex items-center gap-3">
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Text</label>
+                            <div class="relative group">
                                 <input type="color" id="themeColorText" value="#BEEEF4"
-                                    class="w-12 h-10 rounded cursor-pointer border border-steel-blue/30 bg-transparent">
-                                <input type="text" id="themeColorTextHex"
-                                    class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
-                                    placeholder="#BEEEF4" maxlength="7">
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
                             </div>
+                            <input type="text" id="themeColorTextHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-white"
+                                placeholder="#BEEEF4" maxlength="7">
                         </div>
-                        <div>
-                            <label class="block text-sm font-semibold text-steel-blue mb-2">Background</label>
-                            <div class="flex items-center gap-3">
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Background</label>
+                            <div class="relative group">
                                 <input type="color" id="themeColorBackground" value="#000000"
-                                    class="w-12 h-10 rounded cursor-pointer border border-steel-blue/30 bg-transparent">
-                                <input type="text" id="themeColorBackgroundHex"
-                                    class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
-                                    placeholder="#000000" maxlength="7">
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
                             </div>
+                            <input type="text" id="themeColorBackgroundHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-white"
+                                placeholder="#000000" maxlength="7">
                         </div>
                     </div>
-                </div>
 
-                <!-- Font -->
-                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
-                    <h2 class="text-xl font-bold mb-6 text-frosted-blue">Font</h2>
-                    <div>
-                        <label class="block text-sm font-semibold text-steel-blue mb-2">Google Font Family</label>
+                    <!-- Font -->
+                    <div class="mb-6">
+                        <label class="block text-xs font-semibold text-steel-blue mb-1.5">Font Family</label>
                         <input type="hidden" id="themeFont" value="Spline Sans">
                         <div class="relative" id="fontDropdownContainer">
                             <button type="button" id="fontDropdownBtn"
-                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white text-left focus:outline-none focus:ring-2 focus:ring-primary flex items-center justify-between">
+                                class="w-full max-w-sm bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2.5 text-white text-sm text-left focus:outline-none focus:ring-2 focus:ring-primary flex items-center justify-between">
                                 <span id="fontDropdownLabel" class="truncate">Spline Sans</span>
                                 <span class="material-symbols-outlined text-steel-blue text-sm ml-2 shrink-0">expand_more</span>
                             </button>
-                            <div id="fontDropdownPanel" class="hidden absolute z-50 w-full mt-1 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl max-h-72 overflow-hidden flex flex-col">
+                            <div id="fontDropdownPanel" class="hidden absolute z-50 w-full max-w-sm mt-1 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl max-h-72 overflow-hidden flex flex-col">
                                 <div class="p-2 border-b border-steel-blue/20">
                                     <input type="text" id="fontSearch" placeholder="Search or enter custom font..."
                                         class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
@@ -711,16 +749,20 @@
                                 <div id="fontOptionsList" class="overflow-y-auto custom-scrollbar flex-1"></div>
                             </div>
                         </div>
-                        <p class="text-xs text-steel-blue mt-1">Select a font or type a custom Google Fonts family name</p>
                     </div>
-                </div>
 
-                <!-- Custom CSS -->
-                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
-                    <h2 class="text-xl font-bold mb-6 text-frosted-blue">Custom CSS</h2>
-                    <textarea id="themeCustomCss" rows="6"
-                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary font-mono text-sm"
-                        placeholder="/* Custom CSS injected into all pages */"></textarea>
+                    <!-- Custom CSS collapsible -->
+                    <div>
+                        <button type="button" id="customCssToggle" class="flex items-center gap-2 text-sm text-steel-blue hover:text-frosted-blue transition-colors mb-2">
+                            <span class="material-symbols-outlined text-sm transition-transform duration-200" id="customCssChevron">expand_more</span>
+                            Custom CSS
+                        </button>
+                        <div id="customCssBody" class="hidden">
+                            <textarea id="themeCustomCss" rows="5"
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary font-mono text-sm"
+                                placeholder="/* Custom CSS injected into all pages */"></textarea>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Save / Reset -->
@@ -901,8 +943,8 @@
     </div><!-- end scrollable wrapper -->
     </main>
 
-    <script src="/static/js/auth.js?v=2"></script>
-    <script src="/static/js/sidebar.js?v=5"></script>
+    <script src="/static/js/auth.js"></script>
+    <script src="/static/js/sidebar.js"></script>
     <script>
         // Initialize sidebar and auth
         (async function() {
@@ -941,6 +983,190 @@
             activeBtn.classList.add('border-primary', 'text-primary');
             activeBtn.classList.remove('border-transparent', 'text-steel-blue');
         }
+
+        // --- Accordion ---
+        var _openAccordion = null;
+
+        function toggleAccordion(key) {
+            var items = document.querySelectorAll('#integrationsAccordion .accordion-item');
+            items.forEach(function(item) {
+                var itemKey = item.dataset.accordion;
+                var body = item.querySelector('.accordion-body');
+                var chevron = item.querySelector('.accordion-chevron');
+                if (itemKey === key && _openAccordion !== key) {
+                    body.classList.remove('hidden');
+                    chevron.style.transform = 'rotate(180deg)';
+                    _openAccordion = key;
+                } else {
+                    body.classList.add('hidden');
+                    chevron.style.transform = 'rotate(0deg)';
+                }
+            });
+            if (_openAccordion === key && document.querySelector('[data-accordion="' + key + '"] .accordion-body').classList.contains('hidden')) {
+                _openAccordion = null;
+            }
+        }
+
+        // Update accordion status dots when settings load
+        function updateAccordionDots(settingsMap) {
+            var dotMap = {
+                'UptimeKuma': 'integration.uptime_kuma.url',
+                'Plex': 'integration.plex.url',
+                'Overseerr': 'integration.overseerr.url',
+                'Netdata': 'integration.netdata.url',
+                'Sonarr': 'integration.sonarr.url',
+                'Radarr': 'integration.radarr.url'
+            };
+            for (var name in dotMap) {
+                var dot = document.getElementById('accordionDot' + name);
+                if (dot) {
+                    var hasUrl = settingsMap[dotMap[name]] && settingsMap[dotMap[name]].trim() !== '';
+                    dot.className = 'accordion-status size-2 rounded-full shrink-0 ' + (hasUrl ? 'bg-green-500' : 'bg-steel-blue/40');
+                }
+            }
+        }
+
+        // --- Icon Picker ---
+        var ICON_CATALOG = [
+            'home', 'settings', 'movie', 'tv', 'play_circle', 'download', 'upload',
+            'monitor_heart', 'health_metrics', 'newspaper', 'calendar_month', 'report_problem',
+            'settings_input_component', 'dns', 'movie_filter', 'monitoring', 'dashboard',
+            'analytics', 'bar_chart', 'pie_chart', 'trending_up', 'speed', 'memory',
+            'storage', 'cloud', 'cloud_download', 'cloud_upload', 'wifi', 'wifi_tethering',
+            'security', 'shield', 'lock', 'vpn_key', 'admin_panel_settings',
+            'person', 'group', 'account_circle', 'manage_accounts', 'supervisor_account',
+            'notifications', 'email', 'chat', 'forum', 'message',
+            'search', 'filter_list', 'sort', 'view_list', 'grid_view',
+            'favorite', 'star', 'bookmark', 'flag', 'label',
+            'check_circle', 'error', 'warning', 'info', 'help',
+            'schedule', 'timer', 'update', 'history', 'alarm',
+            'folder', 'description', 'article', 'note', 'receipt',
+            'link', 'share', 'public', 'language', 'travel_explore',
+            'code', 'terminal', 'data_object', 'api', 'integration_instructions',
+            'palette', 'brush', 'color_lens', 'tune', 'display_settings',
+            'devices', 'computer', 'phone_android', 'tablet', 'desktop_windows',
+            'music_note', 'headphones', 'mic', 'videocam', 'photo_camera',
+            'image', 'photo_library', 'theaters', 'live_tv', 'smart_display',
+            'rocket_launch', 'bolt', 'auto_awesome', 'lightbulb', 'extension',
+            'hub', 'network_node', 'swap_horiz', 'sync', 'refresh',
+            'power_settings_new', 'restart_alt', 'build', 'construction', 'handyman'
+        ];
+
+        var _iconPickerTarget = null;
+
+        function openIconPicker(targetInputId) {
+            _iconPickerTarget = targetInputId;
+            var modal = document.getElementById('iconPickerModal');
+            modal.classList.remove('hidden');
+            document.getElementById('iconPickerSearch').value = '';
+            document.getElementById('iconPickerManual').value = '';
+            _renderIconGrid('');
+            setTimeout(function() { document.getElementById('iconPickerSearch').focus(); }, 50);
+        }
+
+        function _renderIconGrid(filter) {
+            var grid = document.getElementById('iconPickerGrid');
+            var lowerFilter = (filter || '').toLowerCase();
+            var currentVal = _iconPickerTarget ? document.getElementById(_iconPickerTarget).value : '';
+            var filtered = ICON_CATALOG.filter(function(icon) {
+                return !lowerFilter || icon.indexOf(lowerFilter) !== -1;
+            });
+
+            while (grid.firstChild) grid.removeChild(grid.firstChild);
+
+            filtered.forEach(function(iconName) {
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                var isActive = iconName === currentVal;
+                btn.className = 'flex flex-col items-center justify-center p-2 rounded-lg transition-all cursor-pointer ' +
+                    (isActive ? 'bg-primary/30 border border-primary/50' : 'hover:bg-primary/10 border border-transparent hover:border-steel-blue/20');
+                btn.title = iconName;
+
+                var span = document.createElement('span');
+                span.className = 'material-symbols-outlined text-2xl ' + (isActive ? 'text-white' : 'text-frosted-blue');
+                span.textContent = iconName;
+                btn.appendChild(span);
+
+                var label = document.createElement('span');
+                label.className = 'text-[8px] text-steel-blue/50 mt-0.5 truncate w-full text-center';
+                label.textContent = iconName;
+                btn.appendChild(label);
+
+                btn.addEventListener('click', function() { _applyIconSelection(iconName); });
+                grid.appendChild(btn);
+            });
+        }
+
+        function _applyIconSelection(iconName) {
+            if (!_iconPickerTarget) return;
+            document.getElementById(_iconPickerTarget).value = iconName;
+            // Update the preview
+            var previewId = 'iconPreview' + _iconPickerTarget.replace('icon', '');
+            var preview = document.getElementById(previewId);
+            if (preview) preview.textContent = iconName;
+            // Also update sidebar label icons if applicable
+            _syncLabelIcons();
+            document.getElementById('iconPickerModal').classList.add('hidden');
+            _iconPickerTarget = null;
+        }
+
+        function _syncLabelIcons() {
+            var map = {
+                labelIconHome: 'iconNavHome',
+                labelIconRequests: 'iconNavRequests',
+                labelIconRequests2: 'iconNavRequests2',
+                labelIconIssues: 'iconNavIssues',
+                labelIconSettings: 'iconNavSettings'
+            };
+            for (var labelId in map) {
+                var inputEl = document.getElementById(map[labelId]);
+                var labelEl = document.getElementById(labelId);
+                if (inputEl && labelEl) {
+                    labelEl.textContent = inputEl.value || inputEl.placeholder || inputEl.dataset.default || '';
+                }
+            }
+        }
+
+        // Wire icon picker buttons
+        document.querySelectorAll('.icon-picker-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var target = btn.dataset.iconTarget;
+                if (target) openIconPicker(target);
+            });
+        });
+
+        document.getElementById('iconPickerClose').addEventListener('click', function() {
+            document.getElementById('iconPickerModal').classList.add('hidden');
+        });
+
+        document.getElementById('iconPickerModal').addEventListener('click', function(e) {
+            if (e.target === this) this.classList.add('hidden');
+        });
+
+        document.getElementById('iconPickerSearch').addEventListener('input', function() {
+            _renderIconGrid(this.value.trim());
+        });
+
+        document.getElementById('iconPickerManualApply').addEventListener('click', function() {
+            var val = document.getElementById('iconPickerManual').value.trim();
+            if (val) _applyIconSelection(val);
+        });
+
+        document.getElementById('iconPickerManual').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                var val = this.value.trim();
+                if (val) _applyIconSelection(val);
+            }
+        });
+
+        // --- Custom CSS Toggle ---
+        document.getElementById('customCssToggle').addEventListener('click', function() {
+            var body = document.getElementById('customCssBody');
+            var chevron = document.getElementById('customCssChevron');
+            body.classList.toggle('hidden');
+            chevron.style.transform = body.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
+        });
 
         // --- Monitor List (from Uptime Kuma) ---
         document.getElementById('btnRefreshMonitors').addEventListener('click', () => loadMonitors());
@@ -1096,6 +1322,9 @@
 
                 // Feature flags
                 document.getElementById('featureShowRequests').checked = settingsMap['features.show_requests'] === 'true';
+
+                // Update accordion status dots
+                updateAccordionDots(settingsMap);
             } catch (e) {
                 console.error('Error loading settings:', e);
             }
@@ -1353,14 +1582,9 @@
             setTimeout(function() { statusEl.textContent = ''; }, 5000);
         });
 
-        // Wire icon input live preview
-        document.querySelectorAll('[id^="icon"][id$="Logo"],[id^="iconNav"],[id^="iconSection"]').forEach(function(input) {
-            if (input.tagName !== 'INPUT') return;
-            input.addEventListener('input', function() {
-                var previewId = 'iconPreview' + input.id.replace('icon', '');
-                var preview = document.getElementById(previewId);
-                if (preview) preview.textContent = input.value || input.placeholder;
-            });
+        // Icon hidden inputs don't need live preview wiring — icon picker handles it
+        // Kept for backward compatibility with loadThemeSettings which sets .value on hidden inputs
+        (function() { /* icon wiring handled by icon picker */
         });
 
         // --- Font Dropdown ---
@@ -1517,6 +1741,8 @@
                     var preview = document.getElementById('iconPreview' + fieldId.replace('icon', ''));
                     if (preview && iconFields[fieldId]) preview.textContent = iconFields[fieldId];
                 }
+                // Sync sidebar label icons with current icon values
+                _syncLabelIcons();
             } catch (e) {
                 console.error('Error loading theme settings:', e);
             }
@@ -1636,6 +1862,7 @@
                 var resetPreview = document.getElementById('iconPreview' + resetId.replace('icon', ''));
                 if (resetPreview) resetPreview.textContent = resetVal;
             }
+            _syncLabelIcons();
 
             // Auto-save the defaults
             document.getElementById('btnSaveTheme').click();
