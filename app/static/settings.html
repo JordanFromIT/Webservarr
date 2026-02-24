@@ -1,0 +1,1815 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>HMS Dashboard - Settings</title>
+    <script src="/static/js/theme-loader.js"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <link href="/static/css/theme.css" rel="stylesheet"/>
+    <script>tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "primary": "rgb(var(--color-primary) / <alpha-value>)",
+            "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+            "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+            "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+            "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+            "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+          },
+          fontFamily: {
+            "display": ["var(--font-display)", "sans-serif"]
+          },
+        },
+      },
+    }</script>
+    <style>
+        /* Rich Text Editor Styles */
+        #postContent {
+            min-height: 300px;
+            outline: none;
+            caret-color: #BEEEF4;
+        }
+        #postContent:empty::before {
+            content: 'Start writing your content...';
+            color: rgba(70, 132, 176, 0.5);
+            pointer-events: none;
+        }
+        #postContent h1 {
+            font-size: 1.875rem;
+            font-weight: 700;
+            margin: 0.75rem 0 0.5rem;
+            color: #BEEEF4;
+            line-height: 1.2;
+        }
+        #postContent h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin: 0.75rem 0 0.5rem;
+            color: #BEEEF4;
+            line-height: 1.3;
+        }
+        #postContent h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 0.5rem 0 0.25rem;
+            color: #BEEEF4;
+            line-height: 1.4;
+        }
+        #postContent p {
+            margin: 0.5rem 0;
+        }
+        #postContent ul {
+            list-style-type: disc;
+            padding-left: 1.5rem;
+            margin: 0.5rem 0;
+        }
+        #postContent ol {
+            list-style-type: decimal;
+            padding-left: 1.5rem;
+            margin: 0.5rem 0;
+        }
+        #postContent li {
+            margin: 0.25rem 0;
+        }
+        #postContent blockquote {
+            border-left: 3px solid #4684B0;
+            padding-left: 1rem;
+            margin: 0.75rem 0;
+            color: rgba(255, 255, 255, 0.7);
+            font-style: italic;
+        }
+        #postContent pre {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(70, 132, 176, 0.3);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin: 0.75rem 0;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            color: #BEEEF4;
+        }
+        #postContent code {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(70, 132, 176, 0.2);
+            border-radius: 0.25rem;
+            padding: 0.125rem 0.375rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            color: #BEEEF4;
+        }
+        #postContent pre code {
+            background: none;
+            border: none;
+            padding: 0;
+            border-radius: 0;
+        }
+        #postContent a {
+            color: #BEEEF4;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+        #postContent a:hover {
+            color: #fff;
+        }
+        #postContent img {
+            max-width: 100%;
+            border-radius: 0.5rem;
+            margin: 0.5rem 0;
+        }
+        #postContent hr {
+            border: none;
+            border-top: 1px solid rgba(70, 132, 176, 0.3);
+            margin: 1rem 0;
+        }
+        #postContent s, #postContent del {
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+        #postContent.preview-mode {
+            background: rgba(0, 0, 0, 0.3);
+            cursor: default;
+        }
+        .toolbar-btn.active {
+            background: rgba(18, 87, 147, 0.5);
+            color: #BEEEF4;
+        }
+        .heading-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            z-index: 50;
+            min-width: 160px;
+        }
+        .heading-dropdown.open {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row overflow-hidden">
+    <div id="sidebar-root"></div>
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col min-h-0 lg:h-screen overflow-hidden">
+    <div class="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+
+        <!-- Tabs -->
+        <div class="mb-8 border-b border-steel-blue/20">
+            <nav class="flex gap-4">
+                <button id="tabIntegrations" class="px-6 py-3 font-semibold border-b-2 border-primary text-primary">
+                    Integrations
+                </button>
+                <button id="tabSystem" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue">
+                    System
+                </button>
+                <button id="tabTheme" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue">
+                    Theme
+                </button>
+                <button id="tabNews" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue">
+                    News
+                </button>
+            </nav>
+        </div>
+
+        <!-- Integrations Section (Services + Integration Configs) -->
+        <div id="integrationsSection">
+
+            <!-- Services (auto-populated from Uptime Kuma) -->
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <span class="material-symbols-outlined text-2xl text-frosted-blue">dns</span>
+                    <h2 class="text-xl font-bold text-frosted-blue">Services</h2>
+                </div>
+                <button id="btnRefreshMonitors" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm">refresh</span>
+                    Refresh
+                </button>
+            </div>
+            <p class="text-sm text-steel-blue mb-4">Services are pulled from Uptime Kuma. Toggle which ones appear on the homepage.</p>
+
+            <!-- Monitor List -->
+            <div id="monitorsList" class="space-y-3">
+                <div class="text-center text-steel-blue py-12">
+                    <span class="material-symbols-outlined text-6xl mb-4 block opacity-50">dns</span>
+                    <p>Loading monitors...</p>
+                </div>
+            </div>
+
+            <!-- Divider -->
+            <div class="border-t border-steel-blue/20 my-8"></div>
+
+            <!-- Integration Configurations -->
+
+            <!-- Uptime Kuma -->
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
+                <div class="flex items-center gap-3 mb-6">
+                    <span class="material-symbols-outlined text-3xl text-frosted-blue">monitor_heart</span>
+                    <h2 class="text-xl font-bold text-frosted-blue">Uptime Kuma</h2>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
+                        <input type="url" id="integrationUptimeKumaUrl"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="https://uptime.example.com">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">Status Page Slug</label>
+                        <input type="text" id="integrationUptimeKumaSlug"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="default">
+                        <p class="text-xs text-steel-blue/70 mt-1">The slug of your public status page (found in URL: /status/[slug])</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Key</label>
+                        <input type="password" id="integrationUptimeKumaApiKey"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Enter API key (optional for public status pages)">
+                    </div>
+                    <div class="flex items-center gap-4 pt-2">
+                        <button onclick="saveIntegration('uptime_kuma')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save
+                        </button>
+                        <button onclick="testConnection('uptime_kuma')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                            Test Connection
+                        </button>
+                        <div id="statusUptimeKuma" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Plex -->
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
+                <div class="flex items-center gap-3 mb-6">
+                    <span class="material-symbols-outlined text-3xl text-frosted-blue">play_circle</span>
+                    <h2 class="text-xl font-bold text-frosted-blue">Plex</h2>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
+                        <input type="url" id="integrationPlexUrl"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="https://plex.example.com:32400">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Token</label>
+                        <input type="password" id="integrationPlexToken"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Enter Plex token">
+                    </div>
+                    <div class="flex items-center gap-4 pt-2">
+                        <button onclick="saveIntegration('plex')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save
+                        </button>
+                        <button onclick="testConnection('plex')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                            Test Connection
+                        </button>
+                        <div id="statusPlex" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Overseerr -->
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
+                <div class="flex items-center gap-3 mb-6">
+                    <span class="material-symbols-outlined text-3xl text-frosted-blue">movie_filter</span>
+                    <h2 class="text-xl font-bold text-frosted-blue">Overseerr</h2>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
+                        <input type="url" id="integrationOverseerrUrl"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="https://overseerr.example.com">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Key</label>
+                        <input type="password" id="integrationOverseerrApiKey"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Enter API key">
+                    </div>
+                    <div class="flex items-center gap-4 pt-2">
+                        <button onclick="saveIntegration('overseerr')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save
+                        </button>
+                        <button onclick="testConnection('overseerr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                            Test Connection
+                        </button>
+                        <div id="statusOverseerr" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                    <div class="flex items-center gap-3 mt-4 pt-4 border-t border-steel-blue/20">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="featureShowRequests" class="sr-only peer">
+                            <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                            <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                        </label>
+                        <div>
+                            <span class="text-sm text-frosted-blue">Show Overseerr iframe page in sidebar</span>
+                            <p class="text-xs text-steel-blue/70 mt-0.5">Enables a separate page that embeds Overseerr directly</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Netdata -->
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
+                <div class="flex items-center gap-3 mb-6">
+                    <span class="material-symbols-outlined text-3xl text-frosted-blue">monitoring</span>
+                    <h2 class="text-xl font-bold text-frosted-blue">Netdata</h2>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
+                        <input type="url" id="integrationNetdataUrl"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="http://192.168.1.100:19999">
+                        <p class="text-xs text-steel-blue/70 mt-1">Full URL including port (default Netdata port is 19999)</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Key (optional)</label>
+                        <input type="password" id="integrationNetdataApiKey"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Enter API key (if authentication is enabled)">
+                    </div>
+                    <div class="flex items-center gap-4 pt-2">
+                        <button onclick="saveIntegration('netdata')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save
+                        </button>
+                        <button onclick="testConnection('netdata')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                            Test Connection
+                        </button>
+                        <div id="statusNetdata" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sonarr -->
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
+                <div class="flex items-center gap-3 mb-6">
+                    <span class="material-symbols-outlined text-3xl text-frosted-blue">tv</span>
+                    <h2 class="text-xl font-bold text-frosted-blue">Sonarr</h2>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
+                        <input type="url" id="integrationSonarrUrl"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="http://192.168.1.100:8989">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Key</label>
+                        <input type="password" id="integrationSonarrApiKey"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Enter Sonarr API key">
+                        <p class="text-xs text-steel-blue/70 mt-1">Found in Sonarr under Settings &gt; General &gt; API Key</p>
+                    </div>
+                    <div class="flex items-center gap-4 pt-2">
+                        <button onclick="saveIntegration('sonarr')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save
+                        </button>
+                        <button onclick="testConnection('sonarr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                            Test Connection
+                        </button>
+                        <div id="statusSonarr" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Radarr -->
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mb-6">
+                <div class="flex items-center gap-3 mb-6">
+                    <span class="material-symbols-outlined text-3xl text-frosted-blue">movie</span>
+                    <h2 class="text-xl font-bold text-frosted-blue">Radarr</h2>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">URL</label>
+                        <input type="url" id="integrationRadarrUrl"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="http://192.168.1.100:7878">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">API Key</label>
+                        <input type="password" id="integrationRadarrApiKey"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Enter Radarr API key">
+                        <p class="text-xs text-steel-blue/70 mt-1">Found in Radarr under Settings &gt; General &gt; API Key</p>
+                    </div>
+                    <div class="flex items-center gap-4 pt-2">
+                        <button onclick="saveIntegration('radarr')" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save
+                        </button>
+                        <button onclick="testConnection('radarr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                            <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                            Test Connection
+                        </button>
+                        <div id="statusRadarr" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- System Section -->
+        <div id="systemSection" class="hidden">
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                <h2 class="text-xl font-bold mb-6 text-frosted-blue">System Settings</h2>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">Site Title</label>
+                        <input type="text" id="systemSiteTitle" value="HMS Dashboard"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="HMS Dashboard">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">Admin Email</label>
+                        <input type="email" id="systemAdminEmail" value="admin@hmserver.tv"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="admin@example.com">
+                    </div>
+
+                    <div class="flex items-center gap-4 pt-4">
+                        <button id="btnSaveSystem" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save Settings
+                        </button>
+                        <div id="statusSystem" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Theme Section -->
+        <div id="themeSection" class="hidden">
+            <div class="space-y-8">
+
+                <!-- Branding -->
+                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                    <h2 class="text-xl font-bold mb-6 text-frosted-blue">Branding</h2>
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">App Name</label>
+                                <input type="text" id="themeAppName"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                    placeholder="HMS Dashboard">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Tagline</label>
+                                <input type="text" id="themeTagline"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                    placeholder="Home Media Server Management">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Logo URL</label>
+                            <input type="url" id="themeLogoUrl"
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="https://example.com/logo.png">
+                            <p class="text-xs text-steel-blue mt-1">Leave empty for default icon</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <input type="checkbox" id="themeShowDefaultCreds"
+                                class="rounded border-steel-blue/30 bg-black/50 text-primary focus:ring-primary">
+                            <label for="themeShowDefaultCreds" class="text-sm text-frosted-blue">Show default credentials hint on login page</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sidebar Labels -->
+                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                    <h2 class="text-xl font-bold mb-2 text-frosted-blue">Sidebar Labels</h2>
+                    <p class="text-xs text-steel-blue/70 mb-6">Customize the names shown in the navigation sidebar</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Home</label>
+                            <input type="text" id="sidebarLabelHome"
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Home">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Requests (iframe)</label>
+                            <input type="text" id="sidebarLabelRequests"
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Requests">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Requests (native)</label>
+                            <input type="text" id="sidebarLabelRequests2"
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Requests">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Issues</label>
+                            <input type="text" id="sidebarLabelIssues"
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Issues">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Settings</label>
+                            <input type="text" id="sidebarLabelSettings"
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Settings">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Colors -->
+                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                    <h2 class="text-xl font-bold mb-6 text-frosted-blue">Colors</h2>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Primary</label>
+                            <div class="flex items-center gap-3">
+                                <input type="color" id="themeColorPrimary" value="#125793"
+                                    class="w-12 h-10 rounded cursor-pointer border border-steel-blue/30 bg-transparent">
+                                <input type="text" id="themeColorPrimaryHex"
+                                    class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
+                                    placeholder="#125793" maxlength="7">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Secondary</label>
+                            <div class="flex items-center gap-3">
+                                <input type="color" id="themeColorSecondary" value="#2C6DA1"
+                                    class="w-12 h-10 rounded cursor-pointer border border-steel-blue/30 bg-transparent">
+                                <input type="text" id="themeColorSecondaryHex"
+                                    class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
+                                    placeholder="#2C6DA1" maxlength="7">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Accent</label>
+                            <div class="flex items-center gap-3">
+                                <input type="color" id="themeColorAccent" value="#4684B0"
+                                    class="w-12 h-10 rounded cursor-pointer border border-steel-blue/30 bg-transparent">
+                                <input type="text" id="themeColorAccentHex"
+                                    class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
+                                    placeholder="#4684B0" maxlength="7">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Text</label>
+                            <div class="flex items-center gap-3">
+                                <input type="color" id="themeColorText" value="#BEEEF4"
+                                    class="w-12 h-10 rounded cursor-pointer border border-steel-blue/30 bg-transparent">
+                                <input type="text" id="themeColorTextHex"
+                                    class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
+                                    placeholder="#BEEEF4" maxlength="7">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Background</label>
+                            <div class="flex items-center gap-3">
+                                <input type="color" id="themeColorBackground" value="#000000"
+                                    class="w-12 h-10 rounded cursor-pointer border border-steel-blue/30 bg-transparent">
+                                <input type="text" id="themeColorBackgroundHex"
+                                    class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
+                                    placeholder="#000000" maxlength="7">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Font & Mode -->
+                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                    <h2 class="text-xl font-bold mb-6 text-frosted-blue">Font & Mode</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Google Font Family</label>
+                            <input type="text" id="themeFont"
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Spline Sans">
+                            <p class="text-xs text-steel-blue mt-1">Any Google Fonts family name</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Mode</label>
+                            <div class="flex items-center gap-4 mt-2">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="themeMode" value="true" checked
+                                        class="text-primary focus:ring-primary border-steel-blue/30 bg-black/50">
+                                    <span class="text-frosted-blue">Dark</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" name="themeMode" value="false"
+                                        class="text-primary focus:ring-primary border-steel-blue/30 bg-black/50">
+                                    <span class="text-frosted-blue">Light</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Custom CSS -->
+                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                    <h2 class="text-xl font-bold mb-6 text-frosted-blue">Custom CSS</h2>
+                    <textarea id="themeCustomCss" rows="6"
+                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary font-mono text-sm"
+                        placeholder="/* Custom CSS injected into all pages */"></textarea>
+                </div>
+
+                <!-- Save / Reset -->
+                <div class="flex items-center gap-4">
+                    <button id="btnSaveTheme" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                        <span class="material-symbols-outlined text-sm">save</span>
+                        Save Theme
+                    </button>
+                    <button id="btnResetTheme" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all">
+                        Reset to Defaults
+                    </button>
+                    <div id="statusTheme" class="flex items-center gap-2 text-sm"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- News Section -->
+        <div id="newsSection" class="hidden">
+
+            <!-- Create New Post Button -->
+            <div class="mb-6">
+                <button id="btnNewPost" class="bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-all">
+                    <span class="material-symbols-outlined">add</span>
+                    Create New Post
+                </button>
+            </div>
+
+            <!-- Post Form (Hidden by default) -->
+            <div id="postForm" class="hidden mb-8 bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                <h2 id="newsFormTitle" class="text-xl font-bold mb-6 text-frosted-blue">Create News Post</h2>
+
+                <form id="newsForm" class="space-y-4">
+                    <input type="hidden" id="postId" value="">
+
+                    <!-- Title -->
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">Title</label>
+                        <input type="text" id="postTitle" required
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Enter post title...">
+                    </div>
+
+                    <!-- Content (Rich Text Editor) -->
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">Content</label>
+
+                        <!-- Toolbar -->
+                        <div id="editorToolbar" class="flex flex-wrap items-center gap-1 bg-black/60 border border-steel-blue/30 border-b-0 rounded-t-lg px-2 py-1.5">
+
+                            <!-- Inline Formatting -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="bold" title="Bold (Ctrl+B)">
+                                <span class="material-symbols-outlined text-[20px]">format_bold</span>
+                            </button>
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="italic" title="Italic (Ctrl+I)">
+                                <span class="material-symbols-outlined text-[20px]">format_italic</span>
+                            </button>
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="underline" title="Underline (Ctrl+U)">
+                                <span class="material-symbols-outlined text-[20px]">format_underlined</span>
+                            </button>
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="strikeThrough" title="Strikethrough">
+                                <span class="material-symbols-outlined text-[20px]">strikethrough_s</span>
+                            </button>
+
+                            <!-- Separator -->
+                            <div class="w-px h-6 bg-steel-blue/30 mx-1"></div>
+
+                            <!-- Heading Dropdown -->
+                            <div class="relative">
+                                <button type="button" id="headingBtn" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors flex items-center gap-0.5" title="Heading">
+                                    <span class="material-symbols-outlined text-[20px]">title</span>
+                                    <span class="material-symbols-outlined text-[14px]">arrow_drop_down</span>
+                                </button>
+                                <div id="headingDropdown" class="heading-dropdown bg-black/95 border border-steel-blue/30 rounded-lg shadow-xl py-1">
+                                    <button type="button" class="w-full text-left px-4 py-2 text-white hover:bg-primary/30 transition-colors text-xl font-bold" data-heading="h1">Heading 1</button>
+                                    <button type="button" class="w-full text-left px-4 py-2 text-white hover:bg-primary/30 transition-colors text-lg font-bold" data-heading="h2">Heading 2</button>
+                                    <button type="button" class="w-full text-left px-4 py-2 text-white hover:bg-primary/30 transition-colors text-base font-semibold" data-heading="h3">Heading 3</button>
+                                    <button type="button" class="w-full text-left px-4 py-2 text-white hover:bg-primary/30 transition-colors text-sm" data-heading="p">Paragraph</button>
+                                </div>
+                            </div>
+
+                            <!-- Separator -->
+                            <div class="w-px h-6 bg-steel-blue/30 mx-1"></div>
+
+                            <!-- Lists -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="insertUnorderedList" title="Bulleted List">
+                                <span class="material-symbols-outlined text-[20px]">format_list_bulleted</span>
+                            </button>
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="insertOrderedList" title="Numbered List">
+                                <span class="material-symbols-outlined text-[20px]">format_list_numbered</span>
+                            </button>
+
+                            <!-- Blockquote -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnBlockquote" title="Blockquote">
+                                <span class="material-symbols-outlined text-[20px]">format_quote</span>
+                            </button>
+
+                            <!-- Separator -->
+                            <div class="w-px h-6 bg-steel-blue/30 mx-1"></div>
+
+                            <!-- Insert: Link -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnLink" title="Insert Link">
+                                <span class="material-symbols-outlined text-[20px]">link</span>
+                            </button>
+
+                            <!-- Insert: Image -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnImage" title="Insert Image">
+                                <span class="material-symbols-outlined text-[20px]">image</span>
+                            </button>
+
+                            <!-- Insert: Code Block -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnCodeBlock" title="Code Block">
+                                <span class="material-symbols-outlined text-[20px]">code_blocks</span>
+                            </button>
+
+                            <!-- Insert: Inline Code -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnInlineCode" title="Inline Code">
+                                <span class="material-symbols-outlined text-[20px]">code</span>
+                            </button>
+
+                            <!-- Insert: HR -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnHR" title="Horizontal Rule">
+                                <span class="material-symbols-outlined text-[20px]">horizontal_rule</span>
+                            </button>
+
+                            <!-- Separator -->
+                            <div class="w-px h-6 bg-steel-blue/30 mx-1"></div>
+
+                            <!-- Preview Toggle -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors flex items-center gap-1" id="btnPreview" title="Toggle Preview">
+                                <span class="material-symbols-outlined text-[20px]">visibility</span>
+                                <span class="text-xs font-medium">Preview</span>
+                            </button>
+                        </div>
+
+                        <!-- Editable Area -->
+                        <div id="postContent" contenteditable="true"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-b-lg px-4 py-3 text-white text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary overflow-y-auto"
+                            style="min-height: 300px; max-height: 600px;">
+                        </div>
+                    </div>
+
+                    <!-- Options -->
+                    <div class="flex gap-6">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="postPublished"
+                                class="w-5 h-5 rounded border-steel-blue/30 bg-black/50 text-primary focus:ring-primary">
+                            <span class="text-sm text-steel-blue">Published</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="postPinned"
+                                class="w-5 h-5 rounded border-steel-blue/30 bg-black/50 text-primary focus:ring-primary">
+                            <span class="text-sm text-steel-blue">Pinned</span>
+                        </label>
+                    </div>
+
+                    <!-- Buttons -->
+                    <div class="flex gap-3 pt-4">
+                        <button type="submit" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save Post
+                        </button>
+                        <button type="button" id="btnCancelNewsForm" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Posts List -->
+            <div id="postsList" class="space-y-4">
+                <div class="text-center text-steel-blue py-12">
+                    <span class="material-symbols-outlined text-6xl mb-4 block opacity-50">article</span>
+                    <p>Loading news posts...</p>
+                </div>
+            </div>
+
+        </div>
+
+    </div><!-- end scrollable wrapper -->
+    </main>
+
+    <script src="/static/js/auth.js"></script>
+    <script src="/static/js/sidebar.js?v=5"></script>
+    <script>
+        // Initialize sidebar and auth
+        (async function() {
+            initSidebar('settings');
+            const user = await checkAuth({ requireAdmin: true });
+            if (!user) return;
+            showAdminNav(user.is_admin);
+        })();
+
+        // Tab switching
+        document.getElementById('tabIntegrations').addEventListener('click', () => switchTab('integrations'));
+        document.getElementById('tabSystem').addEventListener('click', () => switchTab('system'));
+        document.getElementById('tabTheme').addEventListener('click', () => switchTab('theme'));
+        document.getElementById('tabNews').addEventListener('click', () => switchTab('news'));
+
+        const tabIds = ['tabIntegrations', 'tabSystem', 'tabTheme', 'tabNews'];
+        const sectionIds = ['integrationsSection', 'systemSection', 'themeSection', 'newsSection'];
+        const tabMap = { integrations: 'tabIntegrations', system: 'tabSystem', theme: 'tabTheme', news: 'tabNews' };
+        const sectionMap = { integrations: 'integrationsSection', system: 'systemSection', theme: 'themeSection', news: 'newsSection' };
+
+        function switchTab(tab) {
+            // Hide all sections
+            sectionIds.forEach(id => document.getElementById(id).classList.add('hidden'));
+            // Show selected section
+            document.getElementById(sectionMap[tab]).classList.remove('hidden');
+
+            // Reset all tab styles
+            tabIds.forEach(id => {
+                const btn = document.getElementById(id);
+                btn.classList.remove('border-primary', 'text-primary');
+                btn.classList.add('border-transparent', 'text-steel-blue');
+            });
+
+            // Activate selected tab
+            const activeBtn = document.getElementById(tabMap[tab]);
+            activeBtn.classList.add('border-primary', 'text-primary');
+            activeBtn.classList.remove('border-transparent', 'text-steel-blue');
+        }
+
+        // --- Monitor List (from Uptime Kuma) ---
+        document.getElementById('btnRefreshMonitors').addEventListener('click', () => loadMonitors());
+
+        async function loadMonitors() {
+            const list = document.getElementById('monitorsList');
+            try {
+                const response = await fetch('/api/integrations/monitors');
+                if (response.status === 401) { window.location.href = '/login'; return; }
+                const monitors = await response.json();
+
+                if (monitors.length === 0) {
+                    list.innerHTML = '<div class="text-center text-steel-blue py-12">' +
+                        '<span class="material-symbols-outlined text-6xl mb-4 block opacity-50">monitor_heart</span>' +
+                        '<p>No monitors found. Configure Uptime Kuma below to get started.</p></div>';
+                    return;
+                }
+
+                list.innerHTML = monitors.map(function(m) {
+                    var statusDot = m.status === 'up' ? 'bg-green-500' :
+                                    m.status === 'degraded' ? 'bg-yellow-500' :
+                                    m.status === 'down' ? 'bg-red-500' : 'bg-steel-blue';
+                    var statusLabel = m.status === 'up' ? 'Online' :
+                                     m.status === 'degraded' ? 'Degraded' :
+                                     m.status === 'down' ? 'Offline' : m.status;
+                    var ping = m.response_time ? m.response_time + 'ms' : '--';
+                    var uptime = m.uptime_24h != null ? m.uptime_24h + '%' : '--';
+
+                    return '<div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl px-5 py-4 flex items-center gap-4">' +
+                        '<div class="size-10 rounded-lg bg-black flex items-center justify-center border border-steel-blue/20 shrink-0">' +
+                            '<span class="material-symbols-outlined text-2xl text-frosted-blue">' + escapeHtml(m.icon || 'dns') + '</span>' +
+                        '</div>' +
+                        '<div class="flex-1 min-w-0">' +
+                            '<div class="flex items-center gap-2">' +
+                                '<span class="size-2 rounded-full ' + statusDot + ' shrink-0"></span>' +
+                                '<h3 class="font-bold text-frosted-blue truncate">' + escapeHtml(m.name) + '</h3>' +
+                            '</div>' +
+                            '<p class="text-xs text-steel-blue mt-0.5">' + statusLabel + ' &middot; ' + ping + ' &middot; ' + uptime + ' uptime (24h)</p>' +
+                        '</div>' +
+                        '<div class="flex items-center gap-3 shrink-0">' +
+                            '<input type="text" data-monitor-id="' + m.id + '" data-field="icon" value="' + escapeHtml(m.icon || '') + '"' +
+                                ' placeholder="icon name" title="Material icon name"' +
+                                ' class="w-28 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:ring-2 focus:ring-primary">' +
+                            '<label class="relative inline-flex items-center cursor-pointer">' +
+                                '<input type="checkbox" data-monitor-id="' + m.id + '" data-field="enabled"' +
+                                    (m.enabled ? ' checked' : '') +
+                                    ' class="sr-only peer">' +
+                                '<div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>' +
+                                '<div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>' +
+                            '</label>' +
+                        '</div>' +
+                    '</div>';
+                }).join('');
+
+                // Wire toggle and icon change handlers
+                list.querySelectorAll('input[data-field="enabled"]').forEach(function(toggle) {
+                    toggle.addEventListener('change', function() {
+                        updateMonitorPref(this.dataset.monitorId, { enabled: this.checked });
+                    });
+                });
+                list.querySelectorAll('input[data-field="icon"]').forEach(function(input) {
+                    var debounce;
+                    input.addEventListener('input', function() {
+                        var el = this;
+                        clearTimeout(debounce);
+                        debounce = setTimeout(function() {
+                            updateMonitorPref(el.dataset.monitorId, { icon: el.value });
+                        }, 600);
+                    });
+                });
+            } catch (error) {
+                console.error('Error loading monitors:', error);
+                list.innerHTML = '<div class="text-center text-red-400 py-12">' +
+                    '<span class="material-symbols-outlined text-6xl mb-4 block">error</span>' +
+                    '<p>Error loading monitors</p></div>';
+            }
+        }
+
+        async function updateMonitorPref(monitorId, prefs) {
+            try {
+                await fetch('/api/admin/monitors/' + monitorId, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(prefs)
+                });
+            } catch (error) {
+                console.error('Error updating monitor:', error);
+            }
+        }
+
+        // --- Integration Settings ---
+
+        // Field mappings: integration key -> { url input id, credential input id, status div id }
+        const integrationFields = {
+            uptime_kuma: {
+                urlInput: 'integrationUptimeKumaUrl',
+                credInput: 'integrationUptimeKumaApiKey',
+                urlKey: 'integration.uptime_kuma.url',
+                credKey: 'integration.uptime_kuma.api_key',
+                slugInput: 'integrationUptimeKumaSlug',
+                slugKey: 'integration.uptime_kuma.slug',
+                statusDiv: 'statusUptimeKuma'
+            },
+            plex: {
+                urlInput: 'integrationPlexUrl',
+                credInput: 'integrationPlexToken',
+                urlKey: 'integration.plex.url',
+                credKey: 'integration.plex.token',
+                statusDiv: 'statusPlex'
+            },
+            overseerr: {
+                urlInput: 'integrationOverseerrUrl',
+                credInput: 'integrationOverseerrApiKey',
+                urlKey: 'integration.overseerr.url',
+                credKey: 'integration.overseerr.api_key',
+                statusDiv: 'statusOverseerr'
+            },
+            netdata: {
+                urlInput: 'integrationNetdataUrl',
+                credInput: 'integrationNetdataApiKey',
+                urlKey: 'integration.netdata.url',
+                credKey: 'integration.netdata.api_key',
+                statusDiv: 'statusNetdata'
+            },
+            sonarr: {
+                urlInput: 'integrationSonarrUrl',
+                credInput: 'integrationSonarrApiKey',
+                urlKey: 'integration.sonarr.url',
+                credKey: 'integration.sonarr.api_key',
+                statusDiv: 'statusSonarr'
+            },
+            radarr: {
+                urlInput: 'integrationRadarrUrl',
+                credInput: 'integrationRadarrApiKey',
+                urlKey: 'integration.radarr.url',
+                credKey: 'integration.radarr.api_key',
+                statusDiv: 'statusRadarr'
+            }
+        };
+
+        // Load all settings from the server and populate fields
+        async function loadSettings() {
+            try {
+                const resp = await fetch('/api/admin/settings');
+                if (!resp.ok) return;
+                const settings = await resp.json();
+
+                // Build a key->value map
+                const settingsMap = {};
+                settings.forEach(s => { settingsMap[s.key] = s.value; });
+
+                // Populate integration fields
+                for (const [svc, fields] of Object.entries(integrationFields)) {
+                    if (settingsMap[fields.urlKey]) {
+                        document.getElementById(fields.urlInput).value = settingsMap[fields.urlKey];
+                    }
+                    if (settingsMap[fields.credKey]) {
+                        document.getElementById(fields.credInput).value = settingsMap[fields.credKey];
+                    }
+                    if (fields.slugInput && fields.slugKey && settingsMap[fields.slugKey]) {
+                        document.getElementById(fields.slugInput).value = settingsMap[fields.slugKey];
+                    }
+                }
+
+                // Populate system fields
+                if (settingsMap['system.site_title']) {
+                    document.getElementById('systemSiteTitle').value = settingsMap['system.site_title'];
+                }
+                if (settingsMap['system.admin_email']) {
+                    document.getElementById('systemAdminEmail').value = settingsMap['system.admin_email'];
+                }
+
+                // Feature flags
+                document.getElementById('featureShowRequests').checked = settingsMap['features.show_requests'] === 'true';
+            } catch (e) {
+                console.error('Error loading settings:', e);
+            }
+        }
+
+        // Save an integration's settings
+        async function saveIntegration(service) {
+            const fields = integrationFields[service];
+            const urlVal = document.getElementById(fields.urlInput).value;
+            const credVal = document.getElementById(fields.credInput).value;
+            const statusDiv = document.getElementById(fields.statusDiv);
+
+            const settingsToSave = [
+                { key: fields.urlKey, value: urlVal, description: `${service} URL` }
+            ];
+
+            // Only save credentials if user entered a real value (not the masked placeholder)
+            if (credVal && credVal !== '***masked***') {
+                settingsToSave.push({ key: fields.credKey, value: credVal, description: `${service} credentials` });
+            }
+
+            // Save extra fields (e.g., slug for Uptime Kuma)
+            if (fields.slugInput && fields.slugKey) {
+                const slugVal = document.getElementById(fields.slugInput).value;
+                if (slugVal) {
+                    settingsToSave.push({ key: fields.slugKey, value: slugVal, description: `${service} status page slug` });
+                }
+            }
+
+            // Save feature flags for overseerr
+            if (service === 'overseerr') {
+                settingsToSave.push({
+                    key: 'features.show_requests',
+                    value: document.getElementById('featureShowRequests').checked ? 'true' : 'false',
+                    description: 'Show Overseerr iframe Requests page in sidebar'
+                });
+            }
+
+            try {
+                const resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: settingsToSave })
+                });
+
+                if (resp.ok) {
+                    showStatus(statusDiv, true, 'Settings saved');
+                } else {
+                    const err = await resp.json();
+                    showStatus(statusDiv, false, err.detail || 'Failed to save');
+                }
+            } catch (e) {
+                showStatus(statusDiv, false, 'Error: ' + e.message);
+            }
+        }
+
+        // Test an integration connection
+        async function testConnection(service) {
+            const fields = integrationFields[service];
+            const urlVal = document.getElementById(fields.urlInput).value;
+            const credVal = document.getElementById(fields.credInput).value;
+            const statusDiv = document.getElementById(fields.statusDiv);
+
+            if (!urlVal) {
+                showStatus(statusDiv, false, 'URL is required');
+                return;
+            }
+
+            // Show loading state
+            statusDiv.innerHTML = '<span class="material-symbols-outlined animate-spin text-steel-blue">progress_activity</span><span class="text-steel-blue">Testing...</span>';
+
+            try {
+                const resp = await fetch('/api/admin/test-connection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        service: service,
+                        url: urlVal,
+                        credentials: credVal && credVal !== '***masked***' ? credVal : ''
+                    })
+                });
+
+                const result = await resp.json();
+                showStatus(statusDiv, result.success, result.message);
+            } catch (e) {
+                showStatus(statusDiv, false, 'Error: ' + e.message);
+            }
+        }
+
+        // Display success/failure inline
+        function showStatus(el, success, message) {
+            const color = success ? 'text-green-400' : 'text-red-400';
+            const icon = success ? 'check_circle' : 'error';
+            el.innerHTML = `<span class="material-symbols-outlined ${color}">${icon}</span><span class="${color}">${escapeHtml(message)}</span>`;
+
+            // Auto-clear after 8 seconds
+            setTimeout(() => { el.innerHTML = ''; }, 8000);
+        }
+
+        // --- System Settings ---
+
+        document.getElementById('btnSaveSystem').addEventListener('click', async () => {
+            const siteTitle = document.getElementById('systemSiteTitle').value;
+            const adminEmail = document.getElementById('systemAdminEmail').value;
+            const statusDiv = document.getElementById('statusSystem');
+
+            try {
+                const resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        settings: [
+                            { key: 'system.site_title', value: siteTitle, description: 'Site title' },
+                            { key: 'system.admin_email', value: adminEmail, description: 'Admin email' }
+                        ]
+                    })
+                });
+
+                if (resp.ok) {
+                    showStatus(statusDiv, true, 'System settings saved');
+                } else {
+                    const err = await resp.json();
+                    showStatus(statusDiv, false, err.detail || 'Failed to save');
+                }
+            } catch (e) {
+                showStatus(statusDiv, false, 'Error: ' + e.message);
+            }
+        });
+
+        // --- Theme Settings ---
+
+        // Color field definitions: picker ID, hex input ID, CSS var, settings key
+        const themeColorFields = [
+            { picker: 'themeColorPrimary', hex: 'themeColorPrimaryHex', cssVar: '--color-primary', key: 'theme.color_primary' },
+            { picker: 'themeColorSecondary', hex: 'themeColorSecondaryHex', cssVar: '--color-secondary', key: 'theme.color_secondary' },
+            { picker: 'themeColorAccent', hex: 'themeColorAccentHex', cssVar: '--color-accent', key: 'theme.color_accent' },
+            { picker: 'themeColorText', hex: 'themeColorTextHex', cssVar: '--color-text', key: 'theme.color_text' },
+            { picker: 'themeColorBackground', hex: 'themeColorBackgroundHex', cssVar: '--color-background', key: 'theme.color_background' },
+        ];
+
+        const THEME_DEFAULTS = {
+            'branding.app_name': 'HMS Dashboard',
+            'branding.tagline': 'Home Media Server Management',
+            'branding.logo_url': '',
+            'branding.show_default_credentials': 'true',
+            'theme.color_primary': '#125793',
+            'theme.color_secondary': '#2C6DA1',
+            'theme.color_accent': '#4684B0',
+            'theme.color_text': '#BEEEF4',
+            'theme.color_background': '#000000',
+            'theme.font': 'Spline Sans',
+            'theme.dark_mode': 'true',
+            'theme.custom_css': '',
+            'sidebar.label_home': 'Home',
+            'sidebar.label_requests': 'Requests',
+            'sidebar.label_requests2': 'Requests',
+            'sidebar.label_issues': 'Issues',
+            'sidebar.label_settings': 'Settings',
+        };
+
+        function hexToRgb(hex) {
+            hex = hex.replace('#', '');
+            if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+            var r = parseInt(hex.substring(0, 2), 16);
+            var g = parseInt(hex.substring(2, 4), 16);
+            var b = parseInt(hex.substring(4, 6), 16);
+            return r + ' ' + g + ' ' + b;
+        }
+
+        // Wire color picker <-> hex input bidirectional sync + live preview
+        themeColorFields.forEach(function(field) {
+            var picker = document.getElementById(field.picker);
+            var hexInput = document.getElementById(field.hex);
+
+            picker.addEventListener('input', function() {
+                hexInput.value = picker.value;
+                document.documentElement.style.setProperty(field.cssVar, hexToRgb(picker.value));
+                document.documentElement.style.setProperty(field.cssVar.replace('--color-', '--hex-'), picker.value);
+            });
+
+            hexInput.addEventListener('input', function() {
+                var val = hexInput.value.trim();
+                if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+                    picker.value = val;
+                    document.documentElement.style.setProperty(field.cssVar, hexToRgb(val));
+                    document.documentElement.style.setProperty(field.cssVar.replace('--color-', '--hex-'), val);
+                }
+            });
+        });
+
+        // Load current theme values from branding API
+        async function loadThemeSettings() {
+            try {
+                const resp = await fetch('/api/branding');
+                if (!resp.ok) return;
+                const data = await resp.json();
+
+                document.getElementById('themeAppName').value = data.app_name || '';
+                document.getElementById('themeTagline').value = data.tagline || '';
+                document.getElementById('themeLogoUrl').value = data.logo_url || '';
+                document.getElementById('themeShowDefaultCreds').checked = data.show_default_credentials !== false;
+
+                const colors = data.colors || {};
+                const colorMap = {
+                    primary: colors.primary || '#125793',
+                    secondary: colors.secondary || '#2C6DA1',
+                    accent: colors.accent || '#4684B0',
+                    text: colors.text || '#BEEEF4',
+                    background: colors.background || '#000000',
+                };
+
+                themeColorFields.forEach(function(field) {
+                    var colorName = field.key.replace('theme.color_', '');
+                    var colorVal = colorMap[colorName] || '#000000';
+                    document.getElementById(field.picker).value = colorVal;
+                    document.getElementById(field.hex).value = colorVal;
+                });
+
+                document.getElementById('themeFont').value = data.font || '';
+                if (data.dark_mode) {
+                    document.querySelector('input[name="themeMode"][value="true"]').checked = true;
+                } else {
+                    document.querySelector('input[name="themeMode"][value="false"]').checked = true;
+                }
+
+                document.getElementById('themeCustomCss').value = data.custom_css || '';
+
+                // Sidebar labels
+                var sidebarLabels = data.sidebar_labels || {};
+                document.getElementById('sidebarLabelHome').value = sidebarLabels.home || '';
+                document.getElementById('sidebarLabelRequests').value = sidebarLabels.requests || '';
+                document.getElementById('sidebarLabelRequests2').value = sidebarLabels.requests2 || '';
+                document.getElementById('sidebarLabelIssues').value = sidebarLabels.issues || '';
+                document.getElementById('sidebarLabelSettings').value = sidebarLabels.settings || '';
+            } catch (e) {
+                console.error('Error loading theme settings:', e);
+            }
+        }
+
+        // Save theme settings
+        document.getElementById('btnSaveTheme').addEventListener('click', async function() {
+            var statusDiv = document.getElementById('statusTheme');
+            var btn = document.getElementById('btnSaveTheme');
+            btn.disabled = true;
+
+            var settings = [
+                { key: 'branding.app_name', value: document.getElementById('themeAppName').value, description: 'App name' },
+                { key: 'branding.tagline', value: document.getElementById('themeTagline').value, description: 'App tagline' },
+                { key: 'branding.logo_url', value: document.getElementById('themeLogoUrl').value, description: 'Logo URL' },
+                { key: 'branding.show_default_credentials', value: document.getElementById('themeShowDefaultCreds').checked ? 'true' : 'false', description: 'Show default credentials on login' },
+            ];
+
+            themeColorFields.forEach(function(field) {
+                settings.push({
+                    key: field.key,
+                    value: document.getElementById(field.hex).value || document.getElementById(field.picker).value,
+                    description: field.key.replace('theme.color_', '').charAt(0).toUpperCase() + field.key.replace('theme.color_', '').slice(1) + ' color',
+                });
+            });
+
+            settings.push({ key: 'theme.font', value: document.getElementById('themeFont').value, description: 'Google Font family' });
+            settings.push({ key: 'theme.dark_mode', value: document.querySelector('input[name="themeMode"]:checked').value, description: 'Dark mode enabled' });
+            settings.push({ key: 'theme.custom_css', value: document.getElementById('themeCustomCss').value, description: 'Custom CSS' });
+
+            // Sidebar labels
+            settings.push({ key: 'sidebar.label_home', value: document.getElementById('sidebarLabelHome').value || 'Home', description: 'Sidebar label for Home' });
+            settings.push({ key: 'sidebar.label_requests', value: document.getElementById('sidebarLabelRequests').value || 'Requests', description: 'Sidebar label for Requests iframe' });
+            settings.push({ key: 'sidebar.label_requests2', value: document.getElementById('sidebarLabelRequests2').value || 'Requests', description: 'Sidebar label for native Requests' });
+            settings.push({ key: 'sidebar.label_issues', value: document.getElementById('sidebarLabelIssues').value || 'Issues', description: 'Sidebar label for Issues' });
+            settings.push({ key: 'sidebar.label_settings', value: document.getElementById('sidebarLabelSettings').value || 'Settings', description: 'Sidebar label for Settings' });
+
+            try {
+                var resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: settings })
+                });
+
+                if (resp.ok) {
+                    showStatus(statusDiv, true, 'Theme saved — reload other pages to see changes');
+                    localStorage.removeItem('hms_branding');
+                } else {
+                    var err = await resp.json();
+                    showStatus(statusDiv, false, err.detail || 'Failed to save');
+                }
+            } catch (e) {
+                showStatus(statusDiv, false, 'Error: ' + e.message);
+            }
+            btn.disabled = false;
+        });
+
+        // Reset theme to defaults
+        document.getElementById('btnResetTheme').addEventListener('click', async function() {
+            if (!confirm('Reset all theme settings to defaults?')) return;
+
+            document.getElementById('themeAppName').value = THEME_DEFAULTS['branding.app_name'];
+            document.getElementById('themeTagline').value = THEME_DEFAULTS['branding.tagline'];
+            document.getElementById('themeLogoUrl').value = THEME_DEFAULTS['branding.logo_url'];
+            document.getElementById('themeShowDefaultCreds').checked = THEME_DEFAULTS['branding.show_default_credentials'] === 'true';
+
+            themeColorFields.forEach(function(field) {
+                var val = THEME_DEFAULTS[field.key];
+                document.getElementById(field.picker).value = val;
+                document.getElementById(field.hex).value = val;
+                document.documentElement.style.setProperty(field.cssVar, hexToRgb(val));
+                document.documentElement.style.setProperty(field.cssVar.replace('--color-', '--hex-'), val);
+            });
+
+            document.getElementById('themeFont').value = THEME_DEFAULTS['theme.font'];
+            document.querySelector('input[name="themeMode"][value="' + THEME_DEFAULTS['theme.dark_mode'] + '"]').checked = true;
+            document.getElementById('themeCustomCss').value = THEME_DEFAULTS['theme.custom_css'];
+
+            // Sidebar labels
+            document.getElementById('sidebarLabelHome').value = THEME_DEFAULTS['sidebar.label_home'];
+            document.getElementById('sidebarLabelRequests').value = THEME_DEFAULTS['sidebar.label_requests'];
+            document.getElementById('sidebarLabelRequests2').value = THEME_DEFAULTS['sidebar.label_requests2'];
+            document.getElementById('sidebarLabelIssues').value = THEME_DEFAULTS['sidebar.label_issues'];
+            document.getElementById('sidebarLabelSettings').value = THEME_DEFAULTS['sidebar.label_settings'];
+
+            // Auto-save the defaults
+            document.getElementById('btnSaveTheme').click();
+        });
+
+        // --- News Editor ---
+
+        let editingPostId = null;
+        let isPreviewMode = false;
+
+        const editor = document.getElementById('postContent');
+        const toolbar = document.getElementById('editorToolbar');
+
+        // Inline commands (Bold, Italic, Underline, Strikethrough)
+        toolbar.querySelectorAll('.toolbar-btn[data-command]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (isPreviewMode) return;
+                const cmd = btn.getAttribute('data-command');
+                document.execCommand(cmd, false, null);
+                editor.focus();
+                updateToolbarState();
+            });
+        });
+
+        // Heading Dropdown
+        const headingBtn = document.getElementById('headingBtn');
+        const headingDropdown = document.getElementById('headingDropdown');
+
+        headingBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (isPreviewMode) return;
+            headingDropdown.classList.toggle('open');
+        });
+
+        headingDropdown.querySelectorAll('[data-heading]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (isPreviewMode) return;
+                const tag = btn.getAttribute('data-heading');
+                if (tag === 'p') {
+                    document.execCommand('formatBlock', false, '<p>');
+                } else {
+                    document.execCommand('formatBlock', false, '<' + tag + '>');
+                }
+                headingDropdown.classList.remove('open');
+                editor.focus();
+            });
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!headingBtn.contains(e.target) && !headingDropdown.contains(e.target)) {
+                headingDropdown.classList.remove('open');
+            }
+        });
+
+        // Blockquote
+        document.getElementById('btnBlockquote').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+            document.execCommand('formatBlock', false, '<blockquote>');
+            editor.focus();
+        });
+
+        // Insert Link
+        document.getElementById('btnLink').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+
+            const selection = window.getSelection();
+            let savedRange = null;
+            if (selection.rangeCount > 0) {
+                savedRange = selection.getRangeAt(0).cloneRange();
+            }
+
+            const url = prompt('Enter the URL:');
+            if (!url) return;
+
+            if (savedRange) {
+                selection.removeAllRanges();
+                selection.addRange(savedRange);
+            }
+
+            if (selection.toString().trim().length > 0) {
+                document.execCommand('createLink', false, url);
+                const links = editor.querySelectorAll('a');
+                links.forEach(link => {
+                    if (link.href === url || link.getAttribute('href') === url) {
+                        link.setAttribute('target', '_blank');
+                        link.setAttribute('rel', 'noopener noreferrer');
+                    }
+                });
+            } else {
+                const a = document.createElement('a');
+                a.href = url;
+                a.textContent = url;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                if (savedRange) {
+                    savedRange.insertNode(a);
+                    savedRange.setStartAfter(a);
+                    savedRange.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(savedRange);
+                }
+            }
+            editor.focus();
+        });
+
+        // Insert Image
+        document.getElementById('btnImage').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+
+            const selection = window.getSelection();
+            let savedRange = null;
+            if (selection.rangeCount > 0) {
+                savedRange = selection.getRangeAt(0).cloneRange();
+            }
+
+            const src = prompt('Enter the image URL:');
+            if (!src) return;
+            const alt = prompt('Enter alt text (optional):') || '';
+
+            if (savedRange) {
+                selection.removeAllRanges();
+                selection.addRange(savedRange);
+            }
+
+            const img = document.createElement('img');
+            img.src = src;
+            img.alt = alt;
+            img.style.maxWidth = '100%';
+
+            if (savedRange) {
+                savedRange.insertNode(img);
+                savedRange.setStartAfter(img);
+                savedRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(savedRange);
+            } else {
+                editor.appendChild(img);
+            }
+            editor.focus();
+        });
+
+        // Code Block
+        document.getElementById('btnCodeBlock').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+
+            const selection = window.getSelection();
+            const selectedText = selection.toString() || '';
+
+            const pre = document.createElement('pre');
+            const code = document.createElement('code');
+            code.textContent = selectedText || 'code here';
+            pre.appendChild(code);
+
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                range.deleteContents();
+                range.insertNode(pre);
+                const p = document.createElement('p');
+                p.innerHTML = '<br>';
+                pre.parentNode.insertBefore(p, pre.nextSibling);
+                const newRange = document.createRange();
+                newRange.setStart(p, 0);
+                newRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(newRange);
+            } else {
+                editor.appendChild(pre);
+                const p = document.createElement('p');
+                p.innerHTML = '<br>';
+                editor.appendChild(p);
+            }
+            editor.focus();
+        });
+
+        // Inline Code
+        document.getElementById('btnInlineCode').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                const selectedText = selection.toString();
+                const code = document.createElement('code');
+                code.textContent = selectedText || 'code';
+
+                range.deleteContents();
+                range.insertNode(code);
+
+                const newRange = document.createRange();
+                newRange.setStartAfter(code);
+                newRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(newRange);
+            }
+            editor.focus();
+        });
+
+        // Horizontal Rule
+        document.getElementById('btnHR').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+            document.execCommand('insertHorizontalRule', false, null);
+            editor.focus();
+        });
+
+        // Preview Toggle
+        document.getElementById('btnPreview').addEventListener('click', (e) => {
+            e.preventDefault();
+            isPreviewMode = !isPreviewMode;
+
+            const previewBtn = document.getElementById('btnPreview');
+            const iconSpan = previewBtn.querySelector('.material-symbols-outlined');
+            const labelSpan = previewBtn.querySelector('.text-xs');
+
+            if (isPreviewMode) {
+                editor.setAttribute('contenteditable', 'false');
+                editor.classList.add('preview-mode');
+                iconSpan.textContent = 'edit';
+                labelSpan.textContent = 'Edit';
+                previewBtn.classList.add('active');
+                toolbar.querySelectorAll('.toolbar-btn:not(#btnPreview)').forEach(btn => {
+                    btn.classList.add('opacity-40', 'pointer-events-none');
+                });
+            } else {
+                editor.setAttribute('contenteditable', 'true');
+                editor.classList.remove('preview-mode');
+                iconSpan.textContent = 'visibility';
+                labelSpan.textContent = 'Preview';
+                previewBtn.classList.remove('active');
+                toolbar.querySelectorAll('.toolbar-btn:not(#btnPreview)').forEach(btn => {
+                    btn.classList.remove('opacity-40', 'pointer-events-none');
+                });
+                editor.focus();
+            }
+        });
+
+        // Keyboard Shortcuts
+        editor.addEventListener('keydown', (e) => {
+            if (isPreviewMode) return;
+            if (e.ctrlKey || e.metaKey) {
+                switch (e.key.toLowerCase()) {
+                    case 'b':
+                        e.preventDefault();
+                        document.execCommand('bold', false, null);
+                        updateToolbarState();
+                        break;
+                    case 'i':
+                        e.preventDefault();
+                        document.execCommand('italic', false, null);
+                        updateToolbarState();
+                        break;
+                    case 'u':
+                        e.preventDefault();
+                        document.execCommand('underline', false, null);
+                        updateToolbarState();
+                        break;
+                }
+            }
+        });
+
+        // Update Toolbar Active State
+        function updateToolbarState() {
+            const commands = ['bold', 'italic', 'underline', 'strikeThrough'];
+            commands.forEach(cmd => {
+                const btn = toolbar.querySelector(`[data-command="${cmd}"]`);
+                if (btn) {
+                    if (document.queryCommandState(cmd)) {
+                        btn.classList.add('active');
+                    } else {
+                        btn.classList.remove('active');
+                    }
+                }
+            });
+        }
+
+        editor.addEventListener('keyup', updateToolbarState);
+        editor.addEventListener('mouseup', updateToolbarState);
+        document.addEventListener('selectionchange', () => {
+            if (document.activeElement === editor) {
+                updateToolbarState();
+            }
+        });
+
+        function clearEditor() {
+            editor.innerHTML = '';
+            isPreviewMode = false;
+            const previewBtn = document.getElementById('btnPreview');
+            const iconSpan = previewBtn.querySelector('.material-symbols-outlined');
+            const labelSpan = previewBtn.querySelector('.text-xs');
+            editor.setAttribute('contenteditable', 'true');
+            editor.classList.remove('preview-mode');
+            iconSpan.textContent = 'visibility';
+            labelSpan.textContent = 'Preview';
+            previewBtn.classList.remove('active');
+            toolbar.querySelectorAll('.toolbar-btn:not(#btnPreview)').forEach(btn => {
+                btn.classList.remove('opacity-40', 'pointer-events-none');
+            });
+        }
+
+        // Show/hide post form
+        document.getElementById('btnNewPost').addEventListener('click', () => {
+            editingPostId = null;
+            document.getElementById('newsFormTitle').textContent = 'Create News Post';
+            document.getElementById('newsForm').reset();
+            document.getElementById('postId').value = '';
+            clearEditor();
+            document.getElementById('postForm').classList.remove('hidden');
+        });
+
+        document.getElementById('btnCancelNewsForm').addEventListener('click', () => {
+            document.getElementById('postForm').classList.add('hidden');
+            document.getElementById('newsForm').reset();
+            clearEditor();
+            editingPostId = null;
+        });
+
+        // Post form submission
+        document.getElementById('newsForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const editorContent = editor.innerHTML.trim();
+            const textContent = editor.textContent.trim();
+            if (!textContent && !editor.querySelector('img, hr')) {
+                alert('Please enter some content for the post.');
+                editor.focus();
+                return;
+            }
+
+            const postData = {
+                title: document.getElementById('postTitle').value,
+                content: editorContent,
+                published: document.getElementById('postPublished').checked,
+                pinned: document.getElementById('postPinned').checked
+            };
+
+            try {
+                let response;
+                if (editingPostId) {
+                    response = await fetch(`/api/news/${editingPostId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(postData)
+                    });
+                } else {
+                    response = await fetch('/api/news/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(postData)
+                    });
+                }
+
+                if (response.ok) {
+                    alert(editingPostId ? 'Post updated successfully!' : 'Post created successfully!');
+                    document.getElementById('postForm').classList.add('hidden');
+                    document.getElementById('newsForm').reset();
+                    clearEditor();
+                    editingPostId = null;
+                    loadPosts();
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + (error.detail || 'Failed to save post'));
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        });
+
+        // Load posts
+        async function loadPosts() {
+            try {
+                const response = await fetch('/api/news/?published_only=false&limit=100');
+                const posts = await response.json();
+
+                const postsList = document.getElementById('postsList');
+
+                if (posts.length === 0) {
+                    postsList.innerHTML = `
+                        <div class="text-center text-steel-blue py-12">
+                            <span class="material-symbols-outlined text-6xl mb-4 block opacity-50">article</span>
+                            <p>No news posts yet. Create your first one!</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                postsList.innerHTML = posts.map(post => `
+                    <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 hover:border-primary/30 transition-all">
+                        <div class="flex items-start justify-between">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <h3 class="text-xl font-bold text-frosted-blue">${escapeHtml(post.title)}</h3>
+                                    ${post.pinned ? '<span class="bg-primary/20 text-primary text-xs px-2 py-1 rounded">PINNED</span>' : ''}
+                                    ${post.published ? '<span class="bg-green-500/20 text-green-400 text-xs px-2 py-1 rounded">PUBLISHED</span>' : '<span class="bg-steel-blue/20 text-steel-blue text-xs px-2 py-1 rounded">DRAFT</span>'}
+                                </div>
+                                <p class="text-steel-blue text-sm mb-3">
+                                    By ${escapeHtml(post.author_name)} • ${new Date(post.created_at).toLocaleString()}
+                                </p>
+                                <div class="text-white/80 text-sm line-clamp-3">
+                                    ${post.content.substring(0, 200)}...
+                                </div>
+                            </div>
+                            <div class="flex gap-2 ml-4">
+                                <button onclick="editPost(${post.id})" class="p-2 hover:bg-primary/20 rounded-lg transition-all" title="Edit">
+                                    <span class="material-symbols-outlined text-frosted-blue">edit</span>
+                                </button>
+                                <button onclick="deletePost(${post.id})" class="p-2 hover:bg-red-500/20 rounded-lg transition-all" title="Delete">
+                                    <span class="material-symbols-outlined text-red-400">delete</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading posts:', error);
+                document.getElementById('postsList').innerHTML = `
+                    <div class="text-center text-red-400 py-12">
+                        <span class="material-symbols-outlined text-6xl mb-4 block">error</span>
+                        <p>Error loading posts: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Edit post
+        async function editPost(id) {
+            try {
+                const response = await fetch(`/api/news/${id}`);
+                const post = await response.json();
+
+                editingPostId = id;
+                document.getElementById('newsFormTitle').textContent = 'Edit News Post';
+                document.getElementById('postId').value = id;
+                document.getElementById('postTitle').value = post.title;
+                editor.innerHTML = post.content;
+                document.getElementById('postPublished').checked = post.published;
+                document.getElementById('postPinned').checked = post.pinned;
+                document.getElementById('postForm').classList.remove('hidden');
+
+                // Switch to news tab if not already there
+                switchTab('news');
+            } catch (error) {
+                alert('Error loading post: ' + error.message);
+            }
+        }
+
+        // Delete post
+        async function deletePost(id) {
+            if (!confirm('Are you sure you want to delete this post?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/news/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('Post deleted successfully!');
+                    loadPosts();
+                } else {
+                    alert('Error deleting post');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // Load monitors and settings on page load
+        loadMonitors();
+        loadSettings();
+        loadThemeSettings();
+        loadPosts();
+    </script>
+
+</body>
+</html>

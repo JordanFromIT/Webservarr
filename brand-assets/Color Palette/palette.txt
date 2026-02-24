@@ -1,0 +1,31 @@
+/* Coolors Exported Palette - https://coolors.co/125793-2c6da1-4684b0-beeef4-000000 */
+
+- CSV
+
+125793,2C6DA1,4684B0,BEEEF4,000000
+
+- With #
+
+#125793, #2C6DA1, #4684B0, #BEEEF4, #000000
+
+- Array
+
+["125793","2C6DA1","4684B0","BEEEF4","000000"]
+
+- Object
+
+{"Baltic Blue":"125793","Cornflower Ocean":"2C6DA1","Steel Blue":"4684B0","Frosted Blue":"BEEEF4","Black":"000000"}
+
+- Extended Array
+
+[{"name":"Baltic Blue","hex":"125793","rgb":[18,87,147],"cmyk":[88,41,0,42],"hsb":[208,88,58],"hsl":[208,78,32],"lab":[36,3,-39]},{"name":"Cornflower Ocean","hex":"2C6DA1","rgb":[44,109,161],"cmyk":[73,32,0,37],"hsb":[207,73,63],"hsl":[207,57,40],"lab":[44,-3,-34]},{"name":"Steel Blue","hex":"4684B0","rgb":[70,132,176],"cmyk":[60,25,0,31],"hsb":[205,60,69],"hsl":[205,43,48],"lab":[53,-7,-29]},{"name":"Frosted Blue","hex":"BEEEF4","rgb":[190,238,244],"cmyk":[22,2,0,4],"hsb":[187,22,96],"hsl":[187,71,85],"lab":[91,-14,-8]},{"name":"Black","hex":"000000","rgb":[0,0,0],"cmyk":[0,0,0,100],"hsb":[0,0,0],"hsl":[0,0,0],"lab":[0,0,0]}]
+
+- XML
+
+<palette>
+  <color name="Baltic Blue" hex="125793" r="18" g="87" b="147" />
+  <color name="Cornflower Ocean" hex="2C6DA1" r="44" g="109" b="161" />
+  <color name="Steel Blue" hex="4684B0" r="70" g="132" b="176" />
+  <color name="Frosted Blue" hex="BEEEF4" r="190" g="238" b="244" />
+  <color name="Black" hex="000000" r="0" g="0" b="0" />
+</palette>

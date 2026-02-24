@@ -1,0 +1,44 @@
+# ==============================================================================
+# HMS Dashboard - Python Dependencies
+# ==============================================================================
+
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# OIDC Authentication
+authlib==1.3.0
+httpx==0.26.0
+itsdangerous==2.1.2
+
+# Database
+sqlalchemy==2.0.25
+aiosqlite==0.19.0
+
+# Redis
+redis==5.0.1
+hiredis==2.3.2
+
+# Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Markdown rendering (for news posts)
+markdown==3.5.2
+bleach==6.1.0
+
+# HTTP client
+requests==2.31.0
+
+# Date/time utilities
+python-dateutil==2.8.2
+
+# Docker management
+docker==7.0.0

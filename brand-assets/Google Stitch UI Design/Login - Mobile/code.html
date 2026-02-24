@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>HMS Dashboard - Login</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#125793",
+                        "frosted-blue": "#BEEEF4",
+                        "baltic-blue": "#125793",
+                        "baltic-accent": "#2C6DA1",
+                        "background-light": "#f8f7f5",
+                        "background-dark": "#000000",
+                    },
+                    fontFamily: {
+                        "display": ["Spline Sans", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }</script>
+<style>
+        body {
+            font-family: 'Spline Sans', sans-serif;
+        }
+        .poster-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 8px;
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+            opacity: 0.4;
+        }
+        .poster-item {
+            aspect-ratio: 2/3;
+            background-size: cover;
+            background-position: center;
+        }
+        .vignette {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, transparent 20%, rgba(0,0,0,0.8) 70%, #000 100%);
+            z-index: 1;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="bg-background-dark text-white font-display overflow-hidden selection:bg-primary/30">
+<!-- Background Poster Mosaic -->
+<div class="fixed inset-0 overflow-hidden pointer-events-none">
+<div class="poster-grid">
+<!-- Mocking a grid of posters with placeholders -->
+<div class="poster-item bg-zinc-900" data-alt="Dark cinematic movie poster with dramatic lighting" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBGCL8C3U2atVxOZpFwELpX1Bl6htDeXVMzP0clsmNZXKNCCFgyR9H8sKjTG7AE0_r0cNcvCENTesp897doyfV2NsnKyCGrPh2A6betuUnVAO_aEQyqmdPw37R_yySiNmpycDfNkl-gq6nG1txehIEhr7KPtVnzUWPQ4itbwfn1iMtvSsFKP11Uh5jXN-IjYry0c1RUlq2eTg9xfv5kSwjiS0YKBLqPtAE3R9yXj_dNhVPaWgd313p2N5qShmzY0HKLWXcrc8mFx44')"></div>
+<div class="poster-item bg-zinc-900" data-alt="Sci-fi movie poster featuring a futuristic city" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDWdxatG_LosfQ6SC8yvZrBhkJEgRwaVX1AUPC9_u4aGxLijx6HkL2VlDc88Q95wWzdK6sM382xHsXYPaIYbqMYhuau9n1gx06iERSwpuU2KfIE6lcGiPpYxSP_qSAvaLrcROqKsw5OEA_yTPMZ7ylHr5FVinSbghes2YFGNryoM3oqh5Vh3YQ8vltS0DX9EwvZfSHzYyirFCZMKetr2xDYSXj75l2WzZzVZMsZfJXEc7h3rcKKcmydD98w4_RTJurL6s3jiKVVkVY')"></div>
+<div class="poster-item bg-zinc-900" data-alt="Classic black and white cinema scene" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDsRAOPfBYVl2QjLLSEnAUynKHgAs49NLxAr757duDQwJCI0lb9ixd4pdui9ZI0NjPKLIMJHkMJuqZAM9e_ZTFPrALCeCcpVfAQI3ZgnRNTHaoE7z_EuneRGI66dOM92sr-Hqbly5aA-gJ4SI2Clt_z4XDWokRIw74qDe7OgB-2RcJgmR7LkZOjizJ46hNIvVldyWFBHPTaQzo1H99FgIlXe590R7tKtfpbDXWDI211xXqZN5mcBepcRXAMGCPKoYzD70egBfjGicM')"></div>
+<div class="poster-item bg-zinc-900" data-alt="Action movie poster with explosions and debris" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDrOkfeGCqZS2ZWmVZBCiOAZBAE3XLY4qIceFkzuQE9O1fIXsW_MVZqQfPJOlov4TgWURa67XmrA6rIpyHEHFq-5LSm7OYdn8K2wMUWj1xJbADg5rfmCjdN7327F0LObO9LOsHVnW11t2vMiFyYjuwVdQWFzl8vJb4wGW5fmEaAMf1MmwnznnDXmet4Io9SXM9Cf0NcOKpbBZ8k19-MnegUps0E7ExnlDgAI2qmDn9b09zLA1V77FnHOuso8gGlmYxyajqrIb4QCGI')"></div>
+<div class="poster-item bg-zinc-900" data-alt="Animated movie poster with vibrant colors" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDYRBuPo4LEG991KYC-TnUiDIAEvobwgLFAsvnC4VnKdDVyU1z-zeT5l1hNE9cPnm-EMJXeSbT6Vi4tReX8YE83jJrlxLll7sTXXzZuVq_mdm2MsZKJDYQFQx78WyDWEB1hFCwUW0DJgoFyILBxkf_S34pYaCXkFMagwODNCQwZTluR530C7MloKXA9RfDoOgwX7PHEoBuBscjEHwbRBC0PH5LrMGDSiEkLhnL27LLI3rt6DYWTxSiXqQzJGY7Y-vDb99_N7KCcusI')"></div>
+<div class="poster-item bg-zinc-900" data-alt="Drama movie poster with emotional portrait" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBgBTQPHtlE4p7wmrPUU_vNZYyA4uahXLN-HKjTWs1xjstjxyv6Eqms1STIl61dsWQ8yrg8ZM52w82wXxtPwEWxvR41WAFDOsvttSNdQF1noOO6gDKNbD8c77gjpPvgs2uG5k3WankBZq30BHTLia6zDV5AhMv2EGQRyYpS68GRuPrAqU51RPj3dtX-jpPnW-jcqZUugYZE3-me8X7tGgXc210C5lgbhdd3ih3bsAgWQT5rpaFAWcN85YcTjGTZy6bTnYEMl-S5WMA')"></div>
+<div class="poster-item bg-zinc-900" data-alt="Horror movie poster with dark moody forest" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCYr1Ts8BAYjmQ4-l-DckDfADpegO6fdb-p45yQdmxU59BVKa_szTJ77cIvqie5b65jksPl_htG6YhtSzEyeHSFdkoWtPIYYJnUm3q_Hd6VQM4DTXdl517izpuprNwDnfioXWAz9LvjRCtPRQp_sv4laCxe4ZQBqmIfcmpcaKf5w_xbM2bpyMrdBqko9QIsgUFV4XwkM3lNlNgCP-jx55G0XPYc7XLxIcVH2_ewWSR9hlZ60gJ3DCD9KHvMOKo0XiJO044iVBSnP94')"></div>
+<div class="poster-item bg-zinc-900" data-alt="Comedy movie poster with bright group photo" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDHSinBfTg6-Bfrwgq-zSjCX5WhioisLoA7sfRApNJ2E1AV06oz1c3wymdgfQF28E0l62VZR-F4Ph-khmtd3KaTyv5mO1iEXFXejhAHAbnoWmSIF6FLpnY-YyQyWKZVKJpYFoMUMduWFUORXyQbbDP32ODYalT373PLm_kWGTZHYAUN3Qdj_mNiwUyVLFPf6Y3u6e6CUhotk99QKscIPWqzonquaTMzZpeaj6I4rejwQLbgP-GyO5ZUPyXDrXAqYKF2Xlabg8jjhxY')"></div>
+<div class="poster-item bg-zinc-900 hidden md:block" data-alt="Space adventure movie poster with planets" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuByM9OFZvebjLpNwv8fSGX43MkUbBjeA2UKtWhCf5VG9j0gQzL6mYibXqfvdLB4_7v82Fd0nIW_DIxfik7aDWKMVofSOFiZ38abo-EClIz91Lm_4zfHV-UXP8M-ENJ_528Z6FU1kqQkpg0KbTvD1DgpxLW509nSay9v5YJOdvKxcMirV1a7i09DDrJ2uDnDq3B0FhSYXQlnVgSLZYbU5YpwrbHUTmuket-kiFkf1xVKqPkU-jMAjYFdyT-Rex9yF8_nxOw1r9sUxzQ')"></div>
+<div class="poster-item bg-zinc-900 hidden md:block" data-alt="Fantasy movie poster with mythical landscape" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuD3a5cMateNpj-Q9oUiKB-9T2S_hwOV49Yijsi-moTQiVg9BSpLIImktdlWPlc0pVybmgjQC0_1TDjljzEc6XUo8KitxEfg1T920LdjK7UmtqqN8f48gxGsFHMDIB5_BuiMf5FdL9ZO9CSci9BBGB-7o2VjsAXwudgmnAP22M6gNiV2nAwdNa9qz4va5FGWwvqKSe2InpScSu5a14XjfpfMx1UvIydH_pQnC5fNvCG8dx0nnHZOTeVf3ciFxmXFGW4LGKQjgnsPTBA')"></div>
+<div class="poster-item bg-zinc-900 hidden lg:block" data-alt="Documentary poster showing nature scenery" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAYw_a82z4wtILTKa3rTobLuNNrmwFR3cYho9sM-3yDJzCnftyr5TWrq2JGKVSNnaoNjfIwih2zyIM--kvFASFjPKIW9AkJWveiz8zsZ7okcG0yJdjAUvm2s51dHP5FJlAllSYBHDXxrum6ViRbylMlRGzR7Ugss3KsHUVYt5uCCnnZ57h0nDOFi5G42fVO1halZwwIojSlG7ng9xIG-0axd0iIk6AcB6-YNMSd6B4QGLIBpDWr_N3QEnQCLzTcDPu-GXq3Pbq1keI')"></div>
+<div class="poster-item bg-zinc-900 hidden lg:block" data-alt="Thriller movie poster with mysterious figure" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDFZxlJXUWzSHOryce_bYEcv4UCtLpFEdsLmcFsjUVFbx94OPM0Tmf8yjsTp_6ZcN8gNm1tF39oe5hKTYeI-FudqFtDe6OQskWm6CuQdUjo15wC7JpV8yVU1BLyDrYwzngC_0zYOWrr-CHzHiTEADxqodgqf4-Oielul1JYLckx_sVFK1kq4OQV5ziF7a9ZPOnNaMFCsfvpj97neH6oLkXbhrvpvrHRNBujymaqwAsdee62UvgqAvUvriwjTLO2n5CFiyMb2rDgwT0')"></div>
+</div>
+<div class="vignette"></div>
+</div>
+<!-- Main Content -->
+<main class="relative z-10 min-h-screen flex items-center justify-center px-4 py-12">
+<div class="w-full max-w-md">
+<!-- Branding -->
+<div class="text-center mb-8">
+<img alt="HMS Server Logo" class="h-32 mx-auto mb-4 object-contain" src="{{DATA:IMAGE:IMAGE_4}}"/>
+<p class="text-zinc-400 font-light">Your Personal Media Gateway</p>
+</div>
+<!-- Login Card -->
+<div class="backdrop-blur-xl bg-black/60 border border-zinc-800 rounded-xl p-8 shadow-2xl">
+<h2 class="text-xl font-semibold text-white mb-6">Welcome back!</h2>
+<form class="space-y-5">
+<!-- Username Field -->
+<div>
+<label class="block text-sm font-medium text-zinc-400 mb-2">Username or Email</label>
+<div class="relative group">
+<input class="w-full h-12 bg-zinc-900/50 border border-zinc-700 rounded-lg px-4 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-baltic-blue/50 focus:border-baltic-blue transition-all duration-200" placeholder="Enter your credentials" type="text"/>
+</div>
+</div>
+<!-- Password Field -->
+<div>
+<div class="flex items-center justify-between mb-2">
+<label class="block text-sm font-medium text-zinc-400">Password</label>
+<a class="text-xs text-baltic-accent hover:underline transition-all" href="#">Forgot?</a>
+</div>
+<div class="relative flex items-center">
+<input class="w-full h-12 bg-zinc-900/50 border border-zinc-700 rounded-lg px-4 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-baltic-blue/50 focus:border-baltic-blue transition-all duration-200" placeholder="••••••••" type="password"/>
+<button class="absolute right-4 text-zinc-500 hover:text-white transition-colors" type="button">
+<span class="material-symbols-outlined text-xl text-zinc-500 hover:text-baltic-accent transition-colors" data-icon="visibility">visibility</span>
+</button>
+</div>
+</div>
+<!-- Sign In Button -->
+<button class="w-full h-12 bg-baltic-blue hover:bg-baltic-accent text-white font-bold rounded-lg transition-all active:scale-[0.98] shadow-lg shadow-baltic-blue/20" type="submit">
+                        Sign In
+                    </button>
+<!-- Divider -->
+<div class="relative py-3 flex items-center">
+<div class="flex-grow border-t border-zinc-800"></div>
+<span class="flex-shrink mx-4 text-zinc-500 text-xs uppercase tracking-widest font-medium">Or continue with</span>
+<div class="flex-grow border-t border-zinc-800"></div>
+</div>
+<!-- Plex Button -->
+<button class="w-full h-12 bg-baltic-blue hover:bg-baltic-accent text-white font-medium rounded-lg flex items-center justify-center gap-3 transition-all active:scale-[0.98]" type="button">
+<svg class="w-5 h-5 fill-current" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M12 0L24 12L12 24L0 12L12 0ZM12 4.2L4.2 12L12 19.8L19.8 12L12 4.2Z"></path>
+</svg>
+                        Sign in with Plex
+                    </button>
+</form>
+<!-- Footer -->
+<div class="mt-8 text-center border-t border-zinc-800/50 pt-6">
+<p class="text-sm text-zinc-500">
+                        Don't have an account? 
+                        <a class="text-baltic-accent font-medium hover:text-white transition-colors" href="#">Request Access</a>
+</p>
+</div>
+</div>
+<!-- Bottom Disclaimer -->
+<div class="mt-12 text-center flex flex-col items-center gap-4">
+<div class="flex gap-6 text-xs text-zinc-600 font-medium">
+<a class="hover:text-zinc-400 transition-colors" href="#">Status</a>
+<a class="hover:text-zinc-400 transition-colors" href="#">Documentation</a>
+<a class="hover:text-zinc-400 transition-colors" href="#">Privacy</a>
+</div>
+<p class="text-[10px] text-zinc-700 uppercase tracking-widest">
+                    © 2024 HMS Media Systems. All Rights Reserved.
+                </p>
+</div>
+</div>
+</main>
+<!-- Overlay Gradient for better contrast at the bottom -->
+<div class="fixed bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black to-transparent z-[5] pointer-events-none"></div>
+</body></html>

@@ -1,0 +1,243 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # HMS Dashboard - FastAPI Backend + Static Frontend
+  # ============================================================================
+  hms-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hms-dashboard
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Database
+      - DATABASE_URL=sqlite:////app/data/hms.db
+
+      # Redis (DB 0 for dashboard)
+      - REDIS_URL=redis://redis:6379/0
+
+      # Authentik OIDC Configuration
+      - AUTHENTIK_URL=https://auth.hmserver.tv
+      - AUTHENTIK_CLIENT_ID=${AUTHENTIK_CLIENT_ID}
+      - AUTHENTIK_CLIENT_SECRET=${AUTHENTIK_CLIENT_SECRET}
+      # AUTHENTIK_REDIRECT_URI derived from APP_DOMAIN if not set
+
+      # Application Settings
+      - APP_SECRET_KEY=${APP_SECRET_KEY}
+      - APP_ENV=production
+      - APP_DEBUG=false
+
+      # Domain / URL Configuration
+      - APP_DOMAIN=dev.hmserver.tv
+      - APP_SCHEME=https
+      - CORS_ORIGINS=https://hmserver.tv
+      - CSP_FRAME_SRC=https://requests.hmserver.tv
+      - CSP_CONNECT_SRC=
+
+    volumes:
+      # SQLite database persistence
+      - ./data:/app/data
+      # Docker socket for container management (admin restart/shutdown)
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    depends_on:
+      - redis
+    networks:
+      - hms-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================================================
+  # Authentik Server - OIDC Identity Provider
+  # ============================================================================
+  authentik-server:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-server
+    restart: unless-stopped
+    command: server
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    environment:
+      # Secret key for Authentik (generate with: openssl rand -base64 32)
+      - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+
+      # Database connection
+      - AUTHENTIK_POSTGRESQL__HOST=postgresql
+      - AUTHENTIK_POSTGRESQL__PORT=5432
+      - AUTHENTIK_POSTGRESQL__NAME=authentik
+      - AUTHENTIK_POSTGRESQL__USER=authentik
+      - AUTHENTIK_POSTGRESQL__PASSWORD=${POSTGRES_PASSWORD}
+
+      # Redis connection (DB 1 for Authentik)
+      - AUTHENTIK_REDIS__HOST=redis
+      - AUTHENTIK_REDIS__PORT=6379
+      - AUTHENTIK_REDIS__DB=1
+
+      # Error reporting
+      - AUTHENTIK_ERROR_REPORTING__ENABLED=false
+
+      # Log level
+      - AUTHENTIK_LOG_LEVEL=info
+
+      # Email configuration (optional - configure later)
+      # - AUTHENTIK_EMAIL__HOST=smtp.gmail.com
+      # - AUTHENTIK_EMAIL__PORT=587
+      # - AUTHENTIK_EMAIL__USERNAME=${EMAIL_USERNAME}
+      # - AUTHENTIK_EMAIL__PASSWORD=${EMAIL_PASSWORD}
+      # - AUTHENTIK_EMAIL__USE_TLS=true
+      # - AUTHENTIK_EMAIL__FROM=noreply@hmserver.tv
+
+    volumes:
+      # Media files (user avatars, custom branding)
+      - authentik-media:/media
+
+      # Custom templates (email, etc.)
+      - authentik-templates:/templates
+
+    depends_on:
+      - postgresql
+      - redis
+    networks:
+      - hms-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9000/-/health/live/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ============================================================================
+  # Authentik Worker - Background Task Processing
+  # ============================================================================
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-worker
+    restart: unless-stopped
+    command: worker
+    environment:
+      # Same environment as authentik-server
+      - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+      - AUTHENTIK_POSTGRESQL__HOST=postgresql
+      - AUTHENTIK_POSTGRESQL__PORT=5432
+      - AUTHENTIK_POSTGRESQL__NAME=authentik
+      - AUTHENTIK_POSTGRESQL__USER=authentik
+      - AUTHENTIK_POSTGRESQL__PASSWORD=${POSTGRES_PASSWORD}
+      - AUTHENTIK_REDIS__HOST=redis
+      - AUTHENTIK_REDIS__PORT=6379
+      - AUTHENTIK_REDIS__DB=1
+      - AUTHENTIK_ERROR_REPORTING__ENABLED=false
+      - AUTHENTIK_LOG_LEVEL=info
+
+      # Worker-specific settings
+      - AUTHENTIK_WORKER_CONCURRENCY=2
+
+    volumes:
+      # Shared volumes with authentik-server
+      - authentik-media:/media
+      - authentik-templates:/templates
+
+    depends_on:
+      - postgresql
+      - redis
+    networks:
+      - hms-network
+
+  # ============================================================================
+  # PostgreSQL - Authentik Database
+  # ============================================================================
+  postgresql:
+    image: postgres:15-alpine
+    container_name: hms-postgresql
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=authentik
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=authentik
+
+      # Performance optimizations for 2GB VPS
+      - POSTGRES_MAX_CONNECTIONS=20
+      - POSTGRES_SHARED_BUFFERS=128MB
+      - POSTGRES_WORK_MEM=4MB
+
+    volumes:
+      # Database persistence
+      - postgres-data:/var/lib/postgresql/data
+
+    networks:
+      - hms-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentik"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    # No ports exposed - internal only
+
+  # ============================================================================
+  # Redis - Shared Cache and Session Store
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: hms-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --maxmemory 50mb
+      --maxmemory-policy allkeys-lru
+      --databases 16
+
+    volumes:
+      # Session persistence
+      - redis-data:/data
+
+    networks:
+      - hms-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    # No ports exposed - internal only
+
+# ==============================================================================
+# Networks
+# ==============================================================================
+networks:
+  hms-network:
+    driver: bridge
+    name: hms-network
+
+# ==============================================================================
+# Volumes
+# ==============================================================================
+volumes:
+  # PostgreSQL data
+  postgres-data:
+    driver: local
+    name: hms-postgres-data
+
+  # Redis data
+  redis-data:
+    driver: local
+    name: hms-redis-data
+
+  # Authentik media files
+  authentik-media:
+    driver: local
+    name: hms-authentik-media
+
+  # Authentik templates
+  authentik-templates:
+    driver: local
+    name: hms-authentik-templates

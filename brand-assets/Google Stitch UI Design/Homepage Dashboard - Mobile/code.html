@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Plex Portal Dashboard - Control Center</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "primary": "#125793",
+            "baltic-blue": "#125793",
+            "cornflower-ocean": "#2C6DA1",
+            "steel-blue": "#4684B0",
+            "frosted-blue": "#BEEEF4",
+            "background-light": "#f8f7f5",
+            "background-dark": "#000000",
+          },
+          fontFamily: {
+            "display": ["Spline Sans", "sans-serif"]
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      font-family: "Spline Sans", sans-serif;
+    }
+    .glass-card {
+      background: rgba(18, 87, 147, 0.15);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(70, 132, 176, 0.3);
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #000000;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #2C6DA1;
+      border-radius: 10px;
+    }
+  </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-frosted-blue min-h-screen flex">
+<!-- Persistent Sidebar -->
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-screen">
+<!-- Header -->
+<header class="h-16 border-b border-steel-blue/20 flex items-center justify-between px-8 bg-black/40 backdrop-blur-md z-10">
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30">
+<span class="flex size-2 rounded-full bg-green-500 animate-pulse"></span>
+<span class="text-green-500 text-xs font-bold uppercase tracking-widest">All Systems Online</span>
+</div>
+<div class="h-4 w-px bg-steel-blue/30"></div>
+<div class="flex items-center gap-2 text-steel-blue">
+<span class="material-symbols-outlined text-sm text-cornflower-ocean">location_on</span>
+<span class="text-xs font-medium">Primary Node: US-East-1</span>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative">
+<span class="material-symbols-outlined text-frosted-blue p-2 hover:bg-white/5 rounded-full cursor-pointer transition-colors">notifications</span>
+<span class="absolute top-2 right-2 size-2 bg-cornflower-ocean rounded-full border border-black"></span>
+</div>
+<div class="flex items-center gap-3 pl-4 border-l border-steel-blue/20">
+<div class="text-right">
+<p class="text-sm font-bold text-white leading-none">Admin User</p>
+<p class="text-[10px] text-steel-blue mt-1">Superuser</p>
+</div>
+<div class="size-9 rounded-full bg-gradient-to-br from-baltic-blue to-cornflower-ocean border border-steel-blue/40" data-alt="User profile avatar icon" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBfLpkIuBfEoGOLWqn54j4uqcNWjZLHeSek3D72op-2Dbtlwq7ptuo1mi3JBqSz-4NXpXd4ESk3CTLdgd48UgaI7TwUDRqNSVs5BCAx2xOKMxAz1nHViOFcUEYPjrncuassLfLebNOA5Z5RXh4XdJoityC9-WqwCLKGI8jGxvILUlb-mVmnWSxxR30Y1GbhlQynbIQvn-arLaslJluDdgyQ51ko37HRnyu5LbwNVZJkrrKWdUjz-EaBmS_KLJBqnTHi342loBLq5y4');"></div>
+</div>
+</div>
+<div class="flex items-center gap-3"><div class="size-8 bg-primary rounded-lg flex items-center justify-center"><span class="material-symbols-outlined text-background-dark text-sm font-bold text-cornflower-ocean">settings_input_component</span></div><h1 class="text-white font-bold text-lg">PLEX PORTAL</h1></div><div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30"><span class="flex size-2 rounded-full bg-green-500 animate-pulse"></span><span class="text-green-500 text-[10px] font-bold uppercase">Online</span></div></header>
+<!-- Scrollable Content -->
+<div class="flex-1 p-4 pb-24 space-y-8">
+<!-- News & Updates Banner -->
+<section class="space-y-4">
+<div class="flex items-center gap-3 mb-2">
+<span class="material-symbols-outlined text-cornflower-ocean">feed</span>
+<h3 class="text-xl font-bold text-white">Latest Updates</h3>
+</div>
+<div class="space-y-2">
+<!-- Update 1 -->
+<div class="glass-card p-4 rounded-xl flex items-center justify-between border-l-4 border-l-red-500/50">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-red-500">error</span>
+<div>
+<h4 class="text-sm font-bold text-white">Server Down - Investigating</h4>
+<p class="text-[10px] text-steel-blue uppercase">10 minutes ago</p>
+</div>
+</div>
+<span class="text-[10px] font-bold text-frosted-blue px-2 py-1 bg-white/5 rounded">CRITICAL</span>
+</div>
+<!-- Update 2 -->
+<div class="glass-card p-4 rounded-xl flex items-center justify-between border-l-4 border-l-primary">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-cornflower-ocean">library_add</span>
+<div>
+<h4 class="text-sm font-bold text-white">New Service Added: Audiobookshelf</h4>
+<p class="text-[10px] text-steel-blue uppercase">2 hours ago</p>
+</div>
+</div>
+<span class="text-[10px] font-bold text-frosted-blue px-2 py-1 bg-white/5 rounded">NEW SERVICE</span>
+</div>
+<!-- Update 3 -->
+<div class="glass-card p-4 rounded-xl flex items-center justify-between border-l-4 border-l-steel-blue">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-steel-blue">build</span>
+<div>
+<h4 class="text-sm font-bold text-white">Scheduled DB Maintenance Complete</h4>
+<p class="text-[10px] text-steel-blue uppercase">Yesterday</p>
+</div>
+</div>
+<span class="text-[10px] font-bold text-frosted-blue px-2 py-1 bg-white/5 rounded">MAINTENANCE</span>
+</div>
+</div>
+</section><section class="lg:col-span-2">
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-cornflower-ocean">health_metrics</span>
+<h3 class="text-xl font-bold text-white">Service Health</h3>
+</div>
+<div class="grid grid-cols-1 gap-4">
+<!-- Plex Card -->
+<div class="bg-baltic-blue/10 border border-steel-blue/20 p-5 rounded-xl flex items-center justify-between group">
+<div class="flex items-center gap-4">
+<div class="size-12 rounded-lg bg-black flex items-center justify-center border border-primary/20 text-cornflower-ocean">
+<span class="material-symbols-outlined text-3xl text-cornflower-ocean">play_circle</span>
+</div>
+<div>
+<h4 class="font-bold text-white text-sm">Plex Media Server</h4>
+<p class="text-[10px] text-green-500 font-medium">99.9% Uptime</p>
+</div>
+</div>
+</div>
+<!-- Sonarr Card -->
+<div class="bg-baltic-blue/10 border border-steel-blue/20 p-5 rounded-xl flex items-center justify-between group">
+<div class="flex items-center gap-4">
+<div class="size-12 rounded-lg bg-black flex items-center justify-center text-blue-400 border border-blue-400/20">
+<span class="material-symbols-outlined text-3xl text-cornflower-ocean">tv_guide</span>
+</div>
+<div>
+<h4 class="font-bold text-white text-sm">Sonarr</h4>
+<p class="text-[10px] text-green-500 font-medium">Operational</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Now Playing Section -->
+<section>
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-cornflower-ocean">play_circle</span>
+<h3 class="text-xl font-bold text-white">Active Streams</h3>
+</div>
+<div class="flex gap-2">
+<button class="p-1 text-steel-blue hover:text-white transition-colors"><span class="material-symbols-outlined text-cornflower-ocean">chevron_left</span></button>
+<button class="p-1 text-steel-blue hover:text-white transition-colors"><span class="material-symbols-outlined text-cornflower-ocean">chevron_right</span></button>
+</div>
+</div>
+<div class="grid grid-cols-1 gap-6">
+<!-- Card 1 -->
+<div class="glass-card rounded-xl overflow-hidden group">
+<div class="aspect-video relative overflow-hidden">
+<div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110" data-alt="Dune Part Two movie poster" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCz5F5MMVUEmDoEZCgT054Btk2HqXwXg84YmN_jcfpFbCjVxwEGrGrb867dFLCiJdbL32-FqAgj8eqW6IWXZZ7Fq2TzkNDKa13kp8MRi0EUYRmPWKGT35y8BNXsB_xXwoahYU8Jvt7UxukjO2qJCoDzzBlSuAncDnJhrSMweKyFlPhe1UvZj_Si4fLhjGtTE_90Jbtv0OLemk68YeurU30oyExRQYO2veeZ9y51kI_pAChFGLQH3ZuxueN-WUPwr97PIiBS4bMT1zw');"></div>
+<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
+<div class="absolute bottom-4 left-4 right-4 flex items-end justify-between">
+<div>
+<span class="bg-primary text-[10px] font-black px-1.5 py-0.5 rounded mb-2 inline-block text-white">4K HDR</span>
+<h4 class="text-lg font-bold text-white">Dune: Part Two</h4>
+</div>
+<div class="text-right">
+<span class="material-symbols-outlined text-cornflower-ocean">sensors</span>
+</div>
+</div>
+</div>
+<div class="p-4 space-y-4">
+<div class="flex items-center justify-between text-xs">
+<div class="flex items-center gap-2">
+<div class="size-6 rounded-full bg-steel-blue/30" data-alt="User avatar small" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCQTFyhaIk0gXgMQ6ZRDvsxCbARWSE87so08NnVHDu3BHZTTElhiXFY0B1tdP_uvgzLxpaw01LAV4a5loufGnEdfuZg3rOuHA7nbGGLU2293Gdc-L8cZOQpKNJlPpgdwGiknBycJ0ILjEXMgviJtIkdK20zt0PatGdy6HL9A0VFPwa2JuQXQxtvGKKl211AZfVD3Ccr42X1MHW63vbtvXSEnDlYOiV52e_MPeR8pPRWtIbjDMFcxgRY-UNJjJpwfU02dxp-9ZOUock');"></div>
+<span class="text-frosted-blue">Admin</span>
+</div>
+<span class="text-steel-blue">Direct Play • 42.5 Mbps</span>
+</div>
+<div class="space-y-1">
+<div class="flex justify-between text-[10px] text-steel-blue font-bold uppercase">
+<span>Progress</span>
+<span>74%</span>
+</div>
+<div class="h-1 bg-white/10 rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[74%]"></div>
+</div>
+</div>
+<button class="w-full py-2 bg-steel-blue/20 hover:bg-steel-blue/40 text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm text-cornflower-ocean">settings_power</span>
+                KILL STREAM
+              </button>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="glass-card rounded-xl overflow-hidden group">
+<div class="aspect-video relative overflow-hidden">
+<div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110" data-alt="The Bear TV show cover art" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuC3SiQBLyjRbRiv4wASu7V1uKQVdZ74xah8snBesOnvNk45jGS8zd5M3S7a7hf7ilR29lFVAmsurHgSfdysFN4A4paAYXtLJIdEKJxJrkSWe8q5xZk9kvPevYtdKtJKqSnFN3KXWx-Bt9n_uXqO7Xgo3aS9Iknfl7hz9EHDObOBbXlal66DChR_oGpNvK-0p0c7igl54VgCRGY8yPwDIdYo4SO5RZM6sMVw7_Tr8K6O7ibI0kFimJnVeKaZcwuTw9NE3OcopCFMjrQ');"></div>
+<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
+<div class="absolute bottom-4 left-4 right-4 flex items-end justify-between">
+<div>
+<span class="bg-blue-400 text-background-dark text-[10px] font-black px-1.5 py-0.5 rounded mb-2 inline-block">1080P</span>
+<h4 class="text-lg font-bold text-white">The Bear (S03E04)</h4>
+</div>
+<div class="text-right">
+<span class="material-symbols-outlined text-frosted-blue">shuffle</span>
+</div>
+</div>
+</div>
+<div class="p-4 space-y-4">
+<div class="flex items-center justify-between text-xs">
+<div class="flex items-center gap-2">
+<div class="size-6 rounded-full bg-steel-blue/30" data-alt="User avatar small" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBjb0VulvbxmzcH4Ol8vP9jWZFmh95kRz4P1d6K1RJMMTs66viabWXsIVANxnjHuM93pkmoJzG1ab1llfebDvOvY8RdLAfh4CBU__HLCBYnThQfmkD3ZEOV7_MjFIqkzjts3PwR4x9GPXkbwM-v1xiJd2GVUJ0CdN5762A7xBQjw9VxTZYCVsNHKQpXFlt9F3ygGm5DHYoOvYAyBuX1RtWQrZJSPBI52ZNzS9KPLvDVhjEoE1ULvjv1KnTUNOpkIYkj4FuPZrdINh0');"></div>
+<span class="text-frosted-blue">SarahJ</span>
+</div>
+<span class="text-steel-blue">Transcoding (HEVC → H264)</span>
+</div>
+<div class="space-y-1">
+<div class="flex justify-between text-[10px] text-steel-blue font-bold uppercase">
+<span>Progress</span>
+<span>12%</span>
+</div>
+<div class="h-1 bg-white/10 rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[12%]"></div>
+</div>
+</div>
+<button class="w-full py-2 bg-steel-blue/20 hover:bg-steel-blue/40 text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm text-cornflower-ocean">settings_power</span>
+                KILL STREAM
+              </button>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="glass-card rounded-xl overflow-hidden group">
+<div class="aspect-video relative overflow-hidden">
+<div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110" data-alt="Oppenheimer movie poster" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAEi-nLEEvY7dM_xy3dBWiBRdrNVspUNvEehgRiNgrGDzvnW7SsmhnkbA550zANf0psXRi8JUlQW3KOnI-VLQ6xBdRQFYtxZ44bNDyDapvmhl3dP-S_MZU6nRz79ZBx7ZfIiZR64if6VxmXCBXtbPjqUWdVvR3GOSQeWzUv30kWCHFxrOUUnmDkBBEgJegOv5FGqTVbWD-tvPR6mvCjeeYNOps9L-b7oStJ0gUsyPyQxKaXXsghKkpSgWpXAl01UuWO2Mhc3b01Lvs');"></div>
+<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
+<div class="absolute bottom-4 left-4 right-4 flex items-end justify-between">
+<div>
+<span class="bg-primary text-[10px] font-black px-1.5 py-0.5 rounded mb-2 inline-block text-white">4K DOLBY VISION</span>
+<h4 class="text-lg font-bold text-white">Oppenheimer</h4>
+</div>
+<div class="text-right">
+<span class="material-symbols-outlined text-cornflower-ocean">sensors</span>
+</div>
+</div>
+</div>
+<div class="p-4 space-y-4">
+<div class="flex items-center justify-between text-xs">
+<div class="flex items-center gap-2">
+<div class="size-6 rounded-full bg-steel-blue/30" data-alt="User avatar small" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAJFkQKxOJgrNEwv2b_bXPcwrDF0vs8i-6aory9YYfg7A7nGjAxT-0XDDkcYvndXH-Qn_f0xxHySdGkiKXn2h8Br3RWv4ygkUiSdGvdNs47_jYWGWDgD_DZV1_xSxKqQHwIOvffi5HD5nWu9C-WLlYPa8qrUctDs-wMw0fcZCePD0VTUkpRfrlBwPJunlfF8qX6u8eAwEKKacQ-1z1lDNI5_nxrCErzFWEOhtJRZmG8Z7ul2d1T0wCSGE7oj9e33J8BmbWmP1pZA0c');"></div>
+<span class="text-frosted-blue">Guest_392</span>
+</div>
+<span class="text-steel-blue">Direct Stream • 68.2 Mbps</span>
+</div>
+<div class="space-y-1">
+<div class="flex justify-between text-[10px] text-steel-blue font-bold uppercase">
+<span>Progress</span>
+<span>91%</span>
+</div>
+<div class="h-1 bg-white/10 rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[91%]"></div>
+</div>
+</div>
+<button class="w-full py-2 bg-steel-blue/20 hover:bg-steel-blue/40 text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm text-cornflower-ocean">settings_power</span>
+                KILL STREAM
+              </button>
+</div>
+</div>
+</div>
+</section>
+<!-- Second Row Grid -->
+<div class="grid grid-cols-1 gap-8">
+<!-- Service Health Section (2/3 width) -->
+<!-- Quick Actions Section (1/3 width) -->
+<section>
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-cornflower-ocean">bolt</span>
+<h3 class="text-xl font-bold text-white">Admin Actions</h3>
+</div>
+<div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-xl p-4 flex flex-col gap-3">
+<button class="flex items-center gap-3 w-full p-4 rounded-lg bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-all">
+<span class="material-symbols-outlined text-cornflower-ocean">refresh</span>
+<span class="font-bold text-sm">Rescan All Libraries</span>
+</button>
+<button class="flex items-center gap-3 w-full p-4 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-white hover:bg-steel-blue/20 transition-all">
+<span class="material-symbols-outlined text-cornflower-ocean">cleaning_services</span>
+<span class="font-bold text-sm">Empty Trash</span>
+</button>
+<button class="flex items-center gap-3 w-full p-4 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-white hover:bg-steel-blue/20 transition-all">
+<span class="material-symbols-outlined text-cornflower-ocean">restart_alt</span>
+<span class="font-bold text-sm">Restart Container</span>
+</button>
+<button class="flex items-center gap-3 w-full p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20 transition-all">
+<span class="material-symbols-outlined text-cornflower-ocean">power_settings_new</span>
+<span class="font-bold text-sm">Shutdown Node</span>
+</button>
+</div>
+</section>
+</div>
+<!-- Third Row Grid -->
+<div class="grid grid-cols-1 gap-8">
+<!-- Release Calendar -->
+<section>
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-cornflower-ocean">calendar_month</span>
+<h3 class="text-xl font-bold text-white">Upcoming Releases</h3>
+</div>
+<a class="text-xs font-bold text-steel-blue hover:text-primary transition-colors" href="#">FULL CALENDAR</a>
+</div>
+<div class="space-y-3">
+<div class="bg-baltic-blue/10 border-l-4 border-primary p-4 rounded-r-xl flex items-center justify-between">
+<div>
+<p class="text-[10px] text-primary font-bold uppercase tracking-widest">Tomorrow</p>
+<h5 class="text-white font-bold">House of the Dragon (S02E01)</h5>
+</div>
+<div class="text-right">
+<span class="text-xs text-steel-blue">Digital Release</span>
+</div>
+</div>
+<div class="bg-baltic-blue/10 border-l-4 border-steel-blue p-4 rounded-r-xl flex items-center justify-between">
+<div>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-widest">Jun 21, 2024</p>
+<h5 class="text-white font-bold">The Bikeriders</h5>
+</div>
+<div class="text-right">
+<span class="text-xs text-steel-blue">Theatrical Digital</span>
+</div>
+</div>
+<div class="bg-baltic-blue/10 border-l-4 border-steel-blue p-4 rounded-r-xl flex items-center justify-between">
+<div>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-widest">Jun 25, 2024</p>
+<h5 class="text-white font-bold">A Quiet Place: Day One</h5>
+</div>
+<div class="text-right">
+<span class="text-xs text-steel-blue">Theatrical</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Recent Requests -->
+<section>
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-cornflower-ocean">shopping_cart</span>
+<h3 class="text-xl font-bold text-white">Recent Requests</h3>
+</div>
+<a class="text-xs font-bold text-steel-blue hover:text-primary transition-colors" href="#">MANAGE ALL</a>
+</div>
+<div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-xl overflow-hidden">
+<table class="w-full text-left text-sm">
+<thead class="bg-white/5 text-steel-blue uppercase text-[10px] font-bold">
+<tr>
+<th class="px-6 py-3">Content</th>
+<th class="px-6 py-3">User</th>
+<th class="px-6 py-3">Status</th>
+<th class="px-6 py-3">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-steel-blue/10">
+<tr>
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded bg-black/40" data-alt="Small thumbnail for Furiosa movie" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuA2f74K9LlpvmYBVTykgA2_x4ccVKbUd5dDyo9q3tN3VJF_mgPEDm_c_joxZPOHeTaqBOn3shbPBgePe8R0lle9L8x6ekSzS3F52bbFGqZH-9dgKysl9gVN6fPXSJVLWwJgPiYipGAlxZudfo02DWkixx1PAqhApkWt7i5mFXUYMRtNYEoXdq52-YtL-N4uw8q20EjkQpRQ0v0jlkL1OejP2J25UMzowQcKyKCjkOIY7kWUl3b-bc9QG0hk3ySkJxIYqEAoSuDVUAo');"></div>
+<span class="font-medium text-white">Furiosa: A Mad Max Saga</span>
+</div>
+</td>
+<td class="px-6 py-4 text-frosted-blue">user_mark</td>
+<td class="px-6 py-4">
+<span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-500 text-[10px] font-bold uppercase">Downloading</span>
+</td>
+<td class="px-6 py-4">
+<button class="text-steel-blue hover:text-white"><span class="material-symbols-outlined text-lg text-cornflower-ocean">more_horiz</span></button>
+</td>
+</tr>
+<tr>
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded bg-black/40" data-alt="Small thumbnail for Bad Boys Ride or Die movie" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCVAm002cfqHoaSNa_i_ukh8UKjQbcllyg_3a2R0kkBziF8uBtvgXQw5eSoikrGuiBmbW-zuSreMoed_jakvgO1A9Y-Z7edM7fflrQ_M6e73Pg-lKmSCRDKATO_gayIPlXLL1ZkSvyiv7Bp8PVp55khNViNSE9G1QV1gy9a9dTZiqcPG07i4tQ8KAdrTR1ygfA8rooQYmKIrmfejlHFmmq0Lyg155JpKTo3CqVjkbu-j8zpPAD9OXqwRug_6FFpLeX4MBJGgifx42M');"></div>
+<span class="font-medium text-white">Bad Boys: Ride or Die</span>
+</div>
+</td>
+<td class="px-6 py-4 text-frosted-blue">sarah_smith</td>
+<td class="px-6 py-4">
+<span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-steel-blue/10 text-steel-blue">Pending</span>
+</td>
+<td class="px-6 py-4">
+<button class="text-steel-blue hover:text-white"><span class="material-symbols-outlined text-lg text-cornflower-ocean">more_horiz</span></button>
+</td>
+</tr>
+<tr>
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="size-8 rounded bg-black/40" data-alt="Small thumbnail for Inside Out 2 movie" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBbX4zIGnriJJDz5UdnPGnVL_FzW9sOhwQU7fgLqXAijZz16p5ILNbpQDvGM8VlVbUnAdJRhE_BK0whhoqEk_Apu9maWWKf6XPWRUetZV73fjsXklFiBIWDo8O7GfUDUjM-FC9YKqFRcapx2LYAAZwfJ6hWXgNbyMkPv0YNuZC0voWTfhWk3TRMJXboXo4PdqFRSGHEPdIBA_JDCQXyigtWaMW-4DoMLMsximULDFRKBDKLFvDCsXSY4JuPFaUQemWhzN8ddsW4xDo');"></div>
+<span class="font-medium text-white">Inside Out 2</span>
+</div>
+</td>
+<td class="px-6 py-4 text-frosted-blue">admin</td>
+<td class="px-6 py-4">
+<span class="px-2 py-0.5 rounded bg-green-500/10 text-green-500 text-[10px] font-bold uppercase">Completed</span>
+</td>
+<td class="px-6 py-4">
+<button class="text-steel-blue hover:text-white"><span class="material-symbols-outlined text-lg text-cornflower-ocean">more_horiz</span></button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+</div>
+<!-- Footer Stats Overlay -->
+</main>
+<nav class="fixed bottom-0 left-0 right-0 h-16 bg-black/90 backdrop-blur-lg border-t border-steel-blue/20 flex items-center justify-around px-4 z-50"><a class="flex flex-col items-center gap-1 text-primary" href="#"><span class="material-symbols-outlined text-cornflower-ocean">home</span><span class="text-[10px] font-bold uppercase">Home</span></a><a class="flex flex-col items-center gap-1 text-steel-blue" href="#"><span class="material-symbols-outlined text-cornflower-ocean">download</span><span class="text-[10px] font-bold uppercase">Requests</span></a><a class="flex flex-col items-center gap-1 text-steel-blue" href="#"><span class="material-symbols-outlined text-cornflower-ocean">monitoring</span><span class="text-[10px] font-bold uppercase">Activity</span></a><a class="flex flex-col items-center gap-1 text-steel-blue" href="#"><span class="material-symbols-outlined text-cornflower-ocean">manage_accounts</span><span class="text-[10px] font-bold uppercase">Admin</span></a></nav></body></html>

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>HMS Dashboard - Login</title>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: {
+        "display": ["var(--font-display)", "sans-serif"]
+      },
+    },
+  },
+}</script>
+<style>
+    .cinematic-overlay {
+      background: radial-gradient(circle, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.9) 100%);
+    }
+    .login-glass-card {
+      background: rgba(18, 20, 24, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(var(--color-accent) / 0.15);
+    }
+</style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display min-h-screen relative flex flex-col overflow-hidden">
+<!-- Cinematic Background Grid -->
+<div class="fixed inset-0 z-0">
+<div class="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 p-2 opacity-40 scale-105">
+<!-- Mock Poster Grid -->
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Cinematic movie poster with dark tones" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuC-NJLm2diyC0QuEwBJiAB-5wFPp4mFMaDagdY2nBoBggz8Wle34LBWrn-fNxnsM0FlPdwxhMDWOHb39mUBZE03QfQm0BW7qNVk8ilsNO-AAt1frflEPCXzezvBWVA9pzhqZvzA8LQ3kJnfsOeAZZI0R4lW3wF7-MGKDBhMstzBudWJtWVDweY1CpvknLxLKd2Mlv4KLo61iCl5ztb6zTf0cQdR3jX0VkVl2Ul7_QpzQR4KFg7Q4DWfbwY0w-nKVCst2ZIZil6NgbM')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Abstract cinematic visual of a galaxy" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCyZl_wDndgFCIkcKHbHOWKBJLJsOjC36-8QVd2wxMrWulvREYz2_FAzIeAQZODYW5YzWMVBvp1N-qjd_Jg_TNr_RF08MP3lBbbAijWTvLji631ytl9Yr7AUsBGKBCdeL0-GSwCR5GRBLVGUslq-lZNk06CN_QNR9rqUUoLOeFLVdP8zblPijCLX_wLBREMdShDmYNEvsBqyfM9jqjkHWxS7BkZvaKFMoxQNteKxf0msLVQ_m9XyWv7LTlzDfI7mYXWmRT-vJlnrJ0')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Vintage film reel and projector" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuB75tG4USYP_2koOiws3e-4hnF2XMUBqIEn9W57DfcsL4YBMMnBLENlXL9Vbrbh4bxaNn03DF1rkuoW7t_rmihbpCtoG8hFC_RSJpjVxhAq65uW476t9JbLp05-e6LkzNXHl-fRteLfUPLyyOG1QqjhAH8vPI_tsHldWxAj2w8Vpb-d_8_pKYWefmiL49iPaUyTJpwfxgd-Toke9HSiprDidW7dNQFrWB53A6RL1HgIdZRb08L-tcAI2ILNLSXu2JK3jiqC95lpDZ0')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Modern sci-fi movie character poster" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDZFlh5mH4DPhhXBneH1yyKDUlJLw2Of098jjdRYscjUJGuD2Q_-lG8DTdqI2lJbU7fTvFi2-qT75GUBba5nzBLvf8NfYbrKnFl35iTCxfVUH2PE5RmspH-gyh8_vl5VOumdAr6xBzybY5iYue_u6k9u8EiCfWNKqNgBx_a3-FqVHvaVbMnp5OFzhgdLIDxGjsgCREvVzRimeqCv64CHM0Kz7YrgSI_0rdpTgtcw64M2GEu4CX_m9VPOJ9geSXTQ8z-fyeT3r575IE')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Action movie scene with explosions" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDLhp8GLKy8jnzeTpqm-kDxfEamCQ-5G-KUrHbzgFPLusmz5gcyf-5kDwq_YaSSJV0SQoOuF3JVEMW8OK2pHQehLO-4MYHx61KZhI2cSlW9hmfKRBL_ZJ2pLiODJ7r5c3JhpKEkj4BA4lHiFP2P0TKym0El20yY6C3YzbemGI9kolLvR0IF9kiU1aVGIMDkNu1TjCRKabz-UqOxkWNm8oHnEdLA9dwVCFh1S_xGSI34EmV64Ses3acyUQl_7YB1csOWpmF0gWBAqTo')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden md:block" data-alt="Classic black and white cinema scene" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDMZ3PnWg6aETwRyJcHWAs1nD_pGFaogSQZZfEMD_4Se1ONwV59ohJJRQgQtlkOcqXkwmukFxvg3ZJ2iR4bTmy2xDoX1UzKr1JkgXVq4NTMiGjj_wNS0XiS2_Db_6EW3oAbqopP8Rifk4FfMJVILEiyZPKUAICcVLl_036przzJNVVaFEjfuQ6dHG0yDGhP02ojTYlzZl-fCRLl4saHeZoEl52oCdSM9taQH_-iEQb-iF3SP0grYjvp2wk-i4cIGSWQHP5NQwTNevM')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden md:block" data-alt="Atmospheric theatre interior seats" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBUVYCI9oIJTPHpfi_mH-Q075nDwKk7N_dBeg8_TOP0Rp6Y3gK0SRH5HPWt9VXLbbHibUjS04uQFmsLoXYvnqpS6Y9dAkT-5lu5JrrA6f7rYSFX1hOt8jztPFDJhqaDza697yMhUi6i6XSwi1FTzRlc1GoK42Q-LGn4EauWaS7SGTzcn7BcKlFqFmyafmCDiRC8hI_hBLaCBBSwLMppIekkhmMVUEWoEYKqYlhwHVKWz4Xa94Jzz450804xxIzJY0gBNS6XYvad1OY')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden lg:block" data-alt="Epic landscape from a movie" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCLBL54NOD7idvkPyGPTTw-f86AnOcFLSRqeGfWAj7H_qvwrLRwet45ZxptKww6I8ux0WsSHRwL036RwLRYyJwus8e1EMF3uywC0H5FWD9yLzN1IF084f12P1JUIMTI-3Brjp9XmBXEmCWaj19t504IdgmmxWpDVJcmlGFdJU6GWCP6kAS0Os1LHdFFAJDszRWHzRfTNjAwkGyCUpy5RKaOHAoHUX72oCfwzB6XjKDNmAPZu_tIhCLKkEMi1nku1KuRwQHCz2i3BMw')"></div>
+<!-- Repeat for fuller grid effect -->
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Dark dramatic movie poster" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBLQ0E44K6LUxBrPqISKLqVNOa3CvvMldr8eQTKKMKGYUNjsN2cPDmVjoPlswWk1Cm0Sur1YXkphmEUZVmm8D6UBuHINgoqSReGHu_iwJYE2UFHxK-KmuENQATSY8erQstBnQo-pSq1kkCNv9S-O7vfC-4vIbuldKALBvICds3HoWjh9lPsxOHPeysg6D-VcyQiIyPBkJFxnwHXP4aRKmz3vCPgbaBvgcCcgE8DQ5hiPy8lBMsgMCY0YsV7a0R7qSsD6Jlw1FJpT14')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Streaming service interface concept" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAtdM7RUl45FMi675_LpGRsMLtyWqXbiLnUujcxLVz9tlsjM1_V5HpFwkFfdX7LkOgrm0TsYhNNi75xcQ_C8Cqk7c31_Ke8JtyR1NxQ5LZ_1_mXRQTb8rOGj7JkTn3WWfGJXYbHn_gAVs3A1JFCw9UydpgidTcohsxl7rKBLJSfIlY_1H8G2g6BdqQxeeOLw1E5e7kAAw7PKAZ2USQOwUiGqJdkIR5q4SsdK7Vv6nAbCwDvzSNChrtR-XV9Qa36XeEXqIerqh-hiyQ')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Movie camera close up" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCcXJDzht8adLziNrnAVPObG4jKsg0MNj8iWHwVk7dFxiDc-6Lih76h_pv6KvlkkfQzQQIphX2Cut14I0wBjpkO3PZJzbaEfRzbgZtOH9UqI0UPAFdr5kLecgoE3vITA8rPryup3lwaSJiGddQ88OFQCd8YinsngFVbB1pwWZ5JFx3cyJNGsGshbgGwQgici4jn7BcQrUKDFYLPu_K3MqkbZUrzMatXCc-4MN1OnltbsArugYzEIFVYEcCssbC5DT1DwTgOAy_gY-Q')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Dramatic lighting on a face" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCopubUa5znKjYofvtsQ5UAhuVanO72hlU19ypyWs-ibPFhvq7S87WM3Lf8W7TJOVuiFxxQYlUhMAl-rQ9sS3oc-ulT_zE6okug8RVd_Ntw9tGPUWYrqChQuH7oZfdHfIlZTrOie4ankPw1ET4zKl6Y6L4AuNsFtWLBLYgFBp8XPl3s6lsa9qNmORwlRtoQASz-im-IIPdLvZSkKaF7KzjnqD91YEZTz5ZsDO3WL0jRv9FPL85NYAObVWnOOfD5yc6-pMUGmBLCQIs')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden md:block" data-alt="Futuristic neon city poster" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDDG4LBQIPKTgIanq3bANZAnPatijo40m9fwxEG-6MvmkO44mBECiMasP5MA-8Xh78lZzPSPx8lZW__uan2QUH-__1x_r5WhE_fQRutOAtJ0drREpBVLQ6EQ6zucUPfuJAQ-kKYdzA7o2yd8ipQW-2NoHhkTm1LJRxUuyRUzLLVj8a4HnvNj40zFRCmk7caiionk-8z4tZJb7LWZc6owwJOrW06y5UamEsurC9k9y7alY8SW2QWDgbdc62fHhqQ6Fp6jEEykQHF_UQ')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden md:block" data-alt="Cinematic street scene at night" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuD7JvRydleAKGGEy3DPkhLPmR6Pv2TJmJlE0t8ooWq96KgRiSrrs_1FZrBrZbpmM-mozmEbHbezHtnWyjiqyMkF1SVjV02zJIeIJIzpoA9gxSPuv_9NUHkO0xlJlEJY1XlxJZyEF1JSX1WB4nTmJZYlXzyjyrAIkcQRbN82i2dElPD3S7VU7F8biW5dqUBhclajvGcpgxBTlOFAHBFB5sSjAT0OtWEY8U1zB0ax10phbzF-9XdaCk5AfXRsQZ84JHB45jC83jBX04E')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden lg:block" data-alt="High budget sci-fi concept art" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCBIY5qTSOQpqlUWyFb1hwk31W2_zodChRD3vSDK3y8oXlsJH2hg22H7RN-mUC5DweVa2iiXsb6ZmUg0jSKO7PthqoSINxnlVEL4pD-YsrADJ9YE_oKDBM82bjSx0ZbIwNFmtDueSeqGt3ic0BCQ6ugQbAO6VoHrVh0lCCm0v4DMWRsZIRmgQvPhuGg279CO5vaZbXQzQSxm-VAbm31xKu6atvyzrSV6Lapkro0vRl7L-xM0Gh4culB-tWd-tvQ6ud7cZEMAPBF2xM')"></div>
+<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden lg:block" data-alt="Movie script and popcorn" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAJ5Oxof3W8hQ4_JtEOCfOgy8Dgvtqx76J-EdX2kalkLcbNFlBqxNoklO1xPEwylX4esE7F2D9Fv6pwVs7tuAQTAgeCyboADtVkorBj-Qdcg2HAcFJJW6pE1xCKoSWUQTimbtH263qwe_GbCE-gLcsb_u7VX6HSr2W858Jl6O2j25tSNvyT2XAC1qhVnEHIsdJfsG37P-WNVf4pRxrP1dRiM24ckEAuIZJVizwwT5Ppz446udBo2wByRu_Nm7eSiKfKHS9qGr_LWZ0')"></div>
+</div>
+</div>
+<!-- Dark Overlay -->
+<div class="fixed inset-0 z-10 cinematic-overlay"></div>
+<!-- Main Content Container -->
+<main class="relative z-20 flex-1 flex flex-col items-center justify-center px-4">
+<!-- Login Card -->
+<div class="w-full max-w-[440px] login-glass-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
+<!-- Logo Section -->
+<div class="mb-8">
+<img alt="HMS Logo" class="h-20 w-auto object-contain border-none mb-2" data-alt="HMS Dashboard brand logo" src="{{DATA:IMAGE:IMAGE_6}}"/>
+<h1 id="loginAppName" class="text-white text-2xl font-bold mt-4 tracking-tight text-center">HMS Dashboard</h1>
+<p id="loginTagline" class="text-white/60 text-sm text-center mt-1">Home Media Server Management</p>
+</div>
+<!-- Login Form -->
+<form id="loginForm" class="w-full space-y-5">
+<div class="flex flex-col gap-1.5">
+<label class="text-white/80 text-sm font-medium px-1">Username</label>
+<div class="relative group">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-primary text-[20px]">person</span>
+<input id="username" name="username" class="w-full bg-white/5 border border-white/10 rounded-lg py-3 pl-10 pr-4 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="admin" type="text" required/>
+</div>
+</div>
+<div class="flex flex-col gap-1.5">
+<div class="flex justify-between items-center px-1">
+<label class="text-white/80 text-sm font-medium">Password</label>
+</div>
+<div class="relative group">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-primary text-[20px]">lock</span>
+<input id="password" name="password" class="w-full bg-white/5 border border-white/10 rounded-lg py-3 pl-10 pr-4 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="••••••••" type="password" required/>
+</div>
+<p id="loginDefaultCreds" class="text-xs text-steel-blue px-1 mt-1">Default: admin / admin123</p>
+</div>
+<button type="submit" class="w-full bg-primary hover:bg-primary/90 text-white font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98]">
+                    Sign In
+                </button>
+<!-- Divider -->
+<div class="flex items-center gap-4 py-2">
+<div class="h-[1px] flex-1 bg-white/10"></div>
+<span class="text-white/30 text-[10px] font-bold uppercase tracking-widest">Or continue with</span>
+<div class="h-[1px] flex-1 bg-white/10"></div>
+</div>
+<!-- Plex SSO Button -->
+<button id="plexLoginBtn" class="w-full bg-[#BEEEF4]/10 hover:bg-[#BEEEF4]/20 border border-[#BEEEF4]/30 text-[#BEEEF4] font-bold py-3 rounded-lg flex items-center justify-center gap-3 transition-all" type="button">
+<svg class="w-5 h-5 fill-current" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M12 0L10.33 4.33L12 8.67L13.67 4.33L12 0ZM5.67 5.67L0 12L5.67 18.33L8 12L5.67 5.67ZM18.33 5.67L16 12L18.33 18.33L24 12L18.33 5.67ZM12 15.33L10.33 19.67L12 24L13.67 19.67L12 15.33Z"></path>
+</svg>
+                    Sign in with Plex
+                </button>
+</form>
+<div class="mt-8 text-center">
+<p class="text-white/50 text-sm">
+                    Don't have an account? 
+                    <a class="font-semibold hover:underline ml-1 text-[#BEEEF4]" href="#">Request Access</a>
+</p>
+</div>
+</div>
+</main>
+<!-- Footer Links -->
+<footer class="relative z-20 p-8 flex flex-col md:flex-row items-center justify-center gap-6 md:gap-10 text-white/40 text-xs font-medium uppercase tracking-widest">
+<a class="transition-colors flex items-center gap-1.5 hover:text-[#BEEEF4]" href="#">
+<span class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
+            Status
+        </a>
+<a class="transition-colors hover:text-[#BEEEF4]" href="#">Documentation</a>
+<a class="transition-colors hover:text-[#BEEEF4]" href="#">Privacy Policy</a>
+<p class="hidden md:block opacity-30 cursor-default">|</p>
+<p class="opacity-50">© 2024 HMS DASHBOARD</p>
+</footer>
+
+<script>
+// HMS Dashboard - Login Logic
+document.addEventListener('DOMContentLoaded', async function() {
+    // Apply branding from theme
+    var theme = window.HMS_THEME || {};
+    if (theme.app_name) {
+        var el = document.getElementById('loginAppName');
+        if (el) el.textContent = theme.app_name;
+        document.title = theme.app_name + ' - Login';
+    }
+    if (theme.tagline) {
+        var el = document.getElementById('loginTagline');
+        if (el) el.textContent = theme.tagline;
+    }
+    if (theme.show_default_credentials === false) {
+        var el = document.getElementById('loginDefaultCreds');
+        if (el) el.style.display = 'none';
+    }
+
+    // If already authenticated, redirect to dashboard
+    try {
+        const authResp = await fetch('/auth/check-session');
+        const authData = await authResp.json();
+        if (authData.authenticated) {
+            window.location.href = '/';
+            return;
+        }
+    } catch (e) { /* Not authenticated, show login form */ }
+
+    // Handle login form submission
+    const loginForm = document.getElementById('loginForm');
+    loginForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+
+        try {
+            const response = await fetch('/auth/simple-login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ username, password })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                // Login successful, redirect to dashboard
+                window.location.href = data.redirect || '/';
+            } else {
+                alert(data.detail || 'Login failed. Please check your credentials.');
+            }
+        } catch (error) {
+            alert('Login error: ' + error.message);
+        }
+    });
+
+    // Plex login — native PIN auth flow (no popups at all).
+    // PIN created from the browser so Plex sees the user's IP, not the server's.
+    const plexLoginBtn = document.getElementById('plexLoginBtn');
+    const plexBtnHTML = plexLoginBtn.innerHTML;
+    plexLoginBtn.addEventListener('click', async function() {
+        plexLoginBtn.disabled = true;
+        plexLoginBtn.innerHTML = '<span class="material-symbols-outlined text-[20px] animate-spin">progress_activity</span> Connecting to Plex...';
+        try {
+            // 1. Create PIN from browser (user's IP shows in Plex security prompt)
+            var pinResp = await fetch('https://plex.tv/api/v2/pins', {
+                method: 'POST',
+                headers: {
+                    'X-Plex-Client-Identifier': 'hms-dashboard',
+                    'X-Plex-Product': 'HMS Dashboard',
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'strong=true',
+            });
+            if (!pinResp.ok) throw new Error('Plex API error');
+            var pinData = await pinResp.json();
+
+            // 2. Store PIN on backend, get callback URL
+            var startResp = await fetch('/auth/plex-start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin_id: pinData.id }),
+            });
+            if (!startResp.ok) throw new Error('Server error');
+            var startData = await startResp.json();
+
+            // 3. Redirect to Plex auth page (full page, no popup)
+            var params = new URLSearchParams({
+                clientID: 'hms-dashboard',
+                code: pinData.code,
+                'context[device][product]': 'HMS Dashboard',
+                forwardUrl: startData.callback_url,
+            });
+            window.location.href = 'https://app.plex.tv/auth#?' + params.toString();
+        } catch (e) {
+            plexLoginBtn.disabled = false;
+            plexLoginBtn.innerHTML = plexBtnHTML;
+            alert('Failed to connect to Plex. Please try again.');
+        }
+    });
+});
+</script>
+
+</body></html>

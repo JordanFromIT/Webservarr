@@ -1,0 +1,47 @@
+/*
+ * HMS Dashboard — Shared Theme Styles
+ * CSS custom properties are set by theme-loader.js from /api/branding.
+ * Fallback values match the default Baltic Blue palette.
+ */
+
+/* ---- CSS Custom Property Defaults ---- */
+:root {
+  --color-primary: 18 87 147;
+  --color-secondary: 44 109 161;
+  --color-accent: 70 132 176;
+  --color-text: 190 238 244;
+  --color-background: 0 0 0;
+
+  --hex-primary: #125793;
+  --hex-secondary: #2C6DA1;
+  --hex-accent: #4684B0;
+  --hex-text: #BEEEF4;
+  --hex-background: #000000;
+
+  --font-display: "Spline Sans", sans-serif;
+}
+
+/* ---- Base ---- */
+body {
+  font-family: var(--font-display);
+}
+
+/* ---- Glass Card ---- */
+.glass-card {
+  background: rgba(var(--color-primary) / 0.15);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(var(--color-accent) / 0.3);
+}
+
+/* ---- Custom Scrollbar ---- */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: var(--hex-background);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--hex-secondary);
+  border-radius: 10px;
+}
