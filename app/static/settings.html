@@ -458,6 +458,59 @@
                     </div>
                 </div>
 
+                <!-- Notifications -->
+                <div class="accordion-item" data-accordion="notifications">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('notifications')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">notifications</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Notifications</span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyNotifications">
+                        <div class="space-y-4 pt-1">
+                            <p class="text-xs text-steel-blue/70">Configure how frequently the notification system checks for updates. Minimum 30 seconds.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Overseerr Poll Interval</label>
+                                    <div class="flex items-center gap-2">
+                                        <input type="number" id="notifPollOverseerr" min="30" step="10"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="60">
+                                        <span class="text-xs text-steel-blue shrink-0">sec</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Monitor Poll Interval</label>
+                                    <div class="flex items-center gap-2">
+                                        <input type="number" id="notifPollMonitors" min="30" step="10"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="60">
+                                        <span class="text-xs text-steel-blue shrink-0">sec</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">News Poll Interval</label>
+                                    <div class="flex items-center gap-2">
+                                        <input type="number" id="notifPollNews" min="30" step="10"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="60">
+                                        <span class="text-xs text-steel-blue shrink-0">sec</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveNotificationSettings()" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="sendTestNotification()" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">notifications_active</span>
+                                    Send Test
+                                </button>
+                                <div id="statusNotifications" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -961,10 +1014,12 @@
 
     <script src="/static/js/auth.js"></script>
     <script src="/static/js/sidebar.js?v=5"></script>
+    <script src="/static/js/notifications.js"></script>
     <script>
         // Initialize sidebar and auth
         (async function() {
             initSidebar('settings');
+            initNotifications();
             const user = await checkAuth({ requireAdmin: true });
             if (!user) return;
             showAdminNav(user.is_admin);
@@ -1339,6 +1394,17 @@
                 // Feature flags
                 document.getElementById('featureShowRequests').checked = settingsMap['features.show_requests'] === 'true';
 
+                // Notification poll intervals
+                if (settingsMap['notifications.poll_interval_overseerr']) {
+                    document.getElementById('notifPollOverseerr').value = settingsMap['notifications.poll_interval_overseerr'];
+                }
+                if (settingsMap['notifications.poll_interval_monitors']) {
+                    document.getElementById('notifPollMonitors').value = settingsMap['notifications.poll_interval_monitors'];
+                }
+                if (settingsMap['notifications.poll_interval_news']) {
+                    document.getElementById('notifPollNews').value = settingsMap['notifications.poll_interval_news'];
+                }
+
                 // Update accordion status dots
                 updateAccordionDots(settingsMap);
             } catch (e) {
@@ -1438,6 +1504,58 @@
 
             // Auto-clear after 8 seconds
             setTimeout(() => { el.innerHTML = ''; }, 8000);
+        }
+
+        // --- Notification Settings ---
+
+        async function saveNotificationSettings() {
+            var statusEl = document.getElementById('statusNotifications');
+            var settings = [
+                { key: 'notifications.poll_interval_overseerr', value: String(Math.max(30, parseInt(document.getElementById('notifPollOverseerr').value) || 60)) },
+                { key: 'notifications.poll_interval_monitors', value: String(Math.max(30, parseInt(document.getElementById('notifPollMonitors').value) || 60)) },
+                { key: 'notifications.poll_interval_news', value: String(Math.max(30, parseInt(document.getElementById('notifPollNews').value) || 60)) },
+            ];
+            try {
+                var resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: settings }),
+                });
+                if (resp.ok) {
+                    statusEl.textContent = 'Saved';
+                    statusEl.className = 'flex items-center gap-2 text-sm text-green-400';
+                } else {
+                    statusEl.textContent = 'Error saving';
+                    statusEl.className = 'flex items-center gap-2 text-sm text-red-400';
+                }
+            } catch (e) {
+                statusEl.textContent = 'Network error';
+                statusEl.className = 'flex items-center gap-2 text-sm text-red-400';
+            }
+            setTimeout(function() { statusEl.textContent = ''; }, 3000);
+        }
+
+        async function sendTestNotification() {
+            var statusEl = document.getElementById('statusNotifications');
+            try {
+                var resp = await fetch('/api/admin/notifications/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: 'Test notification', body: 'This is a test notification from HMS Dashboard.' }),
+                });
+                if (resp.ok) {
+                    var data = await resp.json();
+                    statusEl.textContent = 'Sent to ' + data.sent_to + ' user(s)';
+                    statusEl.className = 'flex items-center gap-2 text-sm text-green-400';
+                } else {
+                    statusEl.textContent = 'Error sending';
+                    statusEl.className = 'flex items-center gap-2 text-sm text-red-400';
+                }
+            } catch (e) {
+                statusEl.textContent = 'Network error';
+                statusEl.className = 'flex items-center gap-2 text-sm text-red-400';
+            }
+            setTimeout(function() { statusEl.textContent = ''; }, 3000);
         }
 
         // --- System Settings ---
