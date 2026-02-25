@@ -16,6 +16,7 @@ Last verified: 2026-02-24
 | `/requests` | `app/static/requests.html` | Session | Overseerr iframe embed with Plex SSO. Calls re-auth before loading iframe. |
 | `/requests2` | `app/static/requests2.html` | Session | Native media request page. Search TMDB, create requests, view existing requests with poster grid and filter tabs. Alternative to iframe approach. |
 | `/issues` | `app/static/issues.html` | Session | Report and view media issues (audio, video, subtitle). Per-user Plex auth for writes. |
+| `/calendar` | `app/static/calendar.html` | Session | Combined Radarr + Sonarr month calendar. Click day for release details. Month navigation. |
 
 **Auth pattern:** Page routes in `main.py` check the session cookie server-side and return a 302 redirect to `/login` if unauthenticated — the HTML is never sent. Each page's JS also calls `GET /auth/check-session` as a secondary check.
 
@@ -40,8 +41,8 @@ All pages (except login) use a shared sidebar component and theme system:
 |------|---------|
 | `app/static/js/theme-loader.js` | Fetches `/api/branding`, sets CSS custom properties (RGB triplets), injects Google Font, applies dark/light mode. Cached in localStorage to prevent FOUC. Loaded in `<head>` before Tailwind. |
 | `app/static/js/auth.js` | `checkAuth()`, `wireLogout()`, `escapeHtml()`, `getTimeAgo()`, `formatUptime()`, `loadAppVersion()` |
-| `app/static/js/sidebar.js` | `initSidebar(page)` — injects sidebar HTML into `<div id="sidebar-root">`. Desktop: persistent 256px sidebar. Mobile: hamburger drawer. `showAdminNav(isAdmin)` reveals admin-only items. Logo auto-sizes to sidebar width. |
-| `app/static/css/theme.css` | CSS custom property defaults, glass-card styles, custom scrollbar. |
+| `app/static/js/sidebar.js` | `initSidebar(page)` — injects sidebar HTML into `<div id="sidebar-root">`. Desktop: persistent 256px sidebar with logo + nav. Mobile: hamburger drawer. `showAdminNav(isAdmin)` reveals admin-only items. Logo auto-sizes to sidebar width. |
+| `app/static/css/theme.css` | CSS custom property defaults, glass-card styles, custom scrollbar, gauge-circle animation, service-icon drop-shadow. |
 
 ### Tailwind + CSS Custom Properties
 
@@ -95,8 +96,8 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
   "font": "Spline Sans",
   "custom_css": "",
   "features": { "show_requests": false },
-  "sidebar_labels": { "home": "Home", "requests": "Requests", "requests2": "Requests", "issues": "Issues", "settings": "Settings" },
-  "icons": { "sidebar_logo": "dashboard", "nav_home": "home", "nav_requests": "download", "nav_requests2": "movie", "nav_issues": "report_problem", "nav_settings": "settings", "section_streams": "play_circle", "section_services": "health_metrics", "section_requests": "movie", "section_news": "newspaper" }
+  "sidebar_labels": { "home": "Home", "requests": "Requests", "requests2": "Requests", "issues": "Issues", "calendar": "Calendar", "settings": "Settings" },
+  "icons": { "sidebar_logo": "dashboard", "nav_home": "home", "nav_requests": "download", "nav_requests2": "movie", "nav_issues": "report_problem", "nav_calendar": "calendar_month", "nav_settings": "settings", "section_streams": "play_circle", "section_services": "health_metrics", "section_requests": "movie", "section_news": "newspaper" }
 }
 ```
 
@@ -151,7 +152,7 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 | GET | `/api/integrations/issues/{id}` | Session | Single issue with comments |
 | POST | `/api/integrations/issues` | Session | Create issue (per-user Plex auth). Body: issueType (1-4), message, mediaId |
 | POST | `/api/integrations/issues/{id}/comment` | Session | Add comment to issue (per-user Plex auth). Body: message |
-| GET | `/api/integrations/upcoming-releases` | Session | Upcoming TV/movie releases from Sonarr/Radarr (days param) |
+| GET | `/api/integrations/upcoming-releases` | Session | Upcoming TV/movie releases from Sonarr/Radarr (days, start params) |
 
 ### Health
 
@@ -200,12 +201,14 @@ Stored in `settings` table, seeded on first startup:
 | `sidebar.label_requests` | `Requests` | Sidebar label for Requests iframe page |
 | `sidebar.label_requests2` | `Requests` | Sidebar label for native Requests page |
 | `sidebar.label_issues` | `Issues` | Sidebar label for Issues page |
+| `sidebar.label_calendar` | `Calendar` | Sidebar label for Calendar page |
 | `sidebar.label_settings` | `Settings` | Sidebar label for Settings page |
 | `icon.sidebar_logo` | `dashboard` | Material Symbol for sidebar logo (when no logo image) |
 | `icon.nav_home` | `home` | Material Symbol for Home nav item |
 | `icon.nav_requests` | `download` | Material Symbol for Requests iframe nav item |
 | `icon.nav_requests2` | `movie` | Material Symbol for native Requests nav item |
 | `icon.nav_issues` | `report_problem` | Material Symbol for Issues nav item |
+| `icon.nav_calendar` | `calendar_month` | Material Symbol for Calendar nav item |
 | `icon.nav_settings` | `settings` | Material Symbol for Settings nav item |
 | `icon.section_streams` | `play_circle` | Material Symbol for Active Streams section |
 | `icon.section_services` | `health_metrics` | Material Symbol for Service Health section |
@@ -237,9 +240,9 @@ Storage: SQLite at `/app/data/hms.db` (container path) / `data/hms.db` (host pat
 | Plex | `plex.py` | Working | XML API parsing, active streams with source/stream quality detection + pixel heights, thumbnail proxy |
 | Uptime Kuma | `uptime_kuma.py` | Working | Public status page API, service health monitors |
 | Overseerr | `overseerr.py` | Working | Recent requests, request counts, TMDB search, media request creation, Plex token SSO authentication, issue management (list, detail, create, comment) with per-user Plex token authentication for writes |
-| Sonarr | `sonarr.py` | Exists | Client code present, not fully wired to dashboard |
-| Radarr | `radarr.py` | Exists | Client code present, not fully wired to dashboard |
-| Netdata | `netdata.py` | Exists | Client code present, not fully wired to dashboard |
+| Sonarr | `sonarr.py` | Working | Calendar API, upcoming episodes with series info and posters |
+| Radarr | `radarr.py` | Working | Calendar API, upcoming movies with release types and posters |
+| Netdata | `netdata.py` | Working | System stats (CPU%, RAM%, network throughput MB/s, uptime, hostname) via `/api/integrations/system-stats` |
 
 **Pattern:** Browser → FastAPI proxy endpoint → external service API (httpx, 10s timeout for Plex, 5s for others). Credentials stored in `settings` table.
 
@@ -250,13 +253,14 @@ Storage: SQLite at `/app/data/hms.db` (container path) / `data/hms.db` (host pat
 | Section | Data Source | Status |
 |---------|------------|--------|
 | Active Streams | Plex API via `/api/integrations/active-streams` | Working |
-| Service Health | Uptime Kuma via `/api/integrations/service-status` (enabled monitors only, compact single-line rows) | Working |
+| Service Health | Uptime Kuma via `/api/integrations/service-status` (auto-fit tile grid with selfh.st CDN icons, "Checked Xs ago" live timer updating every 1s) | Working |
+| Netdata Gauges | Netdata via `/api/integrations/system-stats` (SVG circular gauges: CPU, RAM, Network; polls every 1s) | Working |
 | Recent Requests | Overseerr via `/api/integrations/recent-requests` | Working |
 | News | Local DB via `/api/news/` | Working |
-| Upcoming Releases | Hardcoded placeholder | **Not wired to real data** |
-| Server Load / footer stats | Hardcoded placeholder | **Not wired to real data** |
+| Upcoming Releases | Sonarr/Radarr via `/api/integrations/upcoming-releases?days=7` | Working — compact 7-day grouped list with "View calendar" link |
+| Footer Stats Bar | Netdata via `/api/integrations/system-stats` (hostname, uptime, CPU, RAM) | Working |
 
-Auto-refresh: all sections poll every 30 seconds.
+Auto-refresh: all sections poll every 30 seconds. Netdata gauges poll every 1 second for real-time monitoring. "Checked X ago" timer text updates every 1 second.
 
 ## Requests Page Sections (requests2.html)
 
