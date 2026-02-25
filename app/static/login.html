@@ -140,6 +140,19 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (el) el.textContent = theme.tagline;
     }
 
+    // Hide simple auth form if disabled
+    if (theme.features && theme.features.show_simple_auth === false) {
+        var loginForm = document.getElementById('loginForm');
+        var children = loginForm.children;
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            // Keep the Plex button (id="plexLoginBtn"), hide everything else
+            if (child.id !== 'plexLoginBtn') {
+                child.style.display = 'none';
+            }
+        }
+    }
+
     // If already authenticated, redirect to dashboard
     try {
         const authResp = await fetch('/auth/check-session');
