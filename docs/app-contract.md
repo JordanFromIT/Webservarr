@@ -18,6 +18,8 @@ Last verified: 2026-02-25
 | `/issues` | `app/static/issues.html` | Session | Report and view media issues (audio, video, subtitle). Per-user Plex auth for writes. |
 | `/calendar` | `app/static/calendar.html` | Session | Combined Radarr + Sonarr month calendar. Click day for release details. Month navigation. |
 
+All authenticated pages include a notification bell in the top bar that shows unread count and opens a dropdown panel for viewing/managing notifications.
+
 **Auth pattern:** Page routes in `main.py` check the session cookie server-side and return a 302 redirect to `/login` if unauthenticated — the HTML is never sent. Each page's JS also calls `GET /auth/check-session` as a secondary check.
 
 **Login methods:**
@@ -130,6 +132,21 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 | POST | `/api/admin/restart-container` | Admin | Restart hms-dashboard container via Docker API |
 | POST | `/api/admin/shutdown-container` | Admin | Stop hms-dashboard container via Docker API |
 
+### Notifications (`app/routers/notifications.py`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/notifications` | Session | List user's notifications (paginated) |
+| GET | `/api/notifications/unread-count` | Session | Unread notification count |
+| PUT | `/api/notifications/{id}/read` | Session | Mark notification as read |
+| PUT | `/api/notifications/read-all` | Session | Mark all notifications as read |
+| DELETE | `/api/notifications/{id}` | Session | Delete a notification |
+| GET | `/api/notifications/preferences` | Session | Get per-category toggles |
+| PUT | `/api/notifications/preferences` | Session | Update per-category toggles |
+| POST | `/api/notifications/push-subscribe` | Session | Register push subscription |
+| DELETE | `/api/notifications/push-subscribe` | Session | Remove push subscriptions |
+| POST | `/api/admin/notifications/send` | Admin | Send notification to all users |
+
 ### Integrations (`app/routers/integrations.py`)
 
 | Method | Path | Auth | Description |
@@ -214,6 +231,17 @@ Stored in `settings` table, seeded on first startup:
 | `icon.section_news` | `newspaper` | Material Symbol for Latest News section |
 | `system.admin_email` | `""` | Admin email (priority check for Plex admin determination) |
 
+### Notification Settings
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `notifications.poll_interval_overseerr` | `60` | Seconds between Overseerr checks |
+| `notifications.poll_interval_monitors` | `60` | Seconds between Uptime Kuma checks |
+| `notifications.poll_interval_news` | `60` | Seconds between news checks |
+| `notifications.vapid_public_key` | (auto) | Web Push VAPID public key |
+| `notifications.vapid_private_key` | (auto) | Web Push VAPID private key |
+| `notify.{hash}.{category}` | `true` | Per-user notification preference |
+
 ---
 
 ## Database Models (`app/models.py`)
@@ -226,6 +254,32 @@ Stored in `settings` table, seeded on first startup:
 | Setting | settings | id, key, value, created_at, updated_at |
 | StatusUpdate | status_updates | id, service_id, status, message, created_at, resolved_at |
 | ServiceStatus | service_statuses | id, service_id, status, checked_at |
+| Notification | notifications | id, user_email, category, title, body, reference_id, read, created_at |
+| PushSubscription | push_subscriptions | id, user_email, endpoint, p256dh, auth, created_at |
+
+### Notification
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | Integer | PK, auto-increment |
+| user_email | String(200) | Indexed |
+| category | String(20) | request, issue, service, news |
+| title | String(200) | |
+| body | Text | Nullable |
+| reference_id | String(100) | Nullable, for dedup |
+| read | Boolean | Default false |
+| created_at | DateTime | Auto-set |
+
+### PushSubscription
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | Integer | PK, auto-increment |
+| user_email | String(200) | Indexed |
+| endpoint | Text | Push service URL |
+| p256dh | String(200) | Client key |
+| auth | String(200) | Auth secret |
+| created_at | DateTime | Auto-set |
 
 Storage: SQLite at `/app/data/hms.db` (container path) / `data/hms.db` (host path).
 
