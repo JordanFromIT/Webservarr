@@ -259,10 +259,12 @@ RAM: --
 
 <script src="/static/js/auth.js"></script>
 <script src="/static/js/sidebar.js?v=5"></script>
+<script src="/static/js/notifications.js"></script>
 <script>
 // HMS Dashboard - Main Page
 document.addEventListener('DOMContentLoaded', async function() {
     initSidebar('home');
+    initNotifications();
 
     // Apply configurable section icons from branding
     var icons = (window.HMS_THEME || {}).icons || {};

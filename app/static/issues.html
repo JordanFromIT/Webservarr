@@ -237,6 +237,7 @@ Submit Issue
 
 <script src="/static/js/auth.js"></script>
 <script src="/static/js/sidebar.js?v=5"></script>
+<script src="/static/js/notifications.js"></script>
 <script>
 // State
 var _searchDebounceTimer = null;
@@ -250,6 +251,7 @@ var _refreshInterval = null;
 
 document.addEventListener('DOMContentLoaded', async function() {
     initSidebar('issues');
+    initNotifications();
 
     var user = await checkAuth();
     if (!user) return;

@@ -107,6 +107,7 @@ Today
 
 <script src="/static/js/auth.js"></script>
 <script src="/static/js/sidebar.js?v=5"></script>
+<script src="/static/js/notifications.js"></script>
 <script>
 // ---- State ----
 var _currentYear = new Date().getFullYear();
@@ -118,6 +119,7 @@ var _selectedDate = null; // "YYYY-MM-DD" or null
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', async function() {
     initSidebar('calendar');
+    initNotifications();
 
     var user = await checkAuth();
     if (!user) return;
