@@ -220,24 +220,6 @@ class SessionManager:
 
         return False
 
-    async def store_plex_pin(self, state: str, pin_id: int, client_id: str) -> None:
-        """Store Plex PIN data temporarily (5 minutes) for native Plex auth flow."""
-        redis = await self.get_redis()
-        key = f"plex_pin:{state}"
-        await redis.hset(key, mapping={"pin_id": str(pin_id), "client_id": client_id})
-        await redis.expire(key, 300)
-
-    async def get_plex_pin(self, state: str) -> Optional[Dict[str, str]]:
-        """Retrieve and consume Plex PIN data."""
-        redis = await self.get_redis()
-        key = f"plex_pin:{state}"
-        data = await redis.hgetall(key)
-        if data:
-            await redis.delete(key)
-            return {k.decode(): v.decode() for k, v in data.items()}
-        return None
-
-
 # Global instances
 # OIDCClient is only instantiated when Authentik is configured
 oidc_client = OIDCClient() if settings.authentik_url else None
