@@ -42,3 +42,6 @@ python-dateutil==2.8.2
 
 # Docker management
 docker==7.0.0
+
+# Web Push notifications
+pywebpush>=2.0.0
