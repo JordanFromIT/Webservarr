@@ -5,7 +5,7 @@ Logout is handled by simple_auth.py (shared session clearing).
 """
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, status, Response
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from urllib.parse import quote, urlencode
 import secrets
@@ -165,18 +165,8 @@ async def oidc_callback(code: str, state: str, db: Session = Depends(get_db)):
             except Exception as e:
                 logger.warning("Overseerr SSO failed (non-fatal): %s", str(e))
 
-        # Set session cookie and notify the opener window to redirect
-        # The callback runs inside a popup — send postMessage to close it
-        close_html = """<!DOCTYPE html>
-<html><body><script>
-if (window.opener) {
-    window.opener.postMessage('auth-success', window.location.origin);
-    window.close();
-} else {
-    window.location.href = '/';
-}
-</script></body></html>"""
-        response = HTMLResponse(content=close_html)
+        # Redirect to dashboard after successful OIDC authentication
+        response = RedirectResponse(url="/", status_code=302)
         response.set_cookie(
             key=settings.session_cookie_name,
             value=session_id,
