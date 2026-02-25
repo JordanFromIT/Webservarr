@@ -126,3 +126,35 @@ class Setting(Base):
 
     def __repr__(self):
         return f"<Setting(key='{self.key}')>"
+
+
+class Notification(Base):
+    """User notifications."""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_email = Column(String(200), nullable=False, index=True)
+    category = Column(String(20), nullable=False)  # request, issue, service, news
+    title = Column(String(200), nullable=False)
+    body = Column(Text, nullable=True)
+    reference_id = Column(String(100), nullable=True)  # External ID for dedup
+    read = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    def __repr__(self):
+        return f"<Notification(id={self.id}, category='{self.category}', user='{self.user_email}')>"
+
+
+class PushSubscription(Base):
+    """Browser push notification subscriptions."""
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_email = Column(String(200), nullable=False, index=True)
+    endpoint = Column(Text, nullable=False)
+    p256dh = Column(String(200), nullable=False)
+    auth = Column(String(200), nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    def __repr__(self):
+        return f"<PushSubscription(id={self.id}, user='{self.user_email}')>"
