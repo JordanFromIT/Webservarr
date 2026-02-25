@@ -21,13 +21,13 @@ Last verified: 2026-02-24
 **Auth pattern:** Page routes in `main.py` check the session cookie server-side and return a 302 redirect to `/login` if unauthenticated — the HTML is never sent. Each page's JS also calls `GET /auth/check-session` as a secondary check.
 
 **Login methods:**
-- **Plex native (primary):** "Sign in with Plex" button → browser creates PIN via `plex.tv/api/v2/pins` (user's IP) → `POST /auth/plex-start` stores PIN → full-page redirect to `app.plex.tv/auth` → user authenticates → Plex redirects to `/auth/plex-callback` → session created. No popups.
-- **Plex OAuth via Authentik (legacy, still functional):** `GET /auth/login` → Authentik OIDC → Plex OAuth. Desktop uses popup (postMessage to close). Mobile uses full-page redirect. No longer used by default.
-- **Simple auth (fallback):** Username/password form → `POST /auth/simple-login`.
+- **Plex via Authentik OIDC (primary):** "Sign in with Plex" button → full-page redirect to `GET /auth/login` → Authentik OIDC authorization → Plex OAuth → `GET /auth/callback` exchanges code, resolves admin status, creates session with `auth_method: "oidc"`. No popups.
+- **Simple auth (fallback):** Username/password form → `POST /auth/simple-login`. Used when Plex/Authentik is unavailable.
+- **Native Plex PIN (dormant):** `/auth/plex-start` and `/auth/plex-callback` endpoints still exist in the codebase but are not referenced by the login page. The browser no longer calls `plex.tv` directly.
 
 **Admin determination:** First checks if user's email matches `system.admin_email` setting (if configured). Falls back to checking if email matches the Plex server owner's email (via `plex.tv/api/v2/user` with admin token from `integration.plex.token` setting).
 
-**Session fields:** `user_id`, `email`, `name`, `username`, `is_admin`, `auth_method` (plex/oidc/simple), `id_token` (for OIDC logout), `plex_token` (for Overseerr SSO).
+**Session fields:** `user_id`, `email`, `name`, `username`, `is_admin`, `auth_method` (oidc/simple; "plex" is dormant), `id_token` (for OIDC logout), `plex_token` (for Overseerr SSO).
 
 ---
 
@@ -74,10 +74,10 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/auth/login` | None | Redirect to Authentik OIDC authorization (legacy) |
-| GET | `/auth/callback` | None | OIDC callback — exchanges code, checks Plex server owner for admin, creates session (legacy) |
-| POST | `/auth/plex-start` | None | Store client-created Plex PIN in Redis, return callback URL |
-| GET | `/auth/plex-callback` | None | Plex PIN callback — checks PIN for auth token, gets user info, creates session, redirects to dashboard |
+| GET | `/auth/login` | None | Redirect to Authentik OIDC authorization (primary Plex login) |
+| GET | `/auth/callback` | None | OIDC callback — exchanges code, checks Plex server owner for admin, creates session |
+| POST | `/auth/plex-start` | None | Store client-created Plex PIN in Redis, return callback URL (dormant — not referenced by login page) |
+| GET | `/auth/plex-callback` | None | Plex PIN callback — checks PIN for auth token, gets user info, creates session (dormant — not referenced by login page) |
 | GET | `/auth/me` | Session | Returns current user info (works for all auth methods) |
 
 ### Branding (`app/routers/branding.py`)
@@ -304,7 +304,7 @@ Stream cards show title (with year for movies, S##E## for TV), thumbnail via bac
 - API keys/tokens masked in settings responses
 - Admin role enforcement on all write endpoints
 - httpx 5-second timeout on external API calls
-- CSP connect-src includes `https://plex.tv` for client-side PIN creation
+- CSP connect-src no longer includes `https://plex.tv` (client-side PIN creation is dormant)
 - Overseerr SSO: Plex token stored server-side in Redis, never exposed to frontend. `connect.sid` cookie set on `.hmserver.tv` with `SameSite=None; Secure; HttpOnly` for cross-subdomain iframe SSO. Cleared on logout.
 
 **Not implemented:**
