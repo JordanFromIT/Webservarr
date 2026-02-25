@@ -74,10 +74,68 @@ Sign Out
 <div class="flex items-center gap-3 mb-4">
 <span id="iconSectionServices" class="material-symbols-outlined text-steel-blue">health_metrics</span>
 <h3 class="text-xl font-bold text-white">Service Health</h3>
+<span id="serviceLastChecked" class="text-[10px] text-steel-blue/60 ml-auto"></span>
 </div>
-<div id="servicesContainer" class="grid gap-3">
+<!-- Netdata Gauges -->
+<div id="netdataGauges" class="hidden bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 mb-4">
+<div class="flex justify-between items-center">
+<!-- CPU Gauge -->
+<div class="flex flex-col items-center flex-1">
+<div class="relative w-20 h-20 lg:w-24 lg:h-24">
+<svg class="w-full h-full" viewBox="0 0 100 100">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
+<circle id="cpuGaugeCircle" class="text-cyan-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
+<span class="text-[10px] text-steel-blue font-medium">CPU</span>
+<span id="cpuGaugeText" class="text-lg font-bold text-white">--%</span>
+</div>
+</div>
+<span class="text-[10px] text-steel-blue/50 mt-1">Netdata</span>
+</div>
+<!-- RAM Gauge -->
+<div class="flex flex-col items-center flex-1">
+<div class="relative w-20 h-20 lg:w-24 lg:h-24">
+<svg class="w-full h-full" viewBox="0 0 100 100">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
+<circle id="ramGaugeCircle" class="text-purple-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
+<span class="text-[10px] text-steel-blue font-medium">RAM</span>
+<span id="ramGaugeText" class="text-lg font-bold text-white">--%</span>
+</div>
+</div>
+<span class="text-[10px] text-steel-blue/50 mt-1">Netdata</span>
+</div>
+<!-- Network Gauge -->
+<div class="flex flex-col items-center flex-1">
+<div class="relative w-20 h-20 lg:w-24 lg:h-24">
+<svg class="w-full h-full" viewBox="0 0 100 100">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
+<circle id="netGaugeCircle" class="text-orange-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center pt-1">
+<span class="text-[10px] text-steel-blue font-medium uppercase">Network</span>
+<div class="flex flex-col items-center leading-none mt-1">
+<div class="flex items-center text-[10px] text-white space-x-0.5">
+<span class="material-symbols-outlined text-[10px]">arrow_downward</span>
+<span id="netDownText">0.0</span>
+</div>
+<div class="flex items-center text-[10px] text-white space-x-0.5 mt-0.5">
+<span class="material-symbols-outlined text-[10px]">arrow_upward</span>
+<span id="netUpText">0.0</span>
+</div>
+</div>
+</div>
+</div>
+<span class="text-[10px] text-steel-blue/50 mt-1">MB/s</span>
+</div>
+</div>
+</div>
+<!-- Service Tiles -->
+<div id="servicesContainer" class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr))">
 <!-- Services will be loaded here dynamically -->
-<div class="text-center text-steel-blue py-8">
+<div class="text-center text-steel-blue py-8 col-span-full">
 <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span>
 <p>Loading services...</p>
 </div>
@@ -129,9 +187,12 @@ Sign Out
 <span id="iconSectionReleases" class="material-symbols-outlined text-steel-blue">calendar_month</span>
 <h3 class="text-xl font-bold text-white">Upcoming Releases</h3>
 </div>
+<a href="/calendar" class="text-xs text-steel-blue hover:text-primary transition-colors flex items-center gap-1">
+View calendar <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</a>
 </div>
-<div id="releasesContainer" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-<div class="text-center text-steel-blue py-8 col-span-full">
+<div id="releasesContainer">
+<div class="text-center text-steel-blue py-8">
 <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">calendar_month</span>
 <p>Loading releases...</p>
 </div>
@@ -239,17 +300,19 @@ document.addEventListener('DOMContentLoaded', async function() {
         loadActiveStreams();
         loadRecentRequests();
         loadRequestCount();
-        loadSystemStats();
         loadUpcomingReleases();
     }, 30000);
 
-    // Live-update "Checked X ago" timers every 10 seconds
+    // Real-time Netdata gauges — poll every 1 second
+    setInterval(loadSystemStats, 1000);
+
+    // Live-update "Last checked" timer every second
     setInterval(function() {
-        document.querySelectorAll('.last-check-timer[data-last-check]').forEach(function(el) {
-            var iso = el.dataset.lastCheck;
-            if (iso) el.textContent = 'Checked ' + getTimeAgo(new Date(iso));
-        });
-    }, 10000);
+        var el = document.getElementById('serviceLastChecked');
+        if (el && el.dataset.lastCheck) {
+            el.textContent = 'Checked ' + getTimeAgo(new Date(el.dataset.lastCheck));
+        }
+    }, 1000);
 });
 
 // Load news from API
@@ -552,6 +615,33 @@ async function loadRecentRequests() {
     }
 }
 
+// Homelab icon mapping — service name substring → selfh.st icon slug
+var HOMELAB_ICONS = {
+    'plex': 'plex', 'radarr': 'radarr', 'sonarr': 'sonarr', 'overseerr': 'overseerr',
+    'tautulli': 'tautulli', 'jellyfin': 'jellyfin', 'emby': 'emby', 'lidarr': 'lidarr',
+    'prowlarr': 'prowlarr', 'bazarr': 'bazarr', 'readarr': 'readarr', 'sabnzbd': 'sabnzbd',
+    'qbittorrent': 'qbittorrent', 'transmission': 'transmission', 'deluge': 'deluge',
+    'jackett': 'jackett', 'portainer': 'portainer', 'grafana': 'grafana',
+    'prometheus': 'prometheus', 'netdata': 'netdata', 'pi-hole': 'pi-hole',
+    'adguard': 'adguard-home', 'traefik': 'traefik', 'nginx': 'nginx-proxy-manager',
+    'caddy': 'caddy', 'home assistant': 'home-assistant', 'homeassistant': 'home-assistant',
+    'nextcloud': 'nextcloud', 'vaultwarden': 'vaultwarden', 'bitwarden': 'bitwarden',
+    'wireguard': 'wireguard', 'tailscale': 'tailscale', 'unraid': 'unraid',
+    'truenas': 'truenas', 'proxmox': 'proxmox', 'docker': 'docker',
+    'watchtower': 'watchtower', 'uptime kuma': 'uptime-kuma', 'heimdall': 'heimdall',
+    'homarr': 'homarr', 'organizr': 'organizr', 'authentik': 'authentik', 'authelia': 'authelia',
+};
+
+function getServiceIconUrl(name) {
+    var lower = name.toLowerCase();
+    for (var key in HOMELAB_ICONS) {
+        if (lower.indexOf(key) !== -1) {
+            return 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/' + HOMELAB_ICONS[key] + '.svg';
+        }
+    }
+    return null;
+}
+
 // Load services from Uptime Kuma (only enabled monitors)
 async function loadServices() {
     const servicesContainer = document.getElementById('servicesContainer');
@@ -564,254 +654,262 @@ async function loadServices() {
             services = (Array.isArray(data) ? data : []).map(svc => ({
                 display_name: svc.name || 'Unknown',
                 status: svc.status || 'unknown',
-                response_time: svc.response_time,
-                status_message: svc.status_message || '',
                 icon: svc.icon || 'dns',
-                uptime_24h: svc.uptime_24h,
                 last_check: svc.last_check
             }));
         }
     } catch (error) {
         console.error('Error loading services:', error);
-        servicesContainer.innerHTML = `
-            <div class="text-center text-red-400 py-8 col-span-2">
-                <span class="material-symbols-outlined text-4xl mb-2 block">error</span>
-                <p>Error loading services</p>
-            </div>
-        `;
+        servicesContainer.innerHTML = '<div class="text-center text-red-400 py-8 col-span-full"><span class="material-symbols-outlined text-4xl mb-2 block">error</span><p>Error loading services</p></div>';
         return;
     }
-
-    // System status banner is handled by loadSystemStatus() in auth.js
 
     if (services.length === 0) {
-        servicesContainer.innerHTML = `
-            <div class="text-center text-steel-blue py-8 col-span-2">
-                <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span>
-                <p>No services configured yet.</p>
-            </div>
-        `;
+        servicesContainer.innerHTML = '<div class="text-center text-steel-blue py-8 col-span-full"><span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span><p>No services configured yet.</p></div>';
         return;
     }
 
-    servicesContainer.innerHTML = services.map(service => {
-        let statusColor, statusLabel, borderColor, iconColor, dotColor;
+    // Update "Last checked" timer in section header
+    var latestCheck = null;
+    services.forEach(function(svc) {
+        if (svc.last_check) {
+            var d = new Date(svc.last_check + 'Z');
+            if (!latestCheck || d > latestCheck) latestCheck = d;
+        }
+    });
+    var timerEl = document.getElementById('serviceLastChecked');
+    if (timerEl && latestCheck) {
+        timerEl.textContent = 'Checked ' + getTimeAgo(latestCheck);
+        timerEl.dataset.lastCheck = latestCheck.toISOString();
+    }
+
+    servicesContainer.innerHTML = services.map(function(service) {
+        var barBg, statusLabel;
 
         switch(service.status) {
             case 'up':
-                statusColor = 'text-green-500';
+                barBg = 'bg-green-500';
                 statusLabel = 'Online';
-                borderColor = 'border-primary/20';
-                iconColor = 'text-frosted-blue';
-                dotColor = 'bg-green-500';
                 break;
             case 'degraded':
-                statusColor = 'text-yellow-500';
+                barBg = 'bg-yellow-500';
                 statusLabel = 'Degraded';
-                borderColor = 'border-yellow-500/20';
-                iconColor = 'text-yellow-500';
-                dotColor = 'bg-yellow-500';
                 break;
             case 'down':
-                statusColor = 'text-red-500';
+                barBg = 'bg-red-500';
                 statusLabel = 'Offline';
-                borderColor = 'border-red-500/20';
-                iconColor = 'text-red-500';
-                dotColor = 'bg-red-500';
                 break;
             case 'maintenance':
-                statusColor = 'text-steel-blue';
+                barBg = 'bg-steel-blue';
                 statusLabel = 'Maintenance';
-                borderColor = 'border-steel-blue/20';
-                iconColor = 'text-steel-blue';
-                dotColor = 'bg-steel-blue';
                 break;
             default:
-                statusColor = 'text-steel-blue';
+                barBg = 'bg-steel-blue';
                 statusLabel = 'Unknown';
-                borderColor = 'border-steel-blue/20';
-                iconColor = 'text-steel-blue';
-                dotColor = 'bg-steel-blue';
         }
 
-        const ping = service.response_time != null ? service.response_time + 'ms' : '--';
-        const uptime = service.uptime_24h != null ? service.uptime_24h + '%' : '--';
-        const lastCheckIso = service.last_check ? service.last_check + 'Z' : '';
-        const lastCheck = lastCheckIso ? getTimeAgo(new Date(lastCheckIso)) : '';
+        var iconUrl = getServiceIconUrl(service.display_name);
+        var iconHtml = iconUrl
+            ? '<img src="' + iconUrl + '" alt="" class="service-icon w-8 h-8 object-contain">'
+            : '<span class="material-symbols-outlined text-3xl text-steel-blue">' + escapeHtml(service.icon) + '</span>';
 
-        return `
-            <div class="bg-baltic-blue/10 border ${borderColor} rounded-lg px-3.5 py-2.5 hover:border-primary/50 transition-all">
-                <div class="flex items-center gap-2.5">
-                    <span class="size-2 rounded-full ${dotColor} shrink-0"></span>
-                    <h4 class="font-bold text-white text-sm truncate flex-1 min-w-0">${escapeHtml(service.display_name)}</h4>
-                    <span class="text-[10px] ${statusColor} font-medium shrink-0">${statusLabel}</span>
-                    <span class="text-[10px] text-steel-blue shrink-0 w-12 text-right">${ping}</span>
-                    <span class="text-[10px] text-frosted-blue font-semibold shrink-0 w-11 text-right">${uptime}</span>
-                    <span class="last-check-timer text-[10px] text-steel-blue/60 shrink-0 w-20 text-right" data-last-check="${escapeHtml(lastCheckIso)}">${lastCheck ? escapeHtml(lastCheck) : ''}</span>
-                </div>
-            </div>
-        `;
+        return '<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col hover:border-primary/40 transition-all">' +
+            '<div class="flex-1 p-3 flex flex-col items-center justify-center text-center space-y-2 min-h-[80px]">' +
+                iconHtml +
+                '<span class="text-[11px] font-medium leading-tight line-clamp-2 text-white">' + escapeHtml(service.display_name) + '</span>' +
+            '</div>' +
+            '<div class="' + barBg + ' py-1 flex justify-center">' +
+                '<span class="text-[10px] font-bold text-white uppercase tracking-wider">' + statusLabel + '</span>' +
+            '</div>' +
+        '</div>';
     }).join('');
 }
 
 // Load upcoming releases from Sonarr/Radarr
 async function loadUpcomingReleases() {
-    const container = document.getElementById('releasesContainer');
-    const section = document.getElementById('upcomingReleasesSection');
+    var container = document.getElementById('releasesContainer');
     try {
-        const response = await fetch('/api/integrations/upcoming-releases');
+        var response = await fetch('/api/integrations/upcoming-releases?days=7');
         if (!response.ok) throw new Error('API error');
-        const releases = await response.json();
+        var releases = await response.json();
+
+        // Clear container
+        while (container.firstChild) container.removeChild(container.firstChild);
 
         if (!Array.isArray(releases) || releases.length === 0) {
-            container.innerHTML = `
-                <div class="text-center text-steel-blue py-8 col-span-full">
-                    <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">calendar_month</span>
-                    <p>No upcoming releases</p>
-                </div>
-            `;
+            var emptyDiv = document.createElement('div');
+            emptyDiv.className = 'text-center text-steel-blue py-8';
+            var emptyIcon = document.createElement('span');
+            emptyIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
+            emptyIcon.textContent = 'calendar_month';
+            var emptyText = document.createElement('p');
+            emptyText.textContent = 'No releases this week';
+            emptyDiv.appendChild(emptyIcon);
+            emptyDiv.appendChild(emptyText);
+            container.appendChild(emptyDiv);
             return;
         }
 
-        // Show section
-        section.style.display = '';
+        // Group releases by date
+        var grouped = {};
+        releases.forEach(function(r) {
+            var dateKey = r.air_date ? r.air_date.substring(0, 10) : '';
+            if (!dateKey) return;
+            if (!grouped[dateKey]) grouped[dateKey] = [];
+            grouped[dateKey].push(r);
+        });
 
-        container.innerHTML = releases.slice(0, 12).map(release => {
-            const title = escapeHtml(release.title || 'Unknown');
-            const episodeCode = escapeHtml(release.episode_code || '');
-            const episodeTitle = release.episode_title ? escapeHtml(release.episode_title) : '';
-            const isMovie = release.media_type === 'movie';
-            const typeIcon = isMovie ? 'movie' : 'tv';
-            const typeBadge = isMovie ? 'Movie' : 'TV';
-            const badgeColor = isMovie ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400';
-            const posterUrl = release.poster_url || '';
-            const hasFile = release.has_file;
+        // Sort date keys
+        var dateKeys = Object.keys(grouped).sort();
 
-            // Format the air date
-            let dateLabel = '';
-            if (release.air_date) {
-                const airDate = new Date(release.air_date);
-                const now = new Date();
-                const diffDays = Math.ceil((airDate - now) / 86400000);
-                if (diffDays <= 0) dateLabel = 'Today';
-                else if (diffDays === 1) dateLabel = 'Tomorrow';
-                else if (diffDays <= 7) dateLabel = `In ${diffDays} days`;
-                else dateLabel = airDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        // Build today/tomorrow strings for comparison
+        var today = new Date();
+        var todayStr = today.getFullYear() + '-' + (today.getMonth()+1 < 10 ? '0' : '') + (today.getMonth()+1) + '-' + (today.getDate() < 10 ? '0' : '') + today.getDate();
+        var tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        var tomorrowStr = tomorrow.getFullYear() + '-' + (tomorrow.getMonth()+1 < 10 ? '0' : '') + (tomorrow.getMonth()+1) + '-' + (tomorrow.getDate() < 10 ? '0' : '') + tomorrow.getDate();
+
+        dateKeys.forEach(function(dateKey) {
+            // Day header
+            var header = document.createElement('div');
+            header.className = 'text-xs font-bold uppercase tracking-wider text-steel-blue mb-2 mt-4 first:mt-0';
+            if (dateKey === todayStr) {
+                header.textContent = 'Today';
+            } else if (dateKey === tomorrowStr) {
+                header.textContent = 'Tomorrow';
+            } else {
+                var parts = dateKey.split('-');
+                var d = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
+                header.textContent = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
             }
+            container.appendChild(header);
 
-            const posterBg = posterUrl
-                ? `background-image: url('${posterUrl}'); background-size: cover; background-position: center;`
-                : `background: linear-gradient(135deg, rgba(18, 87, 147, 0.4), rgba(44, 109, 161, 0.2));`;
+            // Release items for this day
+            grouped[dateKey].forEach(function(release) {
+                var row = document.createElement('div');
+                row.className = 'flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors';
 
-            const subtitle = isMovie ? episodeCode : (episodeCode + (episodeTitle ? ' - ' + episodeTitle : ''));
+                // Media type badge
+                var badge = document.createElement('span');
+                if (release.media_type === 'movie') {
+                    badge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 shrink-0';
+                    badge.textContent = 'MOV';
+                } else {
+                    badge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 shrink-0';
+                    badge.textContent = 'TV';
+                }
+                row.appendChild(badge);
 
-            return `
-                <div class="glass-card rounded-xl overflow-hidden group">
-                    <div class="aspect-[2/3] relative overflow-hidden">
-                        <div class="absolute inset-0 transition-transform duration-500 group-hover:scale-110" style="${posterBg}"></div>
-                        <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
-                        <div class="absolute top-2 right-2">
-                            <span class="text-[9px] font-bold px-1.5 py-0.5 rounded ${badgeColor}">${typeBadge}</span>
-                        </div>
-                        ${hasFile ? '<div class="absolute top-2 left-2"><span class="material-symbols-outlined text-green-400 text-sm">check_circle</span></div>' : ''}
-                        <div class="absolute bottom-2 left-2 right-2">
-                            <p class="text-white text-xs font-bold leading-tight">${title}</p>
-                            <p class="text-steel-blue text-[10px] mt-0.5">${subtitle}</p>
-                        </div>
-                    </div>
-                    <div class="px-2 py-1.5 bg-black/40">
-                        <p class="text-[10px] text-steel-blue font-bold uppercase">${dateLabel}</p>
-                    </div>
-                </div>
-            `;
-        }).join('');
+                // Title + episode info
+                var titleSpan = document.createElement('span');
+                titleSpan.className = 'text-sm text-frosted-blue truncate';
+                var titleText = release.title || 'Unknown';
+                if (release.media_type === 'tv' && release.episode_code) {
+                    titleText += ' ' + release.episode_code;
+                }
+                if (release.episode_title) {
+                    titleText += ' - ' + release.episode_title;
+                } else if (release.media_type === 'movie' && release.episode_code) {
+                    titleText += ' (' + release.episode_code + ')';
+                }
+                titleSpan.textContent = titleText;
+                row.appendChild(titleSpan);
+
+                // Green checkmark if has_file
+                if (release.has_file) {
+                    var check = document.createElement('span');
+                    check.className = 'material-symbols-outlined text-green-500 text-sm shrink-0 ml-auto';
+                    check.textContent = 'check_circle';
+                    row.appendChild(check);
+                }
+
+                container.appendChild(row);
+            });
+        });
 
     } catch (error) {
         console.log('Upcoming releases not available');
-        container.innerHTML = `
-            <div class="text-center text-steel-blue py-8 col-span-full">
-                <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">calendar_month</span>
-                <p>Sonarr/Radarr not configured</p>
-            </div>
-        `;
+        while (container.firstChild) container.removeChild(container.firstChild);
+        var errDiv = document.createElement('div');
+        errDiv.className = 'text-center text-steel-blue py-8';
+        var errIcon = document.createElement('span');
+        errIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
+        errIcon.textContent = 'calendar_month';
+        var errText = document.createElement('p');
+        errText.textContent = 'Sonarr/Radarr not configured';
+        errDiv.appendChild(errIcon);
+        errDiv.appendChild(errText);
+        container.appendChild(errDiv);
     }
 }
 
 // Load system stats from Netdata integration
 async function loadSystemStats() {
+    var gaugesEl = document.getElementById('netdataGauges');
+    var footerEl = document.getElementById('footerStats');
     try {
-        const response = await fetch('/api/integrations/system-stats');
+        var response = await fetch('/api/integrations/system-stats');
         if (!response.ok) throw new Error('API error');
-        const stats = await response.json();
+        var stats = await response.json();
 
-        if (!stats.configured) {
-            // Netdata not configured - hide widget and footer stats
-            document.getElementById('serverLoadWidget').style.display = 'none';
-            document.getElementById('footerStats').style.display = 'none';
+        if (!stats.configured || stats.error) {
+            gaugesEl.classList.add('hidden');
+            if (footerEl) footerEl.style.display = 'none';
             return;
         }
 
-        if (stats.error) {
-            document.getElementById('cpuPercent').textContent = 'Error';
-            document.getElementById('ramPercent').textContent = 'Error';
-            return;
-        }
+        // Show gauges
+        gaugesEl.classList.remove('hidden');
+        if (footerEl) footerEl.style.display = '';
 
-        // Show the widget
-        document.getElementById('serverLoadWidget').style.display = '';
-        document.getElementById('footerStats').style.display = '';
-
-        // Update sidebar CPU bar
+        // Update CPU gauge
         if (stats.cpu_percent !== null) {
-            const cpuPct = stats.cpu_percent;
-            document.getElementById('cpuPercent').textContent = cpuPct + '%';
-            const cpuBar = document.getElementById('cpuBar');
-            cpuBar.style.width = cpuPct + '%';
-            // Color based on load
-            cpuBar.className = 'h-full rounded-full transition-all duration-500 ' +
-                (cpuPct > 90 ? 'bg-red-500' : cpuPct > 70 ? 'bg-yellow-500' : 'bg-primary');
+            var cpuPct = stats.cpu_percent;
+            document.getElementById('cpuGaugeText').textContent = Math.round(cpuPct) + '%';
+            document.getElementById('cpuGaugeCircle').style.strokeDashoffset = 251 - (251 * cpuPct / 100);
         }
 
-        // Update sidebar RAM bar
+        // Update RAM gauge
         if (stats.ram_percent !== null) {
-            const ramPct = stats.ram_percent;
-            document.getElementById('ramPercent').textContent = ramPct + '%';
-            const ramBar = document.getElementById('ramBar');
-            ramBar.style.width = ramPct + '%';
-            ramBar.className = 'h-full rounded-full transition-all duration-500 ' +
-                (ramPct > 90 ? 'bg-red-500' : ramPct > 70 ? 'bg-yellow-500' : 'bg-cornflower-ocean');
+            var ramPct = stats.ram_percent;
+            document.getElementById('ramGaugeText').textContent = Math.round(ramPct) + '%';
+            document.getElementById('ramGaugeCircle').style.strokeDashoffset = 251 - (251 * ramPct / 100);
         }
 
-        // Update footer hostname
-        if (stats.hostname) {
-            document.getElementById('footerHostname').innerHTML =
-                '<span class="material-symbols-outlined text-xs">dns</span>' + escapeHtml(stats.hostname);
-        }
+        // Update Network gauge
+        var dl = stats.net_download_mbps != null ? stats.net_download_mbps : 0;
+        var ul = stats.net_upload_mbps != null ? stats.net_upload_mbps : 0;
+        document.getElementById('netDownText').textContent = dl.toFixed(1);
+        document.getElementById('netUpText').textContent = ul.toFixed(1);
+        // Scale network gauge: cap at 100 MB/s for percentage
+        var netPct = Math.min((dl + ul) / 100 * 100, 100);
+        document.getElementById('netGaugeCircle').style.strokeDashoffset = 251 - (251 * netPct / 100);
 
-        // Update footer uptime
-        if (stats.uptime_seconds !== null) {
-            document.getElementById('footerUptime').innerHTML =
-                '<span class="material-symbols-outlined text-xs">schedule</span>Uptime: ' + formatUptime(stats.uptime_seconds);
-        }
-
-        // Update footer CPU
-        if (stats.cpu_percent !== null) {
-            document.getElementById('footerCpu').innerHTML =
-                '<span class="material-symbols-outlined text-xs">memory</span>CPU: ' + stats.cpu_percent + '%';
-        }
-
-        // Update footer RAM
-        if (stats.ram_used_mb !== null && stats.ram_total_mb !== null) {
-            document.getElementById('footerRam').innerHTML =
-                '<span class="material-symbols-outlined text-xs">storage</span>RAM: ' +
-                stats.ram_used_mb + ' / ' + stats.ram_total_mb + ' MB';
+        // Update footer
+        if (footerEl) {
+            if (stats.hostname) {
+                document.getElementById('footerHostname').innerHTML =
+                    '<span class="material-symbols-outlined text-xs">dns</span>' + escapeHtml(stats.hostname);
+            }
+            if (stats.uptime_seconds !== null) {
+                document.getElementById('footerUptime').innerHTML =
+                    '<span class="material-symbols-outlined text-xs">schedule</span>Uptime: ' + formatUptime(stats.uptime_seconds);
+            }
+            if (stats.cpu_percent !== null) {
+                document.getElementById('footerCpu').innerHTML =
+                    '<span class="material-symbols-outlined text-xs">memory</span>CPU: ' + stats.cpu_percent + '%';
+            }
+            if (stats.ram_used_mb !== null && stats.ram_total_mb !== null) {
+                document.getElementById('footerRam').innerHTML =
+                    '<span class="material-symbols-outlined text-xs">storage</span>RAM: ' +
+                    stats.ram_used_mb + ' / ' + stats.ram_total_mb + ' MB';
+            }
         }
 
     } catch (error) {
         console.log('System stats not available');
-        // Hide if endpoint fails (not configured)
-        document.getElementById('serverLoadWidget').style.display = 'none';
-        document.getElementById('footerStats').style.display = 'none';
+        gaugesEl.classList.add('hidden');
+        if (footerEl) footerEl.style.display = 'none';
     }
 }
 
