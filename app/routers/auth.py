@@ -4,10 +4,8 @@ Handles OIDC login redirect, callback with admin determination, and user info.
 Logout is handled by simple_auth.py (shared session clearing).
 """
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
-from urllib.parse import quote, urlencode
 import secrets
 import logging
 import httpx
@@ -24,10 +22,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 PLEX_TIMEOUT = 5.0
-
-# Native Plex PIN auth constants
-PLEX_CLIENT_ID = "hms-dashboard"
-PLEX_PRODUCT = "HMS Dashboard"
 
 
 async def _is_plex_server_owner(email: str, db: Session) -> bool:
@@ -199,147 +193,6 @@ async def oidc_callback(code: str, state: str, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Authentication failed: {str(e)}",
         )
-
-
-class PlexStartRequest(BaseModel):
-    pin_id: int
-
-
-@router.post("/plex-start")
-async def plex_start(body: PlexStartRequest):
-    """
-    Store a client-created Plex PIN and return callback URL.
-    The browser creates the PIN directly with plex.tv (so Plex sees the
-    user's IP, not the server's), then calls this to register it.
-    """
-    state = secrets.token_urlsafe(32)
-    await session_manager.store_plex_pin(state, body.pin_id, PLEX_CLIENT_ID)
-    callback_url = f"{settings.app_url}/auth/plex-callback?state={state}"
-    logger.info("Plex PIN stored (pin_id=%s)", body.pin_id)
-    return {"callback_url": callback_url}
-
-
-@router.get("/plex-callback")
-async def plex_callback(state: str, db: Session = Depends(get_db)):
-    """
-    Plex PIN auth callback.
-    Checks the PIN for an auth token, gets user info, creates session.
-    """
-    # Retrieve and consume PIN data from Redis
-    pin_data = await session_manager.get_plex_pin(state)
-    if not pin_data:
-        logger.error("Invalid or expired Plex auth state")
-        return RedirectResponse(url="/login", status_code=302)
-
-    pin_id = pin_data["pin_id"]
-    client_id = pin_data["client_id"]
-
-    # Check the PIN for auth token
-    try:
-        async with httpx.AsyncClient(timeout=PLEX_TIMEOUT) as client:
-            resp = await client.get(
-                f"https://plex.tv/api/v2/pins/{pin_id}",
-                headers={
-                    "X-Plex-Client-Identifier": client_id,
-                    "Accept": "application/json",
-                },
-            )
-            if resp.status_code != 200:
-                logger.error("Failed to check Plex PIN: HTTP %d", resp.status_code)
-                return RedirectResponse(url="/login", status_code=302)
-            pin_result = resp.json()
-    except httpx.TimeoutException:
-        logger.error("Plex API timed out checking PIN")
-        return RedirectResponse(url="/login", status_code=302)
-
-    auth_token = pin_result.get("authToken")
-    if not auth_token:
-        logger.warning("Plex auth not completed (no token on PIN)")
-        return RedirectResponse(url="/login", status_code=302)
-
-    # Get user info from Plex
-    try:
-        async with httpx.AsyncClient(timeout=PLEX_TIMEOUT) as client:
-            resp = await client.get(
-                "https://plex.tv/api/v2/user",
-                headers={
-                    "X-Plex-Token": auth_token,
-                    "Accept": "application/json",
-                },
-            )
-            if resp.status_code != 200:
-                logger.error("Failed to fetch Plex user info: HTTP %d", resp.status_code)
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail="Failed to fetch Plex user info",
-                )
-            user_info = resp.json()
-    except httpx.TimeoutException:
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Plex API timed out",
-        )
-
-    user_email = user_info.get("email", "")
-    username = user_info.get("username", "")
-    display_name = user_info.get("title", username)
-    avatar_url = user_info.get("thumb", "")
-
-    # Determine admin status: Plex server owner = admin
-    is_admin = await _is_plex_server_owner(user_email, db)
-
-    # Build session data
-    session_data = {
-        "user_id": str(user_info.get("id", "")),
-        "username": username,
-        "display_name": display_name,
-        "email": user_email,
-        "is_admin": str(is_admin).lower(),
-        "auth_method": "plex",
-        "id_token": "",
-        "plex_token": auth_token,
-        "avatar_url": avatar_url,
-    }
-
-    session_id = session_manager.generate_session_id()
-    await session_manager.create_session(session_id, session_data)
-
-    logger.info("Plex login successful: %s (admin=%s)", user_email, is_admin)
-
-    # Authenticate with Overseerr SSO (non-blocking)
-    overseerr_sid = None
-    try:
-        overseerr_sid = await overseerr.authenticate_with_plex_token(db, auth_token)
-        if overseerr_sid:
-            logger.info("Overseerr SSO successful for %s", user_email)
-    except Exception as e:
-        logger.warning("Overseerr SSO failed (non-fatal): %s", str(e))
-
-    # Redirect to dashboard with session cookie
-    response = RedirectResponse(url="/", status_code=302)
-    response.set_cookie(
-        key=settings.session_cookie_name,
-        value=session_id,
-        max_age=settings.session_max_age,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-    )
-
-    # Set Overseerr session cookie on parent domain for iframe SSO
-    if overseerr_sid:
-        parent_domain = "." + settings.app_domain.split(".", 1)[1]
-        response.set_cookie(
-            key="connect.sid",
-            value=overseerr_sid,
-            httponly=True,
-            secure=True,
-            samesite="none",
-            path="/",
-            domain=parent_domain,
-        )
-
-    return response
 
 
 @router.get("/me")
