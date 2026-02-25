@@ -41,14 +41,14 @@
 </div>
 </div>
 <div class="flex items-center gap-4">
-<button class="relative p-2 text-steel-blue hover:text-frosted-blue transition-colors group" title="Notifications - Coming soon">
+<button class="relative p-2 text-steel-blue hover:text-frosted-blue transition-colors group" title="Notifications">
 <span class="material-symbols-outlined">notifications</span>
 </button>
 <div class="relative">
 <button id="userMenuBtn" class="flex items-center gap-3 pl-4 cursor-pointer hover:opacity-80 transition-opacity">
 <div class="text-right">
 <p id="headerUsername" class="text-sm font-bold text-white leading-none"></p>
-<p id="headerRole" class="text-[10px] text-steel-blue mt-1"></p>
+<p id="headerRole" class="text-[10px] text-frosted-blue/60 mt-1"></p>
 </div>
 <div id="headerAvatar" class="size-9 rounded-full bg-gradient-to-br from-baltic-blue to-cornflower-ocean border border-steel-blue/40"></div>
 </button>
@@ -74,14 +74,14 @@ Sign Out
 <div class="flex items-center gap-3 mb-4">
 <span id="iconSectionServices" class="material-symbols-outlined text-steel-blue">health_metrics</span>
 <h3 class="text-xl font-bold text-white">Service Health</h3>
-<span id="serviceLastChecked" class="text-[10px] text-steel-blue/60 ml-auto"></span>
+<span id="serviceLastChecked" class="text-[10px] text-steel-blue ml-auto"></span>
 </div>
 <!-- Netdata Gauges -->
 <div id="netdataGauges" class="hidden bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 mb-4">
 <div class="flex justify-between items-center">
 <!-- CPU Gauge -->
 <div class="flex flex-col items-center flex-1">
-<div class="relative w-20 h-20 lg:w-24 lg:h-24">
+<div class="relative w-24 h-24 lg:w-28 lg:h-28">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
 <circle id="cpuGaugeCircle" class="text-cyan-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
@@ -89,13 +89,13 @@ Sign Out
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
 <span class="text-[10px] text-steel-blue font-medium">CPU</span>
 <span id="cpuGaugeText" class="text-lg font-bold text-white">--%</span>
+<span id="cpuGaugeDetail" class="text-[8px] text-steel-blue/70"></span>
 </div>
 </div>
-<span class="text-[10px] text-steel-blue/50 mt-1">Netdata</span>
 </div>
 <!-- RAM Gauge -->
 <div class="flex flex-col items-center flex-1">
-<div class="relative w-20 h-20 lg:w-24 lg:h-24">
+<div class="relative w-24 h-24 lg:w-28 lg:h-28">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
 <circle id="ramGaugeCircle" class="text-purple-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
@@ -103,13 +103,13 @@ Sign Out
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
 <span class="text-[10px] text-steel-blue font-medium">RAM</span>
 <span id="ramGaugeText" class="text-lg font-bold text-white">--%</span>
+<span id="ramGaugeDetail" class="text-[8px] text-steel-blue/70"></span>
 </div>
 </div>
-<span class="text-[10px] text-steel-blue/50 mt-1">Netdata</span>
 </div>
 <!-- Network Gauge -->
 <div class="flex flex-col items-center flex-1">
-<div class="relative w-20 h-20 lg:w-24 lg:h-24">
+<div class="relative w-24 h-24 lg:w-28 lg:h-28">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
 <circle id="netGaugeCircle" class="text-orange-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
@@ -117,18 +117,20 @@ Sign Out
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center pt-1">
 <span class="text-[10px] text-steel-blue font-medium uppercase">Network</span>
 <div class="flex flex-col items-center leading-none mt-1">
-<div class="flex items-center text-[10px] text-white space-x-0.5">
-<span class="material-symbols-outlined text-[10px]">arrow_downward</span>
-<span id="netDownText">0.0</span>
-</div>
-<div class="flex items-center text-[10px] text-white space-x-0.5 mt-0.5">
-<span class="material-symbols-outlined text-[10px]">arrow_upward</span>
+<div class="flex items-center text-[9px] text-white space-x-0.5">
+<span class="material-symbols-outlined text-[9px]">arrow_upward</span>
 <span id="netUpText">0.0</span>
+<span class="text-steel-blue/60">MB/s</span>
+</div>
+<div class="flex items-center text-[9px] text-white space-x-0.5 mt-0.5">
+<span class="material-symbols-outlined text-[9px]">arrow_downward</span>
+<span id="netDownText">0.0</span>
+<span class="text-steel-blue/60">MB/s</span>
 </div>
 </div>
+<span id="netGaugeDetail" class="text-[7px] text-steel-blue/60 mt-0.5"></span>
 </div>
 </div>
-<span class="text-[10px] text-steel-blue/50 mt-1">MB/s</span>
 </div>
 </div>
 </div>
@@ -172,7 +174,7 @@ Sign Out
 </button>
 </div>
 </div>
-<div id="streamsContainer" class="grid grid-cols-1 xl:grid-cols-3 gap-6 overflow-x-auto custom-scrollbar">
+<div id="streamsContainer" class="grid grid-cols-1 xl:grid-cols-3 gap-6">
 <!-- Stream cards will be loaded here dynamically -->
 <div class="text-center text-steel-blue py-8 col-span-3">
 <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
@@ -232,29 +234,6 @@ Manage All
 </div>
 </section>
 </div>
-<!-- Footer Stats Bar -->
-<footer id="footerStats" class="h-8 border-t border-steel-blue/20 flex items-center justify-between px-8 bg-black/40 text-[10px] text-steel-blue font-bold uppercase tracking-wider shrink-0">
-<div class="flex items-center gap-6">
-<span id="footerHostname" class="flex items-center gap-1">
-<span class="material-symbols-outlined text-xs">dns</span>
---
-</span>
-<span id="footerUptime" class="flex items-center gap-1">
-<span class="material-symbols-outlined text-xs">schedule</span>
---
-</span>
-</div>
-<div class="flex items-center gap-6">
-<span id="footerCpu" class="flex items-center gap-1">
-<span class="material-symbols-outlined text-xs">memory</span>
-CPU: --
-</span>
-<span id="footerRam" class="flex items-center gap-1">
-<span class="material-symbols-outlined text-xs">storage</span>
-RAM: --
-</span>
-</div>
-</footer>
 </main>
 
 <script src="/static/js/auth.js"></script>
@@ -389,6 +368,10 @@ async function loadRequestCount() {
     }
 }
 
+// Stream pagination state
+var _streamPage = 0;
+var _streamsPerPage = 6;
+
 // Load active streams from Plex integration
 let _lastStreams = null; // Cache to prevent flicker on transient API failures
 async function loadActiveStreams() {
@@ -417,7 +400,12 @@ async function loadActiveStreams() {
             return;
         }
 
-        const newHtml = streams.map(stream => {
+        // Paginate streams
+        var totalPages = Math.ceil(streams.length / _streamsPerPage);
+        if (_streamPage >= totalPages) _streamPage = 0;
+        var pageStreams = streams.slice(_streamPage * _streamsPerPage, (_streamPage + 1) * _streamsPerPage);
+
+        const newHtml = pageStreams.map(stream => {
             const progress = stream.progress || 0;
             const title = escapeHtml(stream.title || 'Unknown');
             const year = stream.year || '';
@@ -490,9 +478,9 @@ async function loadActiveStreams() {
             container.innerHTML = newHtml;
         }
 
-        // Show/hide carousel chevrons based on stream count
+        // Show/hide pagination chevrons based on stream count
         const chevrons = document.getElementById('streamChevrons');
-        if (streams.length > 3) {
+        if (streams.length > _streamsPerPage) {
             chevrons.classList.remove('hidden');
         } else {
             chevrons.classList.add('hidden');
@@ -512,11 +500,14 @@ async function loadActiveStreams() {
     }
 }
 
-// Scroll streams carousel
+// Paginate streams
 function scrollStreams(direction) {
-    const container = document.getElementById('streamsContainer');
-    const scrollAmount = 400;
-    container.scrollBy({ left: direction * scrollAmount, behavior: 'smooth' });
+    if (!_lastStreams || _lastStreams.length === 0) return;
+    var totalPages = Math.ceil(_lastStreams.length / _streamsPerPage);
+    _streamPage += direction;
+    if (_streamPage < 0) _streamPage = totalPages - 1;
+    if (_streamPage >= totalPages) _streamPage = 0;
+    loadActiveStreams();
 }
 
 // Load recent requests from Overseerr integration
@@ -866,7 +857,6 @@ function _fmtDate(d) {
 // Load system stats from Netdata integration
 async function loadSystemStats() {
     var gaugesEl = document.getElementById('netdataGauges');
-    var footerEl = document.getElementById('footerStats');
     try {
         var response = await fetch('/api/integrations/system-stats');
         if (!response.ok) throw new Error('API error');
@@ -874,19 +864,26 @@ async function loadSystemStats() {
 
         if (!stats.configured || stats.error) {
             gaugesEl.classList.add('hidden');
-            if (footerEl) footerEl.style.display = 'none';
             return;
         }
 
         // Show gauges
         gaugesEl.classList.remove('hidden');
-        if (footerEl) footerEl.style.display = '';
 
         // Update CPU gauge
         if (stats.cpu_percent !== null) {
             var cpuPct = stats.cpu_percent;
             document.getElementById('cpuGaugeText').textContent = Math.round(cpuPct) + '%';
             document.getElementById('cpuGaugeCircle').style.strokeDashoffset = 251 - (251 * cpuPct / 100);
+        }
+        // Show CPU label (configurable in settings, falls back to thread count)
+        var cpuDetail = document.getElementById('cpuGaugeDetail');
+        if (cpuDetail) {
+            if (stats.cpu_label) {
+                cpuDetail.textContent = stats.cpu_label;
+            } else if (stats.cpu_cores) {
+                cpuDetail.textContent = stats.cpu_cores + 'T';
+            }
         }
 
         // Update RAM gauge
@@ -895,41 +892,35 @@ async function loadSystemStats() {
             document.getElementById('ramGaugeText').textContent = Math.round(ramPct) + '%';
             document.getElementById('ramGaugeCircle').style.strokeDashoffset = 251 - (251 * ramPct / 100);
         }
+        // Show RAM label (configurable, falls back to used/total GB)
+        var ramDetail = document.getElementById('ramGaugeDetail');
+        if (ramDetail) {
+            if (stats.ram_label) {
+                ramDetail.textContent = stats.ram_label;
+            } else if (stats.ram_used_mb !== null && stats.ram_total_mb !== null) {
+                var usedGB = (stats.ram_used_mb / 1024).toFixed(1);
+                var totalGB = (stats.ram_total_mb / 1024).toFixed(0);
+                ramDetail.textContent = usedGB + '/' + totalGB + ' GB';
+            }
+        }
 
         // Update Network gauge
         var dl = stats.net_download_mbps != null ? stats.net_download_mbps : 0;
         var ul = stats.net_upload_mbps != null ? stats.net_upload_mbps : 0;
         document.getElementById('netDownText').textContent = dl.toFixed(1);
         document.getElementById('netUpText').textContent = ul.toFixed(1);
+        // Show network label (configurable)
+        if (stats.net_label) {
+            var netDetail = document.getElementById('netGaugeDetail');
+            if (netDetail) netDetail.textContent = stats.net_label;
+        }
         // Scale network gauge: cap at 100 MB/s for percentage
         var netPct = Math.min((dl + ul) / 100 * 100, 100);
         document.getElementById('netGaugeCircle').style.strokeDashoffset = 251 - (251 * netPct / 100);
 
-        // Update footer
-        if (footerEl) {
-            if (stats.hostname) {
-                document.getElementById('footerHostname').innerHTML =
-                    '<span class="material-symbols-outlined text-xs">dns</span>' + escapeHtml(stats.hostname);
-            }
-            if (stats.uptime_seconds !== null) {
-                document.getElementById('footerUptime').innerHTML =
-                    '<span class="material-symbols-outlined text-xs">schedule</span>Uptime: ' + formatUptime(stats.uptime_seconds);
-            }
-            if (stats.cpu_percent !== null) {
-                document.getElementById('footerCpu').innerHTML =
-                    '<span class="material-symbols-outlined text-xs">memory</span>CPU: ' + stats.cpu_percent + '%';
-            }
-            if (stats.ram_used_mb !== null && stats.ram_total_mb !== null) {
-                document.getElementById('footerRam').innerHTML =
-                    '<span class="material-symbols-outlined text-xs">storage</span>RAM: ' +
-                    stats.ram_used_mb + ' / ' + stats.ram_total_mb + ' MB';
-            }
-        }
-
     } catch (error) {
         console.log('System stats not available');
         gaugesEl.classList.add('hidden');
-        if (footerEl) footerEl.style.display = 'none';
     }
 }
 

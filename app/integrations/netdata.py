@@ -17,9 +17,15 @@ def _get_config(db: Session) -> dict:
     """Read Netdata config from settings table."""
     url_setting = db.query(Setting).filter(Setting.key == "integration.netdata.url").first()
     key_setting = db.query(Setting).filter(Setting.key == "integration.netdata.api_key").first()
+    cpu_label = db.query(Setting).filter(Setting.key == "netdata.cpu_label").first()
+    ram_label = db.query(Setting).filter(Setting.key == "netdata.ram_label").first()
+    net_label = db.query(Setting).filter(Setting.key == "netdata.net_label").first()
     return {
         "url": url_setting.value.rstrip("/") if url_setting else None,
         "api_key": key_setting.value if key_setting else None,
+        "cpu_label": cpu_label.value if cpu_label else None,
+        "ram_label": ram_label.value if ram_label else None,
+        "net_label": net_label.value if net_label else None,
     }
 
 
@@ -45,6 +51,10 @@ async def get_system_stats(db: Session) -> dict:
     result = {
         "configured": True,
         "cpu_percent": None,
+        "cpu_cores": None,
+        "cpu_label": config["cpu_label"],
+        "ram_label": config["ram_label"],
+        "net_label": config["net_label"],
         "ram_used_mb": None,
         "ram_total_mb": None,
         "ram_percent": None,
@@ -129,6 +139,7 @@ async def get_system_stats(db: Session) -> dict:
                 if info_resp.status_code == 200:
                     info_data = info_resp.json()
                     result["hostname"] = info_data.get("hostname")
+                    result["cpu_cores"] = info_data.get("cores_total")
                     # Uptime may be in different locations depending on Netdata version
                     if "host_labels" in info_data:
                         result["hostname"] = result["hostname"] or info_data["host_labels"].get("_hostname")

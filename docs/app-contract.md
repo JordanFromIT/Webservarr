@@ -230,6 +230,9 @@ Stored in `settings` table, seeded on first startup:
 | `icon.section_requests` | `movie` | Material Symbol for Recent Requests section |
 | `icon.section_news` | `newspaper` | Material Symbol for Latest News section |
 | `system.admin_email` | `""` | Admin email (priority check for Plex admin determination) |
+| `netdata.cpu_label` | `""` | Label under CPU gauge (e.g. "16C/32T"). Falls back to thread count from API. |
+| `netdata.ram_label` | `""` | Label under RAM gauge (e.g. "64 GB"). Auto-detects used/total if empty. |
+| `netdata.net_label` | `""` | Label under Network gauge (e.g. "1 Gbps"). |
 
 ### Notification Settings
 
@@ -294,7 +297,7 @@ Storage: SQLite at `/app/data/hms.db` (container path) / `data/hms.db` (host pat
 | Overseerr | `overseerr.py` | Working | Recent requests, request counts, TMDB search, media request creation, Plex token SSO authentication, issue management (list, detail, create, comment) with per-user Plex token authentication for writes |
 | Sonarr | `sonarr.py` | Working | Calendar API, upcoming episodes with series info and posters |
 | Radarr | `radarr.py` | Working | Calendar API, upcoming movies with release types and posters |
-| Netdata | `netdata.py` | Working | System stats (CPU%, RAM%, network throughput MB/s, uptime, hostname) via `/api/integrations/system-stats` |
+| Netdata | `netdata.py` | Working | System stats (CPU%, RAM%, network throughput MB/s, uptime, hostname, cpu_cores, configurable gauge labels) via `/api/integrations/system-stats` |
 
 **Pattern:** Browser → FastAPI proxy endpoint → external service API (httpx, 10s timeout for Plex, 5s for others). Credentials stored in `settings` table.
 
@@ -306,21 +309,20 @@ Storage: SQLite at `/app/data/hms.db` (container path) / `data/hms.db` (host pat
 |---------|------------|--------|
 | Active Streams | Plex API via `/api/integrations/active-streams` | Working |
 | Service Health | Uptime Kuma via `/api/integrations/service-status` (auto-fit tile grid with selfh.st CDN icons, "Checked Xs ago" live timer updating every 1s) | Working |
-| Netdata Gauges | Netdata via `/api/integrations/system-stats` (SVG circular gauges: CPU, RAM, Network; polls every 1s) | Working |
+| Netdata Gauges | Netdata via `/api/integrations/system-stats` (SVG circular gauges: CPU, RAM, Network with configurable sub-labels; polls every 1s) | Working |
 | Recent Requests | Overseerr via `/api/integrations/recent-requests` | Working |
 | News | Local DB via `/api/news/` | Working |
 | Upcoming Releases | Sonarr/Radarr via `/api/integrations/upcoming-releases?days=7` | Working — compact 7-day grouped list with "View calendar" link |
-| Footer Stats Bar | Netdata via `/api/integrations/system-stats` (hostname, uptime, CPU, RAM) | Working |
 
-Auto-refresh: all sections poll every 30 seconds. Netdata gauges poll every 1 second for real-time monitoring. "Checked X ago" timer text updates every 1 second.
+Auto-refresh: all sections poll every 30 seconds. Netdata gauges poll every 1 second for real-time monitoring. "Checked X ago" timer text updates every 1 second. Active Streams paginated at 6 per page with chevron navigation.
 
 ## Requests Page Sections (requests2.html)
 
 | Section | Data Source | Status |
 |---------|------------|--------|
-| Search | Overseerr via `/api/integrations/overseerr-search` | Working |
-| Request Creation | Overseerr via `/api/integrations/overseerr-request` | Working |
-| Existing Requests | Overseerr via `/api/integrations/recent-requests` | Working |
+| Search | Overseerr via `/api/integrations/overseerr-search` (paginated 9 per page) | Working |
+| Request Creation | Overseerr via `/api/integrations/overseerr-request` (single "Request" button, no 4K option) | Working |
+| Existing Requests | Overseerr via `/api/integrations/recent-requests` (paginated 9 per page, filter tabs) | Working |
 | Request Stats | Overseerr via `/api/integrations/request-counts` | Working |
 
 ## Issues Page Sections (issues.html)

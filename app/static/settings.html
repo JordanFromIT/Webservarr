@@ -368,6 +368,30 @@
                                         placeholder="If authentication is enabled">
                                 </div>
                             </div>
+                            <!-- Gauge Labels -->
+                            <div class="border-t border-steel-blue/10 pt-4 mt-2">
+                                <p class="text-xs font-semibold text-steel-blue mb-3">Gauge Labels</p>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-steel-blue mb-1.5">CPU Label</label>
+                                        <input type="text" id="netdataCpuLabel"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="e.g. 16C/32T">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-steel-blue mb-1.5">RAM Label</label>
+                                        <input type="text" id="netdataRamLabel"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="Auto-detects if empty">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-steel-blue mb-1.5">Network Label</label>
+                                        <input type="text" id="netdataNetLabel"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="e.g. 1 Gbps">
+                                    </div>
+                                </div>
+                            </div>
                             <div class="flex items-center gap-3 pt-1">
                                 <button onclick="saveIntegration('netdata')" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
                                     Save
@@ -602,6 +626,7 @@
                             <input type="text" id="sidebarLabelHome"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Home">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/</span>
                         </div>
                         <div class="flex items-center gap-3">
                             <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconRequests">download</span>
@@ -609,6 +634,7 @@
                             <input type="text" id="sidebarLabelRequests"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Requests">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/requests</span>
                         </div>
                         <div class="flex items-center gap-3">
                             <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconRequests2">movie</span>
@@ -616,6 +642,7 @@
                             <input type="text" id="sidebarLabelRequests2"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Requests">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/requests2</span>
                         </div>
                         <div class="flex items-center gap-3">
                             <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconIssues">report_problem</span>
@@ -623,6 +650,7 @@
                             <input type="text" id="sidebarLabelIssues"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Issues">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/issues</span>
                         </div>
                         <div class="flex items-center gap-3">
                             <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconSettings">settings</span>
@@ -630,6 +658,7 @@
                             <input type="text" id="sidebarLabelSettings"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Settings">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/settings</span>
                         </div>
                     </div>
                 </div>
@@ -640,7 +669,6 @@
                     <p class="text-xs text-steel-blue/70 mb-5">Click an icon to change it. Uses <a href="https://fonts.google.com/icons" target="_blank" class="text-primary hover:underline">Material Symbols</a>.</p>
 
                     <!-- Hidden inputs that store the actual values -->
-                    <input type="hidden" id="iconSidebarLogo" value="">
                     <input type="hidden" id="iconNavHome" value="">
                     <input type="hidden" id="iconNavRequests" value="">
                     <input type="hidden" id="iconNavRequests2" value="">
@@ -652,11 +680,7 @@
                     <input type="hidden" id="iconSectionReleases" value="">
 
                     <h3 class="text-xs font-semibold text-steel-blue uppercase tracking-wider mb-3">Sidebar Navigation</h3>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mb-6">
-                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconSidebarLogo">
-                            <span id="iconPreviewSidebarLogo" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">settings_input_component</span>
-                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Logo</span>
-                        </button>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-6">
                         <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavHome">
                             <span id="iconPreviewNavHome" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">home</span>
                             <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Home</span>
@@ -1344,7 +1368,12 @@
                 credInput: 'integrationNetdataApiKey',
                 urlKey: 'integration.netdata.url',
                 credKey: 'integration.netdata.api_key',
-                statusDiv: 'statusNetdata'
+                statusDiv: 'statusNetdata',
+                extraFields: [
+                    { input: 'netdataCpuLabel', key: 'netdata.cpu_label' },
+                    { input: 'netdataRamLabel', key: 'netdata.ram_label' },
+                    { input: 'netdataNetLabel', key: 'netdata.net_label' },
+                ]
             },
             sonarr: {
                 urlInput: 'integrationSonarrUrl',
@@ -1383,6 +1412,15 @@
                     }
                     if (fields.slugInput && fields.slugKey && settingsMap[fields.slugKey]) {
                         document.getElementById(fields.slugInput).value = settingsMap[fields.slugKey];
+                    }
+                    // Populate extra fields (gauge labels, etc.)
+                    if (fields.extraFields) {
+                        fields.extraFields.forEach(function(ef) {
+                            if (settingsMap[ef.key] !== undefined) {
+                                var el = document.getElementById(ef.input);
+                                if (el) el.value = settingsMap[ef.key];
+                            }
+                        });
                     }
                 }
 
@@ -1434,6 +1472,16 @@
                 if (slugVal) {
                     settingsToSave.push({ key: fields.slugKey, value: slugVal, description: `${service} status page slug` });
                 }
+            }
+
+            // Save extra fields (generic: CPU/RAM/Net labels for Netdata, etc.)
+            if (fields.extraFields) {
+                fields.extraFields.forEach(function(ef) {
+                    var el = document.getElementById(ef.input);
+                    if (el) {
+                        settingsToSave.push({ key: ef.key, value: el.value, description: ef.key });
+                    }
+                });
             }
 
             // Save feature flags for overseerr
@@ -1858,7 +1906,6 @@
                 // Icons
                 var iconsData = data.icons || {};
                 var iconFields = {
-                    iconSidebarLogo: iconsData.sidebar_logo || '',
                     iconNavHome: iconsData.nav_home || '',
                     iconNavRequests: iconsData.nav_requests || '',
                     iconNavRequests2: iconsData.nav_requests2 || '',
@@ -1919,7 +1966,6 @@
 
             // Icons
             var iconSaveMap = {
-                'icon.sidebar_logo': { input: 'iconSidebarLogo', fallback: 'settings_input_component' },
                 'icon.nav_home': { input: 'iconNavHome', fallback: 'home' },
                 'icon.nav_requests': { input: 'iconNavRequests', fallback: 'download' },
                 'icon.nav_requests2': { input: 'iconNavRequests2', fallback: 'movie' },
@@ -1991,7 +2037,6 @@
 
             // Icons
             var iconResetMap = {
-                iconSidebarLogo: 'icon.sidebar_logo',
                 iconNavHome: 'icon.nav_home',
                 iconNavRequests: 'icon.nav_requests',
                 iconNavRequests2: 'icon.nav_requests2',

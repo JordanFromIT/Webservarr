@@ -46,6 +46,10 @@ DEFAULT_SETTINGS = {
     "icon.section_news": ("newspaper", "Homepage icon for News & Updates section"),
     "icon.section_streams": ("play_circle", "Homepage icon for Active Streams section"),
     "icon.section_releases": ("calendar_month", "Homepage icon for Upcoming Releases section"),
+    # Netdata gauge labels
+    "netdata.cpu_label": ("", "Label under CPU gauge (e.g. 16C/32T)"),
+    "netdata.ram_label": ("", "Label under RAM gauge (e.g. 64 GB). Auto-detects if empty."),
+    "netdata.net_label": ("", "Label under Network gauge (e.g. 1 Gbps). Auto-detects if empty."),
     # Notification polling intervals (seconds)
     "notifications.poll_interval_overseerr": ("60", "Seconds between Overseerr notification checks"),
     "notifications.poll_interval_monitors": ("60", "Seconds between Uptime Kuma notification checks"),

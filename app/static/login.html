@@ -65,10 +65,9 @@
 <!-- Login Card -->
 <div class="w-full max-w-[440px] login-glass-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
 <!-- Logo Section -->
-<div class="mb-8">
-<img alt="HMS Logo" class="h-20 w-auto object-contain border-none mb-2" data-alt="HMS Dashboard brand logo" src="{{DATA:IMAGE:IMAGE_6}}"/>
+<div class="mb-8 flex flex-col items-center">
+<img id="loginLogo" alt="HMS Logo" class="h-20 w-auto object-contain border-none mb-2 hidden"/>
 <h1 id="loginAppName" class="text-white text-2xl font-bold mt-4 tracking-tight text-center">HMS Dashboard</h1>
-<p id="loginTagline" class="text-white/60 text-sm text-center mt-1">Home Media Server Management</p>
 </div>
 <!-- Login Form -->
 <form id="loginForm" class="w-full space-y-5">
@@ -98,19 +97,16 @@
 <div class="h-[1px] flex-1 bg-white/10"></div>
 </div>
 <!-- Plex SSO Button -->
-<button id="plexLoginBtn" class="w-full bg-[#BEEEF4]/10 hover:bg-[#BEEEF4]/20 border border-[#BEEEF4]/30 text-[#BEEEF4] font-bold py-3 rounded-lg flex items-center justify-center gap-3 transition-all" type="button">
-<svg class="w-5 h-5 fill-current" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-<path d="M12 0L10.33 4.33L12 8.67L13.67 4.33L12 0ZM5.67 5.67L0 12L5.67 18.33L8 12L5.67 5.67ZM18.33 5.67L16 12L18.33 18.33L24 12L18.33 5.67ZM12 15.33L10.33 19.67L12 24L13.67 19.67L12 15.33Z"></path>
+<button id="plexLoginBtn" class="w-full bg-[#E5A00D] hover:bg-[#cc8f0c] text-black font-bold py-3 rounded-lg flex flex-col items-center justify-center gap-1 transition-all active:scale-[0.98]" type="button">
+<div class="flex items-center gap-2">
+<svg class="w-5 h-5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M12 0L10.33 4.33L12 8.67L13.67 4.33L12 0ZM5.67 5.67L0 12L5.67 18.33L8 12L5.67 5.67ZM18.33 5.67L16 12L18.33 18.33L24 12L18.33 5.67ZM12 15.33L10.33 19.67L12 24L13.67 19.67L12 15.33Z" fill="black"/>
 </svg>
-                    Sign in with Plex
-                </button>
-</form>
-<div class="mt-8 text-center">
-<p class="text-white/50 text-sm">
-                    Don't have an account? 
-                    <a class="font-semibold hover:underline ml-1 text-[#BEEEF4]" href="#">Request Access</a>
-</p>
+<span>Sign in with Plex</span>
 </div>
+<span class="text-[10px] font-normal text-black/60">Redirects to Authentik for authentication</span>
+</button>
+</form>
 </div>
 </main>
 <!-- Footer Links -->
@@ -135,9 +131,13 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (el) el.textContent = theme.app_name;
         document.title = theme.app_name + ' - Login';
     }
-    if (theme.tagline) {
-        var el = document.getElementById('loginTagline');
-        if (el) el.textContent = theme.tagline;
+    // Show branding logo if configured
+    if (theme.logo_url) {
+        var logoEl = document.getElementById('loginLogo');
+        if (logoEl) {
+            logoEl.src = theme.logo_url;
+            logoEl.classList.remove('hidden');
+        }
     }
 
     // Hide simple auth form if disabled

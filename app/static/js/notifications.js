@@ -98,14 +98,16 @@
         _bellBtn.classList.add('relative');
       }
     } else {
-      // No bell found — create one and inject near user menu
-      var userMenuArea = document.querySelector('#userMenuBtn');
-      if (userMenuArea && userMenuArea.parentElement) {
+      // No bell found — create one and inject just before the user menu container
+      var userMenuBtn = document.querySelector('#userMenuBtn');
+      var userMenuContainer = userMenuBtn ? userMenuBtn.closest('.relative') : null;
+      var flexParent = userMenuContainer ? userMenuContainer.parentElement : null;
+      if (flexParent) {
         _bellBtn = createEl('button', 'relative p-2 text-steel-blue hover:text-frosted-blue transition-colors group');
         _bellBtn.title = 'Notifications';
         var icon = createEl('span', 'material-symbols-outlined', 'notifications');
         _bellBtn.appendChild(icon);
-        userMenuArea.parentElement.parentElement.insertBefore(_bellBtn, userMenuArea.parentElement);
+        flexParent.insertBefore(_bellBtn, userMenuContainer);
       }
     }
 
