@@ -13,7 +13,7 @@ from app.auth import session_manager
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user_optional
-from app.models import User
+from app.models import User, Setting
 
 # Use secure cookies only in production (behind HTTPS)
 _COOKIE_SECURE = settings.app_env == "production"
@@ -39,6 +39,14 @@ async def simple_login(
     db: Session = Depends(get_db),
 ):
     """Authenticate with username and password against the users table."""
+    # Check if simple auth is enabled
+    simple_auth_setting = db.query(Setting).filter(Setting.key == "features.show_simple_auth").first()
+    if simple_auth_setting and simple_auth_setting.value == "false":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Local authentication is disabled",
+        )
+
     user = db.query(User).filter(
         User.username == login_data.username,
         User.is_active == True,

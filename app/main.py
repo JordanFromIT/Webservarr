@@ -8,12 +8,14 @@ from typing import Optional
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 
 from app.config import settings
 from app.database import init_db
 from app.auth import session_manager
 from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, branding, notifications
+from app.services.notification_poller import start_poller, stop_poller
 
 # Configure logging
 logging.basicConfig(
@@ -38,12 +40,23 @@ async def lifespan(app: FastAPI):
     await session_manager.get_redis()
     logger.info("Redis connection established")
 
+    # Start background notification poller
+    poller_task = asyncio.create_task(start_poller())
+    logger.info("Notification poller launched")
+
     logger.info("HMS Dashboard started successfully!")
 
     yield
 
     # Shutdown
     logger.info("Shutting down HMS Dashboard...")
+    await stop_poller()
+    poller_task.cancel()
+    try:
+        await poller_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("Notification poller stopped")
     await session_manager.close()
     logger.info("HMS Dashboard shut down")
 

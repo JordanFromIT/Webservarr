@@ -25,6 +25,7 @@ DEFAULTS = {
     "theme.custom_css": "",
     # Feature flags
     "features.show_requests": "false",
+    "features.show_simple_auth": "true",
     # Sidebar labels
     "sidebar.label_home": "Home",
     "sidebar.label_requests": "Requests",
@@ -58,6 +59,9 @@ async def get_branding(db: Session = Depends(get_db)):
     rows = db.query(Setting).filter(Setting.key.in_(keys)).all()
     db_values = {row.key: row.value for row in rows}
 
+    # Also fetch VAPID public key for push subscriptions
+    vapid_row = db.query(Setting).filter(Setting.key == "notifications.vapid_public_key").first()
+
     # Merge DB values over defaults
     def get(key: str) -> str:
         return db_values.get(key, DEFAULTS[key])
@@ -77,6 +81,7 @@ async def get_branding(db: Session = Depends(get_db)):
         "custom_css": get("theme.custom_css"),
         "features": {
             "show_requests": get("features.show_requests") == "true",
+            "show_simple_auth": get("features.show_simple_auth") == "true",
         },
         "sidebar_labels": {
             "home": get("sidebar.label_home"),
@@ -99,4 +104,5 @@ async def get_branding(db: Session = Depends(get_db)):
             "section_streams": get("icon.section_streams"),
             "section_releases": get("icon.section_releases"),
         },
+        "vapid_public_key": vapid_row.value if vapid_row else None,
     }

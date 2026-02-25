@@ -26,6 +26,7 @@ DEFAULT_SETTINGS = {
     "theme.custom_css": ("", "Custom CSS injected into all pages"),
     # Feature flags
     "features.show_requests": ("false", "Show Overseerr iframe Requests page in sidebar"),
+    "features.show_simple_auth": ("true", "Show local username/password login on login page"),
     # Sidebar labels
     "sidebar.label_home": ("Home", "Sidebar label for Home page"),
     "sidebar.label_requests": ("Requests", "Sidebar label for Requests iframe page"),
