@@ -11,12 +11,12 @@ app/main.py                  # FastAPI app, middleware, router registration
 app/config.py                # Settings from environment variables (pydantic-settings)
 app/database.py              # SQLAlchemy engine, session factory, init_db
 app/models.py                # User, NewsPost, Service, Setting, StatusUpdate, ServiceStatus
-app/seed.py                  # Default admin user creation on first startup
+app/seed.py                  # Default admin user + settings seeding on first startup
 app/auth.py                  # SessionManager (Redis) + OIDCClient (active)
 app/dependencies.py          # get_current_user, require_admin dependencies
 
-app/routers/simple_auth.py   # Simple login/logout/session-check + shared logout (OIDC-aware)
-app/routers/auth.py          # OIDC auth routes (active — Plex OAuth via Authentik)
+app/routers/simple_auth.py   # Simple login/logout/session-check + shared logout (OIDC-aware). Guarded by features.show_simple_auth.
+app/routers/auth.py          # OIDC auth routes — Plex OAuth via Authentik (/auth/login, /auth/callback, /auth/me)
 app/routers/news.py          # News CRUD with bleach sanitization
 app/routers/admin.py         # Service CRUD, settings CRUD, test-connection
 app/routers/status.py        # Public service status endpoints
@@ -25,9 +25,9 @@ app/routers/integrations.py  # Plex, Uptime Kuma, Overseerr proxy endpoints
 app/integrations/plex.py          # Plex API client (XML parsing)
 app/integrations/uptime_kuma.py   # Uptime Kuma status page API client
 app/integrations/overseerr.py     # Overseerr API client
-app/integrations/sonarr.py        # Sonarr API client (exists, not fully wired)
-app/integrations/radarr.py        # Radarr API client (exists, not fully wired)
-app/integrations/netdata.py       # Netdata API client (exists, not fully wired)
+app/integrations/sonarr.py        # Sonarr API client (calendar, upcoming episodes)
+app/integrations/radarr.py        # Radarr API client (calendar, upcoming movies)
+app/integrations/netdata.py       # Netdata API client (CPU%, RAM%, network MB/s, uptime, hostname)
 
 app/static/login.html        # Login page
 app/static/index.html        # Main dashboard
@@ -73,14 +73,14 @@ ssh webserver "cd /root/hms-dashboard && docker compose exec hms-dashboard /bin/
 
 - **Backend:** Python with type hints. FastAPI dependency injection for auth. SQLAlchemy ORM models.
 - **Frontend:** No build step. Vanilla JS with `fetch()` API calls. Tailwind CSS from CDN. Material Design Icons.
-- **Auth:** Plex OAuth via Authentik OIDC (primary) + simple username/password (fallback). bcrypt hashing via passlib. Sessions stored in Redis with auth_method tracking.
+- **Auth:** Plex OAuth via Authentik OIDC (primary) + simple username/password (toggleable fallback via `features.show_simple_auth` setting). bcrypt hashing via passlib. Sessions stored in Redis with auth_method tracking ("oidc" or "simple").
 - **Content safety:** bleach for HTML sanitization on news content. Security headers middleware in `main.py`.
 - **External APIs:** httpx with 5-second timeout. Proxy pattern: browser → FastAPI endpoint → external service.
 
 ## Known Issues
 
 - Authentik end-session doesn't auto-redirect back to login page (upstream issue, PR goauthentik/authentik#20011 will fix)
-- Plex OAuth 429 rate limit on rapid auth retries — resolves after ~1 min wait
+- Authentik Plex source uses a popup for Plex auth — mobile browsers may block the popup (inherent to Authentik's Plex integration, cannot be changed to redirect)
 - Plex active streams has a float-as-int parsing bug (minor, pre-existing in `plex.py`)
 - Default admin password (`admin123`) should be changed for production
 - Startup can hit "table already exists" on rebuild if SQLite DB file already exists (container auto-recovers on restart)
@@ -133,7 +133,7 @@ brand-assets/
 
 ## Project Phases
 
-**Current phase: 5**
+**Current phase: 6**
 
 | Phase | Name | Status |
 |-------|------|--------|
@@ -142,10 +142,9 @@ brand-assets/
 | 2 | Frontend Rebuild | Complete |
 | 3 | Uptime Kuma Integration | Complete |
 | 4 | Overseerr Integration | Complete |
-| 5 | Radarr Integration | **Next** |
-| 6 | Sonarr Integration | Not started |
-| 7 | Notifications & Theming | Not started |
-| 8 | Hardening & Release | Not started |
+| 5 | Radarr & Sonarr Calendar | Complete |
+| 6 | Notifications & Theming | **Next** |
+| 7 | Hardening & Release | Not started |
 
 See VISION.md for detailed phase descriptions.
 
