@@ -180,50 +180,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
 
-    // Plex login — native PIN auth flow (no popups at all).
-    // PIN created from the browser so Plex sees the user's IP, not the server's.
-    const plexLoginBtn = document.getElementById('plexLoginBtn');
-    const plexBtnHTML = plexLoginBtn.innerHTML;
-    plexLoginBtn.addEventListener('click', async function() {
-        plexLoginBtn.disabled = true;
-        plexLoginBtn.innerHTML = '<span class="material-symbols-outlined text-[20px] animate-spin">progress_activity</span> Connecting to Plex...';
-        try {
-            // 1. Create PIN from browser (user's IP shows in Plex security prompt)
-            var pinResp = await fetch('https://plex.tv/api/v2/pins', {
-                method: 'POST',
-                headers: {
-                    'X-Plex-Client-Identifier': 'hms-dashboard',
-                    'X-Plex-Product': 'HMS Dashboard',
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'strong=true',
-            });
-            if (!pinResp.ok) throw new Error('Plex API error');
-            var pinData = await pinResp.json();
-
-            // 2. Store PIN on backend, get callback URL
-            var startResp = await fetch('/auth/plex-start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pin_id: pinData.id }),
-            });
-            if (!startResp.ok) throw new Error('Server error');
-            var startData = await startResp.json();
-
-            // 3. Redirect to Plex auth page (full page, no popup)
-            var params = new URLSearchParams({
-                clientID: 'hms-dashboard',
-                code: pinData.code,
-                'context[device][product]': 'HMS Dashboard',
-                forwardUrl: startData.callback_url,
-            });
-            window.location.href = 'https://app.plex.tv/auth#?' + params.toString();
-        } catch (e) {
-            plexLoginBtn.disabled = false;
-            plexLoginBtn.innerHTML = plexBtnHTML;
-            alert('Failed to connect to Plex. Please try again.');
-        }
+    // Plex login via Authentik OIDC — full-page redirect, no popups.
+    // Authentik auto-redirects to Plex OAuth, then back to /auth/callback.
+    document.getElementById('plexLoginBtn').addEventListener('click', function() {
+        window.location.href = '/auth/login';
     });
 });
 </script>
