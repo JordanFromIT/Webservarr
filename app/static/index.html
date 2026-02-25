@@ -777,7 +777,7 @@ async function loadUpcomingReleases() {
             var dayReleases = grouped[dateStr] || [];
 
             var cell = document.createElement('div');
-            var cellCls = 'rounded-lg p-1.5 lg:p-2 min-h-[90px] flex flex-col bg-black/30';
+            var cellCls = 'rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col bg-black/30';
             if (isToday) cellCls += ' ring-1 ring-primary bg-primary/10';
             cell.className = cellCls;
 
@@ -798,8 +798,8 @@ async function loadUpcomingReleases() {
                 cell.appendChild(empty);
             } else {
                 var list = document.createElement('div');
-                list.className = 'flex flex-col gap-0.5 overflow-hidden';
-                var maxShow = 3;
+                list.className = 'flex flex-col gap-1 overflow-hidden';
+                var maxShow = 4;
                 for (var j = 0; j < dayReleases.length && j < maxShow; j++) {
                     var rel = dayReleases[j];
                     var badge = document.createElement('div');
