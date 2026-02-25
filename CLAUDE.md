@@ -22,6 +22,10 @@ app/routers/admin.py         # Service CRUD, settings CRUD, test-connection
 app/routers/status.py        # Public service status endpoints
 app/routers/integrations.py  # Plex, Uptime Kuma, Overseerr proxy endpoints
 
+app/services/notification_poller.py # Background polling for notifications
+app/services/push.py               # Web Push dispatch via pywebpush
+app/routers/notifications.py       # Notification CRUD + preferences + push subscription
+
 app/integrations/plex.py          # Plex API client (XML parsing)
 app/integrations/uptime_kuma.py   # Uptime Kuma status page API client
 app/integrations/overseerr.py     # Overseerr API client
@@ -133,7 +137,7 @@ brand-assets/
 
 ## Project Phases
 
-**Current phase: 6**
+**Current phase: 7**
 
 | Phase | Name | Status |
 |-------|------|--------|
@@ -143,8 +147,8 @@ brand-assets/
 | 3 | Uptime Kuma Integration | Complete |
 | 4 | Overseerr Integration | Complete |
 | 5 | Radarr & Sonarr Calendar | Complete |
-| 6 | Notifications & Theming | **Next** |
-| 7 | Hardening & Release | Not started |
+| 6 | In-App Notifications + Browser Push | Complete |
+| 7 | Hardening & Release | **Next** |
 
 See VISION.md for detailed phase descriptions.
 

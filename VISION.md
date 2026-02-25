@@ -86,24 +86,31 @@ The following was built during initial development. The backend code is function
 - Settings page for Overseerr configuration
 - Request display, iframe/portal route
 
-### Phase 5: Radarr Integration
+### Phase 5: Radarr & Sonarr Calendar Integration ✓
 
-- Deep-dive Radarr API
-- Settings page for Radarr configuration
-- Dashboard wiring (upcoming movies, library stats)
+- Wired Radarr and Sonarr API clients (already existed in `app/integrations/`)
+- Added `start` query parameter to `/api/integrations/upcoming-releases` for month navigation
+- Built `/calendar` page: full month grid, day click detail panel, month navigation, auto-refresh
+- Homepage: compact 7-day calendar strip replacing poster card grid
+- Configurable sidebar label and icon for Calendar nav item
+- Sonarr integration absorbed into this phase (both use same calendar endpoint)
 
-### Phase 6: Sonarr Integration
+### Phase 6: In-App Notifications + Browser Push ✓
 
-- Deep-dive Sonarr API
-- Settings page for Sonarr configuration
-- Dashboard wiring (upcoming episodes, library stats)
+- Notification system for non-admin users: media request availability, issue responses, service up/down, news posts
+- In-app bell icon dropdown (existing top-bar bell wired up) + optional browser push notifications
+- Backend polling service: Overseerr requests/issues (60s), Uptime Kuma monitors (60s), news posts (60s) — all configurable
+- SQLite models: Notification (per-user, per-category) + PushSubscription (Web Push endpoints)
+- VAPID key auto-generation on first startup for Web Push
+- Per-user preferences: 4 category toggles (request, issue, service, news)
+- 10 API endpoints for notification CRUD, preferences, push subscribe/unsubscribe
+- Admin endpoint: send custom notifications to all users
+- Service worker (sw.js) for browser push display and click-to-navigate
+- Settings page: Notifications accordion with configurable poll intervals + test notification button
+- Dedup via reference_id + user_email + category; first-run silent seeding prevents notification flood
+- Theming was ~95% complete from Phase 2 (no additional theming work needed)
 
-### Phase 7: Notifications & Theming
-
-- Discord webhook and/or email notifications
-- Theme engine (CSS variables from admin settings)
-
-### Phase 8: Hardening & Release
+### Phase 7: Hardening & Release
 
 - Rate limiting, CSP tuning
 - Automated backups, monitoring
@@ -114,7 +121,7 @@ The following was built during initial development. The backend code is function
 ## Core Principles
 
 1. **Administration and longevity** - Stable tooling, centralized management, audit trails
-2. **Customization** - Sitewide theme engine (planned, not yet built)
+2. **Customization** - Sitewide theme engine (complete — CSS custom properties, branding API, color pickers, font dropdown, logo upload, custom CSS injection)
 3. **Lightweight performance** - Minimal overhead, fast responses, simple deployment
 4. **Security** - Strong authentication, safe content handling, hardened headers
 

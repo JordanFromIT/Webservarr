@@ -50,6 +50,8 @@ async def get_system_stats(db: Session) -> dict:
         "ram_percent": None,
         "uptime_seconds": None,
         "hostname": None,
+        "net_download_mbps": None,
+        "net_upload_mbps": None,
     }
 
     try:
@@ -153,6 +155,35 @@ async def get_system_stats(db: Session) -> dict:
                             result["uptime_seconds"] = int(row[1])
             except Exception as e:
                 logger.warning("Netdata uptime fetch error: %s", str(e))
+
+            # Fetch network throughput
+            try:
+                net_resp = await client.get(
+                    f"{config['url']}/api/v1/data",
+                    params={
+                        "chart": "system.net",
+                        "after": -1,
+                        "points": 1,
+                        "format": "json",
+                    },
+                    headers=headers,
+                )
+                if net_resp.status_code == 200:
+                    net_data = net_resp.json()
+                    labels = net_data.get("labels", [])
+                    if net_data.get("data") and len(net_data["data"]) > 0:
+                        row = net_data["data"][0]
+                        values = {}
+                        for i, label in enumerate(labels):
+                            if i > 0 and i < len(row):
+                                values[label.lower()] = row[i]
+                        # Netdata returns kilobits/s; convert to MB/s
+                        received = abs(values.get("received", 0) or 0)
+                        sent = abs(values.get("sent", 0) or 0)
+                        result["net_download_mbps"] = round(received / 8000, 2)
+                        result["net_upload_mbps"] = round(sent / 8000, 2)
+            except Exception as e:
+                logger.warning("Netdata network fetch error: %s", str(e))
 
     except httpx.TimeoutException:
         logger.warning("Netdata connection timed out")
