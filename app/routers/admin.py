@@ -12,9 +12,12 @@ from pydantic import BaseModel
 from typing import Optional, List
 import httpx
 
+from datetime import datetime, timedelta
+
 from app.database import get_db
-from app.models import Setting
+from app.models import Setting, Notification, PushSubscription
 from app.dependencies import require_admin
+from app.services.push import send_push_to_users
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,12 @@ class TestConnectionRequest(BaseModel):
     service: str  # "plex", "uptime_kuma", "overseerr", or "netdata"
     url: str
     credentials: Optional[str] = None
+
+
+class AdminNotificationRequest(BaseModel):
+    """Schema for admin broadcast notification."""
+    title: str
+    body: str
 
 
 # --- Monitor Preferences ---
@@ -311,6 +320,56 @@ async def upload_logo(
     db.commit()
 
     return {"url": logo_url}
+
+
+# --- Admin Broadcast Notification ---
+
+@router.post("/notifications/send")
+async def send_notification(
+    payload: AdminNotificationRequest,
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Broadcast a notification to all known users.
+    Collects distinct emails from PushSubscription + Notification tables,
+    creates a Notification row per user, and dispatches push notifications.
+    Requires admin.
+    """
+    # Collect all known user emails
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    push_emails = {
+        row[0].lower()
+        for row in db.query(PushSubscription.user_email).distinct().all()
+        if row[0]
+    }
+    notif_emails = {
+        row[0].lower()
+        for row in db.query(Notification.user_email)
+        .filter(Notification.created_at >= cutoff)
+        .distinct()
+        .all()
+        if row[0]
+    }
+    all_emails = push_emails | notif_emails
+
+    if not all_emails:
+        return {"success": True, "sent_to": 0, "message": "No users to notify"}
+
+    # Create a Notification row per user
+    for email in all_emails:
+        db.add(Notification(
+            user_email=email,
+            category="news",
+            title=payload.title,
+            body=payload.body,
+        ))
+    db.commit()
+
+    # Dispatch push notifications
+    await send_push_to_users(db, list(all_emails), payload.title, payload.body, "news", "/")
+
+    return {"success": True, "sent_to": len(all_emails)}
 
 
 # --- Container Management ---
