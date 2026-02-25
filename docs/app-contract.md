@@ -2,7 +2,7 @@
 
 Single source of truth for the HMS Dashboard application surface. If it's not in this file, don't assume it exists.
 
-Last verified: 2026-02-24
+Last verified: 2026-02-25
 
 ---
 
@@ -22,12 +22,11 @@ Last verified: 2026-02-24
 
 **Login methods:**
 - **Plex via Authentik OIDC (primary):** "Sign in with Plex" button → full-page redirect to `GET /auth/login` → Authentik OIDC authorization → Plex OAuth → `GET /auth/callback` exchanges code, resolves admin status, creates session with `auth_method: "oidc"`. No popups.
-- **Simple auth (fallback):** Username/password form → `POST /auth/simple-login`. Used when Plex/Authentik is unavailable.
-- **Native Plex PIN (dormant):** `/auth/plex-start` and `/auth/plex-callback` endpoints still exist in the codebase but are not referenced by the login page. The browser no longer calls `plex.tv` directly.
+- **Simple auth (toggleable fallback):** Username/password form → `POST /auth/simple-login`. Controlled by `features.show_simple_auth` setting (default: `true`). When disabled: login page hides the form (showing only Plex button), and the backend rejects requests with 403 (defense in depth). Intended for bootstrapping instances before Plex/Authentik is configured.
 
 **Admin determination:** First checks if user's email matches `system.admin_email` setting (if configured). Falls back to checking if email matches the Plex server owner's email (via `plex.tv/api/v2/user` with admin token from `integration.plex.token` setting).
 
-**Session fields:** `user_id`, `email`, `name`, `username`, `is_admin`, `auth_method` (oidc/simple; "plex" is dormant), `id_token` (for OIDC logout), `plex_token` (for Overseerr SSO).
+**Session fields:** `user_id`, `email`, `name`, `username`, `is_admin`, `auth_method` (oidc/simple), `id_token` (for OIDC logout), `plex_token` (for Overseerr SSO).
 
 ---
 
@@ -65,7 +64,7 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/auth/simple-login` | None | Login with username/password JSON body |
+| POST | `/auth/simple-login` | None | Login with username/password JSON body. Returns 403 if `features.show_simple_auth` is `"false"`. |
 | POST | `/auth/simple-logout` | Session | Destroy session, clear cookie (JSON response) |
 | GET | `/auth/logout` | Session | Destroy session + redirect. OIDC sessions also redirect through Authentik end-session. |
 | GET | `/auth/check-session` | Session | Returns 200 if session valid, 401 if not |
@@ -76,8 +75,6 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 |--------|------|------|-------------|
 | GET | `/auth/login` | None | Redirect to Authentik OIDC authorization (primary Plex login) |
 | GET | `/auth/callback` | None | OIDC callback — exchanges code, checks Plex server owner for admin, creates session |
-| POST | `/auth/plex-start` | None | Store client-created Plex PIN in Redis, return callback URL (dormant — not referenced by login page) |
-| GET | `/auth/plex-callback` | None | Plex PIN callback — checks PIN for auth token, gets user info, creates session (dormant — not referenced by login page) |
 | GET | `/auth/me` | Session | Returns current user info (works for all auth methods) |
 
 ### Branding (`app/routers/branding.py`)
@@ -95,7 +92,7 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
   "colors": { "primary": "#125793", "secondary": "#2C6DA1", "accent": "#4684B0", "text": "#BEEEF4", "background": "#000000" },
   "font": "Spline Sans",
   "custom_css": "",
-  "features": { "show_requests": false },
+  "features": { "show_requests": false, "show_simple_auth": true },
   "sidebar_labels": { "home": "Home", "requests": "Requests", "requests2": "Requests", "issues": "Issues", "calendar": "Calendar", "settings": "Settings" },
   "icons": { "sidebar_logo": "dashboard", "nav_home": "home", "nav_requests": "download", "nav_requests2": "movie", "nav_issues": "report_problem", "nav_calendar": "calendar_month", "nav_settings": "settings", "section_streams": "play_circle", "section_services": "health_metrics", "section_requests": "movie", "section_news": "newspaper" }
 }
@@ -197,6 +194,7 @@ Stored in `settings` table, seeded on first startup:
 | `theme.font` | `Spline Sans` | Google Font family (30 curated fonts in dropdown + custom entry) |
 | `theme.custom_css` | `""` | Custom CSS injected on all pages |
 | `features.show_requests` | `false` | Show Overseerr iframe Requests page in sidebar |
+| `features.show_simple_auth` | `true` | Show username/password login form. When `"false"`, hides form and backend rejects `/auth/simple-login` with 403. |
 | `sidebar.label_home` | `Home` | Sidebar label for Home page |
 | `sidebar.label_requests` | `Requests` | Sidebar label for Requests iframe page |
 | `sidebar.label_requests2` | `Requests` | Sidebar label for native Requests page |
@@ -304,7 +302,8 @@ Stream cards show title (with year for movies, S##E## for TV), thumbnail via bac
 - API keys/tokens masked in settings responses
 - Admin role enforcement on all write endpoints
 - httpx 5-second timeout on external API calls
-- CSP connect-src no longer includes `https://plex.tv` (client-side PIN creation is dormant)
+- CSP connect-src does not include `https://plex.tv` (no client-side Plex API calls)
+- Simple auth feature flag: `features.show_simple_auth` gates both UI (form hidden) and backend (403 on POST) for defense in depth
 - Overseerr SSO: Plex token stored server-side in Redis, never exposed to frontend. `connect.sid` cookie set on `.hmserver.tv` with `SameSite=None; Secure; HttpOnly` for cross-subdomain iframe SSO. Cleared on logout.
 
 **Not implemented:**
