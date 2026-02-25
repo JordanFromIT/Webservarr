@@ -62,10 +62,10 @@ Sign Out
 </div>
 </header>
 <!-- Scrollable Content -->
-<div class="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+<div class="flex-1 flex flex-col p-4 lg:p-8 min-h-0 overflow-hidden">
 
 <!-- Calendar Header: nav + month label -->
-<div class="glass-card rounded-xl p-4 mb-4">
+<div class="glass-card rounded-xl p-4 mb-4 shrink-0">
 <div class="flex items-center justify-between">
 <div class="flex items-center gap-2">
 <button id="prevMonthBtn" class="p-2 rounded-lg hover:bg-white/10 transition-colors text-steel-blue hover:text-white" title="Previous month">
@@ -83,13 +83,13 @@ Today
 </div>
 
 <!-- Day-of-week headers -->
-<div id="dayHeaders" class="grid grid-cols-7 gap-px mt-4 mb-px"></div>
+<div id="dayHeaders" class="grid grid-cols-7 gap-px shrink-0"></div>
 
-<!-- Calendar grid -->
-<div id="calendarGrid" class="grid grid-cols-7 gap-px"></div>
+<!-- Calendar grid — fills remaining height -->
+<div id="calendarGrid" class="grid grid-cols-7 gap-px flex-1 min-h-0"></div>
 
-<!-- Day Detail Panel -->
-<div id="dayDetailPanel" class="hidden mt-4 glass-card rounded-xl p-4 lg:p-5 relative">
+<!-- Day Detail Panel (overlays below, scrolls if needed) -->
+<div id="dayDetailPanel" class="hidden mt-4 glass-card rounded-xl p-4 lg:p-5 relative shrink-0 max-h-[40vh] overflow-y-auto custom-scrollbar">
 <button id="closePanelBtn" class="absolute top-3 right-3 text-steel-blue hover:text-white transition-colors">
 <span class="material-symbols-outlined">close</span>
 </button>
@@ -275,6 +275,11 @@ function buildGrid(startDate, endDate, grouped) {
     var today = new Date();
     var todayStr = formatDateISO(today);
 
+    // Calculate number of rows to set equal-height grid rows
+    var totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    var numRows = Math.ceil(totalDays / 7);
+    grid.style.gridTemplateRows = 'repeat(' + numRows + ', 1fr)';
+
     var current = new Date(startDate);
     while (current <= endDate) {
         var dateStr = formatDateISO(current);
@@ -291,7 +296,7 @@ function buildGrid(startDate, endDate, grouped) {
 
 function buildDayCell(dayNum, dateStr, isCurrentMonth, isToday, releases) {
     var cell = document.createElement('div');
-    var baseCls = 'min-h-[80px] lg:min-h-[100px] p-1.5 lg:p-2 bg-black/30 cursor-pointer hover:bg-black/50 transition-colors rounded-sm';
+    var baseCls = 'p-1.5 lg:p-2 bg-black/30 cursor-pointer hover:bg-black/50 transition-colors rounded-sm overflow-hidden';
     if (!isCurrentMonth) baseCls += ' opacity-40';
     if (isToday) baseCls += ' ring-2 ring-primary bg-primary/10';
     if (_selectedDate === dateStr) baseCls += ' bg-primary/20 border border-primary/40';

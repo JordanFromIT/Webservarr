@@ -736,96 +736,106 @@ async function loadUpcomingReleases() {
         // Clear container
         while (container.firstChild) container.removeChild(container.firstChild);
 
-        if (!Array.isArray(releases) || releases.length === 0) {
-            var emptyDiv = document.createElement('div');
-            emptyDiv.className = 'text-center text-steel-blue py-8';
-            var emptyIcon = document.createElement('span');
-            emptyIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
-            emptyIcon.textContent = 'calendar_month';
-            var emptyText = document.createElement('p');
-            emptyText.textContent = 'No releases this week';
-            emptyDiv.appendChild(emptyIcon);
-            emptyDiv.appendChild(emptyText);
-            container.appendChild(emptyDiv);
-            return;
-        }
+        // Build 7 day columns starting from today
+        var today = new Date();
+        var todayStr = _fmtDate(today);
 
         // Group releases by date
         var grouped = {};
-        releases.forEach(function(r) {
-            var dateKey = r.air_date ? r.air_date.substring(0, 10) : '';
-            if (!dateKey) return;
-            if (!grouped[dateKey]) grouped[dateKey] = [];
-            grouped[dateKey].push(r);
-        });
-
-        // Sort date keys
-        var dateKeys = Object.keys(grouped).sort();
-
-        // Build today/tomorrow strings for comparison
-        var today = new Date();
-        var todayStr = today.getFullYear() + '-' + (today.getMonth()+1 < 10 ? '0' : '') + (today.getMonth()+1) + '-' + (today.getDate() < 10 ? '0' : '') + today.getDate();
-        var tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        var tomorrowStr = tomorrow.getFullYear() + '-' + (tomorrow.getMonth()+1 < 10 ? '0' : '') + (tomorrow.getMonth()+1) + '-' + (tomorrow.getDate() < 10 ? '0' : '') + tomorrow.getDate();
-
-        dateKeys.forEach(function(dateKey) {
-            // Day header
-            var header = document.createElement('div');
-            header.className = 'text-xs font-bold uppercase tracking-wider text-steel-blue mb-2 mt-4 first:mt-0';
-            if (dateKey === todayStr) {
-                header.textContent = 'Today';
-            } else if (dateKey === tomorrowStr) {
-                header.textContent = 'Tomorrow';
-            } else {
-                var parts = dateKey.split('-');
-                var d = new Date(parseInt(parts[0]), parseInt(parts[1])-1, parseInt(parts[2]));
-                header.textContent = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-            }
-            container.appendChild(header);
-
-            // Release items for this day
-            grouped[dateKey].forEach(function(release) {
-                var row = document.createElement('div');
-                row.className = 'flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors';
-
-                // Media type badge
-                var badge = document.createElement('span');
-                if (release.media_type === 'movie') {
-                    badge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 shrink-0';
-                    badge.textContent = 'MOV';
-                } else {
-                    badge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 shrink-0';
-                    badge.textContent = 'TV';
-                }
-                row.appendChild(badge);
-
-                // Title + episode info
-                var titleSpan = document.createElement('span');
-                titleSpan.className = 'text-sm text-frosted-blue truncate';
-                var titleText = release.title || 'Unknown';
-                if (release.media_type === 'tv' && release.episode_code) {
-                    titleText += ' ' + release.episode_code;
-                }
-                if (release.episode_title) {
-                    titleText += ' - ' + release.episode_title;
-                } else if (release.media_type === 'movie' && release.episode_code) {
-                    titleText += ' (' + release.episode_code + ')';
-                }
-                titleSpan.textContent = titleText;
-                row.appendChild(titleSpan);
-
-                // Green checkmark if has_file
-                if (release.has_file) {
-                    var check = document.createElement('span');
-                    check.className = 'material-symbols-outlined text-green-500 text-sm shrink-0 ml-auto';
-                    check.textContent = 'check_circle';
-                    row.appendChild(check);
-                }
-
-                container.appendChild(row);
+        if (Array.isArray(releases)) {
+            releases.forEach(function(r) {
+                var dateKey = r.air_date ? r.air_date.substring(0, 10) : '';
+                if (!dateKey) return;
+                if (!grouped[dateKey]) grouped[dateKey] = [];
+                grouped[dateKey].push(r);
             });
-        });
+        }
+
+        // Day-of-week header row
+        var headerRow = document.createElement('div');
+        headerRow.className = 'grid grid-cols-7 gap-1 mb-1';
+        var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        for (var d = 0; d < 7; d++) {
+            var dayDate = new Date(today);
+            dayDate.setDate(dayDate.getDate() + d);
+            var hdr = document.createElement('div');
+            hdr.className = 'text-center text-[10px] font-bold uppercase tracking-wider text-steel-blue/60';
+            hdr.textContent = dayNames[dayDate.getDay()];
+            headerRow.appendChild(hdr);
+        }
+        container.appendChild(headerRow);
+
+        // Calendar grid — 7 day columns
+        var grid = document.createElement('div');
+        grid.className = 'grid grid-cols-7 gap-1';
+
+        for (var i = 0; i < 7; i++) {
+            var cellDate = new Date(today);
+            cellDate.setDate(cellDate.getDate() + i);
+            var dateStr = _fmtDate(cellDate);
+            var isToday = (i === 0);
+            var dayReleases = grouped[dateStr] || [];
+
+            var cell = document.createElement('div');
+            var cellCls = 'rounded-lg p-1.5 lg:p-2 min-h-[90px] flex flex-col bg-black/30';
+            if (isToday) cellCls += ' ring-1 ring-primary bg-primary/10';
+            cell.className = cellCls;
+
+            // Day number
+            var dayLabel = document.createElement('div');
+            dayLabel.className = 'text-xs font-bold mb-1 ' + (isToday ? 'text-primary' : 'text-steel-blue');
+            dayLabel.textContent = cellDate.getDate();
+            cell.appendChild(dayLabel);
+
+            // Release badges
+            if (dayReleases.length === 0) {
+                var empty = document.createElement('div');
+                empty.className = 'flex-1 flex items-center justify-center';
+                var dash = document.createElement('span');
+                dash.className = 'text-steel-blue/20 text-xs';
+                dash.textContent = '\u2014';
+                empty.appendChild(dash);
+                cell.appendChild(empty);
+            } else {
+                var list = document.createElement('div');
+                list.className = 'flex flex-col gap-0.5 overflow-hidden';
+                var maxShow = 3;
+                for (var j = 0; j < dayReleases.length && j < maxShow; j++) {
+                    var rel = dayReleases[j];
+                    var badge = document.createElement('div');
+                    badge.className = 'flex items-center gap-1 min-w-0';
+
+                    var dot = document.createElement('span');
+                    if (rel.media_type === 'movie') {
+                        dot.className = 'size-1.5 rounded-full bg-purple-400 shrink-0';
+                    } else {
+                        dot.className = 'size-1.5 rounded-full bg-blue-400 shrink-0';
+                    }
+                    badge.appendChild(dot);
+
+                    var name = document.createElement('span');
+                    name.className = 'text-[10px] text-frosted-blue/80 truncate leading-tight';
+                    var nameText = rel.title || 'Unknown';
+                    if (rel.media_type === 'tv' && rel.episode_code) {
+                        nameText += ' ' + rel.episode_code;
+                    }
+                    name.textContent = nameText;
+                    badge.appendChild(name);
+
+                    list.appendChild(badge);
+                }
+                if (dayReleases.length > maxShow) {
+                    var more = document.createElement('span');
+                    more.className = 'text-[9px] text-steel-blue/50 pl-3';
+                    more.textContent = '+' + (dayReleases.length - maxShow) + ' more';
+                    list.appendChild(more);
+                }
+                cell.appendChild(list);
+            }
+
+            grid.appendChild(cell);
+        }
+        container.appendChild(grid);
 
     } catch (error) {
         console.log('Upcoming releases not available');
@@ -841,6 +851,14 @@ async function loadUpcomingReleases() {
         errDiv.appendChild(errText);
         container.appendChild(errDiv);
     }
+}
+
+// Format Date to YYYY-MM-DD
+function _fmtDate(d) {
+    var y = d.getFullYear();
+    var m = d.getMonth() + 1;
+    var day = d.getDate();
+    return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
 }
 
 // Load system stats from Netdata integration
