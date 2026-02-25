@@ -13,7 +13,7 @@ import logging
 from app.config import settings
 from app.database import init_db
 from app.auth import session_manager
-from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, branding
+from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, branding, notifications
 
 # Configure logging
 logging.basicConfig(
@@ -123,6 +123,7 @@ app.include_router(status.router, prefix="/api/status", tags=["Status"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(integrations.router, prefix="/api/integrations", tags=["Integrations"])
 app.include_router(branding.router, prefix="/api", tags=["Branding"])
+app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 
 
 # Health check endpoint
