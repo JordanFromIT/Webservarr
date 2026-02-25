@@ -92,7 +92,7 @@ async def add_security_headers(request: Request, call_next):
         if src:
             frame_sources.append(src)
 
-    connect_sources = ["'self'", "https://plex.tv"]
+    connect_sources = ["'self'"]
     if settings.authentik_url:
         connect_sources.append(settings.authentik_url)
     for src in settings.csp_connect_src.split(","):
