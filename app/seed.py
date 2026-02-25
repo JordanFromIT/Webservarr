@@ -45,6 +45,10 @@ DEFAULT_SETTINGS = {
     "icon.section_news": ("newspaper", "Homepage icon for News & Updates section"),
     "icon.section_streams": ("play_circle", "Homepage icon for Active Streams section"),
     "icon.section_releases": ("calendar_month", "Homepage icon for Upcoming Releases section"),
+    # Notification polling intervals (seconds)
+    "notifications.poll_interval_overseerr": ("60", "Seconds between Overseerr notification checks"),
+    "notifications.poll_interval_monitors": ("60", "Seconds between Uptime Kuma notification checks"),
+    "notifications.poll_interval_news": ("60", "Seconds between news post notification checks"),
 }
 
 
@@ -91,3 +95,64 @@ def seed_default_settings(db: Session) -> None:
 
     if added:
         logger.info("Seeded %d default branding/theme settings", added)
+
+
+def seed_vapid_keys(db: Session) -> None:
+    """Generate and store VAPID key pair for Web Push notifications.
+    Skips if keys already exist. Handles pywebpush not being installed."""
+    from sqlalchemy.exc import IntegrityError
+
+    # Check if public key already exists — if so, nothing to do
+    existing = db.query(Setting).filter(
+        Setting.key == "notifications.vapid_public_key"
+    ).first()
+    if existing:
+        return
+
+    try:
+        from py_vapid import Vapid
+        from py_vapid.utils import b64urlencode
+        from cryptography.hazmat.primitives import serialization
+    except ImportError:
+        logger.warning(
+            "pywebpush not installed — skipping VAPID key generation. "
+            "Install pywebpush>=2.0.0 to enable push notifications."
+        )
+        return
+
+    # Generate a new ECDSA key pair
+    vapid = Vapid()
+    vapid.generate_keys()
+
+    # Export public key as URL-safe base64 (uncompressed point, no padding)
+    public_key_b64 = b64urlencode(
+        vapid.public_key.public_bytes(
+            serialization.Encoding.X962,
+            serialization.PublicFormat.UncompressedPoint,
+        )
+    )
+
+    # Export private key as PEM string
+    private_key_pem = vapid.private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+
+    # Store both keys in Settings
+    try:
+        db.add(Setting(
+            key="notifications.vapid_public_key",
+            value=public_key_b64,
+            description="VAPID public key for Web Push (auto-generated)",
+        ))
+        db.add(Setting(
+            key="notifications.vapid_private_key",
+            value=private_key_pem,
+            description="VAPID private key for Web Push (auto-generated, keep secret)",
+        ))
+        db.commit()
+        logger.info("Generated and stored VAPID key pair for Web Push notifications")
+    except IntegrityError:
+        db.rollback()  # Another worker already generated keys
+        logger.debug("VAPID keys already exist (race condition), skipping")
