@@ -45,3 +45,27 @@ body {
   background: var(--hex-secondary);
   border-radius: 10px;
 }
+
+/* ---- Service Icons (selfh.st CDN) ---- */
+.service-icon {
+  filter: drop-shadow(0 0 4px rgba(var(--color-primary) / 0.3));
+}
+
+/* ---- Netdata Gauge Circles ---- */
+.gauge-circle {
+  stroke-dasharray: 251;
+  stroke-dashoffset: 251;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset 1s ease-out;
+}
+
+/* ---- Notification Badge Pulse ---- */
+@keyframes pulse-once {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+.animate-pulse-once {
+  animation: pulse-once 0.3s ease-out;
+}
