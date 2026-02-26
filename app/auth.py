@@ -5,6 +5,7 @@ Handles login, callback, logout, and session management.
 
 from authlib.integrations.httpx_client import AsyncOAuth2Client
 from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
 import httpx
 import logging
@@ -26,6 +27,8 @@ class OIDCClient:
         redirect_uri: Optional[str] = None,
     ):
         base_url = authentik_url or settings.authentik_url
+        if not base_url:
+            raise ValueError("authentik_url must be provided or set via AUTHENTIK_URL env var")
         self.client_id = client_id or settings.authentik_client_id
         self.client_secret = client_secret or settings.authentik_client_secret
         self.redirect_uri = redirect_uri or settings.effective_redirect_uri
@@ -232,7 +235,7 @@ class SessionManager:
         return False
 
 
-def get_oidc_client(db) -> Optional[OIDCClient]:
+def get_oidc_client(db: Session) -> Optional[OIDCClient]:
     """Build an OIDCClient from Settings DB, falling back to env vars.
 
     Args:
