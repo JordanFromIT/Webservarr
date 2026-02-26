@@ -535,6 +535,41 @@
                     </div>
                 </div>
 
+                <!-- Authentik -->
+                <div class="accordion-item" data-accordion="authentik">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('authentik')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">shield_person</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Authentik (Optional)</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotAuthentik"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyAuthentik">
+                        <p class="text-xs text-steel-blue/70 mb-4">Optional OIDC identity provider. Only needed if you want to use Authentik instead of direct Plex OAuth.</p>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="text-xs text-steel-blue/70 mb-1 block">Authentik URL</label>
+                                <input type="text" id="integrationAuthentikUrl" placeholder="https://auth.example.com" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm">
+                            </div>
+                            <div>
+                                <label class="text-xs text-steel-blue/70 mb-1 block">Client ID</label>
+                                <input type="text" id="integrationAuthentikClientId" placeholder="OAuth2 Client ID" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm">
+                            </div>
+                            <div>
+                                <label class="text-xs text-steel-blue/70 mb-1 block">Client Secret</label>
+                                <input type="password" id="integrationAuthentikClientSecret" placeholder="OAuth2 Client Secret" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm">
+                            </div>
+                            <div>
+                                <label class="text-xs text-steel-blue/70 mb-1 block">Application Slug</label>
+                                <input type="text" id="integrationAuthentikSlug" placeholder="webservarr" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm">
+                            </div>
+                            <div class="flex items-center gap-4">
+                                <button onclick="saveIntegration('authentik')" class="bg-primary hover:bg-primary/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">Save</button>
+                                <div id="statusAuthentik" class="text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -1401,6 +1436,17 @@
                 urlKey: 'integration.radarr.url',
                 credKey: 'integration.radarr.api_key',
                 statusDiv: 'statusRadarr'
+            },
+            authentik: {
+                urlInput: 'integrationAuthentikUrl',
+                credInput: 'integrationAuthentikClientId',
+                urlKey: 'integration.authentik.url',
+                credKey: 'integration.authentik.client_id',
+                statusDiv: 'statusAuthentik',
+                extraFields: [
+                    { input: 'integrationAuthentikClientSecret', key: 'integration.authentik.client_secret' },
+                    { input: 'integrationAuthentikSlug', key: 'integration.authentik.app_slug' },
+                ]
             }
         };
 
@@ -2548,6 +2594,20 @@
                 alert('Error: ' + error.message);
             }
         }
+
+        // Safety warning when disabling local login
+        document.getElementById('featureShowSimpleAuth').addEventListener('change', function() {
+            if (!this.checked) {
+                var confirmed = confirm(
+                    'WARNING: Disabling local login means you can ONLY log in via Plex or Authentik.\n\n' +
+                    'If those services are misconfigured or unavailable, you will be locked out.\n\n' +
+                    'Are you sure you want to disable local login?'
+                );
+                if (!confirmed) {
+                    this.checked = true;
+                }
+            }
+        });
 
         // Load monitors and settings on page load
         loadMonitors();
