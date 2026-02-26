@@ -316,7 +316,7 @@ Stored in `settings` table. Override environment variable values when non-empty.
 | auth | String(200) | Auth secret |
 | created_at | DateTime | Auto-set |
 
-Storage: SQLite at `/app/data/hms.db` (container path) / `data/hms.db` (host path).
+Storage: SQLite at `/app/data/webservarr.db` (container path) / `data/webservarr.db` (host path).
 
 ---
 

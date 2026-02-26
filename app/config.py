@@ -34,7 +34,7 @@ class Settings(BaseSettings):
         return self.authentik_redirect_uri or f"{self.app_url}/auth/callback"
 
     # Database (SQLite)
-    database_url: str = "sqlite:////app/data/hms.db"
+    database_url: str = "sqlite:////app/data/webservarr.db"
 
     # Redis
     redis_url: str = "redis://redis:6379/0"

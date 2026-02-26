@@ -206,10 +206,10 @@ docker compose up -d
 
 ```bash
 # Check if database file exists
-ls -la data/hms.db
+ls -la data/webservarr.db
 
 # Query the database from inside the container
-docker compose exec webservarr sqlite3 /app/data/hms.db ".tables"
+docker compose exec webservarr sqlite3 /app/data/webservarr.db ".tables"
 ```
 
 ### Session issues (cannot log in or stay logged in)
@@ -232,7 +232,7 @@ docker compose exec webservarr python -c "import redis; r = redis.from_url('redi
 
 ```bash
 docker compose down
-rm -f data/hms.db
+rm -f data/webservarr.db
 docker volume rm webservarr_redis_data 2>/dev/null
 docker compose up -d
 ```

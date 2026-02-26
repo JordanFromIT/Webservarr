@@ -1,3 +1,3 @@
 """
-Background services and push notification dispatch for HMS Dashboard.
+Background services and push notification dispatch for WebServarr.
 """

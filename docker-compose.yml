@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=sqlite:////app/data/hms.db
+      - DATABASE_URL=sqlite:////app/data/webservarr.db
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./data:/app/data

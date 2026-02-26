@@ -1,3 +1,3 @@
 """
-API Routers for HMS Dashboard
+API Routers for WebServarr
 """

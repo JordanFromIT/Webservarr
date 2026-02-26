@@ -1,5 +1,5 @@
 """
-Database models for HMS Dashboard.
+Database models for WebServarr.
 """
 
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Enum

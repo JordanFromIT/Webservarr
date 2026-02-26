@@ -49,7 +49,7 @@ docker-compose.authentik.yml  # Optional Authentik overlay (3 additional contain
 Dockerfile                    # Python 3.11-slim image
 requirements.txt              # Python dependencies
 .env                          # Secrets (not in git)
-data/hms.db                   # SQLite database (not in git)
+data/webservarr.db            # SQLite database (not in git)
 
 docs/app-contract.md          # Single source of truth: pages, endpoints, models, auth
 docs/setup.md                 # Installation and operations guide

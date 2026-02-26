@@ -1,5 +1,5 @@
 """
-HMS Dashboard - Main FastAPI Application
+WebServarr - Main FastAPI Application
 """
 
 from fastapi import FastAPI, Request, Cookie
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
-    logger.info("Starting HMS Dashboard...")
+    logger.info("Starting WebServarr...")
     logger.info(f"Environment: {settings.app_env}")
 
     # Initialize database
@@ -54,12 +54,12 @@ async def lifespan(app: FastAPI):
     poller_task = asyncio.create_task(start_poller())
     logger.info("Notification poller launched")
 
-    logger.info("HMS Dashboard started successfully!")
+    logger.info("WebServarr started successfully!")
 
     yield
 
     # Shutdown
-    logger.info("Shutting down HMS Dashboard...")
+    logger.info("Shutting down WebServarr...")
     await stop_poller()
     poller_task.cancel()
     try:
@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
         pass
     logger.info("Notification poller stopped")
     await session_manager.close()
-    logger.info("HMS Dashboard shut down")
+    logger.info("WebServarr shut down")
 
 
 # Create FastAPI app
