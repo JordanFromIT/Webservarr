@@ -1,8 +1,8 @@
 # App Contract
 
-Single source of truth for the HMS Dashboard application surface. If it's not in this file, don't assume it exists.
+Single source of truth for the WebServarr application surface. If it's not in this file, don't assume it exists.
 
-Last verified: 2026-02-25
+Last verified: 2026-02-26
 
 ---
 
@@ -10,25 +10,29 @@ Last verified: 2026-02-25
 
 | Path | HTML File | Auth | Description |
 |------|-----------|------|-------------|
-| `/login` | `app/static/login.html` | None | Login form (simple auth + Plex OAuth). Branding from theme engine. Rotating TMDB backdrop slideshow (via Overseerr `/api/v1/backdrops`). Falls back to static poster grid. |
-| `/` | `app/static/index.html` | Session | Main dashboard. Plex streams (quality warnings, "More info" expander), service status, news. |
-| `/settings` | `app/static/settings.html` | Session (admin) | Four tabs: Integrations (accordion with Plex/Kuma/Overseerr/Sonarr/Radarr/Netdata), System, Customization (icon picker, theme, sidebar labels), News. |
+| `/login` | `app/static/login.html` | None | Login page with three auth methods: simple (username/password), direct Plex OAuth, and Authentik OIDC. Branding from theme engine. Rotating TMDB backdrop slideshow (via Overseerr `/api/v1/backdrops`). Falls back to static poster grid. |
+| `/` | `app/static/index.html` | Session | Main dashboard. Plex streams (quality warnings, "More info" expander), service status, Netdata gauges, upcoming releases, news. |
+| `/settings` | `app/static/settings.html` | Session (admin) | Four tabs: Integrations (accordion with Plex/Kuma/Overseerr/Sonarr/Radarr/Netdata/Authentik), System, Customization (icon picker, theme, sidebar labels), News. |
 | `/requests` | `app/static/requests.html` | Session | Overseerr iframe embed with Plex SSO. Calls re-auth before loading iframe. |
-| `/requests2` | `app/static/requests2.html` | Session | Native media request page. Search TMDB, create requests, view existing requests with poster grid and filter tabs. Alternative to iframe approach. |
+| `/requests2` | `app/static/requests2.html` | Session | Native media request page. Search TMDB, create requests, view existing requests with poster grid and filter tabs. |
 | `/issues` | `app/static/issues.html` | Session | Report and view media issues (audio, video, subtitle). Per-user Plex auth for writes. |
 | `/calendar` | `app/static/calendar.html` | Session | Combined Radarr + Sonarr month calendar. Click day for release details. Month navigation. |
 
 All authenticated pages include a notification bell in the top bar that shows unread count and opens a dropdown panel for viewing/managing notifications.
 
-**Auth pattern:** Page routes in `main.py` check the session cookie server-side and return a 302 redirect to `/login` if unauthenticated — the HTML is never sent. Each page's JS also calls `GET /auth/check-session` as a secondary check.
+**Auth pattern:** Page routes in `main.py` check the session cookie server-side and return a 302 redirect to `/login` if unauthenticated -- the HTML is never sent. Each page's JS also calls `GET /auth/check-session` as a secondary check.
 
 **Login methods:**
-- **Plex via Authentik OIDC (primary):** "Sign in with Plex" button → full-page redirect to `GET /auth/login` → Authentik OIDC authorization → Plex OAuth → `GET /auth/callback` exchanges code, resolves admin status, creates session with `auth_method: "oidc"`. No popups.
-- **Simple auth (toggleable fallback):** Username/password form → `POST /auth/simple-login`. Controlled by `features.show_simple_auth` setting (default: `true`). When disabled: login page hides the form (showing only Plex button), and the backend rejects requests with 403 (defense in depth). Intended for bootstrapping instances before Plex/Authentik is configured.
+
+1. **Simple auth (default, toggleable):** Username/password form -> `POST /auth/simple-login`. Controlled by `features.show_simple_auth` setting (default: `true`). When disabled: login page hides the form, and the backend rejects requests with 403 (defense in depth). Intended for bootstrapping instances before Plex is configured.
+
+2. **Direct Plex OAuth (recommended):** "Sign in with Plex" button -> `POST /auth/plex-start` (creates PIN, returns auth URL) -> user redirected to `app.plex.tv/auth` -> redirect back to `/auth/plex-callback-page` -> `POST /auth/plex-callback` (exchanges PIN for token, creates session with `auth_method: "plex"`). Same PIN-based flow used by Overseerr and Tautulli. Requires Plex integration to be configured.
+
+3. **Authentik OIDC (advanced):** "Sign in with Plex" (via Authentik) button -> `GET /auth/login` -> Authentik OIDC authorization -> Plex OAuth -> `GET /auth/callback` (exchanges code, creates session with `auth_method: "oidc"`). Requires Authentik to be configured in Settings > Integrations > Authentik.
 
 **Admin determination:** First checks if user's email matches `system.admin_email` setting (if configured). Falls back to checking if email matches the Plex server owner's email (via `plex.tv/api/v2/user` with admin token from `integration.plex.token` setting).
 
-**Session fields:** `user_id`, `email`, `name`, `username`, `is_admin`, `auth_method` (oidc/simple), `id_token` (for OIDC logout), `plex_token` (for Overseerr SSO).
+**Session fields:** `user_id`, `email`, `name`, `username`, `is_admin`, `auth_method` (simple/plex/oidc), `id_token` (for OIDC logout), `plex_token` (for Overseerr SSO), `avatar_url`.
 
 ---
 
@@ -42,19 +46,19 @@ All pages (except login) use a shared sidebar component and theme system:
 |------|---------|
 | `app/static/js/theme-loader.js` | Fetches `/api/branding`, sets CSS custom properties (RGB triplets), injects Google Font, applies dark/light mode. Cached in localStorage to prevent FOUC. Loaded in `<head>` before Tailwind. |
 | `app/static/js/auth.js` | `checkAuth()`, `wireLogout()`, `escapeHtml()`, `getTimeAgo()`, `formatUptime()`, `loadAppVersion()` |
-| `app/static/js/sidebar.js` | `initSidebar(page)` — injects sidebar HTML into `<div id="sidebar-root">`. Desktop: persistent 256px sidebar with logo + nav. Mobile: hamburger drawer. `showAdminNav(isAdmin)` reveals admin-only items. Logo auto-sizes to sidebar width. |
+| `app/static/js/sidebar.js` | `initSidebar(page)` -- injects sidebar HTML into `<div id="sidebar-root">`. Desktop: persistent 256px sidebar with logo + nav. Mobile: hamburger drawer. `showAdminNav(isAdmin)` reveals admin-only items. Logo auto-sizes to sidebar width. |
 | `app/static/css/theme.css` | CSS custom property defaults, glass-card styles, custom scrollbar, gauge-circle animation, service-icon drop-shadow. |
 
 ### Tailwind + CSS Custom Properties
 
 Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modifier support:
 ```
---color-primary: 18 87 147     →  "primary": "rgb(var(--color-primary) / <alpha-value>)"
+--color-primary: 18 87 147     ->  "primary": "rgb(var(--color-primary) / <alpha-value>)"
 ```
 
 ### Responsive Layout
 
-- **Desktop (≥1024px):** Persistent sidebar (left) + main content. Header visible.
+- **Desktop (>=1024px):** Persistent sidebar (left) + main content. Header visible.
 - **Mobile (<1024px):** Sticky top bar with hamburger + slide-out drawer overlay. Header hidden.
 - Body: `flex flex-col lg:flex-row`
 
@@ -71,12 +75,20 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 | GET | `/auth/logout` | Session | Destroy session + redirect. OIDC sessions also redirect through Authentik end-session. |
 | GET | `/auth/check-session` | Session | Returns 200 if session valid, 401 if not |
 
+### Direct Plex OAuth (`app/routers/plex_auth.py`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/auth/plex-start` | None | Initiate Plex PIN-based auth. Returns `pin_id` and `auth_url`. Requires Plex integration configured. |
+| POST | `/auth/plex-callback` | None | Complete Plex PIN auth. Body: `{"pin_id": int}`. Exchanges PIN for token, creates session. |
+| GET | `/auth/plex-callback-page` | None | Landing page after Plex redirect. Sends postMessage to opener (popup) or redirects to login (full-page). |
+
 ### OIDC Authentication (`app/routers/auth.py`)
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/auth/login` | None | Redirect to Authentik OIDC authorization (primary Plex login) |
-| GET | `/auth/callback` | None | OIDC callback — exchanges code, checks Plex server owner for admin, creates session |
+| GET | `/auth/login` | None | Redirect to Authentik OIDC authorization. Uses DB settings or env var config. |
+| GET | `/auth/callback` | None | OIDC callback -- exchanges code, checks Plex server owner for admin, creates session |
 | GET | `/auth/me` | Session | Returns current user info (works for all auth methods) |
 
 ### Branding (`app/routers/branding.py`)
@@ -88,15 +100,16 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 **Response shape:**
 ```json
 {
-  "app_name": "HMS Dashboard",
-  "tagline": "Home Media Server Management",
+  "app_name": "WebServarr",
+  "tagline": "Media Server Management",
   "logo_url": "",
   "colors": { "primary": "#125793", "secondary": "#2C6DA1", "accent": "#4684B0", "text": "#BEEEF4", "background": "#000000" },
   "font": "Spline Sans",
   "custom_css": "",
   "features": { "show_requests": false, "show_simple_auth": true },
   "sidebar_labels": { "home": "Home", "requests": "Requests", "requests2": "Requests", "issues": "Issues", "calendar": "Calendar", "settings": "Settings" },
-  "icons": { "sidebar_logo": "dashboard", "nav_home": "home", "nav_requests": "download", "nav_requests2": "movie", "nav_issues": "report_problem", "nav_calendar": "calendar_month", "nav_settings": "settings", "section_streams": "play_circle", "section_services": "health_metrics", "section_requests": "movie", "section_news": "newspaper" }
+  "icons": { "sidebar_logo": "settings_input_component", "nav_home": "home", "nav_requests": "download", "nav_requests2": "movie", "nav_issues": "report_problem", "nav_calendar": "calendar_month", "nav_settings": "settings", "section_streams": "play_circle", "section_services": "health_metrics", "section_requests": "movie", "section_news": "newspaper" },
+  "vapid_public_key": "..."
 }
 ```
 
@@ -129,8 +142,8 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 | PUT | `/api/admin/settings/bulk` | Admin | Update multiple settings |
 | POST | `/api/admin/upload-logo` | Admin | Upload logo image (PNG, JPEG, GIF, SVG, WebP; 2MB max). Saves to `/static/uploads/` and updates `branding.logo_url` setting. |
 | POST | `/api/admin/test-connection` | Admin | Test integration credentials |
-| POST | `/api/admin/restart-container` | Admin | Restart hms-dashboard container via Docker API |
-| POST | `/api/admin/shutdown-container` | Admin | Stop hms-dashboard container via Docker API |
+| POST | `/api/admin/restart-container` | Admin | Restart webservarr container via Docker API |
+| POST | `/api/admin/shutdown-container` | Admin | Stop webservarr container via Docker API |
 
 ### Notifications (`app/routers/notifications.py`)
 
@@ -177,21 +190,25 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 
 ### Inactive (scaffolded, not wired)
 
-*None currently — all scaffolded endpoints have been activated.*
+*None currently -- all scaffolded endpoints have been activated.*
 
 ---
 
 ## Configuration (`app/config.py`)
 
-### Domain / URL Settings
+### Environment Variables
 
 | Env Var | Default | Description |
 |---------|---------|-------------|
-| `APP_DOMAIN` | `dev.hmserver.tv` | Application domain |
+| `APP_DOMAIN` | `localhost` | Application domain |
 | `APP_SCHEME` | `https` | URL scheme |
+| `REDIS_URL` | `redis://redis:6379/0` | Redis connection string |
 | `CORS_ORIGINS` | `""` | Additional CORS origins (comma-separated) |
 | `CSP_FRAME_SRC` | `""` | Additional frame-src CSP origins (comma-separated) |
 | `CSP_CONNECT_SRC` | `""` | Additional connect-src CSP origins (comma-separated) |
+| `AUTHENTIK_URL` | `""` | Authentik base URL (env var fallback; prefer Settings UI) |
+| `AUTHENTIK_CLIENT_ID` | `""` | Authentik OAuth2 client ID (env var fallback) |
+| `AUTHENTIK_CLIENT_SECRET` | `""` | Authentik OAuth2 client secret (env var fallback) |
 
 CORS origins and CSP directives are built dynamically from these settings plus `app_url` and `authentik_url`.
 
@@ -201,8 +218,8 @@ Stored in `settings` table, seeded on first startup:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `branding.app_name` | `HMS Dashboard` | App name shown in sidebar and login |
-| `branding.tagline` | `Home Media Server Management` | Shown on login page |
+| `branding.app_name` | `WebServarr` | App name shown in sidebar and login |
+| `branding.tagline` | `Media Server Management` | Shown on login page |
 | `branding.logo_url` | `""` | Custom logo URL (or path from upload) |
 | `theme.color_primary` | `#125793` | Primary color (Baltic Blue) |
 | `theme.color_secondary` | `#2C6DA1` | Secondary color (Cornflower Ocean) |
@@ -220,7 +237,7 @@ Stored in `settings` table, seeded on first startup:
 | `sidebar.label_issues` | `Issues` | Sidebar label for Issues page |
 | `sidebar.label_calendar` | `Calendar` | Sidebar label for Calendar page |
 | `sidebar.label_settings` | `Settings` | Sidebar label for Settings page |
-| `icon.sidebar_logo` | `dashboard` | Material Symbol for sidebar logo (when no logo image) |
+| `icon.sidebar_logo` | `settings_input_component` | Material Symbol for sidebar logo (when no logo image) |
 | `icon.nav_home` | `home` | Material Symbol for Home nav item |
 | `icon.nav_requests` | `download` | Material Symbol for Requests iframe nav item |
 | `icon.nav_requests2` | `movie` | Material Symbol for native Requests nav item |
@@ -229,14 +246,27 @@ Stored in `settings` table, seeded on first startup:
 | `icon.nav_settings` | `settings` | Material Symbol for Settings nav item |
 | `icon.section_streams` | `play_circle` | Material Symbol for Active Streams section |
 | `icon.section_services` | `health_metrics` | Material Symbol for Service Health section |
-| `icon.section_requests` | `movie` | Material Symbol for Recent Requests section |
+| `icon.section_releases` | `calendar_month` | Material Symbol for Upcoming Releases section |
 | `icon.section_news` | `newspaper` | Material Symbol for Latest News section |
 | `system.admin_email` | `""` | Admin email (priority check for Plex admin determination) |
-| `netdata.cpu_label` | `""` | Label under CPU gauge (e.g. "16C/32T"). Falls back to thread count from API. |
-| `netdata.ram_label` | `""` | Label under RAM gauge (e.g. "64 GB"). Auto-detects used/total if empty. |
-| `netdata.net_label` | `""` | Label under Network gauge (e.g. "1 Gbps"). |
+| `system.secret_key` | (auto) | Auto-generated secret key for session signing |
+| `system.plex_client_id` | (auto) | Auto-generated Plex client identifier for PIN-based auth |
+| `netdata.cpu_label` | `""` | Label under CPU gauge (e.g., "16C/32T"). Falls back to thread count from API. |
+| `netdata.ram_label` | `""` | Label under RAM gauge (e.g., "64 GB"). Auto-detects used/total if empty. |
+| `netdata.net_label` | `""` | Label under Network gauge (e.g., "1 Gbps"). |
 
-### Notification Settings
+### Authentik Settings (DB)
+
+Stored in `settings` table. Override environment variable values when non-empty. Configurable in Settings > Integrations > Authentik.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `integration.authentik.url` | `""` | Authentik base URL (e.g., `https://auth.example.com`) |
+| `integration.authentik.client_id` | `""` | Authentik OAuth2 client ID |
+| `integration.authentik.client_secret` | `""` | Authentik OAuth2 client secret |
+| `integration.authentik.app_slug` | `""` | Authentik application slug (for logout URL) |
+
+### Notification Settings (DB)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -256,7 +286,7 @@ Stored in `settings` table, seeded on first startup:
 | User | users | id, username, email, display_name, password_hash, is_admin, is_active, created_at, last_login |
 | NewsPost | news_posts | id, title, content, content_html, author, published, pinned, created_at, updated_at |
 | Service | services | id, name, display_name, description, url, icon, status, enabled, requires_auth, created_at |
-| Setting | settings | id, key, value, created_at, updated_at |
+| Setting | settings | id, key, value, description, created_at, updated_at |
 | StatusUpdate | status_updates | id, service_id, status, message, created_at, resolved_at |
 | ServiceStatus | service_statuses | id, service_id, status, checked_at |
 | Notification | notifications | id, user_email, category, title, body, reference_id, read, created_at |
@@ -301,7 +331,7 @@ Storage: SQLite at `/app/data/hms.db` (container path) / `data/hms.db` (host pat
 | Radarr | `radarr.py` | Working | Calendar API, upcoming movies with release types and posters |
 | Netdata | `netdata.py` | Working | System stats (CPU%, RAM%, network throughput MB/s, uptime, hostname, cpu_cores, configurable gauge labels) via `/api/integrations/system-stats` |
 
-**Pattern:** Browser → FastAPI proxy endpoint → external service API (httpx, 10s timeout for Plex, 5s for others). Credentials stored in `settings` table.
+**Pattern:** Browser -> FastAPI proxy endpoint -> external service API (httpx, 10s timeout for Plex, 5s for others). Credentials stored in `settings` table.
 
 ---
 
@@ -314,7 +344,7 @@ Storage: SQLite at `/app/data/hms.db` (container path) / `data/hms.db` (host pat
 | Netdata Gauges | Netdata via `/api/integrations/system-stats` (SVG circular gauges: CPU, RAM, Network with configurable sub-labels; polls every 1s) | Working |
 | Recent Requests | Overseerr via `/api/integrations/recent-requests` | Working |
 | News | Local DB via `/api/news/` | Working |
-| Upcoming Releases | Sonarr/Radarr via `/api/integrations/upcoming-releases?days=7` | Working — compact 7-day grouped list with "View calendar" link |
+| Upcoming Releases | Sonarr/Radarr via `/api/integrations/upcoming-releases?days=7` | Working -- compact 7-day grouped list with "View calendar" link |
 
 Auto-refresh: all sections poll every 30 seconds. Netdata gauges poll every 1 second for real-time monitoring. "Checked X ago" timer text updates every 1 second. Active Streams paginated at 6 per page with chevron navigation.
 
@@ -323,7 +353,7 @@ Auto-refresh: all sections poll every 30 seconds. Netdata gauges poll every 1 se
 | Section | Data Source | Status |
 |---------|------------|--------|
 | Search | Overseerr via `/api/integrations/overseerr-search` (paginated 9 per page) | Working |
-| Request Creation | Overseerr via `/api/integrations/overseerr-request` (single "Request" button, no 4K option) | Working |
+| Request Creation | Overseerr via `/api/integrations/overseerr-request` (single "Request" button) | Working |
 | Existing Requests | Overseerr via `/api/integrations/recent-requests` (paginated 9 per page, filter tabs) | Working |
 | Request Stats | Overseerr via `/api/integrations/request-counts` | Working |
 
@@ -342,8 +372,8 @@ Auto-refresh: all sections poll every 30 seconds. Netdata gauges poll every 1 se
 Stream cards show title (with year for movies, S##E## for TV), thumbnail via backend proxy, and progress bar.
 
 **Quality indicators:**
-- **Direct Play / Direct Stream:** Green text — "Direct Play (Full Quality)" or "Direct Stream (Full Quality)"
-- **Transcode:** Yellow warning — "Warning: Not playing at full quality!" with expandable "More info" section showing source vs stream pixel heights and instructions to set Plex quality to "Original"
+- **Direct Play / Direct Stream:** Green text -- "Direct Play (Full Quality)" or "Direct Stream (Full Quality)"
+- **Transcode:** Yellow warning -- "Warning: Not playing at full quality!" with expandable "More info" section showing source vs stream pixel heights and instructions to set Plex quality to "Original"
 - Polling uses `_lastStreams` cache to prevent UI flicker on transient API failures
 - No usernames displayed (privacy), no admin controls (kill stream, scan, etc.)
 
@@ -352,7 +382,7 @@ Stream cards show title (with year for movies, S##E## for TV), thumbnail via bac
 ## Security
 
 **Implemented:**
-- Server-side page auth: all page routes (except `/login`) check session cookie in `main.py` and 302 redirect to `/login` if unauthenticated — no HTML is served to anonymous users
+- Server-side page auth: all page routes (except `/login`) check session cookie in `main.py` and 302 redirect to `/login` if unauthenticated -- no HTML is served to anonymous users
 - Secure cookies (HttpOnly, Secure, SameSite=Lax)
 - HTML sanitization (bleach) on news content
 - Security headers middleware (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy)
@@ -360,15 +390,15 @@ Stream cards show title (with year for movies, S##E## for TV), thumbnail via bac
 - API keys/tokens masked in settings responses
 - Admin role enforcement on all write endpoints
 - httpx 5-second timeout on external API calls
-- CSP connect-src does not include `https://plex.tv` (no client-side Plex API calls)
 - Simple auth feature flag: `features.show_simple_auth` gates both UI (form hidden) and backend (403 on POST) for defense in depth
-- Overseerr SSO: Plex token stored server-side in Redis, never exposed to frontend. `connect.sid` cookie set on `.hmserver.tv` with `SameSite=None; Secure; HttpOnly` for cross-subdomain iframe SSO. Cleared on logout.
+- Plex PIN anti-replay: PINs tracked in Redis with 5-minute TTL
+- Auto-generated secret key and Plex client identifier (no manual secret setup required)
 
 **Not implemented:**
 - CSRF tokens
 - Rate limiting
-- Bot protection (Cloudflare Turnstile)
-- HSTS (would be at Cloudflare level)
+- Bot protection
+- HSTS (typically set at reverse proxy level)
 
 ---
 
@@ -376,6 +406,6 @@ Stream cards show title (with year for movies, S##E## for TV), thumbnail via bac
 
 | Dependency | What it checks | Used by |
 |------------|---------------|---------|
-| `get_current_user` | Valid session cookie → Redis lookup → returns user dict | All protected endpoints |
+| `get_current_user` | Valid session cookie -> Redis lookup -> returns user dict | All protected endpoints |
 | `get_current_user_optional` | Same as above but returns None instead of 401 | Endpoints with optional auth |
 | `require_admin` | Calls get_current_user + checks is_admin flag | All write/admin endpoints |

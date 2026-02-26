@@ -1,6 +1,6 @@
-# HMS Dashboard — Claude Code Operator Manual
+# WebServarr -- Claude Code Operator Manual
 
-HMS Dashboard is a FastAPI + vanilla JS web portal for Plex media server administration, running on a Linode VPS (2GB RAM, 1 CPU) behind Cloudflare Tunnel at dev.hmserver.tv. The frontend does NOT yet match the Stitch UI designs in `brand-assets/`. See VISION.md for the full project plan.
+WebServarr is a FastAPI + vanilla JS web portal for Plex media server administration. See VISION.md for the full project plan.
 
 ---
 
@@ -10,21 +10,23 @@ HMS Dashboard is a FastAPI + vanilla JS web portal for Plex media server adminis
 app/main.py                  # FastAPI app, middleware, router registration
 app/config.py                # Settings from environment variables (pydantic-settings)
 app/database.py              # SQLAlchemy engine, session factory, init_db
-app/models.py                # User, NewsPost, Service, Setting, StatusUpdate, ServiceStatus
+app/models.py                # User, NewsPost, Service, Setting, StatusUpdate, ServiceStatus, Notification, PushSubscription
 app/seed.py                  # Default admin user + settings seeding on first startup
-app/auth.py                  # SessionManager (Redis) + OIDCClient (active)
+app/auth.py                  # SessionManager (Redis) + OIDCClient
 app/dependencies.py          # get_current_user, require_admin dependencies
 
 app/routers/simple_auth.py   # Simple login/logout/session-check + shared logout (OIDC-aware). Guarded by features.show_simple_auth.
-app/routers/auth.py          # OIDC auth routes — Plex OAuth via Authentik (/auth/login, /auth/callback, /auth/me)
+app/routers/auth.py          # OIDC auth routes -- Plex OAuth via Authentik (/auth/login, /auth/callback, /auth/me)
+app/routers/plex_auth.py     # Direct Plex OAuth -- PIN-based auth (/auth/plex-start, /auth/plex-callback, /auth/plex-callback-page)
 app/routers/news.py          # News CRUD with bleach sanitization
 app/routers/admin.py         # Service CRUD, settings CRUD, test-connection
 app/routers/status.py        # Public service status endpoints
 app/routers/integrations.py  # Plex, Uptime Kuma, Overseerr proxy endpoints
+app/routers/branding.py      # Public branding/theme endpoint
+app/routers/notifications.py # Notification CRUD + preferences + push subscription
 
 app/services/notification_poller.py # Background polling for notifications
 app/services/push.py               # Web Push dispatch via pywebpush
-app/routers/notifications.py       # Notification CRUD + preferences + push subscription
 
 app/integrations/plex.py          # Plex API client (XML parsing)
 app/integrations/uptime_kuma.py   # Uptime Kuma status page API client
@@ -33,63 +35,57 @@ app/integrations/sonarr.py        # Sonarr API client (calendar, upcoming episod
 app/integrations/radarr.py        # Radarr API client (calendar, upcoming movies)
 app/integrations/netdata.py       # Netdata API client (CPU%, RAM%, network MB/s, uptime, hostname)
 
-app/static/login.html        # Login page
+app/static/login.html        # Login page (multi-auth: simple, Plex OAuth, Authentik OIDC)
 app/static/index.html        # Main dashboard
-app/static/settings.html      # Integrations (accordion), System, Customization (icons, theme, labels), News tabs
+app/static/settings.html     # Integrations (accordion), System, Customization (icons, theme, labels), News tabs
+app/static/requests.html     # Overseerr iframe embed (optional)
+app/static/requests2.html    # Native media request page
+app/static/issues.html       # Issue reporting and tracking
+app/static/calendar.html     # Combined Radarr + Sonarr calendar
 
-uploads/                      # Uploaded assets (logos) — volume-mounted, persists across rebuilds
-docker-compose.yml            # 5 containers (all active: hms-dashboard, redis, authentik-server, authentik-worker, postgresql)
+uploads/                      # Uploaded assets (logos) -- volume-mounted, persists across rebuilds
+docker-compose.yml            # 2 containers: webservarr + redis
+docker-compose.authentik.yml  # Optional Authentik overlay (3 additional containers)
 Dockerfile                    # Python 3.11-slim image
 requirements.txt              # Python dependencies
 .env                          # Secrets (not in git)
 data/hms.db                   # SQLite database (not in git)
 
 docs/app-contract.md          # Single source of truth: pages, endpoints, models, auth
-docs/setup.md                 # Deployment and operations guide
+docs/setup.md                 # Installation and operations guide
 ```
 
 ## Development Workflow
 
-Files live on the Linode VPS at `/root/hms-dashboard` and are mounted locally via SSHFS directly to `~/Dropbox/ClaudeCode/hms-dashboard`. Edits here are live on the VPS when the mount is active.
-
-**SSH host alias:** `webserver` (configured in `~/.ssh/config`)
-**Connection script:** `/home/jordan/bin/webserver` (interactive connect/disconnect)
-**SSH key:** `/home/jordan/Dropbox/Shared/WebServerOpenSSH`
-
 ```bash
-# Connect and mount (interactive, prompts for passphrase + 2FA)
-webserver
-
 # Rebuild container after code changes
-ssh webserver "cd /root/hms-dashboard && docker compose up -d --build hms-dashboard"
+docker compose up -d --build webservarr
 
 # View logs
-ssh webserver "cd /root/hms-dashboard && docker compose logs -f hms-dashboard"
+docker compose logs -f webservarr
 
 # Check container status
-ssh webserver "cd /root/hms-dashboard && docker compose ps"
+docker compose ps
 
 # Enter container shell
-ssh webserver "cd /root/hms-dashboard && docker compose exec hms-dashboard /bin/bash"
+docker compose exec webservarr /bin/bash
 ```
 
 ## Conventions
 
 - **Backend:** Python with type hints. FastAPI dependency injection for auth. SQLAlchemy ORM models.
 - **Frontend:** No build step. Vanilla JS with `fetch()` API calls. Tailwind CSS from CDN. Material Design Icons.
-- **Auth:** Plex OAuth via Authentik OIDC (primary) + simple username/password (toggleable fallback via `features.show_simple_auth` setting). bcrypt hashing via passlib. Sessions stored in Redis with auth_method tracking ("oidc" or "simple").
+- **Auth:** Three methods: simple (username/password, toggleable via `features.show_simple_auth`), direct Plex OAuth (PIN-based, same as Overseerr/Tautulli), Authentik OIDC (Plex via Authentik). bcrypt hashing via passlib. Sessions stored in Redis with `auth_method` tracking ("simple", "plex", or "oidc").
 - **Content safety:** bleach for HTML sanitization on news content. Security headers middleware in `main.py`.
-- **External APIs:** httpx with 5-second timeout. Proxy pattern: browser → FastAPI endpoint → external service.
+- **External APIs:** httpx with 5-second timeout (10s for Plex). Proxy pattern: browser -> FastAPI endpoint -> external service.
 
 ## Known Issues
 
-- Authentik end-session doesn't auto-redirect back to login page (upstream issue, PR goauthentik/authentik#20011 will fix)
-- Authentik Plex source uses a popup for Plex auth — mobile browsers may block the popup (inherent to Authentik's Plex integration, cannot be changed to redirect)
+- Authentik end-session doesn't auto-redirect back to login page (upstream issue)
+- Authentik Plex source uses a popup for Plex auth -- mobile browsers may block it
 - Plex active streams has a float-as-int parsing bug (minor, pre-existing in `plex.py`)
 - Default admin password (`admin123`) should be changed for production
-- Startup can hit "table already exists" on rebuild if SQLite DB file already exists (container auto-recovers on restart)
-- Frontend HTML does not match the Stitch UI designs in `brand-assets/` (future redesign work)
-- Sidebar responsive but mobile layout could be refined further
+- Startup can hit "table already exists" on rebuild if SQLite DB file already exists (auto-recovers on restart)
 
 ---
 
@@ -99,23 +95,22 @@ Design reference files live in `brand-assets/` at the repo root.
 
 ```
 brand-assets/
-├── HMServer Logo.png                          # Project logo
-├── Color Palette/
-│   ├── palette.txt                            # HEX, HSL, RGB, CSV, XML, JSON formats
-│   └── palette.scss                           # SCSS variables + CSS gradients
-└── Google Stitch UI Design/
-    ├── Login - Desktop/
-    │   ├── code.html                          # Stitch HTML export
-    │   └── screen.png                         # Design screenshot
-    ├── Login - Mobile/
-    │   ├── code.html
-    │   └── screen.png
-    ├── Homepage Dashboard - Desktop/
-    │   ├── code.html
-    │   └── screen.png
-    └── Homepage Dashboard - Mobile/
-        ├── code.html
-        └── screen.png
++-- Color Palette/
+|   +-- palette.txt                            # HEX, HSL, RGB, CSV, XML, JSON formats
+|   +-- palette.scss                           # SCSS variables + CSS gradients
++-- Google Stitch UI Design/
+    +-- Login - Desktop/
+    |   +-- code.html                          # Stitch HTML export
+    |   +-- screen.png                         # Design screenshot
+    +-- Login - Mobile/
+    |   +-- code.html
+    |   +-- screen.png
+    +-- Homepage Dashboard - Desktop/
+    |   +-- code.html
+    |   +-- screen.png
+    +-- Homepage Dashboard - Mobile/
+        +-- code.html
+        +-- screen.png
 ```
 
 **Color Palette:**
@@ -130,25 +125,26 @@ brand-assets/
 **Rules for UI work:**
 - Always reference `brand-assets/Color Palette/palette.scss` for color values
 - Use Stitch HTML exports as the design target, not the current frontend HTML
-- Do not invent new visual directions — stay within the brand assets unless explicitly asked otherwise
+- Do not invent new visual directions -- stay within the brand assets unless explicitly asked otherwise
 - Read the Stitch `screen.png` screenshots to understand intended layout before writing HTML
 
 ---
 
 ## Project Phases
 
-**Current phase: 7**
+**Current phase: 8**
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 0 | Documentation & Tooling | Complete |
-| 1 | Auth & Plex Integration | Complete |
+| 0 | Documentation and Tooling | Complete |
+| 1 | Auth and Plex Integration | Complete |
 | 2 | Frontend Rebuild | Complete |
 | 3 | Uptime Kuma Integration | Complete |
 | 4 | Overseerr Integration | Complete |
-| 5 | Radarr & Sonarr Calendar | Complete |
+| 5 | Radarr and Sonarr Calendar | Complete |
 | 6 | In-App Notifications + Browser Push | Complete |
-| 7 | Hardening & Release | **Next** |
+| 7 | Hardening and Release | Complete |
+| 8 | Security Hardening | **Next** |
 
 See VISION.md for detailed phase descriptions.
 
@@ -156,14 +152,14 @@ See VISION.md for detailed phase descriptions.
 
 ## Subagent Catalog
 
-Use these Task agent descriptions when delegating work. Always use `subagent_type` as specified. Each subagent has a defined boundary — respect it.
+Use these Task agent descriptions when delegating work. Always use `subagent_type` as specified. Each subagent has a defined boundary -- respect it.
 
 ### Docker/Deploy (`subagent_type: "Bash"`)
 
-**Use for:** Rebuilding containers, checking logs, verifying container state, SSH commands to VPS.
+**Use for:** Rebuilding containers, checking logs, verifying container state.
 
 **Prompt template:**
-> You are working on the HMS Dashboard project deployed on a Linode VPS accessible via `ssh webserver`. The project is at `/root/hms-dashboard` on the VPS. Docker Compose manages the containers. The active containers are `hms-dashboard` and `redis` (the authentik containers exist but are not actively used). Task: [describe task]
+> You are working on the WebServarr project. Docker Compose manages the containers. The active containers are `webservarr` and `redis`. Optional Authentik containers can be added via `docker-compose.authentik.yml`. Task: [describe task]
 
 ---
 
@@ -174,9 +170,9 @@ Use these Task agent descriptions when delegating work. Always use `subagent_typ
 **Boundary:** Only edits Python files in `app/` and `requirements.txt`. Never touches HTML/JS files.
 
 **Prompt template:**
-> You are building and debugging backend functionality for the HMS Dashboard, a FastAPI application. The project root is `/home/jordan/Dropbox/ClaudeCode/hms-dashboard`.
+> You are building and debugging backend functionality for WebServarr, a FastAPI application.
 >
-> **Key files:** `app/main.py` (app setup, middleware), `app/routers/simple_auth.py` (login), `app/dependencies.py` (auth checks), `app/auth.py` (session manager), `app/config.py` (settings), `app/models.py` (DB models), `app/database.py` (SQLAlchemy setup).
+> **Key files:** `app/main.py` (app setup, middleware), `app/routers/simple_auth.py` (simple login), `app/routers/plex_auth.py` (direct Plex OAuth), `app/routers/auth.py` (Authentik OIDC), `app/dependencies.py` (auth checks), `app/auth.py` (session manager), `app/config.py` (settings), `app/models.py` (DB models), `app/database.py` (SQLAlchemy setup).
 >
 > **Current API surface:** Read `docs/app-contract.md` for all existing endpoints, models, and auth dependencies.
 >
@@ -184,7 +180,7 @@ Use these Task agent descriptions when delegating work. Always use `subagent_typ
 > - FastAPI dependency injection for auth (`get_current_user`, `require_admin` from `app/dependencies.py`)
 > - SQLAlchemy ORM models in `app/models.py`
 > - Integration clients in `app/integrations/` using httpx with 5-second timeout
-> - Proxy pattern: browser → FastAPI endpoint → external service
+> - Proxy pattern: browser -> FastAPI endpoint -> external service
 > - bleach for HTML sanitization on user content
 > - Settings stored as key-value pairs in the `settings` table
 >
@@ -192,7 +188,7 @@ Use these Task agent descriptions when delegating work. Always use `subagent_typ
 >
 > **After making changes:** Update `docs/app-contract.md` to reflect any new or modified endpoints, models, or auth requirements.
 >
-> To rebuild and test: `ssh webserver "cd /root/hms-dashboard && docker compose up -d --build hms-dashboard"`
+> To rebuild and test: `docker compose up -d --build webservarr`
 >
 > Task: [describe task]
 
@@ -205,9 +201,9 @@ Use these Task agent descriptions when delegating work. Always use `subagent_typ
 **Boundary:** Only edits files in `app/static/`. Never touches Python files.
 
 **Prompt template:**
-> You are building and debugging frontend pages for the HMS Dashboard. The project root is `/home/jordan/Dropbox/ClaudeCode/hms-dashboard`.
+> You are building and debugging frontend pages for WebServarr.
 >
-> **Key files:** All pages are vanilla HTML+JS in `app/static/`: `login.html` (login form, posts to `/auth/simple-login`), `index.html` (dashboard, polls integration endpoints every 30s), `settings.html` (services/integrations/system/theme/news tabs).
+> **Key files:** All pages are vanilla HTML+JS in `app/static/`: `login.html` (login form with simple auth + Plex OAuth + Authentik OIDC), `index.html` (dashboard, polls integration endpoints every 30s), `settings.html` (services/integrations/system/customization/news tabs).
 >
 > **Design reference:** Read the Stitch UI design exports in `brand-assets/Google Stitch UI Design/` for the target layout. Read `brand-assets/Color Palette/palette.scss` for color values. The brand colors are: Baltic Blue (#125793), Cornflower Ocean (#2C6DA1), Steel Blue (#4684B0), Frosted Blue (#BEEEF4), Black (#000000).
 >
@@ -219,13 +215,13 @@ Use these Task agent descriptions when delegating work. Always use `subagent_typ
 >
 > **Boundary:** Only edit files in `app/static/`. Do not modify any Python files.
 >
-> You have access to Chrome DevTools MCP tools (prefixed `mcp__chrome-devtools__`) to inspect and verify the live site at `https://dev.hmserver.tv`:
-> - `take_snapshot` — get a text snapshot of the page DOM (prefer this over screenshots)
-> - `take_screenshot` — capture a visual screenshot
-> - `list_console_messages` — check for JS errors
-> - `list_network_requests` / `get_network_request` — inspect fetch calls and API responses
-> - `navigate_page` — load a specific page (url type with full URL)
-> - `click`, `fill`, `press_key` — interact with page elements using uid from snapshot
+> You have access to Chrome DevTools MCP tools (prefixed `mcp__chrome-devtools__`) to inspect and verify the live site:
+> - `take_snapshot` -- get a text snapshot of the page DOM (prefer this over screenshots)
+> - `take_screenshot` -- capture a visual screenshot
+> - `list_console_messages` -- check for JS errors
+> - `list_network_requests` / `get_network_request` -- inspect fetch calls and API responses
+> - `navigate_page` -- load a specific page (url type with full URL)
+> - `click`, `fill`, `press_key` -- interact with page elements using uid from snapshot
 >
 > Task: [describe task]
 
@@ -236,17 +232,17 @@ Use these Task agent descriptions when delegating work. Always use `subagent_typ
 **Use for:** Testing API endpoints via curl or browser, verifying auth flow end-to-end, checking response codes and payloads, interacting with the live UI.
 
 **Prompt template:**
-> You are testing the HMS Dashboard API and UI. The app runs at `https://dev.hmserver.tv` (production via Cloudflare Tunnel) or `http://localhost:8000` (direct container access on VPS via `ssh webserver`). Auth flow: POST `/auth/simple-login` with JSON `{"username":"admin","password":"admin123"}` to get a session cookie, then include that cookie in subsequent requests.
+> You are testing the WebServarr API and UI. The app runs at `http://localhost:8000`. Auth flow: POST `/auth/simple-login` with JSON `{"username":"admin","password":"admin123"}` to get a session cookie, then include that cookie in subsequent requests.
 >
 > You have two ways to test:
-> 1. **curl via SSH** — `ssh webserver "curl ..."` for direct API testing against localhost:8000
-> 2. **Chrome DevTools MCP tools** (prefixed `mcp__chrome-devtools__`) for browser-based testing against dev.hmserver.tv:
->    - `navigate_page` — load pages (url type with full URL)
->    - `take_snapshot` — get page DOM as text (prefer over screenshots)
->    - `take_screenshot` — capture visual state
->    - `fill` / `click` / `press_key` — interact with form elements using uid from snapshot
->    - `list_console_messages` — check for JS errors
->    - `list_network_requests` / `get_network_request` — inspect API calls and responses
+> 1. **curl** -- `curl http://localhost:8000/...` for direct API testing
+> 2. **Chrome DevTools MCP tools** (prefixed `mcp__chrome-devtools__`) for browser-based testing:
+>    - `navigate_page` -- load pages (url type with full URL)
+>    - `take_snapshot` -- get page DOM as text (prefer over screenshots)
+>    - `take_screenshot` -- capture visual state
+>    - `fill` / `click` / `press_key` -- interact with form elements using uid from snapshot
+>    - `list_console_messages` -- check for JS errors
+>    - `list_network_requests` / `get_network_request` -- inspect API calls and responses
 >
 > Task: [describe task]
 
@@ -257,7 +253,7 @@ Use these Task agent descriptions when delegating work. Always use `subagent_typ
 **Use for:** Read-only review and auditing. Comparing the live frontend against Stitch design exports. Verifying `docs/app-contract.md` matches the actual codebase. Identifying visual differences or documentation drift. Never edits any files.
 
 **Prompt template:**
-> You are reviewing the HMS Dashboard codebase. The project root is `/home/jordan/Dropbox/ClaudeCode/hms-dashboard`.
+> You are reviewing the WebServarr codebase.
 >
 > **Design source:** Stitch UI exports in `brand-assets/Google Stitch UI Design/`. Each subfolder has a `code.html` (design HTML) and `screen.png` (design screenshot). Read the screenshots to understand the intended visual layout.
 >
@@ -270,10 +266,10 @@ Use these Task agent descriptions when delegating work. Always use `subagent_typ
 > 4. Read `app/static/` filenames and verify the pages table is accurate
 > 5. Check `app/integrations/` files and verify the integration client status column is accurate
 >
-> You have access to Chrome DevTools MCP tools (prefixed `mcp__chrome-devtools__`) to inspect the live site at `https://dev.hmserver.tv`:
-> - `take_screenshot` — capture current visual state
-> - `take_snapshot` — get DOM structure
-> - `navigate_page` — load specific pages
+> You have access to Chrome DevTools MCP tools (prefixed `mcp__chrome-devtools__`) to inspect the live site:
+> - `take_screenshot` -- capture current visual state
+> - `take_snapshot` -- get DOM structure
+> - `navigate_page` -- load specific pages
 >
 > **Output:** Report findings organized by topic. For design reviews, describe what the design shows vs what the live site shows. For contract audits, report any drift (missing/extra endpoints, auth mismatches, model field mismatches).
 >

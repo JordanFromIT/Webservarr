@@ -1,151 +1,158 @@
-# HMS Dashboard - Vision and Project Plan
+# WebServarr - Vision and Project Plan
 
 ## Project Purpose
 
-Create a single web portal for Plex media server administration. The portal provides:
-- A homepage/dashboard showing:
-    - Live Plex streams: Similar to what the plex admin dashboard shows.
-    - Service health: Using Uptime Kuma, show the current status of specific services.
-    - A news system: Announcements and maintenance notices for the plex media server and related services.
-- The project is designed for long-term maintainability by a single administrator, high performance on modest hardware, and strong security practices.
-- There should be settings pages for all the necessary API integrations with the other containerized services I offer.
-- When we are complete I should be able to put this on github and share it so that anyone with similar contianers can configure it how they want and use it. Nothing should be hardcoded into that should be a variable; things like logos, branding, plex api, radarr api, etc.
-## Original Design Decisions
+A self-hosted web portal for Plex media server administration. The portal provides:
+- A homepage/dashboard showing live Plex streams, service health via Uptime Kuma, system gauges via Netdata, and a news system for announcements
+- Media request management via Overseerr integration (search, request, track, report issues)
+- A combined Radarr + Sonarr release calendar
+- In-app and browser push notifications for request updates, issue responses, service changes, and news
+- Full theme engine with color pickers, fonts, logos, icons, and custom CSS
+- Three authentication methods: simple (default), direct Plex OAuth, and Authentik OIDC
+- Designed for long-term maintainability, high performance on modest hardware, and strong security practices
+- Fully configurable through the Settings UI -- nothing is hardcoded that should be a variable
 
-These decisions were made at the start of the project and still hold:
+## Design Decisions
 
 **Backend:** FastAPI (Python 3.11). Chosen for lightweight footprint, good OIDC library support, async performance, and compatibility with the Plex ecosystem.
 
-**Database:** SQLite for dashboard data (news, services, settings, users). File-based, easy to back up, performant for read-heavy single-server workloads. PostgreSQL exists in the compose file for Authentik but is not used by the dashboard.
+**Database:** SQLite for dashboard data (news, services, settings, users, notifications). File-based, easy to back up, performant for read-heavy single-server workloads.
 
 **Frontend:** Vanilla JavaScript + Tailwind CSS from CDN. No build step, no framework. Keeps things simple and avoids dependency churn.
 
-**Infrastructure:** 
-- WebServer (Linode VPS - 2GB RAM, 1 vCPU Core)
-    - Runs Cloudflare Tunnel for routing and SSL.
-    - Docker for container management.
-    - The WebServer hosts the dashboard containers and Uptime Kuma.
-- MediaServer (UNRAID Midtower 16C/32T AMD Ryzen 9 9900x)
-    - Docker for container management.
-    - Hosts the docker containers; Plex, Radarr, Sonarr, Overseerr, and other unrelated docker containers.
+**Infrastructure:** Docker Compose with two containers (webservarr + redis). Optional Authentik overlay for OIDC authentication adds three more containers (authentik-server, authentik-worker, postgresql).
 
-**Authentication (primary):** Authentik as OIDC identity provider with Plex OAuth as the login method. Users click "Sign in with Plex" on the login page, authenticate with Plex via Authentik, and the backend checks if the user's email matches the Plex server owner (admin) or is a known Plex friend (user). Sessions stored in Redis with `auth_method` tracking.
+**Authentication:** Three methods supported simultaneously:
+- Simple username/password login against SQLite (default, toggleable)
+- Direct Plex OAuth via PIN-based flow (same as Overseerr/Tautulli)
+- Plex via Authentik OIDC (advanced, for users who already run Authentik)
 
-**Authentication (fallback):** Simple username/password login against the SQLite User table with bcrypt hashing. Kept for admin access when Plex/Authentik is unavailable.
+Admin determination: checks `system.admin_email` setting first, then falls back to comparing against the Plex server owner's email.
 
 ---
 
 ## Delivery Phases
 
-### Prior work (code exists, needs revisiting)
+### Prior work (code exists, revisited in later phases)
 
-The following was built during initial development. The backend code is functional but the frontend HTML does not match the Stitch UI designs in `brand-assets/`. Each integration will be revisited in its own phase below.
+1. Repo scaffold and infrastructure -- Docker Compose, deployment tooling
+2. UI design -- Stitch design exports created (login + dashboard, desktop + mobile) and stored in `brand-assets/`
+3. Backend skeleton -- FastAPI app structure, SQLAlchemy models, Redis session management
+4. Authentication -- Database-backed login, bcrypt, session cookies, route protection, admin enforcement
+5. News system -- CRUD with rich text editor, bleach sanitization, publish/pin controls
+6. Service management -- CRUD via settings page, dashboard display
+7. Integration configuration -- Plex/Uptime Kuma/Overseerr settings with test-connection and credential masking
+8. Live dashboard -- Plex streams, Uptime Kuma health, Overseerr requests, 30-second refresh
 
-1. **Repo scaffold and infrastructure** — Docker Compose, Cloudflare Tunnel, SSHFS dev workflow
-2. **UI design** — Stitch design exports created (login + dashboard, desktop + mobile) and stored in `brand-assets/`. The current frontend HTML was built independently and does NOT implement these designs. Rebuilding the frontend to match Stitch is Phase 2.
-3. **Backend skeleton** — FastAPI app structure, SQLAlchemy models, Redis session management
-4. **Authentication** — Database-backed login (temporary), bcrypt, session cookies, route protection, admin enforcement
-5. **News system** — CRUD with custom rich text editor, bleach sanitization, publish/pin controls
-6. **Service management** — CRUD via settings page, dashboard display
-7. **Integration configuration** — Plex/Uptime Kuma/Overseerr settings with test-connection and credential masking
-8. **Live dashboard** — Plex streams, Uptime Kuma health, Overseerr requests, 30-second refresh, admin actions
+### Phase 0: Documentation and Tooling ✓
 
-### Phase 0: Documentation & Tooling ✓
-
-- Consolidated 10 markdown files into 3 root + 2 docs + 5 archive
-- Built CLAUDE.md as operator manual with 5 subagent templates
+- Consolidated documentation into structured layout
+- Built developer manual with subagent templates
 - Defined project phases 0-8
 
-### Phase 1: Auth & Plex Integration ✓
+### Phase 1: Auth and Plex Integration ✓
 
-- Configured Authentik OIDC with native Plex source (HMS-Plex)
-- Created custom "Plex Direct Login" flow for auto-redirect to Plex OAuth
+- Configured Authentik OIDC with native Plex source
 - Built OIDC callback with admin determination (Plex server owner = admin)
-- Desktop: popup-based auth flow (postMessage pattern)
-- Mobile: full-page redirect flow (detected via UA/touch/width)
+- Desktop and mobile auth flows (popup-based and full-page redirect)
 - Logout clears both dashboard and Authentik sessions
 - Session tracks auth_method (oidc/simple) and id_token for logout
 - Simple auth kept as fallback alongside Plex OAuth
 
-### Phase 2: Frontend Rebuild
+### Phase 2: Frontend Rebuild ✓
 
-- Rebuild frontend pages to match Stitch UI designs
-- Wire pages to existing backend endpoints
-- Responsive/mobile support
-- Make app configurable (no hardcoded values — logos, branding all variable)
+- Rebuilt frontend pages with responsive sidebar and theme engine
+- Domain configurability: all URLs driven by settings, no hardcoded domains
+- Public branding API for theme/colors/font/branding
+- Shared JS/CSS: theme-loader.js, auth.js, sidebar.js, theme.css
+- Mobile: hamburger drawer. Desktop: persistent sidebar.
+- Theme settings UI: color pickers, font dropdown, logo upload, custom CSS
+- Tailwind + CSS custom properties with RGB triplets for alpha support
 
-### Phase 3: Uptime Kuma Integration
+### Phase 3: Uptime Kuma Integration ✓
 
-- Deep-dive Uptime Kuma API
-- Settings page for Uptime Kuma configuration
-- Service health dashboard wiring
+- Services exclusively from Uptime Kuma monitors (no manual CRUD)
+- Monitor preferences (enabled/disabled, custom icon) stored in Settings
+- Auto-fit tile grid with selfh.st CDN icons on homepage
+- New monitors default to enabled, configurable through Settings UI
 
-### Phase 4: Overseerr Integration
+### Phase 4: Overseerr Integration ✓
 
-- Deep-dive Overseerr API
-- Settings page for Overseerr configuration
-- Request display, iframe/portal route
+- Overseerr SSO via Plex token forwarding
+- Native requests page: search TMDB, create requests, view existing with filter tabs
+- Native issues page: report issues, view list, detail modal with comments
+- Per-user Plex auth for write operations
+- Request/issue stat summary cards
+- Configurable sidebar labels and icons
 
-### Phase 5: Radarr & Sonarr Calendar Integration ✓
+### Phase 5: Radarr and Sonarr Calendar Integration ✓
 
-- Wired Radarr and Sonarr API clients (already existed in `app/integrations/`)
-- Added `start` query parameter to `/api/integrations/upcoming-releases` for month navigation
-- Built `/calendar` page: full month grid, day click detail panel, month navigation, auto-refresh
-- Homepage: compact 7-day calendar strip replacing poster card grid
+- Combined Radarr + Sonarr calendar endpoint with month navigation
+- Full calendar page: month grid, day click detail panel, auto-refresh
+- Homepage: compact 7-day grouped list with "View calendar" link
 - Configurable sidebar label and icon for Calendar nav item
-- Sonarr integration absorbed into this phase (both use same calendar endpoint)
 
-### Phase 6: In-App Notifications + Browser Push ✓
+### Phase 6: In-App Notifications and Browser Push ✓
 
-- Notification system for non-admin users: media request availability, issue responses, service up/down, news posts
-- In-app bell icon dropdown (existing top-bar bell wired up) + optional browser push notifications
-- Backend polling service: Overseerr requests/issues (60s), Uptime Kuma monitors (60s), news posts (60s) — all configurable
-- SQLite models: Notification (per-user, per-category) + PushSubscription (Web Push endpoints)
-- VAPID key auto-generation on first startup for Web Push
-- Per-user preferences: 4 category toggles (request, issue, service, news)
-- 10 API endpoints for notification CRUD, preferences, push subscribe/unsubscribe
-- Admin endpoint: send custom notifications to all users
-- Service worker (sw.js) for browser push display and click-to-navigate
-- Settings page: Notifications accordion with configurable poll intervals + test notification button
-- Dedup via reference_id + user_email + category; first-run silent seeding prevents notification flood
-- Theming was ~95% complete from Phase 2 (no additional theming work needed)
+- Notification system for all users: media request availability, issue responses, service up/down, news posts
+- In-app bell icon dropdown + optional browser push notifications (Web Push / VAPID)
+- Backend polling service with configurable intervals (default 60s)
+- SQLite models: Notification (per-user, per-category) + PushSubscription
+- VAPID key auto-generation on first startup
+- Per-user category preferences (request, issue, service, news)
+- Admin endpoint for custom broadcast notifications
+- Service worker for push display and click-to-navigate
+- Dedup via reference_id; first-run silent seeding prevents notification flood
 
-### Phase 7: Hardening & Release
+### Phase 7: Hardening and Release ✓
 
-- Rate limiting, CSP tuning
-- Automated backups, monitoring
-- Final pass for GitHub shareability
+- Rebranded from HMS Dashboard to WebServarr for open-source release
+- Direct Plex OAuth (PIN-based) as second auth method alongside Authentik OIDC
+- Three auth methods: simple (default), direct Plex OAuth, Authentik OIDC
+- Moved Authentik config from environment variables to Settings DB (configurable in UI)
+- Auto-generated SECRET_KEY on first startup (zero-config)
+- Auto-generated Plex client identifier (system.plex_client_id)
+- Docker Compose simplified to 2 containers (webservarr + redis)
+- Optional Authentik overlay (docker-compose.authentik.yml)
+- Login page updated for multi-auth with dynamic button visibility
+- Frontend rebranded: titles, service worker, manifest
+- Public-facing documentation: README, LICENSE, setup guide, API contract
+
+### Phase 8: Security Hardening
+
+- CSRF tokens for form submissions
+- Rate limiting on login and public endpoints
+- Input validation hardening
+- Dependency audit and pinning
+- Security documentation
 
 ---
 
 ## Core Principles
 
-1. **Administration and longevity** - Stable tooling, centralized management, audit trails
-2. **Customization** - Sitewide theme engine (complete — CSS custom properties, branding API, color pickers, font dropdown, logo upload, custom CSS injection)
-3. **Lightweight performance** - Minimal overhead, fast responses, simple deployment
-4. **Security** - Strong authentication, safe content handling, hardened headers
+1. **Administration and longevity** -- Stable tooling, centralized management, audit trails
+2. **Customization** -- Sitewide theme engine (CSS custom properties, branding API, color pickers, font dropdown, logo upload, custom CSS injection)
+3. **Lightweight performance** -- Minimal overhead, fast responses, simple deployment
+4. **Security** -- Strong authentication, safe content handling, hardened headers
 
 ## Security Requirements
 
-Implemented or started to impletement:
+Implemented:
 - Secure cookies (HttpOnly, Secure, SameSite=Lax)
 - HTML sanitization (bleach) for user-provided content
 - Security headers (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy)
 - No secrets in source control
 - Admin role enforcement on state-changing operations
+- Server-side page auth (302 redirect, no HTML leak)
 
 Not yet implemented:
 - CSRF tokens for form submissions
 - Rate limiting on login and public endpoints
-- Bot protection (Cloudflare Turnstile)
-- HSTS headers (would be set at Cloudflare level)
-
-## Key Risks
-
-- **Iframe compatibility:** Embedding Overseerr in an iframe may require CSP and X-Frame-Options changes on the Overseerr side.
+- Bot protection (e.g., Cloudflare Turnstile)
+- HSTS headers (typically set at reverse proxy level)
 
 ## Out of Scope
 
 - Multiple embedded services beyond Overseerr
-- Public user registration (beyond Plex OAuth, when implemented)
+- Public user registration (beyond Plex OAuth)
 - Full ticketing or support system
