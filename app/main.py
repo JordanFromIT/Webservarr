@@ -15,7 +15,7 @@ from app.config import settings
 from app.database import init_db, SessionLocal
 from app.auth import session_manager
 from app.seed import seed_secret_key
-from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, branding, notifications
+from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications
 from app.services.notification_poller import start_poller, stop_poller
 
 # Configure logging
@@ -142,6 +142,7 @@ async def add_security_headers(request: Request, call_next):
 # Include routers
 app.include_router(simple_auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(oidc_auth.router, prefix="/auth", tags=["OIDC Authentication"])
+app.include_router(plex_auth.router, prefix="/auth", tags=["Plex Authentication"])
 app.include_router(news.router, prefix="/api/news", tags=["News"])
 app.include_router(status.router, prefix="/api/status", tags=["Status"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])

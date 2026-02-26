@@ -146,6 +146,7 @@ class SessionManager:
             "auth_method": str(user_data.get("auth_method", "simple")),
             "id_token": str(user_data.get("id_token", "")),
             "plex_token": str(user_data.get("plex_token", "")),
+            "avatar_url": str(user_data.get("avatar_url", "")),
         }
 
         await redis.hset(session_key, mapping=mapping)
