@@ -577,3 +577,36 @@ async def create_issue_comment(db: Session, plex_token: str, issue_id: int, mess
     except Exception as e:
         logger.error("Overseerr create comment error: %s", str(e))
         return {"success": False, "error": str(e)}
+
+
+async def get_backdrops(db: Session) -> list:
+    """
+    Fetch trending backdrop image URLs via Overseerr's /api/v1/backdrops endpoint.
+    Returns list of full TMDB image URLs. Empty list on failure.
+    """
+    config = _get_config(db)
+    if not config["url"] or not config["api_key"]:
+        return []
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.get(
+                f"{config['url']}/api/v1/backdrops",
+                headers={"X-Api-Key": config["api_key"]},
+            )
+            if resp.status_code != 200:
+                logger.warning("Overseerr backdrops returned HTTP %d", resp.status_code)
+                return []
+
+            paths = resp.json()
+            if not isinstance(paths, list):
+                return []
+
+            return [
+                f"https://image.tmdb.org/t/p/original{p}"
+                for p in paths
+                if isinstance(p, str) and p.startswith("/")
+            ]
+    except Exception as e:
+        logger.debug("Failed to fetch Overseerr backdrops: %s", str(e))
+        return []

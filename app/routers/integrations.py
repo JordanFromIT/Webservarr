@@ -41,6 +41,20 @@ async def plex_thumbnail(
     return Response(content=content, media_type=content_type, headers={"Cache-Control": "public, max-age=3600"})
 
 
+@router.get("/backgrounds")
+async def get_backgrounds(db: Session = Depends(get_db)):
+    """
+    Get TMDB trending backdrop URLs for login page.
+    No auth required — login page is pre-authentication.
+    Returns empty list if Overseerr is not configured or feature is disabled.
+    """
+    from app.models import Setting
+    flag = db.query(Setting).filter(Setting.key == "features.login_backgrounds").first()
+    if flag and flag.value == "false":
+        return []
+    return await overseerr.get_backdrops(db)
+
+
 # --- Uptime Kuma Endpoints ---
 
 def _get_monitor_preferences(db: Session, monitor_id: int) -> dict:

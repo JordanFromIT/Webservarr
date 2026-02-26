@@ -32,11 +32,24 @@
       backdrop-filter: blur(12px);
       border: 1px solid rgba(var(--color-accent) / 0.15);
     }
+    .backdrop-slide {
+      position: absolute;
+      inset: 0;
+      background-size: cover;
+      background-position: center;
+      transition: opacity 1.5s ease-in-out;
+      will-change: opacity;
+    }
 </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark font-display min-h-screen relative flex flex-col overflow-hidden">
+<!-- Dynamic Backdrop Slideshow (hidden until JS loads images) -->
+<div id="backdropSlideshow" class="fixed inset-0 z-0 hidden">
+  <div id="backdropA" class="backdrop-slide opacity-0"></div>
+  <div id="backdropB" class="backdrop-slide opacity-0"></div>
+</div>
 <!-- Cinematic Background Grid -->
-<div class="fixed inset-0 z-0">
+<div id="staticPosterGrid" class="fixed inset-0 z-0">
 <div class="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 p-2 opacity-40 scale-105">
 <!-- Mock Poster Grid -->
 <div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Cinematic movie poster with dark tones" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuC-NJLm2diyC0QuEwBJiAB-5wFPp4mFMaDagdY2nBoBggz8Wle34LBWrn-fNxnsM0FlPdwxhMDWOHb39mUBZE03QfQm0BW7qNVk8ilsNO-AAt1frflEPCXzezvBWVA9pzhqZvzA8LQ3kJnfsOeAZZI0R4lW3wF7-MGKDBhMstzBudWJtWVDweY1CpvknLxLKd2Mlv4KLo61iCl5ztb6zTf0cQdR3jX0VkVl2Ul7_QpzQR4KFg7Q4DWfbwY0w-nKVCst2ZIZil6NgbM')"></div>
@@ -124,6 +137,76 @@
 <script>
 // HMS Dashboard - Login Logic
 document.addEventListener('DOMContentLoaded', async function() {
+    // --- Rotating TMDB Backgrounds ---
+    (async function() {
+        try {
+            var resp = await fetch('/api/integrations/backgrounds');
+            if (!resp.ok) return;
+            var urls = await resp.json();
+            if (!Array.isArray(urls) || urls.length === 0) return;
+
+            // Shuffle the array
+            for (var i = urls.length - 1; i > 0; i--) {
+                var j = Math.floor(Math.random() * (i + 1));
+                var tmp = urls[i]; urls[i] = urls[j]; urls[j] = tmp;
+            }
+
+            var slideshow = document.getElementById('backdropSlideshow');
+            var slideA = document.getElementById('backdropA');
+            var slideB = document.getElementById('backdropB');
+            var staticGrid = document.getElementById('staticPosterGrid');
+            var currentIndex = 0;
+            var activeSlide = 'A';
+
+            // Preload an image and return a promise
+            function preload(url) {
+                return new Promise(function(resolve, reject) {
+                    var img = new Image();
+                    img.onload = function() { resolve(url); };
+                    img.onerror = function() { reject(); };
+                    img.src = url;
+                });
+            }
+
+            // Load first image
+            var firstUrl = urls[0];
+            await preload(firstUrl);
+
+            // Hide static grid, show slideshow
+            if (staticGrid) staticGrid.style.display = 'none';
+            slideshow.classList.remove('hidden');
+            slideA.style.backgroundImage = 'url(' + firstUrl + ')';
+            slideA.style.opacity = '1';
+            currentIndex = 1;
+
+            // Rotate every 10 seconds
+            setInterval(async function() {
+                if (urls.length < 2) return;
+                var nextUrl = urls[currentIndex % urls.length];
+                currentIndex++;
+
+                try {
+                    await preload(nextUrl);
+                } catch(e) { return; }
+
+                if (activeSlide === 'A') {
+                    slideB.style.backgroundImage = 'url(' + nextUrl + ')';
+                    slideB.style.opacity = '1';
+                    slideA.style.opacity = '0';
+                    activeSlide = 'B';
+                } else {
+                    slideA.style.backgroundImage = 'url(' + nextUrl + ')';
+                    slideA.style.opacity = '1';
+                    slideB.style.opacity = '0';
+                    activeSlide = 'A';
+                }
+            }, 10000);
+
+        } catch(e) {
+            // Fetch failed — static grid stays visible
+        }
+    })();
+
     // Apply branding from theme
     var theme = window.HMS_THEME || {};
     if (theme.app_name) {

@@ -10,7 +10,7 @@ Last verified: 2026-02-25
 
 | Path | HTML File | Auth | Description |
 |------|-----------|------|-------------|
-| `/login` | `app/static/login.html` | None | Login form (simple auth + Plex OAuth). Branding from theme engine. |
+| `/login` | `app/static/login.html` | None | Login form (simple auth + Plex OAuth). Branding from theme engine. Rotating TMDB backdrop slideshow (via Overseerr `/api/v1/backdrops`). Falls back to static poster grid. |
 | `/` | `app/static/index.html` | Session | Main dashboard. Plex streams (quality warnings, "More info" expander), service status, news. |
 | `/settings` | `app/static/settings.html` | Session (admin) | Four tabs: Integrations (accordion with Plex/Kuma/Overseerr/Sonarr/Radarr/Netdata), System, Customization (icon picker, theme, sidebar labels), News. |
 | `/requests` | `app/static/requests.html` | Session | Overseerr iframe embed with Plex SSO. Calls re-auth before loading iframe. |
@@ -166,6 +166,7 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 | GET | `/api/integrations/issues/{id}` | Session | Single issue with comments |
 | POST | `/api/integrations/issues` | Session | Create issue (per-user Plex auth). Body: issueType (1-4), message, mediaId |
 | POST | `/api/integrations/issues/{id}/comment` | Session | Add comment to issue (per-user Plex auth). Body: message |
+| GET | `/api/integrations/backgrounds` | None | TMDB trending backdrop URLs for login page (via Overseerr). Empty list if disabled or unavailable. |
 | GET | `/api/integrations/upcoming-releases` | Session | Upcoming TV/movie releases from Sonarr/Radarr (days, start params) |
 
 ### Health
@@ -212,6 +213,7 @@ Stored in `settings` table, seeded on first startup:
 | `theme.custom_css` | `""` | Custom CSS injected on all pages |
 | `features.show_requests` | `false` | Show Overseerr iframe Requests page in sidebar |
 | `features.show_simple_auth` | `true` | Show username/password login form. When `"false"`, hides form and backend rejects `/auth/simple-login` with 403. |
+| `features.login_backgrounds` | `true` | Show rotating TMDB backgrounds on login page (requires Overseerr) |
 | `sidebar.label_home` | `Home` | Sidebar label for Home page |
 | `sidebar.label_requests` | `Requests` | Sidebar label for Requests iframe page |
 | `sidebar.label_requests2` | `Requests` | Sidebar label for native Requests page |

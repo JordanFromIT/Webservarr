@@ -26,6 +26,7 @@ DEFAULTS = {
     # Feature flags
     "features.show_requests": "false",
     "features.show_simple_auth": "true",
+    "features.login_backgrounds": "true",
     # Sidebar labels
     "sidebar.label_home": "Home",
     "sidebar.label_requests": "Requests",
@@ -82,6 +83,7 @@ async def get_branding(db: Session = Depends(get_db)):
         "features": {
             "show_requests": get("features.show_requests") == "true",
             "show_simple_auth": get("features.show_simple_auth") == "true",
+            "login_backgrounds": get("features.login_backgrounds") == "true",
         },
         "sidebar_labels": {
             "home": get("sidebar.label_home"),

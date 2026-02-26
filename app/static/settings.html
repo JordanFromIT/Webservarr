@@ -845,15 +845,28 @@
                 <!-- Feature Flags -->
                 <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
                     <h2 class="text-xl font-bold mb-4 text-frosted-blue">Feature Flags</h2>
-                    <div class="flex items-center gap-3">
-                        <label class="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" id="featureShowSimpleAuth" class="sr-only peer" checked>
-                            <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
-                            <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
-                        </label>
-                        <div>
-                            <span class="text-sm text-frosted-blue">Enable local login</span>
-                            <p class="text-xs text-steel-blue/70 mt-0.5">Show username/password form on the login page. Disable after configuring Plex/Authentik.</p>
+                    <div class="space-y-4">
+                        <div class="flex items-center gap-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="featureShowSimpleAuth" class="sr-only peer" checked>
+                                <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                                <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm text-frosted-blue">Enable local login</span>
+                                <p class="text-xs text-steel-blue/70 mt-0.5">Show username/password form on the login page. Disable after configuring Plex/Authentik.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="featureLoginBackgrounds" class="sr-only peer" checked>
+                                <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                                <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm text-frosted-blue">Login page backgrounds</span>
+                                <p class="text-xs text-steel-blue/70 mt-0.5">Show rotating TMDB movie backgrounds on the login page. Requires Overseerr.</p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1928,6 +1941,7 @@
                 // Feature flags
                 if (data.features) {
                     document.getElementById('featureShowSimpleAuth').checked = data.features.show_simple_auth !== false;
+                    document.getElementById('featureLoginBackgrounds').checked = data.features.login_backgrounds !== false;
                 }
             } catch (e) {
                 console.error('Error loading theme settings:', e);
@@ -1986,6 +2000,11 @@
                 key: 'features.show_simple_auth',
                 value: document.getElementById('featureShowSimpleAuth').checked ? 'true' : 'false',
                 description: 'Show local username/password login on login page'
+            });
+            settings.push({
+                key: 'features.login_backgrounds',
+                value: document.getElementById('featureLoginBackgrounds').checked ? 'true' : 'false',
+                description: 'Show rotating TMDB backgrounds on login page'
             });
 
             try {
