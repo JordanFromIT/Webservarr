@@ -258,7 +258,7 @@ async def plex_callback(
         "username": username,
         "display_name": display_name,
         "email": email,
-        "is_admin": "true" if is_admin else "false",
+        "is_admin": str(is_admin).lower(),
         "auth_method": "plex",
         "plex_token": auth_token,
         "avatar_url": avatar_url,
@@ -286,16 +286,17 @@ async def plex_callback(
         overseerr_sid = await overseerr.authenticate_with_plex_token(db, auth_token)
         if overseerr_sid:
             logger.info("Overseerr SSO successful for %s (plex auth)", email)
-            parent_domain = "." + settings.app_domain.split(".", 1)[1]
-            response.set_cookie(
-                key="connect.sid",
-                value=overseerr_sid,
-                httponly=True,
-                secure=True,
-                samesite="none",
-                path="/",
-                domain=parent_domain,
-            )
+            cookie_kwargs = {
+                "key": "connect.sid",
+                "value": overseerr_sid,
+                "httponly": True,
+                "secure": True,
+                "samesite": "none",
+                "path": "/",
+            }
+            if "." in settings.app_domain:
+                cookie_kwargs["domain"] = "." + settings.app_domain.split(".", 1)[1]
+            response.set_cookie(**cookie_kwargs)
     except Exception as e:
         logger.warning("Overseerr SSO failed (non-fatal, plex auth): %s", str(e))
 
@@ -309,18 +310,22 @@ async def plex_callback_page():
     If opened in a popup: sends postMessage to opener and closes.
     If opened as redirect (no opener): redirects to login page.
     """
-    html = """<!DOCTYPE html>
+    app_origin = f"{settings.app_scheme}://{settings.app_domain}"
+    if settings.app_domain == "localhost":
+        app_origin = "http://localhost:8000"
+
+    html = f"""<!DOCTYPE html>
 <html>
-<head><title>Plex Auth</title></head>
+<head><meta charset="UTF-8"><title>Plex Auth</title></head>
 <body>
 <p>Completing authentication...</p>
 <script>
-if (window.opener) {
-    window.opener.postMessage({type: 'plex-auth-complete'}, '*');
+if (window.opener) {{
+    window.opener.postMessage({{type: 'plex-auth-complete'}}, '{app_origin}');
     window.close();
-} else {
+}} else {{
     window.location.href = '/login?plex_auth=complete';
-}
+}}
 </script>
 </body>
 </html>"""
