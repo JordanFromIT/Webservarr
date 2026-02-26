@@ -1,0 +1,82 @@
+# Optional Authentik overlay for OIDC authentication.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.authentik.yml up -d
+#
+# After starting, configure Authentik at http://localhost:9000, then add the
+# Authentik URL, Client ID, Client Secret, and App Slug in the WebServarr
+# Settings > Integrations > Authentik panel.
+#
+# Required environment variables (create a .env file):
+#   AUTHENTIK_SECRET_KEY  — generate with: openssl rand -base64 32
+#   POSTGRES_PASSWORD     — any strong password
+
+services:
+  webservarr:
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: webservarr-authentik
+    restart: unless-stopped
+    command: server
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    environment:
+      - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+      - AUTHENTIK_POSTGRESQL__HOST=postgresql
+      - AUTHENTIK_POSTGRESQL__PORT=5432
+      - AUTHENTIK_POSTGRESQL__NAME=authentik
+      - AUTHENTIK_POSTGRESQL__USER=authentik
+      - AUTHENTIK_POSTGRESQL__PASSWORD=${POSTGRES_PASSWORD}
+      - AUTHENTIK_REDIS__HOST=redis
+      - AUTHENTIK_REDIS__PORT=6379
+      - AUTHENTIK_REDIS__DB=1
+      - AUTHENTIK_ERROR_REPORTING__ENABLED=false
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    depends_on:
+      - postgresql
+      - redis
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: webservarr-authentik-worker
+    restart: unless-stopped
+    command: worker
+    environment:
+      - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+      - AUTHENTIK_POSTGRESQL__HOST=postgresql
+      - AUTHENTIK_POSTGRESQL__PORT=5432
+      - AUTHENTIK_POSTGRESQL__NAME=authentik
+      - AUTHENTIK_POSTGRESQL__USER=authentik
+      - AUTHENTIK_POSTGRESQL__PASSWORD=${POSTGRES_PASSWORD}
+      - AUTHENTIK_REDIS__HOST=redis
+      - AUTHENTIK_REDIS__PORT=6379
+      - AUTHENTIK_REDIS__DB=1
+      - AUTHENTIK_ERROR_REPORTING__ENABLED=false
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    depends_on:
+      - postgresql
+      - redis
+
+  postgresql:
+    image: postgres:15-alpine
+    container_name: webservarr-postgresql
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=authentik
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=authentik
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:
+  authentik-media:
+  authentik-templates:
