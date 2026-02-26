@@ -15,8 +15,8 @@ DEFAULT_ADMIN_PASSWORD = "admin123"
 
 # Default branding/theme settings (inserted only if missing)
 DEFAULT_SETTINGS = {
-    "branding.app_name": ("HMS Dashboard", "Application display name"),
-    "branding.tagline": ("Home Media Server Management", "Tagline shown on login page"),
+    "branding.app_name": ("WebServarr", "Application display name"),
+    "branding.tagline": ("Media Server Management", "Tagline shown on login page"),
     "branding.logo_url": ("", "URL to custom logo image"),
     "theme.color_primary": ("#125793", "Primary brand color (Baltic Blue)"),
     "theme.color_secondary": ("#2C6DA1", "Secondary brand color (Cornflower Ocean)"),
@@ -68,7 +68,7 @@ def seed_default_admin(db: Session) -> None:
     password_hash = bcrypt.hash(DEFAULT_ADMIN_PASSWORD)
     admin = User(
         username=DEFAULT_ADMIN_USERNAME,
-        email="admin@hmserver.tv",
+        email="admin@localhost",
         display_name="Admin",
         password_hash=password_hash,
         is_admin=True,

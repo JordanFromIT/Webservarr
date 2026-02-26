@@ -13,8 +13,8 @@ router = APIRouter()
 
 # Default values for all branding/theme keys
 DEFAULTS = {
-    "branding.app_name": "HMS Dashboard",
-    "branding.tagline": "Home Media Server Management",
+    "branding.app_name": "WebServarr",
+    "branding.tagline": "Media Server Management",
     "branding.logo_url": "",
     "theme.color_primary": "#125793",
     "theme.color_secondary": "#2C6DA1",

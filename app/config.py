@@ -11,14 +11,14 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Application
-    app_name: str = "HMS Dashboard"
+    app_name: str = "WebServarr"
     app_version: str = "0.1.0"
     app_env: str = "production"
     app_debug: bool = False
     app_secret_key: str = ""  # Auto-generated on first startup if not set
 
     # Domain / URL configuration
-    app_domain: str = "dev.hmserver.tv"
+    app_domain: str = "localhost"
     app_scheme: str = "https"
     cors_origins: str = ""  # Additional CORS origins (comma-separated)
     csp_frame_src: str = ""  # Additional frame-src origins (comma-separated)
@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     authentik_redirect_uri: str = ""  # Defaults to {app_url}/auth/callback if empty
 
     # Session configuration
-    session_cookie_name: str = "hms_session"
+    session_cookie_name: str = "webservarr_session"
     session_max_age: int = 604800  # 7 days in seconds
 
     # OIDC endpoints (auto-constructed from authentik_url)

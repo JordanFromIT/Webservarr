@@ -21,6 +21,8 @@ from app.services.push import send_push_to_users
 
 logger = logging.getLogger(__name__)
 
+CONTAINER_NAME = os.environ.get("CONTAINER_NAME", "webservarr")
+
 router = APIRouter()
 
 
@@ -379,7 +381,7 @@ async def restart_container(
     current_user: dict = Depends(require_admin),
 ):
     """
-    Restart the hms-dashboard container via Docker API.
+    Restart the application container via Docker API.
     Requires admin. The response may not arrive since the container restarts.
     """
     import threading
@@ -390,7 +392,7 @@ async def restart_container(
         try:
             import docker
             client = docker.from_env()
-            container = client.containers.get("hms-dashboard")
+            container = client.containers.get(CONTAINER_NAME)
             container.restart(timeout=10)
         except Exception as e:
             logger.error("Container restart failed: %s", str(e))
@@ -404,7 +406,7 @@ async def shutdown_container(
     current_user: dict = Depends(require_admin),
 ):
     """
-    Stop the hms-dashboard container via Docker API.
+    Stop the application container via Docker API.
     Requires admin. The dashboard will go offline.
     """
     import threading
@@ -415,7 +417,7 @@ async def shutdown_container(
         try:
             import docker
             client = docker.from_env()
-            container = client.containers.get("hms-dashboard")
+            container = client.containers.get(CONTAINER_NAME)
             container.stop(timeout=10)
         except Exception as e:
             logger.error("Container shutdown failed: %s", str(e))

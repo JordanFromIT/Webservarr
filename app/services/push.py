@@ -15,8 +15,6 @@ from app.models import PushSubscription, Setting
 
 logger = logging.getLogger(__name__)
 
-VAPID_CLAIMS = {"sub": "mailto:admin@hmserver.tv"}
-
 
 async def send_push_to_users(
     db: Session,
@@ -48,6 +46,11 @@ async def send_push_to_users(
         return 0
 
     vapid_private_key = priv_row.value
+
+    # Build VAPID claims from admin email in Settings (no hardcoded domain)
+    admin_email_setting = db.query(Setting).filter(Setting.key == "system.admin_email").first()
+    admin_email = admin_email_setting.value if admin_email_setting else "admin@localhost"
+    vapid_claims = {"sub": f"mailto:{admin_email}"}
 
     try:
         from pywebpush import webpush, WebPushException
@@ -94,7 +97,7 @@ async def send_push_to_users(
                 subscription_info=subscription_info,
                 data=payload,
                 vapid_private_key=vapid_private_key,
-                vapid_claims=VAPID_CLAIMS,
+                vapid_claims=vapid_claims,
             )
             success_count += 1
         except WebPushException as exc:
