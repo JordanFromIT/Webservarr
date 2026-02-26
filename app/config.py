@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     app_env: str = "production"
     app_debug: bool = False
-    app_secret_key: str  # REQUIRED - for session signing
+    app_secret_key: str = ""  # Auto-generated on first startup if not set
 
     # Domain / URL configuration
     app_domain: str = "dev.hmserver.tv"

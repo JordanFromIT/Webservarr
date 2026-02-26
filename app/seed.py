@@ -3,6 +3,7 @@ Seed the database with defaults on first startup.
 """
 
 import logging
+import secrets
 from passlib.hash import bcrypt
 from sqlalchemy.orm import Session
 from app.models import User, Setting
@@ -162,3 +163,28 @@ def seed_vapid_keys(db: Session) -> None:
     except IntegrityError:
         db.rollback()  # Another worker already generated keys
         logger.debug("VAPID keys already exist (race condition), skipping")
+
+
+def seed_secret_key(db: Session) -> str:
+    """Auto-generate SECRET_KEY on first startup and store in Settings."""
+    from sqlalchemy.exc import IntegrityError
+
+    existing = db.query(Setting).filter(Setting.key == "system.secret_key").first()
+    if existing:
+        return existing.value
+
+    key = secrets.token_hex(32)
+    setting = Setting(
+        key="system.secret_key",
+        value=key,
+        description="Auto-generated secret key for session signing",
+    )
+    db.add(setting)
+    try:
+        db.commit()
+        logger.info("Generated and stored secret key for session signing")
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(Setting).filter(Setting.key == "system.secret_key").first()
+        return existing.value if existing else key
+    return key

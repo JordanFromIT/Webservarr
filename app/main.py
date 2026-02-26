@@ -12,8 +12,9 @@ import asyncio
 import logging
 
 from app.config import settings
-from app.database import init_db
+from app.database import init_db, SessionLocal
 from app.auth import session_manager
+from app.seed import seed_secret_key
 from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, branding, notifications
 from app.services.notification_poller import start_poller, stop_poller
 
@@ -35,6 +36,15 @@ async def lifespan(app: FastAPI):
     # Initialize database
     logger.info("Initializing database...")
     init_db()
+
+    # Load or generate secret key from database
+    db = SessionLocal()
+    try:
+        secret_key = seed_secret_key(db)
+        if not settings.app_secret_key:
+            settings.app_secret_key = secret_key
+    finally:
+        db.close()
 
     # Initialize Redis connection
     await session_manager.get_redis()
