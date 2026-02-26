@@ -49,27 +49,6 @@ class Settings(BaseSettings):
     session_cookie_name: str = "webservarr_session"
     session_max_age: int = 604800  # 7 days in seconds
 
-    # OIDC endpoints (auto-constructed from authentik_url)
-    @property
-    def oidc_discovery_url(self) -> str:
-        return f"{self.authentik_url}/.well-known/openid-configuration"
-
-    @property
-    def oidc_authorize_url(self) -> str:
-        return f"{self.authentik_url}/application/o/authorize/"
-
-    @property
-    def oidc_token_url(self) -> str:
-        return f"{self.authentik_url}/application/o/token/"
-
-    @property
-    def oidc_userinfo_url(self) -> str:
-        return f"{self.authentik_url}/application/o/userinfo/"
-
-    @property
-    def oidc_logout_url(self) -> str:
-        return f"{self.authentik_url}/application/o/hms-dashboard/end-session/"
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

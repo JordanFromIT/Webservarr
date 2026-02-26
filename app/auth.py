@@ -7,21 +7,31 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client
 from fastapi import HTTPException, status
 from typing import Optional, Dict, Any
 import httpx
+import logging
 import secrets
 from app.config import settings
 import redis.asyncio as aioredis
+
+logger = logging.getLogger(__name__)
 
 
 class OIDCClient:
     """OIDC client for Authentik authentication."""
 
-    def __init__(self):
-        self.client_id = settings.authentik_client_id
-        self.client_secret = settings.authentik_client_secret
-        self.redirect_uri = settings.effective_redirect_uri
-        self.authorize_url = settings.oidc_authorize_url
-        self.token_url = settings.oidc_token_url
-        self.userinfo_url = settings.oidc_userinfo_url
+    def __init__(
+        self,
+        authentik_url: Optional[str] = None,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        redirect_uri: Optional[str] = None,
+    ):
+        base_url = authentik_url or settings.authentik_url
+        self.client_id = client_id or settings.authentik_client_id
+        self.client_secret = client_secret or settings.authentik_client_secret
+        self.redirect_uri = redirect_uri or settings.effective_redirect_uri
+        self.authorize_url = f"{base_url}/application/o/authorize/"
+        self.token_url = f"{base_url}/application/o/token/"
+        self.userinfo_url = f"{base_url}/application/o/userinfo/"
 
     async def get_authorization_url(self, state: str) -> str:
         """
@@ -221,7 +231,44 @@ class SessionManager:
 
         return False
 
+
+def get_oidc_client(db) -> Optional[OIDCClient]:
+    """Build an OIDCClient from Settings DB, falling back to env vars.
+
+    Args:
+        db: SQLAlchemy Session
+
+    Returns:
+        OIDCClient if Authentik is configured, None otherwise
+    """
+    from app.models import Setting
+
+    def get_setting(key: str) -> str:
+        s = db.query(Setting).filter(Setting.key == key).first()
+        return s.value if s else ""
+
+    url = get_setting("integration.authentik.url")
+    client_id = get_setting("integration.authentik.client_id")
+    client_secret = get_setting("integration.authentik.client_secret")
+
+    if url and client_id and client_secret:
+        logger.debug("Using Authentik config from Settings DB")
+        return OIDCClient(
+            authentik_url=url,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+
+    # Fall back to env vars for backwards compatibility
+    if settings.authentik_url and settings.authentik_client_id:
+        logger.debug("Using Authentik config from env vars (fallback)")
+        return OIDCClient()
+
+    return None
+
+
 # Global instances
-# OIDCClient is only instantiated when Authentik is configured
+# OIDCClient is only instantiated when Authentik is configured (env vars).
+# For DB-based config, use get_oidc_client(db) per-request instead.
 oidc_client = OIDCClient() if settings.authentik_url else None
 session_manager = SessionManager()

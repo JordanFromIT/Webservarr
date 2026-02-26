@@ -88,6 +88,7 @@ async def simple_login(
 
 @router.get("/logout")
 async def logout_redirect(
+    db: Session = Depends(get_db),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Logout via GET - clears session and redirects to login page.
@@ -104,13 +105,33 @@ async def logout_redirect(
             id_token = session_data.get("id_token", "")
         await session_manager.delete_session(session_id)
 
-    # If OIDC session and Authentik is configured, redirect through Authentik's
-    # end-session endpoint to clear their session too
-    if is_oidc_session and settings.authentik_url:
-        params = {"post_logout_redirect_uri": f"{settings.app_url}/login"}
-        if id_token:
-            params["id_token_hint"] = id_token
-        redirect_url = f"{settings.oidc_logout_url}?{urlencode(params)}"
+    # If OIDC session, build Authentik end-session URL from DB with env var fallback
+    if is_oidc_session:
+        authentik_url_setting = db.query(Setting).filter(
+            Setting.key == "integration.authentik.url"
+        ).first()
+        slug_setting = db.query(Setting).filter(
+            Setting.key == "integration.authentik.app_slug"
+        ).first()
+        authentik_url = (
+            authentik_url_setting.value
+            if authentik_url_setting and authentik_url_setting.value
+            else settings.authentik_url
+        )
+        slug = (
+            slug_setting.value
+            if slug_setting and slug_setting.value
+            else "webservarr"
+        )
+
+        if authentik_url:
+            logout_url = f"{authentik_url}/application/o/{slug}/end-session/"
+            params = {"post_logout_redirect_uri": f"{settings.app_url}/login"}
+            if id_token:
+                params["id_token_hint"] = id_token
+            redirect_url = f"{logout_url}?{urlencode(params)}"
+        else:
+            redirect_url = "/login"
     else:
         redirect_url = "/login"
 

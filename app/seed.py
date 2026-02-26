@@ -56,6 +56,11 @@ DEFAULT_SETTINGS = {
     "notifications.poll_interval_overseerr": ("60", "Seconds between Overseerr notification checks"),
     "notifications.poll_interval_monitors": ("60", "Seconds between Uptime Kuma notification checks"),
     "notifications.poll_interval_news": ("60", "Seconds between news post notification checks"),
+    # Authentik OIDC (overrides env vars when set)
+    "integration.authentik.url": ("", "Authentik base URL (e.g., https://auth.example.com)"),
+    "integration.authentik.client_id": ("", "Authentik OAuth2 client ID"),
+    "integration.authentik.client_secret": ("", "Authentik OAuth2 client secret"),
+    "integration.authentik.app_slug": ("", "Authentik application slug (for logout URL)"),
 }
 
 

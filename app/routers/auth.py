@@ -10,7 +10,7 @@ import secrets
 import logging
 import httpx
 
-from app.auth import oidc_client, session_manager
+from app.auth import oidc_client, session_manager, get_oidc_client
 from app.config import settings
 from app.dependencies import get_current_user
 from app.database import get_db
@@ -68,15 +68,17 @@ async def _is_plex_server_owner(email: str, db: Session) -> bool:
 
 
 @router.get("/login")
-async def oidc_login():
+async def oidc_login(db: Session = Depends(get_db)):
     """
     Initiate OIDC login flow.
     Redirects user to Authentik, which shows the Plex login option.
     """
-    if not oidc_client:
+    # Prefer DB-based config, fall back to global (env var) client
+    client = get_oidc_client(db) or oidc_client
+    if not client:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="OIDC authentication is not configured. Set AUTHENTIK_URL in environment.",
+            detail="OIDC authentication is not configured. Set Authentik settings in the UI or AUTHENTIK_URL in environment.",
         )
 
     # Generate CSRF state token
@@ -84,7 +86,7 @@ async def oidc_login():
     await session_manager.store_state(state)
 
     # Get authorization URL from OIDC client
-    auth_url = await oidc_client.get_authorization_url(state)
+    auth_url = await client.get_authorization_url(state)
 
     logger.info("OIDC login initiated, redirecting to Authentik")
     return RedirectResponse(url=auth_url)
@@ -97,6 +99,14 @@ async def oidc_callback(code: str, state: str, db: Session = Depends(get_db)):
     Handles the redirect from Authentik after Plex authentication.
     Determines admin status by checking if the user is the Plex server owner.
     """
+    # Prefer DB-based config, fall back to global (env var) client
+    client = get_oidc_client(db) or oidc_client
+    if not client:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OIDC authentication is not configured",
+        )
+
     # Verify CSRF state
     state_valid = await session_manager.verify_state(state)
     if not state_valid:
@@ -108,7 +118,7 @@ async def oidc_callback(code: str, state: str, db: Session = Depends(get_db)):
 
     try:
         # Exchange code for tokens
-        token_response = await oidc_client.exchange_code_for_token(code)
+        token_response = await client.exchange_code_for_token(code)
         access_token = token_response.get("access_token")
 
         if not access_token:
@@ -118,7 +128,7 @@ async def oidc_callback(code: str, state: str, db: Session = Depends(get_db)):
             )
 
         # Get user information from Authentik
-        userinfo = await oidc_client.get_userinfo(access_token)
+        userinfo = await client.get_userinfo(access_token)
 
         # Determine admin status: server owner = admin
         user_email = userinfo.get("email", "")
