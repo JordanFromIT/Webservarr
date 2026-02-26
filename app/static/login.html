@@ -15,6 +15,8 @@
       colors: {
         "primary": "rgb(var(--color-primary) / <alpha-value>)",
         "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
         "background-dark": "rgb(var(--color-background) / <alpha-value>)",
       },
       fontFamily: {
@@ -48,28 +50,9 @@
   <div id="backdropA" class="backdrop-slide opacity-0"></div>
   <div id="backdropB" class="backdrop-slide opacity-0"></div>
 </div>
-<!-- Cinematic Background Grid -->
+<!-- Cinematic Background Grid (fallback when TMDB slideshow not available) -->
 <div id="staticPosterGrid" class="fixed inset-0 z-0">
-<div class="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 p-2 opacity-40 scale-105">
-<!-- Mock Poster Grid -->
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Cinematic movie poster with dark tones" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuC-NJLm2diyC0QuEwBJiAB-5wFPp4mFMaDagdY2nBoBggz8Wle34LBWrn-fNxnsM0FlPdwxhMDWOHb39mUBZE03QfQm0BW7qNVk8ilsNO-AAt1frflEPCXzezvBWVA9pzhqZvzA8LQ3kJnfsOeAZZI0R4lW3wF7-MGKDBhMstzBudWJtWVDweY1CpvknLxLKd2Mlv4KLo61iCl5ztb6zTf0cQdR3jX0VkVl2Ul7_QpzQR4KFg7Q4DWfbwY0w-nKVCst2ZIZil6NgbM')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Abstract cinematic visual of a galaxy" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCyZl_wDndgFCIkcKHbHOWKBJLJsOjC36-8QVd2wxMrWulvREYz2_FAzIeAQZODYW5YzWMVBvp1N-qjd_Jg_TNr_RF08MP3lBbbAijWTvLji631ytl9Yr7AUsBGKBCdeL0-GSwCR5GRBLVGUslq-lZNk06CN_QNR9rqUUoLOeFLVdP8zblPijCLX_wLBREMdShDmYNEvsBqyfM9jqjkHWxS7BkZvaKFMoxQNteKxf0msLVQ_m9XyWv7LTlzDfI7mYXWmRT-vJlnrJ0')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Vintage film reel and projector" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuB75tG4USYP_2koOiws3e-4hnF2XMUBqIEn9W57DfcsL4YBMMnBLENlXL9Vbrbh4bxaNn03DF1rkuoW7t_rmihbpCtoG8hFC_RSJpjVxhAq65uW476t9JbLp05-e6LkzNXHl-fRteLfUPLyyOG1QqjhAH8vPI_tsHldWxAj2w8Vpb-d_8_pKYWefmiL49iPaUyTJpwfxgd-Toke9HSiprDidW7dNQFrWB53A6RL1HgIdZRb08L-tcAI2ILNLSXu2JK3jiqC95lpDZ0')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Modern sci-fi movie character poster" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDZFlh5mH4DPhhXBneH1yyKDUlJLw2Of098jjdRYscjUJGuD2Q_-lG8DTdqI2lJbU7fTvFi2-qT75GUBba5nzBLvf8NfYbrKnFl35iTCxfVUH2PE5RmspH-gyh8_vl5VOumdAr6xBzybY5iYue_u6k9u8EiCfWNKqNgBx_a3-FqVHvaVbMnp5OFzhgdLIDxGjsgCREvVzRimeqCv64CHM0Kz7YrgSI_0rdpTgtcw64M2GEu4CX_m9VPOJ9geSXTQ8z-fyeT3r575IE')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Action movie scene with explosions" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDLhp8GLKy8jnzeTpqm-kDxfEamCQ-5G-KUrHbzgFPLusmz5gcyf-5kDwq_YaSSJV0SQoOuF3JVEMW8OK2pHQehLO-4MYHx61KZhI2cSlW9hmfKRBL_ZJ2pLiODJ7r5c3JhpKEkj4BA4lHiFP2P0TKym0El20yY6C3YzbemGI9kolLvR0IF9kiU1aVGIMDkNu1TjCRKabz-UqOxkWNm8oHnEdLA9dwVCFh1S_xGSI34EmV64Ses3acyUQl_7YB1csOWpmF0gWBAqTo')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden md:block" data-alt="Classic black and white cinema scene" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDMZ3PnWg6aETwRyJcHWAs1nD_pGFaogSQZZfEMD_4Se1ONwV59ohJJRQgQtlkOcqXkwmukFxvg3ZJ2iR4bTmy2xDoX1UzKr1JkgXVq4NTMiGjj_wNS0XiS2_Db_6EW3oAbqopP8Rifk4FfMJVILEiyZPKUAICcVLl_036przzJNVVaFEjfuQ6dHG0yDGhP02ojTYlzZl-fCRLl4saHeZoEl52oCdSM9taQH_-iEQb-iF3SP0grYjvp2wk-i4cIGSWQHP5NQwTNevM')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden md:block" data-alt="Atmospheric theatre interior seats" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBUVYCI9oIJTPHpfi_mH-Q075nDwKk7N_dBeg8_TOP0Rp6Y3gK0SRH5HPWt9VXLbbHibUjS04uQFmsLoXYvnqpS6Y9dAkT-5lu5JrrA6f7rYSFX1hOt8jztPFDJhqaDza697yMhUi6i6XSwi1FTzRlc1GoK42Q-LGn4EauWaS7SGTzcn7BcKlFqFmyafmCDiRC8hI_hBLaCBBSwLMppIekkhmMVUEWoEYKqYlhwHVKWz4Xa94Jzz450804xxIzJY0gBNS6XYvad1OY')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden lg:block" data-alt="Epic landscape from a movie" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCLBL54NOD7idvkPyGPTTw-f86AnOcFLSRqeGfWAj7H_qvwrLRwet45ZxptKww6I8ux0WsSHRwL036RwLRYyJwus8e1EMF3uywC0H5FWD9yLzN1IF084f12P1JUIMTI-3Brjp9XmBXEmCWaj19t504IdgmmxWpDVJcmlGFdJU6GWCP6kAS0Os1LHdFFAJDszRWHzRfTNjAwkGyCUpy5RKaOHAoHUX72oCfwzB6XjKDNmAPZu_tIhCLKkEMi1nku1KuRwQHCz2i3BMw')"></div>
-<!-- Repeat for fuller grid effect -->
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Dark dramatic movie poster" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBLQ0E44K6LUxBrPqISKLqVNOa3CvvMldr8eQTKKMKGYUNjsN2cPDmVjoPlswWk1Cm0Sur1YXkphmEUZVmm8D6UBuHINgoqSReGHu_iwJYE2UFHxK-KmuENQATSY8erQstBnQo-pSq1kkCNv9S-O7vfC-4vIbuldKALBvICds3HoWjh9lPsxOHPeysg6D-VcyQiIyPBkJFxnwHXP4aRKmz3vCPgbaBvgcCcgE8DQ5hiPy8lBMsgMCY0YsV7a0R7qSsD6Jlw1FJpT14')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Streaming service interface concept" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAtdM7RUl45FMi675_LpGRsMLtyWqXbiLnUujcxLVz9tlsjM1_V5HpFwkFfdX7LkOgrm0TsYhNNi75xcQ_C8Cqk7c31_Ke8JtyR1NxQ5LZ_1_mXRQTb8rOGj7JkTn3WWfGJXYbHn_gAVs3A1JFCw9UydpgidTcohsxl7rKBLJSfIlY_1H8G2g6BdqQxeeOLw1E5e7kAAw7PKAZ2USQOwUiGqJdkIR5q4SsdK7Vv6nAbCwDvzSNChrtR-XV9Qa36XeEXqIerqh-hiyQ')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Movie camera close up" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCcXJDzht8adLziNrnAVPObG4jKsg0MNj8iWHwVk7dFxiDc-6Lih76h_pv6KvlkkfQzQQIphX2Cut14I0wBjpkO3PZJzbaEfRzbgZtOH9UqI0UPAFdr5kLecgoE3vITA8rPryup3lwaSJiGddQ88OFQCd8YinsngFVbB1pwWZ5JFx3cyJNGsGshbgGwQgici4jn7BcQrUKDFYLPu_K3MqkbZUrzMatXCc-4MN1OnltbsArugYzEIFVYEcCssbC5DT1DwTgOAy_gY-Q')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg" data-alt="Dramatic lighting on a face" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCopubUa5znKjYofvtsQ5UAhuVanO72hlU19ypyWs-ibPFhvq7S87WM3Lf8W7TJOVuiFxxQYlUhMAl-rQ9sS3oc-ulT_zE6okug8RVd_Ntw9tGPUWYrqChQuH7oZfdHfIlZTrOie4ankPw1ET4zKl6Y6L4AuNsFtWLBLYgFBp8XPl3s6lsa9qNmORwlRtoQASz-im-IIPdLvZSkKaF7KzjnqD91YEZTz5ZsDO3WL0jRv9FPL85NYAObVWnOOfD5yc6-pMUGmBLCQIs')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden md:block" data-alt="Futuristic neon city poster" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDDG4LBQIPKTgIanq3bANZAnPatijo40m9fwxEG-6MvmkO44mBECiMasP5MA-8Xh78lZzPSPx8lZW__uan2QUH-__1x_r5WhE_fQRutOAtJ0drREpBVLQ6EQ6zucUPfuJAQ-kKYdzA7o2yd8ipQW-2NoHhkTm1LJRxUuyRUzLLVj8a4HnvNj40zFRCmk7caiionk-8z4tZJb7LWZc6owwJOrW06y5UamEsurC9k9y7alY8SW2QWDgbdc62fHhqQ6Fp6jEEykQHF_UQ')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden md:block" data-alt="Cinematic street scene at night" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuD7JvRydleAKGGEy3DPkhLPmR6Pv2TJmJlE0t8ooWq96KgRiSrrs_1FZrBrZbpmM-mozmEbHbezHtnWyjiqyMkF1SVjV02zJIeIJIzpoA9gxSPuv_9NUHkO0xlJlEJY1XlxJZyEF1JSX1WB4nTmJZYlXzyjyrAIkcQRbN82i2dElPD3S7VU7F8biW5dqUBhclajvGcpgxBTlOFAHBFB5sSjAT0OtWEY8U1zB0ax10phbzF-9XdaCk5AfXRsQZ84JHB45jC83jBX04E')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden lg:block" data-alt="High budget sci-fi concept art" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCBIY5qTSOQpqlUWyFb1hwk31W2_zodChRD3vSDK3y8oXlsJH2hg22H7RN-mUC5DweVa2iiXsb6ZmUg0jSKO7PthqoSINxnlVEL4pD-YsrADJ9YE_oKDBM82bjSx0ZbIwNFmtDueSeqGt3ic0BCQ6ugQbAO6VoHrVh0lCCm0v4DMWRsZIRmgQvPhuGg279CO5vaZbXQzQSxm-VAbm31xKu6atvyzrSV6Lapkro0vRl7L-xM0Gh4culB-tWd-tvQ6ud7cZEMAPBF2xM')"></div>
-<div class="aspect-[2/3] bg-cover bg-center rounded-lg hidden lg:block" data-alt="Movie script and popcorn" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAJ5Oxof3W8hQ4_JtEOCfOgy8Dgvtqx76J-EdX2kalkLcbNFlBqxNoklO1xPEwylX4esE7F2D9Fv6pwVs7tuAQTAgeCyboADtVkorBj-Qdcg2HAcFJJW6pE1xCKoSWUQTimbtH263qwe_GbCE-gLcsb_u7VX6HSr2W858Jl6O2j25tSNvyT2XAC1qhVnEHIsdJfsG37P-WNVf4pRxrP1dRiM24ckEAuIZJVizwwT5Ppz446udBo2wByRu_Nm7eSiKfKHS9qGr_LWZ0')"></div>
-</div>
+    <div class="absolute inset-0 bg-gradient-to-br from-black via-baltic-blue/20 to-black"></div>
 </div>
 <!-- Dark Overlay -->
 <div class="fixed inset-0 z-10 cinematic-overlay"></div>
@@ -117,7 +100,11 @@
 </svg>
 <span>Sign in with Plex</span>
 </div>
-<span class="text-[10px] font-normal text-black/60">Redirects to Authentik for authentication</span>
+<span id="plexSubtext" class="text-[10px] font-normal text-black/60">Direct Plex authentication</span>
+</button>
+<!-- Authentik SSO Button (hidden by default, shown when configured) -->
+<button id="authentikLoginBtn" class="hidden w-full py-3 rounded-lg font-semibold text-white bg-cornflower-ocean hover:bg-steel-blue transition-colors" type="button">
+    Sign in via Authentik
 </button>
 </form>
 </div>
@@ -136,7 +123,56 @@
 
 <script>
 // HMS Dashboard - Login Logic
+
+// --- Helper: show login error message ---
+function showLoginError(msg) {
+    var errorDiv = document.getElementById('loginError');
+    if (!errorDiv) {
+        errorDiv = document.createElement('div');
+        errorDiv.id = 'loginError';
+        errorDiv.className = 'text-red-400 text-sm text-center mt-2';
+        var form = document.getElementById('loginForm');
+        if (form) form.appendChild(errorDiv);
+    }
+    errorDiv.textContent = msg;
+    setTimeout(function() { errorDiv.textContent = ''; }, 5000);
+}
+
+// --- Helper: complete Plex PIN auth (poll callback) ---
+async function completePlexAuth(pinId) {
+    try {
+        var resp = await fetch('/auth/plex-callback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin_id: pinId }),
+        });
+        if (!resp.ok) {
+            var err = await resp.json();
+            if (err.detail && err.detail.indexOf('not yet authorized') !== -1) {
+                // PIN not linked yet — retry
+                setTimeout(function() { completePlexAuth(pinId); }, 2000);
+                return;
+            }
+            throw new Error(err.detail || 'Authentication failed');
+        }
+        window.location.href = '/';
+    } catch (e) {
+        showLoginError('Plex authentication failed: ' + e.message);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
+    // --- Handle mobile return from Plex auth ---
+    var urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('plex_auth') === 'complete') {
+        var pinId = sessionStorage.getItem('plex_pin_id');
+        if (pinId) {
+            sessionStorage.removeItem('plex_pin_id');
+            completePlexAuth(parseInt(pinId, 10));
+            return; // Don't load the rest of the page
+        }
+    }
+
     // --- Rotating TMDB Backgrounds ---
     (async function() {
         try {
@@ -223,14 +259,34 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
-    // Hide simple auth form if disabled
-    if (theme.features && theme.features.show_simple_auth === false) {
+    // --- Auth method visibility ---
+    var authMethods = theme.auth_methods || {};
+
+    // Hide Plex button if not configured
+    if (!authMethods.plex) {
+        var plexBtn = document.getElementById('plexLoginBtn');
+        if (plexBtn) plexBtn.classList.add('hidden');
+    }
+
+    // Show Authentik button if configured
+    if (authMethods.authentik) {
+        var authentikBtn = document.getElementById('authentikLoginBtn');
+        if (authentikBtn) {
+            authentikBtn.classList.remove('hidden');
+            authentikBtn.addEventListener('click', function() {
+                window.location.href = '/auth/login';
+            });
+        }
+    }
+
+    // Hide simple auth form elements if disabled
+    if (!authMethods.simple) {
         var formEl = document.getElementById('loginForm');
         var children = formEl.children;
         for (var i = 0; i < children.length; i++) {
             var child = children[i];
-            // Keep the Plex button (id="plexLoginBtn"), hide everything else
-            if (child.id !== 'plexLoginBtn') {
+            // Keep SSO buttons visible, hide form inputs and dividers
+            if (child.id !== 'plexLoginBtn' && child.id !== 'authentikLoginBtn') {
                 child.style.display = 'none';
             }
         }
@@ -238,8 +294,8 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // If already authenticated, redirect to dashboard
     try {
-        const authResp = await fetch('/auth/check-session');
-        const authData = await authResp.json();
+        var authResp = await fetch('/auth/check-session');
+        var authData = await authResp.json();
         if (authData.authenticated) {
             window.location.href = '/';
             return;
@@ -247,39 +303,86 @@ document.addEventListener('DOMContentLoaded', async function() {
     } catch (e) { /* Not authenticated, show login form */ }
 
     // Handle login form submission
-    const loginForm = document.getElementById('loginForm');
+    var loginForm = document.getElementById('loginForm');
     loginForm.addEventListener('submit', async function(e) {
         e.preventDefault();
 
-        const username = document.getElementById('username').value;
-        const password = document.getElementById('password').value;
+        var username = document.getElementById('username').value;
+        var password = document.getElementById('password').value;
 
         try {
-            const response = await fetch('/auth/simple-login', {
+            var response = await fetch('/auth/simple-login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ username: username, password: password })
             });
 
-            const data = await response.json();
+            var data = await response.json();
 
             if (response.ok && data.success) {
                 // Login successful, redirect to dashboard
                 window.location.href = data.redirect || '/';
             } else {
-                alert(data.detail || 'Login failed. Please check your credentials.');
+                showLoginError(data.detail || 'Login failed. Please check your credentials.');
             }
         } catch (error) {
-            alert('Login error: ' + error.message);
+            showLoginError('Login error: ' + error.message);
         }
     });
 
-    // Plex login via Authentik OIDC — full-page redirect, no popups.
-    // Authentik auto-redirects to Plex OAuth, then back to /auth/callback.
-    document.getElementById('plexLoginBtn').addEventListener('click', function() {
-        window.location.href = '/auth/login';
+    // --- Plex login via direct PIN-based OAuth ---
+    document.getElementById('plexLoginBtn').addEventListener('click', async function() {
+        var btn = this;
+        var originalChildren = [];
+        // Save original button children (SVG + text nodes)
+        while (btn.firstChild) {
+            originalChildren.push(btn.removeChild(btn.firstChild));
+        }
+        btn.disabled = true;
+        btn.textContent = 'Connecting to Plex...';
+
+        try {
+            var resp = await fetch('/auth/plex-start', { method: 'POST' });
+            if (!resp.ok) {
+                var err = await resp.json();
+                throw new Error(err.detail || 'Failed to start Plex auth');
+            }
+            var data = await resp.json();
+
+            // Desktop: popup, Mobile: redirect
+            var isMobile = /Mobi|Android/i.test(navigator.userAgent) || window.innerWidth < 768;
+
+            if (isMobile) {
+                sessionStorage.setItem('plex_pin_id', String(data.pin_id));
+                window.location.href = data.auth_url;
+            } else {
+                var popup = window.open(data.auth_url, 'PlexAuth', 'width=800,height=600');
+                window.addEventListener('message', function handler(e) {
+                    if (e.data && e.data.type === 'plex-auth-complete') {
+                        window.removeEventListener('message', handler);
+                        if (popup && !popup.closed) popup.close();
+                        completePlexAuth(data.pin_id);
+                    }
+                });
+                // Fallback: poll in case popup closes without postMessage
+                var pollInterval = setInterval(function() {
+                    if (popup && popup.closed) {
+                        clearInterval(pollInterval);
+                        completePlexAuth(data.pin_id);
+                    }
+                }, 1000);
+            }
+        } catch (e) {
+            btn.disabled = false;
+            // Restore original button children
+            btn.textContent = '';
+            for (var i = 0; i < originalChildren.length; i++) {
+                btn.appendChild(originalChildren[i]);
+            }
+            showLoginError(e.message);
+        }
     });
 });
 </script>

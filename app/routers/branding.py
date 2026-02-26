@@ -63,9 +63,31 @@ async def get_branding(db: Session = Depends(get_db)):
     # Also fetch VAPID public key for push subscriptions
     vapid_row = db.query(Setting).filter(Setting.key == "notifications.vapid_public_key").first()
 
+    # Fetch auth-related settings for auth_methods
+    auth_keys = [
+        "integration.plex.url",
+        "integration.plex.token",
+        "integration.authentik.url",
+        "integration.authentik.client_id",
+    ]
+    auth_rows = db.query(Setting).filter(Setting.key.in_(auth_keys)).all()
+    auth_values = {row.key: row.value for row in auth_rows}
+
     # Merge DB values over defaults
     def get(key: str) -> str:
         return db_values.get(key, DEFAULTS[key])
+
+    # Check which auth methods are available
+    plex_url = auth_values.get("integration.plex.url")
+    plex_token = auth_values.get("integration.plex.token")
+    authentik_url = auth_values.get("integration.authentik.url")
+    authentik_client_id = auth_values.get("integration.authentik.client_id")
+
+    auth_methods = {
+        "simple": get("features.show_simple_auth") != "false",
+        "plex": bool(plex_url and plex_token),
+        "authentik": bool(authentik_url and authentik_client_id),
+    }
 
     return {
         "app_name": get("branding.app_name"),
@@ -106,5 +128,6 @@ async def get_branding(db: Session = Depends(get_db)):
             "section_streams": get("icon.section_streams"),
             "section_releases": get("icon.section_releases"),
         },
+        "auth_methods": auth_methods,
         "vapid_public_key": vapid_row.value if vapid_row else None,
     }
