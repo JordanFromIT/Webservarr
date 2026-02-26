@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-    <title>HMS Dashboard - Settings</title>
+    <title>WebServarr - Settings</title>
     <script src="/static/js/theme-loader.js"></script>
     <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
@@ -618,14 +618,14 @@
                                 <label class="block text-sm font-semibold text-steel-blue mb-2">Site Title</label>
                                 <input type="text" id="themeAppName"
                                     class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                                    placeholder="HMS Dashboard">
+                                    placeholder="WebServarr">
                                 <p class="text-xs text-steel-blue/70 mt-1">Shown in the sidebar, browser tab, and login page</p>
                             </div>
                             <div>
                                 <label class="block text-sm font-semibold text-steel-blue mb-2">Tagline</label>
                                 <input type="text" id="themeTagline"
                                     class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-white placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                                    placeholder="Home Media Server Management">
+                                    placeholder="Media Server Management">
                                 <p class="text-xs text-steel-blue/70 mt-1">Shown below the title on the login page</p>
                             </div>
                         </div>
@@ -1657,7 +1657,7 @@
                 var resp = await fetch('/api/admin/notifications/send', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title: 'Test notification', body: 'This is a test notification from HMS Dashboard.' }),
+                    body: JSON.stringify({ title: 'Test notification', body: 'This is a test notification from WebServarr.' }),
                 });
                 if (resp.ok) {
                     var data = await resp.json();
@@ -1714,8 +1714,8 @@
         ];
 
         const THEME_DEFAULTS = {
-            'branding.app_name': 'HMS Dashboard',
-            'branding.tagline': 'Home Media Server Management',
+            'branding.app_name': 'WebServarr',
+            'branding.tagline': 'Media Server Management',
             'branding.logo_url': '',
             'theme.color_primary': '#125793',
             'theme.color_secondary': '#2C6DA1',
@@ -2071,7 +2071,7 @@
 
                 if (resp.ok) {
                     showStatus(statusDiv, true, 'Theme saved — reload other pages to see changes');
-                    localStorage.removeItem('hms_branding');
+                    localStorage.removeItem('webservarr_branding');
                 } else {
                     var err = await resp.json();
                     showStatus(statusDiv, false, err.detail || 'Failed to save');

@@ -1,12 +1,12 @@
 /**
- * HMS Dashboard — Theme Loader
+ * WebServarr — Theme Loader
  * Loads branding/theme from /api/branding and applies CSS custom properties.
  * Include in <head> before Tailwind to prevent FOUC.
  */
 (function () {
   'use strict';
 
-  const CACHE_KEY = 'hms_branding';
+  const CACHE_KEY = 'webservarr_branding';
   const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
 
   /**
@@ -77,6 +77,14 @@
 
     // Store on window for other scripts to use
     window.HMS_THEME = data;
+
+    // Update page title with branding app_name, preserving page suffix
+    if (data.app_name) {
+      var currentTitle = document.title;
+      var dashIndex = currentTitle.indexOf(' - ');
+      var suffix = dashIndex !== -1 ? currentTitle.substring(dashIndex) : '';
+      document.title = data.app_name + suffix;
+    }
   }
 
   /**

@@ -1,5 +1,5 @@
 /**
- * HMS Dashboard — Shared Auth Utilities
+ * WebServarr — Shared Auth Utilities
  * Session check, user display, and common helpers.
  */
 

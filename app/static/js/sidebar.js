@@ -1,5 +1,5 @@
 /**
- * HMS Dashboard — Shared Sidebar Component
+ * WebServarr — Shared Sidebar Component
  * Desktop: persistent 256px sidebar.
  * Mobile (<1024px): sticky top bar with hamburger + slide-out drawer.
  *
@@ -25,7 +25,7 @@ var NAV_ITEMS = [
  */
 function _buildSidebarHTML(currentPage) {
   var theme = window.HMS_THEME || {};
-  var appName = theme.app_name || 'HMS DASHBOARD';
+  var appName = theme.app_name || 'WEBSERVARR';
   var features = theme.features || {};
   var labels = theme.sidebar_labels || {};
   var icons = theme.icons || {};

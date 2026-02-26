@@ -1,10 +1,10 @@
 /**
- * HMS Dashboard — Service Worker
+ * WebServarr — Service Worker
  * Handles push notifications and notification click events.
  */
 
 self.addEventListener('push', function(event) {
-  var payload = { title: 'HMS Dashboard', body: 'You have a new notification.', category: 'general', url: '/' };
+  var payload = { title: 'WebServarr', body: 'You have a new notification.', category: 'general', url: '/' };
 
   if (event.data) {
     try {

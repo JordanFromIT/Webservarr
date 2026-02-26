@@ -1,5 +1,5 @@
 /**
- * HMS Dashboard — Notification System
+ * WebServarr — Notification System
  * Bell icon + badge, dropdown panel, preferences modal, push subscription.
  *
  * Usage: call window.initNotifications() after checkAuth() resolves.
