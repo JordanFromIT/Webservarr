@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Notification, NewsPost, PushSubscription, Setting
+from app.models import Notification, NewsPost, PushSubscription, Setting, Ticket, TicketComment
 from app.services.push import send_push_to_users
 
 logger = logging.getLogger(__name__)
@@ -525,6 +525,122 @@ async def _poll_news(db: Session, r: aioredis.Redis, first_run: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Poll: Support tickets
+# ---------------------------------------------------------------------------
+
+async def _poll_tickets(db: Session, r: aioredis.Redis, first_run: bool) -> None:
+    """Detect admin comments and status changes on support tickets."""
+    try:
+        tickets = db.query(Ticket).all()
+    except Exception as exc:
+        logger.warning("Poller: ticket query error: %s", exc)
+        return
+
+    if not tickets:
+        return
+
+    for ticket in tickets:
+        ticket_id = ticket.id
+        current_status = ticket.status or "open"
+
+        # Count comments and find the newest admin comment
+        comments = (
+            db.query(TicketComment)
+            .filter(TicketComment.ticket_id == ticket_id)
+            .order_by(TicketComment.created_at.asc())
+            .all()
+        )
+        comment_count = len(comments)
+
+        redis_key = f"poller:ticket:{ticket_id}"
+        prev = await r.get(redis_key)
+        snapshot_val = f"{comment_count}:{current_status}"
+        await r.set(redis_key, snapshot_val)
+
+        if first_run or prev is None:
+            continue  # seed silently
+
+        prev_str = prev.decode()
+        try:
+            prev_count_str, prev_status = prev_str.split(":", 1)
+            prev_count = int(prev_count_str)
+        except (ValueError, IndexError):
+            prev_count = 0
+            prev_status = "open"
+
+        # Find the creator's email by scanning Redis sessions for their username
+        creator_username = ticket.creator_username
+        creator_email = None
+        cursor = 0
+        while True:
+            cursor, keys = await r.scan(cursor, match="session:*", count=100)
+            for key in keys:
+                data = await r.hgetall(key)
+                uname = data.get(b"username", b"")
+                uname_str = uname.decode() if isinstance(uname, bytes) else uname
+                if uname_str == creator_username:
+                    email_bytes = data.get(b"email", b"")
+                    email_str = email_bytes.decode() if isinstance(email_bytes, bytes) else email_bytes
+                    if email_str:
+                        creator_email = email_str.lower()
+                        break
+            if creator_email or cursor == 0:
+                break
+
+        if not creator_email:
+            continue
+
+        ticket_title = ticket.title or f"Ticket #{ticket_id}"
+
+        # Check for new admin comments
+        if comment_count > prev_count:
+            # Check if the newest comment is from an admin
+            newest_comment = comments[-1] if comments else None
+            if newest_comment and newest_comment.is_admin:
+                ref_id = f"ticket:{ticket_id}:comment:{comment_count}"
+                notif = _create_notification(
+                    db,
+                    creator_email,
+                    "ticket",
+                    "New response on your ticket",
+                    f"Admin replied to: {ticket_title}",
+                    ref_id,
+                )
+                if notif:
+                    db.commit()
+                    await send_push_to_users(
+                        db,
+                        [creator_email],
+                        notif.title,
+                        notif.body or "",
+                        "ticket",
+                        url="/tickets",
+                    )
+
+        # Check for status change
+        if current_status != prev_status:
+            ref_id = f"ticket:{ticket_id}:status:{current_status}"
+            notif = _create_notification(
+                db,
+                creator_email,
+                "ticket",
+                f"Ticket status updated to {current_status}",
+                f"Your ticket \"{ticket_title}\" is now {current_status}",
+                ref_id,
+            )
+            if notif:
+                db.commit()
+                await send_push_to_users(
+                    db,
+                    [creator_email],
+                    notif.title,
+                    notif.body or "",
+                    "ticket",
+                    url="/tickets",
+                )
+
+
+# ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
@@ -541,11 +657,13 @@ async def start_poller() -> None:
     first_run_overseerr = True
     first_run_monitors = True
     first_run_news = True
+    first_run_tickets = True
 
     # Track when each poller last ran (epoch seconds)
     last_overseerr = 0.0
     last_monitors = 0.0
     last_news = 0.0
+    last_tickets = 0.0
 
     while not _stop_event.is_set():
         try:
@@ -567,6 +685,9 @@ async def start_poller() -> None:
             )
             interval_news = _get_setting_int(
                 db, "notifications.poll_interval_news", DEFAULT_NEWS_INTERVAL
+            )
+            interval_tickets = _get_setting_int(
+                db, "notifications.poll_interval_tickets", DEFAULT_OVERSEERR_INTERVAL
             )
 
             # --- Overseerr ---
@@ -596,6 +717,15 @@ async def start_poller() -> None:
                 except Exception as exc:
                     logger.warning("Poller: news cycle error: %s", exc)
                 first_run_news = False
+
+            # --- Tickets ---
+            if now - last_tickets >= interval_tickets:
+                last_tickets = now
+                try:
+                    await _poll_tickets(db, r, first_run_tickets)
+                except Exception as exc:
+                    logger.warning("Poller: tickets cycle error: %s", exc)
+                first_run_tickets = False
 
         except Exception as exc:
             logger.error("Poller: unexpected error in main loop: %s", exc)

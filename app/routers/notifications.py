@@ -26,6 +26,7 @@ class PreferencesUpdate(BaseModel):
     issue: Optional[bool] = None
     service: Optional[bool] = None
     news: Optional[bool] = None
+    ticket: Optional[bool] = None
 
 
 class PushSubscribeKeys(BaseModel):
@@ -42,7 +43,7 @@ class PushSubscribeRequest(BaseModel):
 
 # --- Helpers ---
 
-NOTIFICATION_CATEGORIES = ("request", "issue", "service", "news")
+NOTIFICATION_CATEGORIES = ("request", "issue", "service", "news", "ticket")
 
 
 def _email_hash(email: str) -> str:
