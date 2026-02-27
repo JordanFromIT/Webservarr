@@ -158,3 +158,41 @@ class PushSubscription(Base):
 
     def __repr__(self):
         return f"<PushSubscription(id={self.id}, user='{self.user_email}')>"
+
+
+class Ticket(Base):
+    """Support tickets submitted by users."""
+    __tablename__ = "tickets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False)
+    category = Column(String(50), nullable=False)  # media_request, playback_issue, account_issue, feature_suggestion, other
+    status = Column(String(20), nullable=False, default="open")  # open, in_progress, resolved, closed
+    priority = Column(String(20), nullable=True)  # low, medium, high, urgent (admin-only)
+    is_public = Column(Boolean, default=False, nullable=False)
+    creator_username = Column(String(100), nullable=False, index=True)
+    creator_name = Column(String(100), nullable=False)
+    image_path = Column(String(300), nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<Ticket(id={self.id}, title='{self.title}', status='{self.status}')>"
+
+
+class TicketComment(Base):
+    """Comments on support tickets."""
+    __tablename__ = "ticket_comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, nullable=False, index=True)
+    author_username = Column(String(100), nullable=False)
+    author_name = Column(String(100), nullable=False)
+    is_admin = Column(Boolean, default=False, nullable=False)
+    message = Column(Text, nullable=False)
+    image_path = Column(String(300), nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    def __repr__(self):
+        return f"<TicketComment(id={self.id}, ticket_id={self.ticket_id})>"
