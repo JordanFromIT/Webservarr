@@ -492,8 +492,8 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
     fetch('/api/tickets/' + ticketId)
       .then(function(r) { return r.json(); })
-      .then(function(data) { renderDetailContent(data.ticket, data.comments); })
-      .catch(function() { showToast('Failed to load ticket', 'error'); closeDetailModal(); });
+      .then(function(data) { renderDetailContent(data, data.comments || []); })
+      .catch(function(err) { console.error('Detail modal error:', err); showToast('Failed to load ticket', 'error'); closeDetailModal(); });
   };
 
   window.closeDetailModal = function() {
