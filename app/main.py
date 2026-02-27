@@ -15,7 +15,7 @@ from app.config import settings
 from app.database import init_db, SessionLocal
 from app.auth import session_manager
 from app.seed import seed_secret_key
-from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications
+from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets
 from app.services.notification_poller import start_poller, stop_poller
 
 # Configure logging
@@ -149,6 +149,7 @@ app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(integrations.router, prefix="/api/integrations", tags=["Integrations"])
 app.include_router(branding.router, prefix="/api", tags=["Branding"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
+app.include_router(tickets.router, prefix="/api", tags=["Tickets"])
 
 
 # Health check endpoint
@@ -238,6 +239,17 @@ async def calendar_page(
     if not await _require_session(session_id):
         return RedirectResponse(url="/login", status_code=302)
     return _serve_page("/app/app/static/calendar.html", "Calendar page")
+
+
+# Tickets page
+@app.get("/tickets", response_class=HTMLResponse, tags=["Pages"])
+async def tickets_page(
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve the support tickets page."""
+    if not await _require_session(session_id):
+        return RedirectResponse(url="/login", status_code=302)
+    return _serve_page("/app/app/static/tickets.html", "Tickets page")
 
 
 # Settings page (admin)
