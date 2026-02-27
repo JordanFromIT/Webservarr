@@ -61,6 +61,11 @@ DEFAULT_SETTINGS = {
     "integration.authentik.client_id": ("", "Authentik OAuth2 client ID"),
     "integration.authentik.client_secret": ("", "Authentik OAuth2 client secret"),
     "integration.authentik.app_slug": ("", "Authentik application slug (for logout URL)"),
+    # Ticket system
+    "features.show_tickets": ("true", "Show Tickets page in sidebar"),
+    "sidebar.label_tickets": ("Tickets", "Sidebar label for Tickets page"),
+    "icon.nav_tickets": ("confirmation_number", "Sidebar icon for Tickets page"),
+    "notifications.poll_interval_tickets": ("60", "Seconds between ticket notification checks"),
 }
 
 
