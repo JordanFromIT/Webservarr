@@ -134,7 +134,7 @@ brand-assets/
 
 ## Project Phases
 
-**Current phase: 8**
+**Current phase: 9**
 
 | Phase | Name | Status |
 |-------|------|--------|
@@ -146,7 +146,7 @@ brand-assets/
 | 5 | Radarr and Sonarr Calendar | Complete |
 | 6 | In-App Notifications + Browser Push | Complete |
 | 7 | Hardening and Release | Complete |
-| 8 | Ticket System | **In Progress** |
+| 8 | Ticket System | Complete |
 | 9 | Security Hardening | **Next** |
 
 See VISION.md for detailed phase descriptions.
