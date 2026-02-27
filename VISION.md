@@ -118,7 +118,22 @@ Admin determination: checks `system.admin_email` setting first, then falls back 
 - Frontend rebranded: titles, service worker, manifest
 - Public-facing documentation: README, LICENSE, setup guide, API contract
 
-### Phase 8: Security Hardening
+### Phase 8: Ticket System
+
+- User support ticket system for non-admin Plex users to submit issues and feature requests
+- Ticket categories: media_request, playback_issue, account_issue, feature_suggestion, other
+- Status workflow: open -> in_progress -> resolved -> closed (admin-managed)
+- Priority levels: low, medium, high, urgent (admin-only assignment)
+- Public/private visibility toggle (admin controls which tickets are visible to all users)
+- Image attachments on tickets and comments (PNG, JPEG, WebP; 2MB max)
+- Privacy-aware: non-admin users only see their own tickets + public tickets; creator info hidden on others' public tickets
+- Admin panel: full ticket list with filters (status, category, priority, creator), bulk status/priority update, delete with cascade
+- Comment system with per-ticket threads, admin badge on admin comments
+- Notification integration: ticket status changes and new comments trigger in-app + push notifications
+- Feature flag: `features.show_tickets` setting (default: true) gates both UI and all API endpoints (403 when disabled)
+- bleach HTML sanitization on all text inputs (title, description, comments)
+
+### Phase 9: Security Hardening
 
 - CSRF tokens for form submissions
 - Rate limiting on login and public endpoints
@@ -155,4 +170,3 @@ Not yet implemented:
 
 - Multiple embedded services beyond Overseerr
 - Public user registration (beyond Plex OAuth)
-- Full ticketing or support system

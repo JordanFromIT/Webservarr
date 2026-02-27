@@ -10,7 +10,7 @@ WebServarr is a FastAPI + vanilla JS web portal for Plex media server administra
 app/main.py                  # FastAPI app, middleware, router registration
 app/config.py                # Settings from environment variables (pydantic-settings)
 app/database.py              # SQLAlchemy engine, session factory, init_db
-app/models.py                # User, NewsPost, Service, Setting, StatusUpdate, ServiceStatus, Notification, PushSubscription
+app/models.py                # User, NewsPost, Service, Setting, StatusUpdate, ServiceStatus, Notification, PushSubscription, Ticket, TicketComment
 app/seed.py                  # Default admin user + settings seeding on first startup
 app/auth.py                  # SessionManager (Redis) + OIDCClient
 app/dependencies.py          # get_current_user, require_admin dependencies
@@ -24,6 +24,7 @@ app/routers/status.py        # Public service status endpoints
 app/routers/integrations.py  # Plex, Uptime Kuma, Overseerr proxy endpoints
 app/routers/branding.py      # Public branding/theme endpoint
 app/routers/notifications.py # Notification CRUD + preferences + push subscription
+app/routers/tickets.py       # Ticket system CRUD + admin management + image uploads
 
 app/services/notification_poller.py # Background polling for notifications
 app/services/push.py               # Web Push dispatch via pywebpush
@@ -42,6 +43,7 @@ app/static/requests.html     # Overseerr iframe embed (optional)
 app/static/requests2.html    # Native media request page
 app/static/issues.html       # Issue reporting and tracking
 app/static/calendar.html     # Combined Radarr + Sonarr calendar
+app/static/tickets.html      # User support ticket system
 
 uploads/                      # Uploaded assets (logos) -- volume-mounted, persists across rebuilds
 docker-compose.yml            # 2 containers: webservarr + redis
@@ -144,7 +146,8 @@ brand-assets/
 | 5 | Radarr and Sonarr Calendar | Complete |
 | 6 | In-App Notifications + Browser Push | Complete |
 | 7 | Hardening and Release | Complete |
-| 8 | Security Hardening | **Next** |
+| 8 | Ticket System | **In Progress** |
+| 9 | Security Hardening | **Next** |
 
 See VISION.md for detailed phase descriptions.
 

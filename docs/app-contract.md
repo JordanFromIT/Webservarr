@@ -2,7 +2,7 @@
 
 Single source of truth for the WebServarr application surface. If it's not in this file, don't assume it exists.
 
-Last verified: 2026-02-26
+Last verified: 2026-02-27
 
 ---
 
@@ -17,6 +17,7 @@ Last verified: 2026-02-26
 | `/requests2` | `app/static/requests2.html` | Session | Native media request page. Search TMDB, create requests, view existing requests with poster grid and filter tabs. |
 | `/issues` | `app/static/issues.html` | Session | Report and view media issues (audio, video, subtitle). Per-user Plex auth for writes. |
 | `/calendar` | `app/static/calendar.html` | Session | Combined Radarr + Sonarr month calendar. Click day for release details. Month navigation. |
+| `/tickets` | `app/static/tickets.html` | Session | User support tickets. Submit new tickets (multipart with optional image), view own + public tickets, admin management panel. |
 
 All authenticated pages include a notification bell in the top bar that shows unread count and opens a dropdown panel for viewing/managing notifications.
 
@@ -160,6 +161,21 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 | DELETE | `/api/notifications/push-subscribe` | Session | Remove push subscriptions |
 | POST | `/api/admin/notifications/send` | Admin | Send notification to all users |
 
+### Tickets (`app/routers/tickets.py`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/tickets` | Session | List user's tickets + public tickets (filters: status, category, limit, offset) |
+| POST | `/api/tickets` | Session | Create a new ticket (multipart: title, description, category, optional image) |
+| GET | `/api/tickets/counts` | Session | Ticket counts by status (open, in_progress, resolved, closed, total) |
+| GET | `/api/tickets/{id}` | Session | Ticket detail with comments. Accessible if own ticket, public, or admin. |
+| POST | `/api/tickets/{id}/comments` | Session | Add comment to ticket (multipart: message, optional image). Only creator or admin. |
+| GET | `/api/admin/tickets` | Admin | List all tickets with filters (status, category, priority, creator) |
+| PUT | `/api/admin/tickets/{id}` | Admin | Update ticket status, priority, or visibility (JSON body) |
+| DELETE | `/api/admin/tickets/{id}` | Admin | Delete ticket + all comments + associated images |
+
+All ticket endpoints respect the `features.show_tickets` setting -- returns 403 when disabled.
+
 ### Integrations (`app/routers/integrations.py`)
 
 | Method | Path | Auth | Description |
@@ -291,6 +307,8 @@ Stored in `settings` table. Override environment variable values when non-empty.
 | ServiceStatus | service_statuses | id, service_id, status, checked_at |
 | Notification | notifications | id, user_email, category, title, body, reference_id, read, created_at |
 | PushSubscription | push_subscriptions | id, user_email, endpoint, p256dh, auth, created_at |
+| Ticket | tickets | id, title, description, category, status, priority, is_public, creator_username, creator_name, image_path, created_at, updated_at |
+| TicketComment | ticket_comments | id, ticket_id, author_username, author_name, is_admin, message, image_path, created_at |
 
 ### Notification
 
@@ -314,6 +332,36 @@ Stored in `settings` table. Override environment variable values when non-empty.
 | endpoint | Text | Push service URL |
 | p256dh | String(200) | Client key |
 | auth | String(200) | Auth secret |
+| created_at | DateTime | Auto-set |
+
+### Ticket
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | Integer | PK, auto-increment |
+| title | String(200) | |
+| description | Text | |
+| category | String(50) | media_request, playback_issue, account_issue, feature_suggestion, other |
+| status | String(20) | open, in_progress, resolved, closed (default: open) |
+| priority | String(20) | Nullable. low, medium, high, urgent (admin-only) |
+| is_public | Boolean | Default false |
+| creator_username | String(100) | Indexed |
+| creator_name | String(100) | |
+| image_path | String(300) | Nullable. Path to uploaded image |
+| created_at | DateTime | Auto-set |
+| updated_at | DateTime | Auto-set, auto-updated |
+
+### TicketComment
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | Integer | PK, auto-increment |
+| ticket_id | Integer | Indexed, references Ticket |
+| author_username | String(100) | |
+| author_name | String(100) | |
+| is_admin | Boolean | Default false |
+| message | Text | |
+| image_path | String(300) | Nullable. Path to uploaded image |
 | created_at | DateTime | Auto-set |
 
 Storage: SQLite at `/app/data/webservarr.db` (container path) / `data/webservarr.db` (host path).
