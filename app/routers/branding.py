@@ -27,12 +27,14 @@ DEFAULTS = {
     "features.show_requests": "false",
     "features.show_simple_auth": "true",
     "features.login_backgrounds": "true",
+    "features.show_tickets": "true",
     # Sidebar labels
     "sidebar.label_home": "Home",
     "sidebar.label_requests": "Requests",
     "sidebar.label_requests2": "Requests",
     "sidebar.label_issues": "Issues",
     "sidebar.label_calendar": "Calendar",
+    "sidebar.label_tickets": "Tickets",
     "sidebar.label_settings": "Settings",
     # Configurable icons
     "icon.nav_home": "home",
@@ -40,6 +42,7 @@ DEFAULTS = {
     "icon.nav_requests2": "movie",
     "icon.nav_issues": "report_problem",
     "icon.nav_calendar": "calendar_month",
+    "icon.nav_tickets": "confirmation_number",
     "icon.nav_settings": "settings",
     "icon.sidebar_logo": "settings_input_component",
     "icon.section_services": "health_metrics",
@@ -106,6 +109,7 @@ async def get_branding(db: Session = Depends(get_db)):
             "show_requests": get("features.show_requests") == "true",
             "show_simple_auth": get("features.show_simple_auth") == "true",
             "login_backgrounds": get("features.login_backgrounds") == "true",
+            "show_tickets": get("features.show_tickets") == "true",
         },
         "sidebar_labels": {
             "home": get("sidebar.label_home"),
@@ -113,6 +117,7 @@ async def get_branding(db: Session = Depends(get_db)):
             "requests2": get("sidebar.label_requests2"),
             "issues": get("sidebar.label_issues"),
             "calendar": get("sidebar.label_calendar"),
+            "tickets": get("sidebar.label_tickets"),
             "settings": get("sidebar.label_settings"),
         },
         "icons": {
@@ -121,6 +126,7 @@ async def get_branding(db: Session = Depends(get_db)):
             "nav_requests2": get("icon.nav_requests2"),
             "nav_issues": get("icon.nav_issues"),
             "nav_calendar": get("icon.nav_calendar"),
+            "nav_tickets": get("icon.nav_tickets"),
             "nav_settings": get("icon.nav_settings"),
             "sidebar_logo": get("icon.sidebar_logo"),
             "section_services": get("icon.section_services"),
