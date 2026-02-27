@@ -21,19 +21,22 @@
     request: 'movie',
     issue: 'report_problem',
     service: 'health_metrics',
-    news: 'newspaper'
+    news: 'newspaper',
+    ticket: 'confirmation_number'
   };
   var CATEGORY_URLS = {
     request: '/requests2',
     issue: '/issues',
     service: '/',
-    news: '/'
+    news: '/',
+    ticket: '/tickets'
   };
   var CATEGORY_LABELS = {
     request: 'Requests',
     issue: 'Issues',
     service: 'Service Status',
-    news: 'Announcements'
+    news: 'Announcements',
+    ticket: 'Tickets'
   };
 
   // ---- Helpers ----

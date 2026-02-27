@@ -15,6 +15,7 @@ var NAV_ITEMS = [
   { id: 'requests2', label: 'Requests2',  icon: 'movie',                 href: '/requests2' },
   { id: 'issues',    label: 'Issues',     icon: 'report_problem',        href: '/issues' },
   { id: 'calendar',  label: 'Calendar',    icon: 'calendar_month',        href: '/calendar' },
+  { id: 'tickets',  label: 'Tickets',    icon: 'confirmation_number',   href: '/tickets', feature: 'show_tickets' },
   { id: 'settings', label: 'Settings',    icon: 'settings',              href: '/settings', adminOnly: true },
 ];
 
