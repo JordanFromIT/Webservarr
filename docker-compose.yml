@@ -1,5 +1,6 @@
 services:
   webservarr:
+    image: webservarr/webservarr:latest
     build: .
     container_name: webservarr
     restart: unless-stopped
@@ -11,7 +12,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./uploads:/app/app/static/uploads
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - redis
 
