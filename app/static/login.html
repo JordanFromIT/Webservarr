@@ -62,7 +62,7 @@
 <div class="w-full max-w-[440px] login-glass-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
 <!-- Logo Section -->
 <div class="mb-8 flex flex-col items-center">
-<img id="loginLogo" alt="HMS Logo" class="h-20 w-auto object-contain border-none mb-2 hidden"/>
+<img id="loginLogo" alt="Logo" class="h-20 w-auto object-contain border-none mb-2 hidden"/>
 <h1 id="loginAppName" class="text-white text-2xl font-bold mt-4 tracking-tight text-center">WebServarr</h1>
 </div>
 <!-- Login Form -->
@@ -244,7 +244,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     })();
 
     // Apply branding from theme
-    var theme = window.HMS_THEME || {};
+    var theme = window.WEBSERVARR_THEME || {};
     if (theme.app_name) {
         var el = document.getElementById('loginAppName');
         if (el) el.textContent = theme.app_name;

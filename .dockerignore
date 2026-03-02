@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.claude/
+.moat/
+.Trash-1000/
+archive/
+brand-assets/
+docs/
+*.md
+LICENSE
+nginx.conf

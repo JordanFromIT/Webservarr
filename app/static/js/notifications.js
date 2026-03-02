@@ -3,7 +3,7 @@
  * Bell icon + badge, dropdown panel, preferences modal, push subscription.
  *
  * Usage: call window.initNotifications() after checkAuth() resolves.
- * Requires: auth.js (escapeHtml, getTimeAgo), theme-loader.js (window.HMS_THEME)
+ * Requires: auth.js (escapeHtml, getTimeAgo), theme-loader.js (window.WEBSERVARR_THEME)
  *
  * CRITICAL: No innerHTML anywhere. All DOM built with createElement/textContent.
  */
@@ -513,7 +513,7 @@
   }
 
   function enablePush(toggleEl) {
-    var theme = window.HMS_THEME || {};
+    var theme = window.WEBSERVARR_THEME || {};
     var vapidKey = theme.vapid_public_key;
     if (!vapidKey) {
       console.warn('VAPID public key not available. Push notifications cannot be enabled.');

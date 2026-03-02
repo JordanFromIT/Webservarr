@@ -48,7 +48,7 @@
       root.style.setProperty('--font-display', data.font + ', sans-serif');
 
       // Inject Google Fonts link if not already present
-      var fontId = 'hms-google-font';
+      var fontId = 'webservarr-google-font';
       if (!document.getElementById(fontId)) {
         var link = document.createElement('link');
         link.id = fontId;
@@ -65,7 +65,7 @@
 
     // Custom CSS injection
     if (data.custom_css) {
-      var styleId = 'hms-custom-css';
+      var styleId = 'webservarr-custom-css';
       var el = document.getElementById(styleId);
       if (!el) {
         el = document.createElement('style');
@@ -76,7 +76,7 @@
     }
 
     // Store on window for other scripts to use
-    window.HMS_THEME = data;
+    window.WEBSERVARR_THEME = data;
 
     // Update page title with branding app_name, preserving page suffix
     if (data.app_name) {

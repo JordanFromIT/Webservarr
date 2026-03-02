@@ -25,7 +25,7 @@ var NAV_ITEMS = [
  * @returns {string} HTML string
  */
 function _buildSidebarHTML(currentPage) {
-  var theme = window.HMS_THEME || {};
+  var theme = window.WEBSERVARR_THEME || {};
   var appName = theme.app_name || 'WEBSERVARR';
   var features = theme.features || {};
   var labels = theme.sidebar_labels || {};

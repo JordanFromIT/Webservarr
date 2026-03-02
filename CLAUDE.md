@@ -73,6 +73,8 @@ docker compose ps
 docker compose exec webservarr /bin/bash
 ```
 
+**Git push over SSHFS:** The repo lives on the VPS and is mounted locally via SSHFS. Pushing requires `gh auth setup-git` on the local machine (one-time setup). If push fails with `could not read Username for 'https://github.com'`, check for an empty local credential helper override: `git config --local credential.helper`. Fix with `git config --local --unset credential.helper` so the global `gh` helper takes effect.
+
 ## Conventions
 
 - **Backend:** Python with type hints. FastAPI dependency injection for auth. SQLAlchemy ORM models.
