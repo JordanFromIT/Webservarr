@@ -314,17 +314,18 @@ def migrate_news_rebrand(db: Session) -> None:
     if test_post:
         db.delete(test_post)
 
-    db.commit()
+    # Add migration marker in the same transaction as the data changes (atomic)
+    db.add(Setting(
+        key="migration.news_rebrand_v1",
+        value="done",
+        description="One-time news post rebrand migration (HMS Dashboard -> WebServarr)",
+    ))
 
-    # Mark migration as done
     try:
-        db.add(Setting(
-            key="migration.news_rebrand_v1",
-            value="done",
-            description="One-time news post rebrand migration (HMS Dashboard -> WebServarr)",
-        ))
         db.commit()
     except IntegrityError:
         db.rollback()
+        logger.debug("migration.news_rebrand_v1 marker already exists (race), skipping")
+        return
 
     logger.info("Completed one-time news rebrand migration")
