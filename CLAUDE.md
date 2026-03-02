@@ -154,7 +154,8 @@ brand-assets/
 | 6 | In-App Notifications + Browser Push | Complete |
 | 7 | Hardening and Release | Complete |
 | 8 | Ticket System | Complete |
-| 9 | Security Hardening | **Next** |
+| 9 | WebServarr Branding & Public Release | **Next** |
+| 10 | Security Hardening | Planned |
 
 See VISION.md for detailed phase descriptions.
 

@@ -133,7 +133,15 @@ Admin determination: checks `system.admin_email` setting first, then falls back 
 - Feature flag: `features.show_tickets` setting (default: true) gates both UI and all API endpoints (403 when disabled)
 - bleach HTML sanitization on all text inputs (title, description, comments)
 
-### Phase 9: Security Hardening
+### Phase 9: WebServarr Branding & Public Release ✓
+
+- Docker Hub image publishing via GitHub Actions (multi-platform: amd64 + arm64)
+- Update mechanism documented for both `docker compose` and `docker run` users
+- Default news post seeding (welcome post + labeled example post)
+- One-time news rebrand migration (HMS Dashboard → WebServarr post titles)
+- Authentik OIDC setup documentation (existing instance + fresh install paths)
+
+### Phase 10: Security Hardening
 
 - CSRF tokens for form submissions
 - Rate limiting on login and public endpoints
