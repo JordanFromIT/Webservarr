@@ -116,11 +116,11 @@ brand-assets/          # Design references, color palette, logos
 ## Updating
 
 ```bash
-git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-Data is stored in `./data/` (SQLite database) and `./uploads/` (logos). These directories persist across rebuilds.
+Data is stored in `./data/` (SQLite database) and `./uploads/` (logos). These directories persist across updates.
 
 ## Backup
 
