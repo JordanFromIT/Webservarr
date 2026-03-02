@@ -83,15 +83,41 @@ A secret key for session signing is auto-generated on first startup and stored i
 
 ## Updating
 
-```bash
-# Pull the latest code
-git pull
+### Docker Compose
 
-# Rebuild and restart
-docker compose up -d --build
+```bash
+docker compose pull
+docker compose up -d
 ```
 
-Your data (SQLite database) and uploads (logos) are stored in mounted volumes and persist across rebuilds.
+### docker run
+
+```bash
+docker pull webservarr/webservarr:latest
+docker stop webservarr
+docker rm webservarr
+docker run -d \
+  --name webservarr \
+  --restart unless-stopped \
+  -p 8000:8000 \
+  -v ./data:/app/data \
+  -v ./uploads:/app/app/static/uploads \
+  webservarr/webservarr:latest
+```
+
+### Automatic updates with Watchtower (optional)
+
+[Watchtower](https://containrrr.dev/watchtower/) watches Docker Hub for new image versions and automatically recreates your containers when a new `:latest` is published.
+
+```bash
+docker run -d \
+  --name watchtower \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  containrrr/watchtower \
+  webservarr webservarr-redis
+```
+
+This restarts only the `webservarr` and `webservarr-redis` containers when new images are available. Your data volumes persist across restarts.
 
 ## Backup
 
