@@ -17,10 +17,11 @@ A self-hosted web dashboard for Plex media server administration. WebServarr bri
 
 ## Quick Start
 
+### Option A — Docker Compose (recommended)
+
 ```bash
-# 1. Clone the repository
-git clone https://github.com/webservarr/webservarr.git
-cd webservarr
+# 1. Download the compose file
+curl -O https://raw.githubusercontent.com/webservarr/webservarr/main/docker-compose.yml
 
 # 2. Start the containers
 docker compose up -d
@@ -28,6 +29,20 @@ docker compose up -d
 # 3. Open the dashboard
 open http://localhost:8000
 ```
+
+### Option B — docker run
+
+```bash
+docker run -d \
+  --name webservarr \
+  --restart unless-stopped \
+  -p 8000:8000 \
+  -v ./data:/app/data \
+  -v ./uploads:/app/app/static/uploads \
+  webservarr/webservarr:latest
+```
+
+> A Redis container is also required. See [docs/setup.md](docs/setup.md) for the full `docker run` setup with Redis.
 
 Log in with the default credentials (`admin` / `admin123`) and head to **Settings** to configure your integrations.
 
