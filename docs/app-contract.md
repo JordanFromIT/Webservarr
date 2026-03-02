@@ -45,7 +45,7 @@ All pages (except login) use a shared sidebar component and theme system:
 
 | File | Purpose |
 |------|---------|
-| `app/static/js/theme-loader.js` | Fetches `/api/branding`, sets CSS custom properties (RGB triplets), injects Google Font, applies dark/light mode. Cached in localStorage to prevent FOUC. Loaded in `<head>` before Tailwind. |
+| `app/static/js/theme-loader.js` | Fetches `/api/branding`, sets CSS custom properties (RGB triplets), injects Google Font, applies dark/light mode. Cached in localStorage to prevent FOUC. Loaded in `<head>` before Tailwind. Stores branding data as `window.WEBSERVARR_THEME` for other scripts. |
 | `app/static/js/auth.js` | `checkAuth()`, `wireLogout()`, `escapeHtml()`, `getTimeAgo()`, `formatUptime()`, `loadAppVersion()` |
 | `app/static/js/sidebar.js` | `initSidebar(page)` -- injects sidebar HTML into `<div id="sidebar-root">`. Desktop: persistent 256px sidebar with logo + nav. Mobile: hamburger drawer. `showAdminNav(isAdmin)` reveals admin-only items. Logo auto-sizes to sidebar width. |
 | `app/static/css/theme.css` | CSS custom property defaults, glass-card styles, custom scrollbar, gauge-circle animation, service-icon drop-shadow. |

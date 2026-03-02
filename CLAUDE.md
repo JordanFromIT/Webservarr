@@ -49,6 +49,7 @@ uploads/                      # Uploaded assets (logos) -- volume-mounted, persi
 docker-compose.yml            # 2 containers: webservarr + redis
 docker-compose.authentik.yml  # Optional Authentik overlay (3 additional containers)
 Dockerfile                    # Python 3.11-slim image
+.dockerignore                 # Docker build context exclusions
 requirements.txt              # Python dependencies
 .env                          # Secrets (not in git)
 data/webservarr.db            # SQLite database (not in git)
@@ -99,6 +100,7 @@ Design reference files live in `brand-assets/` at the repo root.
 
 ```
 brand-assets/
++-- logo.png                                   # WebServarr logo
 +-- Color Palette/
 |   +-- palette.txt                            # HEX, HSL, RGB, CSV, XML, JSON formats
 |   +-- palette.scss                           # SCSS variables + CSS gradients
@@ -113,6 +115,9 @@ brand-assets/
     |   +-- code.html
     |   +-- screen.png
     +-- Homepage Dashboard - Mobile/
+    |   +-- code.html
+    |   +-- screen.png
+    +-- Homepage Dashboard - Service Health/
         +-- code.html
         +-- screen.png
 ```
