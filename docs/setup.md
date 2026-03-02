@@ -134,41 +134,93 @@ tar czf webservarr-backup-$(date +%Y%m%d).tar.gz data/ uploads/ .env
 
 ## Advanced: Authentik OIDC Setup
 
-If you want to use Authentik as an OIDC identity provider for Plex login (useful if you already run Authentik for SSO across multiple services):
+Authentik provides Plex login *through* an identity provider. This is useful if you already run Authentik for SSO across multiple services, or want centralized session management. If you just want users to sign in with Plex, use **direct Plex OAuth** instead — it requires no Authentik and is configured entirely in Settings > Integrations > Plex.
 
-### 1. Start the Authentik containers
+### Path A — Connect to an existing Authentik instance
+
+#### 1. Create a Plex source in Authentik
+
+In Authentik, go to **Directory → Federation & Social login → Create → Plex**.
+
+- Give it a name (e.g., "Plex")
+- Save
+
+This allows users to authenticate with their Plex account through Authentik.
+
+#### 2. Create an OAuth2/OIDC Provider
+
+In Authentik, go to **Applications → Providers → Create → OAuth2/OpenID Connect**.
+
+- **Name:** WebServarr (or any name)
+- **Redirect URIs:** `https://your-domain.com/auth/callback`
+  This must exactly match your WebServarr domain including the scheme (`https://`) and no trailing slash.
+- **Signing Key:** Select the default certificate
+- Save, then note the **Client ID** and **Client Secret** from the provider detail page
+
+#### 3. Create an Application
+
+In Authentik, go to **Applications → Applications → Create**.
+
+- **Name:** WebServarr
+- **Slug:** `webservarr` (or any slug — note it, you will need it)
+- **Provider:** select the OAuth2 provider you just created
+- Save
+
+#### 4. Configure in WebServarr
+
+In WebServarr, go to **Settings → Integrations → Authentik (Optional)**:
+
+| Field | Value |
+|-------|-------|
+| Authentik URL | `https://auth.example.com` (your Authentik base URL) |
+| Client ID | From the OAuth2 provider detail page |
+| Client Secret | From the OAuth2 provider detail page |
+| App Slug | The slug of the Authentik application (e.g., `webservarr`) |
+
+Click **Save**. The "Sign in with Plex (via Authentik)" button will appear on the login page.
+
+---
+
+### Path B — New Authentik instance alongside WebServarr
+
+The repo includes an optional Docker Compose overlay that adds Authentik and its PostgreSQL database alongside WebServarr, sharing the existing Redis container.
+
+#### 1. Generate required secrets
 
 ```bash
-# Create environment variables for Authentik
-cat >> .env << 'EOF'
-AUTHENTIK_SECRET_KEY=your-authentik-secret-here
-POSTGRES_PASSWORD=your-postgres-password-here
-EOF
+echo "AUTHENTIK_SECRET_KEY=$(openssl rand -base64 32)" >> .env
+echo "POSTGRES_PASSWORD=$(openssl rand -base64 16)" >> .env
+```
 
-# Start with the Authentik overlay
+#### 2. Start all containers
+
+```bash
 docker compose -f docker-compose.yml -f docker-compose.authentik.yml up -d
 ```
 
-### 2. Configure Authentik
+#### 3. Complete the Authentik setup wizard
 
-1. Open Authentik at `http://localhost:9000` and complete initial setup
-2. Add a **Plex source** in Authentik (Sources > Create > Plex)
-3. Create an **OAuth2 provider** (Providers > Create > OAuth2/OIDC)
-   - Set the redirect URI to `https://your-domain.com/auth/callback`
-   - Note the Client ID and Client Secret
-4. Create an **Application** (Applications > Create) linked to the provider
+Open `http://localhost:9000/if/flow/initial-setup/` and create the initial admin account.
 
-### 3. Configure WebServarr
+#### 4. Follow Path A steps above
 
-1. In WebServarr, go to Settings > Integrations > Authentik
-2. Enter:
-   - Authentik URL (e.g., `https://auth.example.com`)
-   - Client ID (from the OAuth2 provider)
-   - Client Secret (from the OAuth2 provider)
-   - App Slug (the slug of the Authentik application)
-3. Save
+Continue from "Create a Plex source" to configure the provider, application, and WebServarr settings.
 
-The "Sign in with Plex (via Authentik)" button will appear on the login page.
+---
+
+### Troubleshooting
+
+**"Sign in with Plex (via Authentik)" button not appearing**
+All four settings (URL, Client ID, Client Secret, App Slug) must be saved in Settings → Integrations → Authentik. Verify none are blank.
+
+**Redirect URI mismatch error**
+The redirect URI in the Authentik OAuth2 provider must exactly match `https://your-domain.com/auth/callback` — same scheme, same domain, no trailing slash.
+
+**Plex popup blocked on mobile**
+Authentik opens a Plex popup window during login. Some mobile browsers block popups. For mobile users, direct Plex OAuth (no Authentik) is the recommended auth method — configure it in Settings → Integrations → Plex.
+
+**Logout does not return to the WebServarr login page**
+This is a known upstream Authentik limitation with end-session redirects. Users will land on the Authentik logout confirmation page rather than being redirected back automatically.
 
 ## Advanced: Reverse Proxy
 
