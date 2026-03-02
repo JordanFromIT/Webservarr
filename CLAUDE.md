@@ -141,7 +141,7 @@ brand-assets/
 
 ## Project Phases
 
-**Current phase: 9**
+**Current phase: 10**
 
 | Phase | Name | Status |
 |-------|------|--------|
@@ -154,8 +154,8 @@ brand-assets/
 | 6 | In-App Notifications + Browser Push | Complete |
 | 7 | Hardening and Release | Complete |
 | 8 | Ticket System | Complete |
-| 9 | WebServarr Branding & Public Release | **Next** |
-| 10 | Security Hardening | Planned |
+| 9 | WebServarr Branding & Public Release | Complete |
+| 10 | Security Hardening | **Next** |
 
 See VISION.md for detailed phase descriptions.
 
