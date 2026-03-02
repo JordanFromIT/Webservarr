@@ -198,3 +198,133 @@ def seed_secret_key(db: Session) -> str:
         existing = db.query(Setting).filter(Setting.key == "system.secret_key").first()
         return existing.value if existing else key
     return key
+
+
+def seed_default_news(db: Session) -> None:
+    """Seed default news posts for fresh installs. Skips if any posts exist."""
+    from app.models import NewsPost
+    from app.routers.news import render_markdown
+    from datetime import datetime, timezone
+
+    if db.query(NewsPost).count() > 0:
+        return
+
+    now = datetime.now(timezone.utc)
+
+    posts = [
+        {
+            "title": "Welcome to WebServarr",
+            "content": (
+                "## Welcome to WebServarr\n\n"
+                "WebServarr is your self-hosted media server portal. Here's what you can do:\n\n"
+                "- **Plex Streams** — Monitor active streams and playback quality in real time\n"
+                "- **Service Health** — Status tiles powered by Uptime Kuma\n"
+                "- **System Gauges** — CPU, RAM, and network stats from Netdata\n"
+                "- **Media Requests** — Search and request movies and TV shows via Overseerr\n"
+                "- **Release Calendar** — Upcoming movies and episodes from Radarr and Sonarr\n"
+                "- **Notifications** — In-app and browser push notifications\n"
+                "- **Theme Engine** — Colors, fonts, logos, and custom CSS\n\n"
+                "Head to **Settings** to connect your integrations and get started."
+            ),
+            "pinned": True,
+        },
+        {
+            "title": "[Example] Server Maintenance Notice",
+            "content": (
+                "> **Note:** This is an example post showing news formatting. "
+                "Edit or delete it from **Settings > News**.\n\n"
+                "We will be performing routine maintenance on **Saturday** from 2:00 AM to 4:00 AM.\n\n"
+                "**Services affected:**\n"
+                "- Media streaming (Plex)\n"
+                "- Media requests (Overseerr)\n\n"
+                "Expected downtime: ~30 minutes. Thank you for your patience!"
+            ),
+            "pinned": False,
+        },
+    ]
+
+    for post_data in posts:
+        content_html = render_markdown(post_data["content"])
+        post = NewsPost(
+            title=post_data["title"],
+            content=post_data["content"],
+            content_html=content_html,
+            author_id="system",
+            author_name="WebServarr",
+            published=True,
+            published_at=now,
+            pinned=post_data["pinned"],
+        )
+        db.add(post)
+
+    db.commit()
+    logger.info("Seeded %d default news posts", len(posts))
+
+
+def migrate_news_rebrand(db: Session) -> None:
+    """One-time migration: update news post titles/content from HMS Dashboard to WebServarr branding.
+    Guarded by a migration marker in Settings so it runs exactly once."""
+    from sqlalchemy.exc import IntegrityError
+    from app.models import NewsPost
+    from app.routers.news import render_markdown
+
+    # Skip if already ran
+    if db.query(Setting).filter(Setting.key == "migration.news_rebrand_v1").first():
+        return
+
+    # Update the welcome post
+    welcome = db.query(NewsPost).filter(NewsPost.title == "Welcome to HMS Dashboard").first()
+    if welcome:
+        new_content = (
+            "## Welcome to WebServarr\n\n"
+            "WebServarr is your self-hosted media server portal. Here's what you can do:\n\n"
+            "- **Plex Streams** — Monitor active streams and playback quality in real time\n"
+            "- **Service Health** — Status tiles powered by Uptime Kuma\n"
+            "- **System Gauges** — CPU, RAM, and network stats from Netdata\n"
+            "- **Media Requests** — Search and request movies and TV shows via Overseerr\n"
+            "- **Release Calendar** — Upcoming movies and episodes from Radarr and Sonarr\n"
+            "- **Notifications** — In-app and browser push notifications\n"
+            "- **Theme Engine** — Colors, fonts, logos, and custom CSS\n\n"
+            "Head to **Settings** to connect your integrations and get started."
+        )
+        welcome.title = "Welcome to WebServarr"
+        welcome.content = new_content
+        welcome.content_html = render_markdown(new_content)
+
+    # Rename and update the maintenance example post
+    maintenance = db.query(NewsPost).filter(
+        NewsPost.title == "Server Maintenance Scheduled"
+    ).first()
+    if maintenance:
+        new_content = (
+            "> **Note:** This is an example post showing news formatting. "
+            "Edit or delete it from **Settings > News**.\n\n"
+            "We will be performing routine maintenance on **Saturday** from 2:00 AM to 4:00 AM.\n\n"
+            "**Services affected:**\n"
+            "- Media streaming (Plex)\n"
+            "- Media requests (Overseerr)\n\n"
+            "Expected downtime: ~30 minutes. Thank you for your patience!"
+        )
+        maintenance.title = "[Example] Server Maintenance Notice"
+        maintenance.content = new_content
+        maintenance.content_html = render_markdown(new_content)
+
+    # Delete the test post
+    test_post = db.query(NewsPost).filter(NewsPost.title == "test").first()
+    if test_post:
+        db.delete(test_post)
+
+    db.commit()
+
+    # Mark migration as done
+    try:
+        db.add(Setting(
+            key="migration.news_rebrand_v1",
+            value="done",
+            description="One-time news post rebrand migration (HMS Dashboard -> WebServarr)",
+        ))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+
+    logger.info("Completed one-time news rebrand migration")

@@ -43,11 +43,16 @@ def init_db():
     Base.metadata.create_all(bind=engine, checkfirst=True)
 
     # Seed defaults
-    from app.seed import seed_default_admin, seed_default_settings, seed_vapid_keys
+    from app.seed import (
+        seed_default_admin, seed_default_settings, seed_vapid_keys,
+        seed_default_news, migrate_news_rebrand,
+    )
     db = SessionLocal()
     try:
         seed_default_admin(db)
         seed_default_settings(db)
         seed_vapid_keys(db)
+        seed_default_news(db)
+        migrate_news_rebrand(db)
     finally:
         db.close()
