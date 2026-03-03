@@ -72,8 +72,8 @@ For most users, the Settings UI is sufficient. Advanced users can override defau
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_DOMAIN` | `localhost` | Your domain (e.g., `dashboard.example.com`) |
-| `APP_SCHEME` | `https` | URL scheme (`http` for local/development) |
+| `APP_DOMAIN` | `localhost` | Your domain — used for CSP headers (e.g., `dashboard.example.com`) |
+| `APP_SCHEME` | `https` | URL scheme — used for CSP headers (`http` for local/development) |
 | `REDIS_URL` | `redis://redis:6379/0` | Redis connection string |
 | `CORS_ORIGINS` | `""` | Additional CORS origins (comma-separated) |
 | `CSP_FRAME_SRC` | `""` | Additional CSP frame-src origins |
@@ -222,6 +222,19 @@ Authentik opens a Plex popup window during login. Some mobile browsers block pop
 **Logout does not return to the WebServarr login page**
 This is a known upstream Authentik limitation with end-session redirects. Users will land on the Authentik logout confirmation page rather than being redirected back automatically.
 
+**Authentik containers are unhealthy / can't connect to Redis**
+Authentik must be on the same Docker network as the `redis` service. This happens automatically when you start using the overlay command:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.authentik.yml up -d
+```
+If you started the Authentik containers separately or manually, connect them to the correct network:
+```bash
+docker network connect <project>_default authentik-server
+docker network connect <project>_default authentik-worker
+docker network connect --alias postgresql <project>_default <postgres-container-name>
+```
+Replace `<project>_default` with the network name shown by `docker network ls` (typically `hms-dashboard_default`).
+
 ## Advanced: Reverse Proxy
 
 WebServarr runs on port 8000 by default. To expose it on a custom domain with HTTPS, use a reverse proxy.
@@ -262,7 +275,7 @@ cloudflared tunnel route dns <tunnel-name> dashboard.example.com
 
 In your Cloudflare Tunnel config, point the hostname to `http://localhost:8000`.
 
-When using a reverse proxy, set the `APP_DOMAIN` environment variable to your domain:
+When using a reverse proxy, set `APP_DOMAIN` and `APP_SCHEME` in your `.env` file. Auth callback URLs and cookie domains are derived from the incoming HTTP request (so login works without these set), but `APP_DOMAIN` is used for Content Security Policy headers:
 
 ```bash
 # In .env or docker-compose.yml

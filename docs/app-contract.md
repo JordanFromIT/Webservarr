@@ -216,8 +216,8 @@ All ticket endpoints respect the `features.show_tickets` setting -- returns 403 
 
 | Env Var | Default | Description |
 |---------|---------|-------------|
-| `APP_DOMAIN` | `localhost` | Application domain |
-| `APP_SCHEME` | `https` | URL scheme |
+| `APP_DOMAIN` | `localhost` | Application domain — used for CSP headers; auth URLs derived from HTTP request |
+| `APP_SCHEME` | `https` | URL scheme — used for CSP headers; auth URLs derived from HTTP request |
 | `REDIS_URL` | `redis://redis:6379/0` | Redis connection string |
 | `CORS_ORIGINS` | `""` | Additional CORS origins (comma-separated) |
 | `CSP_FRAME_SRC` | `""` | Additional frame-src CSP origins (comma-separated) |

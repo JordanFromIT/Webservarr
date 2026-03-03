@@ -91,6 +91,7 @@ docker compose exec webservarr /bin/bash
 - Plex active streams has a float-as-int parsing bug (minor, pre-existing in `plex.py`)
 - Default admin password (`admin123`) should be changed for production
 - Startup can hit "table already exists" on rebuild if SQLite DB file already exists (auto-recovers on restart)
+- Authentik containers must be on the same Docker network as the `redis` service (use the overlay command, not manual `docker run`)
 
 ---
 

@@ -81,8 +81,8 @@ For most users, the Settings UI is sufficient. Advanced users can override defau
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_DOMAIN` | `localhost` | Your domain (e.g., `dashboard.example.com`) |
-| `APP_SCHEME` | `https` | URL scheme (`http` for local development) |
+| `APP_DOMAIN` | `localhost` | Your domain — used for CSP headers (e.g., `dashboard.example.com`) |
+| `APP_SCHEME` | `https` | URL scheme — used for CSP headers (`http` for local development) |
 | `REDIS_URL` | `redis://redis:6379/0` | Redis connection string |
 | `CORS_ORIGINS` | `""` | Additional CORS origins (comma-separated) |
 | `CSP_FRAME_SRC` | `""` | Additional CSP frame-src origins |
