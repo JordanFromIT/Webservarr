@@ -4,7 +4,7 @@ Will be replaced with Authentik/OIDC in a future phase.
 """
 
 from datetime import datetime
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from passlib.hash import bcrypt
@@ -88,6 +88,7 @@ async def simple_login(
 
 @router.get("/logout")
 async def logout_redirect(
+    request: Request,
     db: Session = Depends(get_db),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
@@ -126,7 +127,8 @@ async def logout_redirect(
 
         if authentik_url:
             logout_url = f"{authentik_url}/application/o/{slug}/end-session/"
-            params = {"post_logout_redirect_uri": f"{settings.app_url}/login"}
+            app_origin = f"{request.url.scheme}://{request.url.netloc}"
+            params = {"post_logout_redirect_uri": f"{app_origin}/login"}
             if id_token:
                 params["id_token_hint"] = id_token
             redirect_url = f"{logout_url}?{urlencode(params)}"
@@ -142,14 +144,19 @@ async def logout_redirect(
         secure=_COOKIE_SECURE,
         samesite="lax",
     )
-    # Clear Overseerr SSO cookie
-    parent_domain = "." + settings.app_domain.split(".", 1)[1]
-    response.delete_cookie("connect.sid", domain=parent_domain, path="/")
+    # Clear Overseerr SSO cookie (domain scoping only applies on multi-part hostnames)
+    host = request.url.hostname or ""
+    if "." in host:
+        parent_domain = "." + host.split(".", 1)[1]
+        response.delete_cookie("connect.sid", domain=parent_domain, path="/")
+    else:
+        response.delete_cookie("connect.sid", path="/")
     return response
 
 
 @router.post("/simple-logout")
 async def simple_logout(
+    request: Request,
     response: Response,
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
@@ -163,9 +170,13 @@ async def simple_logout(
         secure=_COOKIE_SECURE,
         samesite="lax",
     )
-    # Clear Overseerr SSO cookie
-    parent_domain = "." + settings.app_domain.split(".", 1)[1]
-    response.delete_cookie("connect.sid", domain=parent_domain, path="/")
+    # Clear Overseerr SSO cookie (domain scoping only applies on multi-part hostnames)
+    host = request.url.hostname or ""
+    if "." in host:
+        parent_domain = "." + host.split(".", 1)[1]
+        response.delete_cookie("connect.sid", domain=parent_domain, path="/")
+    else:
+        response.delete_cookie("connect.sid", path="/")
 
     return {"success": True, "message": "Logged out", "redirect": "/login"}
 

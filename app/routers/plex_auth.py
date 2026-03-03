@@ -8,7 +8,7 @@ import uuid
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
@@ -79,7 +79,7 @@ class PlexCallbackRequest(BaseModel):
 
 
 @router.post("/plex-start")
-async def plex_start(db: Session = Depends(get_db)):
+async def plex_start(request: Request, db: Session = Depends(get_db)):
     """
     Initiate Plex PIN-based auth flow.
     Creates a PIN on plex.tv and returns the auth URL for the client to open.
@@ -137,12 +137,8 @@ async def plex_start(db: Session = Depends(get_db)):
     redis = await session_manager.get_redis()
     await redis.setex(f"plex_pin:{pin_id}", 300, "1")
 
-    # Build the auth URL
-    if settings.app_domain == "localhost":
-        app_url = "http://localhost:8000"
-    else:
-        app_url = f"{settings.app_scheme}://{settings.app_domain}"
-
+    # Build callback URL from the incoming request so no APP_DOMAIN config is needed
+    app_url = str(request.base_url).rstrip("/")
     callback_url = f"{app_url}/auth/plex-callback-page"
     auth_params = urlencode({
         "clientID": client_id,
@@ -304,15 +300,13 @@ async def plex_callback(
 
 
 @router.get("/plex-callback-page")
-async def plex_callback_page():
+async def plex_callback_page(request: Request):
     """
     Landing page after Plex auth redirect.
     If opened in a popup: sends postMessage to opener and closes.
     If opened as redirect (no opener): redirects to login page.
     """
-    app_origin = f"{settings.app_scheme}://{settings.app_domain}"
-    if settings.app_domain == "localhost":
-        app_origin = "http://localhost:8000"
+    app_origin = f"{request.url.scheme}://{request.url.netloc}"
 
     html = f"""<!DOCTYPE html>
 <html>

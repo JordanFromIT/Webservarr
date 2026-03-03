@@ -4,7 +4,7 @@ Handles OIDC login redirect, callback with admin determination, and user info.
 Logout is handled by simple_auth.py (shared session clearing).
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 import secrets
 import logging
@@ -93,7 +93,7 @@ async def oidc_login(db: Session = Depends(get_db)):
 
 
 @router.get("/callback")
-async def oidc_callback(code: str, state: str, db: Session = Depends(get_db)):
+async def oidc_callback(request: Request, code: str, state: str, db: Session = Depends(get_db)):
     """
     OIDC callback endpoint.
     Handles the redirect from Authentik after Plex authentication.
@@ -182,16 +182,18 @@ async def oidc_callback(code: str, state: str, db: Session = Depends(get_db)):
 
         # Set Overseerr session cookie on parent domain for iframe SSO
         if overseerr_sid:
-            parent_domain = "." + settings.app_domain.split(".", 1)[1]
-            response.set_cookie(
-                key="connect.sid",
-                value=overseerr_sid,
-                httponly=True,
-                secure=True,
-                samesite="none",
-                path="/",
-                domain=parent_domain,
-            )
+            host = request.url.hostname or ""
+            cookie_kwargs: dict = {
+                "key": "connect.sid",
+                "value": overseerr_sid,
+                "httponly": True,
+                "secure": True,
+                "samesite": "none",
+                "path": "/",
+            }
+            if "." in host:
+                cookie_kwargs["domain"] = "." + host.split(".", 1)[1]
+            response.set_cookie(**cookie_kwargs)
 
         return response
 
