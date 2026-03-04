@@ -13,7 +13,9 @@ A self-hosted web dashboard for Plex media server administration. WebServarr bri
 - **News System** -- Publish announcements and maintenance notices with rich text and pinning
 - **Notifications** -- In-app bell notifications and optional browser push (Web Push / VAPID) for request updates, issue responses, service changes, and news posts
 - **Themeable** -- Full theme engine with color pickers, Google Fonts, custom CSS, logo upload, configurable sidebar labels and icons
+- **Ticket System** -- User support tickets with categories, priority levels, image attachments, and admin management
 - **Three Auth Methods** -- Simple username/password (default), direct Plex OAuth (recommended), or Plex via Authentik OIDC (advanced)
+- **Security Hardened** -- Rate limiting on all endpoints, magic number upload verification, authenticated file serving, full dependency pinning
 
 ## Quick Start
 

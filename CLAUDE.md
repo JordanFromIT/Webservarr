@@ -14,6 +14,8 @@ app/models.py                # User, NewsPost, Service, Setting, StatusUpdate, S
 app/seed.py                  # Default admin user + settings seeding on first startup
 app/auth.py                  # SessionManager (Redis) + OIDCClient
 app/dependencies.py          # get_current_user, require_admin dependencies
+app/limiter.py               # slowapi Limiter instance (Redis-backed rate limiting)
+app/utils.py                 # Shared utilities (validate_image_magic)
 
 app/routers/simple_auth.py   # Simple login/logout/session-check + shared logout (OIDC-aware). Guarded by features.show_simple_auth.
 app/routers/auth.py          # OIDC auth routes -- Plex OAuth via Authentik (/auth/login, /auth/callback, /auth/me)
@@ -50,7 +52,8 @@ docker-compose.yml            # 2 containers: webservarr + redis
 docker-compose.authentik.yml  # Optional Authentik overlay (3 additional containers)
 Dockerfile                    # Python 3.11-slim image
 .dockerignore                 # Docker build context exclusions
-requirements.txt              # Python dependencies
+requirements.in               # Direct Python dependencies (human-edited)
+requirements.txt              # Full pinned dependency tree (pip-compile output)
 .env                          # Secrets (not in git)
 data/webservarr.db            # SQLite database (not in git)
 
@@ -82,6 +85,9 @@ docker compose exec webservarr /bin/bash
 - **Frontend:** No build step. Vanilla JS with `fetch()` API calls. Tailwind CSS from CDN. Material Design Icons.
 - **Auth:** Three methods: simple (username/password, toggleable via `features.show_simple_auth`), direct Plex OAuth (PIN-based, same as Overseerr/Tautulli), Authentik OIDC (Plex via Authentik). bcrypt hashing via passlib. Sessions stored in Redis with `auth_method` tracking ("simple", "plex", or "oidc").
 - **Content safety:** bleach for HTML sanitization on news content. Security headers middleware in `main.py`.
+- **Rate limiting:** slowapi with Redis backend (`app/limiter.py`). 5 tiers: 5/min login, 10/min uploads, 30/min writes, 60/min public, 120/min default. IP from CF-Connecting-IP > X-Forwarded-For > direct.
+- **Upload security:** Content-Type allowlist + magic number verification (`app/utils.py`). Ticket images served via authenticated endpoint, not static files.
+- **Dependencies:** `requirements.in` (direct deps) → `pip-compile` → `requirements.txt` (full pinned tree). Dependabot for weekly update PRs.
 - **External APIs:** httpx with 5-second timeout (10s for Plex). Proxy pattern: browser -> FastAPI endpoint -> external service.
 
 ## Known Issues
@@ -187,7 +193,7 @@ Use these Task agent descriptions when delegating work. Always use `subagent_typ
 **Prompt template:**
 > You are building and debugging backend functionality for WebServarr, a FastAPI application.
 >
-> **Key files:** `app/main.py` (app setup, middleware), `app/routers/simple_auth.py` (simple login), `app/routers/plex_auth.py` (direct Plex OAuth), `app/routers/auth.py` (Authentik OIDC), `app/dependencies.py` (auth checks), `app/auth.py` (session manager), `app/config.py` (settings), `app/models.py` (DB models), `app/database.py` (SQLAlchemy setup).
+> **Key files:** `app/main.py` (app setup, middleware), `app/routers/simple_auth.py` (simple login), `app/routers/plex_auth.py` (direct Plex OAuth), `app/routers/auth.py` (Authentik OIDC), `app/dependencies.py` (auth checks), `app/auth.py` (session manager), `app/config.py` (settings), `app/models.py` (DB models), `app/database.py` (SQLAlchemy setup), `app/limiter.py` (rate limiting), `app/utils.py` (shared utilities).
 >
 > **Current API surface:** Read `docs/app-contract.md` for all existing endpoints, models, and auth dependencies.
 >
@@ -198,8 +204,10 @@ Use these Task agent descriptions when delegating work. Always use `subagent_typ
 > - Proxy pattern: browser -> FastAPI endpoint -> external service
 > - bleach for HTML sanitization on user content
 > - Settings stored as key-value pairs in the `settings` table
+> - Rate limiting via `from app.limiter import limiter` + `@limiter.limit("X/minute")` decorator
+> - Upload validation via `from app.utils import validate_image_magic`
 >
-> **Boundary:** Only edit Python files in `app/` and `requirements.txt`. Do not modify HTML/JS files.
+> **Boundary:** Only edit Python files in `app/`, `requirements.in`, and `requirements.txt`. Do not modify HTML/JS files.
 >
 > **After making changes:** Update `docs/app-contract.md` to reflect any new or modified endpoints, models, or auth requirements.
 >
