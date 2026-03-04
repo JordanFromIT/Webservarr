@@ -283,6 +283,71 @@ APP_DOMAIN=dashboard.example.com
 APP_SCHEME=https
 ```
 
+## Security Considerations
+
+### Default Credentials
+
+WebServarr seeds a default admin account (`admin` / `admin123`) on first startup. **Change this password immediately** or disable simple auth once Plex OAuth or Authentik OIDC is configured.
+
+To disable simple auth, set `features.show_simple_auth` to `false` in Settings > System.
+
+### Rate Limiting
+
+All endpoints are rate-limited to prevent abuse:
+
+| Endpoint Type | Limit |
+|---|---|
+| Login endpoints | 5 requests/minute per IP |
+| File uploads | 10 requests/minute per IP |
+| Write operations (POST/PUT/DELETE) | 30 requests/minute per IP |
+| Public endpoints (branding, status) | 60 requests/minute per IP |
+| Read operations (GET) | 120 requests/minute per IP |
+
+Rate limits are enforced per client IP. When behind a reverse proxy (Cloudflare, nginx), the `CF-Connecting-IP` or `X-Forwarded-For` header is used. Exceeded limits return HTTP 429.
+
+### Session Security
+
+- Sessions stored in Redis with configurable expiry (default: 7 days)
+- Cookies set with `HttpOnly` (no JS access), `Secure` (HTTPS-only in production), `SameSite=Lax`
+- Session IDs generated with `secrets.token_urlsafe(32)` (256-bit entropy)
+
+### Content Security
+
+- All user-submitted HTML (news posts) sanitized with bleach using a strict tag allowlist
+- Ticket text content stripped of all HTML tags
+- Content Security Policy (CSP) header restricts script/style/image sources
+- `X-Content-Type-Options: nosniff` prevents MIME type sniffing
+- `X-Frame-Options: SAMEORIGIN` prevents clickjacking
+
+### File Uploads
+
+- Allowed types: PNG, JPEG, WebP (tickets); PNG, JPEG, GIF, SVG, WebP (logos)
+- Maximum size: 2MB per file
+- Filenames generated with UUID (no user-controlled filenames on disk)
+- Magic number verification ensures file content matches declared type
+- Ticket images served through authenticated endpoint (not public static files)
+
+### Recommended Reverse Proxy Hardening
+
+If running behind Cloudflare or nginx, consider:
+
+- **HSTS**: Add `Strict-Transport-Security: max-age=31536000; includeSubDomains` at the proxy level
+- **Cloudflare Bot Protection**: Enable Bot Fight Mode or add Turnstile to the login page
+- **Additional rate limiting**: Layer Cloudflare rate limiting rules on top of app-level limits
+- **IP allowlisting**: Restrict direct access to the origin server (only allow Cloudflare IPs)
+
+### Dependency Management
+
+Dependencies are pinned using `pip-compile` (from `pip-tools`). To update:
+
+```bash
+pip install pip-tools
+pip-compile requirements.in --output-file=requirements.txt --upgrade
+docker compose up -d --build webservarr
+```
+
+GitHub Dependabot is configured to open weekly PRs for outdated or vulnerable packages.
+
 ## Troubleshooting
 
 ### Container will not start
