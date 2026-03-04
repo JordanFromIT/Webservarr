@@ -18,6 +18,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.limiter import limiter
 from app.models import Setting, Ticket, TicketComment
+from app.utils import validate_image_magic
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,12 @@ async def _save_upload(file: UploadFile) -> str:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File too large. Maximum size is 2MB.",
+        )
+
+    if not validate_image_magic(content, file.content_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File content does not match declared image type",
         )
 
     os.makedirs(TICKET_UPLOAD_DIR, exist_ok=True)
