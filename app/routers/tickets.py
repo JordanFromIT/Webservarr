@@ -457,7 +457,10 @@ async def admin_list_tickets(
         query = query.filter(Ticket.category == category)
     if priority and priority in VALID_PRIORITIES:
         query = query.filter(Ticket.priority == priority)
-    if creator:
+    if creator is not None:
+        creator = creator.strip()
+        if not creator or len(creator) > 200:
+            raise HTTPException(status_code=400, detail="Invalid creator filter")
         query = query.filter(Ticket.creator_username == creator)
 
     total = query.count()

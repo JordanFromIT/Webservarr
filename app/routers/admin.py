@@ -4,12 +4,13 @@ Admin API routes - Service management, settings, etc.
 
 import logging
 import os
+import re
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Literal, Optional, List
 import httpx
 
 from datetime import datetime, timedelta
@@ -56,7 +57,7 @@ class MonitorPreferences(BaseModel):
 
 class TestConnectionRequest(BaseModel):
     """Schema for testing an external API connection."""
-    service: str  # "plex", "uptime_kuma", "overseerr", or "netdata"
+    service: Literal["plex", "uptime_kuma", "overseerr", "netdata", "sonarr", "radarr"]
     url: str
     credentials: Optional[str] = None
 
@@ -90,6 +91,8 @@ async def update_monitor_preferences(
         updated["enabled"] = prefs.enabled
 
     if prefs.icon is not None:
+        if prefs.icon and (len(prefs.icon) > 200 or not re.match(r'^[a-zA-Z0-9\-_/.:]+$', prefs.icon)):
+            raise HTTPException(status_code=400, detail="Invalid icon value")
         key = f"monitor.{monitor_id}.icon"
         row = db.query(Setting).filter(Setting.key == key).first()
         if row:
