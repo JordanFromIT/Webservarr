@@ -3,6 +3,7 @@ Ticket system API routes — user support tickets with admin management.
 """
 
 import logging
+import mimetypes
 import os
 import uuid
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from typing import Optional
 
 import bleach
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -93,7 +95,7 @@ async def _save_upload(file: UploadFile) -> str:
     with open(filepath, "wb") as f:
         f.write(content)
 
-    return f"/static/uploads/tickets/{filename}"
+    return f"/api/uploads/tickets/{filename}"
 
 
 def _ticket_to_dict(ticket: Ticket, is_admin: bool, current_username: str, comments: list = None) -> dict:
@@ -147,6 +149,47 @@ def _comment_to_dict(comment: TicketComment, is_admin: bool, current_username: s
         data["author_name"] = None
 
     return data
+
+
+# ============================================================
+# Authenticated file serving
+# ============================================================
+
+@router.get("/uploads/tickets/{filename}")
+async def get_ticket_image(
+    filename: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Serve a ticket image with authentication."""
+    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    filepath = os.path.join(TICKET_UPLOAD_DIR, filename)
+    if not os.path.isfile(filepath):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    # Find the ticket this image belongs to
+    url_path = f"/api/uploads/tickets/{filename}"
+    ticket = db.query(Ticket).filter(
+        (Ticket.image_path == url_path) |
+        (Ticket.id.in_(
+            db.query(TicketComment.ticket_id).filter(TicketComment.image_path == url_path)
+        ))
+    ).first()
+
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    username = current_user.get("username", "")
+    is_admin = current_user.get("is_admin") == "true"
+
+    if not is_admin:
+        if ticket.creator_username != username and not ticket.is_public:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    content_type, _ = mimetypes.guess_type(filepath)
+    return FileResponse(filepath, media_type=content_type or "application/octet-stream")
 
 
 # ============================================================
@@ -519,9 +562,12 @@ async def admin_delete_ticket(
 def _try_delete_file(url_path: str) -> None:
     """Try to delete a file given its URL path. Fails silently."""
     try:
-        # URL path like /static/uploads/tickets/ticket-abc123.png
-        # Filesystem: /app/app/static/uploads/tickets/ticket-abc123.png
-        if url_path.startswith("/static/"):
+        if url_path.startswith("/api/uploads/tickets/"):
+            filename = url_path.split("/")[-1]
+            filepath = os.path.join(TICKET_UPLOAD_DIR, filename)
+            if os.path.isfile(filepath):
+                os.remove(filepath)
+        elif url_path.startswith("/static/"):
             rel = url_path[len("/static/"):]
             filepath = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", rel)
             if os.path.isfile(filepath):
