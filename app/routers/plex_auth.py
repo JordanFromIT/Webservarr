@@ -18,6 +18,7 @@ from app.auth import session_manager
 from app.config import settings
 from app.database import get_db
 from app.integrations import overseerr
+from app.limiter import limiter
 from app.models import Setting
 from app.routers.auth import _is_plex_server_owner
 
@@ -79,6 +80,7 @@ class PlexCallbackRequest(BaseModel):
 
 
 @router.post("/plex-start")
+@limiter.limit("5/minute")
 async def plex_start(request: Request, db: Session = Depends(get_db)):
     """
     Initiate Plex PIN-based auth flow.
@@ -137,8 +139,10 @@ async def plex_start(request: Request, db: Session = Depends(get_db)):
     redis = await session_manager.get_redis()
     await redis.setex(f"plex_pin:{pin_id}", 300, "1")
 
-    # Build callback URL from the incoming request so no APP_DOMAIN config is needed
-    app_url = str(request.base_url).rstrip("/")
+    # Build callback URL from the incoming request so no APP_DOMAIN config is needed.
+    # Honour X-Forwarded-Proto behind reverse proxy / Cloudflare Tunnel.
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    app_url = f"{scheme}://{request.url.netloc}"
     callback_url = f"{app_url}/auth/plex-callback-page"
     auth_params = urlencode({
         "clientID": client_id,

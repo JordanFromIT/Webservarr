@@ -13,6 +13,7 @@ from app.auth import session_manager
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user_optional
+from app.limiter import limiter
 from app.models import User, Setting
 
 # Use secure cookies only in production (behind HTTPS)
@@ -33,7 +34,9 @@ class LoginResponse(BaseModel):
 
 
 @router.post("/simple-login", response_model=LoginResponse)
+@limiter.limit("5/minute")
 async def simple_login(
+    request: Request,
     login_data: LoginRequest,
     response: Response,
     db: Session = Depends(get_db),

@@ -11,11 +11,11 @@ from contextlib import asynccontextmanager
 import asyncio
 import logging
 
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
+from app.limiter import limiter
 from app.database import init_db, SessionLocal
 from app.auth import session_manager
 from app.seed import seed_secret_key
@@ -75,14 +75,6 @@ async def lifespan(app: FastAPI):
     logger.info("WebServarr shut down")
 
 
-def _get_client_ip(request: Request) -> str:
-    """Get client IP from X-Forwarded-For (reverse proxy) or direct connection."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
 # Create FastAPI app
 app = FastAPI(
     title=settings.app_name,
@@ -92,11 +84,6 @@ app = FastAPI(
 )
 
 # Rate limiting via slowapi (backed by Redis)
-limiter = Limiter(
-    key_func=_get_client_ip,
-    storage_uri=settings.redis_url,
-    default_limits=["120/minute"],
-)
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 

@@ -14,6 +14,7 @@ from app.auth import oidc_client, session_manager, get_oidc_client
 from app.config import settings
 from app.dependencies import get_current_user
 from app.database import get_db
+from app.limiter import limiter
 from app.models import Setting
 from app.integrations import overseerr
 from sqlalchemy.orm import Session
@@ -68,7 +69,8 @@ async def _is_plex_server_owner(email: str, db: Session) -> bool:
 
 
 @router.get("/login")
-async def oidc_login(db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def oidc_login(request: Request, db: Session = Depends(get_db)):
     """
     Initiate OIDC login flow.
     Redirects user to Authentik, which shows the Plex login option.
@@ -80,6 +82,13 @@ async def oidc_login(db: Session = Depends(get_db)):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="OIDC authentication is not configured. Set Authentik settings in the UI or AUTHENTIK_URL in environment.",
         )
+
+    # Derive redirect URI from the incoming request (not from config).
+    # Behind a reverse proxy / Cloudflare Tunnel, base_url reports http://
+    # so honour X-Forwarded-Proto to get the real scheme.
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    redirect_uri = f"{scheme}://{request.url.netloc}/auth/callback"
+    client.redirect_uri = redirect_uri
 
     # Generate CSRF state token
     state = secrets.token_urlsafe(32)
@@ -106,6 +115,10 @@ async def oidc_callback(request: Request, code: str, state: str, db: Session = D
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="OIDC authentication is not configured",
         )
+
+    # Derive redirect URI from the incoming request (must match what /login sent)
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    client.redirect_uri = f"{scheme}://{request.url.netloc}/auth/callback"
 
     # Verify CSRF state
     state_valid = await session_manager.verify_state(state)
