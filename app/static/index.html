@@ -158,21 +158,6 @@ Sign Out
 </div>
 </section>
 </div>
-<!-- Compact Recent Requests (shown when enabled in settings) -->
-<section id="compactRequestsSection" class="hidden">
-<div class="flex items-center justify-between mb-3">
-<div class="flex items-center gap-3">
-<span class="material-symbols-outlined text-steel-blue">shopping_cart</span>
-<h3 class="text-lg font-bold text-white">Recent Requests</h3>
-</div>
-<a id="compactViewRequestsLink" href="/requests" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors uppercase tracking-wider">
-View Requests
-<span class="material-symbols-outlined text-sm">arrow_forward</span>
-</a>
-</div>
-<div id="compactRequestsContainer" class="flex gap-3 overflow-x-auto pb-2 custom-scrollbar">
-</div>
-</section>
 <!-- Now Playing Section -->
 <section>
 <div class="flex items-center justify-between mb-6">
@@ -220,7 +205,7 @@ View Calendar
 <section>
 <div class="flex items-center justify-between mb-6">
 <div class="flex items-center gap-3">
-<span class="material-symbols-outlined text-steel-blue">shopping_cart</span>
+<span id="iconSectionRequests" class="material-symbols-outlined text-steel-blue">shopping_cart</span>
 <h3 class="text-xl font-bold text-white">Recent Requests</h3>
 </div>
 <a id="viewRequestsLink" href="/requests" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors uppercase tracking-wider">
@@ -282,6 +267,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         iconSectionNews: icons.section_news,
         iconSectionStreams: icons.section_streams,
         iconSectionReleases: icons.section_releases,
+        iconSectionRequests: icons.section_requests,
     };
     for (var elId in iconMap) {
         if (iconMap[elId]) {
@@ -550,8 +536,6 @@ async function loadRecentRequests() {
         }
         const requests = await response.json();
 
-        // Also populate compact requests section if enabled
-        loadCompactRequests(requests);
 
         if (!Array.isArray(requests) || requests.length === 0) {
             tbody.innerHTML = `
@@ -633,64 +617,6 @@ async function loadRecentRequests() {
             </tr>
         `;
     }
-}
-
-// Populate compact requests section (horizontal card strip)
-function loadCompactRequests(requests) {
-    var container = document.getElementById('compactRequestsContainer');
-    var section = document.getElementById('compactRequestsSection');
-    if (!container || !section) return;
-
-    // Only show if feature flag is enabled
-    var features = (window.WEBSERVARR_THEME || {}).features || {};
-    if (!features.show_compact_requests) {
-        section.classList.add('hidden');
-        return;
-    }
-
-    if (!Array.isArray(requests) || requests.length === 0) {
-        section.classList.add('hidden');
-        return;
-    }
-
-    section.classList.remove('hidden');
-    // Clear and rebuild
-    while (container.firstChild) container.removeChild(container.firstChild);
-
-    requests.slice(0, 6).forEach(function(req) {
-        var title = req.media_title || 'Unknown';
-        var status = (req.status || 'pending').toLowerCase();
-        var posterUrl = req.poster_url || '';
-
-        var statusColor = 'steel-blue';
-        if (status === 'available' || status === 'completed') statusColor = 'green-500';
-        else if (status === 'approved' || status === 'downloading') statusColor = 'blue-500';
-        else if (status === 'declined') statusColor = 'red-500';
-
-        var card = document.createElement('div');
-        card.className = 'flex-shrink-0 w-28 text-center group';
-
-        var posterDiv = document.createElement('div');
-        posterDiv.className = 'w-28 h-40 rounded-lg bg-black/40 mb-2 overflow-hidden';
-        if (posterUrl) {
-            posterDiv.style.backgroundImage = 'url(' + posterUrl + ')';
-            posterDiv.style.backgroundSize = 'cover';
-            posterDiv.style.backgroundPosition = 'center';
-        }
-        card.appendChild(posterDiv);
-
-        var titleP = document.createElement('p');
-        titleP.className = 'text-xs text-white font-medium truncate';
-        titleP.textContent = title;
-        card.appendChild(titleP);
-
-        var statusP = document.createElement('p');
-        statusP.className = 'text-[10px] text-' + statusColor + ' font-bold uppercase mt-0.5';
-        statusP.textContent = status;
-        card.appendChild(statusP);
-
-        container.appendChild(card);
-    });
 }
 
 // Homelab icon mapping — service name substring → selfh.st icon slug

@@ -31,7 +31,6 @@ DEFAULTS = {
     "features.show_authentik_auth": "false",
     "features.login_backgrounds": "true",
     "features.show_tickets": "true",
-    "features.show_compact_requests": "false",
     # Sidebar labels
     "sidebar.label_home": "Home",
     "sidebar.label_requests": "Requests",
@@ -53,6 +52,7 @@ DEFAULTS = {
     "icon.section_news": "newspaper",
     "icon.section_streams": "play_circle",
     "icon.section_releases": "calendar_month",
+    "icon.section_requests": "shopping_cart",
 }
 
 
@@ -117,7 +117,6 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "show_authentik_auth": get("features.show_authentik_auth") == "true",
             "login_backgrounds": get("features.login_backgrounds") == "true",
             "show_tickets": get("features.show_tickets") == "true",
-            "show_compact_requests": get("features.show_compact_requests") == "true",
         },
         "sidebar_labels": {
             "home": get("sidebar.label_home"),
@@ -141,6 +140,7 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "section_news": get("icon.section_news"),
             "section_streams": get("icon.section_streams"),
             "section_releases": get("icon.section_releases"),
+            "section_requests": get("icon.section_requests"),
         },
         "auth_methods": auth_methods,
         "vapid_public_key": vapid_row.value if vapid_row else None,

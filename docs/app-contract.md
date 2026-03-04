@@ -12,7 +12,7 @@ Last verified: 2026-02-27
 |------|-----------|------|-------------|
 | `/login` | `app/static/login.html` | None | Login page with three auth methods: simple (username/password), direct Plex OAuth, and Authentik OIDC. Branding from theme engine. Rotating TMDB backdrop slideshow (via Overseerr `/api/v1/backdrops`). Falls back to static poster grid. |
 | `/` | `app/static/index.html` | Session | Main dashboard. Plex streams (quality warnings, "More info" expander), service status, Netdata gauges, upcoming releases, news. |
-| `/settings` | `app/static/settings.html` | Session (admin) | Four tabs: Integrations (accordion with Plex/Kuma/Overseerr/Sonarr/Radarr/Netdata/Authentik), System, Customization (icon picker, theme, sidebar labels), News. |
+| `/settings` | `app/static/settings.html` | Session (admin) | Four tabs: Integrations (accordion with Plex/Kuma/Overseerr/Sonarr/Radarr/Netdata), System (Authentication toggles for simple/Plex/Authentik with inline Authentik config), Customization (icon picker, theme, sidebar labels, feature flags), News. |
 | `/requests` | `app/static/requests.html` | Session | Native media request page. Search TMDB, create requests, view existing requests with poster grid and filter tabs. |
 | `/requests-embed` | `app/static/requests-embed.html` | Session | Overseerr iframe embed with Plex SSO. Calls re-auth before loading iframe. |
 | `/requests2` | *(301 redirect to `/requests`)* | None | Legacy redirect for old bookmarks. |
@@ -108,9 +108,10 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
   "colors": { "primary": "#125793", "secondary": "#2C6DA1", "accent": "#4684B0", "text": "#BEEEF4", "background": "#000000" },
   "font": "Spline Sans",
   "custom_css": "",
-  "features": { "show_requests": false, "show_simple_auth": true },
+  "features": { "show_requests": false, "show_simple_auth": true, "show_plex_auth": true, "show_authentik_auth": false, "login_backgrounds": true, "show_tickets": true },
+  "auth_methods": { "simple": true, "plex": true, "authentik": false },
   "sidebar_labels": { "home": "Home", "requests": "Requests", "requests-embed": "Requests (Embed)", "issues": "Issues", "calendar": "Calendar", "settings": "Settings" },
-  "icons": { "sidebar_logo": "settings_input_component", "nav_home": "home", "nav_requests": "movie", "nav_requests-embed": "download", "nav_issues": "report_problem", "nav_calendar": "calendar_month", "nav_settings": "settings", "section_streams": "play_circle", "section_services": "health_metrics", "section_requests": "movie", "section_news": "newspaper" },
+  "icons": { "sidebar_logo": "settings_input_component", "nav_home": "home", "nav_requests": "movie", "nav_requests-embed": "download", "nav_issues": "report_problem", "nav_calendar": "calendar_month", "nav_settings": "settings", "section_streams": "play_circle", "section_services": "health_metrics", "section_releases": "calendar_month", "section_requests": "shopping_cart", "section_news": "newspaper" },
   "vapid_public_key": "..."
 }
 ```
@@ -248,6 +249,8 @@ Stored in `settings` table, seeded on first startup:
 | `theme.custom_css` | `""` | Custom CSS injected on all pages |
 | `features.show_requests` | `false` | Show Overseerr iframe Requests (Embed) page in sidebar |
 | `features.show_simple_auth` | `true` | Show username/password login form. When `"false"`, hides form and backend rejects `/auth/simple-login` with 403. |
+| `features.show_plex_auth` | `true` | Show Plex OAuth login button. Default ON; requires Plex integration configured. |
+| `features.show_authentik_auth` | `false` | Show Authentik OIDC login button. Default OFF; must be explicitly enabled and requires Authentik configured. |
 | `features.login_backgrounds` | `true` | Show rotating TMDB backgrounds on login page (requires Overseerr) |
 | `sidebar.label_home` | `Home` | Sidebar label for Home page |
 | `sidebar.label_requests` | `Requests` | Sidebar label for Requests page |
@@ -266,6 +269,7 @@ Stored in `settings` table, seeded on first startup:
 | `icon.section_services` | `health_metrics` | Material Symbol for Service Health section |
 | `icon.section_releases` | `calendar_month` | Material Symbol for Upcoming Releases section |
 | `icon.section_news` | `newspaper` | Material Symbol for Latest News section |
+| `icon.section_requests` | `shopping_cart` | Material Symbol for Recent Requests section |
 | `system.admin_email` | `""` | Admin email (priority check for Plex admin determination) |
 | `system.secret_key` | (auto) | Auto-generated secret key for session signing |
 | `system.plex_client_id` | (auto) | Auto-generated Plex client identifier for PIN-based auth |
