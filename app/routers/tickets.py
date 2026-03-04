@@ -9,13 +9,14 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import bleach
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
+from app.limiter import limiter
 from app.models import Setting, Ticket, TicketComment
 
 logger = logging.getLogger(__name__)
@@ -191,7 +192,9 @@ async def list_tickets(
 
 
 @router.post("/tickets", status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 async def create_ticket(
+    request: Request,
     title: str = Form(...),
     description: str = Form(...),
     category: str = Form(...),
@@ -316,7 +319,9 @@ async def get_ticket(
 
 
 @router.post("/tickets/{ticket_id}/comments", status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 async def add_comment(
+    request: Request,
     ticket_id: int,
     message: str = Form(...),
     image: Optional[UploadFile] = File(None),
@@ -418,7 +423,9 @@ async def admin_list_tickets(
 
 
 @router.put("/admin/tickets/{ticket_id}")
+@limiter.limit("30/minute")
 async def admin_update_ticket(
+    request: Request,
     ticket_id: int,
     payload: AdminTicketUpdate,
     current_user: dict = Depends(require_admin),
@@ -463,7 +470,9 @@ async def admin_update_ticket(
 
 
 @router.delete("/admin/tickets/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("30/minute")
 async def admin_delete_ticket(
+    request: Request,
     ticket_id: int,
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db),

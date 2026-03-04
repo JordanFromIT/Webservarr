@@ -2,7 +2,7 @@
 Service Status API routes
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
@@ -10,8 +10,9 @@ from datetime import datetime
 
 
 from app.database import get_db
-from app.models import StatusUpdate
 from app.dependencies import require_admin
+from app.limiter import limiter
+from app.models import StatusUpdate
 
 router = APIRouter()
 
@@ -44,7 +45,9 @@ class StatusUpdateCreate(BaseModel):
 
 
 @router.get("/updates", response_model=List[StatusUpdateResponse])
+@limiter.limit("60/minute")
 async def get_status_updates(
+    request: Request,
     active_only: bool = True,
     limit: int = 20,
     db: Session = Depends(get_db)

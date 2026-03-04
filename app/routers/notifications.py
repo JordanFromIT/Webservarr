@@ -4,14 +4,15 @@ Notification API routes - User notifications, preferences, and push subscription
 
 import hashlib
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
 from app.database import get_db
-from app.models import Notification, PushSubscription, Setting
 from app.dependencies import get_current_user
+from app.limiter import limiter
+from app.models import Notification, PushSubscription, Setting
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,9 @@ async def unread_count(
 
 
 @router.put("/notifications/{notification_id}/read")
+@limiter.limit("30/minute")
 async def mark_read(
+    request: Request,
     notification_id: int,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -138,7 +141,9 @@ async def mark_read(
 
 
 @router.put("/notifications/read-all")
+@limiter.limit("30/minute")
 async def mark_all_read(
+    request: Request,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -157,7 +162,9 @@ async def mark_all_read(
 
 
 @router.delete("/notifications/{notification_id}")
+@limiter.limit("30/minute")
 async def delete_notification(
+    request: Request,
     notification_id: int,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -197,7 +204,9 @@ async def get_preferences(
 
 
 @router.put("/notifications/preferences")
+@limiter.limit("30/minute")
 async def update_preferences(
+    request: Request,
     body: PreferencesUpdate,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -225,7 +234,9 @@ async def update_preferences(
 # --- Push subscription ---
 
 @router.post("/notifications/push-subscribe")
+@limiter.limit("30/minute")
 async def push_subscribe(
+    request: Request,
     body: PushSubscribeRequest,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -258,7 +269,9 @@ async def push_subscribe(
 
 
 @router.delete("/notifications/push-subscribe")
+@limiter.limit("30/minute")
 async def push_unsubscribe(
+    request: Request,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

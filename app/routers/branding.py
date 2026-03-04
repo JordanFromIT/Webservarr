@@ -3,10 +3,11 @@ Public branding API - returns theme and branding settings without authentication
 Used by frontend theme-loader to apply branding before auth check.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.limiter import limiter
 from app.models import Setting
 
 router = APIRouter()
@@ -53,7 +54,8 @@ DEFAULTS = {
 
 
 @router.get("/branding")
-async def get_branding(db: Session = Depends(get_db)):
+@limiter.limit("60/minute")
+async def get_branding(request: Request, db: Session = Depends(get_db)):
     """
     Public endpoint - returns branding and theme settings.
     No authentication required. Frontend loads this on every page.

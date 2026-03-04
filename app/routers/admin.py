@@ -5,7 +5,7 @@ Admin API routes - Service management, settings, etc.
 import logging
 import os
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -15,6 +15,7 @@ import httpx
 from datetime import datetime, timedelta
 
 from app.database import get_db
+from app.limiter import limiter
 from app.models import Setting, Notification, PushSubscription
 from app.dependencies import require_admin
 from app.services.push import send_push_to_users
@@ -68,7 +69,9 @@ class AdminNotificationRequest(BaseModel):
 # --- Monitor Preferences ---
 
 @router.put("/monitors/{monitor_id}")
+@limiter.limit("30/minute")
 async def update_monitor_preferences(
+    request: Request,
     monitor_id: int,
     prefs: MonitorPreferences,
     current_user: dict = Depends(require_admin),
@@ -120,7 +123,9 @@ async def get_setting(
 
 
 @router.put("/settings")
+@limiter.limit("30/minute")
 async def update_setting(
+    request: Request,
     setting_data: SettingCreate,
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db)
@@ -176,7 +181,9 @@ async def list_settings(
 
 
 @router.put("/settings/bulk")
+@limiter.limit("30/minute")
 async def bulk_update_settings(
+    request: Request,
     payload: BulkSettingsUpdate,
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db)
@@ -206,7 +213,9 @@ async def bulk_update_settings(
 
 
 @router.post("/test-connection")
+@limiter.limit("30/minute")
 async def test_connection(
+    request: Request,
     payload: TestConnectionRequest,
     current_user: dict = Depends(require_admin)
 ):
@@ -277,7 +286,9 @@ MAX_LOGO_SIZE = 2 * 1024 * 1024  # 2MB
 
 
 @router.post("/upload-logo")
+@limiter.limit("10/minute")
 async def upload_logo(
+    request: Request,
     file: UploadFile = File(...),
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -327,7 +338,9 @@ async def upload_logo(
 # --- Admin Broadcast Notification ---
 
 @router.post("/notifications/send")
+@limiter.limit("30/minute")
 async def send_notification(
+    request: Request,
     payload: AdminNotificationRequest,
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -377,7 +390,9 @@ async def send_notification(
 # --- Container Management ---
 
 @router.post("/restart-container")
+@limiter.limit("30/minute")
 async def restart_container(
+    request: Request,
     current_user: dict = Depends(require_admin),
 ):
     """
@@ -402,7 +417,9 @@ async def restart_container(
 
 
 @router.post("/shutdown-container")
+@limiter.limit("30/minute")
 async def shutdown_container(
+    request: Request,
     current_user: dict = Depends(require_admin),
 ):
     """

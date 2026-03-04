@@ -2,7 +2,7 @@
 News API routes - CRUD operations for news posts
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
@@ -11,8 +11,9 @@ import markdown
 import bleach
 
 from app.database import get_db
-from app.models import NewsPost
 from app.dependencies import get_current_user, require_admin
+from app.limiter import limiter
+from app.models import NewsPost
 
 router = APIRouter()
 
@@ -131,7 +132,9 @@ async def get_news_post(
 
 
 @router.post("/", response_model=NewsPostResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("30/minute")
 async def create_news_post(
+    request: Request,
     post_data: NewsPostCreate,
     current_user: dict = Depends(require_admin),    db: Session = Depends(get_db)
 ):
@@ -162,7 +165,9 @@ async def create_news_post(
 
 
 @router.put("/{post_id}", response_model=NewsPostResponse)
+@limiter.limit("30/minute")
 async def update_news_post(
+    request: Request,
     post_id: int,
     post_data: NewsPostUpdate,
     current_user: dict = Depends(require_admin),    db: Session = Depends(get_db)
@@ -203,7 +208,9 @@ async def update_news_post(
 
 
 @router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("30/minute")
 async def delete_news_post(
+    request: Request,
     post_id: int,
     current_user: dict = Depends(require_admin),    db: Session = Depends(get_db)
 ):
