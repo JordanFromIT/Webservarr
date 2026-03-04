@@ -69,7 +69,7 @@ Each integration has a **Test Connection** button to verify your credentials bef
 
 ### Authentication
 
-WebServarr supports three authentication methods, configurable in **Settings > Integrations**:
+WebServarr supports three authentication methods, configurable in **Settings > System > Authentication**:
 
 1. **Simple Auth** (default) -- Username and password login against the local database. Enabled out of the box. Can be disabled once Plex OAuth is configured.
 
