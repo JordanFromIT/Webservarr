@@ -141,13 +141,37 @@ Admin determination: checks `system.admin_email` setting first, then falls back 
 - One-time news rebrand migration (HMS Dashboard → WebServarr post titles)
 - Authentik OIDC setup documentation (existing instance + fresh install paths)
 
-### Phase 10: Security Hardening
+### Phase 10: Security Hardening ✓
 
-- CSRF tokens for form submissions
-- Rate limiting on login and public endpoints
-- Input validation hardening
-- Dependency audit and pinning
-- Security documentation
+- Rate limiting via slowapi (Redis-backed): 5/min login, 10/min uploads, 30/min writes, 60/min public, 120/min reads
+- Client IP detection: CF-Connecting-IP (Cloudflare) > X-Forwarded-For > direct connection
+- Magic number verification on all image uploads (PNG, JPEG, WebP, GIF, SVG)
+- Authenticated ticket image serving (GET /api/uploads/tickets/{filename})
+- Input validation hardening (Literal types, field length/format checks)
+- Full dependency tree pinning via pip-compile + GitHub Dependabot
+- Security documentation in setup guide
+
+### Phase 11: Mobile Views
+
+- Audit and fix all pages for mobile responsiveness
+- Fix layout breakpoints, overflow issues, and touch targets
+- Ensure sidebar drawer, modals, and forms work correctly on small screens
+- Test across common mobile viewport sizes (iPhone, Android)
+
+### Phase 12: UI Polish
+
+- Final pass on visual consistency, spacing, and alignment across all pages
+- Fix any remaining UI bugs, edge cases, and design drift from Stitch exports
+- Ensure theme engine and branding apply cleanly to all components
+- Address any accumulated UX papercuts
+
+### Phase 13: Fresh Install Verification
+
+- Spin up a clean WebServarr instance from scratch (docker compose, no pre-existing data)
+- Walk through the full first-run experience: login, integration setup, theme configuration
+- Verify all features work out of the box for a new user with their own Plex server
+- Simulate the public GitHub discovery experience: README instructions, docs, onboarding flow
+- Document any gaps, missing defaults, or confusing steps found during testing
 
 ---
 

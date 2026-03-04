@@ -173,6 +173,7 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
 | GET | `/api/admin/tickets` | Admin | List all tickets with filters (status, category, priority, creator) |
 | PUT | `/api/admin/tickets/{id}` | Admin | Update ticket status, priority, or visibility (JSON body) |
 | DELETE | `/api/admin/tickets/{id}` | Admin | Delete ticket + all comments + associated images |
+| GET | `/api/uploads/tickets/{filename}` | Session | Serve ticket image with auth check (admin=all, non-admin=own+public) |
 
 All ticket endpoints respect the `features.show_tickets` setting -- returns 403 when disabled.
 

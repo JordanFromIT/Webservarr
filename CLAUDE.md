@@ -142,7 +142,7 @@ brand-assets/
 
 ## Project Phases
 
-**Current phase: 10**
+**Current phase: 11**
 
 | Phase | Name | Status |
 |-------|------|--------|
@@ -156,7 +156,10 @@ brand-assets/
 | 7 | Hardening and Release | Complete |
 | 8 | Ticket System | Complete |
 | 9 | WebServarr Branding & Public Release | Complete |
-| 10 | Security Hardening | **Next** |
+| 10 | Security Hardening | Complete |
+| 11 | Mobile Views | **Next** |
+| 12 | UI Polish | Planned |
+| 13 | Fresh Install Verification | Planned |
 
 See VISION.md for detailed phase descriptions.
 
