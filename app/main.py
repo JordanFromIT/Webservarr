@@ -13,6 +13,7 @@ import logging
 
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
 from app.database import init_db, SessionLocal
@@ -97,6 +98,7 @@ limiter = Limiter(
     default_limits=["120/minute"],
 )
 app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
 
 
 async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
