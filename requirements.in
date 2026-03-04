@@ -45,7 +45,7 @@ bleach==6.1.0
 requests==2.31.0
 
 # Date/time utilities
-python-dateutil==2.8.2
+python-dateutil==2.9.0.post0
 
 # Docker management
 docker==7.0.0
