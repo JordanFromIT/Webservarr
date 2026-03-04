@@ -11,7 +11,10 @@ from app.config import settings
 
 
 def _get_client_ip(request: Request) -> str:
-    """Get client IP from X-Forwarded-For (reverse proxy) or direct connection."""
+    """Get client IP, preferring Cloudflare's trusted header over spoofable XFF."""
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip:
+        return cf_ip.strip()
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()
