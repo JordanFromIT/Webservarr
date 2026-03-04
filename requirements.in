@@ -1,5 +1,9 @@
 # ==============================================================================
-# WebServarr - Python Dependencies
+# WebServarr - Direct Dependencies
+# ==============================================================================
+# This file lists direct (top-level) dependencies only.
+# Run `pip-compile requirements.in -o requirements.txt` to resolve and pin
+# the full dependency tree including transitive dependencies.
 # ==============================================================================
 
 # Web Framework
@@ -25,6 +29,9 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 
+# Rate Limiting
+slowapi==0.1.9
+
 # Utilities
 python-dotenv==1.0.1
 pydantic==2.5.3
@@ -42,9 +49,6 @@ python-dateutil==2.8.2
 
 # Docker management
 docker==7.0.0
-
-# Rate Limiting
-slowapi==0.1.9
 
 # Web Push notifications
 pywebpush>=2.0.0

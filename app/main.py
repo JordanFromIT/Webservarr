@@ -11,6 +11,9 @@ from contextlib import asynccontextmanager
 import asyncio
 import logging
 
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+
 from app.config import settings
 from app.database import init_db, SessionLocal
 from app.auth import session_manager
@@ -71,6 +74,14 @@ async def lifespan(app: FastAPI):
     logger.info("WebServarr shut down")
 
 
+def _get_client_ip(request: Request) -> str:
+    """Get client IP from X-Forwarded-For (reverse proxy) or direct connection."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 # Create FastAPI app
 app = FastAPI(
     title=settings.app_name,
@@ -78,6 +89,23 @@ app = FastAPI(
     debug=settings.app_debug,
     lifespan=lifespan
 )
+
+# Rate limiting via slowapi (backed by Redis)
+limiter = Limiter(
+    key_func=_get_client_ip,
+    storage_uri=settings.redis_url,
+    default_limits=["120/minute"],
+)
+app.state.limiter = limiter
+
+
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"Rate limit exceeded: {exc.detail}"},
+    )
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
 # CORS middleware - built from config
 _cors_origins = [settings.app_url]
