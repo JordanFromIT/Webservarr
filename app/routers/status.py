@@ -66,7 +66,9 @@ async def get_status_updates(
 
 
 @router.post("/updates", response_model=StatusUpdateResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("30/minute")
 async def create_status_update(
+    request: Request,
     update_data: StatusUpdateCreate,
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db)
@@ -94,7 +96,9 @@ async def create_status_update(
 
 
 @router.put("/updates/{update_id}/resolve", response_model=StatusUpdateResponse)
+@limiter.limit("30/minute")
 async def resolve_status_update(
+    request: Request,
     update_id: int,
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db)
