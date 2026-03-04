@@ -729,20 +729,20 @@
                             <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/</span>
                         </div>
                         <div class="flex items-center gap-3">
-                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconRequests">download</span>
-                            <label class="text-sm text-steel-blue w-28 shrink-0">Requests <span class="text-steel-blue/50 text-xs">(iframe)</span></label>
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconRequests">movie</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Requests</label>
                             <input type="text" id="sidebarLabelRequests"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Requests">
                             <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/requests</span>
                         </div>
                         <div class="flex items-center gap-3">
-                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconRequests2">movie</span>
-                            <label class="text-sm text-steel-blue w-28 shrink-0">Requests <span class="text-steel-blue/50 text-xs">(native)</span></label>
-                            <input type="text" id="sidebarLabelRequests2"
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconRequestsEmbed">download</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Requests <span class="text-steel-blue/50 text-xs">(Embed)</span></label>
+                            <input type="text" id="sidebarLabelRequestsEmbed"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                                placeholder="Requests">
-                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/requests2</span>
+                                placeholder="Requests (Embed)">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/requests-embed</span>
                         </div>
                         <div class="flex items-center gap-3">
                             <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconIssues">report_problem</span>
@@ -779,7 +779,7 @@
                     <!-- Hidden inputs that store the actual values -->
                     <input type="hidden" id="iconNavHome" value="">
                     <input type="hidden" id="iconNavRequests" value="">
-                    <input type="hidden" id="iconNavRequests2" value="">
+                    <input type="hidden" id="iconNavRequestsEmbed" value="">
                     <input type="hidden" id="iconNavIssues" value="">
                     <input type="hidden" id="iconNavTickets" value="">
                     <input type="hidden" id="iconNavSettings" value="">
@@ -795,12 +795,12 @@
                             <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Home</span>
                         </button>
                         <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavRequests">
-                            <span id="iconPreviewNavRequests" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">download</span>
+                            <span id="iconPreviewNavRequests" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">movie</span>
                             <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Requests</span>
                         </button>
-                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavRequests2">
-                            <span id="iconPreviewNavRequests2" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">movie</span>
-                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Requests 2</span>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavRequestsEmbed">
+                            <span id="iconPreviewNavRequestsEmbed" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">download</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Requests (Embed)</span>
                         </button>
                         <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavIssues">
                             <span id="iconPreviewNavIssues" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-white transition-colors">report_problem</span>
@@ -1178,7 +1178,7 @@
     </main>
 
     <script src="/static/js/auth.js"></script>
-    <script src="/static/js/sidebar.js?v=9"></script>
+    <script src="/static/js/sidebar.js?v=10"></script>
     <script src="/static/js/notifications.js"></script>
     <script>
         // Initialize sidebar and auth
@@ -1386,7 +1386,7 @@
             var map = {
                 labelIconHome: 'iconNavHome',
                 labelIconRequests: 'iconNavRequests',
-                labelIconRequests2: 'iconNavRequests2',
+                labelIconRequestsEmbed: 'iconNavRequestsEmbed',
                 labelIconIssues: 'iconNavIssues',
                 labelIconTickets: 'iconNavTickets',
                 labelIconSettings: 'iconNavSettings'
@@ -1899,14 +1899,14 @@
             'theme.custom_css': '',
             'sidebar.label_home': 'Home',
             'sidebar.label_requests': 'Requests',
-            'sidebar.label_requests2': 'Requests',
+            'sidebar.label_requests_embed': 'Requests (Embed)',
             'sidebar.label_issues': 'Issues',
             'sidebar.label_tickets': 'Tickets',
             'sidebar.label_settings': 'Settings',
             'icon.sidebar_logo': 'settings_input_component',
             'icon.nav_home': 'home',
-            'icon.nav_requests': 'download',
-            'icon.nav_requests2': 'movie',
+            'icon.nav_requests': 'movie',
+            'icon.nav_requests_embed': 'download',
             'icon.nav_issues': 'report_problem',
             'icon.nav_tickets': 'confirmation_number',
             'icon.nav_settings': 'settings',
@@ -2142,7 +2142,7 @@
                 var sidebarLabels = data.sidebar_labels || {};
                 document.getElementById('sidebarLabelHome').value = sidebarLabels.home || '';
                 document.getElementById('sidebarLabelRequests').value = sidebarLabels.requests || '';
-                document.getElementById('sidebarLabelRequests2').value = sidebarLabels.requests2 || '';
+                document.getElementById('sidebarLabelRequestsEmbed').value = sidebarLabels['requests-embed'] || '';
                 document.getElementById('sidebarLabelIssues').value = sidebarLabels.issues || '';
                 document.getElementById('sidebarLabelTickets').value = sidebarLabels.tickets || '';
                 document.getElementById('sidebarLabelSettings').value = sidebarLabels.settings || '';
@@ -2152,7 +2152,7 @@
                 var iconFields = {
                     iconNavHome: iconsData.nav_home || '',
                     iconNavRequests: iconsData.nav_requests || '',
-                    iconNavRequests2: iconsData.nav_requests2 || '',
+                    iconNavRequestsEmbed: iconsData['nav_requests-embed'] || '',
                     iconNavIssues: iconsData.nav_issues || '',
                     iconNavTickets: iconsData.nav_tickets || '',
                     iconNavSettings: iconsData.nav_settings || '',
@@ -2215,8 +2215,8 @@
 
             // Sidebar labels
             settings.push({ key: 'sidebar.label_home', value: document.getElementById('sidebarLabelHome').value || 'Home', description: 'Sidebar label for Home' });
-            settings.push({ key: 'sidebar.label_requests', value: document.getElementById('sidebarLabelRequests').value || 'Requests', description: 'Sidebar label for Requests iframe' });
-            settings.push({ key: 'sidebar.label_requests2', value: document.getElementById('sidebarLabelRequests2').value || 'Requests', description: 'Sidebar label for native Requests' });
+            settings.push({ key: 'sidebar.label_requests', value: document.getElementById('sidebarLabelRequests').value || 'Requests', description: 'Sidebar label for Requests' });
+            settings.push({ key: 'sidebar.label_requests_embed', value: document.getElementById('sidebarLabelRequestsEmbed').value || 'Requests (Embed)', description: 'Sidebar label for Requests (Embed)' });
             settings.push({ key: 'sidebar.label_issues', value: document.getElementById('sidebarLabelIssues').value || 'Issues', description: 'Sidebar label for Issues' });
             settings.push({ key: 'sidebar.label_tickets', value: document.getElementById('sidebarLabelTickets').value || 'Tickets', description: 'Sidebar label for Tickets' });
             settings.push({ key: 'sidebar.label_settings', value: document.getElementById('sidebarLabelSettings').value || 'Settings', description: 'Sidebar label for Settings' });
@@ -2224,8 +2224,8 @@
             // Icons
             var iconSaveMap = {
                 'icon.nav_home': { input: 'iconNavHome', fallback: 'home' },
-                'icon.nav_requests': { input: 'iconNavRequests', fallback: 'download' },
-                'icon.nav_requests2': { input: 'iconNavRequests2', fallback: 'movie' },
+                'icon.nav_requests': { input: 'iconNavRequests', fallback: 'movie' },
+                'icon.nav_requests_embed': { input: 'iconNavRequestsEmbed', fallback: 'download' },
                 'icon.nav_issues': { input: 'iconNavIssues', fallback: 'report_problem' },
                 'icon.nav_tickets': { input: 'iconNavTickets', fallback: 'confirmation_number' },
                 'icon.nav_settings': { input: 'iconNavSettings', fallback: 'settings' },
@@ -2299,7 +2299,7 @@
             // Sidebar labels
             document.getElementById('sidebarLabelHome').value = THEME_DEFAULTS['sidebar.label_home'];
             document.getElementById('sidebarLabelRequests').value = THEME_DEFAULTS['sidebar.label_requests'];
-            document.getElementById('sidebarLabelRequests2').value = THEME_DEFAULTS['sidebar.label_requests2'];
+            document.getElementById('sidebarLabelRequestsEmbed').value = THEME_DEFAULTS['sidebar.label_requests_embed'];
             document.getElementById('sidebarLabelIssues').value = THEME_DEFAULTS['sidebar.label_issues'];
             document.getElementById('sidebarLabelTickets').value = THEME_DEFAULTS['sidebar.label_tickets'];
             document.getElementById('sidebarLabelSettings').value = THEME_DEFAULTS['sidebar.label_settings'];
@@ -2308,7 +2308,7 @@
             var iconResetMap = {
                 iconNavHome: 'icon.nav_home',
                 iconNavRequests: 'icon.nav_requests',
-                iconNavRequests2: 'icon.nav_requests2',
+                iconNavRequestsEmbed: 'icon.nav_requests_embed',
                 iconNavIssues: 'icon.nav_issues',
                 iconNavTickets: 'icon.nav_tickets',
                 iconNavSettings: 'icon.nav_settings',

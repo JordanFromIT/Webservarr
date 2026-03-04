@@ -13,8 +13,9 @@ Last verified: 2026-02-27
 | `/login` | `app/static/login.html` | None | Login page with three auth methods: simple (username/password), direct Plex OAuth, and Authentik OIDC. Branding from theme engine. Rotating TMDB backdrop slideshow (via Overseerr `/api/v1/backdrops`). Falls back to static poster grid. |
 | `/` | `app/static/index.html` | Session | Main dashboard. Plex streams (quality warnings, "More info" expander), service status, Netdata gauges, upcoming releases, news. |
 | `/settings` | `app/static/settings.html` | Session (admin) | Four tabs: Integrations (accordion with Plex/Kuma/Overseerr/Sonarr/Radarr/Netdata/Authentik), System, Customization (icon picker, theme, sidebar labels), News. |
-| `/requests` | `app/static/requests.html` | Session | Overseerr iframe embed with Plex SSO. Calls re-auth before loading iframe. |
-| `/requests2` | `app/static/requests2.html` | Session | Native media request page. Search TMDB, create requests, view existing requests with poster grid and filter tabs. |
+| `/requests` | `app/static/requests.html` | Session | Native media request page. Search TMDB, create requests, view existing requests with poster grid and filter tabs. |
+| `/requests-embed` | `app/static/requests-embed.html` | Session | Overseerr iframe embed with Plex SSO. Calls re-auth before loading iframe. |
+| `/requests2` | *(301 redirect to `/requests`)* | None | Legacy redirect for old bookmarks. |
 | `/issues` | `app/static/issues.html` | Session | Report and view media issues (audio, video, subtitle). Per-user Plex auth for writes. |
 | `/calendar` | `app/static/calendar.html` | Session | Combined Radarr + Sonarr month calendar. Click day for release details. Month navigation. |
 | `/tickets` | `app/static/tickets.html` | Session | User support tickets. Submit new tickets (multipart with optional image), view own + public tickets, admin management panel. |
@@ -108,8 +109,8 @@ Colors defined as RGB triplets via CSS custom properties for Tailwind alpha modi
   "font": "Spline Sans",
   "custom_css": "",
   "features": { "show_requests": false, "show_simple_auth": true },
-  "sidebar_labels": { "home": "Home", "requests": "Requests", "requests2": "Requests", "issues": "Issues", "calendar": "Calendar", "settings": "Settings" },
-  "icons": { "sidebar_logo": "settings_input_component", "nav_home": "home", "nav_requests": "download", "nav_requests2": "movie", "nav_issues": "report_problem", "nav_calendar": "calendar_month", "nav_settings": "settings", "section_streams": "play_circle", "section_services": "health_metrics", "section_requests": "movie", "section_news": "newspaper" },
+  "sidebar_labels": { "home": "Home", "requests": "Requests", "requests-embed": "Requests (Embed)", "issues": "Issues", "calendar": "Calendar", "settings": "Settings" },
+  "icons": { "sidebar_logo": "settings_input_component", "nav_home": "home", "nav_requests": "movie", "nav_requests-embed": "download", "nav_issues": "report_problem", "nav_calendar": "calendar_month", "nav_settings": "settings", "section_streams": "play_circle", "section_services": "health_metrics", "section_requests": "movie", "section_news": "newspaper" },
   "vapid_public_key": "..."
 }
 ```
@@ -245,19 +246,19 @@ Stored in `settings` table, seeded on first startup:
 | `theme.color_background` | `#000000` | Background color |
 | `theme.font` | `Spline Sans` | Google Font family (30 curated fonts in dropdown + custom entry) |
 | `theme.custom_css` | `""` | Custom CSS injected on all pages |
-| `features.show_requests` | `false` | Show Overseerr iframe Requests page in sidebar |
+| `features.show_requests` | `false` | Show Overseerr iframe Requests (Embed) page in sidebar |
 | `features.show_simple_auth` | `true` | Show username/password login form. When `"false"`, hides form and backend rejects `/auth/simple-login` with 403. |
 | `features.login_backgrounds` | `true` | Show rotating TMDB backgrounds on login page (requires Overseerr) |
 | `sidebar.label_home` | `Home` | Sidebar label for Home page |
-| `sidebar.label_requests` | `Requests` | Sidebar label for Requests iframe page |
-| `sidebar.label_requests2` | `Requests` | Sidebar label for native Requests page |
+| `sidebar.label_requests` | `Requests` | Sidebar label for Requests page |
+| `sidebar.label_requests_embed` | `Requests (Embed)` | Sidebar label for Requests (Embed) page |
 | `sidebar.label_issues` | `Issues` | Sidebar label for Issues page |
 | `sidebar.label_calendar` | `Calendar` | Sidebar label for Calendar page |
 | `sidebar.label_settings` | `Settings` | Sidebar label for Settings page |
 | `icon.sidebar_logo` | `settings_input_component` | Material Symbol for sidebar logo (when no logo image) |
 | `icon.nav_home` | `home` | Material Symbol for Home nav item |
-| `icon.nav_requests` | `download` | Material Symbol for Requests iframe nav item |
-| `icon.nav_requests2` | `movie` | Material Symbol for native Requests nav item |
+| `icon.nav_requests` | `movie` | Material Symbol for Requests nav item |
+| `icon.nav_requests_embed` | `download` | Material Symbol for Requests (Embed) nav item |
 | `icon.nav_issues` | `report_problem` | Material Symbol for Issues nav item |
 | `icon.nav_calendar` | `calendar_month` | Material Symbol for Calendar nav item |
 | `icon.nav_settings` | `settings` | Material Symbol for Settings nav item |
@@ -397,7 +398,7 @@ Storage: SQLite at `/app/data/webservarr.db` (container path) / `data/webservarr
 
 Auto-refresh: all sections poll every 30 seconds. Netdata gauges poll every 1 second for real-time monitoring. "Checked X ago" timer text updates every 1 second. Active Streams paginated at 6 per page with chevron navigation.
 
-## Requests Page Sections (requests2.html)
+## Requests Page Sections (requests.html)
 
 | Section | Data Source | Status |
 |---------|------------|--------|

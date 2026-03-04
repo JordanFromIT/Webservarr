@@ -35,15 +35,15 @@ DEFAULTS = {
     # Sidebar labels
     "sidebar.label_home": "Home",
     "sidebar.label_requests": "Requests",
-    "sidebar.label_requests2": "Requests",
+    "sidebar.label_requests_embed": "Requests (Embed)",
     "sidebar.label_issues": "Issues",
     "sidebar.label_calendar": "Calendar",
     "sidebar.label_tickets": "Tickets",
     "sidebar.label_settings": "Settings",
     # Configurable icons
     "icon.nav_home": "home",
-    "icon.nav_requests": "download",
-    "icon.nav_requests2": "movie",
+    "icon.nav_requests": "movie",
+    "icon.nav_requests_embed": "download",
     "icon.nav_issues": "report_problem",
     "icon.nav_calendar": "calendar_month",
     "icon.nav_tickets": "confirmation_number",
@@ -122,7 +122,7 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
         "sidebar_labels": {
             "home": get("sidebar.label_home"),
             "requests": get("sidebar.label_requests"),
-            "requests2": get("sidebar.label_requests2"),
+            "requests-embed": get("sidebar.label_requests_embed"),
             "issues": get("sidebar.label_issues"),
             "calendar": get("sidebar.label_calendar"),
             "tickets": get("sidebar.label_tickets"),
@@ -131,7 +131,7 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
         "icons": {
             "nav_home": get("icon.nav_home"),
             "nav_requests": get("icon.nav_requests"),
-            "nav_requests2": get("icon.nav_requests2"),
+            "nav_requests-embed": get("icon.nav_requests_embed"),
             "nav_issues": get("icon.nav_issues"),
             "nav_calendar": get("icon.nav_calendar"),
             "nav_tickets": get("icon.nav_tickets"),

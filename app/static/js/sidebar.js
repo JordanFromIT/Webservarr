@@ -11,8 +11,8 @@
 
 var NAV_ITEMS = [
   { id: 'home',     label: 'Home',        icon: 'home',                   href: '/' },
-  { id: 'requests', label: 'Requests',    icon: 'download',              href: '/requests', badgeId: 'requestsBadge', feature: 'show_requests' },
-  { id: 'requests2', label: 'Requests2',  icon: 'movie',                 href: '/requests2' },
+  { id: 'requests', label: 'Requests',    icon: 'movie',                 href: '/requests' },
+  { id: 'requests-embed', label: 'Requests (Embed)', icon: 'download',  href: '/requests-embed', badgeId: 'requestsBadge', feature: 'show_requests' },
   { id: 'issues',    label: 'Issues',     icon: 'report_problem',        href: '/issues' },
   { id: 'calendar',  label: 'Calendar',    icon: 'calendar_month',        href: '/calendar' },
   { id: 'tickets',  label: 'Tickets',    icon: 'confirmation_number',   href: '/tickets', feature: 'show_tickets' },

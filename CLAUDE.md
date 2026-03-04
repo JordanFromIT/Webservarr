@@ -41,8 +41,8 @@ app/integrations/netdata.py       # Netdata API client (CPU%, RAM%, network MB/s
 app/static/login.html        # Login page (multi-auth: simple, Plex OAuth, Authentik OIDC)
 app/static/index.html        # Main dashboard
 app/static/settings.html     # Integrations (accordion), System, Customization (icons, theme, labels), News tabs
-app/static/requests.html     # Overseerr iframe embed (optional)
-app/static/requests2.html    # Native media request page
+app/static/requests.html     # Native media request page
+app/static/requests-embed.html # Overseerr iframe embed (optional)
 app/static/issues.html       # Issue reporting and tracking
 app/static/calendar.html     # Combined Radarr + Sonarr calendar
 app/static/tickets.html      # User support ticket system

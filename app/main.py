@@ -214,26 +214,33 @@ async def login_page():
     return _serve_page("/app/app/static/login.html", "Login page")
 
 
-# Requests page (Overseerr iframe wrapper)
+# Requests page (native Overseerr UI)
 @app.get("/requests", response_class=HTMLResponse, tags=["Pages"])
 async def requests_page(
-    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
-):
-    """Serve the requests page (Overseerr iframe)."""
-    if not await _require_session(session_id):
-        return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/requests.html", "Requests page")
-
-
-# Requests2 page (native Overseerr UI)
-@app.get("/requests2", response_class=HTMLResponse, tags=["Pages"])
-async def requests2_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the native requests page."""
     if not await _require_session(session_id):
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/requests2.html", "Requests2 page")
+    return _serve_page("/app/app/static/requests.html", "Requests page")
+
+
+# Requests embed page (Overseerr iframe wrapper)
+@app.get("/requests-embed", response_class=HTMLResponse, tags=["Pages"])
+async def requests_embed_page(
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve the requests embed page (Overseerr iframe)."""
+    if not await _require_session(session_id):
+        return RedirectResponse(url="/login", status_code=302)
+    return _serve_page("/app/app/static/requests-embed.html", "Requests embed page")
+
+
+# Legacy redirect: /requests2 → /requests (301)
+@app.get("/requests2", response_class=HTMLResponse, tags=["Pages"])
+async def requests2_redirect():
+    """Redirect old /requests2 URL to /requests."""
+    return RedirectResponse(url="/requests", status_code=301)
 
 
 # Issues page

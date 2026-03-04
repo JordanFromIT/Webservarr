@@ -26,20 +26,20 @@ DEFAULT_SETTINGS = {
     "theme.font": ("Spline Sans", "Google Font family name"),
     "theme.custom_css": ("", "Custom CSS injected into all pages"),
     # Feature flags
-    "features.show_requests": ("false", "Show Overseerr iframe Requests page in sidebar"),
+    "features.show_requests": ("false", "Show Overseerr iframe Requests (Embed) page in sidebar"),
     "features.show_simple_auth": ("true", "Show local username/password login on login page"),
     "features.login_backgrounds": ("true", "Show rotating TMDB backgrounds on login page"),
     # Sidebar labels
     "sidebar.label_home": ("Home", "Sidebar label for Home page"),
-    "sidebar.label_requests": ("Requests", "Sidebar label for Requests iframe page"),
-    "sidebar.label_requests2": ("Requests", "Sidebar label for native Requests page"),
+    "sidebar.label_requests": ("Requests", "Sidebar label for Requests page"),
+    "sidebar.label_requests_embed": ("Requests (Embed)", "Sidebar label for Requests (Embed) page"),
     "sidebar.label_issues": ("Issues", "Sidebar label for Issues page"),
     "sidebar.label_calendar": ("Calendar", "Sidebar label for Calendar page"),
     "sidebar.label_settings": ("Settings", "Sidebar label for Settings page"),
     # Configurable icons (Material Symbols icon names)
     "icon.nav_home": ("home", "Sidebar icon for Home page"),
-    "icon.nav_requests": ("download", "Sidebar icon for Requests iframe page"),
-    "icon.nav_requests2": ("movie", "Sidebar icon for native Requests page"),
+    "icon.nav_requests": ("movie", "Sidebar icon for Requests page"),
+    "icon.nav_requests_embed": ("download", "Sidebar icon for Requests (Embed) page"),
     "icon.nav_issues": ("report_problem", "Sidebar icon for Issues page"),
     "icon.nav_calendar": ("calendar_month", "Sidebar icon for Calendar page"),
     "icon.nav_settings": ("settings", "Sidebar icon for Settings page"),
@@ -329,3 +329,48 @@ def migrate_news_rebrand(db: Session) -> None:
         return
 
     logger.info("Completed one-time news rebrand migration")
+
+
+def migrate_requests_rename(db: Session) -> None:
+    """One-time migration: rename requests2 settings keys to match the
+    requests/requests-embed URL rename.
+    Guarded by migration.requests_rename_v1 marker."""
+    from sqlalchemy.exc import IntegrityError
+
+    if db.query(Setting).filter(Setting.key == "migration.requests_rename_v1").first():
+        return
+
+    # Rename order matters: move the old iframe keys out first, then move native keys in.
+    renames = [
+        # Old iframe keys → new embed keys
+        ("sidebar.label_requests", "sidebar.label_requests_embed"),
+        ("icon.nav_requests", "icon.nav_requests_embed"),
+        # Old native keys → new primary keys
+        ("sidebar.label_requests2", "sidebar.label_requests"),
+        ("icon.nav_requests2", "icon.nav_requests"),
+    ]
+
+    for old_key, new_key in renames:
+        row = db.query(Setting).filter(Setting.key == old_key).first()
+        if row:
+            # Delete any existing row at the target key to avoid unique constraint
+            existing_target = db.query(Setting).filter(Setting.key == new_key).first()
+            if existing_target:
+                db.delete(existing_target)
+            row.key = new_key
+            db.flush()
+
+    db.add(Setting(
+        key="migration.requests_rename_v1",
+        value="done",
+        description="One-time requests2 → requests-embed rename migration",
+    ))
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.debug("migration.requests_rename_v1 marker already exists (race), skipping")
+        return
+
+    logger.info("Completed one-time requests rename migration")

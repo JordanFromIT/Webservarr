@@ -25,7 +25,7 @@
     ticket: 'confirmation_number'
   };
   var CATEGORY_URLS = {
-    request: '/requests2',
+    request: '/requests',
     issue: '/issues',
     service: '/',
     news: '/',

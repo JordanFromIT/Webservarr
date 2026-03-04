@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Requests</title>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: {
+        "display": ["var(--font-display)", "sans-serif"]
+      },
+    },
+  },
+}</script>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<div id="sidebar-root"></div>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<!-- Header (desktop only) -->
+<header class="h-16 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-black/40 backdrop-blur-md z-10">
+<div class="flex items-center gap-6">
+<div id="systemStatus" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-steel-blue/10 border border-steel-blue/30">
+<span class="flex size-2 rounded-full bg-steel-blue"></span>
+<span class="text-steel-blue text-xs font-bold uppercase tracking-widest">Loading...</span>
+</div>
+</div>
+<div class="relative">
+<button id="userMenuBtn" class="flex items-center gap-3 pl-4 cursor-pointer hover:opacity-80 transition-opacity">
+<div class="text-right">
+<p id="headerUsername" class="text-sm font-bold text-white leading-none"></p>
+<p id="headerRole" class="text-[10px] text-steel-blue mt-1"></p>
+</div>
+<div id="headerAvatar" class="size-9 rounded-full bg-gradient-to-br from-baltic-blue to-cornflower-ocean border border-steel-blue/40"></div>
+</button>
+<div id="userMenuDropdown" class="hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
+<a href="/settings" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors" data-admin-only="true" style="display:none">
+<span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>
+Account Settings
+</a>
+<button data-logout class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors text-left">
+<span class="material-symbols-outlined text-steel-blue text-sm">logout</span>
+Sign Out
+</button>
+</div>
+</div>
+</header>
+<!-- Overseerr Iframe -->
+<div class="flex-1 overflow-hidden">
+<div id="iframeContainer" class="w-full h-full">
+<div id="iframePlaceholder" class="flex flex-col items-center justify-center h-full text-center text-steel-blue p-8">
+<span class="material-symbols-outlined text-6xl mb-4 opacity-50">download</span>
+<p class="text-lg mb-2">Loading Overseerr...</p>
+<p class="text-sm">If Overseerr is not configured, set the URL in Settings > Integrations.</p>
+</div>
+</div>
+</div>
+</main>
+
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/sidebar.js?v=10"></script>
+<script>
+document.addEventListener('DOMContentLoaded', async function() {
+    initSidebar('requests-embed');
+
+    const user = await checkAuth();
+    if (!user) return;
+    showAdminNav(user.is_admin);
+    loadSystemStatus();
+
+    // Authenticate with Overseerr SSO before loading iframe
+    try {
+        await fetch('/api/integrations/overseerr-auth', { method: 'POST' });
+    } catch (e) { /* SSO optional — iframe will show Overseerr login if it fails */ }
+
+    // Load Overseerr URL from settings
+    try {
+        const resp = await fetch('/api/integrations/overseerr-url');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.url) {
+                const container = document.getElementById('iframeContainer');
+                container.innerHTML = '<iframe src="' + data.url + '" class="w-full h-full border-0" allow="fullscreen"></iframe>';
+            }
+        }
+    } catch (e) {
+        // Overseerr not configured — keep placeholder
+    }
+});
+</script>
+</body>
+</html>

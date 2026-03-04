@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>WebServarr - Requests</title>
+<title>WebServarr - Media Requests</title>
 <script src="/static/js/theme-loader.js"></script>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
@@ -29,6 +29,8 @@
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <div id="sidebar-root"></div>
+<!-- Toast notification container -->
+<div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 <!-- Main Content Area -->
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
 <!-- Header (desktop only) -->
@@ -39,6 +41,10 @@
 <span class="text-steel-blue text-xs font-bold uppercase tracking-widest">Loading...</span>
 </div>
 </div>
+<div class="flex items-center gap-4">
+<button class="relative p-2 text-steel-blue hover:text-frosted-blue transition-colors group" title="Notifications">
+<span class="material-symbols-outlined">notifications</span>
+</button>
 <div class="relative">
 <button id="userMenuBtn" class="flex items-center gap-3 pl-4 cursor-pointer hover:opacity-80 transition-opacity">
 <div class="text-right">
@@ -58,49 +64,719 @@ Sign Out
 </button>
 </div>
 </div>
+</div>
 </header>
-<!-- Overseerr Iframe -->
-<div class="flex-1 overflow-hidden">
-<div id="iframeContainer" class="w-full h-full">
-<div id="iframePlaceholder" class="flex flex-col items-center justify-center h-full text-center text-steel-blue p-8">
-<span class="material-symbols-outlined text-6xl mb-4 opacity-50">download</span>
-<p class="text-lg mb-2">Loading Overseerr...</p>
-<p class="text-sm">If Overseerr is not configured, set the URL in Settings > Integrations.</p>
+<!-- Scrollable Content -->
+<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+
+<!-- Stat Summary Cards -->
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+<div class="glass-card rounded-xl p-4 text-center">
+<p class="text-2xl font-bold text-white" id="statTotal">--</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Total</p>
+</div>
+<div class="glass-card rounded-xl p-4 text-center">
+<p class="text-2xl font-bold text-steel-blue" id="statPending">--</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Pending</p>
+</div>
+<div class="glass-card rounded-xl p-4 text-center">
+<p class="text-2xl font-bold text-blue-500" id="statApproved">--</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Approved</p>
+</div>
+<div class="glass-card rounded-xl p-4 text-center">
+<p class="text-2xl font-bold text-green-500" id="statAvailable">--</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Available</p>
 </div>
 </div>
+
+<!-- Two-column layout: Search (left) + Requests (right) on desktop, stacked on mobile -->
+<div class="flex flex-col lg:flex-row gap-6">
+
+<!-- Left column: Search -->
+<div class="w-full lg:w-1/2 min-w-0 rounded-xl glass-card p-4 lg:p-5">
+<!-- Search Bar inside panel -->
+<div class="relative mb-4">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-xl">search</span>
+<input id="searchInput" type="text" placeholder="Search movies and TV shows..."
+  class="w-full pl-10 pr-4 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-white placeholder-steel-blue/60 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm"/>
+</div>
+<div class="space-y-1.5 mb-4 text-[11px] leading-relaxed text-steel-blue/80">
+<p><strong class="text-steel-blue">Requests</strong> are processed automatically and should be available within an hour, though there is no guarantee the content is available.</p>
+</div>
+<div class="flex items-center gap-3 mb-4 pb-3 border-b border-steel-blue/30">
+<span class="material-symbols-outlined text-primary">manage_search</span>
+<h3 class="text-lg font-bold text-white">Search Results</h3>
+<span id="searchResultCount" class="text-sm text-steel-blue font-medium"></span>
+</div>
+<!-- Search Results Section (hidden by default) -->
+<section id="searchResultsSection" class="hidden">
+<div id="searchResultsGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+</div>
+<!-- Search pagination -->
+<div id="searchPagination" class="flex items-center justify-center gap-3 mt-6 hidden">
+<button id="searchPrevBtn" onclick="searchPrevPage()" class="px-4 py-2 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-white hover:bg-steel-blue/30 transition-all text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed">
+<span class="material-symbols-outlined text-sm align-middle">chevron_left</span> Prev
+</button>
+<span id="searchPageInfo" class="text-sm text-steel-blue font-medium"></span>
+<button id="searchNextBtn" onclick="searchNextPage()" class="px-4 py-2 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-white hover:bg-steel-blue/30 transition-all text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed">
+Next <span class="material-symbols-outlined text-sm align-middle">chevron_right</span>
+</button>
+</div>
+</section>
+
+<!-- Search Empty State (visible by default) -->
+<div id="searchEmptyState" class="text-center text-steel-blue py-10">
+<span class="material-symbols-outlined text-5xl mb-3 block opacity-40">search</span>
+<p class="text-sm">Search above to find content to request</p>
+</div>
+</div>
+
+<!-- Right column: Existing Requests -->
+<div class="w-full lg:w-1/2 min-w-0 rounded-xl glass-card p-4 lg:p-5">
+<div class="flex items-center gap-3 mb-4 pb-3 border-b border-steel-blue/30">
+<span class="material-symbols-outlined text-primary">shopping_cart</span>
+<h3 class="text-lg font-bold text-white">Your Requests</h3>
+<span id="requestsTotalCount" class="text-sm text-steel-blue font-medium"></span>
+</div>
+<section>
+<!-- Filter Tabs -->
+<div class="flex flex-wrap gap-2 mb-4">
+<button onclick="setFilter('all')" data-filter="all" class="filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All</button>
+<button onclick="setFilter('pending')" data-filter="pending" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Pending</button>
+<button onclick="setFilter('approved')" data-filter="approved" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Approved</button>
+<button onclick="setFilter('available')" data-filter="available" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Available</button>
+<button onclick="setFilter('declined')" data-filter="declined" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Declined</button>
+</div>
+
+<!-- Requests Grid -->
+<div id="requestsGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+<div class="text-center text-steel-blue py-8 col-span-full">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
+<p>Loading requests...</p>
+</div>
+</div>
+<!-- Requests pagination -->
+<div id="requestsPagination" class="flex items-center justify-center gap-3 mt-6 hidden">
+<button id="requestsPrevBtn" onclick="requestsPrevPage()" class="px-4 py-2 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-white hover:bg-steel-blue/30 transition-all text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed">
+<span class="material-symbols-outlined text-sm align-middle">chevron_left</span> Prev
+</button>
+<span id="requestsPageInfo" class="text-sm text-steel-blue font-medium"></span>
+<button id="requestsNextBtn" onclick="requestsNextPage()" class="px-4 py-2 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-white hover:bg-steel-blue/30 transition-all text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed">
+Next <span class="material-symbols-outlined text-sm align-middle">chevron_right</span>
+</button>
+</div>
+</section>
+</div>
+
+</div>
+</div>
+<!-- Scroll-down hint (mobile only) -->
+<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+    <span class="material-symbols-outlined text-primary text-4xl animate-bounce">arrow_downward</span>
 </div>
 </main>
 
+<style>
+.filter-tab {
+  background: rgba(var(--color-accent) / 0.1);
+  border: 1px solid rgba(var(--color-accent) / 0.2);
+  color: rgb(var(--color-accent));
+}
+.filter-tab:hover {
+  background: rgba(var(--color-accent) / 0.2);
+  color: rgb(var(--color-text));
+}
+.filter-tab.active {
+  background: rgb(var(--color-primary));
+  border-color: rgb(var(--color-primary));
+  color: rgb(var(--color-background));
+}
+.poster-placeholder {
+  background: linear-gradient(135deg, rgba(var(--color-primary) / 0.3), rgba(var(--color-secondary) / 0.15));
+}
+</style>
+
 <script src="/static/js/auth.js"></script>
-<script src="/static/js/sidebar.js?v=9"></script>
+<script src="/static/js/sidebar.js?v=10"></script>
+<script src="/static/js/notifications.js"></script>
 <script>
+// State
+var _searchDebounceTimer = null;
+var _currentSearchQuery = '';
+var _currentSearchPage = 1;
+var _totalSearchPages = 1;
+var _searchResults = [];
+var _searchDisplayPage = 1;
+var _allRequests = [];
+var _currentFilter = 'all';
+var _requestsDisplayPage = 1;
+var _refreshInterval = null;
+var CARDS_PER_PAGE = 9;
+
 document.addEventListener('DOMContentLoaded', async function() {
     initSidebar('requests');
+    initNotifications();
 
-    const user = await checkAuth();
+    // Scroll-down hint — fade when at bottom
+    (function() {
+        var hint = document.getElementById('scrollDownHint');
+        if (!hint) return;
+        window.addEventListener('scroll', function() {
+            var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+            hint.style.opacity = atBottom ? '0' : '1';
+        });
+    })();
+
+    var user = await checkAuth();
     if (!user) return;
     showAdminNav(user.is_admin);
     loadSystemStatus();
 
-    // Authenticate with Overseerr SSO before loading iframe
-    try {
-        await fetch('/api/integrations/overseerr-auth', { method: 'POST' });
-    } catch (e) { /* SSO optional — iframe will show Overseerr login if it fails */ }
-
-    // Load Overseerr URL from settings
-    try {
-        const resp = await fetch('/api/integrations/overseerr-url');
-        if (resp.ok) {
-            const data = await resp.json();
-            if (data.url) {
-                const container = document.getElementById('iframeContainer');
-                container.innerHTML = '<iframe src="' + data.url + '" class="w-full h-full border-0" allow="fullscreen"></iframe>';
-            }
+    // Wire up search input with debounce
+    var searchInput = document.getElementById('searchInput');
+    searchInput.addEventListener('input', function() {
+        var query = searchInput.value.trim();
+        clearTimeout(_searchDebounceTimer);
+        if (query.length === 0) {
+            clearSearch();
+            return;
         }
-    } catch (e) {
-        // Overseerr not configured — keep placeholder
-    }
+        _searchDebounceTimer = setTimeout(function() {
+            _currentSearchPage = 1;
+            _searchDisplayPage = 1;
+            performSearch(query);
+        }, 300);
+    });
+
+    // Load initial data
+    loadRequestCounts();
+    loadExistingRequests();
+
+    // Auto-refresh every 30 seconds
+    _refreshInterval = setInterval(function() {
+        loadRequestCounts();
+        loadExistingRequests();
+    }, 30000);
 });
+
+// ---- Search ----
+
+async function performSearch(query) {
+    _currentSearchQuery = query;
+    var section = document.getElementById('searchResultsSection');
+    var emptyState = document.getElementById('searchEmptyState');
+    var grid = document.getElementById('searchResultsGrid');
+
+    // Show section, hide empty state
+    section.classList.remove('hidden');
+    emptyState.classList.add('hidden');
+
+    // Show loading
+    grid.textContent = '';
+    var loadingDiv = document.createElement('div');
+    loadingDiv.className = 'text-center text-steel-blue py-8 col-span-full';
+    var spinner = document.createElement('span');
+    spinner.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin';
+    spinner.textContent = 'progress_activity';
+    var loadingP = document.createElement('p');
+    loadingP.textContent = 'Searching...';
+    loadingDiv.appendChild(spinner);
+    loadingDiv.appendChild(loadingP);
+    grid.appendChild(loadingDiv);
+
+    try {
+        var resp = await fetch('/api/integrations/overseerr-search?query=' + encodeURIComponent(query) + '&page=' + _currentSearchPage);
+        if (!resp.ok) throw new Error('Search failed');
+        var data = await resp.json();
+
+        _totalSearchPages = data.totalPages || 1;
+        _searchResults = data.results || [];
+        // Keep _searchDisplayPage if set to -1 (going to last page), otherwise reset to 1
+        if (_searchDisplayPage === -1) {
+            _searchDisplayPage = getSearchTotalDisplayPages() || 1;
+        } else {
+            _searchDisplayPage = 1;
+        }
+
+        document.getElementById('searchResultCount').textContent = '(' + (data.totalResults || 0) + ' results)';
+
+        if (_searchResults.length === 0) {
+            grid.textContent = '';
+            var emptyDiv = document.createElement('div');
+            emptyDiv.className = 'text-center text-steel-blue py-8 col-span-full';
+            var emptyIcon = document.createElement('span');
+            emptyIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
+            emptyIcon.textContent = 'search_off';
+            var emptyP = document.createElement('p');
+            emptyP.textContent = 'No results found for "' + query + '"';
+            emptyDiv.appendChild(emptyIcon);
+            emptyDiv.appendChild(emptyP);
+            grid.appendChild(emptyDiv);
+            updateSearchPagination();
+            return;
+        }
+
+        renderSearchPage();
+        updateSearchPagination();
+
+    } catch (error) {
+        console.error('Search error:', error);
+        grid.textContent = '';
+        var errDiv = document.createElement('div');
+        errDiv.className = 'text-center text-red-400 py-8 col-span-full';
+        var errIcon = document.createElement('span');
+        errIcon.className = 'material-symbols-outlined text-4xl mb-2 block';
+        errIcon.textContent = 'error';
+        var errP = document.createElement('p');
+        errP.textContent = 'Error searching. Is Overseerr configured?';
+        errDiv.appendChild(errIcon);
+        errDiv.appendChild(errP);
+        grid.appendChild(errDiv);
+    }
+}
+
+function renderSearchPage() {
+    var grid = document.getElementById('searchResultsGrid');
+    var start = (_searchDisplayPage - 1) * CARDS_PER_PAGE;
+    var end = start + CARDS_PER_PAGE;
+    var pageItems = _searchResults.slice(start, end);
+
+    grid.textContent = '';
+    var fragment = document.createDocumentFragment();
+    pageItems.forEach(function(item) {
+        var wrapper = document.createElement('div');
+        wrapper.insertAdjacentHTML('beforeend', buildSearchCard(item));
+        fragment.appendChild(wrapper.firstChild);
+    });
+    grid.appendChild(fragment);
+
+    wirePosterFallbacks(grid);
+}
+
+function buildSearchCard(item) {
+    var title = escapeHtml(item.title || 'Unknown');
+    var year = item.year ? escapeHtml(String(item.year)) : '';
+    var mediaType = item.media_type || 'movie';
+    var typeBadge = mediaType === 'tv' ? 'TV' : 'Movie';
+    var typeBadgeColor = mediaType === 'tv' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400';
+    var posterUrl = item.poster_url || '';
+    var status = item.media_status ? item.media_status.toLowerCase() : null;
+    var status4k = item.media_status_4k ? item.media_status_4k.toLowerCase() : null;
+    var mediaId = item.id;
+
+    var posterHtml;
+    if (posterUrl) {
+        posterHtml = '<img src="' + escapeHtml(posterUrl) + '" alt="' + title + '" class="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"/>' +
+            '<div class="absolute inset-0 items-center justify-center poster-placeholder" style="display:none"><span class="material-symbols-outlined text-4xl text-steel-blue/40">movie</span></div>';
+    } else {
+        posterHtml = '<div class="absolute inset-0 flex items-center justify-center poster-placeholder"><span class="material-symbols-outlined text-4xl text-steel-blue/40">movie</span></div>';
+    }
+
+    // Request button or status badge (combined standard + 4K: show best available status)
+    var combinedStatus = status;
+    // If standard has a status, use it; also consider 4K status for "available"/"partially_available"
+    if (!combinedStatus && status4k) {
+        combinedStatus = status4k;
+    } else if (combinedStatus && status4k) {
+        // If either is available, show available
+        var availStatuses = ['available', 'completed'];
+        if (availStatuses.indexOf(status4k) !== -1 && availStatuses.indexOf(combinedStatus) === -1) {
+            combinedStatus = status4k;
+        }
+    }
+
+    var stdHtml;
+    if (!combinedStatus) {
+        stdHtml = '<button onclick="requestMedia(\'' + mediaType + '\', ' + mediaId + ', false, this)" class="w-full py-2 rounded-lg bg-primary hover:bg-primary/80 text-white text-xs font-bold transition-all">Request</button>';
+    } else {
+        stdHtml = '<div class="w-full py-2 flex items-center justify-center">' + getStatusBadge(combinedStatus) + '</div>';
+    }
+
+    return '<div class="glass-card rounded-xl overflow-hidden group flex flex-col">' +
+        '<div class="aspect-[2/3] relative overflow-hidden">' +
+            posterHtml +
+            '<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>' +
+            '<div class="absolute top-2 right-2">' +
+                '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
+            '</div>' +
+        '</div>' +
+        '<div class="p-3 flex flex-col gap-2 flex-1">' +
+            '<div class="flex-1">' +
+                '<p class="text-white text-sm font-bold leading-tight line-clamp-2">' + title + '</p>' +
+                (year ? '<p class="text-steel-blue text-[11px] mt-0.5">' + year + '</p>' : '') +
+            '</div>' +
+            '<div class="space-y-1.5">' + stdHtml + '</div>' +
+        '</div>' +
+    '</div>';
+}
+
+function clearSearch() {
+    _currentSearchQuery = '';
+    _currentSearchPage = 1;
+    _searchResults = [];
+    _searchDisplayPage = 1;
+    document.getElementById('searchResultsSection').classList.add('hidden');
+    document.getElementById('searchEmptyState').classList.remove('hidden');
+    document.getElementById('searchResultsGrid').textContent = '';
+    document.getElementById('searchResultCount').textContent = '';
+    document.getElementById('searchPagination').classList.add('hidden');
+}
+
+function getSearchTotalDisplayPages() {
+    return Math.ceil(_searchResults.length / CARDS_PER_PAGE);
+}
+
+function updateSearchPagination() {
+    var pagination = document.getElementById('searchPagination');
+    var totalDisplayPages = getSearchTotalDisplayPages();
+    // Show pagination if there are multiple display pages OR multiple API pages
+    if (totalDisplayPages <= 1 && _totalSearchPages <= 1) {
+        pagination.classList.add('hidden');
+        return;
+    }
+    pagination.classList.remove('hidden');
+    // Show current display page info
+    var pageLabel = 'Page ' + _searchDisplayPage + ' of ' + totalDisplayPages;
+    if (_totalSearchPages > 1) {
+        pageLabel += ' (batch ' + _currentSearchPage + '/' + _totalSearchPages + ')';
+    }
+    document.getElementById('searchPageInfo').textContent = pageLabel;
+    // Prev disabled if on first display page of first API page
+    document.getElementById('searchPrevBtn').disabled = (_searchDisplayPage <= 1 && _currentSearchPage <= 1);
+    // Next disabled if on last display page of last API page
+    document.getElementById('searchNextBtn').disabled = (_searchDisplayPage >= totalDisplayPages && _currentSearchPage >= _totalSearchPages);
+}
+
+function searchPrevPage() {
+    if (_searchDisplayPage > 1) {
+        _searchDisplayPage--;
+        renderSearchPage();
+        updateSearchPagination();
+    } else if (_currentSearchPage > 1) {
+        // Go to previous API page, start at the last display page
+        _currentSearchPage--;
+        _searchDisplayPage = -1; // signal to go to last page after fetch
+        performSearch(_currentSearchQuery);
+    }
+}
+
+function searchNextPage() {
+    var totalDisplayPages = getSearchTotalDisplayPages();
+    if (_searchDisplayPage < totalDisplayPages) {
+        _searchDisplayPage++;
+        renderSearchPage();
+        updateSearchPagination();
+    } else if (_currentSearchPage < _totalSearchPages) {
+        // Fetch next API page
+        _currentSearchPage++;
+        performSearch(_currentSearchQuery);
+    }
+}
+
+// ---- Request Media ----
+
+async function requestMedia(mediaType, mediaId, is4k, buttonEl) {
+    // Disable button immediately
+    buttonEl.disabled = true;
+    var origLabel = 'Request';
+    buttonEl.innerHTML = '<span class="material-symbols-outlined text-xs animate-spin">progress_activity</span>';
+    buttonEl.classList.add('opacity-60', 'cursor-not-allowed');
+
+    try {
+        var resp = await fetch('/api/integrations/overseerr-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mediaType: mediaType, mediaId: mediaId, is4k: is4k })
+        });
+
+        if (!resp.ok) {
+            var errData = await resp.json().catch(function() { return {}; });
+            throw new Error(errData.detail || 'Request failed');
+        }
+
+        // Update button to show pending status
+        buttonEl.outerHTML = '<div class="flex-1 py-1.5 text-center">' + getStatusBadge('pending') + '</div>';
+
+        showToast('Request submitted successfully!', 'success');
+
+        // Refresh existing requests after a short delay
+        setTimeout(function() {
+            loadRequestCounts();
+            loadExistingRequests();
+        }, 1500);
+
+    } catch (error) {
+        console.error('Request error:', error);
+        buttonEl.disabled = false;
+        buttonEl.innerHTML = '<span class="material-symbols-outlined text-xs">add</span> ' + origLabel;
+        buttonEl.classList.remove('opacity-60', 'cursor-not-allowed');
+        showToast(error.message || 'Failed to submit request', 'error');
+    }
+}
+
+// ---- Status Badges ----
+
+function getStatusBadge(status) {
+    var badgeBg, badgeText, label;
+    switch (status) {
+        case 'pending':
+            badgeBg = 'bg-steel-blue/20';
+            badgeText = 'text-steel-blue';
+            label = 'Pending';
+            break;
+        case 'approved':
+        case 'downloading':
+        case 'processing':
+            badgeBg = 'bg-blue-500/10';
+            badgeText = 'text-blue-500';
+            label = status === 'processing' ? 'Processing' : status.charAt(0).toUpperCase() + status.slice(1);
+            break;
+        case 'available':
+        case 'completed':
+            badgeBg = 'bg-green-500/10';
+            badgeText = 'text-green-500';
+            label = status.charAt(0).toUpperCase() + status.slice(1);
+            break;
+        case 'declined':
+            badgeBg = 'bg-red-500/10';
+            badgeText = 'text-red-500';
+            label = 'Declined';
+            break;
+        case 'partially_available':
+            badgeBg = 'bg-yellow-500/10';
+            badgeText = 'text-yellow-500';
+            label = 'Partial';
+            break;
+        default:
+            badgeBg = 'bg-steel-blue/20';
+            badgeText = 'text-steel-blue';
+            label = status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown';
+    }
+    return '<span class="px-2 py-1 rounded ' + badgeBg + ' ' + badgeText + ' text-[9px] font-bold uppercase tracking-wider">' + label + '</span>';
+}
+
+// ---- Request Counts ----
+
+async function loadRequestCounts() {
+    try {
+        var resp = await fetch('/api/integrations/request-counts');
+        if (!resp.ok) throw new Error('API error');
+        var counts = await resp.json();
+
+        document.getElementById('statTotal').textContent = counts.total || 0;
+        document.getElementById('statPending').textContent = counts.pending || 0;
+        document.getElementById('statApproved').textContent = counts.approved || 0;
+        document.getElementById('statAvailable').textContent = counts.available || 0;
+        document.getElementById('requestsTotalCount').textContent = '(' + (counts.total || 0) + ')';
+    } catch (e) {
+        console.log('Request counts not available');
+    }
+}
+
+// ---- Existing Requests ----
+
+async function loadExistingRequests() {
+    var grid = document.getElementById('requestsGrid');
+    try {
+        var resp = await fetch('/api/integrations/recent-requests?limit=50');
+        if (!resp.ok) throw new Error('API error');
+        var requests = await resp.json();
+
+        if (!Array.isArray(requests)) requests = [];
+        _allRequests = requests;
+
+        renderRequests();
+    } catch (error) {
+        console.error('Error loading requests:', error);
+        grid.textContent = '';
+        var errDiv = document.createElement('div');
+        errDiv.className = 'text-center text-steel-blue py-8 col-span-full';
+        var errIcon = document.createElement('span');
+        errIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
+        errIcon.textContent = 'shopping_cart';
+        var errP = document.createElement('p');
+        errP.textContent = 'Overseerr not configured';
+        errDiv.appendChild(errIcon);
+        errDiv.appendChild(errP);
+        grid.appendChild(errDiv);
+        updateRequestsPagination(0);
+    }
+}
+
+function renderRequests() {
+    var grid = document.getElementById('requestsGrid');
+    var filtered = _allRequests;
+
+    if (_currentFilter !== 'all') {
+        filtered = _allRequests.filter(function(req) {
+            var s = (req.status || '').toLowerCase();
+            if (_currentFilter === 'available') return s === 'available' || s === 'completed';
+            if (_currentFilter === 'approved') return s === 'approved' || s === 'downloading';
+            return s === _currentFilter;
+        });
+    }
+
+    if (filtered.length === 0) {
+        var msg = _currentFilter === 'all' ? 'No requests yet' : 'No ' + _currentFilter + ' requests';
+        grid.textContent = '';
+        var emptyDiv = document.createElement('div');
+        emptyDiv.className = 'text-center text-steel-blue py-8 col-span-full';
+        var emptyIcon = document.createElement('span');
+        emptyIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
+        emptyIcon.textContent = 'shopping_cart';
+        var emptyP = document.createElement('p');
+        emptyP.textContent = msg;
+        emptyDiv.appendChild(emptyIcon);
+        emptyDiv.appendChild(emptyP);
+        grid.appendChild(emptyDiv);
+        updateRequestsPagination(0);
+        return;
+    }
+
+    // Clamp page to valid range
+    var totalPages = Math.ceil(filtered.length / CARDS_PER_PAGE);
+    if (_requestsDisplayPage > totalPages) _requestsDisplayPage = totalPages;
+    if (_requestsDisplayPage < 1) _requestsDisplayPage = 1;
+
+    var start = (_requestsDisplayPage - 1) * CARDS_PER_PAGE;
+    var end = start + CARDS_PER_PAGE;
+    var pageItems = filtered.slice(start, end);
+
+    grid.textContent = '';
+    var fragment = document.createDocumentFragment();
+    pageItems.forEach(function(req) {
+        var wrapper = document.createElement('div');
+        wrapper.insertAdjacentHTML('beforeend', buildRequestCard(req));
+        fragment.appendChild(wrapper.firstChild);
+    });
+    grid.appendChild(fragment);
+
+    // Wire poster error handlers
+    wirePosterFallbacks(grid);
+    updateRequestsPagination(totalPages);
+}
+
+function updateRequestsPagination(totalPages) {
+    var pagination = document.getElementById('requestsPagination');
+    if (totalPages <= 1) {
+        pagination.classList.add('hidden');
+        return;
+    }
+    pagination.classList.remove('hidden');
+    document.getElementById('requestsPageInfo').textContent = 'Page ' + _requestsDisplayPage + ' of ' + totalPages;
+    document.getElementById('requestsPrevBtn').disabled = _requestsDisplayPage <= 1;
+    document.getElementById('requestsNextBtn').disabled = _requestsDisplayPage >= totalPages;
+}
+
+function requestsPrevPage() {
+    if (_requestsDisplayPage > 1) {
+        _requestsDisplayPage--;
+        renderRequests();
+    }
+}
+
+function requestsNextPage() {
+    _requestsDisplayPage++;
+    renderRequests();
+}
+
+function buildRequestCard(req) {
+    var title = escapeHtml(req.media_title || 'Unknown');
+    var mediaType = req.media_type || 'movie';
+    var typeBadge = mediaType === 'tv' ? 'TV' : 'Movie';
+    var typeBadgeColor = mediaType === 'tv' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400';
+    var posterUrl = req.poster_url || '';
+    var status = (req.status || 'pending').toLowerCase();
+    var requestedDate = req.requested_date ? getTimeAgo(new Date(req.requested_date)) : '';
+
+    var posterHtml;
+    if (posterUrl) {
+        posterHtml = '<img src="' + escapeHtml(posterUrl) + '" alt="' + title + '" class="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"/>' +
+            '<div class="absolute inset-0 items-center justify-center poster-placeholder" style="display:none"><span class="material-symbols-outlined text-4xl text-steel-blue/40">movie</span></div>';
+    } else {
+        posterHtml = '<div class="absolute inset-0 flex items-center justify-center poster-placeholder"><span class="material-symbols-outlined text-4xl text-steel-blue/40">movie</span></div>';
+    }
+
+    return '<div class="glass-card rounded-xl overflow-hidden group" data-status="' + status + '">' +
+        '<div class="aspect-[2/3] relative overflow-hidden">' +
+            posterHtml +
+            '<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>' +
+            '<div class="absolute top-2 right-2">' +
+                '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
+            '</div>' +
+            '<div class="absolute top-2 left-2">' +
+                getStatusBadge(status) +
+            '</div>' +
+        '</div>' +
+        '<div class="p-3 space-y-1">' +
+            '<p class="text-white text-sm font-bold leading-tight line-clamp-2">' + title + '</p>' +
+            (requestedDate ? '<p class="text-[10px] text-steel-blue/60 font-medium uppercase">' + requestedDate + '</p>' : '') +
+        '</div>' +
+    '</div>';
+}
+
+// ---- Filter Tabs ----
+
+function setFilter(filter) {
+    _currentFilter = filter;
+    _requestsDisplayPage = 1;
+
+    // Update tab styles
+    var tabs = document.querySelectorAll('.filter-tab');
+    tabs.forEach(function(tab) {
+        if (tab.getAttribute('data-filter') === filter) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+
+    renderRequests();
+}
+
+// ---- Toast Notifications ----
+
+function showToast(message, type) {
+    var container = document.getElementById('toastContainer');
+    var toast = document.createElement('div');
+    var bgColor = type === 'success' ? 'bg-green-500/90' : 'bg-red-500/90';
+    var icon = type === 'success' ? 'check_circle' : 'error';
+
+    toast.className = 'pointer-events-auto flex items-center gap-2 px-4 py-3 rounded-lg ' + bgColor + ' text-white text-sm font-medium shadow-lg backdrop-blur-sm transform translate-x-full transition-transform duration-300';
+    toast.innerHTML = '<span class="material-symbols-outlined text-sm">' + icon + '</span>' + escapeHtml(message);
+
+    container.appendChild(toast);
+
+    // Animate in
+    requestAnimationFrame(function() {
+        toast.classList.remove('translate-x-full');
+        toast.classList.add('translate-x-0');
+    });
+
+    // Animate out after 3 seconds
+    setTimeout(function() {
+        toast.classList.remove('translate-x-0');
+        toast.classList.add('translate-x-full');
+        setTimeout(function() {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 300);
+    }, 3000);
+}
+
+// ---- Poster Fallbacks ----
+
+function wirePosterFallbacks(container) {
+    var imgs = container.querySelectorAll('img[onerror]');
+    // onerror is handled inline, but we also set a fallback for broken images that loaded as 0x0
+    imgs.forEach(function(img) {
+        img.addEventListener('load', function() {
+            if (img.naturalWidth === 0) {
+                img.style.display = 'none';
+                if (img.nextElementSibling) img.nextElementSibling.style.display = 'flex';
+            }
+        });
+    });
+}
 </script>
 </body>
 </html>
