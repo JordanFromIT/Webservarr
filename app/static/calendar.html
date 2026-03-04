@@ -27,12 +27,12 @@
   },
 }</script>
 </head>
-<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row overflow-hidden">
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <div id="sidebar-root"></div>
 <!-- Toast notification container -->
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 <!-- Main Content Area -->
-<main class="flex-1 flex flex-col min-h-0 lg:h-screen overflow-hidden">
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
 <!-- Header (desktop only) -->
 <header class="h-16 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-black/40 backdrop-blur-md z-10">
 <div class="flex items-center gap-6">
@@ -67,7 +67,7 @@ Sign Out
 </div>
 </header>
 <!-- Scrollable Content -->
-<div class="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+<div class="flex-1 flex flex-col min-h-0 lg:overflow-hidden relative">
 
 <!-- Calendar area — fills full viewport height -->
 <div class="flex flex-col flex-1 min-h-0 p-4 lg:p-8">
@@ -91,10 +91,10 @@ Today
 </div>
 
 <!-- Day-of-week headers -->
-<div id="dayHeaders" class="grid grid-cols-7 gap-px shrink-0"></div>
+<div id="dayHeaders" class="hidden lg:grid grid-cols-7 gap-px shrink-0"></div>
 
 <!-- Calendar grid — fills remaining height -->
-<div id="calendarGrid" class="grid grid-cols-7 gap-px flex-1 min-h-0 overflow-hidden"></div>
+<div id="calendarGrid" class="grid grid-cols-7 gap-px flex-1 min-h-0 lg:overflow-hidden"></div>
 
 </div>
 
@@ -108,10 +108,16 @@ Today
 </div>
 
 </div>
+
+<!-- Scroll down indicator (mobile only) -->
+<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+    <span class="material-symbols-outlined text-primary text-4xl animate-bounce">arrow_downward</span>
+</div>
+
 </main>
 
 <script src="/static/js/auth.js"></script>
-<script src="/static/js/sidebar.js?v=6"></script>
+<script src="/static/js/sidebar.js?v=9"></script>
 <script src="/static/js/notifications.js"></script>
 <script>
 // ---- State ----
@@ -125,6 +131,16 @@ var _selectedDate = null; // "YYYY-MM-DD" or null
 document.addEventListener('DOMContentLoaded', async function() {
     initSidebar('calendar');
     initNotifications();
+
+    // Scroll-down hint — fade out at bottom
+    (function() {
+        var hint = document.getElementById('scrollDownHint');
+        if (!hint) return;
+        window.addEventListener('scroll', function() {
+            var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+            hint.style.opacity = atBottom ? '0' : '1';
+        });
+    })();
 
     var user = await checkAuth();
     if (!user) return;
@@ -284,6 +300,19 @@ function buildGrid(startDate, endDate, grouped) {
     var grid = document.getElementById('calendarGrid');
     clearChildren(grid);
 
+    var isMobile = window.innerWidth < 1024;
+
+    if (isMobile) {
+        // Agenda view on mobile
+        grid.className = 'flex flex-col flex-1 min-h-0';
+        grid.style.gridTemplateRows = '';
+        buildAgendaView(grid, grouped);
+        return;
+    }
+
+    // Desktop: restore grid classes
+    grid.className = 'grid grid-cols-7 gap-px flex-1 min-h-0 lg:overflow-hidden';
+
     var today = new Date();
     var todayStr = formatDateISO(today);
 
@@ -303,6 +332,119 @@ function buildGrid(startDate, endDate, grouped) {
         grid.appendChild(cell);
 
         current.setDate(current.getDate() + 1);
+    }
+}
+
+function buildAgendaView(container, grouped) {
+    var today = new Date();
+    var todayStr = formatDateISO(today);
+    var dayNames = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    var hasContent = false;
+
+    var firstOfMonth = new Date(_currentYear, _currentMonth, 1);
+    var lastOfMonth = new Date(_currentYear, _currentMonth + 1, 0);
+
+    var current = new Date(firstOfMonth);
+    while (current <= lastOfMonth) {
+        var dateStr = formatDateISO(current);
+        var isToday = dateStr === todayStr;
+        var dayReleases = grouped[dateStr] || [];
+
+        // Skip empty days (except today)
+        if (dayReleases.length === 0 && !isToday) {
+            current.setDate(current.getDate() + 1);
+            continue;
+        }
+
+        hasContent = true;
+
+        // Day row
+        var row = document.createElement('div');
+        row.className = 'flex gap-4 py-3 px-2 cursor-pointer';
+        if (isToday) row.className += ' bg-primary/10 rounded-lg border border-primary/30';
+
+        row.addEventListener('click', (function(ds, rels) {
+            return function() { onDayCellClick(ds, rels); };
+        })(dateStr, dayReleases));
+
+        // Date label (left column)
+        var dateLabel = document.createElement('div');
+        dateLabel.className = 'w-14 shrink-0 text-center pt-0.5';
+
+        var dayNameEl = document.createElement('div');
+        dayNameEl.className = 'text-[10px] font-bold uppercase tracking-wider ' + (isToday ? 'text-primary' : 'text-steel-blue');
+        dayNameEl.textContent = dayNames[current.getDay()];
+        dateLabel.appendChild(dayNameEl);
+
+        var dayNumEl = document.createElement('div');
+        dayNumEl.className = 'text-xl font-bold ' + (isToday ? 'text-primary' : 'text-white');
+        dayNumEl.textContent = String(current.getDate());
+        dateLabel.appendChild(dayNumEl);
+
+        row.appendChild(dateLabel);
+
+        // Releases column (right)
+        var releasesCol = document.createElement('div');
+        releasesCol.className = 'flex-1 min-w-0 flex flex-col gap-1';
+
+        if (dayReleases.length === 0) {
+            var noReleases = document.createElement('span');
+            noReleases.className = 'text-sm text-steel-blue/40 italic';
+            noReleases.textContent = 'No releases';
+            releasesCol.appendChild(noReleases);
+        } else {
+            dayReleases.forEach(function(release) {
+                var item = document.createElement('div');
+                item.className = 'flex items-center gap-2';
+
+                var badge = document.createElement('span');
+                if (release.media_type === 'movie') {
+                    badge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 shrink-0';
+                    badge.textContent = 'MOV';
+                } else {
+                    badge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 shrink-0';
+                    badge.textContent = 'TV';
+                }
+                item.appendChild(badge);
+
+                var titleEl = document.createElement('span');
+                titleEl.className = 'text-sm text-frosted-blue/80 truncate';
+                var titleText = release.title || 'Unknown';
+                if (release.media_type === 'tv' && release.episode_code) {
+                    titleText += ' ' + release.episode_code;
+                }
+                titleEl.textContent = titleText;
+                item.appendChild(titleEl);
+
+                if (release.has_file) {
+                    var check = document.createElement('span');
+                    check.className = 'material-symbols-outlined text-green-500 text-xs shrink-0';
+                    check.textContent = 'check_circle';
+                    item.appendChild(check);
+                }
+
+                releasesCol.appendChild(item);
+            });
+        }
+
+        row.appendChild(releasesCol);
+        container.appendChild(row);
+
+        current.setDate(current.getDate() + 1);
+    }
+
+    if (!hasContent) {
+        var emptyEl = document.createElement('div');
+        emptyEl.className = 'text-center text-steel-blue py-12';
+        var emptyIcon = document.createElement('span');
+        emptyIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-30';
+        emptyIcon.textContent = 'event_busy';
+        var emptyText = document.createElement('p');
+        emptyText.className = 'text-sm';
+        emptyText.textContent = 'No releases this month';
+        emptyEl.appendChild(emptyIcon);
+        emptyEl.appendChild(emptyText);
+        container.appendChild(emptyEl);
     }
 }
 

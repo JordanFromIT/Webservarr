@@ -27,7 +27,7 @@
   },
 }</script>
 </head>
-<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row overflow-hidden">
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <div id="sidebar-root"></div>
 <!-- Toast notification container -->
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
@@ -47,7 +47,7 @@
 </div>
 </div>
 <!-- Main Content Area -->
-<main class="flex-1 flex flex-col min-h-0 lg:h-screen overflow-hidden">
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
 <!-- Header (desktop only) -->
 <header class="h-16 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-black/40 backdrop-blur-md z-10">
 <div class="flex items-center gap-6">
@@ -82,7 +82,7 @@ Sign Out
 </div>
 </header>
 <!-- Scrollable Content -->
-<div class="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
 <!-- Stat Summary Cards -->
 <div class="grid grid-cols-3 gap-3 mb-6">
@@ -207,6 +207,12 @@ Submit Issue
 
 </div>
 </div>
+
+<!-- Scroll down indicator (mobile only) -->
+<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+    <span class="material-symbols-outlined text-primary text-4xl animate-bounce">arrow_downward</span>
+</div>
+
 </main>
 
 <style>
@@ -241,7 +247,7 @@ Submit Issue
 </style>
 
 <script src="/static/js/auth.js"></script>
-<script src="/static/js/sidebar.js?v=6"></script>
+<script src="/static/js/sidebar.js?v=9"></script>
 <script src="/static/js/notifications.js"></script>
 <script>
 // State
@@ -257,6 +263,16 @@ var _refreshInterval = null;
 document.addEventListener('DOMContentLoaded', async function() {
     initSidebar('issues');
     initNotifications();
+
+    // Scroll-down hint — fade out at bottom
+    (function() {
+        var hint = document.getElementById('scrollDownHint');
+        if (!hint) return;
+        window.addEventListener('scroll', function() {
+            var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+            hint.style.opacity = atBottom ? '0' : '1';
+        });
+    })();
 
     var user = await checkAuth();
     if (!user) return;

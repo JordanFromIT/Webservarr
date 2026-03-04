@@ -27,8 +27,11 @@ DEFAULTS = {
     # Feature flags
     "features.show_requests": "false",
     "features.show_simple_auth": "true",
+    "features.show_plex_auth": "true",
+    "features.show_authentik_auth": "false",
     "features.login_backgrounds": "true",
     "features.show_tickets": "true",
+    "features.show_compact_requests": "false",
     # Sidebar labels
     "sidebar.label_home": "Home",
     "sidebar.label_requests": "Requests",
@@ -90,8 +93,8 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
 
     auth_methods = {
         "simple": get("features.show_simple_auth") != "false",
-        "plex": bool(plex_url and plex_token),
-        "authentik": bool(authentik_url and authentik_client_id),
+        "plex": get("features.show_plex_auth") != "false" and bool(plex_url and plex_token),
+        "authentik": get("features.show_authentik_auth") == "true" and bool(authentik_url and authentik_client_id),
     }
 
     return {
@@ -110,8 +113,11 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
         "features": {
             "show_requests": get("features.show_requests") == "true",
             "show_simple_auth": get("features.show_simple_auth") == "true",
+            "show_plex_auth": get("features.show_plex_auth") != "false",
+            "show_authentik_auth": get("features.show_authentik_auth") == "true",
             "login_backgrounds": get("features.login_backgrounds") == "true",
             "show_tickets": get("features.show_tickets") == "true",
+            "show_compact_requests": get("features.show_compact_requests") == "true",
         },
         "sidebar_labels": {
             "home": get("sidebar.label_home"),

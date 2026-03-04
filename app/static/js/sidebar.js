@@ -69,7 +69,7 @@ function _buildSidebarHTML(currentPage) {
 
   // Logo: image if logo_url set, otherwise icon
   var logoHtml = logoUrl
-    ? '<img src="' + escapeHtml(logoUrl) + '" alt="Logo" class="w-full h-auto rounded-lg object-contain shadow-lg shadow-baltic-blue/20 mb-3">'
+    ? '<img src="' + escapeHtml(logoUrl) + '" alt="Logo" class="w-full h-auto rounded-lg object-contain mb-3">'
     : '<div class="size-14 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-baltic-blue/20 mb-3">' +
         '<span class="material-symbols-outlined text-background-dark font-bold text-3xl">' + escapeHtml(logoIcon) + '</span>' +
       '</div>';
@@ -83,10 +83,7 @@ function _buildSidebarHTML(currentPage) {
       '</div>' +
       '<nav class="flex-1 px-4 py-6 space-y-2">' + navLinks + '</nav>' +
       '<div class="p-4 border-t border-steel-blue/20">' +
-        '<button id="logoutBtn" class="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-steel-blue hover:text-white transition-colors">' +
-          '<span class="material-symbols-outlined text-sm">logout</span> Sign Out' +
-        '</button>' +
-        '<p id="appVersion" class="text-steel-blue text-[10px] text-center mt-2" data-admin-only="true" style="display:none"></p>' +
+        '<p id="appVersion" class="text-steel-blue text-[10px] text-center" data-admin-only="true" style="display:none"></p>' +
       '</div>' +
     '</aside>';
 
@@ -97,10 +94,25 @@ function _buildSidebarHTML(currentPage) {
         '<span class="material-symbols-outlined">menu</span>' +
       '</button>' +
       '<span class="text-white font-bold text-sm">' + escapeHtml(appName) + '</span>' +
-      '<div class="flex items-center gap-2">' +
-        '<div class="text-right">' +
-          '<p id="mobileUsername" class="text-xs font-bold text-white leading-none"></p>' +
-          '<p id="mobileRole" class="text-[10px] text-steel-blue"></p>' +
+      '<div class="relative flex items-center gap-2">' +
+        '<button class="relative p-2 text-steel-blue hover:text-frosted-blue transition-colors" title="Notifications">' +
+          '<span class="material-symbols-outlined">notifications</span>' +
+        '</button>' +
+        '<button id="mobileUserMenuBtn" class="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity">' +
+          '<div class="text-right">' +
+            '<p id="mobileUsername" class="text-xs font-bold text-white leading-none"></p>' +
+            '<p id="mobileRole" class="text-[10px] text-steel-blue"></p>' +
+          '</div>' +
+        '</button>' +
+        '<div id="mobileUserMenuDropdown" class="hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">' +
+          '<a href="/settings" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors" data-admin-only="true" style="display:none">' +
+            '<span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>' +
+            'Account Settings' +
+          '</a>' +
+          '<button data-logout class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors text-left">' +
+            '<span class="material-symbols-outlined text-steel-blue text-sm">logout</span>' +
+            'Sign Out' +
+          '</button>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -169,6 +181,19 @@ function initSidebar(currentPage) {
   if (overlay) overlay.addEventListener('click', function (e) {
     if (e.target === overlay) closeDrawer();
   });
+
+  // Wire mobile user menu dropdown
+  var mobileUserBtn = document.getElementById('mobileUserMenuBtn');
+  var mobileUserDropdown = document.getElementById('mobileUserMenuDropdown');
+  if (mobileUserBtn && mobileUserDropdown) {
+    mobileUserBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      mobileUserDropdown.classList.toggle('hidden');
+    });
+    document.addEventListener('click', function() {
+      mobileUserDropdown.classList.add('hidden');
+    });
+  }
 
   // Wire logout buttons
   wireLogout();

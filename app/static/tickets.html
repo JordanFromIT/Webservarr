@@ -27,7 +27,7 @@
   },
 }</script>
 </head>
-<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row overflow-hidden">
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <div id="sidebar-root"></div>
 
 <!-- Toast notification container -->
@@ -92,7 +92,7 @@ Submit Ticket
 </div>
 
 <!-- Main Content Area -->
-<main class="flex-1 flex flex-col min-h-0 lg:h-screen overflow-hidden">
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
 <!-- Header (desktop only) -->
 <header class="h-16 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-black/40 backdrop-blur-md z-10">
 <div class="flex items-center gap-6">
@@ -128,7 +128,7 @@ Sign Out
 </header>
 
 <!-- Scrollable Content -->
-<div class="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
 <!-- Stat Cards -->
 <div class="grid grid-cols-4 gap-3 mb-6">
@@ -200,12 +200,17 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 <p class="text-xs opacity-60">Click "New Ticket" to submit a support request</p>
 </div>
 
+<!-- Scroll down indicator (mobile only) -->
+<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+    <span class="material-symbols-outlined text-primary text-4xl animate-bounce">arrow_downward</span>
+</div>
+
 </div>
 </main>
 
 <!-- Scripts -->
 <script src="/static/js/auth.js"></script>
-<script src="/static/js/sidebar.js?v=6"></script>
+<script src="/static/js/sidebar.js?v=9"></script>
 <script src="/static/js/notifications.js"></script>
 <script>
 // WebServarr — Tickets Page
@@ -381,8 +386,8 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
       var card = createEl('div', 'glass-card rounded-xl p-4 cursor-pointer hover:border-primary/40 transition-all border border-transparent');
       card.addEventListener('click', function() { openDetailModal(ticket.id); });
 
-      // Top row: title + badges
-      var topRow = createEl('div', 'flex items-start justify-between gap-3 mb-2');
+      // Top row: title + badges (stacked on mobile, side-by-side on desktop)
+      var topRow = createEl('div', 'flex flex-col lg:flex-row lg:items-start lg:justify-between gap-1 lg:gap-3 mb-2');
 
       var titleDiv = createEl('div', 'flex-1 min-w-0');
       var titleEl = createEl('p', 'text-white font-bold text-sm truncate', ticket.title);
@@ -394,7 +399,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
         titleDiv.appendChild(creatorEl);
       }
 
-      var badgeDiv = createEl('div', 'flex items-center gap-1.5 shrink-0 flex-wrap justify-end');
+      var badgeDiv = createEl('div', 'flex items-center gap-1.5 flex-wrap lg:shrink-0 lg:justify-end');
 
       // Category badge
       var catBadge = createEl('span', 'px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ' + (CATEGORY_COLORS[ticket.category] || CATEGORY_COLORS.other), CATEGORY_LABELS[ticket.category] || ticket.category);
@@ -746,6 +751,17 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
   // ---- Init ----
 
   initSidebar('tickets');
+  loadSystemStatus();
+
+  // Scroll-down hint — fade out at bottom
+  (function() {
+    var hint = document.getElementById('scrollDownHint');
+    if (!hint) return;
+    window.addEventListener('scroll', function() {
+      var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+      hint.style.opacity = atBottom ? '0' : '1';
+    });
+  })();
 
   checkAuth().then(function(user) {
     _isAdmin = user.is_admin;

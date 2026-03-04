@@ -27,6 +27,8 @@
       },
     }</script>
     <style>
+        .hide-scrollbar { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
         /* Rich Text Editor Styles */
         #postContent {
             min-height: 300px;
@@ -164,28 +166,36 @@
         }
     </style>
 </head>
-<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row overflow-hidden">
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
     <div id="sidebar-root"></div>
     <!-- Main Content -->
-    <main class="flex-1 flex flex-col min-h-0 lg:h-screen overflow-hidden">
-    <div class="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+    <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+    <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
         <!-- Tabs -->
-        <div class="mb-8 border-b border-steel-blue/20">
-            <nav class="flex gap-4">
-                <button id="tabIntegrations" class="px-6 py-3 font-semibold border-b-2 border-primary text-primary">
-                    Integrations
-                </button>
-                <button id="tabSystem" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue">
-                    System
-                </button>
-                <button id="tabTheme" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue">
-                    Customization
-                </button>
-                <button id="tabNews" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue">
-                    News
-                </button>
-            </nav>
+        <div class="mb-8 border-b border-steel-blue/20 relative">
+            <div id="tabScroller" class="overflow-x-auto hide-scrollbar">
+                <nav class="flex gap-4 whitespace-nowrap px-8 lg:px-0">
+                    <button id="tabIntegrations" class="px-6 py-3 font-semibold border-b-2 border-primary text-primary shrink-0">
+                        Integrations
+                    </button>
+                    <button id="tabSystem" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue shrink-0">
+                        System
+                    </button>
+                    <button id="tabTheme" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue shrink-0">
+                        Customization
+                    </button>
+                    <button id="tabNews" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue shrink-0">
+                        News
+                    </button>
+                </nav>
+            </div>
+            <div id="tabScrollHintLeft" class="absolute left-2 top-1/2 -translate-y-1/2 flex items-center pointer-events-none lg:hidden" style="opacity:0;transition:opacity 0.2s">
+                <span class="material-symbols-outlined text-white text-base animate-pulse">arrow_back</span>
+            </div>
+            <div id="tabScrollHint" class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center pointer-events-none lg:hidden">
+                <span class="material-symbols-outlined text-white text-base animate-pulse">arrow_forward</span>
+            </div>
         </div>
 
         <!-- Integrations Section (Accordion) -->
@@ -544,48 +554,6 @@
                     </div>
                 </div>
 
-                <!-- Authentik -->
-                <div class="accordion-item" data-accordion="authentik">
-                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('authentik')">
-                        <span class="material-symbols-outlined text-xl text-frosted-blue">shield_person</span>
-                        <span class="flex-1 font-bold text-frosted-blue">Authentik (Optional)</span>
-                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotAuthentik"></span>
-                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
-                    </button>
-                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyAuthentik">
-                        <p class="text-xs text-steel-blue/70 mb-4">Optional OIDC identity provider. Only needed if you want to use Authentik instead of direct Plex OAuth.</p>
-                        <div class="space-y-4 pt-1">
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Authentik URL</label>
-                                    <input type="url" id="integrationAuthentikUrl" placeholder="https://auth.example.com"
-                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Client ID</label>
-                                    <input type="text" id="integrationAuthentikClientId" placeholder="OAuth2 Client ID"
-                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
-                                </div>
-                            </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Client Secret</label>
-                                    <input type="password" id="integrationAuthentikClientSecret" placeholder="OAuth2 Client Secret"
-                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Application Slug</label>
-                                    <input type="text" id="integrationAuthentikSlug" placeholder="webservarr"
-                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
-                                </div>
-                            </div>
-                            <div class="flex items-center gap-3 pt-1">
-                                <button onclick="saveIntegration('authentik')" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">Save</button>
-                                <div id="statusAuthentik" class="flex items-center gap-2 text-sm"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
             </div>
         </div>
@@ -609,6 +577,86 @@
                             Save Settings
                         </button>
                         <div id="statusSystem" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Authentication Section -->
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mt-6">
+                <h2 class="text-xl font-bold mb-2 text-frosted-blue">Authentication</h2>
+                <p class="text-xs text-steel-blue/70 mb-5">Control which login methods appear on the login page</p>
+
+                <div class="space-y-5">
+                    <!-- Simple Auth Toggle -->
+                    <div class="flex items-center gap-3">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="authToggleSimple" class="sr-only peer" checked>
+                            <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                            <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                        </label>
+                        <div>
+                            <span class="text-sm text-frosted-blue">Local Login</span>
+                            <p class="text-xs text-steel-blue/70 mt-0.5">Username and password login against the local database. Enabled by default.</p>
+                        </div>
+                    </div>
+
+                    <!-- Plex Auth Toggle -->
+                    <div class="flex items-center gap-3">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="authTogglePlex" class="sr-only peer" checked>
+                            <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                            <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                        </label>
+                        <div>
+                            <span class="text-sm text-frosted-blue">Plex OAuth</span>
+                            <p class="text-xs text-steel-blue/70 mt-0.5">Direct Plex PIN-based login. Requires Plex integration to be configured.</p>
+                        </div>
+                    </div>
+
+                    <!-- Authentik Auth Toggle + Config -->
+                    <div class="flex items-center gap-3">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="authToggleAuthentik" class="sr-only peer">
+                            <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                            <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                        </label>
+                        <div>
+                            <span class="text-sm text-frosted-blue">Authentik OIDC</span>
+                            <p class="text-xs text-steel-blue/70 mt-0.5">Plex login through Authentik identity provider. For advanced users with existing Authentik setup.</p>
+                        </div>
+                    </div>
+
+                    <!-- Authentik Config Fields (shown when toggle is on) -->
+                    <div id="authentikConfigFields" class="hidden ml-12 space-y-3 border-l-2 border-steel-blue/20 pl-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">Authentik URL</label>
+                                <input type="url" id="authAuthentikUrl" placeholder="https://auth.example.com"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">Client ID</label>
+                                <input type="text" id="authAuthentikClientId" placeholder="OAuth2 Client ID"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">Client Secret</label>
+                                <input type="password" id="authAuthentikClientSecret" placeholder="OAuth2 Client Secret"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">App Slug</label>
+                                <input type="text" id="authAuthentikSlug" placeholder="webservarr"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-white text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-4 pt-2">
+                        <button id="btnSaveAuth" class="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save Authentication
+                        </button>
+                        <div id="statusAuth" class="flex items-center gap-2 text-sm"></div>
                     </div>
                 </div>
             </div>
@@ -913,17 +961,6 @@
                     <div class="space-y-4">
                         <div class="flex items-center gap-3">
                             <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" id="featureShowSimpleAuth" class="sr-only peer" checked>
-                                <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
-                                <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
-                            </label>
-                            <div>
-                                <span class="text-sm text-frosted-blue">Enable local login</span>
-                                <p class="text-xs text-steel-blue/70 mt-0.5">Show username/password form on the login page. Disable after configuring Plex/Authentik.</p>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <label class="relative inline-flex items-center cursor-pointer">
                                 <input type="checkbox" id="featureLoginBackgrounds" class="sr-only peer" checked>
                                 <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
                                 <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
@@ -942,6 +979,17 @@
                             <div>
                                 <span class="text-sm text-frosted-blue">Tickets</span>
                                 <p class="text-xs text-steel-blue/70 mt-0.5">Show Tickets page in sidebar for support requests.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="featureShowCompactRequests" class="sr-only peer">
+                                <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                                <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm text-frosted-blue">Compact Requests</span>
+                                <p class="text-xs text-steel-blue/70 mt-0.5">Show a compact poster strip of recent requests above Active Streams on the homepage.</p>
                             </div>
                         </div>
                     </div>
@@ -1123,19 +1171,59 @@
         </div>
 
     </div><!-- end scrollable wrapper -->
+    <!-- Scroll-down hint (mobile only) -->
+    <div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+        <span class="material-symbols-outlined text-primary text-4xl animate-bounce">arrow_downward</span>
+    </div>
     </main>
 
     <script src="/static/js/auth.js"></script>
-    <script src="/static/js/sidebar.js?v=6"></script>
+    <script src="/static/js/sidebar.js?v=9"></script>
     <script src="/static/js/notifications.js"></script>
     <script>
         // Initialize sidebar and auth
         (async function() {
             initSidebar('settings');
             initNotifications();
+
+            // Scroll-down hint — fade when at bottom
+            (function() {
+                var hint = document.getElementById('scrollDownHint');
+                if (!hint) return;
+                window.addEventListener('scroll', function() {
+                    var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+                    hint.style.opacity = atBottom ? '0' : '1';
+                });
+            })();
+
             const user = await checkAuth({ requireAdmin: true });
             if (!user) return;
             showAdminNav(user.is_admin);
+            // Settings page has no desktop header — populate mobile user info directly
+            var mobileUsername = document.getElementById('mobileUsername');
+            var mobileRole = document.getElementById('mobileRole');
+            if (mobileUsername) mobileUsername.textContent = user.display_name || user.username;
+            if (mobileRole) mobileRole.textContent = user.is_admin ? 'Admin' : 'User';
+        })();
+
+        // Tab scroll hint — hide when scrolled to end
+        (function() {
+            var scroller = document.getElementById('tabScroller');
+            var hintRight = document.getElementById('tabScrollHint');
+            var hintLeft = document.getElementById('tabScrollHintLeft');
+            if (!scroller || !hintRight) return;
+            function checkScroll() {
+                var atEnd = scroller.scrollLeft + scroller.clientWidth >= scroller.scrollWidth - 4;
+                var atStart = scroller.scrollLeft <= 4;
+                hintRight.style.opacity = atEnd ? '0' : '1';
+                hintRight.style.transition = 'opacity 0.2s';
+                if (hintLeft) {
+                    hintLeft.style.opacity = atStart ? '0' : '1';
+                }
+            }
+            scroller.addEventListener('scroll', checkScroll);
+            window.addEventListener('resize', checkScroll);
+            checkScroll();
         })();
 
         // Tab switching
@@ -1199,8 +1287,7 @@
                 'Overseerr': 'integration.overseerr.url',
                 'Netdata': 'integration.netdata.url',
                 'Sonarr': 'integration.sonarr.url',
-                'Radarr': 'integration.radarr.url',
-                'Authentik': 'integration.authentik.url'
+                'Radarr': 'integration.radarr.url'
             };
             for (var name in dotMap) {
                 var dot = document.getElementById('accordionDot' + name);
@@ -1481,14 +1568,14 @@
                 statusDiv: 'statusRadarr'
             },
             authentik: {
-                urlInput: 'integrationAuthentikUrl',
-                credInput: 'integrationAuthentikClientId',
+                urlInput: 'authAuthentikUrl',
+                credInput: 'authAuthentikClientId',
                 urlKey: 'integration.authentik.url',
                 credKey: 'integration.authentik.client_id',
-                statusDiv: 'statusAuthentik',
+                statusDiv: 'statusAuth',
                 extraFields: [
-                    { input: 'integrationAuthentikClientSecret', key: 'integration.authentik.client_secret' },
-                    { input: 'integrationAuthentikSlug', key: 'integration.authentik.app_slug' },
+                    { input: 'authAuthentikClientSecret', key: 'integration.authentik.client_secret' },
+                    { input: 'authAuthentikSlug', key: 'integration.authentik.app_slug' },
                 ]
             }
         };
@@ -1738,6 +1825,54 @@
             } catch (e) {
                 showStatus(statusDiv, false, 'Error: ' + e.message);
             }
+        });
+
+        // --- Authentication Settings ---
+
+        // Toggle Authentik config fields visibility
+        document.getElementById('authToggleAuthentik').addEventListener('change', function() {
+            document.getElementById('authentikConfigFields').classList.toggle('hidden', !this.checked);
+        });
+
+        // Save auth settings
+        document.getElementById('btnSaveAuth').addEventListener('click', async function() {
+            var statusDiv = document.getElementById('statusAuth');
+            var btn = this;
+            btn.disabled = true;
+
+            var settings = [
+                { key: 'features.show_simple_auth', value: document.getElementById('authToggleSimple').checked ? 'true' : 'false', description: 'Enable local login' },
+                { key: 'features.show_plex_auth', value: document.getElementById('authTogglePlex').checked ? 'true' : 'false', description: 'Enable Plex OAuth login' },
+                { key: 'features.show_authentik_auth', value: document.getElementById('authToggleAuthentik').checked ? 'true' : 'false', description: 'Enable Authentik OIDC login' },
+            ];
+
+            // Include Authentik config fields if toggle is on
+            if (document.getElementById('authToggleAuthentik').checked) {
+                settings.push({ key: 'integration.authentik.url', value: document.getElementById('authAuthentikUrl').value, description: 'Authentik URL' });
+                settings.push({ key: 'integration.authentik.client_id', value: document.getElementById('authAuthentikClientId').value, description: 'Authentik Client ID' });
+                settings.push({ key: 'integration.authentik.client_secret', value: document.getElementById('authAuthentikClientSecret').value, description: 'Authentik Client Secret' });
+                settings.push({ key: 'integration.authentik.app_slug', value: document.getElementById('authAuthentikSlug').value, description: 'Authentik App Slug' });
+            }
+
+            try {
+                var resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: settings })
+                });
+
+                if (resp.ok) {
+                    showStatus(statusDiv, true, 'Authentication settings saved');
+                    localStorage.removeItem('webservarr_branding');
+                } else {
+                    var err = await resp.json();
+                    showStatus(statusDiv, false, err.detail || 'Failed to save');
+                }
+            } catch (e) {
+                showStatus(statusDiv, false, 'Error: ' + e.message);
+            }
+
+            btn.disabled = false;
         });
 
         // --- Theme Settings ---
@@ -2037,9 +2172,18 @@
 
                 // Feature flags
                 if (data.features) {
-                    document.getElementById('featureShowSimpleAuth').checked = data.features.show_simple_auth !== false;
                     document.getElementById('featureLoginBackgrounds').checked = data.features.login_backgrounds !== false;
                     document.getElementById('featureShowTickets').checked = data.features.show_tickets !== false;
+                    document.getElementById('featureShowCompactRequests').checked = data.features.show_compact_requests === true;
+                }
+
+                // Auth toggles (loaded from branding features)
+                if (data.features) {
+                    document.getElementById('authToggleSimple').checked = data.features.show_simple_auth !== false;
+                    document.getElementById('authTogglePlex').checked = data.features.show_plex_auth !== false;
+                    document.getElementById('authToggleAuthentik').checked = data.features.show_authentik_auth === true;
+                    // Show/hide Authentik config fields
+                    document.getElementById('authentikConfigFields').classList.toggle('hidden', !data.features.show_authentik_auth);
                 }
             } catch (e) {
                 console.error('Error loading theme settings:', e);
@@ -2097,11 +2241,6 @@
 
             // Feature flags
             settings.push({
-                key: 'features.show_simple_auth',
-                value: document.getElementById('featureShowSimpleAuth').checked ? 'true' : 'false',
-                description: 'Show local username/password login on login page'
-            });
-            settings.push({
                 key: 'features.login_backgrounds',
                 value: document.getElementById('featureLoginBackgrounds').checked ? 'true' : 'false',
                 description: 'Show rotating TMDB backgrounds on login page'
@@ -2110,6 +2249,11 @@
                 key: 'features.show_tickets',
                 value: document.getElementById('featureShowTickets').checked ? 'true' : 'false',
                 description: 'Show Tickets page in sidebar'
+            });
+            settings.push({
+                key: 'features.show_compact_requests',
+                value: document.getElementById('featureShowCompactRequests').checked ? 'true' : 'false',
+                description: 'Show compact requests strip on homepage'
             });
 
             try {
@@ -2657,7 +2801,7 @@
         }
 
         // Safety warning when disabling local login
-        document.getElementById('featureShowSimpleAuth').addEventListener('change', function() {
+        document.getElementById('authToggleSimple').addEventListener('change', function() {
             if (!this.checked) {
                 var confirmed = confirm(
                     'WARNING: Disabling local login means you can ONLY log in via Plex or Authentik.\n\n' +

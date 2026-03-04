@@ -44,7 +44,7 @@
     }
 </style>
 </head>
-<body class="bg-background-light dark:bg-background-dark font-display min-h-screen relative flex flex-col overflow-hidden">
+<body class="bg-background-light dark:bg-background-dark font-display min-h-screen relative flex flex-col overflow-y-auto">
 <!-- Dynamic Backdrop Slideshow (hidden until JS loads images) -->
 <div id="backdropSlideshow" class="fixed inset-0 z-0 hidden">
   <div id="backdropA" class="backdrop-slide opacity-0"></div>
@@ -62,7 +62,7 @@
 <div class="w-full max-w-[440px] login-glass-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
 <!-- Logo Section -->
 <div class="mb-8 flex flex-col items-center">
-<img id="loginLogo" alt="Logo" class="h-20 w-auto object-contain border-none mb-2 hidden"/>
+<img id="loginLogo" alt="Logo" class="h-32 w-auto object-contain border-none mb-2 hidden"/>
 <h1 id="loginAppName" class="text-white text-2xl font-bold mt-4 tracking-tight text-center">WebServarr</h1>
 </div>
 <!-- Login Form -->
@@ -93,18 +93,15 @@
 <div class="h-[1px] flex-1 bg-white/10"></div>
 </div>
 <!-- Plex SSO Button -->
-<button id="plexLoginBtn" class="w-full bg-[#E5A00D] hover:bg-[#cc8f0c] text-black font-bold py-3 rounded-lg flex flex-col items-center justify-center gap-1 transition-all active:scale-[0.98]" type="button">
-<div class="flex items-center gap-2">
-<svg class="w-5 h-5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-<path d="M12 0L10.33 4.33L12 8.67L13.67 4.33L12 0ZM5.67 5.67L0 12L5.67 18.33L8 12L5.67 5.67ZM18.33 5.67L16 12L18.33 18.33L24 12L18.33 5.67ZM12 15.33L10.33 19.67L12 24L13.67 19.67L12 15.33Z" fill="black"/>
-</svg>
-<span>Sign in with Plex</span>
-</div>
-<span id="plexSubtext" class="text-[10px] font-normal text-black/60">Direct Plex authentication</span>
+<button id="plexLoginBtn" class="w-full bg-[#E5A00D] hover:bg-[#cc8f0c] text-black font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all active:scale-[0.98]" type="button">
+<span class="text-sm font-medium">Sign in with</span>
+<span class="font-black text-xl tracking-tight leading-none uppercase" style="font-family: 'Arial Black', 'Helvetica Neue', sans-serif">PLEX</span>
 </button>
 <!-- Authentik SSO Button (hidden by default, shown when configured) -->
-<button id="authentikLoginBtn" class="hidden w-full py-3 rounded-lg font-semibold text-white bg-cornflower-ocean hover:bg-steel-blue transition-colors" type="button">
-    Sign in via Authentik
+<button id="authentikLoginBtn" class="hidden w-full py-3 rounded-lg font-semibold text-white bg-cornflower-ocean hover:bg-steel-blue transition-colors flex items-center justify-center gap-2" type="button">
+    <span class="text-sm font-medium">Sign in with</span>
+    <span class="font-black tracking-tight leading-none uppercase" style="font-family: 'Arial Black', 'Helvetica Neue', sans-serif">PLEX</span>
+    <span class="text-sm font-medium">via Authentik</span>
 </button>
 </form>
 </div>
@@ -260,6 +257,8 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // --- Auth method visibility ---
     var authMethods = theme.auth_methods || {};
+    // If auth_methods not loaded yet (no cache), default to showing simple auth
+    var hasAnyAuthConfig = authMethods.simple !== undefined || authMethods.plex !== undefined || authMethods.authentik !== undefined;
 
     // Hide Plex button if not configured
     if (!authMethods.plex) {
@@ -278,8 +277,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
-    // Hide simple auth form elements if disabled
-    if (!authMethods.simple) {
+    // Hide simple auth form elements only if explicitly disabled (not when auth_methods missing)
+    if (hasAnyAuthConfig && !authMethods.simple) {
         var formEl = document.getElementById('loginForm');
         var children = formEl.children;
         for (var i = 0; i < children.length; i++) {
@@ -335,7 +334,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     document.getElementById('plexLoginBtn').addEventListener('click', async function() {
         var btn = this;
         var originalChildren = [];
-        // Save original button children (SVG + text nodes)
         while (btn.firstChild) {
             originalChildren.push(btn.removeChild(btn.firstChild));
         }

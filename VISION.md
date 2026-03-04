@@ -164,6 +164,7 @@ Admin determination: checks `system.admin_email` setting first, then falls back 
 - Fix any remaining UI bugs, edge cases, and design drift from Stitch exports
 - Ensure theme engine and branding apply cleanly to all components
 - Address any accumulated UX papercuts
+- Theme engine testing: verify color pickers, font dropdown, logo upload, custom CSS, and branding API work end-to-end across all pages
 
 ### Phase 13: Fresh Install Verification
 
