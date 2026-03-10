@@ -5,22 +5,9 @@ services:
     container_name: webservarr
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "7979:7979"
     environment:
       - DATABASE_URL=sqlite:////app/data/webservarr.db
-      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./data:/app/data
       - ./uploads:/app/app/static/uploads
-    depends_on:
-      - redis
-
-  redis:
-    image: redis:7-alpine
-    container_name: webservarr-redis
-    restart: unless-stopped
-    volumes:
-      - redis_data:/data
-
-volumes:
-  redis_data:

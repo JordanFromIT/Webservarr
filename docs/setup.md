@@ -17,10 +17,10 @@ docker compose up -d
 
 # Verify
 docker compose ps
-curl http://localhost:8000/health
+curl http://localhost:7979/health
 ```
 
-Open `http://localhost:8000` in your browser.
+Open `http://localhost:7979` in your browser.
 
 ## First-Time Setup
 
@@ -78,7 +78,7 @@ For most users, the Settings UI is sufficient. Advanced users can override defau
 |----------|---------|-------------|
 | `APP_DOMAIN` | `localhost` | Your domain — used for CSP headers (e.g., `dashboard.example.com`) |
 | `APP_SCHEME` | `https` | URL scheme — used for CSP headers (`http` for local/development) |
-| `REDIS_URL` | `redis://redis:6379/0` | Redis connection string |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string (embedded; override to use external Redis) |
 | `CORS_ORIGINS` | `""` | Additional CORS origins (comma-separated) |
 | `CSP_FRAME_SRC` | `""` | Additional CSP frame-src origins |
 | `CSP_CONNECT_SRC` | `""` | Additional CSP connect-src origins |
@@ -103,7 +103,7 @@ docker rm webservarr
 docker run -d \
   --name webservarr \
   --restart unless-stopped \
-  -p 8000:8000 \
+  -p 7979:7979 \
   -v ./data:/app/data \
   -v ./uploads:/app/app/static/uploads \
   ghcr.io/jordanfromit/webservarr:latest
@@ -118,10 +118,10 @@ docker run -d \
   --name watchtower \
   -v /var/run/docker.sock:/var/run/docker.sock \
   containrrr/watchtower \
-  webservarr webservarr-redis
+  webservarr
 ```
 
-This restarts only the `webservarr` and `webservarr-redis` containers when new images are available. Your data volumes persist across restarts.
+This restarts the `webservarr` container when a new image is available. Your data volumes persist across restarts.
 
 ## Backup
 
@@ -138,110 +138,19 @@ tar czf webservarr-backup-$(date +%Y%m%d).tar.gz data/ uploads/ .env
 
 ## Advanced: Authentik OIDC Setup
 
-Authentik provides Plex login *through* an identity provider. This is useful if you already run Authentik for SSO across multiple services, or want centralized session management. If you just want users to sign in with Plex, use **direct Plex OAuth** instead — it requires no Authentik and is configured entirely in Settings > Integrations > Plex.
+Authentik provides Plex login *through* a centralized identity provider. This is useful if you already run Authentik for SSO across multiple services, or want centralized session management. If you just want users to sign in with Plex, use **direct Plex OAuth** instead — it requires no Authentik and is configured entirely in Settings > Integrations > Plex.
 
-### Path A — Connect to an existing Authentik instance
+See the full **[Authentik Setup Guide](authentik.md)** for step-by-step instructions covering:
 
-#### 1. Create a Plex source in Authentik
-
-In Authentik, go to **Directory → Federation & Social login → Create → Plex**.
-
-- Give it a name (e.g., "Plex")
-- Save
-
-This allows users to authenticate with their Plex account through Authentik.
-
-#### 2. Create an OAuth2/OIDC Provider
-
-In Authentik, go to **Applications → Providers → Create → OAuth2/OpenID Connect**.
-
-- **Name:** WebServarr (or any name)
-- **Redirect URIs:** `https://your-domain.com/auth/callback`
-  This must exactly match your WebServarr domain including the scheme (`https://`) and no trailing slash.
-- **Signing Key:** Select the default certificate
-- Save, then note the **Client ID** and **Client Secret** from the provider detail page
-
-#### 3. Create an Application
-
-In Authentik, go to **Applications → Applications → Create**.
-
-- **Name:** WebServarr
-- **Slug:** `webservarr` (or any slug — note it, you will need it)
-- **Provider:** select the OAuth2 provider you just created
-- Save
-
-#### 4. Configure in WebServarr
-
-In WebServarr, go to **Settings → System → Authentication**, enable the Authentik OIDC toggle, then fill in:
-
-| Field | Value |
-|-------|-------|
-| Authentik URL | `https://auth.example.com` (your Authentik base URL) |
-| Client ID | From the OAuth2 provider detail page |
-| Client Secret | From the OAuth2 provider detail page |
-| App Slug | The slug of the Authentik application (e.g., `webservarr`) |
-
-Click **Save**. The "Sign in with Plex (via Authentik)" button will appear on the login page.
-
----
-
-### Path B — New Authentik instance alongside WebServarr
-
-The repo includes an optional Docker Compose overlay that adds Authentik and its PostgreSQL database alongside WebServarr, sharing the existing Redis container.
-
-#### 1. Generate required secrets
-
-```bash
-echo "AUTHENTIK_SECRET_KEY=$(openssl rand -base64 32)" >> .env
-echo "POSTGRES_PASSWORD=$(openssl rand -base64 16)" >> .env
-```
-
-#### 2. Start all containers
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.authentik.yml up -d
-```
-
-#### 3. Complete the Authentik setup wizard
-
-Open `http://localhost:9000/if/flow/initial-setup/` and create the initial admin account.
-
-#### 4. Follow Path A steps above
-
-Continue from "Create a Plex source" to configure the provider, application, and WebServarr settings.
-
----
-
-### Troubleshooting
-
-**"Sign in with Plex (via Authentik)" button not appearing**
-All four settings (URL, Client ID, Client Secret, App Slug) must be saved in Settings → System → Authentication. Verify none are blank.
-
-**Redirect URI mismatch error**
-The redirect URI in the Authentik OAuth2 provider must exactly match `https://your-domain.com/auth/callback` — same scheme, same domain, no trailing slash.
-
-**Plex popup blocked on mobile**
-Authentik opens a Plex popup window during login. Some mobile browsers block popups. For mobile users, direct Plex OAuth (no Authentik) is the recommended auth method — configure it in Settings → Integrations → Plex.
-
-**Logout does not return to the WebServarr login page**
-This is a known upstream Authentik limitation with end-session redirects. Users will land on the Authentik logout confirmation page rather than being redirected back automatically.
-
-**Authentik containers are unhealthy / can't connect to Redis**
-Authentik must be on the same Docker network as the `redis` service. This happens automatically when you start using the overlay command:
-```bash
-docker compose -f docker-compose.yml -f docker-compose.authentik.yml up -d
-```
-If you started the Authentik containers separately or manually, connect them to the correct network:
-```bash
-docker network connect <project>_default authentik-server
-docker network connect <project>_default authentik-worker
-docker network connect --alias postgresql <project>_default <postgres-container-name>
-```
-Replace `<project>_default` with the network name shown by `docker network ls` (typically `hms-dashboard_default`).
+- Deploying Authentik alongside WebServarr (Docker Compose overlay)
+- Connecting to an existing Authentik instance
+- Creating the Plex source, custom login flow, and OAuth2 provider
+- Custom property mapping for Plex token passthrough
+- Verification, troubleshooting, and removal
 
 ## Advanced: Reverse Proxy
 
-WebServarr runs on port 8000 by default. To expose it on a custom domain with HTTPS, use a reverse proxy.
+WebServarr runs on port 7979 by default. To expose it on a custom domain with HTTPS, use a reverse proxy.
 
 ### nginx
 
@@ -254,7 +163,7 @@ server {
     ssl_certificate_key /path/to/key.pem;
 
     location / {
-        proxy_pass http://localhost:8000;
+        proxy_pass http://localhost:7979;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -267,7 +176,7 @@ server {
 
 ```
 dashboard.example.com {
-    reverse_proxy localhost:8000
+    reverse_proxy localhost:7979
 }
 ```
 
@@ -277,7 +186,7 @@ dashboard.example.com {
 cloudflared tunnel route dns <tunnel-name> dashboard.example.com
 ```
 
-In your Cloudflare Tunnel config, point the hostname to `http://localhost:8000`.
+In your Cloudflare Tunnel config, point the hostname to `http://localhost:7979`.
 
 When using a reverse proxy, set `APP_DOMAIN` and `APP_SCHEME` in your `.env` file. Auth callback URLs and cookie domains are derived from the incoming HTTP request (so login works without these set), but `APP_DOMAIN` is used for Content Security Policy headers:
 
@@ -375,11 +284,11 @@ docker compose exec webservarr sqlite3 /app/data/webservarr.db ".tables"
 ### Session issues (cannot log in or stay logged in)
 
 ```bash
-# Check Redis is running
-docker compose ps redis
+# Check that Redis is running inside the container
+docker compose exec webservarr redis-cli -h 127.0.0.1 ping
 
-# Verify Redis connectivity from the app container
-docker compose exec webservarr python -c "import redis; r = redis.from_url('redis://redis:6379/0'); print(r.ping())"
+# Check supervisord process status
+docker compose exec webservarr supervisorctl status
 ```
 
 ### Plex OAuth not working
@@ -393,7 +302,6 @@ docker compose exec webservarr python -c "import redis; r = redis.from_url('redi
 ```bash
 docker compose down
 rm -f data/webservarr.db
-docker volume rm webservarr_redis_data 2>/dev/null
 docker compose up -d
 ```
 
@@ -402,12 +310,6 @@ This recreates the database and triggers the setup wizard on next visit.
 ## Viewing Logs
 
 ```bash
-# WebServarr logs
+# WebServarr logs (includes both uvicorn and Redis output)
 docker compose logs -f webservarr
-
-# All container logs
-docker compose logs
-
-# Redis logs
-docker compose logs redis
 ```

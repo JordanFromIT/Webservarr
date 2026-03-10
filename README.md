@@ -29,7 +29,7 @@ curl -O https://raw.githubusercontent.com/JordanFromIT/webservarr/main/docker-co
 docker compose up -d
 
 # 3. Open the dashboard
-open http://localhost:8000
+open http://localhost:7979
 ```
 
 ### Option B — docker run
@@ -38,13 +38,11 @@ open http://localhost:8000
 docker run -d \
   --name webservarr \
   --restart unless-stopped \
-  -p 8000:8000 \
+  -p 7979:7979 \
   -v ./data:/app/data \
   -v ./uploads:/app/app/static/uploads \
   ghcr.io/jordanfromit/webservarr:latest
 ```
-
-> A Redis container is also required. See [docs/setup.md](docs/setup.md) for the full `docker run` setup with Redis.
 
 On first launch, a **setup wizard** will guide you through creating an admin account, generating a secret key, and optionally connecting Plex. After setup, head to **Settings** to configure your other integrations.
 
@@ -85,7 +83,7 @@ For most users, the Settings UI is sufficient. Advanced users can override defau
 |----------|---------|-------------|
 | `APP_DOMAIN` | `localhost` | Your domain — used for CSP headers (e.g., `dashboard.example.com`) |
 | `APP_SCHEME` | `https` | URL scheme — used for CSP headers (`http` for local development) |
-| `REDIS_URL` | `redis://redis:6379/0` | Redis connection string |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string (embedded; override to use external Redis) |
 | `CORS_ORIGINS` | `""` | Additional CORS origins (comma-separated) |
 | `CSP_FRAME_SRC` | `""` | Additional CSP frame-src origins |
 | `CSP_CONNECT_SRC` | `""` | Additional CSP connect-src origins |
@@ -94,7 +92,7 @@ For most users, the Settings UI is sufficient. Advanced users can override defau
 
 - **Backend:** FastAPI (Python 3.11), SQLite, Redis sessions
 - **Frontend:** Vanilla JavaScript, Tailwind CSS (CDN), Material Design Icons
-- **Deployment:** Docker Compose (2 containers: `webservarr` + `redis`)
+- **Deployment:** Docker Compose (single container with embedded Redis)
 
 ## Project Structure
 
@@ -145,4 +143,4 @@ Contributions are welcome. Please open an issue to discuss significant changes b
 
 ## License
 
-[MIT](LICENSE)
+[GPL-3.0](LICENSE)
