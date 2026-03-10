@@ -25,7 +25,7 @@ A self-hosted web dashboard for Plex media server administration. WebServarr bri
 # 1. Download the compose file
 curl -O https://raw.githubusercontent.com/JordanFromIT/webservarr/main/docker-compose.yml
 
-# 2. Start the containers
+# 2. Start the container
 docker compose up -d
 
 # 3. Open the dashboard
@@ -73,7 +73,7 @@ WebServarr supports three authentication methods, configurable in **Settings > S
 
 2. **Direct Plex OAuth** (recommended) -- Users sign in with their Plex account. Same PIN-based flow used by Overseerr and Tautulli. Requires Plex integration to be configured. Admin is determined by matching the user's email against the Plex server owner or `system.admin_email` setting.
 
-3. **Authentik OIDC** (advanced) -- Plex login through an Authentik identity provider. Useful if you already run Authentik for SSO across multiple services. See [docs/setup.md](docs/setup.md) for setup instructions.
+3. **Authentik OIDC** (advanced) -- Plex login through an Authentik identity provider. Useful if you already run Authentik for SSO across multiple services. See [docs/authentik.md](docs/authentik.md) for setup instructions.
 
 ### Environment Variables
 
