@@ -215,7 +215,7 @@ Continue from "Create a Plex source" to configure the provider, application, and
 ### Troubleshooting
 
 **"Sign in with Plex (via Authentik)" button not appearing**
-All four settings (URL, Client ID, Client Secret, App Slug) must be saved in Settings → Integrations → Authentik. Verify none are blank.
+All four settings (URL, Client ID, Client Secret, App Slug) must be saved in Settings → System → Authentication. Verify none are blank.
 
 **Redirect URI mismatch error**
 The redirect URI in the Authentik OAuth2 provider must exactly match `https://your-domain.com/auth/callback` — same scheme, same domain, no trailing slash.
