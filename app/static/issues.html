@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Issues</title>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: {
+        "display": ["var(--font-display)", "sans-serif"]
+      },
+    },
+  },
+}</script>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<div id="sidebar-root"></div>
+<!-- Toast notification container -->
+<div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
+<!-- Issue Detail Modal -->
+<div id="issueModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
+<div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+<div class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl glass-card p-5 custom-scrollbar">
+<button onclick="closeModal()" class="absolute top-3 right-3 text-steel-blue hover:text-bright transition-colors">
+<span class="material-symbols-outlined">close</span>
+</button>
+<div id="modalContent">
+<div class="text-center text-steel-blue py-8">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin">progress_activity</span>
+<p>Loading...</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<div id="header-root"></div>
+<!-- Scrollable Content -->
+<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+
+<!-- Stat Summary Cards -->
+<div class="grid grid-cols-3 gap-3 mb-6">
+<div class="glass-card rounded-xl p-4 text-center">
+<p class="text-2xl font-bold text-frosted-blue" id="statTotal">--</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Total</p>
+</div>
+<div class="glass-card rounded-xl p-4 text-center">
+<p class="text-2xl font-bold text-amber-400" id="statOpen">--</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Open</p>
+</div>
+<div class="glass-card rounded-xl p-4 text-center">
+<p class="text-2xl font-bold text-green-500" id="statClosed">--</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Resolved</p>
+</div>
+</div>
+
+<!-- Two-column layout -->
+<div class="flex flex-col lg:flex-row gap-6">
+
+<!-- Left column: Report Issue -->
+<div class="w-full lg:w-1/2 min-w-0 rounded-xl glass-card p-4 lg:p-5">
+<div class="flex items-center gap-3 mb-4 pb-3 border-b border-steel-blue/30">
+<span class="material-symbols-outlined text-primary">add_circle</span>
+<h3 class="text-lg font-bold text-frosted-blue">Report an Issue</h3>
+</div>
+
+<!-- Search Bar -->
+<div class="relative mb-4">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-xl">search</span>
+<input id="searchInput" type="text" placeholder="Search for the media with the issue..."
+  class="w-full pl-10 pr-4 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm"/>
+</div>
+
+<!-- Search Results (compact list) -->
+<div id="searchResultsSection" class="hidden mb-4">
+<p id="searchResultCount" class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-2"></p>
+<div id="searchResultsList" class="space-y-1 max-h-64 overflow-y-auto custom-scrollbar"></div>
+</div>
+
+<!-- Search Empty State -->
+<div id="searchEmptyState" class="text-center text-steel-blue py-8">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-30">search</span>
+<p class="text-sm">Search for the movie or TV show you're having an issue with</p>
+</div>
+
+<!-- Issue Form (shown after selecting media) -->
+<div id="issueFormSection" class="hidden">
+<!-- Selected media card -->
+<div class="flex items-center gap-3 p-3 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 mb-4">
+<img id="selectedMediaPoster" src="" alt="" class="w-12 h-[72px] rounded object-cover shrink-0" onerror="this.style.display='none'"/>
+<div class="flex-1 min-w-0">
+<p id="selectedMediaTitle" class="text-frosted-blue text-sm font-bold truncate"></p>
+<p id="selectedMediaYear" class="text-steel-blue text-xs"></p>
+</div>
+<button onclick="deselectMedia()" class="text-steel-blue hover:text-bright transition-colors shrink-0" title="Change selection">
+<span class="material-symbols-outlined text-sm">close</span>
+</button>
+</div>
+
+<!-- Issue type selector -->
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-2">Issue Type</p>
+<div class="grid grid-cols-2 gap-2 mb-4">
+<button onclick="selectIssueType(1)" data-type="1" class="issue-type-btn py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5">
+<span class="material-symbols-outlined text-sm">videocam</span> Video
+</button>
+<button onclick="selectIssueType(2)" data-type="2" class="issue-type-btn py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5">
+<span class="material-symbols-outlined text-sm">volume_up</span> Audio
+</button>
+<button onclick="selectIssueType(3)" data-type="3" class="issue-type-btn py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5">
+<span class="material-symbols-outlined text-sm">subtitles</span> Subtitles
+</button>
+<button onclick="selectIssueType(4)" data-type="4" class="issue-type-btn py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5">
+<span class="material-symbols-outlined text-sm">more_horiz</span> Other
+</button>
+</div>
+
+<!-- Description -->
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-2">Description</p>
+<textarea id="issueMessage" placeholder="Describe the issue (e.g., 'Audio out of sync in Season 1 Episode 3')..."
+  class="w-full p-3 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm resize-none h-24 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"></textarea>
+
+<!-- Submit -->
+<button id="submitIssueBtn" onclick="submitIssue()" class="w-full py-2.5 mt-3 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all">
+Submit Issue
+</button>
+</div>
+</div>
+
+<!-- Right column: Issues List -->
+<div class="w-full lg:w-1/2 min-w-0 rounded-xl glass-card p-4 lg:p-5">
+<div class="flex items-center gap-3 mb-4 pb-3 border-b border-steel-blue/30">
+<span class="material-symbols-outlined text-primary">list_alt</span>
+<h3 class="text-lg font-bold text-frosted-blue">Issues</h3>
+<span id="issuesTotalCount" class="text-sm text-steel-blue font-medium"></span>
+</div>
+
+<!-- Status Filter Tabs -->
+<div class="flex flex-wrap gap-2 mb-3">
+<button onclick="setStatusFilter('all')" data-sfilter="all" class="status-filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All</button>
+<button onclick="setStatusFilter('open')" data-sfilter="open" class="status-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Open</button>
+<button onclick="setStatusFilter('resolved')" data-sfilter="resolved" class="status-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Resolved</button>
+</div>
+
+<!-- Type Filter Tabs -->
+<div class="flex flex-wrap gap-2 mb-4">
+<button onclick="setTypeFilter('all')" data-tfilter="all" class="type-filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All Types</button>
+<button onclick="setTypeFilter('video')" data-tfilter="video" class="type-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Video</button>
+<button onclick="setTypeFilter('audio')" data-tfilter="audio" class="type-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Audio</button>
+<button onclick="setTypeFilter('subtitles')" data-tfilter="subtitles" class="type-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Subtitles</button>
+<button onclick="setTypeFilter('other')" data-tfilter="other" class="type-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Other</button>
+</div>
+
+<!-- Issues List -->
+<div id="issuesList" class="space-y-2">
+<div class="text-center text-steel-blue py-8">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">report_problem</span>
+<p>Loading issues...</p>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+
+<!-- Scroll down indicator (mobile only) -->
+<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+    <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
+</div>
+
+</main>
+
+<style>
+.status-filter-tab, .type-filter-tab {
+  background: rgba(var(--color-accent) / 0.1);
+  border: 1px solid rgba(var(--color-accent) / 0.2);
+  color: rgb(var(--color-accent));
+}
+.status-filter-tab:hover, .type-filter-tab:hover {
+  background: rgba(var(--color-accent) / 0.2);
+  color: rgb(var(--color-text));
+}
+.status-filter-tab.active, .type-filter-tab.active {
+  background: rgb(var(--color-primary));
+  border-color: rgb(var(--color-primary));
+  color: rgb(var(--color-background));
+}
+.issue-type-btn {
+  background: rgba(var(--color-accent) / 0.1);
+  border: 1px solid rgba(var(--color-accent) / 0.2);
+  color: rgb(var(--color-accent));
+}
+.issue-type-btn:hover {
+  background: rgba(var(--color-accent) / 0.2);
+  color: rgb(var(--color-text));
+}
+.issue-type-btn.active {
+  background: rgb(var(--color-primary));
+  border-color: rgb(var(--color-primary));
+  color: rgb(var(--color-background));
+}
+</style>
+
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/sidebar.js?v=11"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+<script>
+// State
+var _searchDebounceTimer = null;
+var _currentSearchQuery = '';
+var _allIssues = [];
+var _currentStatusFilter = 'all';
+var _currentTypeFilter = 'all';
+var _selectedMedia = null;
+var _selectedIssueType = null;
+var _refreshInterval = null;
+
+document.addEventListener('DOMContentLoaded', async function() {
+    initSidebar('issues');
+    initNotifications();
+
+    // Scroll-down hint — fade out at bottom
+    (function() {
+        var hint = document.getElementById('scrollDownHint');
+        if (!hint) return;
+        window.addEventListener('scroll', function() {
+            var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+            hint.style.opacity = atBottom ? '0' : '1';
+        });
+    })();
+
+    var user = await checkAuth();
+    if (!user) return;
+    showAdminNav(user.is_admin);
+    loadSystemStatus();
+
+    // Wire up search input with debounce
+    var searchInput = document.getElementById('searchInput');
+    searchInput.addEventListener('input', function() {
+        var query = searchInput.value.trim();
+        clearTimeout(_searchDebounceTimer);
+        if (query.length === 0) {
+            clearSearch();
+            return;
+        }
+        _searchDebounceTimer = setTimeout(function() {
+            performSearch(query);
+        }, 300);
+    });
+
+    // Load initial data
+    loadIssueCounts();
+    loadIssues();
+
+    // Auto-refresh every 30 seconds
+    _refreshInterval = setInterval(function() {
+        loadIssueCounts();
+        loadIssues();
+    }, 30000);
+});
+
+// ---- Search ----
+
+async function performSearch(query) {
+    _currentSearchQuery = query;
+    var section = document.getElementById('searchResultsSection');
+    var emptyState = document.getElementById('searchEmptyState');
+    var list = document.getElementById('searchResultsList');
+
+    section.classList.remove('hidden');
+    emptyState.classList.add('hidden');
+
+    list.innerHTML = '<div class="text-center text-steel-blue py-4">' +
+        '<span class="material-symbols-outlined text-2xl mb-1 block opacity-50 animate-spin">progress_activity</span>' +
+        '<p class="text-xs">Searching...</p></div>';
+
+    try {
+        var resp = await fetch('/api/integrations/overseerr-search?query=' + encodeURIComponent(query) + '&page=1');
+        if (!resp.ok) throw new Error('Search failed');
+        var data = await resp.json();
+
+        var results = (data.results || []).filter(function(item) {
+            // Only show items that exist in the library (have media_info_id)
+            return item.media_info_id;
+        });
+
+        document.getElementById('searchResultCount').textContent = results.length + ' in library';
+
+        if (results.length === 0) {
+            list.innerHTML = '<div class="text-center text-steel-blue py-4">' +
+                '<span class="material-symbols-outlined text-2xl mb-1 block opacity-50">search_off</span>' +
+                '<p class="text-xs">No library items found for "' + escapeHtml(query) + '"</p>' +
+                '<p class="text-[10px] text-steel-blue/50 mt-1">Issues can only be reported for media already in the library</p></div>';
+            return;
+        }
+
+        list.innerHTML = results.map(function(item) {
+            return buildSearchResultItem(item);
+        }).join('');
+
+    } catch (error) {
+        console.error('Search error:', error);
+        list.innerHTML = '<div class="text-center text-red-400 py-4">' +
+            '<span class="material-symbols-outlined text-2xl mb-1 block">error</span>' +
+            '<p class="text-xs">Error searching. Is Overseerr configured?</p></div>';
+    }
+}
+
+function buildSearchResultItem(item) {
+    var title = escapeHtml(item.title || 'Unknown');
+    var year = item.year ? escapeHtml(String(item.year)) : '';
+    var mediaType = item.media_type === 'tv' ? 'TV Show' : 'Movie';
+    var typeBadgeColor = item.media_type === 'tv' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400';
+    var posterUrl = item.poster_url || '';
+    var mediaInfoId = item.media_info_id;
+
+    var posterHtml = posterUrl
+        ? '<img src="' + escapeHtml(posterUrl) + '" alt="' + title + '" class="w-10 h-[60px] rounded object-cover shrink-0" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"/>' +
+          '<div class="w-10 h-[60px] rounded bg-frosted-blue/5 items-center justify-center shrink-0" style="display:none"><span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span></div>'
+        : '<div class="w-10 h-[60px] rounded bg-frosted-blue/5 flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span></div>';
+
+    // Encode data as JSON string in data attribute
+    var dataStr = escapeHtml(JSON.stringify({
+        id: item.id,
+        media_type: item.media_type,
+        title: item.title || 'Unknown',
+        year: item.year || '',
+        poster_url: posterUrl,
+        media_info_id: mediaInfoId,
+    }));
+
+    return '<div class="flex items-center gap-3 p-2 rounded-lg hover:bg-frosted-blue/5 cursor-pointer transition-all border border-transparent hover:border-steel-blue/20" ' +
+        'onclick=\'selectMedia(' + JSON.stringify({id: item.id, media_type: item.media_type, title: item.title || "Unknown", year: item.year || "", poster_url: posterUrl, media_info_id: mediaInfoId}) + ')\'>' +
+        posterHtml +
+        '<div class="flex-1 min-w-0">' +
+            '<p class="text-frosted-blue text-sm font-medium truncate">' + title + '</p>' +
+            '<div class="flex items-center gap-2 mt-0.5">' +
+                (year ? '<span class="text-steel-blue text-[11px]">' + year + '</span>' : '') +
+                '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + mediaType + '</span>' +
+            '</div>' +
+        '</div>' +
+    '</div>';
+}
+
+function clearSearch() {
+    _currentSearchQuery = '';
+    document.getElementById('searchResultsSection').classList.add('hidden');
+    document.getElementById('searchEmptyState').classList.remove('hidden');
+    document.getElementById('searchResultsList').innerHTML = '';
+    document.getElementById('searchResultCount').textContent = '';
+}
+
+// ---- Media Selection ----
+
+function selectMedia(item) {
+    _selectedMedia = item;
+    _selectedIssueType = null;
+
+    // Show issue form, hide search
+    document.getElementById('issueFormSection').classList.remove('hidden');
+    document.getElementById('searchResultsSection').classList.add('hidden');
+    document.getElementById('searchEmptyState').classList.add('hidden');
+    document.getElementById('searchInput').value = '';
+
+    // Populate selected media display
+    document.getElementById('selectedMediaTitle').textContent = item.title;
+    document.getElementById('selectedMediaYear').textContent = (item.year || '') + ' - ' + (item.media_type === 'tv' ? 'TV Show' : 'Movie');
+    var poster = document.getElementById('selectedMediaPoster');
+    if (item.poster_url) {
+        poster.src = item.poster_url;
+        poster.style.display = '';
+    } else {
+        poster.style.display = 'none';
+    }
+
+    // Reset form
+    document.getElementById('issueMessage').value = '';
+    document.querySelectorAll('.issue-type-btn').forEach(function(btn) {
+        btn.classList.remove('active');
+    });
+}
+
+function deselectMedia() {
+    _selectedMedia = null;
+    _selectedIssueType = null;
+    document.getElementById('issueFormSection').classList.add('hidden');
+    document.getElementById('searchEmptyState').classList.remove('hidden');
+    document.getElementById('searchInput').value = '';
+    document.getElementById('searchInput').focus();
+}
+
+function selectIssueType(type) {
+    _selectedIssueType = type;
+    document.querySelectorAll('.issue-type-btn').forEach(function(btn) {
+        if (parseInt(btn.getAttribute('data-type')) === type) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+}
+
+// ---- Submit Issue ----
+
+async function submitIssue() {
+    if (!_selectedMedia) return;
+    if (!_selectedIssueType) {
+        showToast('Please select an issue type', 'error');
+        return;
+    }
+    var message = document.getElementById('issueMessage').value.trim();
+    if (!message) {
+        showToast('Please describe the issue', 'error');
+        return;
+    }
+
+    var submitBtn = document.getElementById('submitIssueBtn');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span>';
+    submitBtn.classList.add('opacity-60');
+
+    try {
+        var resp = await fetch('/api/integrations/issues', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                issueType: _selectedIssueType,
+                message: message,
+                mediaId: _selectedMedia.media_info_id,
+            }),
+        });
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return {}; });
+            throw new Error(err.detail || 'Failed to create issue');
+        }
+
+        showToast('Issue reported successfully!', 'success');
+        deselectMedia();
+        setTimeout(function() { loadIssueCounts(); loadIssues(); }, 1500);
+
+    } catch (error) {
+        console.error('Submit issue error:', error);
+        showToast(error.message, 'error');
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Issue';
+        submitBtn.classList.remove('opacity-60');
+    }
+}
+
+// ---- Issue Counts ----
+
+async function loadIssueCounts() {
+    try {
+        var resp = await fetch('/api/integrations/issue-counts');
+        if (!resp.ok) throw new Error('API error');
+        var counts = await resp.json();
+
+        document.getElementById('statTotal').textContent = counts.total || 0;
+        document.getElementById('statOpen').textContent = counts.open || 0;
+        document.getElementById('statClosed').textContent = counts.closed || 0;
+        document.getElementById('issuesTotalCount').textContent = '(' + (counts.total || 0) + ')';
+    } catch (e) {
+        console.log('Issue counts not available');
+    }
+}
+
+// ---- Issues List ----
+
+async function loadIssues() {
+    try {
+        var resp = await fetch('/api/integrations/issues?take=50');
+        if (!resp.ok) throw new Error('API error');
+        var data = await resp.json();
+
+        _allIssues = data.results || [];
+        renderIssues();
+    } catch (error) {
+        console.error('Error loading issues:', error);
+        document.getElementById('issuesList').innerHTML =
+            '<div class="text-center text-steel-blue py-8">' +
+            '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">report_problem</span>' +
+            '<p>Could not load issues</p></div>';
+    }
+}
+
+function renderIssues() {
+    var list = document.getElementById('issuesList');
+    var filtered = _allIssues;
+
+    // Apply status filter
+    if (_currentStatusFilter !== 'all') {
+        filtered = filtered.filter(function(issue) {
+            return issue.status === _currentStatusFilter;
+        });
+    }
+    // Apply type filter
+    if (_currentTypeFilter !== 'all') {
+        filtered = filtered.filter(function(issue) {
+            return issue.issue_type === _currentTypeFilter;
+        });
+    }
+
+    if (filtered.length === 0) {
+        var msg = 'No issues found';
+        if (_currentStatusFilter !== 'all' || _currentTypeFilter !== 'all') msg = 'No matching issues';
+        list.innerHTML = '<div class="text-center text-steel-blue py-8">' +
+            '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">check_circle</span>' +
+            '<p>' + msg + '</p></div>';
+        return;
+    }
+
+    list.innerHTML = filtered.map(function(issue) {
+        return buildIssueCard(issue);
+    }).join('');
+}
+
+function buildIssueCard(issue) {
+    var title = escapeHtml(issue.media_title || 'Unknown');
+    var posterUrl = issue.poster_url || '';
+
+    var posterHtml = posterUrl
+        ? '<img src="' + escapeHtml(posterUrl) + '" alt="' + title + '" class="w-12 h-[72px] rounded object-cover shrink-0" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"/>' +
+          '<div class="w-12 h-[72px] rounded bg-frosted-blue/5 items-center justify-center shrink-0" style="display:none"><span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span></div>'
+        : '<div class="w-12 h-[72px] rounded bg-frosted-blue/5 flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span></div>';
+
+    var dateStr = issue.created_date ? getTimeAgo(new Date(issue.created_date)) : '';
+
+    return '<div class="glass-card rounded-xl p-3 flex gap-3 items-start cursor-pointer hover:border-primary/40 transition-all" onclick="viewIssue(' + issue.id + ')">' +
+        posterHtml +
+        '<div class="flex-1 min-w-0">' +
+            '<p class="text-frosted-blue text-sm font-bold truncate">' + title + '</p>' +
+            '<div class="flex flex-wrap items-center gap-1.5 mt-1">' +
+                getIssueTypeBadge(issue.issue_type) +
+                getIssueStatusBadge(issue.status) +
+            '</div>' +
+            (dateStr ? '<p class="text-[10px] text-steel-blue/40 mt-1.5">' + dateStr + '</p>' : '') +
+        '</div>' +
+    '</div>';
+}
+
+// ---- Badges ----
+
+function getIssueTypeBadge(type) {
+    var configs = {
+        'video':     { bg: 'bg-purple-500/10', text: 'text-purple-400', icon: 'videocam',  label: 'Video' },
+        'audio':     { bg: 'bg-blue-500/10',   text: 'text-blue-400',   icon: 'volume_up', label: 'Audio' },
+        'subtitles': { bg: 'bg-yellow-500/10', text: 'text-yellow-400', icon: 'subtitles', label: 'Subtitles' },
+        'other':     { bg: 'bg-steel-blue/20', text: 'text-steel-blue', icon: 'more_horiz', label: 'Other' },
+    };
+    var c = configs[type] || configs['other'];
+    return '<span class="px-2 py-0.5 rounded ' + c.bg + ' ' + c.text + ' text-[9px] font-bold uppercase tracking-wider inline-flex items-center gap-1">' +
+        '<span class="material-symbols-outlined text-[10px]">' + c.icon + '</span>' + c.label + '</span>';
+}
+
+function getIssueStatusBadge(status) {
+    if (status === 'open') {
+        return '<span class="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[9px] font-bold uppercase tracking-wider">Open</span>';
+    }
+    return '<span class="px-2 py-0.5 rounded bg-green-500/10 text-green-500 text-[9px] font-bold uppercase tracking-wider">Resolved</span>';
+}
+
+// ---- Filter Tabs ----
+
+function setStatusFilter(filter) {
+    _currentStatusFilter = filter;
+    document.querySelectorAll('.status-filter-tab').forEach(function(tab) {
+        if (tab.getAttribute('data-sfilter') === filter) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+    renderIssues();
+}
+
+function setTypeFilter(filter) {
+    _currentTypeFilter = filter;
+    document.querySelectorAll('.type-filter-tab').forEach(function(tab) {
+        if (tab.getAttribute('data-tfilter') === filter) {
+            tab.classList.add('active');
+        } else {
+            tab.classList.remove('active');
+        }
+    });
+    renderIssues();
+}
+
+// ---- Issue Detail Modal ----
+
+async function viewIssue(issueId) {
+    var modal = document.getElementById('issueModal');
+    var content = document.getElementById('modalContent');
+    modal.classList.remove('hidden');
+
+    content.innerHTML = '<div class="text-center text-steel-blue py-8">' +
+        '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin">progress_activity</span>' +
+        '<p>Loading issue...</p></div>';
+
+    try {
+        var resp = await fetch('/api/integrations/issues/' + issueId);
+        if (!resp.ok) throw new Error('API error');
+        var issue = await resp.json();
+        renderIssueDetail(issue);
+    } catch (error) {
+        content.innerHTML = '<div class="text-center text-red-400 py-8">' +
+            '<span class="material-symbols-outlined text-4xl mb-2 block">error</span>' +
+            '<p>Could not load issue details</p></div>';
+    }
+}
+
+function renderIssueDetail(issue) {
+    var content = document.getElementById('modalContent');
+    var posterUrl = issue.poster_url || '';
+    var title = escapeHtml(issue.media_title || 'Unknown');
+    var dateStr = issue.created_date ? getTimeAgo(new Date(issue.created_date)) : '';
+
+    var posterHtml = posterUrl
+        ? '<img src="' + escapeHtml(posterUrl) + '" alt="' + title + '" class="w-16 h-24 rounded object-cover shrink-0"/>'
+        : '<div class="w-16 h-24 rounded bg-frosted-blue/5 flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-2xl text-steel-blue/30">movie</span></div>';
+
+    // Comments
+    var comments = issue.comments || [];
+    var commentsHtml = comments.map(function(c) {
+        var commentDate = c.created_date ? getTimeAgo(new Date(c.created_date)) : '';
+        return '<div class="p-3 rounded-lg bg-frosted-blue/5 border border-steel-blue/10">' +
+            (commentDate ? '<p class="text-[10px] text-steel-blue/40 mb-1.5">' + commentDate + '</p>' : '') +
+            '<p class="text-sm text-frosted-blue/80 whitespace-pre-wrap">' + escapeHtml(c.message || '') + '</p>' +
+        '</div>';
+    }).join('');
+
+    content.innerHTML = '' +
+        // Header: poster + title + badges
+        '<div class="flex gap-4 mb-4">' +
+            posterHtml +
+            '<div class="flex-1 min-w-0">' +
+                '<p class="text-frosted-blue text-base font-bold">' + title + '</p>' +
+                '<div class="flex flex-wrap items-center gap-1.5 mt-1.5">' +
+                    getIssueTypeBadge(issue.issue_type) +
+                    getIssueStatusBadge(issue.status) +
+                '</div>' +
+                (dateStr ? '<p class="text-xs text-steel-blue/40 mt-2">' + dateStr + '</p>' : '') +
+            '</div>' +
+        '</div>' +
+        // Comments
+        '<div class="border-t border-steel-blue/20 pt-4">' +
+            '<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-3">Comments (' + comments.length + ')</p>' +
+            (commentsHtml ? '<div class="space-y-2 mb-4">' + commentsHtml + '</div>' : '<p class="text-sm text-steel-blue/40 mb-4">No comments yet</p>') +
+        '</div>' +
+        // Add comment form
+        '<div class="border-t border-steel-blue/20 pt-4">' +
+            '<textarea id="commentMessage" placeholder="Add a comment..." class="w-full p-3 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm resize-none h-20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"></textarea>' +
+            '<button id="addCommentBtn" onclick="addComment(' + issue.id + ')" class="w-full py-2 mt-2 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all">Add Comment</button>' +
+        '</div>';
+}
+
+async function addComment(issueId) {
+    var message = document.getElementById('commentMessage').value.trim();
+    if (!message) {
+        showToast('Please enter a comment', 'error');
+        return;
+    }
+
+    var btn = document.getElementById('addCommentBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span>';
+    btn.classList.add('opacity-60');
+
+    try {
+        var resp = await fetch('/api/integrations/issues/' + issueId + '/comment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: message }),
+        });
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return {}; });
+            throw new Error(err.detail || 'Failed to add comment');
+        }
+
+        showToast('Comment added!', 'success');
+        // Reload the issue detail
+        viewIssue(issueId);
+
+    } catch (error) {
+        showToast(error.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Add Comment';
+        btn.classList.remove('opacity-60');
+    }
+}
+
+function closeModal() {
+    document.getElementById('issueModal').classList.add('hidden');
+}
+
+// ---- Toast Notifications ----
+
+function showToast(message, type) {
+    var container = document.getElementById('toastContainer');
+    var toast = document.createElement('div');
+    var bgColor = type === 'success' ? 'bg-green-500/90' : 'bg-red-500/90';
+    var icon = type === 'success' ? 'check_circle' : 'error';
+
+    toast.className = 'pointer-events-auto flex items-center gap-2 px-4 py-3 rounded-lg ' + bgColor + ' text-bright text-sm font-medium shadow-lg backdrop-blur-sm transform translate-x-full transition-transform duration-300';
+    toast.innerHTML = '<span class="material-symbols-outlined text-sm">' + icon + '</span>' + escapeHtml(message);
+
+    container.appendChild(toast);
+
+    requestAnimationFrame(function() {
+        toast.classList.remove('translate-x-full');
+        toast.classList.add('translate-x-0');
+    });
+
+    setTimeout(function() {
+        toast.classList.remove('translate-x-0');
+        toast.classList.add('translate-x-full');
+        setTimeout(function() {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 300);
+    }, 3000);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Control Center</title>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: {
+        "display": ["var(--font-display)", "sans-serif"]
+      },
+    },
+  },
+}</script>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<div id="sidebar-root"></div>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<div id="header-root"></div>
+<!-- Scrollable Content -->
+<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8">
+<!-- Service Health + News Side by Side -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+<!-- Service Health -->
+<section>
+<div class="flex items-center gap-3 mb-4">
+<span id="iconSectionServices" class="material-symbols-outlined text-steel-blue">health_metrics</span>
+<h3 class="text-xl font-bold text-frosted-blue">Service Health</h3>
+<span id="serviceLastChecked" class="text-[10px] text-steel-blue ml-auto"></span>
+</div>
+<!-- Netdata Gauges -->
+<div id="netdataGauges" class="hidden bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 mb-4">
+<div class="flex justify-between items-center">
+<!-- CPU Gauge -->
+<div class="flex flex-col items-center flex-1">
+<div class="relative w-24 h-24 lg:w-28 lg:h-28">
+<svg class="w-full h-full" viewBox="0 0 100 100">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
+<circle id="cpuGaugeCircle" class="text-cyan-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
+<span class="text-[10px] text-steel-blue font-medium">CPU</span>
+<span id="cpuGaugeText" class="text-lg font-bold text-frosted-blue">--%</span>
+<span id="cpuGaugeDetail" class="text-[8px] text-steel-blue/70"></span>
+</div>
+</div>
+</div>
+<!-- RAM Gauge -->
+<div class="flex flex-col items-center flex-1">
+<div class="relative w-24 h-24 lg:w-28 lg:h-28">
+<svg class="w-full h-full" viewBox="0 0 100 100">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
+<circle id="ramGaugeCircle" class="text-purple-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
+<span class="text-[10px] text-steel-blue font-medium">RAM</span>
+<span id="ramGaugeText" class="text-lg font-bold text-frosted-blue">--%</span>
+<span id="ramGaugeDetail" class="text-[8px] text-steel-blue/70"></span>
+</div>
+</div>
+</div>
+<!-- Network Gauge -->
+<div class="flex flex-col items-center flex-1">
+<div class="relative w-24 h-24 lg:w-28 lg:h-28">
+<svg class="w-full h-full" viewBox="0 0 100 100">
+<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
+<circle id="netGaugeCircle" class="text-orange-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center pt-1">
+<span class="text-[10px] text-steel-blue font-medium uppercase">Network</span>
+<div class="flex flex-col items-center leading-none mt-1">
+<div class="flex items-center text-[9px] text-frosted-blue space-x-0.5">
+<span class="material-symbols-outlined text-[9px]">arrow_upward</span>
+<span id="netUpText">0.0</span>
+<span class="text-steel-blue/60">MB/s</span>
+</div>
+<div class="flex items-center text-[9px] text-frosted-blue space-x-0.5 mt-0.5">
+<span class="material-symbols-outlined text-[9px]">arrow_downward</span>
+<span id="netDownText">0.0</span>
+<span class="text-steel-blue/60">MB/s</span>
+</div>
+</div>
+<span id="netGaugeDetail" class="text-[7px] text-steel-blue/60 mt-0.5"></span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Service Tiles -->
+<div id="servicesContainer" class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr))">
+<!-- Services will be loaded here dynamically -->
+<div class="text-center text-steel-blue py-8 col-span-full">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span>
+<p>Loading services...</p>
+</div>
+</div>
+</section>
+<!-- News & Updates -->
+<section>
+<div class="flex items-center gap-3 mb-4">
+<span id="iconSectionNews" class="material-symbols-outlined text-steel-blue">newspaper</span>
+<h3 class="text-xl font-bold text-frosted-blue">News &amp; Updates</h3>
+</div>
+<div id="newsContainer" class="grid gap-3">
+<!-- News posts will be loaded here dynamically -->
+<div class="text-center text-steel-blue py-8">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>
+<p>Loading news...</p>
+</div>
+</div>
+</section>
+</div>
+<!-- Now Playing Section -->
+<section>
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-3">
+<span id="iconSectionStreams" class="material-symbols-outlined text-steel-blue">play_circle</span>
+<h3 class="text-xl font-bold text-frosted-blue">Active Streams</h3>
+</div>
+<div id="streamChevrons" class="flex items-center gap-2 hidden">
+<button onclick="scrollStreams(-1)" class="p-1 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-bright hover:bg-frosted-blue/10 transition-all">
+<span class="material-symbols-outlined">chevron_left</span>
+</button>
+<button onclick="scrollStreams(1)" class="p-1 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-bright hover:bg-frosted-blue/10 transition-all">
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+</div>
+</div>
+<div id="streamsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<!-- Stream cards will be loaded here dynamically -->
+<div class="text-center text-steel-blue py-8 col-span-3">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
+<p>Loading streams...</p>
+</div>
+</div>
+</section>
+<!-- Upcoming Releases -->
+<section id="upcomingReleasesSection">
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-3">
+<span id="iconSectionReleases" class="material-symbols-outlined text-steel-blue">calendar_month</span>
+<h3 class="text-xl font-bold text-frosted-blue">Upcoming Releases</h3>
+</div>
+<a href="/calendar" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors uppercase tracking-wider">
+View Calendar
+<span class="material-symbols-outlined text-sm">arrow_forward</span>
+</a>
+</div>
+<div id="releasesContainer">
+<div class="text-center text-steel-blue py-8">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">calendar_month</span>
+<p>Loading releases...</p>
+</div>
+</div>
+</section>
+<!-- Recent Requests -->
+<section>
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-3">
+<span id="iconSectionRequests" class="material-symbols-outlined text-steel-blue">shopping_cart</span>
+<h3 class="text-xl font-bold text-frosted-blue">Recent Requests</h3>
+</div>
+<a id="viewRequestsLink" href="/requests" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors uppercase tracking-wider">
+View Requests
+<span class="material-symbols-outlined text-sm">arrow_forward</span>
+</a>
+</div>
+<div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-xl overflow-hidden">
+<table class="w-full text-left text-sm">
+<thead class="bg-frosted-blue/5 text-steel-blue uppercase text-[10px] font-bold">
+<tr>
+<th class="px-4 lg:px-6 py-3">Content</th>
+<th class="px-4 lg:px-6 py-3">Status</th>
+</tr>
+</thead>
+<tbody id="requestsBody" class="divide-y divide-steel-blue/10">
+<tr>
+<td colspan="2" class="px-6 py-8 text-center text-steel-blue">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
+<p>Loading requests...</p>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+
+<!-- Scroll down indicator (mobile only) -->
+<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+    <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
+</div>
+
+</main>
+
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/sidebar.js?v=11"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+<script>
+// WebServarr - Main Page
+document.addEventListener('DOMContentLoaded', async function() {
+    initSidebar('home');
+    initNotifications();
+
+    // Scroll-down hint — fade out after scrolling
+    (function() {
+        var hint = document.getElementById('scrollDownHint');
+        if (!hint) return;
+        window.addEventListener('scroll', function() {
+            var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+            hint.style.opacity = atBottom ? '0' : '1';
+        });
+    })();
+
+    // Apply configurable section icons from branding
+    var icons = (window.WEBSERVARR_THEME || {}).icons || {};
+    var iconMap = {
+        iconSectionServices: icons.section_services,
+        iconSectionNews: icons.section_news,
+        iconSectionStreams: icons.section_streams,
+        iconSectionReleases: icons.section_releases,
+        iconSectionRequests: icons.section_requests,
+    };
+    for (var elId in iconMap) {
+        if (iconMap[elId]) {
+            var el = document.getElementById(elId);
+            if (el) el.textContent = iconMap[elId];
+        }
+    }
+
+    const user = await checkAuth();
+    if (!user) return;
+    showAdminNav(user.is_admin);
+
+    // Load all dynamic sections
+    loadSystemStatus();
+    loadNews();
+    loadServices();
+    loadActiveStreams();
+    loadRecentRequests();
+    loadRequestCount();
+    loadSystemStats();
+    loadUpcomingReleases();
+
+    // Auto-refresh dynamic sections every 30 seconds
+    setInterval(function() {
+        loadSystemStatus();
+        loadServices();
+        loadActiveStreams();
+        loadRecentRequests();
+        loadRequestCount();
+        loadUpcomingReleases();
+    }, 30000);
+
+    // Real-time Netdata gauges — poll every 1 second
+    setInterval(loadSystemStats, 1000);
+
+    // Live-update "Last checked" timer every second
+    setInterval(function() {
+        var el = document.getElementById('serviceLastChecked');
+        if (el && el.dataset.lastCheck) {
+            el.textContent = 'Checked ' + getTimeAgo(new Date(el.dataset.lastCheck));
+        }
+    }, 1000);
+});
+
+// Load news from API
+async function loadNews() {
+    try {
+        const response = await fetch('/api/news/?limit=5');
+        const posts = await response.json();
+
+        const newsContainer = document.getElementById('newsContainer');
+
+        if (posts.length === 0) {
+            newsContainer.innerHTML = `
+                <div class="text-center text-steel-blue py-8">
+                    <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>
+                    <p>No news posts yet.</p>
+                </div>
+            `;
+            return;
+        }
+
+        newsContainer.innerHTML = posts.map(post => {
+            const isRecent = (new Date() - new Date(post.created_at)) < 86400000; // 24 hours
+            const icon = post.pinned ? 'push_pin' : (isRecent ? 'fiber_new' : 'article');
+            const borderColor = post.pinned ? 'border-l-primary' : (isRecent ? 'border-l-green-500' : 'border-l-steel-blue');
+            const iconColor = post.pinned ? 'text-primary' : (isRecent ? 'text-green-500' : 'text-steel-blue');
+            const timeAgo = getTimeAgo(new Date(post.created_at));
+
+            return `
+                <div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 ${borderColor}">
+                    <span class="material-symbols-outlined ${iconColor} mt-1">${icon}</span>
+                    <div class="flex-1">
+                        <div class="flex justify-between items-start">
+                            <h4 class="font-bold text-frosted-blue">${escapeHtml(post.title)}</h4>
+                            <span class="text-[10px] text-steel-blue font-bold uppercase">${timeAgo}</span>
+                        </div>
+                        <div class="text-sm text-frosted-blue/80 mt-1 prose prose-invert max-w-none">
+                            ${post.content_html}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    } catch (error) {
+        console.error('Error loading news:', error);
+        document.getElementById('newsContainer').innerHTML = `
+            <div class="text-center text-red-400 py-8">
+                <span class="material-symbols-outlined text-4xl mb-2 block">error</span>
+                <p>Error loading news</p>
+            </div>
+        `;
+    }
+}
+
+
+// Load request count for sidebar badge
+async function loadRequestCount() {
+    const badge = document.getElementById('requestsBadge');
+    try {
+        const response = await fetch('/api/integrations/request-counts');
+        if (!response.ok) throw new Error('API error');
+        const counts = await response.json();
+        const pending = counts.pending || 0;
+        if (pending > 0) {
+            badge.textContent = pending;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    } catch (e) {
+        badge.classList.add('hidden');
+    }
+}
+
+// Stream pagination state
+var _streamPage = 0;
+var _streamsPerPage = 6;
+
+// Load active streams from Plex integration
+let _lastStreams = null; // Cache to prevent flicker on transient API failures
+async function loadActiveStreams() {
+    const container = document.getElementById('streamsContainer');
+    try {
+        const response = await fetch('/api/integrations/active-streams');
+        if (!response.ok) {
+            throw new Error('API error');
+        }
+        const streams = await response.json();
+
+        // If API returns empty but we had data before, keep showing previous data
+        // (prevents streams disappearing/reappearing due to transient Plex API issues)
+        if ((!Array.isArray(streams) || streams.length === 0) && _lastStreams && _lastStreams.length > 0) {
+            return; // Keep showing previous streams
+        }
+        _lastStreams = streams;
+
+        if (!Array.isArray(streams) || streams.length === 0) {
+            container.innerHTML = `
+                <div class="text-center text-steel-blue py-8 col-span-3">
+                    <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
+                    <p>No active streams</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Paginate streams
+        var totalPages = Math.ceil(streams.length / _streamsPerPage);
+        if (_streamPage >= totalPages) _streamPage = 0;
+        var pageStreams = streams.slice(_streamPage * _streamsPerPage, (_streamPage + 1) * _streamsPerPage);
+
+        const newHtml = pageStreams.map(stream => {
+            const progress = stream.progress || 0;
+            const title = escapeHtml(stream.title || 'Unknown');
+            const year = stream.year || '';
+            const subtitle = stream.episode_info ? escapeHtml(stream.episode_info) : '';
+            const decision = stream.decision || 'Direct Play';
+            const thumbUrl = stream.thumb_url || '';
+            const isTranscode = decision.toLowerCase() === 'transcode' || decision.toLowerCase() === 'transcoding';
+            const sessionId = stream.session_id || '';
+            const sourceQuality = stream.source_quality || '';
+            const sourceHeight = stream.source_height || 0;
+            const streamQuality = stream.stream_quality || '';
+            const streamHeight = stream.stream_height || 0;
+
+            // Build display title: "Movie (2024)" or "Show (S01E05)"
+            let displayTitle = title;
+            if (subtitle) {
+                displayTitle = `${title} (${subtitle})`;
+            } else if (year) {
+                displayTitle = `${title} (${year})`;
+            }
+
+            // Transcode warning or play type label
+            let playTypeHtml;
+            if (isTranscode) {
+                const detailId = `detail-${sessionId || Math.random().toString(36).slice(2)}`;
+                playTypeHtml = `
+                    <div>
+                        <span class="text-yellow-300 text-[11px] font-bold">Warning: Not playing at full quality!</span>
+                        <button onclick="document.getElementById('${detailId}').classList.toggle('hidden')" class="text-yellow-300/50 hover:text-yellow-300/80 text-[10px] underline cursor-pointer block mt-0.5">More info</button>
+                        <div id="${detailId}" class="hidden mt-1.5 text-[10px] text-yellow-300/60 leading-relaxed">
+                            <p>Source file is ${sourceHeight ? sourceHeight + 'p' : escapeHtml(sourceQuality)} but you're streaming at ${streamHeight ? streamHeight + 'p' : escapeHtml(streamQuality)}${sourceQuality === streamQuality ? ' (if these values are the same it means it\'s a lower bitrate)' : ''}</p>
+                            <p class="mt-1">Transcoding gives you a lower quality experience, change your Plex app quality setting to "Original" for the best experience.</p>
+                        </div>
+                    </div>`;
+            } else {
+                playTypeHtml = `<span class="text-green-400 text-xs font-bold">${escapeHtml(decision)} (Full Quality)</span>`;
+            }
+
+            const bgStyle = thumbUrl
+                ? `background-image: url('${thumbUrl}'); background-size: cover; background-position: center;`
+                : `background: linear-gradient(135deg, rgb(var(--color-primary) / 0.6), rgb(var(--color-secondary) / 0.4));`;
+
+            return `
+                <div class="glass-card rounded-xl overflow-hidden group">
+                    <div class="aspect-video relative overflow-hidden">
+                        <div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110" style="${bgStyle}"></div>
+                        <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
+                        <div class="absolute bottom-4 left-4 right-4">
+                            <h4 class="text-lg font-bold text-frosted-blue">${displayTitle}</h4>
+                        </div>
+                    </div>
+                    <div class="p-4 space-y-3">
+                        ${playTypeHtml}
+                        <div class="space-y-1">
+                            <div class="flex justify-between text-[10px] text-steel-blue font-bold uppercase">
+                                <span>Progress</span>
+                                <span>${Math.round(progress)}%</span>
+                            </div>
+                            <div class="h-1 bg-frosted-blue/10 rounded-full overflow-hidden">
+                                <div class="h-full w-[${Math.round(progress)}%]"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Only update DOM if content actually changed (prevents flicker)
+        if (container.innerHTML !== newHtml) {
+            container.innerHTML = newHtml;
+        }
+
+        // Show/hide pagination chevrons based on stream count
+        const chevrons = document.getElementById('streamChevrons');
+        if (streams.length > _streamsPerPage) {
+            chevrons.classList.remove('hidden');
+        } else {
+            chevrons.classList.add('hidden');
+        }
+
+    } catch (error) {
+        console.error('Error loading active streams:', error);
+        // On error, keep showing previous data if available
+        if (_lastStreams && _lastStreams.length > 0) return;
+        document.getElementById('streamChevrons').classList.add('hidden');
+        container.innerHTML = `
+            <div class="text-center text-steel-blue py-8 col-span-3">
+                <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
+                <p>Plex not configured</p>
+            </div>
+        `;
+    }
+}
+
+// Paginate streams
+function scrollStreams(direction) {
+    if (!_lastStreams || _lastStreams.length === 0) return;
+    var totalPages = Math.ceil(_lastStreams.length / _streamsPerPage);
+    _streamPage += direction;
+    if (_streamPage < 0) _streamPage = totalPages - 1;
+    if (_streamPage >= totalPages) _streamPage = 0;
+    loadActiveStreams();
+}
+
+// Load recent requests from Overseerr integration
+async function loadRecentRequests() {
+    const tbody = document.getElementById('requestsBody');
+    try {
+        const response = await fetch('/api/integrations/recent-requests');
+        if (!response.ok) {
+            throw new Error('API error');
+        }
+        const requests = await response.json();
+
+
+        if (!Array.isArray(requests) || requests.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="2" class="px-6 py-8 text-center text-steel-blue">
+                        <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
+                        <p>No recent requests</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = requests.map(req => {
+            const title = escapeHtml(req.media_title || 'Unknown');
+            const user = escapeHtml(req.requested_by || 'Unknown');
+            const status = (req.status || 'pending').toLowerCase();
+            const posterUrl = req.poster_url || '';
+
+            let badgeBg, badgeText, statusLabel;
+            switch (status) {
+                case 'pending':
+                    badgeBg = 'bg-steel-blue/20';
+                    badgeText = 'text-steel-blue';
+                    statusLabel = 'Pending';
+                    break;
+                case 'approved':
+                case 'downloading':
+                    badgeBg = 'bg-blue-500/10';
+                    badgeText = 'text-blue-500';
+                    statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+                    break;
+                case 'available':
+                case 'completed':
+                    badgeBg = 'bg-green-500/10';
+                    badgeText = 'text-green-500';
+                    statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+                    break;
+                case 'declined':
+                    badgeBg = 'bg-red-500/10';
+                    badgeText = 'text-red-500';
+                    statusLabel = 'Declined';
+                    break;
+                default:
+                    badgeBg = 'bg-steel-blue/20';
+                    badgeText = 'text-steel-blue';
+                    statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+            }
+
+            const posterStyle = posterUrl
+                ? `background-image: url('${posterUrl}'); background-size: cover; background-position: center;`
+                : '';
+
+            const overseerrId = req.id || '';
+
+            return `
+                <tr>
+                    <td class="px-4 lg:px-6 py-4">
+                        <div class="flex items-center gap-3">
+                            <div class="size-8 rounded bg-black/40 shrink-0" style="${posterStyle}"></div>
+                            <span class="font-medium text-frosted-blue truncate">${title}</span>
+                        </div>
+                    </td>
+                    <td class="px-4 lg:px-6 py-4">
+                        <span class="px-2 py-0.5 rounded ${badgeBg} ${badgeText} text-[10px] font-bold uppercase">${statusLabel}</span>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+    } catch (error) {
+        console.error('Error loading recent requests:', error);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="4" class="px-6 py-8 text-center text-steel-blue">
+                    <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
+                    <p>Overseerr not configured</p>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+// Homelab icon mapping — service name substring → selfh.st icon slug
+var HOMELAB_ICONS = {
+    'plex': 'plex', 'radarr': 'radarr', 'sonarr': 'sonarr', 'overseerr': 'overseerr',
+    'tautulli': 'tautulli', 'jellyfin': 'jellyfin', 'emby': 'emby', 'lidarr': 'lidarr',
+    'prowlarr': 'prowlarr', 'bazarr': 'bazarr', 'readarr': 'readarr', 'sabnzbd': 'sabnzbd',
+    'qbittorrent': 'qbittorrent', 'transmission': 'transmission', 'deluge': 'deluge',
+    'jackett': 'jackett', 'portainer': 'portainer', 'grafana': 'grafana',
+    'prometheus': 'prometheus', 'netdata': 'netdata', 'pi-hole': 'pi-hole',
+    'adguard': 'adguard-home', 'traefik': 'traefik', 'nginx': 'nginx-proxy-manager',
+    'caddy': 'caddy', 'home assistant': 'home-assistant', 'homeassistant': 'home-assistant',
+    'nextcloud': 'nextcloud', 'vaultwarden': 'vaultwarden', 'bitwarden': 'bitwarden',
+    'wireguard': 'wireguard', 'tailscale': 'tailscale', 'unraid': 'unraid',
+    'truenas': 'truenas', 'proxmox': 'proxmox', 'docker': 'docker',
+    'watchtower': 'watchtower', 'uptime kuma': 'uptime-kuma', 'heimdall': 'heimdall',
+    'homarr': 'homarr', 'organizr': 'organizr', 'authentik': 'authentik', 'authelia': 'authelia',
+};
+
+function getServiceIconUrl(name) {
+    var lower = name.toLowerCase();
+    for (var key in HOMELAB_ICONS) {
+        if (lower.indexOf(key) !== -1) {
+            return 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/' + HOMELAB_ICONS[key] + '.svg';
+        }
+    }
+    return null;
+}
+
+// Load services from Uptime Kuma (only enabled monitors)
+async function loadServices() {
+    const servicesContainer = document.getElementById('servicesContainer');
+    let services = [];
+
+    try {
+        const response = await fetch('/api/integrations/service-status');
+        if (response.ok) {
+            const data = await response.json();
+            services = (Array.isArray(data) ? data : []).map(svc => ({
+                display_name: svc.name || 'Unknown',
+                status: svc.status || 'unknown',
+                icon: svc.icon || 'dns',
+                last_check: svc.last_check
+            }));
+        }
+    } catch (error) {
+        console.error('Error loading services:', error);
+        servicesContainer.innerHTML = '<div class="text-center text-red-400 py-8 col-span-full"><span class="material-symbols-outlined text-4xl mb-2 block">error</span><p>Error loading services</p></div>';
+        return;
+    }
+
+    if (services.length === 0) {
+        servicesContainer.innerHTML = '<div class="text-center text-steel-blue py-8 col-span-full"><span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span><p>No services configured yet.</p></div>';
+        return;
+    }
+
+    // Update "Last checked" timer in section header
+    var latestCheck = null;
+    services.forEach(function(svc) {
+        if (svc.last_check) {
+            var d = new Date(svc.last_check + 'Z');
+            if (!latestCheck || d > latestCheck) latestCheck = d;
+        }
+    });
+    var timerEl = document.getElementById('serviceLastChecked');
+    if (timerEl && latestCheck) {
+        timerEl.textContent = 'Checked ' + getTimeAgo(latestCheck);
+        timerEl.dataset.lastCheck = latestCheck.toISOString();
+    }
+
+    servicesContainer.innerHTML = services.map(function(service) {
+        var barBg, statusLabel;
+
+        switch(service.status) {
+            case 'up':
+                barBg = 'bg-green-500';
+                statusLabel = 'Online';
+                break;
+            case 'degraded':
+                barBg = 'bg-yellow-500';
+                statusLabel = 'Degraded';
+                break;
+            case 'down':
+                barBg = 'bg-red-500';
+                statusLabel = 'Offline';
+                break;
+            case 'maintenance':
+                barBg = 'bg-steel-blue';
+                statusLabel = 'Maintenance';
+                break;
+            default:
+                barBg = 'bg-steel-blue';
+                statusLabel = 'Unknown';
+        }
+
+        var iconUrl = getServiceIconUrl(service.display_name);
+        var iconHtml = iconUrl
+            ? '<img src="' + iconUrl + '" alt="" class="service-icon w-8 h-8 object-contain">'
+            : '<span class="material-symbols-outlined text-3xl text-steel-blue">' + escapeHtml(service.icon) + '</span>';
+
+        return '<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col hover:border-primary/40 transition-all">' +
+            '<div class="flex-1 p-3 flex flex-col items-center justify-center text-center space-y-2 min-h-[80px]">' +
+                iconHtml +
+                '<span class="text-[11px] font-medium leading-tight line-clamp-2 text-frosted-blue">' + escapeHtml(service.display_name) + '</span>' +
+            '</div>' +
+            '<div class="' + barBg + ' py-1 flex justify-center">' +
+                '<span class="text-[10px] font-bold text-bright uppercase tracking-wider">' + statusLabel + '</span>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+// Load upcoming releases from Sonarr/Radarr
+async function loadUpcomingReleases() {
+    var container = document.getElementById('releasesContainer');
+    try {
+        var response = await fetch('/api/integrations/upcoming-releases?days=7');
+        if (!response.ok) throw new Error('API error');
+        var releases = await response.json();
+
+        // Clear container
+        while (container.firstChild) container.removeChild(container.firstChild);
+
+        // Build 7 day columns starting from today
+        var today = new Date();
+        var todayStr = _fmtDate(today);
+
+        // Group releases by date
+        var grouped = {};
+        if (Array.isArray(releases)) {
+            releases.forEach(function(r) {
+                var dateKey = r.air_date ? r.air_date.substring(0, 10) : '';
+                if (!dateKey) return;
+                if (!grouped[dateKey]) grouped[dateKey] = [];
+                grouped[dateKey].push(r);
+            });
+        }
+
+        var isMobile = window.innerWidth < 1024;
+        var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+        if (isMobile) {
+            // Mobile: vertical list grouped by day
+            var list = document.createElement('div');
+            list.className = 'flex flex-col gap-2';
+
+            for (var i = 0; i < 7; i++) {
+                var cellDate = new Date(today);
+                cellDate.setDate(cellDate.getDate() + i);
+                var dateStr = _fmtDate(cellDate);
+                var isToday = (i === 0);
+                var dayReleases = grouped[dateStr] || [];
+                if (dayReleases.length === 0 && !isToday) continue;
+
+                var row = document.createElement('div');
+                var rowCls = 'rounded-lg p-3 bg-black/30 flex gap-3';
+                if (isToday) rowCls += ' ring-1 ring-primary bg-primary/10';
+                row.className = rowCls;
+
+                // Date label (left column)
+                var dateCol = document.createElement('div');
+                dateCol.className = 'shrink-0 w-12 text-center';
+                var dayName = document.createElement('div');
+                dayName.className = 'text-[10px] font-bold uppercase tracking-wider ' + (isToday ? 'text-primary' : 'text-steel-blue/60');
+                dayName.textContent = dayNames[cellDate.getDay()];
+                dateCol.appendChild(dayName);
+                var dayNum = document.createElement('div');
+                dayNum.className = 'text-lg font-bold ' + (isToday ? 'text-primary' : 'text-frosted-blue');
+                dayNum.textContent = cellDate.getDate();
+                dateCol.appendChild(dayNum);
+                row.appendChild(dateCol);
+
+                // Releases (right column)
+                var relCol = document.createElement('div');
+                relCol.className = 'flex-1 flex flex-col gap-1 min-w-0';
+
+                if (dayReleases.length === 0) {
+                    var empty = document.createElement('span');
+                    empty.className = 'text-xs text-steel-blue/30 italic';
+                    empty.textContent = 'No releases';
+                    relCol.appendChild(empty);
+                } else {
+                    for (var j = 0; j < dayReleases.length; j++) {
+                        var rel = dayReleases[j];
+                        var badge = document.createElement('div');
+                        badge.className = 'flex items-center gap-2 min-w-0';
+
+                        var typeBadge = document.createElement('span');
+                        if (rel.media_type === 'movie') {
+                            typeBadge.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 shrink-0';
+                            typeBadge.textContent = 'MOV';
+                        } else {
+                            typeBadge.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 shrink-0';
+                            typeBadge.textContent = 'TV';
+                        }
+                        badge.appendChild(typeBadge);
+
+                        var name = document.createElement('span');
+                        name.className = 'text-xs text-frosted-blue/90 truncate';
+                        var nameText = rel.title || 'Unknown';
+                        if (rel.media_type === 'tv' && rel.episode_code) {
+                            nameText += ' ' + rel.episode_code;
+                        }
+                        name.textContent = nameText;
+                        badge.appendChild(name);
+
+                        relCol.appendChild(badge);
+                    }
+                }
+                row.appendChild(relCol);
+                list.appendChild(row);
+            }
+            container.appendChild(list);
+
+        } else {
+            // Desktop: 7-column grid
+            var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+            // Day-of-week header row
+            var headerRow = document.createElement('div');
+            headerRow.className = 'grid grid-cols-7 gap-1 mb-1';
+            for (var d = 0; d < 7; d++) {
+                var dayDate = new Date(today);
+                dayDate.setDate(dayDate.getDate() + d);
+                var hdr = document.createElement('div');
+                hdr.className = 'text-center text-[10px] font-bold uppercase tracking-wider text-steel-blue/60';
+                hdr.textContent = dayNames[dayDate.getDay()];
+                headerRow.appendChild(hdr);
+            }
+            container.appendChild(headerRow);
+
+            var grid = document.createElement('div');
+            grid.className = 'grid grid-cols-7 gap-1';
+
+            for (var i = 0; i < 7; i++) {
+                var cellDate = new Date(today);
+                cellDate.setDate(cellDate.getDate() + i);
+                var dateStr = _fmtDate(cellDate);
+                var isToday = (i === 0);
+                var dayReleases = grouped[dateStr] || [];
+
+                var cell = document.createElement('div');
+                var cellCls = 'rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col bg-black/30';
+                if (isToday) cellCls += ' ring-1 ring-primary bg-primary/10';
+                cell.className = cellCls;
+
+                // Day number
+                var dayLabel = document.createElement('div');
+                dayLabel.className = 'text-xs font-bold mb-1 ' + (isToday ? 'text-primary' : 'text-steel-blue');
+                dayLabel.textContent = cellDate.getDate();
+                cell.appendChild(dayLabel);
+
+                // Release badges
+                if (dayReleases.length === 0) {
+                    var empty = document.createElement('div');
+                    empty.className = 'flex-1 flex items-center justify-center';
+                    var dash = document.createElement('span');
+                    dash.className = 'text-steel-blue/20 text-xs';
+                    dash.textContent = '\u2014';
+                    empty.appendChild(dash);
+                    cell.appendChild(empty);
+                } else {
+                    var rlist = document.createElement('div');
+                    rlist.className = 'flex flex-col gap-1 overflow-hidden';
+                    var maxShow = 4;
+                    for (var j = 0; j < dayReleases.length && j < maxShow; j++) {
+                        var rel = dayReleases[j];
+                        var badge = document.createElement('div');
+                        badge.className = 'flex items-center gap-1 min-w-0';
+
+                        var dot = document.createElement('span');
+                        if (rel.media_type === 'movie') {
+                            dot.className = 'size-1.5 rounded-full bg-purple-400 shrink-0';
+                        } else {
+                            dot.className = 'size-1.5 rounded-full bg-blue-400 shrink-0';
+                        }
+                        badge.appendChild(dot);
+
+                        var name = document.createElement('span');
+                        name.className = 'text-[10px] text-frosted-blue/80 truncate leading-tight';
+                        var nameText = rel.title || 'Unknown';
+                        if (rel.media_type === 'tv' && rel.episode_code) {
+                            nameText += ' ' + rel.episode_code;
+                        }
+                        name.textContent = nameText;
+                        badge.appendChild(name);
+
+                        rlist.appendChild(badge);
+                    }
+                    if (dayReleases.length > maxShow) {
+                        var more = document.createElement('span');
+                        more.className = 'text-[9px] text-steel-blue/50 pl-3';
+                        more.textContent = '+' + (dayReleases.length - maxShow) + ' more';
+                        rlist.appendChild(more);
+                    }
+                    cell.appendChild(rlist);
+                }
+
+                grid.appendChild(cell);
+            }
+            container.appendChild(grid);
+        }
+
+    } catch (error) {
+        console.log('Upcoming releases not available');
+        while (container.firstChild) container.removeChild(container.firstChild);
+        var errDiv = document.createElement('div');
+        errDiv.className = 'text-center text-steel-blue py-8';
+        var errIcon = document.createElement('span');
+        errIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
+        errIcon.textContent = 'calendar_month';
+        var errText = document.createElement('p');
+        errText.textContent = 'Sonarr/Radarr not configured';
+        errDiv.appendChild(errIcon);
+        errDiv.appendChild(errText);
+        container.appendChild(errDiv);
+    }
+}
+
+// Format Date to YYYY-MM-DD
+function _fmtDate(d) {
+    var y = d.getFullYear();
+    var m = d.getMonth() + 1;
+    var day = d.getDate();
+    return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+}
+
+// Load system stats from Netdata integration
+async function loadSystemStats() {
+    var gaugesEl = document.getElementById('netdataGauges');
+    try {
+        var response = await fetch('/api/integrations/system-stats');
+        if (!response.ok) throw new Error('API error');
+        var stats = await response.json();
+
+        if (!stats.configured || stats.error) {
+            gaugesEl.classList.add('hidden');
+            return;
+        }
+
+        // Show gauges
+        gaugesEl.classList.remove('hidden');
+
+        // Update CPU gauge
+        if (stats.cpu_percent !== null) {
+            var cpuPct = stats.cpu_percent;
+            document.getElementById('cpuGaugeText').textContent = Math.round(cpuPct) + '%';
+            document.getElementById('cpuGaugeCircle').style.strokeDashoffset = 251 - (251 * cpuPct / 100);
+        }
+        // Show CPU label (configurable in settings, falls back to thread count)
+        var cpuDetail = document.getElementById('cpuGaugeDetail');
+        if (cpuDetail) {
+            if (stats.cpu_label) {
+                cpuDetail.textContent = stats.cpu_label;
+            } else if (stats.cpu_cores) {
+                cpuDetail.textContent = stats.cpu_cores + 'T';
+            }
+        }
+
+        // Update RAM gauge
+        if (stats.ram_percent !== null) {
+            var ramPct = stats.ram_percent;
+            document.getElementById('ramGaugeText').textContent = Math.round(ramPct) + '%';
+            document.getElementById('ramGaugeCircle').style.strokeDashoffset = 251 - (251 * ramPct / 100);
+        }
+        // Show RAM label (configurable, falls back to used/total GB)
+        var ramDetail = document.getElementById('ramGaugeDetail');
+        if (ramDetail) {
+            if (stats.ram_label) {
+                ramDetail.textContent = stats.ram_label;
+            } else if (stats.ram_used_mb !== null && stats.ram_total_mb !== null) {
+                var usedGB = (stats.ram_used_mb / 1024).toFixed(1);
+                var totalGB = (stats.ram_total_mb / 1024).toFixed(0);
+                ramDetail.textContent = usedGB + '/' + totalGB + ' GB';
+            }
+        }
+
+        // Update Network gauge
+        var dl = stats.net_download_mbps != null ? stats.net_download_mbps : 0;
+        var ul = stats.net_upload_mbps != null ? stats.net_upload_mbps : 0;
+        document.getElementById('netDownText').textContent = dl.toFixed(1);
+        document.getElementById('netUpText').textContent = ul.toFixed(1);
+        // Show network label (configurable)
+        if (stats.net_label) {
+            var netDetail = document.getElementById('netGaugeDetail');
+            if (netDetail) netDetail.textContent = stats.net_label;
+        }
+        // Scale network gauge: cap at 100 MB/s for percentage
+        var netPct = Math.min((dl + ul) / 100 * 100, 100);
+        document.getElementById('netGaugeCircle').style.strokeDashoffset = 251 - (251 * netPct / 100);
+
+    } catch (error) {
+        console.log('System stats not available');
+        gaugesEl.classList.add('hidden');
+    }
+}
+
+// Generate status bars based on service status
+function generateStatusBars(status, barColor) {
+    const heights = ['h-1/2', 'h-2/3', 'h-full', 'h-full', 'h-2/3', 'h-full'];
+
+    if (status === 'up') {
+        return heights.map((h, i) =>
+            `<div class="w-1 ${i < 3 ? barColor + '/40' : barColor} ${h}"></div>`
+        ).join('');
+    } else if (status === 'degraded') {
+        return `
+            <div class="w-1 ${barColor}/40 h-full"></div>
+            <div class="w-1 ${barColor} h-full"></div>
+            <div class="w-1 ${barColor}/40 h-2/3"></div>
+            <div class="w-1 ${barColor} h-full"></div>
+            <div class="w-1 ${barColor}/40 h-1/2"></div>
+            <div class="w-1 ${barColor} h-2/3"></div>
+        `;
+    } else {
+        return `
+            <div class="w-1 ${barColor}/40 h-1/2"></div>
+            <div class="w-1 ${barColor}/40 h-2/3"></div>
+            <div class="w-1 ${barColor}/40 h-1/2"></div>
+            <div class="w-1 ${barColor} h-1/3"></div>
+            <div class="w-1 ${barColor}/40 h-1/2"></div>
+            <div class="w-1 ${barColor} h-1/4"></div>
+        `;
+    }
+}
+</script>
+
+</body></html>

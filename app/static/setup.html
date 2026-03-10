@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Setup</title>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: {
+        "display": ["var(--font-display)", "sans-serif"]
+      },
+    },
+  },
+}</script>
+<style>
+    .login-glass-card {
+      background: rgb(var(--color-background) / 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(var(--color-accent) / 0.15);
+    }
+    .step-circle {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      transition: all 0.3s ease;
+    }
+    .step-circle.active {
+      background: rgb(var(--color-primary));
+      color: rgb(var(--color-text-secondary));
+    }
+    .step-circle.completed {
+      background: rgb(var(--color-primary));
+      color: rgb(var(--color-text-secondary));
+    }
+    .step-circle.inactive {
+      background: rgb(var(--color-accent) / 0.2);
+      color: rgb(var(--color-accent) / 0.5);
+    }
+    .step-line {
+      height: 2px;
+      flex: 1;
+      transition: background 0.3s ease;
+    }
+    .step-line.active {
+      background: rgb(var(--color-primary));
+    }
+    .step-line.inactive {
+      background: rgb(var(--color-accent) / 0.2);
+    }
+</style>
+</head>
+<body class="bg-background-dark font-display min-h-screen relative flex flex-col overflow-y-auto">
+<!-- Dark Background -->
+<div class="fixed inset-0 z-0">
+    <div class="absolute inset-0 bg-gradient-to-br from-black via-baltic-blue/20 to-black"></div>
+</div>
+<div class="fixed inset-0 z-10" style="background: radial-gradient(circle, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.9) 100%);"></div>
+<!-- Main Content -->
+<main class="relative z-20 flex-1 flex flex-col items-center justify-center px-4 py-8">
+<div class="w-full max-w-[500px] login-glass-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
+<!-- Logo Section -->
+<div class="mb-6 flex flex-col items-center">
+<img id="setupLogo" alt="Logo" class="h-32 w-auto object-contain border-none mb-2 hidden"/>
+<h1 id="setupAppName" class="text-frosted-blue text-2xl font-bold mt-2 tracking-tight text-center">WebServarr Setup</h1>
+</div>
+<!-- Stepper -->
+<div id="stepper" class="flex items-center w-full mb-8 px-4"></div>
+<!-- Step Content Container -->
+<div id="stepContent" class="w-full"></div>
+<!-- Navigation Buttons -->
+<div id="navButtons" class="w-full flex gap-3 mt-6"></div>
+<!-- Error Message -->
+<div id="setupError" class="text-red-400 text-sm text-center mt-3 hidden"></div>
+</div>
+</main>
+
+<script>
+(function() {
+    var currentStep = 0;
+    var totalSteps = 3;
+    var secretKey = '';
+
+    // Stored step data (persists across step navigation)
+    var storedStep1 = { username: 'admin', password: '', passwordConfirm: '' };
+
+    // --- Generate hex key ---
+    function generateSecretKey() {
+        var arr = new Uint8Array(32);
+        crypto.getRandomValues(arr);
+        var hex = '';
+        for (var i = 0; i < arr.length; i++) {
+            hex += arr[i].toString(16).padStart(2, '0');
+        }
+        return hex;
+    }
+
+    // --- Show/clear error ---
+    function showError(msg) {
+        var el = document.getElementById('setupError');
+        el.textContent = msg;
+        el.classList.remove('hidden');
+        setTimeout(function() { el.classList.add('hidden'); }, 5000);
+    }
+
+    function clearError() {
+        var el = document.getElementById('setupError');
+        el.textContent = '';
+        el.classList.add('hidden');
+    }
+
+    // --- Show field error ---
+    function showFieldError(id, msg) {
+        var el = document.getElementById(id + '-error');
+        if (el) {
+            el.textContent = msg;
+            el.classList.remove('hidden');
+        }
+    }
+
+    function clearFieldErrors() {
+        var errors = document.querySelectorAll('[id$="-error"]');
+        for (var i = 0; i < errors.length; i++) {
+            errors[i].classList.add('hidden');
+            errors[i].textContent = '';
+        }
+    }
+
+    // --- Build stepper ---
+    function renderStepper() {
+        var container = document.getElementById('stepper');
+        while (container.firstChild) container.removeChild(container.firstChild);
+
+        var labels = ['Account', 'Security', 'Plex'];
+        for (var i = 0; i < totalSteps; i++) {
+            var circle = document.createElement('div');
+            circle.className = 'step-circle';
+            if (i < currentStep) {
+                circle.className += ' completed';
+                var check = document.createElement('span');
+                check.className = 'material-symbols-outlined text-[18px]';
+                check.textContent = 'check';
+                circle.appendChild(check);
+            } else if (i === currentStep) {
+                circle.className += ' active';
+                circle.textContent = String(i + 1);
+            } else {
+                circle.className += ' inactive';
+                circle.textContent = String(i + 1);
+            }
+
+            var stepWrapper = document.createElement('div');
+            stepWrapper.className = 'flex flex-col items-center gap-1';
+            stepWrapper.appendChild(circle);
+            var label = document.createElement('span');
+            label.className = 'text-[10px] font-semibold uppercase tracking-wider';
+            label.className += i <= currentStep ? ' text-frosted-blue/80' : ' text-steel-blue/40';
+            label.textContent = labels[i];
+            stepWrapper.appendChild(label);
+
+            container.appendChild(stepWrapper);
+
+            if (i < totalSteps - 1) {
+                var line = document.createElement('div');
+                line.className = 'step-line mb-5 ' + (i < currentStep ? 'active' : 'inactive');
+                container.appendChild(line);
+            }
+        }
+    }
+
+    // --- Create labeled input field ---
+    function createField(labelText, id, type, placeholder, iconName, value) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'flex flex-col gap-1.5';
+
+        var lbl = document.createElement('label');
+        lbl.className = 'text-frosted-blue/80 text-sm font-medium px-1';
+        lbl.textContent = labelText;
+        lbl.setAttribute('for', id);
+        wrapper.appendChild(lbl);
+
+        var inputGroup = document.createElement('div');
+        inputGroup.className = 'relative group';
+
+        var icon = document.createElement('span');
+        icon.className = 'material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/40 group-focus-within:text-primary text-[20px]';
+        icon.textContent = iconName;
+        inputGroup.appendChild(icon);
+
+        var input = document.createElement('input');
+        input.type = type;
+        input.id = id;
+        input.className = 'w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/30 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all';
+        input.placeholder = placeholder || '';
+        if (value !== undefined) input.value = value;
+        inputGroup.appendChild(input);
+
+        wrapper.appendChild(inputGroup);
+
+        var errSpan = document.createElement('span');
+        errSpan.className = 'text-red-400 text-xs px-1 hidden';
+        errSpan.id = id + '-error';
+        wrapper.appendChild(errSpan);
+
+        return wrapper;
+    }
+
+    // --- Save current step data before navigating away ---
+    function saveCurrentStepData() {
+        if (currentStep === 0) {
+            var u = document.getElementById('setup-username');
+            var p = document.getElementById('setup-password');
+            var pc = document.getElementById('setup-password-confirm');
+            if (u) storedStep1.username = u.value.trim();
+            if (p) storedStep1.password = p.value;
+            if (pc) storedStep1.passwordConfirm = pc.value;
+        }
+    }
+
+    // --- Validate current step ---
+    function validateStep() {
+        clearFieldErrors();
+        if (currentStep === 0) {
+            saveCurrentStepData();
+            var valid = true;
+            if (!storedStep1.username) {
+                showFieldError('setup-username', 'Username is required');
+                valid = false;
+            }
+            if (storedStep1.password.length < 8) {
+                showFieldError('setup-password', 'Password must be at least 8 characters');
+                valid = false;
+            }
+            if (storedStep1.password !== storedStep1.passwordConfirm) {
+                showFieldError('setup-password-confirm', 'Passwords do not match');
+                valid = false;
+            }
+            return valid;
+        }
+        return true;
+    }
+
+    // --- Step 1: Admin Account ---
+    function renderStep1(container) {
+        var heading = document.createElement('h2');
+        heading.className = 'text-frosted-blue text-lg font-bold mb-5 text-center';
+        heading.textContent = 'Create Admin Account';
+        container.appendChild(heading);
+
+        var form = document.createElement('div');
+        form.className = 'space-y-4';
+
+        form.appendChild(createField('Username', 'setup-username', 'text', 'admin', 'person', storedStep1.username));
+        form.appendChild(createField('Password', 'setup-password', 'password', 'Minimum 8 characters', 'lock', storedStep1.password));
+        form.appendChild(createField('Confirm Password', 'setup-password-confirm', 'password', 'Re-enter password', 'lock', storedStep1.passwordConfirm));
+
+        container.appendChild(form);
+    }
+
+    // --- Step 2: Secret Key ---
+    function renderStep2(container) {
+        var heading = document.createElement('h2');
+        heading.className = 'text-frosted-blue text-lg font-bold mb-5 text-center';
+        heading.textContent = 'Security Key';
+        container.appendChild(heading);
+
+        if (!secretKey) secretKey = generateSecretKey();
+
+        var fieldWrapper = document.createElement('div');
+        fieldWrapper.className = 'flex flex-col gap-1.5';
+
+        var lbl = document.createElement('label');
+        lbl.className = 'text-frosted-blue/80 text-sm font-medium px-1';
+        lbl.textContent = 'Secret Key';
+        lbl.setAttribute('for', 'setup-secret-key');
+        fieldWrapper.appendChild(lbl);
+
+        var inputGroup = document.createElement('div');
+        inputGroup.className = 'relative group';
+
+        var icon = document.createElement('span');
+        icon.className = 'material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/40 group-focus-within:text-primary text-[20px]';
+        icon.textContent = 'key';
+        inputGroup.appendChild(icon);
+
+        var input = document.createElement('input');
+        input.type = 'password';
+        input.id = 'setup-secret-key';
+        input.className = 'w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-20 text-frosted-blue font-mono text-xs focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all';
+        input.value = secretKey;
+        input.readOnly = true;
+        inputGroup.appendChild(input);
+
+        // Eye toggle
+        var toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'absolute right-10 top-1/2 -translate-y-1/2 text-frosted-blue/40 hover:text-frosted-blue transition-colors';
+        var toggleIcon = document.createElement('span');
+        toggleIcon.className = 'material-symbols-outlined text-[20px]';
+        toggleIcon.textContent = 'visibility';
+        toggleBtn.appendChild(toggleIcon);
+        toggleBtn.addEventListener('click', function() {
+            if (input.type === 'password') {
+                input.type = 'text';
+                toggleIcon.textContent = 'visibility_off';
+            } else {
+                input.type = 'password';
+                toggleIcon.textContent = 'visibility';
+            }
+        });
+        inputGroup.appendChild(toggleBtn);
+
+        // Regenerate
+        var regenBtn = document.createElement('button');
+        regenBtn.type = 'button';
+        regenBtn.className = 'absolute right-3 top-1/2 -translate-y-1/2 text-frosted-blue/40 hover:text-frosted-blue transition-colors';
+        var regenIcon = document.createElement('span');
+        regenIcon.className = 'material-symbols-outlined text-[20px]';
+        regenIcon.textContent = 'refresh';
+        regenBtn.appendChild(regenIcon);
+        regenBtn.addEventListener('click', function() {
+            secretKey = generateSecretKey();
+            input.value = secretKey;
+        });
+        inputGroup.appendChild(regenBtn);
+
+        fieldWrapper.appendChild(inputGroup);
+        container.appendChild(fieldWrapper);
+
+        var note = document.createElement('p');
+        note.className = 'text-steel-blue/60 text-xs mt-4 px-1 leading-relaxed';
+        note.textContent = 'Save this key somewhere safe. You\'ll need it if you migrate or restore from backup.';
+        container.appendChild(note);
+    }
+
+    // --- Step 3: Plex Setup ---
+    function renderStep3(container) {
+        var heading = document.createElement('h2');
+        heading.className = 'text-frosted-blue text-lg font-bold mb-1 text-center';
+        heading.textContent = 'Connect Plex (Optional)';
+        container.appendChild(heading);
+
+        var subtext = document.createElement('p');
+        subtext.className = 'text-steel-blue/50 text-xs mb-5 text-center';
+        subtext.textContent = 'You can configure this later in Settings.';
+        container.appendChild(subtext);
+
+        var form = document.createElement('div');
+        form.className = 'space-y-4';
+
+        form.appendChild(createField('Plex URL', 'setup-plex-url', 'text', 'http://192.168.1.100:32400', 'dns', ''));
+        form.appendChild(createField('Plex Token', 'setup-plex-token', 'password', 'Enter Plex token', 'token', ''));
+
+        // Test Connection row
+        var testRow = document.createElement('div');
+        testRow.className = 'flex items-center gap-3';
+
+        var testBtn = document.createElement('button');
+        testBtn.type = 'button';
+        testBtn.className = 'bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue font-semibold py-2.5 px-5 rounded-lg transition-all text-sm';
+        testBtn.textContent = 'Test Connection';
+
+        var testResult = document.createElement('span');
+        testResult.id = 'plex-test-result';
+        testResult.className = 'text-xs';
+
+        testBtn.addEventListener('click', async function() {
+            var url = document.getElementById('setup-plex-url').value.trim();
+            var token = document.getElementById('setup-plex-token').value.trim();
+            if (!url || !token) {
+                testResult.className = 'text-xs text-red-400';
+                testResult.textContent = 'Enter URL and token first';
+                return;
+            }
+            testBtn.disabled = true;
+            testBtn.textContent = 'Testing...';
+            testResult.textContent = '';
+            try {
+                var resp = await fetch('/api/admin/test-connection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ service: 'plex', url: url, credential: token })
+                });
+                var data = await resp.json();
+                if (resp.ok && data.success) {
+                    testResult.className = 'text-xs text-green-400';
+                    testResult.textContent = 'Connection successful!';
+                } else {
+                    testResult.className = 'text-xs text-red-400';
+                    testResult.textContent = data.detail || 'Connection failed';
+                }
+            } catch (e) {
+                testResult.className = 'text-xs text-red-400';
+                testResult.textContent = 'Connection failed: ' + e.message;
+            }
+            testBtn.disabled = false;
+            testBtn.textContent = 'Test Connection';
+        });
+
+        testRow.appendChild(testBtn);
+        testRow.appendChild(testResult);
+        form.appendChild(testRow);
+
+        container.appendChild(form);
+    }
+
+    // --- Render nav buttons ---
+    function renderNavButtons() {
+        var container = document.getElementById('navButtons');
+        while (container.firstChild) container.removeChild(container.firstChild);
+
+        if (currentStep > 0) {
+            var backBtn = document.createElement('button');
+            backBtn.type = 'button';
+            backBtn.className = 'flex-1 bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue font-bold py-3 rounded-lg transition-all';
+            backBtn.textContent = 'Back';
+            backBtn.addEventListener('click', function() {
+                saveCurrentStepData();
+                currentStep--;
+                renderStep();
+            });
+            container.appendChild(backBtn);
+        }
+
+        if (currentStep < totalSteps - 1) {
+            var nextBtn = document.createElement('button');
+            nextBtn.type = 'button';
+            nextBtn.className = 'flex-1 bg-primary hover:bg-primary/90 text-bright font-bold py-3 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98]';
+            nextBtn.textContent = 'Next';
+            nextBtn.addEventListener('click', function() {
+                if (validateStep()) {
+                    currentStep++;
+                    renderStep();
+                }
+            });
+            container.appendChild(nextBtn);
+        } else {
+            var completeBtn = document.createElement('button');
+            completeBtn.type = 'button';
+            completeBtn.className = 'w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98]';
+            completeBtn.textContent = 'Complete Setup';
+            completeBtn.addEventListener('click', async function() {
+                completeBtn.disabled = true;
+                completeBtn.textContent = 'Setting up...';
+
+                var username = storedStep1.username;
+                var password = storedStep1.password;
+                var passwordConfirm = storedStep1.passwordConfirm;
+
+                if (!username || password.length < 8 || password !== passwordConfirm) {
+                    showError('Please go back and complete the admin account step.');
+                    completeBtn.disabled = false;
+                    completeBtn.textContent = 'Complete Setup';
+                    return;
+                }
+
+                var plexUrlEl = document.getElementById('setup-plex-url');
+                var plexTokenEl = document.getElementById('setup-plex-token');
+                var plexUrl = plexUrlEl ? plexUrlEl.value.trim() : '';
+                var plexToken = plexTokenEl ? plexTokenEl.value.trim() : '';
+
+                try {
+                    var resp = await fetch('/api/setup/complete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            username: username,
+                            password: password,
+                            password_confirm: passwordConfirm,
+                            secret_key: secretKey,
+                            plex_url: plexUrl,
+                            plex_token: plexToken
+                        })
+                    });
+                    if (resp.ok) {
+                        window.location.href = '/login';
+                    } else {
+                        var data = await resp.json();
+                        showError(data.detail || 'Setup failed. Please try again.');
+                    }
+                } catch (e) {
+                    showError('Setup failed: ' + e.message);
+                }
+                completeBtn.disabled = false;
+                completeBtn.textContent = 'Complete Setup';
+            });
+            container.appendChild(completeBtn);
+        }
+    }
+
+    // --- Render current step ---
+    function renderStep() {
+        var container = document.getElementById('stepContent');
+        while (container.firstChild) container.removeChild(container.firstChild);
+        clearError();
+
+        if (currentStep === 0) renderStep1(container);
+        else if (currentStep === 1) renderStep2(container);
+        else if (currentStep === 2) renderStep3(container);
+
+        renderStepper();
+        renderNavButtons();
+    }
+
+    // --- Init ---
+    document.addEventListener('DOMContentLoaded', async function() {
+        // Load branding
+        try {
+            var resp = await fetch('/api/branding');
+            if (resp.ok) {
+                var branding = await resp.json();
+                if (branding.app_name) {
+                    var nameEl = document.getElementById('setupAppName');
+                    if (nameEl) nameEl.textContent = branding.app_name + ' Setup';
+                }
+                if (branding.logo_url) {
+                    var logoEl = document.getElementById('setupLogo');
+                    if (logoEl) {
+                        logoEl.src = branding.logo_url;
+                        logoEl.classList.remove('hidden');
+                    }
+                }
+            }
+        } catch (e) { /* branding not available */ }
+
+        // Generate initial secret key
+        secretKey = generateSecretKey();
+
+        // Render first step
+        renderStep();
+    });
+})();
+</script>
+
+</body></html>

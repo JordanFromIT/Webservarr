@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Calendar</title>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: {
+        "display": ["var(--font-display)", "sans-serif"]
+      },
+    },
+  },
+}</script>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<div id="sidebar-root"></div>
+<!-- Toast notification container -->
+<div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<div id="header-root"></div>
+<!-- Scrollable Content -->
+<div class="flex-1 flex flex-col min-h-0 lg:overflow-hidden relative">
+
+<!-- Calendar area — fills full viewport height -->
+<div class="flex flex-col flex-1 min-h-0 p-4 lg:p-8">
+
+<!-- Calendar Header: nav + month label -->
+<div class="glass-card rounded-xl p-4 mb-4 shrink-0">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<button id="prevMonthBtn" class="p-2 rounded-lg hover:bg-frosted-blue/10 transition-colors text-steel-blue hover:text-bright" title="Previous month">
+<span class="material-symbols-outlined">chevron_left</span>
+</button>
+<button id="nextMonthBtn" class="p-2 rounded-lg hover:bg-frosted-blue/10 transition-colors text-steel-blue hover:text-bright" title="Next month">
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+<h2 id="monthLabel" class="text-lg lg:text-xl font-bold text-frosted-blue ml-2"></h2>
+</div>
+<button id="todayBtn" class="px-3 py-1.5 rounded-lg bg-primary/20 border border-primary/30 text-primary text-xs font-bold uppercase tracking-wider hover:bg-primary/30 transition-colors">
+Today
+</button>
+</div>
+</div>
+
+<!-- Day-of-week headers -->
+<div id="dayHeaders" class="hidden lg:grid grid-cols-7 gap-px shrink-0"></div>
+
+<!-- Calendar grid — fills remaining height -->
+<div id="calendarGrid" class="grid grid-cols-7 gap-px flex-1 min-h-0 lg:overflow-hidden"></div>
+
+</div>
+
+<!-- Day Detail Panel — overlays bottom of viewport, doesn't affect grid size -->
+<div id="dayDetailPanel" class="hidden absolute bottom-0 left-0 right-0 mx-4 lg:mx-8 mb-4 lg:mb-8 glass-card rounded-xl p-4 lg:p-5 max-h-[40vh] overflow-y-auto custom-scrollbar z-20 shadow-2xl border border-steel-blue/20">
+<button id="closePanelBtn" class="absolute top-3 right-3 text-steel-blue hover:text-bright transition-colors z-10">
+<span class="material-symbols-outlined">close</span>
+</button>
+<h3 id="detailDateLabel" class="text-lg font-bold text-frosted-blue mb-4"></h3>
+<div id="detailReleasesList" class="space-y-3"></div>
+</div>
+
+</div>
+
+<!-- Scroll down indicator (mobile only) -->
+<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+    <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
+</div>
+
+</main>
+
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/sidebar.js?v=11"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+<script>
+// ---- State ----
+var _currentYear = new Date().getFullYear();
+var _currentMonth = new Date().getMonth(); // 0-indexed
+var _releaseCache = {}; // key: "YYYY-MM" → array of releases
+var _refreshInterval = null;
+var _selectedDate = null; // "YYYY-MM-DD" or null
+
+// ---- Init ----
+document.addEventListener('DOMContentLoaded', async function() {
+    initSidebar('calendar');
+    initNotifications();
+
+    // Scroll-down hint — fade out at bottom
+    (function() {
+        var hint = document.getElementById('scrollDownHint');
+        if (!hint) return;
+        window.addEventListener('scroll', function() {
+            var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+            hint.style.opacity = atBottom ? '0' : '1';
+        });
+    })();
+
+    var user = await checkAuth();
+    if (!user) return;
+    showAdminNav(user.is_admin);
+    loadSystemStatus();
+
+    // Wire up nav buttons
+    document.getElementById('prevMonthBtn').addEventListener('click', function() {
+        navigateMonth(-1);
+    });
+    document.getElementById('nextMonthBtn').addEventListener('click', function() {
+        navigateMonth(1);
+    });
+    document.getElementById('todayBtn').addEventListener('click', function() {
+        goToToday();
+    });
+    document.getElementById('closePanelBtn').addEventListener('click', function() {
+        closeDetailPanel();
+    });
+
+    // Build day-of-week headers
+    buildDayHeaders();
+
+    // Render initial month
+    renderMonth();
+
+    // Auto-refresh every 60 seconds
+    _refreshInterval = setInterval(function() {
+        fetchAndRender();
+    }, 60000);
+});
+
+// ---- Navigation ----
+
+function navigateMonth(delta) {
+    _currentMonth += delta;
+    if (_currentMonth < 0) {
+        _currentMonth = 11;
+        _currentYear--;
+    } else if (_currentMonth > 11) {
+        _currentMonth = 0;
+        _currentYear++;
+    }
+    closeDetailPanel();
+    renderMonth();
+}
+
+function goToToday() {
+    var now = new Date();
+    _currentYear = now.getFullYear();
+    _currentMonth = now.getMonth();
+    closeDetailPanel();
+    renderMonth();
+}
+
+// ---- Day-of-Week Headers ----
+
+function buildDayHeaders() {
+    var container = document.getElementById('dayHeaders');
+    var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    days.forEach(function(day) {
+        var el = document.createElement('div');
+        el.className = 'text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2';
+        el.textContent = day;
+        container.appendChild(el);
+    });
+}
+
+// ---- Month Rendering ----
+
+function renderMonth() {
+    // Update month label
+    var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'];
+    document.getElementById('monthLabel').textContent = monthNames[_currentMonth] + ' ' + _currentYear;
+
+    // Show loading state in grid
+    var grid = document.getElementById('calendarGrid');
+    clearChildren(grid);
+    var loadingCell = document.createElement('div');
+    loadingCell.className = 'col-span-7 text-center text-steel-blue py-12';
+    var spinner = document.createElement('span');
+    spinner.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin';
+    spinner.textContent = 'progress_activity';
+    var loadingText = document.createElement('p');
+    loadingText.className = 'text-sm';
+    loadingText.textContent = 'Loading calendar...';
+    loadingCell.appendChild(spinner);
+    loadingCell.appendChild(loadingText);
+    grid.appendChild(loadingCell);
+
+    fetchAndRender();
+}
+
+async function fetchAndRender() {
+    var cacheKey = _currentYear + '-' + padZero(_currentMonth + 1);
+
+    // Calculate visible date range
+    var firstOfMonth = new Date(_currentYear, _currentMonth, 1);
+    var lastOfMonth = new Date(_currentYear, _currentMonth + 1, 0);
+
+    // First Sunday on or before month start
+    var startDate = new Date(firstOfMonth);
+    startDate.setDate(startDate.getDate() - startDate.getDay());
+
+    // Last Saturday on or after month end
+    var endDate = new Date(lastOfMonth);
+    if (endDate.getDay() < 6) {
+        endDate.setDate(endDate.getDate() + (6 - endDate.getDay()));
+    }
+
+    var days = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    var startStr = formatDateISO(startDate);
+
+    try {
+        var resp = await fetch('/api/integrations/upcoming-releases?start=' + startStr + '&days=' + days);
+        if (!resp.ok) throw new Error('API error');
+        var releases = await resp.json();
+
+        // Group by date
+        var grouped = {};
+        releases.forEach(function(release) {
+            var dateKey = release.air_date ? release.air_date.substring(0, 10) : '';
+            if (!dateKey) return;
+            if (!grouped[dateKey]) grouped[dateKey] = [];
+            grouped[dateKey].push(release);
+        });
+
+        _releaseCache[cacheKey] = grouped;
+        buildGrid(startDate, endDate, grouped);
+
+        // If detail panel is open, refresh it too
+        if (_selectedDate && grouped[_selectedDate]) {
+            showDetailPanel(_selectedDate, grouped[_selectedDate]);
+        } else if (_selectedDate) {
+            showDetailPanel(_selectedDate, []);
+        }
+    } catch (error) {
+        console.error('Calendar fetch error:', error);
+        var grid = document.getElementById('calendarGrid');
+        clearChildren(grid);
+        var errCell = document.createElement('div');
+        errCell.className = 'col-span-7 text-center text-steel-blue py-12';
+        var errIcon = document.createElement('span');
+        errIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
+        errIcon.textContent = 'error';
+        var errText = document.createElement('p');
+        errText.className = 'text-sm';
+        errText.textContent = 'Could not load calendar data';
+        errCell.appendChild(errIcon);
+        errCell.appendChild(errText);
+        grid.appendChild(errCell);
+    }
+}
+
+function buildGrid(startDate, endDate, grouped) {
+    var grid = document.getElementById('calendarGrid');
+    clearChildren(grid);
+
+    var isMobile = window.innerWidth < 1024;
+
+    if (isMobile) {
+        // Agenda view on mobile
+        grid.className = 'flex flex-col flex-1 min-h-0';
+        grid.style.gridTemplateRows = '';
+        buildAgendaView(grid, grouped);
+        return;
+    }
+
+    // Desktop: restore grid classes
+    grid.className = 'grid grid-cols-7 gap-px flex-1 min-h-0 lg:overflow-hidden';
+
+    var today = new Date();
+    var todayStr = formatDateISO(today);
+
+    // Calculate number of rows to set equal-height grid rows
+    var totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    var numRows = Math.ceil(totalDays / 7);
+    grid.style.gridTemplateRows = 'repeat(' + numRows + ', 1fr)';
+
+    var current = new Date(startDate);
+    while (current <= endDate) {
+        var dateStr = formatDateISO(current);
+        var isCurrentMonth = current.getMonth() === _currentMonth && current.getFullYear() === _currentYear;
+        var isToday = dateStr === todayStr;
+        var dayReleases = grouped[dateStr] || [];
+
+        var cell = buildDayCell(current.getDate(), dateStr, isCurrentMonth, isToday, dayReleases);
+        grid.appendChild(cell);
+
+        current.setDate(current.getDate() + 1);
+    }
+}
+
+function buildAgendaView(container, grouped) {
+    var today = new Date();
+    var todayStr = formatDateISO(today);
+    var dayNames = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    var hasContent = false;
+
+    var firstOfMonth = new Date(_currentYear, _currentMonth, 1);
+    var lastOfMonth = new Date(_currentYear, _currentMonth + 1, 0);
+
+    var current = new Date(firstOfMonth);
+    while (current <= lastOfMonth) {
+        var dateStr = formatDateISO(current);
+        var isToday = dateStr === todayStr;
+        var dayReleases = grouped[dateStr] || [];
+
+        // Skip empty days (except today)
+        if (dayReleases.length === 0 && !isToday) {
+            current.setDate(current.getDate() + 1);
+            continue;
+        }
+
+        hasContent = true;
+
+        // Day row
+        var row = document.createElement('div');
+        row.className = 'flex gap-4 py-3 px-2 cursor-pointer';
+        if (isToday) row.className += ' bg-primary/10 rounded-lg border border-primary/30';
+
+        row.addEventListener('click', (function(ds, rels) {
+            return function() { onDayCellClick(ds, rels); };
+        })(dateStr, dayReleases));
+
+        // Date label (left column)
+        var dateLabel = document.createElement('div');
+        dateLabel.className = 'w-14 shrink-0 text-center pt-0.5';
+
+        var dayNameEl = document.createElement('div');
+        dayNameEl.className = 'text-[10px] font-bold uppercase tracking-wider ' + (isToday ? 'text-primary' : 'text-steel-blue');
+        dayNameEl.textContent = dayNames[current.getDay()];
+        dateLabel.appendChild(dayNameEl);
+
+        var dayNumEl = document.createElement('div');
+        dayNumEl.className = 'text-xl font-bold ' + (isToday ? 'text-primary' : 'text-frosted-blue');
+        dayNumEl.textContent = String(current.getDate());
+        dateLabel.appendChild(dayNumEl);
+
+        row.appendChild(dateLabel);
+
+        // Releases column (right)
+        var releasesCol = document.createElement('div');
+        releasesCol.className = 'flex-1 min-w-0 flex flex-col gap-1';
+
+        if (dayReleases.length === 0) {
+            var noReleases = document.createElement('span');
+            noReleases.className = 'text-sm text-steel-blue/40 italic';
+            noReleases.textContent = 'No releases';
+            releasesCol.appendChild(noReleases);
+        } else {
+            dayReleases.forEach(function(release) {
+                var item = document.createElement('div');
+                item.className = 'flex items-center gap-2';
+
+                var badge = document.createElement('span');
+                if (release.media_type === 'movie') {
+                    badge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 shrink-0';
+                    badge.textContent = 'MOV';
+                } else {
+                    badge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 shrink-0';
+                    badge.textContent = 'TV';
+                }
+                item.appendChild(badge);
+
+                var titleEl = document.createElement('span');
+                titleEl.className = 'text-sm text-frosted-blue/80 truncate';
+                var titleText = release.title || 'Unknown';
+                if (release.media_type === 'tv' && release.episode_code) {
+                    titleText += ' ' + release.episode_code;
+                }
+                titleEl.textContent = titleText;
+                item.appendChild(titleEl);
+
+                if (release.has_file) {
+                    var check = document.createElement('span');
+                    check.className = 'material-symbols-outlined text-green-500 text-xs shrink-0';
+                    check.textContent = 'check_circle';
+                    item.appendChild(check);
+                }
+
+                releasesCol.appendChild(item);
+            });
+        }
+
+        row.appendChild(releasesCol);
+        container.appendChild(row);
+
+        current.setDate(current.getDate() + 1);
+    }
+
+    if (!hasContent) {
+        var emptyEl = document.createElement('div');
+        emptyEl.className = 'text-center text-steel-blue py-12';
+        var emptyIcon = document.createElement('span');
+        emptyIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-30';
+        emptyIcon.textContent = 'event_busy';
+        var emptyText = document.createElement('p');
+        emptyText.className = 'text-sm';
+        emptyText.textContent = 'No releases this month';
+        emptyEl.appendChild(emptyIcon);
+        emptyEl.appendChild(emptyText);
+        container.appendChild(emptyEl);
+    }
+}
+
+function buildDayCell(dayNum, dateStr, isCurrentMonth, isToday, releases) {
+    var cell = document.createElement('div');
+    var baseCls = 'p-1.5 lg:p-2 bg-black/30 cursor-pointer hover:bg-black/50 transition-colors rounded-sm overflow-hidden';
+    if (!isCurrentMonth) baseCls += ' opacity-40';
+    if (isToday) baseCls += ' ring-2 ring-primary bg-primary/10';
+    if (_selectedDate === dateStr) baseCls += ' bg-primary/20 border border-primary/40';
+    cell.className = baseCls;
+
+    cell.addEventListener('click', function() {
+        onDayCellClick(dateStr, releases);
+    });
+
+    // Date number
+    var dateNumEl = document.createElement('div');
+    dateNumEl.className = 'text-xs lg:text-sm font-bold mb-1';
+    if (isToday) {
+        dateNumEl.className += ' text-primary';
+    } else {
+        dateNumEl.className += ' text-steel-blue';
+    }
+    dateNumEl.textContent = String(dayNum);
+    cell.appendChild(dateNumEl);
+
+    // Release entries (show up to 3)
+    var maxShow = 3;
+    var shown = Math.min(releases.length, maxShow);
+    for (var i = 0; i < shown; i++) {
+        var entry = buildReleaseEntry(releases[i]);
+        cell.appendChild(entry);
+    }
+
+    // "+N more" overflow
+    if (releases.length > maxShow) {
+        var moreEl = document.createElement('div');
+        moreEl.className = 'text-[9px] text-steel-blue/60 font-medium mt-0.5 pl-0.5';
+        moreEl.textContent = '+' + (releases.length - maxShow) + ' more';
+        cell.appendChild(moreEl);
+    }
+
+    return cell;
+}
+
+function buildReleaseEntry(release) {
+    var entry = document.createElement('div');
+    entry.className = 'flex items-center gap-1 mb-0.5 min-w-0';
+
+    // Badge
+    var badge = document.createElement('span');
+    if (release.media_type === 'movie') {
+        badge.className = 'text-[8px] lg:text-[9px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 shrink-0 leading-none';
+        badge.textContent = 'MOV';
+    } else {
+        badge.className = 'text-[8px] lg:text-[9px] font-bold px-1 py-0.5 rounded bg-blue-500/20 text-blue-400 shrink-0 leading-none';
+        badge.textContent = 'TV';
+    }
+    entry.appendChild(badge);
+
+    // Title text
+    var titleEl = document.createElement('span');
+    titleEl.className = 'text-[9px] lg:text-[10px] text-frosted-blue/80 truncate leading-tight';
+    if (release.media_type === 'tv' && release.episode_code) {
+        titleEl.textContent = release.title + ' ' + release.episode_code;
+    } else {
+        titleEl.textContent = release.title;
+    }
+    entry.appendChild(titleEl);
+
+    // Green checkmark if has_file
+    if (release.has_file) {
+        var check = document.createElement('span');
+        check.className = 'material-symbols-outlined text-green-500 text-[10px] lg:text-xs shrink-0 leading-none';
+        check.textContent = 'check_circle';
+        entry.appendChild(check);
+    }
+
+    return entry;
+}
+
+// ---- Day Cell Click → Detail Panel ----
+
+function onDayCellClick(dateStr, releases) {
+    _selectedDate = dateStr;
+
+    // Re-render grid to update selection highlight (use cached data)
+    var cacheKey = _currentYear + '-' + padZero(_currentMonth + 1);
+    var grouped = _releaseCache[cacheKey] || {};
+
+    // Rebuild grid with selection highlight
+    var firstOfMonth = new Date(_currentYear, _currentMonth, 1);
+    var lastOfMonth = new Date(_currentYear, _currentMonth + 1, 0);
+    var startDate = new Date(firstOfMonth);
+    startDate.setDate(startDate.getDate() - startDate.getDay());
+    var endDate = new Date(lastOfMonth);
+    if (endDate.getDay() < 6) {
+        endDate.setDate(endDate.getDate() + (6 - endDate.getDay()));
+    }
+    buildGrid(startDate, endDate, grouped);
+
+    // Show detail panel
+    var releasesForDay = grouped[dateStr] || [];
+    showDetailPanel(dateStr, releasesForDay);
+}
+
+function showDetailPanel(dateStr, releases) {
+    var panel = document.getElementById('dayDetailPanel');
+    var label = document.getElementById('detailDateLabel');
+    var list = document.getElementById('detailReleasesList');
+
+    panel.classList.remove('hidden');
+
+    // Format the date nicely
+    var parts = dateStr.split('-');
+    var dateObj = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    var dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'];
+    label.textContent = dayNames[dateObj.getDay()] + ', ' + monthNames[dateObj.getMonth()] + ' ' + dateObj.getDate() + ', ' + dateObj.getFullYear();
+
+    clearChildren(list);
+
+    if (releases.length === 0) {
+        var emptyEl = document.createElement('div');
+        emptyEl.className = 'text-center text-steel-blue py-6';
+        var emptyIcon = document.createElement('span');
+        emptyIcon.className = 'material-symbols-outlined text-3xl mb-2 block opacity-30';
+        emptyIcon.textContent = 'event_busy';
+        var emptyText = document.createElement('p');
+        emptyText.className = 'text-sm';
+        emptyText.textContent = 'No releases on this day';
+        emptyEl.appendChild(emptyIcon);
+        emptyEl.appendChild(emptyText);
+        list.appendChild(emptyEl);
+        return;
+    }
+
+    releases.forEach(function(release) {
+        var card = buildDetailCard(release);
+        list.appendChild(card);
+    });
+
+    // Scroll panel into view
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function buildDetailCard(release) {
+    var card = document.createElement('div');
+    card.className = 'flex gap-3 lg:gap-4 p-3 rounded-lg bg-frosted-blue/5 border border-steel-blue/10';
+
+    // Poster
+    if (release.poster_url) {
+        var poster = document.createElement('img');
+        poster.src = release.poster_url;
+        poster.alt = release.title || '';
+        poster.className = 'w-14 h-[84px] lg:w-16 lg:h-24 rounded object-cover shrink-0';
+        poster.addEventListener('error', function() {
+            poster.style.display = 'none';
+        });
+        card.appendChild(poster);
+    } else {
+        var posterPlaceholder = document.createElement('div');
+        posterPlaceholder.className = 'w-14 h-[84px] lg:w-16 lg:h-24 rounded bg-frosted-blue/5 flex items-center justify-center shrink-0';
+        var phIcon = document.createElement('span');
+        phIcon.className = 'material-symbols-outlined text-2xl text-steel-blue/30';
+        phIcon.textContent = release.media_type === 'movie' ? 'movie' : 'tv';
+        posterPlaceholder.appendChild(phIcon);
+        card.appendChild(posterPlaceholder);
+    }
+
+    // Info column
+    var info = document.createElement('div');
+    info.className = 'flex-1 min-w-0';
+
+    // Title row
+    var titleRow = document.createElement('div');
+    titleRow.className = 'flex items-start gap-2';
+
+    var titleText = document.createElement('p');
+    titleText.className = 'text-frosted-blue text-sm font-bold leading-snug';
+    titleText.textContent = release.title || 'Unknown';
+    titleRow.appendChild(titleText);
+
+    // has_file checkmark
+    if (release.has_file) {
+        var checkIcon = document.createElement('span');
+        checkIcon.className = 'material-symbols-outlined text-green-500 text-base shrink-0 mt-0.5';
+        checkIcon.textContent = 'check_circle';
+        checkIcon.title = 'Available';
+        titleRow.appendChild(checkIcon);
+    }
+    info.appendChild(titleRow);
+
+    // Badges row
+    var badgesRow = document.createElement('div');
+    badgesRow.className = 'flex flex-wrap items-center gap-1.5 mt-1';
+
+    // Media type badge
+    var typeBadge = document.createElement('span');
+    if (release.media_type === 'movie') {
+        typeBadge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 uppercase tracking-wider';
+        typeBadge.textContent = 'Movie';
+    } else {
+        typeBadge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 uppercase tracking-wider';
+        typeBadge.textContent = 'TV Show';
+    }
+    badgesRow.appendChild(typeBadge);
+
+    // Episode code (TV) or release type (Movie)
+    if (release.episode_code) {
+        var codeBadge = document.createElement('span');
+        codeBadge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-steel-blue/20 text-steel-blue uppercase tracking-wider';
+        codeBadge.textContent = release.episode_code;
+        badgesRow.appendChild(codeBadge);
+    }
+
+    info.appendChild(badgesRow);
+
+    // Episode title (TV)
+    if (release.episode_title) {
+        var epTitle = document.createElement('p');
+        epTitle.className = 'text-xs text-frosted-blue/70 mt-1';
+        epTitle.textContent = release.episode_title;
+        info.appendChild(epTitle);
+    }
+
+    // Overview
+    if (release.overview) {
+        var overview = document.createElement('p');
+        overview.className = 'text-xs text-steel-blue/60 mt-1.5 line-clamp-2 lg:line-clamp-3 leading-relaxed';
+        overview.textContent = release.overview;
+        info.appendChild(overview);
+    }
+
+    card.appendChild(info);
+    return card;
+}
+
+function closeDetailPanel() {
+    _selectedDate = null;
+    document.getElementById('dayDetailPanel').classList.add('hidden');
+
+    // Rebuild grid to clear selection highlight
+    var cacheKey = _currentYear + '-' + padZero(_currentMonth + 1);
+    var grouped = _releaseCache[cacheKey];
+    if (grouped) {
+        var firstOfMonth = new Date(_currentYear, _currentMonth, 1);
+        var lastOfMonth = new Date(_currentYear, _currentMonth + 1, 0);
+        var startDate = new Date(firstOfMonth);
+        startDate.setDate(startDate.getDate() - startDate.getDay());
+        var endDate = new Date(lastOfMonth);
+        if (endDate.getDay() < 6) {
+            endDate.setDate(endDate.getDate() + (6 - endDate.getDay()));
+        }
+        buildGrid(startDate, endDate, grouped);
+    }
+}
+
+// ---- Toast Notifications ----
+
+function showToast(message, type) {
+    var container = document.getElementById('toastContainer');
+    var toast = document.createElement('div');
+    var bgColor = type === 'success' ? 'bg-green-500/90' : 'bg-red-500/90';
+
+    toast.className = 'pointer-events-auto flex items-center gap-2 px-4 py-3 rounded-lg ' + bgColor + ' text-bright text-sm font-medium shadow-lg backdrop-blur-sm transform translate-x-full transition-transform duration-300';
+
+    var icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined text-sm';
+    icon.textContent = type === 'success' ? 'check_circle' : 'error';
+    toast.appendChild(icon);
+
+    var msgSpan = document.createElement('span');
+    msgSpan.textContent = message;
+    toast.appendChild(msgSpan);
+
+    container.appendChild(toast);
+
+    requestAnimationFrame(function() {
+        toast.classList.remove('translate-x-full');
+        toast.classList.add('translate-x-0');
+    });
+
+    setTimeout(function() {
+        toast.classList.remove('translate-x-0');
+        toast.classList.add('translate-x-full');
+        setTimeout(function() {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 300);
+    }, 3000);
+}
+
+// ---- Utility ----
+
+function clearChildren(el) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+function padZero(n) {
+    return n < 10 ? '0' + n : String(n);
+}
+
+function formatDateISO(date) {
+    return date.getFullYear() + '-' + padZero(date.getMonth() + 1) + '-' + padZero(date.getDate());
+}
+</script>
+</body>
+</html>

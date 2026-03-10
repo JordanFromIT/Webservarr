@@ -1,0 +1,3015 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>WebServarr - Settings</title>
+    <script src="/static/js/theme-loader.js"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <link href="/static/css/theme.css" rel="stylesheet"/>
+    <script>tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "primary": "rgb(var(--color-primary) / <alpha-value>)",
+            "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+            "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+            "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+            "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+            "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+            "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+          },
+          fontFamily: {
+            "display": ["var(--font-display)", "sans-serif"]
+          },
+        },
+      },
+    }</script>
+    <style>
+        .hide-scrollbar { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        /* Rich Text Editor Styles */
+        #postContent {
+            min-height: 300px;
+            outline: none;
+            caret-color: rgb(var(--color-text));
+        }
+        #postContent:empty::before {
+            content: 'Start writing your content...';
+            color: rgb(var(--color-accent) / 0.5);
+            pointer-events: none;
+        }
+        #postContent h1 {
+            font-size: 1.875rem;
+            font-weight: 700;
+            margin: 0.75rem 0 0.5rem;
+            color: rgb(var(--color-text));
+            line-height: 1.2;
+        }
+        #postContent h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin: 0.75rem 0 0.5rem;
+            color: rgb(var(--color-text));
+            line-height: 1.3;
+        }
+        #postContent h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 0.5rem 0 0.25rem;
+            color: rgb(var(--color-text));
+            line-height: 1.4;
+        }
+        #postContent p {
+            margin: 0.5rem 0;
+        }
+        #postContent ul {
+            list-style-type: disc;
+            padding-left: 1.5rem;
+            margin: 0.5rem 0;
+        }
+        #postContent ol {
+            list-style-type: decimal;
+            padding-left: 1.5rem;
+            margin: 0.5rem 0;
+        }
+        #postContent li {
+            margin: 0.25rem 0;
+        }
+        #postContent blockquote {
+            border-left: 3px solid rgb(var(--color-accent));
+            padding-left: 1rem;
+            margin: 0.75rem 0;
+            color: rgb(var(--color-text) / 0.7);
+            font-style: italic;
+        }
+        #postContent pre {
+            background: rgb(var(--color-background) / 0.6);
+            border: 1px solid rgb(var(--color-accent) / 0.3);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin: 0.75rem 0;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            color: rgb(var(--color-text));
+        }
+        #postContent code {
+            background: rgb(var(--color-background) / 0.4);
+            border: 1px solid rgb(var(--color-accent) / 0.2);
+            border-radius: 0.25rem;
+            padding: 0.125rem 0.375rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            color: rgb(var(--color-text));
+        }
+        #postContent pre code {
+            background: none;
+            border: none;
+            padding: 0;
+            border-radius: 0;
+        }
+        #postContent a {
+            color: rgb(var(--color-text));
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+        #postContent a:hover {
+            color: rgb(var(--color-text));
+        }
+        #postContent img {
+            max-width: 100%;
+            border-radius: 0.5rem;
+            margin: 0.5rem 0;
+        }
+        #postContent hr {
+            border: none;
+            border-top: 1px solid rgb(var(--color-accent) / 0.3);
+            margin: 1rem 0;
+        }
+        #postContent s, #postContent del {
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+        #postContent.preview-mode {
+            background: rgb(var(--color-background) / 0.3);
+            cursor: default;
+        }
+        .toolbar-btn.active {
+            background: rgb(var(--color-primary) / 0.5);
+            color: rgb(var(--color-text));
+        }
+        .heading-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            z-index: 50;
+            min-width: 160px;
+        }
+        .heading-dropdown.open {
+            display: block;
+        }
+        /* Accordion active state */
+        .accordion-item .accordion-trigger:has(+ .accordion-body:not(.hidden)) {
+            background: rgb(var(--color-secondary) / 0.08);
+        }
+        /* Color swatch circle inputs */
+        input[type="color"] {
+            -webkit-appearance: none;
+            padding: 0;
+        }
+        input[type="color"]::-moz-color-swatch {
+            border: none;
+            border-radius: 9999px;
+        }
+    </style>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+    <div id="sidebar-root"></div>
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+    <div id="header-root"></div>
+    <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+
+        <!-- Tabs -->
+        <div class="mb-8 border-b border-steel-blue/20 relative">
+            <div id="tabScroller" class="overflow-x-auto hide-scrollbar">
+                <nav class="flex gap-4 whitespace-nowrap px-8 lg:px-0">
+                    <button id="tabIntegrations" class="px-6 py-3 font-semibold border-b-2 border-primary text-primary shrink-0">
+                        Integrations
+                    </button>
+                    <button id="tabSystem" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue shrink-0">
+                        System
+                    </button>
+                    <button id="tabTheme" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue shrink-0">
+                        Customization
+                    </button>
+                    <button id="tabNews" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue shrink-0">
+                        News
+                    </button>
+                </nav>
+            </div>
+            <div id="tabScrollHintLeft" class="absolute left-2 top-1/2 -translate-y-1/2 flex items-center pointer-events-none lg:hidden" style="opacity:0;transition:opacity 0.2s">
+                <span class="material-symbols-outlined text-frosted-blue text-base animate-pulse">arrow_back</span>
+            </div>
+            <div id="tabScrollHint" class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center pointer-events-none lg:hidden">
+                <span class="material-symbols-outlined text-frosted-blue text-base animate-pulse">arrow_forward</span>
+            </div>
+        </div>
+
+        <!-- Integrations Section (Accordion) -->
+        <div id="integrationsSection">
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl overflow-hidden" id="integrationsAccordion">
+
+                <!-- Uptime Kuma -->
+                <div class="accordion-item border-b border-steel-blue/20 last:border-b-0" data-accordion="uptime_kuma">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('uptime_kuma')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">monitor_heart</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Uptime Kuma</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotUptimeKuma"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyUptimeKuma">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL <span class="text-red-400">*</span></label>
+                                    <input type="url" id="integrationUptimeKumaUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="https://uptime.example.com">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Status Page Slug <span class="text-red-400">*</span></label>
+                                    <input type="text" id="integrationUptimeKumaSlug"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="default">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key</label>
+                                <input type="password" id="integrationUptimeKumaApiKey"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                    placeholder="Optional — only for private status pages">
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('uptime_kuma')" class="bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('uptime_kuma')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <button id="clearBtnuptime_kuma" onclick="clearIntegration('uptime_kuma')" class="hidden bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">delete</span>
+                                    Clear
+                                </button>
+                                <div id="statusUptimeKuma" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+
+                            <!-- Services sub-section -->
+                            <div class="border-t border-steel-blue/20 mt-3 pt-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="material-symbols-outlined text-lg text-steel-blue">dns</span>
+                                        <h3 class="text-sm font-bold text-frosted-blue">Homepage Services</h3>
+                                    </div>
+                                    <button id="btnRefreshMonitors" class="text-steel-blue hover:text-frosted-blue transition-colors" title="Refresh monitors">
+                                        <span class="material-symbols-outlined text-lg">refresh</span>
+                                    </button>
+                                </div>
+                                <p class="text-xs text-steel-blue/70 mb-3">Toggle which monitors appear on the homepage.</p>
+                                <div id="monitorsList" class="space-y-2">
+                                    <div class="text-center text-steel-blue py-6">
+                                        <span class="material-symbols-outlined text-3xl mb-2 block opacity-50">dns</span>
+                                        <p class="text-xs">Loading monitors...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Plex -->
+                <div class="accordion-item border-b border-steel-blue/20" data-accordion="plex">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('plex')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">play_circle</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Plex</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotPlex"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyPlex">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL <span class="text-red-400">*</span></label>
+                                    <input type="url" id="integrationPlexUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="https://plex.example.com:32400">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Token <span class="text-red-400">*</span></label>
+                                    <input type="password" id="integrationPlexToken"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="Enter Plex token">
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('plex')" class="bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('plex')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <button id="clearBtnplex" onclick="clearIntegration('plex')" class="hidden bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">delete</span>
+                                    Clear
+                                </button>
+                                <div id="statusPlex" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Overseerr -->
+                <div class="accordion-item border-b border-steel-blue/20" data-accordion="overseerr">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('overseerr')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">movie_filter</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Overseerr</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotOverseerr"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyOverseerr">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL <span class="text-red-400">*</span></label>
+                                    <input type="url" id="integrationOverseerrUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="https://overseerr.example.com">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key <span class="text-red-400">*</span></label>
+                                    <input type="password" id="integrationOverseerrApiKey"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="Enter API key">
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('overseerr')" class="bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('overseerr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <button id="clearBtnoverseerr" onclick="clearIntegration('overseerr')" class="hidden bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">delete</span>
+                                    Clear
+                                </button>
+                                <div id="statusOverseerr" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-3 border-t border-steel-blue/20">
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="featureShowRequests" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                                    <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                                </label>
+                                <div>
+                                    <span class="text-sm text-frosted-blue">Show iframe page in sidebar</span>
+                                    <p class="text-xs text-steel-blue/70 mt-0.5">Embeds Overseerr directly in a dashboard page</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Netdata -->
+                <div class="accordion-item border-b border-steel-blue/20" data-accordion="netdata">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('netdata')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">monitoring</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Netdata</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotNetdata"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyNetdata">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL <span class="text-red-400">*</span></label>
+                                    <input type="url" id="integrationNetdataUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="http://192.168.1.100:19999">
+                                    <p class="text-xs text-steel-blue/50 mt-1">Default port: 19999</p>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key (optional)</label>
+                                    <input type="password" id="integrationNetdataApiKey"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="If authentication is enabled">
+                                </div>
+                            </div>
+                            <!-- Gauge Labels -->
+                            <div class="border-t border-steel-blue/10 pt-4 mt-2">
+                                <p class="text-xs font-semibold text-steel-blue mb-3">Gauge Labels</p>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-xs font-semibold text-steel-blue mb-1.5">CPU Label</label>
+                                        <input type="text" id="netdataCpuLabel"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="e.g. 16C/32T">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-steel-blue mb-1.5">RAM Label</label>
+                                        <input type="text" id="netdataRamLabel"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="Auto-detects if empty">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-semibold text-steel-blue mb-1.5">Network Label</label>
+                                        <input type="text" id="netdataNetLabel"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="e.g. 1 Gbps">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('netdata')" class="bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('netdata')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <button id="clearBtnnetdata" onclick="clearIntegration('netdata')" class="hidden bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">delete</span>
+                                    Clear
+                                </button>
+                                <div id="statusNetdata" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sonarr -->
+                <div class="accordion-item border-b border-steel-blue/20" data-accordion="sonarr">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('sonarr')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">tv</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Sonarr</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotSonarr"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodySonarr">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL <span class="text-red-400">*</span></label>
+                                    <input type="url" id="integrationSonarrUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="http://192.168.1.100:8989">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key <span class="text-red-400">*</span></label>
+                                    <input type="password" id="integrationSonarrApiKey"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="Settings > General > API Key">
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('sonarr')" class="bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('sonarr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <button id="clearBtnsonarr" onclick="clearIntegration('sonarr')" class="hidden bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">delete</span>
+                                    Clear
+                                </button>
+                                <div id="statusSonarr" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Radarr -->
+                <div class="accordion-item" data-accordion="radarr">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('radarr')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">movie</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Radarr</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotRadarr"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyRadarr">
+                        <div class="space-y-4 pt-1">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL <span class="text-red-400">*</span></label>
+                                    <input type="url" id="integrationRadarrUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="http://192.168.1.100:7878">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key <span class="text-red-400">*</span></label>
+                                    <input type="password" id="integrationRadarrApiKey"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="Settings > General > API Key">
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('radarr')" class="bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="testConnection('radarr')" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">wifi_tethering</span>
+                                    Test
+                                </button>
+                                <button id="clearBtnradarr" onclick="clearIntegration('radarr')" class="hidden bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">delete</span>
+                                    Clear
+                                </button>
+                                <div id="statusRadarr" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notifications -->
+                <div class="accordion-item" data-accordion="notifications">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('notifications')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">notifications</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Notifications</span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyNotifications">
+                        <div class="space-y-4 pt-1">
+                            <p class="text-xs text-steel-blue/70">Configure how frequently the notification system checks for updates. Minimum 30 seconds.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Overseerr Poll Interval</label>
+                                    <div class="flex items-center gap-2">
+                                        <input type="number" id="notifPollOverseerr" min="30" step="10"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="60">
+                                        <span class="text-xs text-steel-blue shrink-0">sec</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Monitor Poll Interval</label>
+                                    <div class="flex items-center gap-2">
+                                        <input type="number" id="notifPollMonitors" min="30" step="10"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="60">
+                                        <span class="text-xs text-steel-blue shrink-0">sec</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">News Poll Interval</label>
+                                    <div class="flex items-center gap-2">
+                                        <input type="number" id="notifPollNews" min="30" step="10"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="60">
+                                        <span class="text-xs text-steel-blue shrink-0">sec</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Ticket Poll Interval</label>
+                                    <div class="flex items-center gap-2">
+                                        <input type="number" id="notifPollTickets" min="30" step="10"
+                                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                            placeholder="60">
+                                        <span class="text-xs text-steel-blue shrink-0">sec</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveNotificationSettings()" class="bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                                    Save
+                                </button>
+                                <button onclick="sendTestNotification()" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">notifications_active</span>
+                                    Send Test
+                                </button>
+                                <div id="statusNotifications" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+            </div>
+        </div>
+
+        <!-- System Section -->
+        <div id="systemSection" class="hidden">
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                <h2 class="text-xl font-bold mb-6 text-frosted-blue">System Settings</h2>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">Admin Email</label>
+                        <input type="email" id="systemAdminEmail"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-frosted-blue placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="admin@example.com">
+                        <p class="text-xs text-steel-blue/70 mt-1">Plex users who log in with this email will be granted admin access. Also falls back to comparing against the Plex server owner's email.</p>
+                    </div>
+
+                    <div class="flex items-center gap-4 pt-4">
+                        <button id="btnSaveSystem" class="bg-primary hover:bg-primary/90 text-bright px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save Settings
+                        </button>
+                        <div id="statusSystem" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Admin Account Section (simple auth only) -->
+            <div id="adminAccountSection" class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mt-6 hidden">
+                <h2 class="text-xl font-bold mb-2 text-frosted-blue">Admin Account</h2>
+                <p class="text-xs text-steel-blue/70 mb-5">Change your username or password</p>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">Current Password</label>
+                        <input type="password" id="adminCurrentPassword"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-frosted-blue placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Enter current password">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">New Username</label>
+                        <input type="text" id="adminNewUsername"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-frosted-blue placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Leave blank to keep current">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">New Password</label>
+                        <input type="password" id="adminNewPassword"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-frosted-blue placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Minimum 8 characters">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">Confirm New Password</label>
+                        <input type="password" id="adminConfirmPassword"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-frosted-blue placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Re-enter new password">
+                    </div>
+
+                    <div class="flex items-center gap-4 pt-4">
+                        <button id="btnSaveAdminAccount" class="bg-primary hover:bg-primary/90 text-bright px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save Changes
+                        </button>
+                        <div id="statusAdminAccount" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Authentication Section -->
+            <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 mt-6">
+                <h2 class="text-xl font-bold mb-2 text-frosted-blue">Authentication</h2>
+                <p class="text-xs text-steel-blue/70 mb-5">Control which login methods appear on the login page</p>
+
+                <div class="space-y-5">
+                    <!-- Simple Auth Toggle -->
+                    <div class="flex items-center gap-3">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="authToggleSimple" class="sr-only peer" checked>
+                            <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                            <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                        </label>
+                        <div>
+                            <span class="text-sm text-frosted-blue">Local Login</span>
+                            <p class="text-xs text-steel-blue/70 mt-0.5">Username and password login against the local database. Enabled by default.</p>
+                        </div>
+                    </div>
+
+                    <!-- Plex Auth Toggle -->
+                    <div class="flex items-center gap-3">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="authTogglePlex" class="sr-only peer" checked>
+                            <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                            <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                        </label>
+                        <div>
+                            <span class="text-sm text-frosted-blue">Plex OAuth</span>
+                            <p class="text-xs text-steel-blue/70 mt-0.5">Direct Plex PIN-based login. Requires Plex integration to be configured.</p>
+                        </div>
+                    </div>
+
+                    <!-- Authentik Auth Toggle + Config -->
+                    <div class="flex items-center gap-3">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="authToggleAuthentik" class="sr-only peer">
+                            <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                            <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                        </label>
+                        <div>
+                            <span class="text-sm text-frosted-blue">Authentik OIDC</span>
+                            <p class="text-xs text-steel-blue/70 mt-0.5">Plex login through Authentik identity provider. For advanced users with existing Authentik setup.</p>
+                        </div>
+                    </div>
+
+                    <!-- Authentik Config Fields (shown when toggle is on) -->
+                    <div id="authentikConfigFields" class="hidden ml-12 space-y-3 border-l-2 border-steel-blue/20 pl-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">Authentik URL</label>
+                                <input type="url" id="authAuthentikUrl" placeholder="https://auth.example.com"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">Client ID</label>
+                                <input type="text" id="authAuthentikClientId" placeholder="OAuth2 Client ID"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">Client Secret</label>
+                                <input type="password" id="authAuthentikClientSecret" placeholder="OAuth2 Client Secret"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">App Slug</label>
+                                <input type="text" id="authAuthentikSlug" placeholder="webservarr"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-4 pt-2">
+                        <button id="btnSaveAuth" class="bg-primary hover:bg-primary/90 text-bright px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save Authentication
+                        </button>
+                        <div id="statusAuth" class="flex items-center gap-2 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Theme Section -->
+        <div id="themeSection" class="hidden">
+            <div class="space-y-8">
+
+                <!-- Branding -->
+                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                    <h2 class="text-xl font-bold mb-6 text-frosted-blue">Branding</h2>
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Site Title</label>
+                                <input type="text" id="themeAppName"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-frosted-blue placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                    placeholder="WebServarr">
+                                <p class="text-xs text-steel-blue/70 mt-1">Shown in the sidebar, browser tab, and login page</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-steel-blue mb-2">Tagline</label>
+                                <input type="text" id="themeTagline"
+                                    class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-frosted-blue placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                    placeholder="Media Server Management">
+                                <p class="text-xs text-steel-blue/70 mt-1">Shown below the title on the login page</p>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-steel-blue mb-2">Logo</label>
+                            <div class="flex items-start gap-4">
+                                <div id="logoPreview" class="size-16 bg-primary/20 border border-steel-blue/30 rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
+                                    <span class="material-symbols-outlined text-steel-blue text-2xl">image</span>
+                                </div>
+                                <div class="flex-1 space-y-2">
+                                    <input type="text" id="themeLogoUrl"
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                        placeholder="https://example.com/logo.png or /static/uploads/logo.png">
+                                    <div class="flex items-center gap-2">
+                                        <label class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5">
+                                            <span class="material-symbols-outlined text-sm">upload_file</span>
+                                            Upload File
+                                            <input type="file" id="logoFileInput" accept="image/png,image/jpeg,image/gif,image/svg+xml,image/webp" class="hidden">
+                                        </label>
+                                        <button type="button" id="btnClearLogo" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5">
+                                            <span class="material-symbols-outlined text-sm">delete</span>
+                                            Clear
+                                        </button>
+                                        <span id="logoUploadStatus" class="text-xs"></span>
+                                    </div>
+                                    <p class="text-xs text-steel-blue/70">Shown in the sidebar. Accepts URL, uploaded file (max 2MB), or server path. Leave empty for default icon.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sidebar Labels — compact inline layout -->
+                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                    <h2 class="text-xl font-bold mb-2 text-frosted-blue">Sidebar Labels</h2>
+                    <p class="text-xs text-steel-blue/70 mb-5">Rename navigation items in the sidebar</p>
+                    <div class="space-y-2.5">
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconHome">home</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Home</label>
+                            <input type="text" id="sidebarLabelHome"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Home">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconRequests">movie</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Requests</label>
+                            <input type="text" id="sidebarLabelRequests"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Requests">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/requests</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconRequestsEmbed">download</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Requests <span class="text-steel-blue/50 text-xs">(Embed)</span></label>
+                            <input type="text" id="sidebarLabelRequestsEmbed"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Requests (Embed)">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/requests-embed</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconIssues">report_problem</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Issues</label>
+                            <input type="text" id="sidebarLabelIssues"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Issues">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/issues</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconTickets">confirmation_number</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Tickets</label>
+                            <input type="text" id="sidebarLabelTickets"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Tickets">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/tickets</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconSettings">settings</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Settings</label>
+                            <input type="text" id="sidebarLabelSettings"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Settings">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/settings</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Icons — visual icon picker buttons -->
+                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                    <h2 class="text-xl font-bold mb-2 text-frosted-blue">Icons</h2>
+                    <p class="text-xs text-steel-blue/70 mb-5">Click an icon to change it. Uses <a href="https://fonts.google.com/icons" target="_blank" class="text-primary hover:underline">Material Symbols</a>.</p>
+
+                    <!-- Hidden inputs that store the actual values -->
+                    <input type="hidden" id="iconNavHome" value="">
+                    <input type="hidden" id="iconNavRequests" value="">
+                    <input type="hidden" id="iconNavRequestsEmbed" value="">
+                    <input type="hidden" id="iconNavIssues" value="">
+                    <input type="hidden" id="iconNavTickets" value="">
+                    <input type="hidden" id="iconNavSettings" value="">
+                    <input type="hidden" id="iconSectionServices" value="">
+                    <input type="hidden" id="iconSectionNews" value="">
+                    <input type="hidden" id="iconSectionStreams" value="">
+                    <input type="hidden" id="iconSectionReleases" value="">
+                    <input type="hidden" id="iconSectionRequests" value="">
+
+                    <h3 class="text-xs font-semibold text-steel-blue uppercase tracking-wider mb-3">Sidebar Navigation</h3>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-6">
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavHome">
+                            <span id="iconPreviewNavHome" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-bright transition-colors">home</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Home</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavRequests">
+                            <span id="iconPreviewNavRequests" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-bright transition-colors">movie</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Requests</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavRequestsEmbed">
+                            <span id="iconPreviewNavRequestsEmbed" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-bright transition-colors">download</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Requests (Embed)</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavIssues">
+                            <span id="iconPreviewNavIssues" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-bright transition-colors">report_problem</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Issues</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavTickets">
+                            <span id="iconPreviewNavTickets" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-bright transition-colors">confirmation_number</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Tickets</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconNavSettings">
+                            <span id="iconPreviewNavSettings" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-bright transition-colors">settings</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Settings</span>
+                        </button>
+                    </div>
+
+                    <h3 class="text-xs font-semibold text-steel-blue uppercase tracking-wider mb-3">Homepage Sections</h3>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconSectionServices">
+                            <span id="iconPreviewSectionServices" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-bright transition-colors">health_metrics</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Services</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconSectionNews">
+                            <span id="iconPreviewSectionNews" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-bright transition-colors">newspaper</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">News</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconSectionStreams">
+                            <span id="iconPreviewSectionStreams" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-bright transition-colors">play_circle</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Streams</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconSectionReleases">
+                            <span id="iconPreviewSectionReleases" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-bright transition-colors">calendar_month</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Releases</span>
+                        </button>
+                        <button type="button" class="icon-picker-btn group flex flex-col items-center gap-2 bg-black/30 border border-steel-blue/20 rounded-xl p-3 hover:border-primary/50 hover:bg-primary/10 transition-all cursor-pointer" data-icon-target="iconSectionRequests">
+                            <span id="iconPreviewSectionRequests" class="material-symbols-outlined text-3xl text-frosted-blue group-hover:text-bright transition-colors">shopping_cart</span>
+                            <span class="text-[10px] text-steel-blue/70 group-hover:text-steel-blue truncate w-full text-center">Requests</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Icon Picker Modal -->
+                <div id="iconPickerModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                    <div class="bg-background-dark border border-steel-blue/30 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+                        <div class="flex items-center justify-between px-5 py-4 border-b border-steel-blue/20">
+                            <h3 class="text-lg font-bold text-frosted-blue">Choose Icon</h3>
+                            <button type="button" id="iconPickerClose" class="text-steel-blue hover:text-bright transition-colors">
+                                <span class="material-symbols-outlined">close</span>
+                            </button>
+                        </div>
+                        <div class="px-5 py-3 border-b border-steel-blue/20">
+                            <input type="text" id="iconPickerSearch" placeholder="Search icons..."
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                        </div>
+                        <div id="iconPickerGrid" class="flex-1 overflow-y-auto custom-scrollbar p-4 grid grid-cols-6 sm:grid-cols-8 gap-2">
+                        </div>
+                        <div class="px-5 py-3 border-t border-steel-blue/20 flex items-center gap-3">
+                            <span class="text-xs text-steel-blue/70">Or type manually:</span>
+                            <input type="text" id="iconPickerManual" placeholder="icon_name"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                            <button type="button" id="iconPickerManualApply" class="bg-primary hover:bg-primary/90 text-bright px-3 py-2 rounded-lg text-sm font-semibold transition-all">
+                                Apply
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Theme — Colors, Font, Custom CSS combined -->
+                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                    <h2 class="text-xl font-bold mb-5 text-frosted-blue">Theme</h2>
+
+                    <!-- Color palette row -->
+                    <div class="flex flex-wrap items-end gap-4 mb-6">
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Primary</label>
+                            <div class="relative group">
+                                <input type="color" id="themeColorPrimary" value="#125793"
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
+                            </div>
+                            <input type="text" id="themeColorPrimaryHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
+                                placeholder="#125793" maxlength="7">
+                        </div>
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Secondary</label>
+                            <div class="relative group">
+                                <input type="color" id="themeColorSecondary" value="#2C6DA1"
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
+                            </div>
+                            <input type="text" id="themeColorSecondaryHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
+                                placeholder="#2C6DA1" maxlength="7">
+                        </div>
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Accent</label>
+                            <div class="relative group">
+                                <input type="color" id="themeColorAccent" value="#4684B0"
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
+                            </div>
+                            <input type="text" id="themeColorAccentHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
+                                placeholder="#4684B0" maxlength="7">
+                        </div>
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Text Primary</label>
+                            <div class="relative group">
+                                <input type="color" id="themeColorText" value="#BEEEF4"
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
+                            </div>
+                            <input type="text" id="themeColorTextHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
+                                placeholder="#BEEEF4" maxlength="7">
+                        </div>
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Text Secondary</label>
+                            <div class="relative group">
+                                <input type="color" id="themeColorTextSecondary" value="#FFFFFF"
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
+                            </div>
+                            <input type="text" id="themeColorTextSecondaryHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
+                                placeholder="#FFFFFF" maxlength="7">
+                        </div>
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Background</label>
+                            <div class="relative group">
+                                <input type="color" id="themeColorBackground" value="#000000"
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
+                            </div>
+                            <input type="text" id="themeColorBackgroundHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
+                                placeholder="#000000" maxlength="7">
+                        </div>
+                    </div>
+
+                    <!-- Font -->
+                    <div class="mb-6">
+                        <label class="block text-xs font-semibold text-steel-blue mb-1.5">Font Family</label>
+                        <input type="hidden" id="themeFont" value="Spline Sans">
+                        <div class="relative" id="fontDropdownContainer">
+                            <button type="button" id="fontDropdownBtn"
+                                class="w-full max-w-sm bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2.5 text-frosted-blue text-sm text-left focus:outline-none focus:ring-2 focus:ring-primary flex items-center justify-between">
+                                <span id="fontDropdownLabel" class="truncate">Spline Sans</span>
+                                <span class="material-symbols-outlined text-steel-blue text-sm ml-2 shrink-0">expand_more</span>
+                            </button>
+                            <div id="fontDropdownPanel" class="hidden absolute z-50 w-full max-w-sm mt-1 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl max-h-72 overflow-hidden flex flex-col">
+                                <div class="p-2 border-b border-steel-blue/20">
+                                    <input type="text" id="fontSearch" placeholder="Search or enter custom font..."
+                                        class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary">
+                                </div>
+                                <div id="fontOptionsList" class="overflow-y-auto custom-scrollbar flex-1"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Custom CSS collapsible -->
+                    <div>
+                        <button type="button" id="customCssToggle" class="flex items-center gap-2 text-sm text-steel-blue hover:text-frosted-blue transition-colors mb-2">
+                            <span class="material-symbols-outlined text-sm transition-transform duration-200" id="customCssChevron">expand_more</span>
+                            Custom CSS
+                        </button>
+                        <div id="customCssBody" class="hidden">
+                            <textarea id="themeCustomCss" rows="5"
+                                class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-frosted-blue placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary font-mono text-sm"
+                                placeholder="/* Custom CSS injected into all pages */"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Feature Flags -->
+                <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                    <h2 class="text-xl font-bold mb-4 text-frosted-blue">Feature Flags</h2>
+                    <div class="space-y-4">
+                        <div class="flex items-center gap-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="featureLoginBackgrounds" class="sr-only peer" checked>
+                                <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                                <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm text-frosted-blue">Login page backgrounds</span>
+                                <p class="text-xs text-steel-blue/70 mt-0.5">Show rotating TMDB movie backgrounds on the login page. Requires Overseerr.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="featureShowTickets" class="sr-only peer" checked>
+                                <div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                                <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>
+                            </label>
+                            <div>
+                                <span class="text-sm text-frosted-blue">Tickets</span>
+                                <p class="text-xs text-steel-blue/70 mt-0.5">Show Tickets page in sidebar for support requests.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Save / Reset -->
+                <div class="flex items-center gap-4">
+                    <button id="btnSaveTheme" class="bg-primary hover:bg-primary/90 text-bright px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                        <span class="material-symbols-outlined text-sm">save</span>
+                        Save Theme
+                    </button>
+                    <button id="btnResetTheme" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all">
+                        Reset to Defaults
+                    </button>
+                    <div id="statusTheme" class="flex items-center gap-2 text-sm"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- News Section -->
+        <div id="newsSection" class="hidden">
+
+            <!-- Create New Post Button -->
+            <div class="mb-6">
+                <button id="btnNewPost" class="bg-primary hover:bg-primary/90 text-bright px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-all">
+                    <span class="material-symbols-outlined">add</span>
+                    Create New Post
+                </button>
+            </div>
+
+            <!-- Post Form (Hidden by default) -->
+            <div id="postForm" class="hidden mb-8 bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
+                <h2 id="newsFormTitle" class="text-xl font-bold mb-6 text-frosted-blue">Create News Post</h2>
+
+                <form id="newsForm" class="space-y-4">
+                    <input type="hidden" id="postId" value="">
+
+                    <!-- Title -->
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">Title</label>
+                        <input type="text" id="postTitle" required
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-3 text-frosted-blue placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Enter post title...">
+                    </div>
+
+                    <!-- Content (Rich Text Editor) -->
+                    <div>
+                        <label class="block text-sm font-semibold text-steel-blue mb-2">Content</label>
+
+                        <!-- Toolbar -->
+                        <div id="editorToolbar" class="flex flex-wrap items-center gap-1 bg-black/60 border border-steel-blue/30 border-b-0 rounded-t-lg px-2 py-1.5">
+
+                            <!-- Inline Formatting -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="bold" title="Bold (Ctrl+B)">
+                                <span class="material-symbols-outlined text-[20px]">format_bold</span>
+                            </button>
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="italic" title="Italic (Ctrl+I)">
+                                <span class="material-symbols-outlined text-[20px]">format_italic</span>
+                            </button>
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="underline" title="Underline (Ctrl+U)">
+                                <span class="material-symbols-outlined text-[20px]">format_underlined</span>
+                            </button>
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="strikeThrough" title="Strikethrough">
+                                <span class="material-symbols-outlined text-[20px]">strikethrough_s</span>
+                            </button>
+
+                            <!-- Separator -->
+                            <div class="w-px h-6 bg-steel-blue/30 mx-1"></div>
+
+                            <!-- Heading Dropdown -->
+                            <div class="relative">
+                                <button type="button" id="headingBtn" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors flex items-center gap-0.5" title="Heading">
+                                    <span class="material-symbols-outlined text-[20px]">title</span>
+                                    <span class="material-symbols-outlined text-[14px]">arrow_drop_down</span>
+                                </button>
+                                <div id="headingDropdown" class="heading-dropdown bg-black/95 border border-steel-blue/30 rounded-lg shadow-xl py-1">
+                                    <button type="button" class="w-full text-left px-4 py-2 text-frosted-blue hover:bg-primary/30 transition-colors text-xl font-bold" data-heading="h1">Heading 1</button>
+                                    <button type="button" class="w-full text-left px-4 py-2 text-frosted-blue hover:bg-primary/30 transition-colors text-lg font-bold" data-heading="h2">Heading 2</button>
+                                    <button type="button" class="w-full text-left px-4 py-2 text-frosted-blue hover:bg-primary/30 transition-colors text-base font-semibold" data-heading="h3">Heading 3</button>
+                                    <button type="button" class="w-full text-left px-4 py-2 text-frosted-blue hover:bg-primary/30 transition-colors text-sm" data-heading="p">Paragraph</button>
+                                </div>
+                            </div>
+
+                            <!-- Separator -->
+                            <div class="w-px h-6 bg-steel-blue/30 mx-1"></div>
+
+                            <!-- Lists -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="insertUnorderedList" title="Bulleted List">
+                                <span class="material-symbols-outlined text-[20px]">format_list_bulleted</span>
+                            </button>
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" data-command="insertOrderedList" title="Numbered List">
+                                <span class="material-symbols-outlined text-[20px]">format_list_numbered</span>
+                            </button>
+
+                            <!-- Blockquote -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnBlockquote" title="Blockquote">
+                                <span class="material-symbols-outlined text-[20px]">format_quote</span>
+                            </button>
+
+                            <!-- Separator -->
+                            <div class="w-px h-6 bg-steel-blue/30 mx-1"></div>
+
+                            <!-- Insert: Link -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnLink" title="Insert Link">
+                                <span class="material-symbols-outlined text-[20px]">link</span>
+                            </button>
+
+                            <!-- Insert: Image -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnImage" title="Insert Image">
+                                <span class="material-symbols-outlined text-[20px]">image</span>
+                            </button>
+
+                            <!-- Insert: Code Block -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnCodeBlock" title="Code Block">
+                                <span class="material-symbols-outlined text-[20px]">code_blocks</span>
+                            </button>
+
+                            <!-- Insert: Inline Code -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnInlineCode" title="Inline Code">
+                                <span class="material-symbols-outlined text-[20px]">code</span>
+                            </button>
+
+                            <!-- Insert: HR -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors" id="btnHR" title="Horizontal Rule">
+                                <span class="material-symbols-outlined text-[20px]">horizontal_rule</span>
+                            </button>
+
+                            <!-- Separator -->
+                            <div class="w-px h-6 bg-steel-blue/30 mx-1"></div>
+
+                            <!-- Preview Toggle -->
+                            <button type="button" class="toolbar-btn p-1.5 rounded hover:bg-primary/30 text-steel-blue hover:text-frosted-blue transition-colors flex items-center gap-1" id="btnPreview" title="Toggle Preview">
+                                <span class="material-symbols-outlined text-[20px]">visibility</span>
+                                <span class="text-xs font-medium">Preview</span>
+                            </button>
+                        </div>
+
+                        <!-- Editable Area -->
+                        <div id="postContent" contenteditable="true"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-b-lg px-4 py-3 text-frosted-blue text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary overflow-y-auto"
+                            style="min-height: 300px; max-height: 600px;">
+                        </div>
+                    </div>
+
+                    <!-- Options -->
+                    <div class="flex gap-6">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="postPublished"
+                                class="w-5 h-5 rounded border-steel-blue/30 bg-black/50 text-primary focus:ring-primary">
+                            <span class="text-sm text-steel-blue">Published</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="postPinned"
+                                class="w-5 h-5 rounded border-steel-blue/30 bg-black/50 text-primary focus:ring-primary">
+                            <span class="text-sm text-steel-blue">Pinned</span>
+                        </label>
+                    </div>
+
+                    <!-- Buttons -->
+                    <div class="flex gap-3 pt-4">
+                        <button type="submit" class="bg-primary hover:bg-primary/90 text-bright px-6 py-2 rounded-lg font-semibold transition-all">
+                            Save Post
+                        </button>
+                        <button type="button" id="btnCancelNewsForm" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Posts List -->
+            <div id="postsList" class="space-y-4">
+                <div class="text-center text-steel-blue py-12">
+                    <span class="material-symbols-outlined text-6xl mb-4 block opacity-50">article</span>
+                    <p>Loading news posts...</p>
+                </div>
+            </div>
+
+        </div>
+
+    </div><!-- end scrollable wrapper -->
+    <!-- Scroll-down hint (mobile only) -->
+    <div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+        <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
+    </div>
+    </main>
+
+    <script src="/static/js/auth.js"></script>
+    <script src="/static/js/header.js?v=2"></script>
+    <script src="/static/js/sidebar.js?v=11"></script>
+    <script src="/static/js/notifications.js?v=3"></script>
+    <script>
+        // Initialize sidebar and auth
+        (async function() {
+            initSidebar('settings');
+            initNotifications();
+
+            // Scroll-down hint — fade when at bottom
+            (function() {
+                var hint = document.getElementById('scrollDownHint');
+                if (!hint) return;
+                window.addEventListener('scroll', function() {
+                    var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+                    hint.style.opacity = atBottom ? '0' : '1';
+                });
+            })();
+
+            const user = await checkAuth({ requireAdmin: true });
+            if (!user) return;
+            showAdminNav(user.is_admin);
+            loadSystemStatus();
+
+            // Show admin account section for simple auth users
+            if (user.auth_method === 'simple') {
+                var adminSection = document.getElementById('adminAccountSection');
+                if (adminSection) adminSection.classList.remove('hidden');
+                var usernameField = document.getElementById('adminNewUsername');
+                if (usernameField) usernameField.placeholder = user.username || 'Leave blank to keep current';
+            }
+
+            // Populate desktop header
+            var headerUsername = document.getElementById('headerUsername');
+            var headerRole = document.getElementById('headerRole');
+            if (headerUsername) headerUsername.textContent = user.display_name || user.username;
+            if (headerRole) headerRole.textContent = user.is_admin ? 'Admin' : 'User';
+
+            // Populate mobile user info
+            var mobileUsername = document.getElementById('mobileUsername');
+            var mobileRole = document.getElementById('mobileRole');
+            if (mobileUsername) mobileUsername.textContent = user.display_name || user.username;
+            if (mobileRole) mobileRole.textContent = user.is_admin ? 'Admin' : 'User';
+        })();
+
+        // Tab scroll hint — hide when scrolled to end
+        (function() {
+            var scroller = document.getElementById('tabScroller');
+            var hintRight = document.getElementById('tabScrollHint');
+            var hintLeft = document.getElementById('tabScrollHintLeft');
+            if (!scroller || !hintRight) return;
+            function checkScroll() {
+                var atEnd = scroller.scrollLeft + scroller.clientWidth >= scroller.scrollWidth - 4;
+                var atStart = scroller.scrollLeft <= 4;
+                hintRight.style.opacity = atEnd ? '0' : '1';
+                hintRight.style.transition = 'opacity 0.2s';
+                if (hintLeft) {
+                    hintLeft.style.opacity = atStart ? '0' : '1';
+                }
+            }
+            scroller.addEventListener('scroll', checkScroll);
+            window.addEventListener('resize', checkScroll);
+            checkScroll();
+        })();
+
+        // Tab switching
+        document.getElementById('tabIntegrations').addEventListener('click', () => switchTab('integrations'));
+        document.getElementById('tabSystem').addEventListener('click', () => switchTab('system'));
+        document.getElementById('tabTheme').addEventListener('click', () => switchTab('theme'));
+        document.getElementById('tabNews').addEventListener('click', () => switchTab('news'));
+
+        const tabIds = ['tabIntegrations', 'tabSystem', 'tabTheme', 'tabNews'];
+        const sectionIds = ['integrationsSection', 'systemSection', 'themeSection', 'newsSection'];
+        const tabMap = { integrations: 'tabIntegrations', system: 'tabSystem', theme: 'tabTheme', news: 'tabNews' };
+        const sectionMap = { integrations: 'integrationsSection', system: 'systemSection', theme: 'themeSection', news: 'newsSection' };
+
+        function switchTab(tab) {
+            // Hide all sections
+            sectionIds.forEach(id => document.getElementById(id).classList.add('hidden'));
+            // Show selected section
+            document.getElementById(sectionMap[tab]).classList.remove('hidden');
+
+            // Reset all tab styles
+            tabIds.forEach(id => {
+                const btn = document.getElementById(id);
+                btn.classList.remove('border-primary', 'text-primary');
+                btn.classList.add('border-transparent', 'text-steel-blue');
+            });
+
+            // Activate selected tab
+            const activeBtn = document.getElementById(tabMap[tab]);
+            activeBtn.classList.add('border-primary', 'text-primary');
+            activeBtn.classList.remove('border-transparent', 'text-steel-blue');
+        }
+
+        // --- Accordion ---
+        var _openAccordion = null;
+
+        function toggleAccordion(key) {
+            var items = document.querySelectorAll('#integrationsAccordion .accordion-item');
+            items.forEach(function(item) {
+                var itemKey = item.dataset.accordion;
+                var body = item.querySelector('.accordion-body');
+                var chevron = item.querySelector('.accordion-chevron');
+                if (itemKey === key && _openAccordion !== key) {
+                    body.classList.remove('hidden');
+                    chevron.style.transform = 'rotate(180deg)';
+                    _openAccordion = key;
+                } else {
+                    body.classList.add('hidden');
+                    chevron.style.transform = 'rotate(0deg)';
+                }
+            });
+            if (_openAccordion === key && document.querySelector('[data-accordion="' + key + '"] .accordion-body').classList.contains('hidden')) {
+                _openAccordion = null;
+            }
+        }
+
+        // Update accordion status dots when settings load
+        function updateAccordionDots(settingsMap) {
+            var dotMap = {
+                'UptimeKuma': 'integration.uptime_kuma.url',
+                'Plex': 'integration.plex.url',
+                'Overseerr': 'integration.overseerr.url',
+                'Netdata': 'integration.netdata.url',
+                'Sonarr': 'integration.sonarr.url',
+                'Radarr': 'integration.radarr.url'
+            };
+            for (var name in dotMap) {
+                var dot = document.getElementById('accordionDot' + name);
+                if (dot) {
+                    var hasUrl = settingsMap[dotMap[name]] && settingsMap[dotMap[name]].trim() !== '';
+                    dot.className = 'accordion-status size-2 rounded-full shrink-0 ' + (hasUrl ? 'bg-green-500' : 'bg-steel-blue/40');
+                }
+            }
+        }
+
+        // --- Icon Picker ---
+        var ICON_CATALOG = [
+            'home', 'settings', 'movie', 'tv', 'play_circle', 'download', 'upload',
+            'monitor_heart', 'health_metrics', 'newspaper', 'calendar_month', 'report_problem',
+            'settings_input_component', 'dns', 'movie_filter', 'monitoring', 'dashboard',
+            'analytics', 'bar_chart', 'pie_chart', 'trending_up', 'speed', 'memory',
+            'storage', 'cloud', 'cloud_download', 'cloud_upload', 'wifi', 'wifi_tethering',
+            'security', 'shield', 'lock', 'vpn_key', 'admin_panel_settings',
+            'person', 'group', 'account_circle', 'manage_accounts', 'supervisor_account',
+            'notifications', 'email', 'chat', 'forum', 'message',
+            'search', 'filter_list', 'sort', 'view_list', 'grid_view',
+            'favorite', 'star', 'bookmark', 'flag', 'label',
+            'check_circle', 'error', 'warning', 'info', 'help',
+            'schedule', 'timer', 'update', 'history', 'alarm',
+            'folder', 'description', 'article', 'note', 'receipt',
+            'link', 'share', 'public', 'language', 'travel_explore',
+            'code', 'terminal', 'data_object', 'api', 'integration_instructions',
+            'palette', 'brush', 'color_lens', 'tune', 'display_settings',
+            'devices', 'computer', 'phone_android', 'tablet', 'desktop_windows',
+            'music_note', 'headphones', 'mic', 'videocam', 'photo_camera',
+            'image', 'photo_library', 'theaters', 'live_tv', 'smart_display',
+            'rocket_launch', 'bolt', 'auto_awesome', 'lightbulb', 'extension',
+            'hub', 'network_node', 'swap_horiz', 'sync', 'refresh',
+            'power_settings_new', 'restart_alt', 'build', 'construction', 'handyman'
+        ];
+
+        var _iconPickerTarget = null;
+
+        function openIconPicker(targetInputId) {
+            _iconPickerTarget = targetInputId;
+            var modal = document.getElementById('iconPickerModal');
+            modal.classList.remove('hidden');
+            document.getElementById('iconPickerSearch').value = '';
+            document.getElementById('iconPickerManual').value = '';
+            _renderIconGrid('');
+            setTimeout(function() { document.getElementById('iconPickerSearch').focus(); }, 50);
+        }
+
+        function _renderIconGrid(filter) {
+            var grid = document.getElementById('iconPickerGrid');
+            var lowerFilter = (filter || '').toLowerCase();
+            var currentVal = _iconPickerTarget ? document.getElementById(_iconPickerTarget).value : '';
+            var filtered = ICON_CATALOG.filter(function(icon) {
+                return !lowerFilter || icon.indexOf(lowerFilter) !== -1;
+            });
+
+            while (grid.firstChild) grid.removeChild(grid.firstChild);
+
+            filtered.forEach(function(iconName) {
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                var isActive = iconName === currentVal;
+                btn.className = 'flex flex-col items-center justify-center p-2 rounded-lg transition-all cursor-pointer ' +
+                    (isActive ? 'bg-primary/30 border border-primary/50' : 'hover:bg-primary/10 border border-transparent hover:border-steel-blue/20');
+                btn.title = iconName;
+
+                var span = document.createElement('span');
+                span.className = 'material-symbols-outlined text-2xl ' + (isActive ? 'text-bright' : 'text-frosted-blue');
+                span.textContent = iconName;
+                btn.appendChild(span);
+
+                var label = document.createElement('span');
+                label.className = 'text-[8px] text-steel-blue/50 mt-0.5 truncate w-full text-center';
+                label.textContent = iconName;
+                btn.appendChild(label);
+
+                btn.addEventListener('click', function() { _applyIconSelection(iconName); });
+                grid.appendChild(btn);
+            });
+        }
+
+        function _applyIconSelection(iconName) {
+            if (!_iconPickerTarget) return;
+            document.getElementById(_iconPickerTarget).value = iconName;
+            // Update the preview
+            var previewId = 'iconPreview' + _iconPickerTarget.replace('icon', '');
+            var preview = document.getElementById(previewId);
+            if (preview) preview.textContent = iconName;
+            // Also update sidebar label icons if applicable
+            _syncLabelIcons();
+            document.getElementById('iconPickerModal').classList.add('hidden');
+            _iconPickerTarget = null;
+        }
+
+        function _syncLabelIcons() {
+            var map = {
+                labelIconHome: 'iconNavHome',
+                labelIconRequests: 'iconNavRequests',
+                labelIconRequestsEmbed: 'iconNavRequestsEmbed',
+                labelIconIssues: 'iconNavIssues',
+                labelIconTickets: 'iconNavTickets',
+                labelIconSettings: 'iconNavSettings'
+            };
+            for (var labelId in map) {
+                var inputEl = document.getElementById(map[labelId]);
+                var labelEl = document.getElementById(labelId);
+                if (inputEl && labelEl) {
+                    labelEl.textContent = inputEl.value || inputEl.placeholder || inputEl.dataset.default || '';
+                }
+            }
+        }
+
+        // Wire icon picker buttons
+        document.querySelectorAll('.icon-picker-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var target = btn.dataset.iconTarget;
+                if (target) openIconPicker(target);
+            });
+        });
+
+        document.getElementById('iconPickerClose').addEventListener('click', function() {
+            document.getElementById('iconPickerModal').classList.add('hidden');
+        });
+
+        document.getElementById('iconPickerModal').addEventListener('click', function(e) {
+            if (e.target === this) this.classList.add('hidden');
+        });
+
+        document.getElementById('iconPickerSearch').addEventListener('input', function() {
+            _renderIconGrid(this.value.trim());
+        });
+
+        document.getElementById('iconPickerManualApply').addEventListener('click', function() {
+            var val = document.getElementById('iconPickerManual').value.trim();
+            if (val) _applyIconSelection(val);
+        });
+
+        document.getElementById('iconPickerManual').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                var val = this.value.trim();
+                if (val) _applyIconSelection(val);
+            }
+        });
+
+        // --- Custom CSS Toggle ---
+        document.getElementById('customCssToggle').addEventListener('click', function() {
+            var body = document.getElementById('customCssBody');
+            var chevron = document.getElementById('customCssChevron');
+            body.classList.toggle('hidden');
+            chevron.style.transform = body.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
+        });
+
+        // --- Monitor List (from Uptime Kuma) ---
+        document.getElementById('btnRefreshMonitors').addEventListener('click', () => loadMonitors());
+
+        async function loadMonitors() {
+            const list = document.getElementById('monitorsList');
+            try {
+                const response = await fetch('/api/integrations/monitors');
+                if (response.status === 401) { window.location.href = '/login'; return; }
+                const monitors = await response.json();
+
+                if (monitors.length === 0) {
+                    list.innerHTML = '<div class="text-center text-steel-blue py-12">' +
+                        '<span class="material-symbols-outlined text-6xl mb-4 block opacity-50">monitor_heart</span>' +
+                        '<p>No monitors found. Configure Uptime Kuma below to get started.</p></div>';
+                    return;
+                }
+
+                list.innerHTML = monitors.map(function(m) {
+                    var statusDot = m.status === 'up' ? 'bg-green-500' :
+                                    m.status === 'degraded' ? 'bg-yellow-500' :
+                                    m.status === 'down' ? 'bg-red-500' : 'bg-steel-blue';
+                    var statusLabel = m.status === 'up' ? 'Online' :
+                                     m.status === 'degraded' ? 'Degraded' :
+                                     m.status === 'down' ? 'Offline' : m.status;
+                    var ping = m.response_time ? m.response_time + 'ms' : '--';
+                    var uptime = m.uptime_24h != null ? m.uptime_24h + '%' : '--';
+
+                    return '<div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl px-5 py-4 flex items-center gap-4">' +
+                        '<div class="flex-1 min-w-0">' +
+                            '<div class="flex items-center gap-2">' +
+                                '<span class="size-2 rounded-full ' + statusDot + ' shrink-0"></span>' +
+                                '<h3 class="font-bold text-frosted-blue truncate">' + escapeHtml(m.name) + '</h3>' +
+                            '</div>' +
+                            '<p class="text-xs text-steel-blue mt-0.5">' + statusLabel + ' &middot; ' + ping + ' &middot; ' + uptime + ' uptime (24h)</p>' +
+                        '</div>' +
+                        '<div class="flex items-center gap-3 shrink-0">' +
+                            '<label class="relative inline-flex items-center cursor-pointer">' +
+                                '<input type="checkbox" data-monitor-id="' + m.id + '" data-field="enabled"' +
+                                    (m.enabled ? ' checked' : '') +
+                                    ' class="sr-only peer">' +
+                                '<div class="w-9 h-5 bg-steel-blue/30 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:bg-primary transition-colors"></div>' +
+                                '<div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full peer-checked:translate-x-4 transition-transform"></div>' +
+                            '</label>' +
+                        '</div>' +
+                    '</div>';
+                }).join('');
+
+                // Wire toggle and icon change handlers
+                list.querySelectorAll('input[data-field="enabled"]').forEach(function(toggle) {
+                    toggle.addEventListener('change', function() {
+                        updateMonitorPref(this.dataset.monitorId, { enabled: this.checked });
+                    });
+                });
+            } catch (error) {
+                console.error('Error loading monitors:', error);
+                list.innerHTML = '<div class="text-center text-red-400 py-12">' +
+                    '<span class="material-symbols-outlined text-6xl mb-4 block">error</span>' +
+                    '<p>Error loading monitors</p></div>';
+            }
+        }
+
+        async function updateMonitorPref(monitorId, prefs) {
+            try {
+                await fetch('/api/admin/monitors/' + monitorId, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(prefs)
+                });
+            } catch (error) {
+                console.error('Error updating monitor:', error);
+            }
+        }
+
+        // --- Integration Settings ---
+
+        // Field mappings: integration key -> { url input id, credential input id, status div id }
+        const integrationFields = {
+            uptime_kuma: {
+                urlInput: 'integrationUptimeKumaUrl',
+                credInput: 'integrationUptimeKumaApiKey',
+                urlKey: 'integration.uptime_kuma.url',
+                credKey: 'integration.uptime_kuma.api_key',
+                slugInput: 'integrationUptimeKumaSlug',
+                slugKey: 'integration.uptime_kuma.slug',
+                statusDiv: 'statusUptimeKuma'
+            },
+            plex: {
+                urlInput: 'integrationPlexUrl',
+                credInput: 'integrationPlexToken',
+                urlKey: 'integration.plex.url',
+                credKey: 'integration.plex.token',
+                statusDiv: 'statusPlex'
+            },
+            overseerr: {
+                urlInput: 'integrationOverseerrUrl',
+                credInput: 'integrationOverseerrApiKey',
+                urlKey: 'integration.overseerr.url',
+                credKey: 'integration.overseerr.api_key',
+                statusDiv: 'statusOverseerr'
+            },
+            netdata: {
+                urlInput: 'integrationNetdataUrl',
+                credInput: 'integrationNetdataApiKey',
+                urlKey: 'integration.netdata.url',
+                credKey: 'integration.netdata.api_key',
+                statusDiv: 'statusNetdata',
+                extraFields: [
+                    { input: 'netdataCpuLabel', key: 'netdata.cpu_label' },
+                    { input: 'netdataRamLabel', key: 'netdata.ram_label' },
+                    { input: 'netdataNetLabel', key: 'netdata.net_label' },
+                ]
+            },
+            sonarr: {
+                urlInput: 'integrationSonarrUrl',
+                credInput: 'integrationSonarrApiKey',
+                urlKey: 'integration.sonarr.url',
+                credKey: 'integration.sonarr.api_key',
+                statusDiv: 'statusSonarr'
+            },
+            radarr: {
+                urlInput: 'integrationRadarrUrl',
+                credInput: 'integrationRadarrApiKey',
+                urlKey: 'integration.radarr.url',
+                credKey: 'integration.radarr.api_key',
+                statusDiv: 'statusRadarr'
+            },
+            authentik: {
+                urlInput: 'authAuthentikUrl',
+                credInput: 'authAuthentikClientId',
+                urlKey: 'integration.authentik.url',
+                credKey: 'integration.authentik.client_id',
+                statusDiv: 'statusAuth',
+                extraFields: [
+                    { input: 'authAuthentikClientSecret', key: 'integration.authentik.client_secret' },
+                    { input: 'authAuthentikSlug', key: 'integration.authentik.app_slug' },
+                ]
+            }
+        };
+
+        // Clear all fields for an integration and save empty values to backend
+        async function clearIntegration(service) {
+            var fields = integrationFields[service];
+            var statusDiv = document.getElementById(fields.statusDiv);
+
+            // Collect all setting keys to clear
+            var settingsToClear = [
+                { key: fields.urlKey, value: '', description: service + ' URL' },
+                { key: fields.credKey, value: '', description: service + ' credentials' }
+            ];
+            if (fields.slugInput && fields.slugKey) {
+                document.getElementById(fields.slugInput).value = '';
+                settingsToClear.push({ key: fields.slugKey, value: '', description: service + ' slug' });
+            }
+            if (fields.extraFields) {
+                fields.extraFields.forEach(function(ef) {
+                    var el = document.getElementById(ef.input);
+                    if (el) { el.value = ''; }
+                    settingsToClear.push({ key: ef.key, value: '', description: ef.key });
+                });
+            }
+
+            // Clear input fields
+            document.getElementById(fields.urlInput).value = '';
+            document.getElementById(fields.credInput).value = '';
+
+            try {
+                var resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: settingsToClear })
+                });
+                if (resp.ok) {
+                    showStatus(statusDiv, true, 'Integration cleared');
+                    // Update accordion dot to inactive
+                    var dotId = 'accordionDot' + service.charAt(0).toUpperCase() + service.slice(1).replace('_', '');
+                    var dot = document.getElementById(dotId);
+                    if (dot) dot.className = 'accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0';
+                    // Hide the clear button
+                    var clearBtn = document.getElementById('clearBtn' + service);
+                    if (clearBtn) clearBtn.classList.add('hidden');
+                } else {
+                    showStatus(statusDiv, false, 'Failed to clear');
+                }
+            } catch (e) {
+                showStatus(statusDiv, false, 'Error: ' + e.message);
+            }
+        }
+
+        // Load all settings from the server and populate fields
+        async function loadSettings() {
+            try {
+                const resp = await fetch('/api/admin/settings');
+                if (!resp.ok) return;
+                const settings = await resp.json();
+
+                // Build a key->value map
+                const settingsMap = {};
+                settings.forEach(s => { settingsMap[s.key] = s.value; });
+
+                // Populate integration fields
+                for (const [svc, fields] of Object.entries(integrationFields)) {
+                    if (settingsMap[fields.urlKey]) {
+                        document.getElementById(fields.urlInput).value = settingsMap[fields.urlKey];
+                    }
+                    if (settingsMap[fields.credKey]) {
+                        document.getElementById(fields.credInput).value = settingsMap[fields.credKey];
+                    }
+                    // Show clear button if integration has any saved data
+                    if (settingsMap[fields.urlKey] || settingsMap[fields.credKey]) {
+                        var clearBtn = document.getElementById('clearBtn' + svc);
+                        if (clearBtn) clearBtn.classList.remove('hidden');
+                    }
+                    if (fields.slugInput && fields.slugKey && settingsMap[fields.slugKey]) {
+                        document.getElementById(fields.slugInput).value = settingsMap[fields.slugKey];
+                    }
+                    // Populate extra fields (gauge labels, etc.)
+                    if (fields.extraFields) {
+                        fields.extraFields.forEach(function(ef) {
+                            if (settingsMap[ef.key] !== undefined) {
+                                var el = document.getElementById(ef.input);
+                                if (el) el.value = settingsMap[ef.key];
+                            }
+                        });
+                    }
+                }
+
+                // Populate system fields
+                if (settingsMap['system.admin_email']) {
+                    document.getElementById('systemAdminEmail').value = settingsMap['system.admin_email'];
+                }
+
+                // Feature flags
+                document.getElementById('featureShowRequests').checked = settingsMap['features.show_requests'] === 'true';
+
+                // Notification poll intervals
+                if (settingsMap['notifications.poll_interval_overseerr']) {
+                    document.getElementById('notifPollOverseerr').value = settingsMap['notifications.poll_interval_overseerr'];
+                }
+                if (settingsMap['notifications.poll_interval_monitors']) {
+                    document.getElementById('notifPollMonitors').value = settingsMap['notifications.poll_interval_monitors'];
+                }
+                if (settingsMap['notifications.poll_interval_news']) {
+                    document.getElementById('notifPollNews').value = settingsMap['notifications.poll_interval_news'];
+                }
+                if (settingsMap['notifications.poll_interval_tickets']) {
+                    document.getElementById('notifPollTickets').value = settingsMap['notifications.poll_interval_tickets'];
+                }
+
+                // Update accordion status dots
+                updateAccordionDots(settingsMap);
+            } catch (e) {
+                console.error('Error loading settings:', e);
+            }
+        }
+
+        // Save an integration's settings
+        async function saveIntegration(service) {
+            const fields = integrationFields[service];
+            const urlVal = document.getElementById(fields.urlInput).value;
+            const credVal = document.getElementById(fields.credInput).value;
+            const statusDiv = document.getElementById(fields.statusDiv);
+
+            const settingsToSave = [
+                { key: fields.urlKey, value: urlVal, description: `${service} URL` }
+            ];
+
+            // Save credentials: skip only the masked placeholder (which means "unchanged")
+            if (credVal !== '***masked***') {
+                settingsToSave.push({ key: fields.credKey, value: credVal, description: `${service} credentials` });
+            }
+
+            // Save extra fields (e.g., slug for Uptime Kuma)
+            if (fields.slugInput && fields.slugKey) {
+                const slugVal = document.getElementById(fields.slugInput).value;
+                settingsToSave.push({ key: fields.slugKey, value: slugVal, description: `${service} status page slug` });
+            }
+
+            // Save extra fields (generic: CPU/RAM/Net labels for Netdata, etc.)
+            if (fields.extraFields) {
+                fields.extraFields.forEach(function(ef) {
+                    var el = document.getElementById(ef.input);
+                    if (el) {
+                        settingsToSave.push({ key: ef.key, value: el.value, description: ef.key });
+                    }
+                });
+            }
+
+            // Save feature flags for overseerr
+            if (service === 'overseerr') {
+                settingsToSave.push({
+                    key: 'features.show_requests',
+                    value: document.getElementById('featureShowRequests').checked ? 'true' : 'false',
+                    description: 'Show Overseerr iframe Requests page in sidebar'
+                });
+            }
+
+            try {
+                const resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: settingsToSave })
+                });
+
+                if (resp.ok) {
+                    showStatus(statusDiv, true, 'Settings saved');
+                } else {
+                    const err = await resp.json();
+                    showStatus(statusDiv, false, err.detail || 'Failed to save');
+                }
+            } catch (e) {
+                showStatus(statusDiv, false, 'Error: ' + e.message);
+            }
+        }
+
+        // Test an integration connection
+        async function testConnection(service) {
+            const fields = integrationFields[service];
+            const urlVal = document.getElementById(fields.urlInput).value;
+            const credVal = document.getElementById(fields.credInput).value;
+            const statusDiv = document.getElementById(fields.statusDiv);
+
+            if (!urlVal) {
+                showStatus(statusDiv, false, 'URL is required');
+                return;
+            }
+
+            // Show loading state
+            statusDiv.innerHTML = '<span class="material-symbols-outlined animate-spin text-steel-blue">progress_activity</span><span class="text-steel-blue">Testing...</span>';
+
+            try {
+                const resp = await fetch('/api/admin/test-connection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        service: service,
+                        url: urlVal,
+                        credentials: credVal && credVal !== '***masked***' ? credVal : ''
+                    })
+                });
+
+                const result = await resp.json();
+                showStatus(statusDiv, result.success, result.message);
+            } catch (e) {
+                showStatus(statusDiv, false, 'Error: ' + e.message);
+            }
+        }
+
+        // Display success/failure inline
+        function showStatus(el, success, message) {
+            const color = success ? 'text-green-400' : 'text-red-400';
+            const icon = success ? 'check_circle' : 'error';
+            el.innerHTML = `<span class="material-symbols-outlined ${color}">${icon}</span><span class="${color}">${escapeHtml(message)}</span>`;
+
+            // Auto-clear after 8 seconds
+            setTimeout(() => { el.innerHTML = ''; }, 8000);
+        }
+
+        // --- Notification Settings ---
+
+        async function saveNotificationSettings() {
+            var statusEl = document.getElementById('statusNotifications');
+            var settings = [
+                { key: 'notifications.poll_interval_overseerr', value: String(Math.max(30, parseInt(document.getElementById('notifPollOverseerr').value) || 60)) },
+                { key: 'notifications.poll_interval_monitors', value: String(Math.max(30, parseInt(document.getElementById('notifPollMonitors').value) || 60)) },
+                { key: 'notifications.poll_interval_news', value: String(Math.max(30, parseInt(document.getElementById('notifPollNews').value) || 60)) },
+                { key: 'notifications.poll_interval_tickets', value: String(Math.max(30, parseInt(document.getElementById('notifPollTickets').value) || 60)) },
+            ];
+            try {
+                var resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: settings }),
+                });
+                if (resp.ok) {
+                    statusEl.textContent = 'Saved';
+                    statusEl.className = 'flex items-center gap-2 text-sm text-green-400';
+                } else {
+                    statusEl.textContent = 'Error saving';
+                    statusEl.className = 'flex items-center gap-2 text-sm text-red-400';
+                }
+            } catch (e) {
+                statusEl.textContent = 'Network error';
+                statusEl.className = 'flex items-center gap-2 text-sm text-red-400';
+            }
+            setTimeout(function() { statusEl.textContent = ''; }, 3000);
+        }
+
+        async function sendTestNotification() {
+            var statusEl = document.getElementById('statusNotifications');
+            try {
+                var resp = await fetch('/api/admin/notifications/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: 'Test notification', body: 'This is a test notification from WebServarr.' }),
+                });
+                if (resp.ok) {
+                    var data = await resp.json();
+                    statusEl.textContent = 'Sent to ' + data.sent_to + ' user(s)';
+                    statusEl.className = 'flex items-center gap-2 text-sm text-green-400';
+                } else {
+                    statusEl.textContent = 'Error sending';
+                    statusEl.className = 'flex items-center gap-2 text-sm text-red-400';
+                }
+            } catch (e) {
+                statusEl.textContent = 'Network error';
+                statusEl.className = 'flex items-center gap-2 text-sm text-red-400';
+            }
+            setTimeout(function() { statusEl.textContent = ''; }, 3000);
+        }
+
+        // --- Admin Account ---
+
+        var btnSaveAdmin = document.getElementById('btnSaveAdminAccount');
+        if (btnSaveAdmin) {
+            btnSaveAdmin.addEventListener('click', async function() {
+                var statusDiv = document.getElementById('statusAdminAccount');
+                var currentPw = document.getElementById('adminCurrentPassword').value;
+                var newUser = document.getElementById('adminNewUsername').value;
+                var newPw = document.getElementById('adminNewPassword').value;
+                var confirmPw = document.getElementById('adminConfirmPassword').value;
+
+                if (!currentPw) {
+                    showStatus(statusDiv, false, 'Current password is required');
+                    return;
+                }
+                if (newPw && newPw.length < 8) {
+                    showStatus(statusDiv, false, 'Password must be at least 8 characters');
+                    return;
+                }
+                if (newPw !== confirmPw) {
+                    showStatus(statusDiv, false, 'Passwords do not match');
+                    return;
+                }
+
+                try {
+                    var resp = await fetch('/api/admin/account', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            current_password: currentPw,
+                            new_username: newUser,
+                            new_password: newPw,
+                            new_password_confirm: confirmPw,
+                        })
+                    });
+                    var result = await resp.json();
+                    if (resp.ok) {
+                        showStatus(statusDiv, true, result.message || 'Account updated');
+                        document.getElementById('adminCurrentPassword').value = '';
+                        document.getElementById('adminNewPassword').value = '';
+                        document.getElementById('adminConfirmPassword').value = '';
+                    } else {
+                        showStatus(statusDiv, false, result.detail || 'Failed to update');
+                    }
+                } catch (e) {
+                    showStatus(statusDiv, false, 'Error: ' + e.message);
+                }
+            });
+        }
+
+        // --- System Settings ---
+
+        document.getElementById('btnSaveSystem').addEventListener('click', async () => {
+            const adminEmail = document.getElementById('systemAdminEmail').value;
+            const statusDiv = document.getElementById('statusSystem');
+
+            try {
+                const resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        settings: [
+                            { key: 'system.admin_email', value: adminEmail, description: 'Admin email' }
+                        ]
+                    })
+                });
+
+                if (resp.ok) {
+                    showStatus(statusDiv, true, 'System settings saved');
+                } else {
+                    const err = await resp.json();
+                    showStatus(statusDiv, false, err.detail || 'Failed to save');
+                }
+            } catch (e) {
+                showStatus(statusDiv, false, 'Error: ' + e.message);
+            }
+        });
+
+        // --- Authentication Settings ---
+
+        // Toggle Authentik config fields visibility
+        document.getElementById('authToggleAuthentik').addEventListener('change', function() {
+            document.getElementById('authentikConfigFields').classList.toggle('hidden', !this.checked);
+        });
+
+        // Save auth settings
+        document.getElementById('btnSaveAuth').addEventListener('click', async function() {
+            var statusDiv = document.getElementById('statusAuth');
+            var btn = this;
+            btn.disabled = true;
+
+            var settings = [
+                { key: 'features.show_simple_auth', value: document.getElementById('authToggleSimple').checked ? 'true' : 'false', description: 'Enable local login' },
+                { key: 'features.show_plex_auth', value: document.getElementById('authTogglePlex').checked ? 'true' : 'false', description: 'Enable Plex OAuth login' },
+                { key: 'features.show_authentik_auth', value: document.getElementById('authToggleAuthentik').checked ? 'true' : 'false', description: 'Enable Authentik OIDC login' },
+            ];
+
+            // Include Authentik config fields if toggle is on
+            if (document.getElementById('authToggleAuthentik').checked) {
+                settings.push({ key: 'integration.authentik.url', value: document.getElementById('authAuthentikUrl').value, description: 'Authentik URL' });
+                settings.push({ key: 'integration.authentik.client_id', value: document.getElementById('authAuthentikClientId').value, description: 'Authentik Client ID' });
+                settings.push({ key: 'integration.authentik.client_secret', value: document.getElementById('authAuthentikClientSecret').value, description: 'Authentik Client Secret' });
+                settings.push({ key: 'integration.authentik.app_slug', value: document.getElementById('authAuthentikSlug').value, description: 'Authentik App Slug' });
+            }
+
+            try {
+                var resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: settings })
+                });
+
+                if (resp.ok) {
+                    showStatus(statusDiv, true, 'Authentication settings saved');
+                    localStorage.removeItem('webservarr_branding');
+                } else {
+                    var err = await resp.json();
+                    showStatus(statusDiv, false, err.detail || 'Failed to save');
+                }
+            } catch (e) {
+                showStatus(statusDiv, false, 'Error: ' + e.message);
+            }
+
+            btn.disabled = false;
+        });
+
+        // --- Theme Settings ---
+
+        // Color field definitions: picker ID, hex input ID, CSS var, settings key
+        const themeColorFields = [
+            { picker: 'themeColorPrimary', hex: 'themeColorPrimaryHex', cssVar: '--color-primary', key: 'theme.color_primary' },
+            { picker: 'themeColorSecondary', hex: 'themeColorSecondaryHex', cssVar: '--color-secondary', key: 'theme.color_secondary' },
+            { picker: 'themeColorAccent', hex: 'themeColorAccentHex', cssVar: '--color-accent', key: 'theme.color_accent' },
+            { picker: 'themeColorText', hex: 'themeColorTextHex', cssVar: '--color-text', key: 'theme.color_text' },
+            { picker: 'themeColorTextSecondary', hex: 'themeColorTextSecondaryHex', cssVar: '--color-text-secondary', key: 'theme.color_text_secondary' },
+            { picker: 'themeColorBackground', hex: 'themeColorBackgroundHex', cssVar: '--color-background', key: 'theme.color_background' },
+        ];
+
+        const THEME_DEFAULTS = {
+            'branding.app_name': 'WebServarr',
+            'branding.tagline': 'Media Server Management',
+            'branding.logo_url': '',
+            'theme.color_primary': '#125793',
+            'theme.color_secondary': '#2C6DA1',
+            'theme.color_accent': '#4684B0',
+            'theme.color_text': '#BEEEF4',
+            'theme.color_text_secondary': '#FFFFFF',
+            'theme.color_background': '#000000',
+            'theme.font': 'Spline Sans',
+            'theme.custom_css': '',
+            'sidebar.label_home': 'Home',
+            'sidebar.label_requests': 'Requests',
+            'sidebar.label_requests_embed': 'Requests (Embed)',
+            'sidebar.label_issues': 'Issues',
+            'sidebar.label_tickets': 'Tickets',
+            'sidebar.label_settings': 'Settings',
+            'icon.sidebar_logo': 'settings_input_component',
+            'icon.nav_home': 'home',
+            'icon.nav_requests': 'movie',
+            'icon.nav_requests_embed': 'download',
+            'icon.nav_issues': 'report_problem',
+            'icon.nav_tickets': 'confirmation_number',
+            'icon.nav_settings': 'settings',
+            'icon.section_services': 'health_metrics',
+            'icon.section_news': 'newspaper',
+            'icon.section_streams': 'play_circle',
+            'icon.section_releases': 'calendar_month',
+            'icon.section_requests': 'shopping_cart',
+        };
+
+        function hexToRgb(hex) {
+            hex = hex.replace('#', '');
+            if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+            var r = parseInt(hex.substring(0, 2), 16);
+            var g = parseInt(hex.substring(2, 4), 16);
+            var b = parseInt(hex.substring(4, 6), 16);
+            return r + ' ' + g + ' ' + b;
+        }
+
+        // Wire color picker <-> hex input bidirectional sync + live preview
+        themeColorFields.forEach(function(field) {
+            var picker = document.getElementById(field.picker);
+            var hexInput = document.getElementById(field.hex);
+
+            picker.addEventListener('input', function() {
+                hexInput.value = picker.value;
+                document.documentElement.style.setProperty(field.cssVar, hexToRgb(picker.value));
+                document.documentElement.style.setProperty(field.cssVar.replace('--color-', '--hex-'), picker.value);
+            });
+
+            hexInput.addEventListener('input', function() {
+                var val = hexInput.value.trim();
+                if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+                    picker.value = val;
+                    document.documentElement.style.setProperty(field.cssVar, hexToRgb(val));
+                    document.documentElement.style.setProperty(field.cssVar.replace('--color-', '--hex-'), val);
+                }
+            });
+        });
+
+        // --- Logo Upload & Preview ---
+        function _updateLogoPreview(url) {
+            var preview = document.getElementById('logoPreview');
+            while (preview.firstChild) preview.removeChild(preview.firstChild);
+            if (url) {
+                var img = document.createElement('img');
+                img.src = url;
+                img.alt = 'Logo';
+                img.className = 'w-full h-full object-contain';
+                preview.appendChild(img);
+            } else {
+                var icon = document.createElement('span');
+                icon.className = 'material-symbols-outlined text-steel-blue text-2xl';
+                icon.textContent = 'image';
+                preview.appendChild(icon);
+            }
+        }
+
+        document.getElementById('themeLogoUrl').addEventListener('input', function() {
+            _updateLogoPreview(this.value.trim());
+        });
+
+        document.getElementById('btnClearLogo').addEventListener('click', function() {
+            document.getElementById('themeLogoUrl').value = '';
+            _updateLogoPreview('');
+        });
+
+        document.getElementById('logoFileInput').addEventListener('change', async function() {
+            var file = this.files[0];
+            if (!file) return;
+            var statusEl = document.getElementById('logoUploadStatus');
+            statusEl.textContent = 'Uploading...';
+            statusEl.className = 'text-xs text-steel-blue';
+
+            var formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                var resp = await fetch('/api/admin/upload-logo', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (resp.ok) {
+                    var data = await resp.json();
+                    document.getElementById('themeLogoUrl').value = data.url;
+                    _updateLogoPreview(data.url);
+                    statusEl.textContent = 'Uploaded!';
+                    statusEl.className = 'text-xs text-green-400';
+                } else {
+                    var err = await resp.json();
+                    statusEl.textContent = err.detail || 'Upload failed';
+                    statusEl.className = 'text-xs text-red-400';
+                }
+            } catch (e) {
+                statusEl.textContent = 'Error: ' + e.message;
+                statusEl.className = 'text-xs text-red-400';
+            }
+            this.value = '';
+            setTimeout(function() { statusEl.textContent = ''; }, 5000);
+        });
+
+        // Icon hidden inputs don't need live preview wiring — icon picker handles it
+        // Kept for backward compatibility with loadThemeSettings which sets .value on hidden inputs
+        (function() { /* icon wiring handled by icon picker */
+        });
+
+        // --- Font Dropdown ---
+        var FONT_LIST = [
+            'Spline Sans', 'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat',
+            'Poppins', 'Nunito', 'Raleway', 'Source Sans 3', 'Ubuntu', 'Outfit',
+            'Space Grotesk', 'DM Sans', 'Manrope', 'Plus Jakarta Sans', 'Sora',
+            'Lexend', 'Figtree', 'Work Sans', 'Jost', 'Albert Sans', 'Barlow',
+            'Red Hat Display', 'Rubik', 'Nunito Sans', 'Cabin', 'Karla',
+            'Quicksand', 'Exo 2'
+        ];
+        var _loadedFonts = {};
+
+        function _loadFontPreview(fontName) {
+            if (_loadedFonts[fontName]) return;
+            _loadedFonts[fontName] = true;
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(fontName) + '&display=swap';
+            document.head.appendChild(link);
+        }
+
+        function _createFontBtn(fontName, isActive) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'w-full text-left px-4 py-2.5 text-sm transition-colors ' +
+                (isActive ? 'bg-primary/30 text-bright' : 'text-frosted-blue hover:bg-primary/20');
+            btn.style.fontFamily = "'" + fontName + "', sans-serif";
+            btn.dataset.font = fontName;
+            btn.textContent = fontName;
+            btn.addEventListener('click', function() { _selectFont(fontName); });
+            return btn;
+        }
+
+        function _buildFontOptions(filter) {
+            var list = document.getElementById('fontOptionsList');
+            var currentVal = document.getElementById('themeFont').value;
+            var lowerFilter = (filter || '').toLowerCase();
+            var filtered = FONT_LIST.filter(function(f) {
+                return !lowerFilter || f.toLowerCase().indexOf(lowerFilter) !== -1;
+            });
+
+            filtered.forEach(_loadFontPreview);
+            while (list.firstChild) list.removeChild(list.firstChild);
+
+            filtered.forEach(function(fontName) {
+                list.appendChild(_createFontBtn(fontName, fontName === currentVal));
+            });
+
+            // Custom entry option
+            if (lowerFilter && !FONT_LIST.some(function(f) { return f.toLowerCase() === lowerFilter; })) {
+                var customBtn = document.createElement('button');
+                customBtn.type = 'button';
+                customBtn.className = 'w-full text-left px-4 py-2.5 text-sm text-steel-blue hover:bg-primary/20 transition-colors border-t border-steel-blue/20';
+                customBtn.dataset.font = filter;
+                customBtn.textContent = 'Use custom: "' + filter + '"';
+                customBtn.addEventListener('click', function() { _selectFont(filter); });
+                list.appendChild(customBtn);
+            }
+        }
+
+        function _selectFont(fontName) {
+            document.getElementById('themeFont').value = fontName;
+            var label = document.getElementById('fontDropdownLabel');
+            label.textContent = fontName;
+            _loadFontPreview(fontName);
+            label.style.fontFamily = "'" + fontName + "', sans-serif";
+            document.getElementById('fontDropdownPanel').classList.add('hidden');
+            document.getElementById('fontSearch').value = '';
+        }
+
+        document.getElementById('fontDropdownBtn').addEventListener('click', function() {
+            var panel = document.getElementById('fontDropdownPanel');
+            var isHidden = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden');
+            if (isHidden) {
+                _buildFontOptions('');
+                document.getElementById('fontSearch').focus();
+            }
+        });
+
+        document.getElementById('fontSearch').addEventListener('input', function() {
+            _buildFontOptions(this.value.trim());
+        });
+
+        document.addEventListener('click', function(e) {
+            var container = document.getElementById('fontDropdownContainer');
+            if (!container.contains(e.target)) {
+                document.getElementById('fontDropdownPanel').classList.add('hidden');
+            }
+        });
+
+        // Load current theme values from branding API
+        async function loadThemeSettings() {
+            try {
+                const resp = await fetch('/api/branding');
+                if (!resp.ok) return;
+                const data = await resp.json();
+
+                document.getElementById('themeAppName').value = data.app_name || '';
+                document.getElementById('themeTagline').value = data.tagline || '';
+                document.getElementById('themeLogoUrl').value = data.logo_url || '';
+                _updateLogoPreview(data.logo_url || '');
+                const colors = data.colors || {};
+                const colorMap = {
+                    primary: colors.primary || '#125793',
+                    secondary: colors.secondary || '#2C6DA1',
+                    accent: colors.accent || '#4684B0',
+                    text: colors.text || '#BEEEF4',
+                    text_secondary: colors.text_secondary || '#FFFFFF',
+                    background: colors.background || '#000000',
+                };
+
+                themeColorFields.forEach(function(field) {
+                    var colorName = field.key.replace('theme.color_', '');
+                    var colorVal = colorMap[colorName] || '#000000';
+                    document.getElementById(field.picker).value = colorVal;
+                    document.getElementById(field.hex).value = colorVal;
+                });
+
+                var fontVal = data.font || 'Spline Sans';
+                document.getElementById('themeFont').value = fontVal;
+                var fontLabel = document.getElementById('fontDropdownLabel');
+                fontLabel.textContent = fontVal;
+                _loadFontPreview(fontVal);
+                fontLabel.style.fontFamily = "'" + fontVal + "', sans-serif";
+
+                document.getElementById('themeCustomCss').value = data.custom_css || '';
+
+                // Sidebar labels
+                var sidebarLabels = data.sidebar_labels || {};
+                document.getElementById('sidebarLabelHome').value = sidebarLabels.home || '';
+                document.getElementById('sidebarLabelRequests').value = sidebarLabels.requests || '';
+                document.getElementById('sidebarLabelRequestsEmbed').value = sidebarLabels['requests-embed'] || '';
+                document.getElementById('sidebarLabelIssues').value = sidebarLabels.issues || '';
+                document.getElementById('sidebarLabelTickets').value = sidebarLabels.tickets || '';
+                document.getElementById('sidebarLabelSettings').value = sidebarLabels.settings || '';
+
+                // Icons
+                var iconsData = data.icons || {};
+                var iconFields = {
+                    iconNavHome: iconsData.nav_home || '',
+                    iconNavRequests: iconsData.nav_requests || '',
+                    iconNavRequestsEmbed: iconsData['nav_requests-embed'] || '',
+                    iconNavIssues: iconsData.nav_issues || '',
+                    iconNavTickets: iconsData.nav_tickets || '',
+                    iconNavSettings: iconsData.nav_settings || '',
+                    iconSectionServices: iconsData.section_services || '',
+                    iconSectionNews: iconsData.section_news || '',
+                    iconSectionStreams: iconsData.section_streams || '',
+                    iconSectionReleases: iconsData.section_releases || '',
+                    iconSectionRequests: iconsData.section_requests || '',
+                };
+                for (var fieldId in iconFields) {
+                    var input = document.getElementById(fieldId);
+                    if (input) input.value = iconFields[fieldId];
+                    var preview = document.getElementById('iconPreview' + fieldId.replace('icon', ''));
+                    if (preview && iconFields[fieldId]) preview.textContent = iconFields[fieldId];
+                }
+                // Sync sidebar label icons with current icon values
+                _syncLabelIcons();
+
+                // Feature flags
+                if (data.features) {
+                    document.getElementById('featureLoginBackgrounds').checked = data.features.login_backgrounds !== false;
+                    document.getElementById('featureShowTickets').checked = data.features.show_tickets !== false;
+                }
+
+                // Auth toggles (loaded from branding features)
+                if (data.features) {
+                    document.getElementById('authToggleSimple').checked = data.features.show_simple_auth !== false;
+                    document.getElementById('authTogglePlex').checked = data.features.show_plex_auth !== false;
+                    document.getElementById('authToggleAuthentik').checked = data.features.show_authentik_auth === true;
+                    // Show/hide Authentik config fields
+                    document.getElementById('authentikConfigFields').classList.toggle('hidden', !data.features.show_authentik_auth);
+                }
+            } catch (e) {
+                console.error('Error loading theme settings:', e);
+            }
+        }
+
+        // Save theme settings
+        document.getElementById('btnSaveTheme').addEventListener('click', async function() {
+            var statusDiv = document.getElementById('statusTheme');
+            var btn = document.getElementById('btnSaveTheme');
+            btn.disabled = true;
+
+            var settings = [
+                { key: 'branding.app_name', value: document.getElementById('themeAppName').value, description: 'App name' },
+                { key: 'branding.tagline', value: document.getElementById('themeTagline').value, description: 'App tagline' },
+                { key: 'branding.logo_url', value: document.getElementById('themeLogoUrl').value, description: 'Logo URL' },
+            ];
+
+            themeColorFields.forEach(function(field) {
+                settings.push({
+                    key: field.key,
+                    value: document.getElementById(field.hex).value || document.getElementById(field.picker).value,
+                    description: field.key.replace('theme.color_', '').charAt(0).toUpperCase() + field.key.replace('theme.color_', '').slice(1) + ' color',
+                });
+            });
+
+            settings.push({ key: 'theme.font', value: document.getElementById('themeFont').value, description: 'Google Font family' });
+            settings.push({ key: 'theme.custom_css', value: document.getElementById('themeCustomCss').value, description: 'Custom CSS' });
+
+            // Sidebar labels
+            settings.push({ key: 'sidebar.label_home', value: document.getElementById('sidebarLabelHome').value || 'Home', description: 'Sidebar label for Home' });
+            settings.push({ key: 'sidebar.label_requests', value: document.getElementById('sidebarLabelRequests').value || 'Requests', description: 'Sidebar label for Requests' });
+            settings.push({ key: 'sidebar.label_requests_embed', value: document.getElementById('sidebarLabelRequestsEmbed').value || 'Requests (Embed)', description: 'Sidebar label for Requests (Embed)' });
+            settings.push({ key: 'sidebar.label_issues', value: document.getElementById('sidebarLabelIssues').value || 'Issues', description: 'Sidebar label for Issues' });
+            settings.push({ key: 'sidebar.label_tickets', value: document.getElementById('sidebarLabelTickets').value || 'Tickets', description: 'Sidebar label for Tickets' });
+            settings.push({ key: 'sidebar.label_settings', value: document.getElementById('sidebarLabelSettings').value || 'Settings', description: 'Sidebar label for Settings' });
+
+            // Icons
+            var iconSaveMap = {
+                'icon.nav_home': { input: 'iconNavHome', fallback: 'home' },
+                'icon.nav_requests': { input: 'iconNavRequests', fallback: 'movie' },
+                'icon.nav_requests_embed': { input: 'iconNavRequestsEmbed', fallback: 'download' },
+                'icon.nav_issues': { input: 'iconNavIssues', fallback: 'report_problem' },
+                'icon.nav_tickets': { input: 'iconNavTickets', fallback: 'confirmation_number' },
+                'icon.nav_settings': { input: 'iconNavSettings', fallback: 'settings' },
+                'icon.section_services': { input: 'iconSectionServices', fallback: 'health_metrics' },
+                'icon.section_news': { input: 'iconSectionNews', fallback: 'newspaper' },
+                'icon.section_streams': { input: 'iconSectionStreams', fallback: 'play_circle' },
+                'icon.section_releases': { input: 'iconSectionReleases', fallback: 'calendar_month' },
+                'icon.section_requests': { input: 'iconSectionRequests', fallback: 'shopping_cart' },
+            };
+            for (var iconKey in iconSaveMap) {
+                var iconDef = iconSaveMap[iconKey];
+                settings.push({ key: iconKey, value: document.getElementById(iconDef.input).value || iconDef.fallback, description: iconKey });
+            }
+
+            // Feature flags
+            settings.push({
+                key: 'features.login_backgrounds',
+                value: document.getElementById('featureLoginBackgrounds').checked ? 'true' : 'false',
+                description: 'Show rotating TMDB backgrounds on login page'
+            });
+            settings.push({
+                key: 'features.show_tickets',
+                value: document.getElementById('featureShowTickets').checked ? 'true' : 'false',
+                description: 'Show Tickets page in sidebar'
+            });
+
+            try {
+                var resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: settings })
+                });
+
+                if (resp.ok) {
+                    showStatus(statusDiv, true, 'Theme saved — reload other pages to see changes');
+                    localStorage.removeItem('webservarr_branding');
+                } else {
+                    var err = await resp.json();
+                    showStatus(statusDiv, false, err.detail || 'Failed to save');
+                }
+            } catch (e) {
+                showStatus(statusDiv, false, 'Error: ' + e.message);
+            }
+            btn.disabled = false;
+        });
+
+        // Reset theme to defaults
+        document.getElementById('btnResetTheme').addEventListener('click', async function() {
+            if (!confirm('Reset all theme settings to defaults?')) return;
+
+            document.getElementById('themeAppName').value = THEME_DEFAULTS['branding.app_name'];
+            document.getElementById('themeTagline').value = THEME_DEFAULTS['branding.tagline'];
+            document.getElementById('themeLogoUrl').value = THEME_DEFAULTS['branding.logo_url'];
+            _updateLogoPreview('');
+
+            themeColorFields.forEach(function(field) {
+                var val = THEME_DEFAULTS[field.key];
+                document.getElementById(field.picker).value = val;
+                document.getElementById(field.hex).value = val;
+                document.documentElement.style.setProperty(field.cssVar, hexToRgb(val));
+                document.documentElement.style.setProperty(field.cssVar.replace('--color-', '--hex-'), val);
+            });
+
+            _selectFont(THEME_DEFAULTS['theme.font']);
+            document.getElementById('themeCustomCss').value = THEME_DEFAULTS['theme.custom_css'];
+
+            // Sidebar labels
+            document.getElementById('sidebarLabelHome').value = THEME_DEFAULTS['sidebar.label_home'];
+            document.getElementById('sidebarLabelRequests').value = THEME_DEFAULTS['sidebar.label_requests'];
+            document.getElementById('sidebarLabelRequestsEmbed').value = THEME_DEFAULTS['sidebar.label_requests_embed'];
+            document.getElementById('sidebarLabelIssues').value = THEME_DEFAULTS['sidebar.label_issues'];
+            document.getElementById('sidebarLabelTickets').value = THEME_DEFAULTS['sidebar.label_tickets'];
+            document.getElementById('sidebarLabelSettings').value = THEME_DEFAULTS['sidebar.label_settings'];
+
+            // Icons
+            var iconResetMap = {
+                iconNavHome: 'icon.nav_home',
+                iconNavRequests: 'icon.nav_requests',
+                iconNavRequestsEmbed: 'icon.nav_requests_embed',
+                iconNavIssues: 'icon.nav_issues',
+                iconNavTickets: 'icon.nav_tickets',
+                iconNavSettings: 'icon.nav_settings',
+                iconSectionServices: 'icon.section_services',
+                iconSectionNews: 'icon.section_news',
+                iconSectionStreams: 'icon.section_streams',
+                iconSectionReleases: 'icon.section_releases',
+                iconSectionRequests: 'icon.section_requests',
+            };
+            for (var resetId in iconResetMap) {
+                var resetVal = THEME_DEFAULTS[iconResetMap[resetId]];
+                document.getElementById(resetId).value = resetVal;
+                var resetPreview = document.getElementById('iconPreview' + resetId.replace('icon', ''));
+                if (resetPreview) resetPreview.textContent = resetVal;
+            }
+            _syncLabelIcons();
+
+            // Auto-save the defaults
+            document.getElementById('btnSaveTheme').click();
+        });
+
+        // --- News Editor ---
+
+        let editingPostId = null;
+        let isPreviewMode = false;
+
+        const editor = document.getElementById('postContent');
+        const toolbar = document.getElementById('editorToolbar');
+
+        // Inline commands (Bold, Italic, Underline, Strikethrough)
+        toolbar.querySelectorAll('.toolbar-btn[data-command]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (isPreviewMode) return;
+                const cmd = btn.getAttribute('data-command');
+                document.execCommand(cmd, false, null);
+                editor.focus();
+                updateToolbarState();
+            });
+        });
+
+        // Heading Dropdown
+        const headingBtn = document.getElementById('headingBtn');
+        const headingDropdown = document.getElementById('headingDropdown');
+
+        headingBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (isPreviewMode) return;
+            headingDropdown.classList.toggle('open');
+        });
+
+        headingDropdown.querySelectorAll('[data-heading]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (isPreviewMode) return;
+                const tag = btn.getAttribute('data-heading');
+                if (tag === 'p') {
+                    document.execCommand('formatBlock', false, '<p>');
+                } else {
+                    document.execCommand('formatBlock', false, '<' + tag + '>');
+                }
+                headingDropdown.classList.remove('open');
+                editor.focus();
+            });
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!headingBtn.contains(e.target) && !headingDropdown.contains(e.target)) {
+                headingDropdown.classList.remove('open');
+            }
+        });
+
+        // Blockquote
+        document.getElementById('btnBlockquote').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+            document.execCommand('formatBlock', false, '<blockquote>');
+            editor.focus();
+        });
+
+        // Insert Link
+        document.getElementById('btnLink').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+
+            const selection = window.getSelection();
+            let savedRange = null;
+            if (selection.rangeCount > 0) {
+                savedRange = selection.getRangeAt(0).cloneRange();
+            }
+
+            const url = prompt('Enter the URL:');
+            if (!url) return;
+
+            if (savedRange) {
+                selection.removeAllRanges();
+                selection.addRange(savedRange);
+            }
+
+            if (selection.toString().trim().length > 0) {
+                document.execCommand('createLink', false, url);
+                const links = editor.querySelectorAll('a');
+                links.forEach(link => {
+                    if (link.href === url || link.getAttribute('href') === url) {
+                        link.setAttribute('target', '_blank');
+                        link.setAttribute('rel', 'noopener noreferrer');
+                    }
+                });
+            } else {
+                const a = document.createElement('a');
+                a.href = url;
+                a.textContent = url;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                if (savedRange) {
+                    savedRange.insertNode(a);
+                    savedRange.setStartAfter(a);
+                    savedRange.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(savedRange);
+                }
+            }
+            editor.focus();
+        });
+
+        // Insert Image
+        document.getElementById('btnImage').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+
+            const selection = window.getSelection();
+            let savedRange = null;
+            if (selection.rangeCount > 0) {
+                savedRange = selection.getRangeAt(0).cloneRange();
+            }
+
+            const src = prompt('Enter the image URL:');
+            if (!src) return;
+            const alt = prompt('Enter alt text (optional):') || '';
+
+            if (savedRange) {
+                selection.removeAllRanges();
+                selection.addRange(savedRange);
+            }
+
+            const img = document.createElement('img');
+            img.src = src;
+            img.alt = alt;
+            img.style.maxWidth = '100%';
+
+            if (savedRange) {
+                savedRange.insertNode(img);
+                savedRange.setStartAfter(img);
+                savedRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(savedRange);
+            } else {
+                editor.appendChild(img);
+            }
+            editor.focus();
+        });
+
+        // Code Block
+        document.getElementById('btnCodeBlock').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+
+            const selection = window.getSelection();
+            const selectedText = selection.toString() || '';
+
+            const pre = document.createElement('pre');
+            const code = document.createElement('code');
+            code.textContent = selectedText || 'code here';
+            pre.appendChild(code);
+
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                range.deleteContents();
+                range.insertNode(pre);
+                const p = document.createElement('p');
+                p.innerHTML = '<br>';
+                pre.parentNode.insertBefore(p, pre.nextSibling);
+                const newRange = document.createRange();
+                newRange.setStart(p, 0);
+                newRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(newRange);
+            } else {
+                editor.appendChild(pre);
+                const p = document.createElement('p');
+                p.innerHTML = '<br>';
+                editor.appendChild(p);
+            }
+            editor.focus();
+        });
+
+        // Inline Code
+        document.getElementById('btnInlineCode').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                const selectedText = selection.toString();
+                const code = document.createElement('code');
+                code.textContent = selectedText || 'code';
+
+                range.deleteContents();
+                range.insertNode(code);
+
+                const newRange = document.createRange();
+                newRange.setStartAfter(code);
+                newRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(newRange);
+            }
+            editor.focus();
+        });
+
+        // Horizontal Rule
+        document.getElementById('btnHR').addEventListener('click', (e) => {
+            e.preventDefault();
+            if (isPreviewMode) return;
+            document.execCommand('insertHorizontalRule', false, null);
+            editor.focus();
+        });
+
+        // Preview Toggle
+        document.getElementById('btnPreview').addEventListener('click', (e) => {
+            e.preventDefault();
+            isPreviewMode = !isPreviewMode;
+
+            const previewBtn = document.getElementById('btnPreview');
+            const iconSpan = previewBtn.querySelector('.material-symbols-outlined');
+            const labelSpan = previewBtn.querySelector('.text-xs');
+
+            if (isPreviewMode) {
+                editor.setAttribute('contenteditable', 'false');
+                editor.classList.add('preview-mode');
+                iconSpan.textContent = 'edit';
+                labelSpan.textContent = 'Edit';
+                previewBtn.classList.add('active');
+                toolbar.querySelectorAll('.toolbar-btn:not(#btnPreview)').forEach(btn => {
+                    btn.classList.add('opacity-40', 'pointer-events-none');
+                });
+            } else {
+                editor.setAttribute('contenteditable', 'true');
+                editor.classList.remove('preview-mode');
+                iconSpan.textContent = 'visibility';
+                labelSpan.textContent = 'Preview';
+                previewBtn.classList.remove('active');
+                toolbar.querySelectorAll('.toolbar-btn:not(#btnPreview)').forEach(btn => {
+                    btn.classList.remove('opacity-40', 'pointer-events-none');
+                });
+                editor.focus();
+            }
+        });
+
+        // Keyboard Shortcuts
+        editor.addEventListener('keydown', (e) => {
+            if (isPreviewMode) return;
+            if (e.ctrlKey || e.metaKey) {
+                switch (e.key.toLowerCase()) {
+                    case 'b':
+                        e.preventDefault();
+                        document.execCommand('bold', false, null);
+                        updateToolbarState();
+                        break;
+                    case 'i':
+                        e.preventDefault();
+                        document.execCommand('italic', false, null);
+                        updateToolbarState();
+                        break;
+                    case 'u':
+                        e.preventDefault();
+                        document.execCommand('underline', false, null);
+                        updateToolbarState();
+                        break;
+                }
+            }
+        });
+
+        // Update Toolbar Active State
+        function updateToolbarState() {
+            const commands = ['bold', 'italic', 'underline', 'strikeThrough'];
+            commands.forEach(cmd => {
+                const btn = toolbar.querySelector(`[data-command="${cmd}"]`);
+                if (btn) {
+                    if (document.queryCommandState(cmd)) {
+                        btn.classList.add('active');
+                    } else {
+                        btn.classList.remove('active');
+                    }
+                }
+            });
+        }
+
+        editor.addEventListener('keyup', updateToolbarState);
+        editor.addEventListener('mouseup', updateToolbarState);
+        document.addEventListener('selectionchange', () => {
+            if (document.activeElement === editor) {
+                updateToolbarState();
+            }
+        });
+
+        function clearEditor() {
+            editor.innerHTML = '';
+            isPreviewMode = false;
+            const previewBtn = document.getElementById('btnPreview');
+            const iconSpan = previewBtn.querySelector('.material-symbols-outlined');
+            const labelSpan = previewBtn.querySelector('.text-xs');
+            editor.setAttribute('contenteditable', 'true');
+            editor.classList.remove('preview-mode');
+            iconSpan.textContent = 'visibility';
+            labelSpan.textContent = 'Preview';
+            previewBtn.classList.remove('active');
+            toolbar.querySelectorAll('.toolbar-btn:not(#btnPreview)').forEach(btn => {
+                btn.classList.remove('opacity-40', 'pointer-events-none');
+            });
+        }
+
+        // Show/hide post form
+        document.getElementById('btnNewPost').addEventListener('click', () => {
+            editingPostId = null;
+            document.getElementById('newsFormTitle').textContent = 'Create News Post';
+            document.getElementById('newsForm').reset();
+            document.getElementById('postId').value = '';
+            clearEditor();
+            document.getElementById('postForm').classList.remove('hidden');
+        });
+
+        document.getElementById('btnCancelNewsForm').addEventListener('click', () => {
+            document.getElementById('postForm').classList.add('hidden');
+            document.getElementById('newsForm').reset();
+            clearEditor();
+            editingPostId = null;
+        });
+
+        // Post form submission
+        document.getElementById('newsForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const editorContent = editor.innerHTML.trim();
+            const textContent = editor.textContent.trim();
+            if (!textContent && !editor.querySelector('img, hr')) {
+                alert('Please enter some content for the post.');
+                editor.focus();
+                return;
+            }
+
+            const postData = {
+                title: document.getElementById('postTitle').value,
+                content: editorContent,
+                published: document.getElementById('postPublished').checked,
+                pinned: document.getElementById('postPinned').checked
+            };
+
+            try {
+                let response;
+                if (editingPostId) {
+                    response = await fetch(`/api/news/${editingPostId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(postData)
+                    });
+                } else {
+                    response = await fetch('/api/news/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(postData)
+                    });
+                }
+
+                if (response.ok) {
+                    alert(editingPostId ? 'Post updated successfully!' : 'Post created successfully!');
+                    document.getElementById('postForm').classList.add('hidden');
+                    document.getElementById('newsForm').reset();
+                    clearEditor();
+                    editingPostId = null;
+                    loadPosts();
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + (error.detail || 'Failed to save post'));
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        });
+
+        // Load posts
+        async function loadPosts() {
+            try {
+                const response = await fetch('/api/news/?published_only=false&limit=100');
+                const posts = await response.json();
+
+                const postsList = document.getElementById('postsList');
+
+                if (posts.length === 0) {
+                    postsList.innerHTML = `
+                        <div class="text-center text-steel-blue py-12">
+                            <span class="material-symbols-outlined text-6xl mb-4 block opacity-50">article</span>
+                            <p>No news posts yet. Create your first one!</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                postsList.innerHTML = posts.map(post => `
+                    <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 hover:border-primary/30 transition-all">
+                        <div class="flex items-start justify-between">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <h3 class="text-xl font-bold text-frosted-blue">${escapeHtml(post.title)}</h3>
+                                    ${post.pinned ? '<span class="bg-primary/20 text-primary text-xs px-2 py-1 rounded">PINNED</span>' : ''}
+                                    ${post.published ? '<span class="bg-green-500/20 text-green-400 text-xs px-2 py-1 rounded">PUBLISHED</span>' : '<span class="bg-steel-blue/20 text-steel-blue text-xs px-2 py-1 rounded">DRAFT</span>'}
+                                </div>
+                                <p class="text-steel-blue text-sm mb-3">
+                                    By ${escapeHtml(post.author_name)} • ${new Date(post.created_at).toLocaleString()}
+                                </p>
+                                <div class="text-frosted-blue/80 text-sm line-clamp-3">
+                                    ${post.content.substring(0, 200)}...
+                                </div>
+                            </div>
+                            <div class="flex gap-2 ml-4">
+                                <button onclick="editPost(${post.id})" class="p-2 hover:bg-primary/20 rounded-lg transition-all" title="Edit">
+                                    <span class="material-symbols-outlined text-frosted-blue">edit</span>
+                                </button>
+                                <button onclick="deletePost(${post.id})" class="p-2 hover:bg-red-500/20 rounded-lg transition-all" title="Delete">
+                                    <span class="material-symbols-outlined text-red-400">delete</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading posts:', error);
+                document.getElementById('postsList').innerHTML = `
+                    <div class="text-center text-red-400 py-12">
+                        <span class="material-symbols-outlined text-6xl mb-4 block">error</span>
+                        <p>Error loading posts: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Edit post
+        async function editPost(id) {
+            try {
+                const response = await fetch(`/api/news/${id}`);
+                const post = await response.json();
+
+                editingPostId = id;
+                document.getElementById('newsFormTitle').textContent = 'Edit News Post';
+                document.getElementById('postId').value = id;
+                document.getElementById('postTitle').value = post.title;
+                editor.innerHTML = post.content;
+                document.getElementById('postPublished').checked = post.published;
+                document.getElementById('postPinned').checked = post.pinned;
+                document.getElementById('postForm').classList.remove('hidden');
+
+                // Switch to news tab if not already there
+                switchTab('news');
+            } catch (error) {
+                alert('Error loading post: ' + error.message);
+            }
+        }
+
+        // Delete post
+        async function deletePost(id) {
+            if (!confirm('Are you sure you want to delete this post?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/news/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('Post deleted successfully!');
+                    loadPosts();
+                } else {
+                    alert('Error deleting post');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // Safety warning when disabling local login
+        document.getElementById('authToggleSimple').addEventListener('change', function() {
+            if (!this.checked) {
+                var confirmed = confirm(
+                    'WARNING: Disabling local login means you can ONLY log in via Plex or Authentik.\n\n' +
+                    'If those services are misconfigured or unavailable, you will be locked out.\n\n' +
+                    'Are you sure you want to disable local login?'
+                );
+                if (!confirmed) {
+                    this.checked = true;
+                }
+            }
+        });
+
+        // Load monitors and settings on page load
+        loadMonitors();
+        loadSettings();
+        loadThemeSettings();
+        loadPosts();
+    </script>
+
+</body>
+</html>

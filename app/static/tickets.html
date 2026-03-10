@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Tickets</title>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: {
+        "display": ["var(--font-display)", "sans-serif"]
+      },
+    },
+  },
+}</script>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<div id="sidebar-root"></div>
+
+<!-- Toast notification container -->
+<div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
+
+<!-- Create Ticket Modal -->
+<div id="createModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4" onclick="if(event.target===this)closeCreateModal()">
+<div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+<div class="relative w-full max-w-md rounded-xl glass-card p-5">
+<button onclick="closeCreateModal()" class="absolute top-3 right-3 text-steel-blue hover:text-bright transition-colors">
+<span class="material-symbols-outlined">close</span>
+</button>
+<h3 class="text-lg font-bold text-frosted-blue mb-4">New Ticket</h3>
+
+<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Title</label>
+<input id="createTitle" type="text" maxlength="200" placeholder="Brief summary of your issue..."
+  class="w-full px-3 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"/>
+
+<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Category</label>
+<select id="createCategory"
+  class="w-full px-3 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3">
+<option value="media_request">Media Request</option>
+<option value="playback_issue">Playback Issue</option>
+<option value="account_issue">Account Issue</option>
+<option value="feature_suggestion">Feature Suggestion</option>
+<option value="other">Other</option>
+</select>
+
+<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Description</label>
+<textarea id="createDescription" rows="4" placeholder="Describe your request or issue in detail..."
+  class="w-full px-3 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"></textarea>
+
+<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Screenshot (optional)</label>
+<input id="createImage" type="file" accept="image/png,image/jpeg,image/webp"
+  class="w-full text-sm text-steel-blue file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-primary/20 file:text-primary hover:file:bg-primary/30 transition-all mb-4"/>
+
+<button onclick="submitNewTicket()" id="createSubmitBtn" class="w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all">
+Submit Ticket
+</button>
+</div>
+</div>
+
+<!-- Ticket Detail Modal -->
+<div id="detailModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4" onclick="if(event.target===this)closeDetailModal()">
+<div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+<div class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl glass-card p-5 custom-scrollbar">
+<button onclick="closeDetailModal()" class="absolute top-3 right-3 text-steel-blue hover:text-bright transition-colors z-10">
+<span class="material-symbols-outlined">close</span>
+</button>
+<div id="detailContent">
+<div class="text-center text-steel-blue py-8">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin">progress_activity</span>
+<p>Loading...</p>
+</div>
+</div>
+</div>
+</div>
+
+<!-- Image Lightbox -->
+<div id="lightbox" class="fixed inset-0 z-[60] hidden items-center justify-center bg-black/90 cursor-pointer" onclick="closeLightbox()">
+<img id="lightboxImg" src="" class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"/>
+</div>
+
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<div id="header-root"></div>
+
+<!-- Scrollable Content -->
+<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+
+<!-- Stat Cards -->
+<div class="grid grid-cols-4 gap-3 mb-6">
+<div class="glass-card rounded-xl p-4 text-center">
+<p class="text-2xl font-bold text-frosted-blue" id="statTotal">--</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Total</p>
+</div>
+<div class="glass-card rounded-xl p-4 text-center">
+<p class="text-2xl font-bold text-amber-400" id="statOpen">--</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Open</p>
+</div>
+<div class="glass-card rounded-xl p-4 text-center">
+<p class="text-2xl font-bold text-blue-400" id="statInProgress">--</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">In Progress</p>
+</div>
+<div class="glass-card rounded-xl p-4 text-center">
+<p class="text-2xl font-bold text-green-500" id="statResolved">--</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Resolved</p>
+</div>
+</div>
+
+<!-- New Ticket Button + Filter Tabs -->
+<div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+<button onclick="openCreateModal()" class="px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all flex items-center gap-2 shrink-0">
+<span class="material-symbols-outlined text-sm">add</span> New Ticket
+</button>
+<div class="flex flex-wrap gap-2">
+<button onclick="setFilter('all')" data-filter="all" class="filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All</button>
+<button onclick="setFilter('open')" data-filter="open" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Open</button>
+<button onclick="setFilter('in_progress')" data-filter="in_progress" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">In Progress</button>
+<button onclick="setFilter('resolved')" data-filter="resolved" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Resolved</button>
+<button onclick="setFilter('closed')" data-filter="closed" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Closed</button>
+</div>
+</div>
+
+<!-- Category Filter -->
+<div class="flex flex-wrap gap-2 mb-4">
+<button onclick="setCategoryFilter('all')" data-catfilter="all" class="cat-filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All Types</button>
+<button onclick="setCategoryFilter('media_request')" data-catfilter="media_request" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Media Request</button>
+<button onclick="setCategoryFilter('playback_issue')" data-catfilter="playback_issue" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Playback Issue</button>
+<button onclick="setCategoryFilter('account_issue')" data-catfilter="account_issue" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Account Issue</button>
+<button onclick="setCategoryFilter('feature_suggestion')" data-catfilter="feature_suggestion" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Feature</button>
+<button onclick="setCategoryFilter('other')" data-catfilter="other" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Other</button>
+</div>
+
+<!-- Ticket List -->
+<div id="ticketList" class="space-y-2">
+<div class="text-center text-steel-blue py-12">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin">progress_activity</span>
+<p>Loading tickets...</p>
+</div>
+</div>
+
+<!-- Pagination -->
+<div id="pagination" class="hidden flex items-center justify-center gap-4 mt-6">
+<button onclick="prevPage()" id="prevBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-bright hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
+<span class="material-symbols-outlined text-sm align-middle">chevron_left</span> Prev
+</button>
+<span id="pageInfo" class="text-sm text-steel-blue font-bold"></span>
+<button onclick="nextPage()" id="nextBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-bright hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
+Next <span class="material-symbols-outlined text-sm align-middle">chevron_right</span>
+</button>
+</div>
+
+<!-- Empty State -->
+<div id="emptyState" class="hidden text-center text-steel-blue py-12">
+<span class="material-symbols-outlined text-5xl mb-3 block opacity-30">confirmation_number</span>
+<p class="text-sm mb-1">No tickets yet</p>
+<p class="text-xs opacity-60">Click "New Ticket" to submit a support request</p>
+</div>
+
+<!-- Scroll down indicator (mobile only) -->
+<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+    <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
+</div>
+
+</div>
+</main>
+
+<!-- Scripts -->
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/sidebar.js?v=11"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+<script>
+// WebServarr — Tickets Page
+(function() {
+  'use strict';
+
+  // ---- State ----
+  var _tickets = [];
+  var _currentFilter = 'all';
+  var _currentCatFilter = 'all';
+  var _currentPage = 0;
+  var _pageSize = 12;
+  var _total = 0;
+  var _isAdmin = false;
+  var _username = '';
+  var _refreshTimer = null;
+
+  // ---- Category display config ----
+  var CATEGORY_LABELS = {
+    media_request: 'Media Request',
+    playback_issue: 'Playback Issue',
+    account_issue: 'Account Issue',
+    feature_suggestion: 'Feature',
+    other: 'Other'
+  };
+  var CATEGORY_COLORS = {
+    media_request: 'bg-purple-500/20 text-purple-400',
+    playback_issue: 'bg-red-500/20 text-red-400',
+    account_issue: 'bg-blue-500/20 text-blue-400',
+    feature_suggestion: 'bg-green-500/20 text-green-400',
+    other: 'bg-steel-blue/20 text-steel-blue'
+  };
+  var STATUS_COLORS = {
+    open: 'bg-amber-500/20 text-amber-400',
+    in_progress: 'bg-blue-500/20 text-blue-400',
+    resolved: 'bg-green-500/20 text-green-400',
+    closed: 'bg-steel-blue/20 text-steel-blue'
+  };
+  var PRIORITY_COLORS = {
+    low: 'bg-green-500/20 text-green-400',
+    medium: 'bg-amber-500/20 text-amber-400',
+    high: 'bg-orange-500/20 text-orange-400',
+    urgent: 'bg-red-500/20 text-red-400'
+  };
+
+  // ---- Helpers ----
+
+  function createEl(tag, classes, text) {
+    var el = document.createElement(tag);
+    if (classes) el.className = classes;
+    if (text !== undefined && text !== null) el.textContent = text;
+    return el;
+  }
+
+  function timeAgo(isoString) {
+    if (!isoString) return '';
+    var seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+    if (seconds < 0) seconds = 0;
+    if (seconds < 5) return 'just now';
+    if (seconds < 60) return seconds + 's ago';
+    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+    if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+    if (seconds < 604800) return Math.floor(seconds / 86400) + 'd ago';
+    return new Date(isoString).toLocaleDateString();
+  }
+
+  function showToast(message, type) {
+    var container = document.getElementById('toastContainer');
+    var toast = createEl('div', 'pointer-events-auto px-4 py-3 rounded-xl text-sm font-bold shadow-xl backdrop-blur-md border transition-all transform translate-x-full');
+    if (type === 'error') {
+      toast.className += ' bg-red-500/20 border-red-500/30 text-red-400';
+    } else {
+      toast.className += ' bg-green-500/20 border-green-500/30 text-green-400';
+    }
+    toast.textContent = message;
+    container.appendChild(toast);
+    requestAnimationFrame(function() { toast.classList.remove('translate-x-full'); });
+    setTimeout(function() {
+      toast.classList.add('translate-x-full');
+      setTimeout(function() { toast.remove(); }, 300);
+    }, 3000);
+  }
+
+  // ---- Filter tabs ----
+
+  window.setFilter = function(status) {
+    _currentFilter = status;
+    _currentPage = 0;
+    document.querySelectorAll('.filter-tab').forEach(function(btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-filter') === status);
+    });
+    loadTickets();
+  };
+
+  window.setCategoryFilter = function(cat) {
+    _currentCatFilter = cat;
+    _currentPage = 0;
+    document.querySelectorAll('.cat-filter-tab').forEach(function(btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-catfilter') === cat);
+    });
+    loadTickets();
+  };
+
+  // ---- Pagination ----
+
+  window.prevPage = function() { if (_currentPage > 0) { _currentPage--; loadTickets(); } };
+  window.nextPage = function() {
+    if ((_currentPage + 1) * _pageSize < _total) { _currentPage++; loadTickets(); }
+  };
+
+  function updatePagination() {
+    var pag = document.getElementById('pagination');
+    var totalPages = Math.max(1, Math.ceil(_total / _pageSize));
+    if (_total <= _pageSize) { pag.classList.add('hidden'); return; }
+    pag.classList.remove('hidden');
+    document.getElementById('pageInfo').textContent = 'Page ' + (_currentPage + 1) + ' of ' + totalPages;
+    document.getElementById('prevBtn').disabled = _currentPage === 0;
+    document.getElementById('nextBtn').disabled = (_currentPage + 1) >= totalPages;
+  }
+
+  // ---- Load tickets ----
+
+  function loadTickets() {
+    var params = new URLSearchParams();
+    if (_currentFilter !== 'all') params.set('status', _currentFilter);
+    if (_currentCatFilter !== 'all') params.set('category', _currentCatFilter);
+    params.set('limit', _pageSize);
+    params.set('offset', _currentPage * _pageSize);
+
+    var url = _isAdmin ? '/api/admin/tickets' : '/api/tickets';
+
+    fetch(url + '?' + params.toString())
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        _tickets = data.tickets || [];
+        _total = data.total || 0;
+        renderTicketList();
+        updatePagination();
+      })
+      .catch(function() { showToast('Failed to load tickets', 'error'); });
+  }
+
+  function loadCounts() {
+    fetch('/api/tickets/counts')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        document.getElementById('statTotal').textContent = data.total || 0;
+        document.getElementById('statOpen').textContent = data.open || 0;
+        document.getElementById('statInProgress').textContent = data.in_progress || 0;
+        document.getElementById('statResolved').textContent = data.resolved || 0;
+      })
+      .catch(function() {});
+  }
+
+  // ---- Render ticket list ----
+
+  function renderTicketList() {
+    var container = document.getElementById('ticketList');
+    var empty = document.getElementById('emptyState');
+
+    // Clear
+    while (container.firstChild) container.removeChild(container.firstChild);
+
+    if (_tickets.length === 0) {
+      container.classList.add('hidden');
+      empty.classList.remove('hidden');
+      return;
+    }
+    container.classList.remove('hidden');
+    empty.classList.add('hidden');
+
+    _tickets.forEach(function(ticket) {
+      var card = createEl('div', 'glass-card rounded-xl p-4 cursor-pointer hover:border-primary/40 transition-all border border-transparent');
+      card.addEventListener('click', function() { openDetailModal(ticket.id); });
+
+      // Top row: title + badges (stacked on mobile, side-by-side on desktop)
+      var topRow = createEl('div', 'flex flex-col lg:flex-row lg:items-start lg:justify-between gap-1 lg:gap-3 mb-2');
+
+      var titleDiv = createEl('div', 'flex-1 min-w-0');
+      var titleEl = createEl('p', 'text-frosted-blue font-bold text-sm truncate', ticket.title);
+      titleDiv.appendChild(titleEl);
+
+      // Creator (admin only)
+      if (_isAdmin && ticket.creator_username) {
+        var creatorEl = createEl('p', 'text-[10px] text-steel-blue mt-0.5', '@' + ticket.creator_username);
+        titleDiv.appendChild(creatorEl);
+      }
+
+      var badgeDiv = createEl('div', 'flex items-center gap-1.5 flex-wrap lg:shrink-0 lg:justify-end');
+
+      // Category badge
+      var catBadge = createEl('span', 'px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ' + (CATEGORY_COLORS[ticket.category] || CATEGORY_COLORS.other), CATEGORY_LABELS[ticket.category] || ticket.category);
+      badgeDiv.appendChild(catBadge);
+
+      // Status badge
+      var statusLabel = (ticket.status || 'open').replace('_', ' ');
+      var statusBadge = createEl('span', 'px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ' + (STATUS_COLORS[ticket.status] || STATUS_COLORS.open), statusLabel);
+      badgeDiv.appendChild(statusBadge);
+
+      // Priority badge (if set)
+      if (ticket.priority) {
+        var priBadge = createEl('span', 'px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ' + (PRIORITY_COLORS[ticket.priority] || ''), ticket.priority);
+        badgeDiv.appendChild(priBadge);
+      }
+
+      topRow.appendChild(titleDiv);
+      topRow.appendChild(badgeDiv);
+      card.appendChild(topRow);
+
+      // Bottom row: description snippet + time
+      var bottomRow = createEl('div', 'flex items-center justify-between gap-3');
+      var descSnippet = createEl('p', 'text-xs text-steel-blue truncate flex-1', ticket.description);
+      var timeEl = createEl('span', 'text-[10px] text-steel-blue/60 shrink-0', timeAgo(ticket.created_at));
+      bottomRow.appendChild(descSnippet);
+      bottomRow.appendChild(timeEl);
+      card.appendChild(bottomRow);
+
+      container.appendChild(card);
+    });
+  }
+
+  // ---- Create ticket ----
+
+  window.openCreateModal = function() {
+    document.getElementById('createModal').classList.remove('hidden');
+    document.getElementById('createTitle').value = '';
+    document.getElementById('createDescription').value = '';
+    document.getElementById('createCategory').value = 'media_request';
+    document.getElementById('createImage').value = '';
+  };
+
+  window.closeCreateModal = function() {
+    document.getElementById('createModal').classList.add('hidden');
+  };
+
+  window.submitNewTicket = function() {
+    var title = document.getElementById('createTitle').value.trim();
+    var description = document.getElementById('createDescription').value.trim();
+    var category = document.getElementById('createCategory').value;
+    var imageInput = document.getElementById('createImage');
+
+    if (!title) { showToast('Title is required', 'error'); return; }
+    if (!description) { showToast('Description is required', 'error'); return; }
+
+    var formData = new FormData();
+    formData.append('title', title);
+    formData.append('description', description);
+    formData.append('category', category);
+    if (imageInput.files.length > 0) {
+      formData.append('image', imageInput.files[0]);
+    }
+
+    var btn = document.getElementById('createSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = 'Submitting...';
+
+    fetch('/api/tickets', { method: 'POST', body: formData })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || 'Failed'); });
+        return r.json();
+      })
+      .then(function() {
+        closeCreateModal();
+        showToast('Ticket submitted!', 'success');
+        loadTickets();
+        loadCounts();
+      })
+      .catch(function(e) { showToast(e.message, 'error'); })
+      .finally(function() { btn.disabled = false; btn.textContent = 'Submit Ticket'; });
+  };
+
+  // ---- Ticket detail modal ----
+
+  window.openDetailModal = function(ticketId) {
+    document.getElementById('detailModal').classList.remove('hidden');
+    var content = document.getElementById('detailContent');
+    // Show loading
+    while (content.firstChild) content.removeChild(content.firstChild);
+    var loadingDiv = createEl('div', 'text-center text-steel-blue py-8');
+    var spinner = createEl('span', 'material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin', 'progress_activity');
+    loadingDiv.appendChild(spinner);
+    loadingDiv.appendChild(createEl('p', '', 'Loading...'));
+    content.appendChild(loadingDiv);
+
+    fetch('/api/tickets/' + ticketId)
+      .then(function(r) { return r.json(); })
+      .then(function(data) { renderDetailContent(data, data.comments || []); })
+      .catch(function(err) { console.error('Detail modal error:', err); showToast('Failed to load ticket', 'error'); closeDetailModal(); });
+  };
+
+  window.closeDetailModal = function() {
+    document.getElementById('detailModal').classList.add('hidden');
+  };
+
+  function renderDetailContent(ticket, comments) {
+    var content = document.getElementById('detailContent');
+    while (content.firstChild) content.removeChild(content.firstChild);
+
+    // Title
+    content.appendChild(createEl('h3', 'text-lg font-bold text-frosted-blue mb-1 pr-8', ticket.title));
+
+    // Creator (admin or own)
+    if (ticket.creator_username) {
+      content.appendChild(createEl('p', 'text-xs text-steel-blue mb-3', 'by @' + ticket.creator_username + ' \u00B7 ' + timeAgo(ticket.created_at)));
+    } else {
+      content.appendChild(createEl('p', 'text-xs text-steel-blue mb-3', timeAgo(ticket.created_at)));
+    }
+
+    // Badges row
+    var badgeRow = createEl('div', 'flex flex-wrap gap-2 mb-4');
+    var catBadge = createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ' + (CATEGORY_COLORS[ticket.category] || ''), CATEGORY_LABELS[ticket.category] || ticket.category);
+    badgeRow.appendChild(catBadge);
+    var statusLabel = (ticket.status || 'open').replace('_', ' ');
+    var statusBadge = createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ' + (STATUS_COLORS[ticket.status] || ''), statusLabel);
+    badgeRow.appendChild(statusBadge);
+    if (ticket.priority) {
+      var priBadge = createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ' + (PRIORITY_COLORS[ticket.priority] || ''), ticket.priority);
+      badgeRow.appendChild(priBadge);
+    }
+    if (ticket.is_public) {
+      badgeRow.appendChild(createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-primary/20 text-primary', 'Public'));
+    }
+    content.appendChild(badgeRow);
+
+    // Description
+    content.appendChild(createEl('p', 'text-sm text-frosted-blue mb-4 whitespace-pre-wrap', ticket.description));
+
+    // Image
+    if (ticket.image_path) {
+      var img = document.createElement('img');
+      img.src = ticket.image_path;
+      img.className = 'w-full max-h-48 object-contain rounded-lg mb-4 cursor-pointer hover:opacity-80 transition-opacity';
+      img.alt = 'Ticket attachment';
+      img.addEventListener('click', function() { openLightbox(ticket.image_path); });
+      content.appendChild(img);
+    }
+
+    // Admin controls
+    if (_isAdmin) {
+      var controlsDiv = createEl('div', 'flex flex-wrap gap-2 mb-4 p-3 rounded-lg bg-frosted-blue/5 border border-steel-blue/20');
+
+      // Status dropdown
+      var statusSelect = document.createElement('select');
+      statusSelect.className = 'px-2 py-1.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue text-xs focus:outline-none focus:ring-1 focus:ring-primary/30';
+      ['open', 'in_progress', 'resolved', 'closed'].forEach(function(s) {
+        var opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = s.replace('_', ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
+        if (s === ticket.status) opt.selected = true;
+        statusSelect.appendChild(opt);
+      });
+
+      // Priority dropdown
+      var prioritySelect = document.createElement('select');
+      prioritySelect.className = 'px-2 py-1.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue text-xs focus:outline-none focus:ring-1 focus:ring-primary/30';
+      var noneOpt = document.createElement('option');
+      noneOpt.value = '';
+      noneOpt.textContent = 'No Priority';
+      if (!ticket.priority) noneOpt.selected = true;
+      prioritySelect.appendChild(noneOpt);
+      ['low', 'medium', 'high', 'urgent'].forEach(function(p) {
+        var opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = p.charAt(0).toUpperCase() + p.slice(1);
+        if (p === ticket.priority) opt.selected = true;
+        prioritySelect.appendChild(opt);
+      });
+
+      // Public toggle
+      var pubLabel = createEl('label', 'flex items-center gap-2 text-xs text-steel-blue cursor-pointer');
+      var pubCheck = document.createElement('input');
+      pubCheck.type = 'checkbox';
+      pubCheck.checked = ticket.is_public;
+      pubCheck.className = 'rounded border-steel-blue/30 bg-black/40 text-primary focus:ring-primary/30';
+      pubLabel.appendChild(pubCheck);
+      pubLabel.appendChild(document.createTextNode('Public'));
+
+      // Save button
+      var saveBtn = createEl('button', 'px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-xs font-bold transition-all ml-auto', 'Save');
+      saveBtn.addEventListener('click', function() {
+        fetch('/api/admin/tickets/' + ticket.id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: statusSelect.value,
+            priority: prioritySelect.value || null,
+            is_public: pubCheck.checked,
+          }),
+        })
+          .then(function(r) { return r.json(); })
+          .then(function() {
+            showToast('Ticket updated', 'success');
+            loadTickets();
+            loadCounts();
+          })
+          .catch(function() { showToast('Failed to update', 'error'); });
+      });
+
+      // Delete button
+      var delBtn = createEl('button', 'px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-bold transition-all', 'Delete');
+      delBtn.addEventListener('click', function() {
+        if (!confirm('Delete this ticket permanently?')) return;
+        fetch('/api/admin/tickets/' + ticket.id, { method: 'DELETE' })
+          .then(function(r) { return r.json(); })
+          .then(function() {
+            closeDetailModal();
+            showToast('Ticket deleted', 'success');
+            loadTickets();
+            loadCounts();
+          })
+          .catch(function() { showToast('Failed to delete', 'error'); });
+      });
+
+      controlsDiv.appendChild(statusSelect);
+      controlsDiv.appendChild(prioritySelect);
+      controlsDiv.appendChild(pubLabel);
+      controlsDiv.appendChild(saveBtn);
+      controlsDiv.appendChild(delBtn);
+      content.appendChild(controlsDiv);
+    }
+
+    // Separator
+    content.appendChild(createEl('div', 'border-t border-steel-blue/20 my-4'));
+
+    // Comments header
+    content.appendChild(createEl('p', 'text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-3', 'Comments (' + comments.length + ')'));
+
+    // Comments list
+    if (comments.length === 0) {
+      content.appendChild(createEl('p', 'text-sm text-steel-blue/60 italic mb-4', 'No comments yet'));
+    } else {
+      var commentsList = createEl('div', 'space-y-3 mb-4');
+      comments.forEach(function(comment) {
+        var cDiv = createEl('div', 'p-3 rounded-lg ' + (comment.is_admin ? 'bg-primary/10 border border-primary/20' : 'bg-frosted-blue/5 border border-steel-blue/10'));
+
+        // Author + time
+        var cHeader = createEl('div', 'flex items-center justify-between mb-1.5');
+        var authorText = comment.is_admin ? 'Admin' : (comment.author_name || 'You');
+        var cAuthor = createEl('span', 'text-xs font-bold ' + (comment.is_admin ? 'text-primary' : 'text-frosted-blue'), authorText);
+        if (comment.is_admin) {
+          var adminBadge = createEl('span', 'ml-1.5 px-1.5 py-0.5 rounded text-[8px] font-bold bg-primary/20 text-primary uppercase', 'Staff');
+          var authorWrap = createEl('div', 'flex items-center');
+          authorWrap.appendChild(cAuthor);
+          authorWrap.appendChild(adminBadge);
+          cHeader.appendChild(authorWrap);
+        } else {
+          cHeader.appendChild(cAuthor);
+        }
+        cHeader.appendChild(createEl('span', 'text-[10px] text-steel-blue/60', timeAgo(comment.created_at)));
+        cDiv.appendChild(cHeader);
+
+        // Message
+        cDiv.appendChild(createEl('p', 'text-sm text-frosted-blue whitespace-pre-wrap', comment.message));
+
+        // Image
+        if (comment.image_path) {
+          var cImg = document.createElement('img');
+          cImg.src = comment.image_path;
+          cImg.className = 'mt-2 max-h-32 rounded-lg cursor-pointer hover:opacity-80 transition-opacity';
+          cImg.alt = 'Comment attachment';
+          cImg.addEventListener('click', function() { openLightbox(comment.image_path); });
+          cDiv.appendChild(cImg);
+        }
+
+        commentsList.appendChild(cDiv);
+      });
+      content.appendChild(commentsList);
+    }
+
+    // Add comment form (only if own ticket or admin)
+    if (ticket.is_own || _isAdmin) {
+      var formDiv = createEl('div', 'border-t border-steel-blue/20 pt-4');
+      var textarea = document.createElement('textarea');
+      textarea.placeholder = 'Write a comment...';
+      textarea.rows = 3;
+      textarea.className = 'w-full px-3 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-2';
+
+      var fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/png,image/jpeg,image/webp';
+      fileInput.className = 'w-full text-sm text-steel-blue file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-primary/20 file:text-primary hover:file:bg-primary/30 transition-all mb-2';
+
+      var sendBtn = createEl('button', 'w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all', 'Add Comment');
+      sendBtn.addEventListener('click', function() {
+        var msg = textarea.value.trim();
+        if (!msg) { showToast('Comment cannot be empty', 'error'); return; }
+
+        var formData = new FormData();
+        formData.append('message', msg);
+        if (fileInput.files.length > 0) {
+          formData.append('image', fileInput.files[0]);
+        }
+
+        sendBtn.disabled = true;
+        sendBtn.textContent = 'Sending...';
+
+        fetch('/api/tickets/' + ticket.id + '/comments', { method: 'POST', body: formData })
+          .then(function(r) {
+            if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || 'Failed'); });
+            return r.json();
+          })
+          .then(function() {
+            showToast('Comment added', 'success');
+            openDetailModal(ticket.id); // Refresh detail
+          })
+          .catch(function(e) { showToast(e.message, 'error'); })
+          .finally(function() { sendBtn.disabled = false; sendBtn.textContent = 'Add Comment'; });
+      });
+
+      formDiv.appendChild(textarea);
+      formDiv.appendChild(fileInput);
+      formDiv.appendChild(sendBtn);
+      content.appendChild(formDiv);
+    }
+  }
+
+  // ---- Lightbox ----
+
+  window.openLightbox = function(src) {
+    document.getElementById('lightboxImg').src = src;
+    document.getElementById('lightbox').classList.remove('hidden');
+    document.getElementById('lightbox').classList.add('flex');
+  };
+
+  window.closeLightbox = function() {
+    document.getElementById('lightbox').classList.add('hidden');
+    document.getElementById('lightbox').classList.remove('flex');
+  };
+
+  // ---- Filter tab styles ----
+
+  var styleEl = document.createElement('style');
+  styleEl.textContent = '.filter-tab, .cat-filter-tab { background: rgb(var(--color-accent) / 0.1); color: rgb(var(--color-accent)); border: 1px solid transparent; }' +
+    '.filter-tab.active, .cat-filter-tab.active { background: rgb(var(--color-primary) / 0.2); color: rgb(var(--color-primary)); border-color: rgb(var(--color-primary) / 0.3); }' +
+    '.filter-tab:hover, .cat-filter-tab:hover { background: rgb(var(--color-accent) / 0.2); }';
+  document.head.appendChild(styleEl);
+
+  // ---- Init ----
+
+  initSidebar('tickets');
+  loadSystemStatus();
+
+  // Scroll-down hint — fade out at bottom
+  (function() {
+    var hint = document.getElementById('scrollDownHint');
+    if (!hint) return;
+    window.addEventListener('scroll', function() {
+      var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+      hint.style.opacity = atBottom ? '0' : '1';
+    });
+  })();
+
+  checkAuth().then(function(user) {
+    _isAdmin = user.is_admin;
+    _username = user.username || '';
+
+    // Header
+    var uEl = document.getElementById('headerUsername');
+    var rEl = document.getElementById('headerRole');
+    if (uEl) uEl.textContent = user.display_name || user.username;
+    if (rEl) rEl.textContent = user.is_admin ? 'Admin' : 'Member';
+    showAdminNav(user.is_admin);
+
+    // User menu
+    var menuBtn = document.getElementById('userMenuBtn');
+    var menuDrop = document.getElementById('userMenuDropdown');
+    if (menuBtn && menuDrop) {
+      menuBtn.addEventListener('click', function() { menuDrop.classList.toggle('hidden'); });
+      document.addEventListener('click', function(e) {
+        if (!menuBtn.contains(e.target) && !menuDrop.contains(e.target)) menuDrop.classList.add('hidden');
+      });
+    }
+
+    // Load data
+    loadTickets();
+    loadCounts();
+
+    // Auto-refresh every 30s
+    _refreshTimer = setInterval(function() { loadTickets(); loadCounts(); }, 30000);
+
+    // Init notifications
+    if (window.initNotifications) window.initNotifications();
+  });
+
+})();
+</script>
+</body>
+</html>
