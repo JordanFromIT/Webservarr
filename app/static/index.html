@@ -304,7 +304,9 @@ async function loadNews() {
             const icon = post.pinned ? 'push_pin' : (isRecent ? 'fiber_new' : 'article');
             const borderColor = post.pinned ? 'border-l-primary' : (isRecent ? 'border-l-green-500' : 'border-l-steel-blue');
             const iconColor = post.pinned ? 'text-primary' : (isRecent ? 'text-green-500' : 'text-steel-blue');
-            const timeAgo = getTimeAgo(new Date(post.created_at));
+            const postDate = new Date(post.created_at);
+            const secondsAgo = Math.floor((new Date() - postDate) / 1000);
+            const timeAgo = secondsAgo < 60 ? 'Just now' : postDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 
             return `
                 <div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 ${borderColor}">
