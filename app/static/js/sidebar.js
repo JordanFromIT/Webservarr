@@ -81,7 +81,7 @@ function _buildSidebarHTML(currentPage) {
         logoHtml +
         '<h1 class="text-frosted-blue font-bold text-lg leading-none text-center">' + escapeHtml(appName) + '</h1>' +
       '</div>' +
-      '<nav class="flex-1 px-4 py-6 space-y-2">' + navLinks + '</nav>' +
+      '<nav class="flex-1 px-4 py-6 space-y-2 opacity-0 transition-opacity duration-200" id="desktopNav">' + navLinks + '</nav>' +
       '<div class="p-4 border-t border-steel-blue/20">' +
         '<p id="appVersion" class="text-steel-blue text-[10px] text-center" data-admin-only="true" style="display:none"></p>' +
       '</div>' +
@@ -93,15 +93,15 @@ function _buildSidebarHTML(currentPage) {
       '<button id="hamburgerBtn" class="p-2 text-steel-blue hover:text-bright transition-colors">' +
         '<span class="material-symbols-outlined">menu</span>' +
       '</button>' +
-      '<span class="text-frosted-blue font-bold text-sm">' + escapeHtml(appName) + '</span>' +
-      '<div class="relative flex items-center gap-2">' +
-        '<button class="relative p-2 text-steel-blue hover:text-frosted-blue transition-colors" title="Notifications">' +
+      '<span class="text-frosted-blue font-bold text-sm truncate max-w-[40%]">' + escapeHtml(appName) + '</span>' +
+      '<div class="relative flex items-center gap-1 sm:gap-2 min-w-0">' +
+        '<button class="relative p-1.5 sm:p-2 text-steel-blue hover:text-frosted-blue transition-colors shrink-0" title="Notifications">' +
           '<span class="material-symbols-outlined">notifications</span>' +
         '</button>' +
-        '<button id="mobileUserMenuBtn" class="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity">' +
-          '<div class="text-right">' +
-            '<p id="mobileUsername" class="text-xs font-bold text-frosted-blue leading-none"></p>' +
-            '<p id="mobileRole" class="text-[10px] text-steel-blue"></p>' +
+        '<button id="mobileUserMenuBtn" class="flex items-center gap-1.5 sm:gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0">' +
+          '<div class="text-right min-w-0">' +
+            '<p id="mobileUsername" class="text-xs font-bold text-frosted-blue leading-none truncate max-w-[80px] sm:max-w-[120px]"></p>' +
+            '<p id="mobileRole" class="text-[10px] text-steel-blue hidden sm:block"></p>' +
           '</div>' +
         '</button>' +
         '<div id="mobileUserMenuDropdown" class="hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">' +
@@ -133,7 +133,7 @@ function _buildSidebarHTML(currentPage) {
             '<h1 class="text-frosted-blue font-bold text-lg leading-none text-center">' + escapeHtml(appName) + '</h1>' +
           '</div>' +
         '</div>' +
-        '<nav class="flex-1 px-4 py-4 space-y-2">' + navLinks + '</nav>' +
+        '<nav class="flex-1 px-4 py-4 space-y-2 opacity-0 transition-opacity duration-200" id="drawerNav">' + navLinks + '</nav>' +
         '<div class="p-4 border-t border-steel-blue/20">' +
           '<button data-logout class="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-steel-blue hover:text-bright transition-colors">' +
             '<span class="material-symbols-outlined text-sm">logout</span> Sign Out' +
@@ -208,11 +208,18 @@ function initSidebar(currentPage) {
  * @param {boolean} isAdmin
  */
 function showAdminNav(isAdmin) {
-  if (!isAdmin) return;
-  var items = document.querySelectorAll('[data-admin-only]');
-  items.forEach(function (el) {
-    el.style.display = '';
-  });
+  if (isAdmin) {
+    var items = document.querySelectorAll('[data-admin-only]');
+    items.forEach(function (el) {
+      el.style.display = '';
+    });
+  }
+
+  // Fade in nav sections (prevents flicker of admin items popping in)
+  var desktopNav = document.getElementById('desktopNav');
+  var drawerNav = document.getElementById('drawerNav');
+  if (desktopNav) desktopNav.classList.replace('opacity-0', 'opacity-100');
+  if (drawerNav) drawerNav.classList.replace('opacity-0', 'opacity-100');
 
   // Also populate mobile user info
   var mobileUsername = document.getElementById('mobileUsername');

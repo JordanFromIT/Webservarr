@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "WebServarr"
-    app_version: str = "1.0.0"
+    app_version: str = "dev"
     app_env: str = "production"
     app_debug: bool = False
     app_secret_key: str = ""  # Auto-generated on first startup if not set

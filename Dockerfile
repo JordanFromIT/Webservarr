@@ -22,6 +22,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy supervisord config
 COPY supervisord.conf /etc/supervisord.conf
 
+# Version (set by CI from git tag, defaults to "dev")
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 # Copy application code
 COPY app/ ./app/
 
