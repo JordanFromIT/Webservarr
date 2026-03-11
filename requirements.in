@@ -38,7 +38,7 @@ pydantic==2.5.3
 pydantic-settings==2.1.0
 
 # Markdown rendering (for news posts)
-markdown==3.5.2
+markdown==3.10.2
 bleach==6.1.0
 
 # HTTP client
