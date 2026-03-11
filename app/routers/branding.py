@@ -28,7 +28,7 @@ DEFAULTS = {
     # Feature flags
     "features.show_requests": "false",
     "features.show_simple_auth": "true",
-    "features.show_plex_auth": "true",
+    "features.show_plex_auth": "false",
     "features.show_authentik_auth": "false",
     "features.login_backgrounds": "true",
     "features.show_tickets": "true",

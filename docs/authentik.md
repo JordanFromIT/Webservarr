@@ -1,66 +1,28 @@
 # Authentik OIDC Setup Guide
 
-Authentik provides Plex login *through* a centralized identity provider. This gives you SSO across multiple services, centralized session management, and audit logging -- features that direct Plex OAuth does not provide.
+## Why Authentik?
 
-**If you just want users to sign in with Plex**, use direct Plex OAuth instead. It requires no additional containers and is configured entirely in Settings > Integrations > Plex.
+Plex doesn't provide a traditional identity provider -- it's a media server, not an auth platform. If you run multiple services for your users (Overseerr, Organizr, wikis, forums, etc.), each one needs its own login mechanism. Authentik solves this by acting as a **translational authentication layer** between Plex and everything else.
+
+When a user signs in with their Plex account through Authentik, Authentik creates a local identity for them. That identity can then be used to authenticate against any service you connect to Authentik -- not just WebServarr. This gives you:
+
+- **Single sign-on (SSO)** across all your services using Plex as the identity source
+- **Centralized user management** -- onboard/offboard users in one place instead of per-service
+- **Audit logging** -- see who logged in, when, and to which service
+- **Granular access control** -- restrict which Plex users can access which services
+
+**If you just want users to sign in with Plex for WebServarr only**, use direct Plex OAuth instead. It requires no additional infrastructure and is configured entirely in Settings > Integrations > Plex.
 
 ## Prerequisites
 
 - WebServarr running and accessible (complete the [setup guide](setup.md) first)
 - A domain with HTTPS (required for OAuth redirects)
-- Your Plex server URL and API token (configured in WebServarr Settings > Integrations > Plex)
-- Your Plex server's machine identifier (found in Plex Settings > General > "Machine identifier", or via the Plex API)
-
-## Path A: Deploy Authentik Alongside WebServarr
-
-The WebServarr repo includes a Docker Compose overlay that adds Authentik (server + worker) and PostgreSQL alongside WebServarr.
-
-### 1. Generate required secrets
-
-```bash
-echo "AUTHENTIK_SECRET_KEY=$(openssl rand -base64 32)" >> .env
-echo "PG_PASS=$(openssl rand -base64 16)" >> .env
-```
-
-### 2. Start all containers
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.authentik.yml up -d
-```
-
-### 3. Wait for Authentik to become healthy
-
-Authentik takes 1-2 minutes to start on first launch. Check readiness:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.authentik.yml ps
-```
-
-Wait until `authentik-server` shows `(healthy)` before proceeding.
-
-### 4. Create the Authentik admin account
-
-Open `http://<your-server>:9000/if/flow/initial-setup/` in your browser.
-
-- Choose a username and password for the Authentik admin account
-- This is separate from your WebServarr admin account
-- Save these credentials -- you will need them to configure Authentik
-
-After completing the wizard, you will be redirected to the Authentik admin dashboard.
-
-### 5. Continue to "Configure Authentik" below
-
----
-
-## Path B: Connect to an Existing Authentik Instance
-
-If you already run Authentik for other services, skip Path A and go directly to "Configure Authentik" below. Your Authentik instance must be network-accessible from the WebServarr container.
-
----
+- A Plex account with admin access to your Plex server (you will authenticate through Authentik's Plex source setup)
+- A running Authentik instance with admin access -- follow the [official Authentik Docker Compose installation guide](https://docs.goauthentik.io/install-config/install/docker-compose/) if you don't have one yet
 
 ## Configure Authentik
 
-These steps apply whether you deployed Authentik via Path A or are connecting to an existing instance. Log in to the Authentik admin interface to complete them.
+Log in to the Authentik admin interface to complete the following steps.
 
 ### Step 1: Create a Plex Source
 
@@ -76,8 +38,7 @@ This allows users to authenticate with their Plex account through Authentik.
 | Name | `Plex` (or any descriptive name) |
 | Slug | `plex` (auto-generated from name) |
 | Client ID | Leave the auto-generated value |
-| Plex token | Your Plex API token (same one configured in WebServarr Settings > Integrations > Plex) |
-| Allowed servers | Click **Load servers**, then check the box next to your Plex server |
+| Allowed servers | Click the blue **Load servers** button. You will be prompted to authenticate with your Plex admin account. Once authenticated, your servers will populate -- check the box next to your Plex server |
 | Allow friends | Uncheck this unless you want all Plex friends to be able to log in |
 
 5. Leave **Authentication flow** and **Enrollment flow** at their defaults
@@ -118,14 +79,14 @@ This custom flow shows only the Plex login button (no username/password fields),
 | Sources | Select the Plex source you created in Step 1 |
 
 5. Leave all other fields at their defaults
-6. Click **Create**
+6. Click **Finish**
 
 #### 2c. Bind the stage to the flow
 
 1. Navigate back to **Flows and Stages > Flows**
 2. Click on **Plex Direct Login** to open it
 3. Go to the **Stage Bindings** tab
-4. Click **Create Binding**
+4. Click **Bind existing stage**
 5. Fill in the fields:
 
 | Field | Value |
@@ -150,7 +111,7 @@ This custom scope mapping passes the user's Plex token through to WebServarr, en
 | Scope name | `plex` |
 | Expression | See below |
 
-5. Paste this expression:
+5. Paste this expression (note: it may appear word-wrapped in the editor, which is normal):
 
 ```python
 from authentik.sources.plex.models import UserPlexSourceConnection
@@ -159,22 +120,22 @@ connection = UserPlexSourceConnection.objects.filter(user=request.user).first()
 return {"plex_token": connection.plex_token if connection else ""}
 ```
 
-6. Click **Create**
+6. Click **Finish**
 
 ### Step 4: Create the OAuth2/OIDC Provider
 
 1. Navigate to **Applications > Providers**
 2. Click **Create**
-3. Select **OAuth2/OpenID Connect**
+3. Select **OAuth2/OpenID Provider**
 4. Fill in the fields:
 
 | Field | Value |
 |-------|-------|
 | Name | `WebServarr` (or any name) |
-| Authentication flow | **Plex Direct Login** (the flow from Step 2) |
 | Authorization flow | **default-provider-authorization-implicit-consent** |
+| Authentication flow | **Plex Direct Login** (the flow from Step 2) |
 | Client type | Confidential |
-| Redirect URIs/Origins (RegEx) | `https://your-domain.com/auth/callback` |
+| Redirect URIs/Origins (RegEx) | Your WebServarr callback URL, e.g. `https://hmserver.tv/auth/callback`. This must exactly match your domain -- replace `hmserver.tv` with your actual domain. No trailing slash. |
 | Redirect URIs matching mode | Strict |
 | Signing key | **authentik Self-signed Certificate** |
 
@@ -276,13 +237,7 @@ Verify that:
 
 **Authentik takes too long to start**
 
-First launch can take 1-2 minutes while Authentik runs database migrations. Check progress with:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.authentik.yml logs -f authentik-server
-```
-
-Look for `Starting authentik server` in the logs to confirm it is ready.
+First launch can take 1-2 minutes while Authentik runs database migrations. Check your Authentik server logs for `Starting authentik server` to confirm it is ready.
 
 ---
 
@@ -329,20 +284,9 @@ Point the hostname `auth.example.com` to `http://localhost:9000` in your tunnel 
 
 ## Removal
 
-To remove Authentik and its data:
+To disconnect Authentik from WebServarr:
 
-```bash
-# Stop Authentik containers
-docker compose -f docker-compose.yml -f docker-compose.authentik.yml down
+1. In WebServarr, go to **Settings > System > Authentication** and disable the **Authentik OIDC** toggle
+2. Users who were logged in via Authentik will need to log in again using another method (simple auth or direct Plex OAuth)
 
-# Remove Authentik data volumes
-docker volume rm webservarr_postgres-data webservarr_authentik-data webservarr_authentik-templates
-
-# Remove secrets from .env
-# Edit .env and remove the AUTHENTIK_SECRET_KEY and PG_PASS lines
-
-# Restart WebServarr without Authentik
-docker compose up -d
-```
-
-In WebServarr, disable the Authentik toggle in Settings > System > Authentication. Users who were logged in via Authentik will need to log in again using another method.
+To remove the Authentik instance itself, refer to the [Authentik documentation](https://docs.goauthentik.io/).

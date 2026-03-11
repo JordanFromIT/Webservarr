@@ -14,7 +14,7 @@ A self-hosted web dashboard for Plex media server administration. WebServarr bri
 - **Notifications** -- In-app bell notifications and optional browser push (Web Push / VAPID) for request updates, issue responses, service changes, and news posts
 - **Themeable** -- Full theme engine with color pickers, Google Fonts, custom CSS, logo upload, configurable sidebar labels and icons
 - **Ticket System** -- User support tickets with categories, priority levels, image attachments, and admin management
-- **Three Auth Methods** -- Simple username/password (default), direct Plex OAuth (recommended), or Plex via Authentik OIDC (advanced)
+- **Three Auth Methods** -- Local username/password (default), direct Plex OAuth, or Plex via Authentik OIDC (for multi-service SSO)
 - **Security Hardened** -- Rate limiting on all endpoints, magic number upload verification, authenticated file serving, full dependency pinning
 
 ## Quick Start
@@ -46,6 +46,8 @@ docker run -d \
 
 On first launch, a **setup wizard** will guide you through creating an admin account, generating a secret key, and optionally connecting Plex. After setup, head to **Settings** to configure your other integrations.
 
+> **HTTPS:** WebServarr does not handle HTTPS directly. We strongly recommend placing it behind a reverse proxy for TLS termination. [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) is free and requires no port forwarding or certificates. See [docs/setup.md](docs/setup.md#reverse-proxy-strongly-recommended) for details.
+
 ## Configuration
 
 All configuration is done through the Settings UI after logging in. No `.env` file is required for basic operation.
@@ -69,11 +71,11 @@ Each integration has a **Test Connection** button to verify your credentials bef
 
 WebServarr supports three authentication methods, configurable in **Settings > System > Authentication**:
 
-1. **Simple Auth** (default) -- Username and password login against the local database. Enabled out of the box. Can be disabled once Plex OAuth is configured.
+1. **Local Auth** (default) -- Username and password login against the local database. Enabled out of the box. Can be disabled once another auth method is configured.
 
-2. **Direct Plex OAuth** (recommended) -- Users sign in with their Plex account. Same PIN-based flow used by Overseerr and Tautulli. Requires Plex integration to be configured. Admin is determined by matching the user's email against the Plex server owner or `system.admin_email` setting.
+2. **Direct Plex OAuth** -- Users sign in with their Plex account. Same PIN-based flow used by Overseerr and Tautulli. Enable in Settings > System > Authentication after configuring Plex integration.
 
-3. **Authentik OIDC** (advanced) -- Plex login through an Authentik identity provider. Useful if you already run Authentik for SSO across multiple services. See [docs/authentik.md](docs/authentik.md) for setup instructions.
+3. **Authentik OIDC** -- Plex login through an Authentik identity provider. Best for admins who run multiple services and want centralized SSO. See [docs/authentik.md](docs/authentik.md) for setup instructions.
 
 ### Environment Variables
 

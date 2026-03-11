@@ -138,19 +138,21 @@ tar czf webservarr-backup-$(date +%Y%m%d).tar.gz data/ uploads/ .env
 
 ## Advanced: Authentik OIDC Setup
 
-Authentik provides Plex login *through* a centralized identity provider. This is useful if you already run Authentik for SSO across multiple services, or want centralized session management. If you just want users to sign in with Plex, use **direct Plex OAuth** instead — it requires no Authentik and is configured entirely in Settings > Integrations > Plex.
+For admins who run multiple services and want centralized authentication using Plex as the identity source, WebServarr supports login through [Authentik](https://goauthentik.io/). This requires a separate Authentik instance -- see the **[Authentik Setup Guide](authentik.md)** for how to configure it for WebServarr.
 
-See the full **[Authentik Setup Guide](authentik.md)** for step-by-step instructions covering:
+## Reverse Proxy (Strongly Recommended)
 
-- Deploying Authentik alongside WebServarr (Docker Compose overlay)
-- Connecting to an existing Authentik instance
-- Creating the Plex source, custom login flow, and OAuth2 provider
-- Custom property mapping for Plex token passthrough
-- Verification, troubleshooting, and removal
+**WebServarr does not handle HTTPS directly.** It serves plain HTTP on port 7979 and expects a reverse proxy in front to terminate TLS/SSL. Without a reverse proxy, session cookies will not be marked `Secure`, OAuth callbacks may fail, and all traffic will be unencrypted.
 
-## Advanced: Reverse Proxy
+We strongly recommend **[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)** -- it's free, requires no port forwarding or firewall configuration, and automatically provides HTTPS with Cloudflare's edge certificates. Simply install `cloudflared` on your server, create a tunnel, and point a hostname to `http://localhost:7979`.
 
-WebServarr runs on port 7979 by default. To expose it on a custom domain with HTTPS, use a reverse proxy.
+If you prefer a traditional reverse proxy, nginx and Caddy are both well-supported options.
+
+### Cloudflare Tunnel (recommended)
+
+1. [Install cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) on your server
+2. Create a tunnel and point your hostname to `http://localhost:7979`
+3. No port forwarding, no firewall rules, no SSL certificates to manage
 
 ### nginx
 
@@ -179,14 +181,6 @@ dashboard.example.com {
     reverse_proxy localhost:7979
 }
 ```
-
-### Cloudflare Tunnel
-
-```bash
-cloudflared tunnel route dns <tunnel-name> dashboard.example.com
-```
-
-In your Cloudflare Tunnel config, point the hostname to `http://localhost:7979`.
 
 When using a reverse proxy, set `APP_DOMAIN` and `APP_SCHEME` in your `.env` file. Auth callback URLs and cookie domains are derived from the incoming HTTP request (so login works without these set), but `APP_DOMAIN` is used for Content Security Policy headers:
 
