@@ -314,7 +314,7 @@ async function loadNews() {
                             <h4 class="font-bold text-frosted-blue">${escapeHtml(post.title)}</h4>
                             <span class="text-[10px] text-steel-blue font-bold uppercase">${timeAgo}</span>
                         </div>
-                        <div class="text-sm text-frosted-blue/80 mt-1 prose prose-invert max-w-none">
+                        <div class="text-sm text-frosted-blue/80 mt-1 prose prose-invert max-w-none [&>div]:mb-2 [&>p]:mb-2 [&_br]:block" style="white-space:pre-line">
                             ${post.content_html}
                         </div>
                     </div>
