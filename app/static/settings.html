@@ -2921,7 +2921,7 @@
                                     By ${escapeHtml(post.author_name)} • ${new Date(post.created_at).toLocaleString()}
                                 </p>
                                 <div class="text-frosted-blue/80 text-sm line-clamp-3">
-                                    ${post.content.substring(0, 200)}...
+                                    ${escapeHtml(post.content.replace(/<[^>]*>/g, '').substring(0, 200))}...
                                 </div>
                             </div>
                             <div class="flex gap-2 ml-4">
