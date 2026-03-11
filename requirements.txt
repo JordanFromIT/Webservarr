@@ -85,7 +85,7 @@ itsdangerous==2.1.2
     # via -r requirements.in
 limits==5.8.0
     # via slowapi
-markdown==3.5.2
+markdown==3.10.2
     # via -r requirements.in
 multidict==6.7.1
     # via
