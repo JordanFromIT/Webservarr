@@ -276,7 +276,14 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     })();
 
-    // Apply branding from theme
+    // Wait for branding data if not cached (theme-loader fetches async)
+    if (!window.WEBSERVARR_THEME) {
+        try {
+            var brandResp = await fetch('/api/branding');
+            var brandData = await brandResp.json();
+            window.WEBSERVARR_THEME = brandData;
+        } catch (e) { /* use empty defaults */ }
+    }
     var theme = window.WEBSERVARR_THEME || {};
     if (theme.app_name) {
         var el = document.getElementById('loginAppName');
