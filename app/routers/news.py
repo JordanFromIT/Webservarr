@@ -58,9 +58,9 @@ def sanitize_html(html: str) -> str:
     Allows safe tags only.
     """
     allowed_tags = [
-        'p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'p', 'br', 'b', 'strong', 'i', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
         'ul', 'ol', 'li', 'a', 'code', 'pre', 'blockquote', 'hr',
-        'img', 's', 'del', 'div', 'span'
+        'img', 's', 'del', 'div', 'span', 'sub', 'sup'
     ]
     allowed_attributes = {
         'a': ['href', 'title', 'target', 'rel'],
