@@ -6,7 +6,7 @@ Fetches upcoming movies from Radarr's calendar API.
 import logging
 from datetime import datetime, timedelta
 import httpx
-from sqlalchemy.orm import Session
+from app.database import SessionLocal
 from app.models import Setting
 
 logger = logging.getLogger(__name__)
@@ -14,22 +14,26 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 5.0
 
 
-def _get_config(db: Session) -> dict:
-    """Read Radarr config from settings table."""
-    url_setting = db.query(Setting).filter(Setting.key == "integration.radarr.url").first()
-    key_setting = db.query(Setting).filter(Setting.key == "integration.radarr.api_key").first()
-    return {
-        "url": url_setting.value.rstrip("/") if url_setting else None,
-        "api_key": key_setting.value if key_setting else None,
-    }
+def _get_config() -> dict:
+    """Read Radarr config from settings table (short-lived session)."""
+    db = SessionLocal()
+    try:
+        url_setting = db.query(Setting).filter(Setting.key == "integration.radarr.url").first()
+        key_setting = db.query(Setting).filter(Setting.key == "integration.radarr.api_key").first()
+        return {
+            "url": url_setting.value.rstrip("/") if url_setting else None,
+            "api_key": key_setting.value if key_setting else None,
+        }
+    finally:
+        db.close()
 
 
-async def get_calendar(db: Session, days: int = 14, start: str = "") -> list:
+async def get_calendar(days: int = 14, start: str = "") -> list:
     """
     Fetch upcoming movies from Radarr's calendar.
     Returns list of dicts with movie title, release date, and type.
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"] or not config["api_key"]:
         return []
 

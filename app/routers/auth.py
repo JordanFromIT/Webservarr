@@ -192,7 +192,7 @@ async def oidc_callback(request: Request, code: str, state: str, db: Session = D
         overseerr_sid = None
         if plex_token:
             try:
-                overseerr_sid = await overseerr.authenticate_with_plex_token(db, plex_token)
+                overseerr_sid = await overseerr.authenticate_with_plex_token(plex_token)
                 if overseerr_sid:
                     logger.info("Overseerr SSO successful for %s", user_email)
                 else:

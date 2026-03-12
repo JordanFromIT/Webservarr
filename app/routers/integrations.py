@@ -21,10 +21,9 @@ router = APIRouter()
 @router.get("/active-streams")
 async def get_active_streams(
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get active Plex streams. Requires authentication."""
-    streams = await plex.get_active_streams(db)
+    streams = await plex.get_active_streams()
     return streams
 
 
@@ -32,10 +31,9 @@ async def get_active_streams(
 async def plex_thumbnail(
     path: str,
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Proxy a Plex thumbnail image to avoid mixed-content issues."""
-    content, content_type = await plex.get_thumbnail(db, path)
+    content, content_type = await plex.get_thumbnail(path)
     if content is None:
         raise HTTPException(status_code=404, detail="Thumbnail not found")
     return Response(content=content, media_type=content_type, headers={"Cache-Control": "public, max-age=3600"})
@@ -52,7 +50,7 @@ async def get_backgrounds(db: Session = Depends(get_db)):
     flag = db.query(Setting).filter(Setting.key == "features.login_backgrounds").first()
     if flag and flag.value == "false":
         return []
-    return await overseerr.get_backdrops(db)
+    return await overseerr.get_backdrops()
 
 
 # --- Uptime Kuma Endpoints ---
@@ -74,7 +72,7 @@ async def get_monitors(
     db: Session = Depends(get_db),
 ):
     """Get all Uptime Kuma monitors with stored preferences (enabled, icon)."""
-    monitors = await uptime_kuma.get_monitors(db)
+    monitors = await uptime_kuma.get_monitors()
     for m in monitors:
         prefs = _get_monitor_preferences(db, m["id"])
         m["enabled"] = prefs["enabled"]
@@ -88,7 +86,7 @@ async def get_service_status(
     db: Session = Depends(get_db),
 ):
     """Get enabled service status from Uptime Kuma for homepage display."""
-    monitors = await uptime_kuma.get_monitors(db)
+    monitors = await uptime_kuma.get_monitors()
     result = []
     for m in monitors:
         prefs = _get_monitor_preferences(db, m["id"])
@@ -104,20 +102,18 @@ async def get_service_status(
 async def get_recent_requests(
     limit: int = 10,
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get recent Overseerr requests. Requires authentication."""
-    requests = await overseerr.get_recent_requests(db, limit=limit)
+    requests = await overseerr.get_recent_requests(limit=limit)
     return requests
 
 
 @router.get("/request-counts")
 async def get_request_counts(
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get Overseerr request count statistics. Requires authentication."""
-    counts = await overseerr.get_request_counts(db)
+    counts = await overseerr.get_request_counts()
     return counts
 
 
@@ -136,7 +132,6 @@ async def get_overseerr_url(
 async def overseerr_auth(
     response: Response,
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Re-authenticate with Overseerr using stored Plex token. Sets connect.sid cookie."""
@@ -151,7 +146,7 @@ async def overseerr_auth(
     if not plex_token:
         return {"success": False, "reason": "no_plex_token"}
 
-    overseerr_sid = await overseerr.authenticate_with_plex_token(db, plex_token)
+    overseerr_sid = await overseerr.authenticate_with_plex_token(plex_token)
     if not overseerr_sid:
         return {"success": False, "reason": "auth_failed"}
 
@@ -173,12 +168,11 @@ async def overseerr_search(
     query: str,
     page: int = 1,
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Search TMDB via Overseerr. Returns movies and TV shows."""
     if not query.strip():
         return {"page": 1, "totalPages": 0, "totalResults": 0, "results": []}
-    results = await overseerr.search_media(db, query=query.strip(), page=page)
+    results = await overseerr.search_media(query=query.strip(), page=page)
     return results
 
 
@@ -202,7 +196,6 @@ class RequestCreate(BaseModel):
 async def create_overseerr_request(
     body: RequestCreate,
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Create a media request in Overseerr, attributed to the current Plex user when possible."""
@@ -212,12 +205,12 @@ async def create_overseerr_request(
     plex_token = await _get_plex_token(session_id)
     if plex_token:
         result = await overseerr.create_request_as_user(
-            db, plex_token=plex_token,
+            plex_token=plex_token,
             media_type=body.mediaType, media_id=body.mediaId, is4k=body.is4k,
         )
     else:
         result = await overseerr.create_request(
-            db, media_type=body.mediaType, media_id=body.mediaId, is4k=body.is4k,
+            media_type=body.mediaType, media_id=body.mediaId, is4k=body.is4k,
         )
 
     if not result.get("success"):
@@ -243,29 +236,26 @@ async def get_issues(
     skip: int = 0,
     sort: str = "added",
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get Overseerr issues with media details. Requires authentication."""
-    return await overseerr.get_issues(db, take=take, skip=skip, sort=sort)
+    return await overseerr.get_issues(take=take, skip=skip, sort=sort)
 
 
 @router.get("/issue-counts")
 async def get_issue_counts(
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get Overseerr issue count statistics."""
-    return await overseerr.get_issue_counts(db)
+    return await overseerr.get_issue_counts()
 
 
 @router.get("/issues/{issue_id}")
 async def get_issue_detail(
     issue_id: int,
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get single issue with comments."""
-    issue = await overseerr.get_issue_detail(db, issue_id)
+    issue = await overseerr.get_issue_detail(issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
     return issue
@@ -275,7 +265,6 @@ async def get_issue_detail(
 async def create_issue(
     body: IssueCreate,
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Create an issue in Overseerr, attributed to the current Plex user."""
@@ -289,7 +278,7 @@ async def create_issue(
         raise HTTPException(status_code=400, detail="No Plex token in session. Please sign in with Plex.")
 
     result = await overseerr.create_issue(
-        db, plex_token=plex_token,
+        plex_token=plex_token,
         issue_type=body.issueType, message=body.message.strip(), media_id=body.mediaId,
     )
     if not result.get("success"):
@@ -302,7 +291,6 @@ async def create_issue_comment(
     issue_id: int,
     body: IssueCommentCreate,
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Add a comment to an issue, attributed to the current Plex user."""
@@ -314,7 +302,7 @@ async def create_issue_comment(
         raise HTTPException(status_code=400, detail="No Plex token in session. Please sign in with Plex.")
 
     result = await overseerr.create_issue_comment(
-        db, plex_token=plex_token, issue_id=issue_id, message=body.message.strip(),
+        plex_token=plex_token, issue_id=issue_id, message=body.message.strip(),
     )
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "Failed to add comment"))
@@ -328,11 +316,10 @@ async def get_upcoming_releases(
     days: int = 14,
     start: str = "",
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get upcoming TV episodes and movies from Sonarr/Radarr. Requires authentication."""
-    sonarr_items = await sonarr.get_calendar(db, days=days, start=start)
-    radarr_items = await radarr.get_calendar(db, days=days, start=start)
+    sonarr_items = await sonarr.get_calendar(days=days, start=start)
+    radarr_items = await radarr.get_calendar(days=days, start=start)
 
     # Merge and sort by air_date
     combined = sonarr_items + radarr_items
@@ -346,8 +333,7 @@ async def get_upcoming_releases(
 @router.get("/system-stats")
 async def get_system_stats(
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get system stats from Netdata. Requires authentication."""
-    stats = await netdata.get_system_stats(db)
+    stats = await netdata.get_system_stats()
     return stats

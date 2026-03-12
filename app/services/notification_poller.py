@@ -160,21 +160,26 @@ async def _collect_session_emails(r: aioredis.Redis) -> Set[str]:
 # Overseerr config helper
 # ---------------------------------------------------------------------------
 
-def _get_overseerr_config(db: Session) -> dict:
-    url_row = db.query(Setting).filter(Setting.key == "integration.overseerr.url").first()
-    key_row = db.query(Setting).filter(Setting.key == "integration.overseerr.api_key").first()
-    return {
-        "url": url_row.value.rstrip("/") if url_row else None,
-        "api_key": key_row.value if key_row else None,
-    }
+def _get_overseerr_config() -> dict:
+    """Read Overseerr config using a short-lived session."""
+    db = SessionLocal()
+    try:
+        url_row = db.query(Setting).filter(Setting.key == "integration.overseerr.url").first()
+        key_row = db.query(Setting).filter(Setting.key == "integration.overseerr.api_key").first()
+        return {
+            "url": url_row.value.rstrip("/") if url_row else None,
+            "api_key": key_row.value if key_row else None,
+        }
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
 # Poll: Overseerr requests
 # ---------------------------------------------------------------------------
 
-async def _poll_overseerr_requests(db: Session, r: aioredis.Redis, first_run: bool) -> None:
-    config = _get_overseerr_config(db)
+async def _poll_overseerr_requests(r: aioredis.Redis, first_run: bool) -> None:
+    config = _get_overseerr_config()
     if not config["url"] or not config["api_key"]:
         return
 
@@ -235,24 +240,28 @@ async def _poll_overseerr_requests(db: Session, r: aioredis.Redis, first_run: bo
                         continue
 
                     ref_id = f"request:{request_id}:available"
-                    notif = _create_notification(
-                        db,
-                        requester_email,
-                        "request",
-                        "Your request is available",
-                        f"{title} is now available on Plex",
-                        ref_id,
-                    )
-                    if notif:
-                        db.commit()
-                        await send_push_to_users(
+                    # Use short-lived session for DB write
+                    db = SessionLocal()
+                    try:
+                        notif = _create_notification(
                             db,
-                            [requester_email],
-                            notif.title,
-                            notif.body or "",
+                            requester_email,
                             "request",
-                            url="/",
+                            "Your request is available",
+                            f"{title} is now available on Plex",
+                            ref_id,
                         )
+                        if notif:
+                            db.commit()
+                            await send_push_to_users(
+                                [requester_email],
+                                notif.title,
+                                notif.body or "",
+                                "request",
+                                url="/",
+                            )
+                    finally:
+                        db.close()
 
     except Exception as exc:
         logger.warning("Poller: Overseerr requests error: %s", exc)
@@ -262,8 +271,8 @@ async def _poll_overseerr_requests(db: Session, r: aioredis.Redis, first_run: bo
 # Poll: Overseerr issues
 # ---------------------------------------------------------------------------
 
-async def _poll_overseerr_issues(db: Session, r: aioredis.Redis, first_run: bool) -> None:
-    config = _get_overseerr_config(db)
+async def _poll_overseerr_issues(r: aioredis.Redis, first_run: bool) -> None:
+    config = _get_overseerr_config()
     if not config["url"] or not config["api_key"]:
         return
 
@@ -345,46 +354,52 @@ async def _poll_overseerr_issues(db: Session, r: aioredis.Redis, first_run: bool
                 # Status change to resolved
                 if status_label == "resolved" and prev_status != "resolved":
                     ref_id = f"issue:{issue_id}:resolved"
-                    notif = _create_notification(
-                        db,
-                        creator_email,
-                        "issue",
-                        "Your issue has been resolved",
-                        f"The issue for {media_title} has been resolved",
-                        ref_id,
-                    )
-                    if notif:
-                        db.commit()
-                        await send_push_to_users(
+                    db = SessionLocal()
+                    try:
+                        notif = _create_notification(
                             db,
-                            [creator_email],
-                            notif.title,
-                            notif.body or "",
+                            creator_email,
                             "issue",
-                            url="/issues",
+                            "Your issue has been resolved",
+                            f"The issue for {media_title} has been resolved",
+                            ref_id,
                         )
+                        if notif:
+                            db.commit()
+                            await send_push_to_users(
+                                [creator_email],
+                                notif.title,
+                                notif.body or "",
+                                "issue",
+                                url="/issues",
+                            )
+                    finally:
+                        db.close()
 
                 # New comments
                 if comment_count > prev_count:
                     ref_id = f"issue:{issue_id}:comment:{comment_count}"
-                    notif = _create_notification(
-                        db,
-                        creator_email,
-                        "issue",
-                        "New response on your issue",
-                        f"New comment on your issue for {media_title}",
-                        ref_id,
-                    )
-                    if notif:
-                        db.commit()
-                        await send_push_to_users(
+                    db = SessionLocal()
+                    try:
+                        notif = _create_notification(
                             db,
-                            [creator_email],
-                            notif.title,
-                            notif.body or "",
+                            creator_email,
                             "issue",
-                            url="/issues",
+                            "New response on your issue",
+                            f"New comment on your issue for {media_title}",
+                            ref_id,
                         )
+                        if notif:
+                            db.commit()
+                            await send_push_to_users(
+                                [creator_email],
+                                notif.title,
+                                notif.body or "",
+                                "issue",
+                                url="/issues",
+                            )
+                    finally:
+                        db.close()
 
     except Exception as exc:
         logger.warning("Poller: Overseerr issues error: %s", exc)
@@ -394,7 +409,7 @@ async def _poll_overseerr_issues(db: Session, r: aioredis.Redis, first_run: bool
 # Poll: Uptime Kuma monitors
 # ---------------------------------------------------------------------------
 
-async def _poll_monitors(db: Session, r: aioredis.Redis, first_run: bool) -> None:
+async def _poll_monitors(r: aioredis.Redis, first_run: bool) -> None:
     try:
         from app.integrations.uptime_kuma import get_monitors
     except ImportError:
@@ -402,7 +417,7 @@ async def _poll_monitors(db: Session, r: aioredis.Redis, first_run: bool) -> Non
         return
 
     try:
-        monitors = await get_monitors(db)
+        monitors = await get_monitors()
     except Exception as exc:
         logger.warning("Poller: monitor fetch error: %s", exc)
         return
@@ -436,29 +451,32 @@ async def _poll_monitors(db: Session, r: aioredis.Redis, first_run: bool) -> Non
         title = f"{name} is {status_label}"
         body = f"Service status changed from {prev_status} to {status_label}"
 
-        notified_emails = []
-        for email in emails:
-            notif = _create_notification(db, email, "service", title, body, ref_id)
-            if notif:
-                notified_emails.append(email)
+        db = SessionLocal()
+        try:
+            notified_emails = []
+            for email in emails:
+                notif = _create_notification(db, email, "service", title, body, ref_id)
+                if notif:
+                    notified_emails.append(email)
 
-        if notified_emails:
-            db.commit()
-            await send_push_to_users(
-                db,
-                notified_emails,
-                title,
-                body,
-                "service",
-                url="/",
-            )
+            if notified_emails:
+                db.commit()
+                await send_push_to_users(
+                    notified_emails,
+                    title,
+                    body,
+                    "service",
+                    url="/",
+                )
+        finally:
+            db.close()
 
 
 # ---------------------------------------------------------------------------
 # Poll: News posts
 # ---------------------------------------------------------------------------
 
-async def _poll_news(db: Session, r: aioredis.Redis, first_run: bool) -> None:
+async def _poll_news(r: aioredis.Redis, first_run: bool) -> None:
     LAST_CHECK_KEY = "poller:news:last_check"
 
     prev_check_raw = await r.get(LAST_CHECK_KEY)
@@ -476,168 +494,173 @@ async def _poll_news(db: Session, r: aioredis.Redis, first_run: bool) -> None:
     if first_run or last_check is None:
         return  # seed silently — don't flood on first run
 
-    # Query for published posts since last check
-    new_posts = (
-        db.query(NewsPost)
-        .filter(
-            NewsPost.published == True,  # noqa: E712
-            NewsPost.published_at >= last_check,
+    db = SessionLocal()
+    try:
+        # Query for published posts since last check
+        new_posts = (
+            db.query(NewsPost)
+            .filter(
+                NewsPost.published == True,  # noqa: E712
+                NewsPost.published_at >= last_check,
+            )
+            .all()
         )
-        .all()
-    )
 
-    if not new_posts:
-        return
+        if not new_posts:
+            return
 
-    # Collect all known emails (sessions + push subscriptions)
-    r_conn = await _get_redis()
-    session_emails = await _collect_session_emails(r_conn)
-    sub_emails = set(
-        row.user_email.lower()
-        for row in db.query(PushSubscription.user_email).distinct().all()
-        if row.user_email
-    )
-    all_emails = session_emails | sub_emails
+        # Collect all known emails (sessions + push subscriptions)
+        r_conn = await _get_redis()
+        session_emails = await _collect_session_emails(r_conn)
+        sub_emails = set(
+            row.user_email.lower()
+            for row in db.query(PushSubscription.user_email).distinct().all()
+            if row.user_email
+        )
+        all_emails = session_emails | sub_emails
 
-    if not all_emails:
-        return
+        if not all_emails:
+            return
 
-    for post in new_posts:
-        ref_id = f"news:{post.id}"
-        notified_emails = []
-        for email in all_emails:
-            notif = _create_notification(
-                db, email, "news", "New announcement", post.title, ref_id
-            )
-            if notif:
-                notified_emails.append(email)
+        for post in new_posts:
+            ref_id = f"news:{post.id}"
+            notified_emails = []
+            for email in all_emails:
+                notif = _create_notification(
+                    db, email, "news", "New announcement", post.title, ref_id
+                )
+                if notif:
+                    notified_emails.append(email)
 
-        if notified_emails:
-            db.commit()
-            await send_push_to_users(
-                db,
-                notified_emails,
-                "New announcement",
-                post.title,
-                "news",
-                url="/",
-            )
+            if notified_emails:
+                db.commit()
+                await send_push_to_users(
+                    notified_emails,
+                    "New announcement",
+                    post.title,
+                    "news",
+                    url="/",
+                )
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
 # Poll: Support tickets
 # ---------------------------------------------------------------------------
 
-async def _poll_tickets(db: Session, r: aioredis.Redis, first_run: bool) -> None:
+async def _poll_tickets(r: aioredis.Redis, first_run: bool) -> None:
     """Detect admin comments and status changes on support tickets."""
+    db = SessionLocal()
     try:
-        tickets = db.query(Ticket).all()
-    except Exception as exc:
-        logger.warning("Poller: ticket query error: %s", exc)
-        return
-
-    if not tickets:
-        return
-
-    for ticket in tickets:
-        ticket_id = ticket.id
-        current_status = ticket.status or "open"
-
-        # Count comments and find the newest admin comment
-        comments = (
-            db.query(TicketComment)
-            .filter(TicketComment.ticket_id == ticket_id)
-            .order_by(TicketComment.created_at.asc())
-            .all()
-        )
-        comment_count = len(comments)
-
-        redis_key = f"poller:ticket:{ticket_id}"
-        prev = await r.get(redis_key)
-        snapshot_val = f"{comment_count}:{current_status}"
-        await r.set(redis_key, snapshot_val)
-
-        if first_run or prev is None:
-            continue  # seed silently
-
-        prev_str = prev.decode()
         try:
-            prev_count_str, prev_status = prev_str.split(":", 1)
-            prev_count = int(prev_count_str)
-        except (ValueError, IndexError):
-            prev_count = 0
-            prev_status = "open"
+            tickets = db.query(Ticket).all()
+        except Exception as exc:
+            logger.warning("Poller: ticket query error: %s", exc)
+            return
 
-        # Find the creator's email by scanning Redis sessions for their username
-        creator_username = ticket.creator_username
-        creator_email = None
-        cursor = 0
-        while True:
-            cursor, keys = await r.scan(cursor, match="session:*", count=100)
-            for key in keys:
-                data = await r.hgetall(key)
-                uname = data.get(b"username", b"")
-                uname_str = uname.decode() if isinstance(uname, bytes) else uname
-                if uname_str == creator_username:
-                    email_bytes = data.get(b"email", b"")
-                    email_str = email_bytes.decode() if isinstance(email_bytes, bytes) else email_bytes
-                    if email_str:
-                        creator_email = email_str.lower()
-                        break
-            if creator_email or cursor == 0:
-                break
+        if not tickets:
+            return
 
-        if not creator_email:
-            continue
+        for ticket in tickets:
+            ticket_id = ticket.id
+            current_status = ticket.status or "open"
 
-        ticket_title = ticket.title or f"Ticket #{ticket_id}"
+            # Count comments and find the newest admin comment
+            comments = (
+                db.query(TicketComment)
+                .filter(TicketComment.ticket_id == ticket_id)
+                .order_by(TicketComment.created_at.asc())
+                .all()
+            )
+            comment_count = len(comments)
 
-        # Check for new admin comments
-        if comment_count > prev_count:
-            # Check if the newest comment is from an admin
-            newest_comment = comments[-1] if comments else None
-            if newest_comment and newest_comment.is_admin:
-                ref_id = f"ticket:{ticket_id}:comment:{comment_count}"
+            redis_key = f"poller:ticket:{ticket_id}"
+            prev = await r.get(redis_key)
+            snapshot_val = f"{comment_count}:{current_status}"
+            await r.set(redis_key, snapshot_val)
+
+            if first_run or prev is None:
+                continue  # seed silently
+
+            prev_str = prev.decode()
+            try:
+                prev_count_str, prev_status = prev_str.split(":", 1)
+                prev_count = int(prev_count_str)
+            except (ValueError, IndexError):
+                prev_count = 0
+                prev_status = "open"
+
+            # Find the creator's email by scanning Redis sessions for their username
+            creator_username = ticket.creator_username
+            creator_email = None
+            cursor = 0
+            while True:
+                cursor, keys = await r.scan(cursor, match="session:*", count=100)
+                for key in keys:
+                    data = await r.hgetall(key)
+                    uname = data.get(b"username", b"")
+                    uname_str = uname.decode() if isinstance(uname, bytes) else uname
+                    if uname_str == creator_username:
+                        email_bytes = data.get(b"email", b"")
+                        email_str = email_bytes.decode() if isinstance(email_bytes, bytes) else email_bytes
+                        if email_str:
+                            creator_email = email_str.lower()
+                            break
+                if creator_email or cursor == 0:
+                    break
+
+            if not creator_email:
+                continue
+
+            ticket_title = ticket.title or f"Ticket #{ticket_id}"
+
+            # Check for new admin comments
+            if comment_count > prev_count:
+                # Check if the newest comment is from an admin
+                newest_comment = comments[-1] if comments else None
+                if newest_comment and newest_comment.is_admin:
+                    ref_id = f"ticket:{ticket_id}:comment:{comment_count}"
+                    notif = _create_notification(
+                        db,
+                        creator_email,
+                        "ticket",
+                        "New response on your ticket",
+                        f"Admin replied to: {ticket_title}",
+                        ref_id,
+                    )
+                    if notif:
+                        db.commit()
+                        await send_push_to_users(
+                            [creator_email],
+                            notif.title,
+                            notif.body or "",
+                            "ticket",
+                            url="/tickets",
+                        )
+
+            # Check for status change
+            if current_status != prev_status:
+                ref_id = f"ticket:{ticket_id}:status:{current_status}"
                 notif = _create_notification(
                     db,
                     creator_email,
                     "ticket",
-                    "New response on your ticket",
-                    f"Admin replied to: {ticket_title}",
+                    f"Ticket status updated to {current_status}",
+                    f"Your ticket \"{ticket_title}\" is now {current_status}",
                     ref_id,
                 )
                 if notif:
                     db.commit()
                     await send_push_to_users(
-                        db,
                         [creator_email],
                         notif.title,
                         notif.body or "",
                         "ticket",
                         url="/tickets",
                     )
-
-        # Check for status change
-        if current_status != prev_status:
-            ref_id = f"ticket:{ticket_id}:status:{current_status}"
-            notif = _create_notification(
-                db,
-                creator_email,
-                "ticket",
-                f"Ticket status updated to {current_status}",
-                f"Your ticket \"{ticket_title}\" is now {current_status}",
-                ref_id,
-            )
-            if notif:
-                db.commit()
-                await send_push_to_users(
-                    db,
-                    [creator_email],
-                    notif.title,
-                    notif.body or "",
-                    "ticket",
-                    url="/tickets",
-                )
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -674,7 +697,7 @@ async def start_poller() -> None:
 
         now = asyncio.get_event_loop().time()
 
-        # Read intervals from DB each tick (cheap queries)
+        # Read intervals from DB with short-lived session
         db = SessionLocal()
         try:
             interval_overseerr = _get_setting_int(
@@ -689,13 +712,16 @@ async def start_poller() -> None:
             interval_tickets = _get_setting_int(
                 db, "notifications.poll_interval_tickets", DEFAULT_OVERSEERR_INTERVAL
             )
+        finally:
+            db.close()
 
+        try:
             # --- Overseerr ---
             if now - last_overseerr >= interval_overseerr:
                 last_overseerr = now
                 try:
-                    await _poll_overseerr_requests(db, r, first_run_overseerr)
-                    await _poll_overseerr_issues(db, r, first_run_overseerr)
+                    await _poll_overseerr_requests(r, first_run_overseerr)
+                    await _poll_overseerr_issues(r, first_run_overseerr)
                 except Exception as exc:
                     logger.warning("Poller: overseerr cycle error: %s", exc)
                 first_run_overseerr = False
@@ -704,7 +730,7 @@ async def start_poller() -> None:
             if now - last_monitors >= interval_monitors:
                 last_monitors = now
                 try:
-                    await _poll_monitors(db, r, first_run_monitors)
+                    await _poll_monitors(r, first_run_monitors)
                 except Exception as exc:
                     logger.warning("Poller: monitors cycle error: %s", exc)
                 first_run_monitors = False
@@ -713,7 +739,7 @@ async def start_poller() -> None:
             if now - last_news >= interval_news:
                 last_news = now
                 try:
-                    await _poll_news(db, r, first_run_news)
+                    await _poll_news(r, first_run_news)
                 except Exception as exc:
                     logger.warning("Poller: news cycle error: %s", exc)
                 first_run_news = False
@@ -722,15 +748,13 @@ async def start_poller() -> None:
             if now - last_tickets >= interval_tickets:
                 last_tickets = now
                 try:
-                    await _poll_tickets(db, r, first_run_tickets)
+                    await _poll_tickets(r, first_run_tickets)
                 except Exception as exc:
                     logger.warning("Poller: tickets cycle error: %s", exc)
                 first_run_tickets = False
 
         except Exception as exc:
             logger.error("Poller: unexpected error in main loop: %s", exc)
-        finally:
-            db.close()
 
     logger.info("Notification poller stopped.")
 

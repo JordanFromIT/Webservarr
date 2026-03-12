@@ -456,7 +456,7 @@ async def send_notification(
     db.commit()
 
     # Dispatch push notifications
-    await send_push_to_users(db, list(all_emails), payload.title, payload.body, "news", "/")
+    await send_push_to_users(list(all_emails), payload.title, payload.body, "news", "/")
 
     return {"success": True, "sent_to": len(all_emails)}
 

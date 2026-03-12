@@ -283,7 +283,7 @@ async def plex_callback(
 
     # Try Overseerr SSO (non-blocking — failure doesn't affect login)
     try:
-        overseerr_sid = await overseerr.authenticate_with_plex_token(db, auth_token)
+        overseerr_sid = await overseerr.authenticate_with_plex_token(auth_token)
         if overseerr_sid:
             logger.info("Overseerr SSO successful for %s (plex auth)", email)
             cookie_kwargs = {

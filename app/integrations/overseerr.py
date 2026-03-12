@@ -7,7 +7,7 @@ and issue management (list, detail, create, comment).
 import asyncio
 import logging
 import httpx
-from sqlalchemy.orm import Session
+from app.database import SessionLocal
 from app.models import Setting
 
 logger = logging.getLogger(__name__)
@@ -47,14 +47,18 @@ ISSUE_STATUS_MAP = {
 }
 
 
-def _get_config(db: Session) -> dict:
-    """Read Overseerr config from settings table."""
-    url_setting = db.query(Setting).filter(Setting.key == "integration.overseerr.url").first()
-    key_setting = db.query(Setting).filter(Setting.key == "integration.overseerr.api_key").first()
-    return {
-        "url": url_setting.value.rstrip("/") if url_setting else None,
-        "api_key": key_setting.value if key_setting else None,
-    }
+def _get_config() -> dict:
+    """Read Overseerr config from settings table (short-lived session)."""
+    db = SessionLocal()
+    try:
+        url_setting = db.query(Setting).filter(Setting.key == "integration.overseerr.url").first()
+        key_setting = db.query(Setting).filter(Setting.key == "integration.overseerr.api_key").first()
+        return {
+            "url": url_setting.value.rstrip("/") if url_setting else None,
+            "api_key": key_setting.value if key_setting else None,
+        }
+    finally:
+        db.close()
 
 
 async def _fetch_media_details(client: httpx.AsyncClient, base_url: str, api_key: str,
@@ -76,12 +80,12 @@ async def _fetch_media_details(client: httpx.AsyncClient, base_url: str, api_key
     return {"title": "Unknown", "poster_path": ""}
 
 
-async def get_recent_requests(db: Session, limit: int = 10) -> list:
+async def get_recent_requests(limit: int = 10) -> list:
     """
     Fetch recent media requests from Overseerr.
     Returns list of request dicts with media info, status, and requester.
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"] or not config["api_key"]:
         return []
 
@@ -158,13 +162,13 @@ async def get_recent_requests(db: Session, limit: int = 10) -> list:
         return []
 
 
-async def authenticate_with_plex_token(db: Session, plex_token: str) -> str | None:
+async def authenticate_with_plex_token(plex_token: str) -> str | None:
     """
     Authenticate with Overseerr using a Plex token.
     Calls POST /api/v1/auth/plex and returns the connect.sid cookie value on success.
     Returns None on failure.
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"]:
         return None
 
@@ -193,12 +197,12 @@ async def authenticate_with_plex_token(db: Session, plex_token: str) -> str | No
         return None
 
 
-async def search_media(db: Session, query: str, page: int = 1) -> dict:
+async def search_media(query: str, page: int = 1) -> dict:
     """
     Search TMDB via Overseerr.
     Returns dict with page, totalPages, totalResults, and normalized results[].
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"] or not config["api_key"]:
         return {"page": 1, "totalPages": 0, "totalResults": 0, "results": []}
 
@@ -264,12 +268,12 @@ async def search_media(db: Session, query: str, page: int = 1) -> dict:
         return {"page": 1, "totalPages": 0, "totalResults": 0, "results": []}
 
 
-async def create_request(db: Session, media_type: str, media_id: int, is4k: bool = False) -> dict:
+async def create_request(media_type: str, media_id: int, is4k: bool = False) -> dict:
     """
     Create a media request in Overseerr.
     Returns the response dict on success, or error dict on failure.
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"] or not config["api_key"]:
         return {"success": False, "error": "Overseerr not configured"}
 
@@ -294,9 +298,9 @@ async def create_request(db: Session, media_type: str, media_id: int, is4k: bool
         return {"success": False, "error": str(e)}
 
 
-async def get_request_counts(db: Session) -> dict:
+async def get_request_counts() -> dict:
     """Fetch request count statistics from Overseerr."""
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"] or not config["api_key"]:
         return {"total": 0, "pending": 0, "approved": 0, "available": 0}
 
@@ -324,13 +328,13 @@ async def get_request_counts(db: Session) -> dict:
 
 # --- Per-user auth helpers ---
 
-async def create_request_as_user(db: Session, plex_token: str, media_type: str, media_id: int, is4k: bool = False) -> dict:
+async def create_request_as_user(plex_token: str, media_type: str, media_id: int, is4k: bool = False) -> dict:
     """Create a media request attributed to the individual Plex user."""
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"]:
         return {"success": False, "error": "Overseerr not configured"}
 
-    connect_sid = await authenticate_with_plex_token(db, plex_token)
+    connect_sid = await authenticate_with_plex_token(plex_token)
     if not connect_sid:
         return {"success": False, "error": "Could not authenticate with Overseerr"}
 
@@ -354,12 +358,12 @@ async def create_request_as_user(db: Session, plex_token: str, media_type: str, 
 
 # --- Issues ---
 
-async def get_issues(db: Session, take: int = 20, skip: int = 0, sort: str = "added") -> dict:
+async def get_issues(take: int = 20, skip: int = 0, sort: str = "added") -> dict:
     """
     Fetch issues from Overseerr with media details.
     Returns dict with results list and pageInfo.
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"] or not config["api_key"]:
         return {"results": [], "pageInfo": {"pages": 0, "results": 0}}
 
@@ -438,9 +442,9 @@ async def get_issues(db: Session, take: int = 20, skip: int = 0, sort: str = "ad
         return {"results": [], "pageInfo": {"pages": 0, "results": 0}}
 
 
-async def get_issue_counts(db: Session) -> dict:
+async def get_issue_counts() -> dict:
     """Fetch issue count statistics from Overseerr."""
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"] or not config["api_key"]:
         return {"total": 0, "open": 0, "closed": 0, "video": 0, "audio": 0, "subtitles": 0, "other": 0}
 
@@ -469,9 +473,9 @@ async def get_issue_counts(db: Session) -> dict:
         return {"total": 0, "open": 0, "closed": 0, "video": 0, "audio": 0, "subtitles": 0, "other": 0}
 
 
-async def get_issue_detail(db: Session, issue_id: int) -> dict:
+async def get_issue_detail(issue_id: int) -> dict:
     """Fetch a single issue with comments from Overseerr."""
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"] or not config["api_key"]:
         return {}
 
@@ -518,16 +522,16 @@ async def get_issue_detail(db: Session, issue_id: int) -> dict:
         return {}
 
 
-async def create_issue(db: Session, plex_token: str, issue_type: int, message: str, media_id: int) -> dict:
+async def create_issue(plex_token: str, issue_type: int, message: str, media_id: int) -> dict:
     """
     Create an issue in Overseerr attributed to the user's Plex account.
     Uses plex_token -> connect.sid for per-user authentication.
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"]:
         return {"success": False, "error": "Overseerr not configured"}
 
-    connect_sid = await authenticate_with_plex_token(db, plex_token)
+    connect_sid = await authenticate_with_plex_token(plex_token)
     if not connect_sid:
         return {"success": False, "error": "Could not authenticate with Overseerr. Try logging out and back in."}
 
@@ -551,13 +555,13 @@ async def create_issue(db: Session, plex_token: str, issue_type: int, message: s
         return {"success": False, "error": str(e)}
 
 
-async def create_issue_comment(db: Session, plex_token: str, issue_id: int, message: str) -> dict:
+async def create_issue_comment(plex_token: str, issue_id: int, message: str) -> dict:
     """Add a comment to an issue, attributed to the user's Plex account."""
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"]:
         return {"success": False, "error": "Overseerr not configured"}
 
-    connect_sid = await authenticate_with_plex_token(db, plex_token)
+    connect_sid = await authenticate_with_plex_token(plex_token)
     if not connect_sid:
         return {"success": False, "error": "Could not authenticate with Overseerr. Try logging out and back in."}
 
@@ -579,12 +583,12 @@ async def create_issue_comment(db: Session, plex_token: str, issue_id: int, mess
         return {"success": False, "error": str(e)}
 
 
-async def get_backdrops(db: Session) -> list:
+async def get_backdrops() -> list:
     """
     Fetch trending backdrop image URLs via Overseerr's /api/v1/backdrops endpoint.
     Returns list of full TMDB image URLs. Empty list on failure.
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"] or not config["api_key"]:
         return []
 

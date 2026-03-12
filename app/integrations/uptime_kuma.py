@@ -5,7 +5,7 @@ Fetches service status from Uptime Kuma's public status page API.
 
 import logging
 import httpx
-from sqlalchemy.orm import Session
+from app.database import SessionLocal
 from app.models import Setting
 
 logger = logging.getLogger(__name__)
@@ -22,22 +22,26 @@ STATUS_MAP = {
 }
 
 
-def _get_config(db: Session) -> dict:
-    """Read Uptime Kuma config from settings table."""
-    url_setting = db.query(Setting).filter(Setting.key == "integration.uptime_kuma.url").first()
-    slug_setting = db.query(Setting).filter(Setting.key == "integration.uptime_kuma.slug").first()
-    return {
-        "url": url_setting.value.rstrip("/") if url_setting else None,
-        "slug": slug_setting.value if slug_setting else "default",
-    }
+def _get_config() -> dict:
+    """Read Uptime Kuma config from settings table (short-lived session)."""
+    db = SessionLocal()
+    try:
+        url_setting = db.query(Setting).filter(Setting.key == "integration.uptime_kuma.url").first()
+        slug_setting = db.query(Setting).filter(Setting.key == "integration.uptime_kuma.slug").first()
+        return {
+            "url": url_setting.value.rstrip("/") if url_setting else None,
+            "slug": slug_setting.value if slug_setting else "default",
+        }
+    finally:
+        db.close()
 
 
-async def get_monitors(db: Session) -> list:
+async def get_monitors() -> list:
     """
     Fetch monitor status from Uptime Kuma's public status page API.
     Returns list of monitor dicts compatible with our Service model format.
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"]:
         return []
 

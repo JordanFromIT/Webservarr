@@ -5,28 +5,32 @@ Fetches CPU usage, RAM usage, uptime, and hostname from a Netdata agent.
 
 import logging
 import httpx
-from sqlalchemy.orm import Session
 from app.models import Setting
+from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
 TIMEOUT = 5.0
 
 
-def _get_config(db: Session) -> dict:
-    """Read Netdata config from settings table."""
-    url_setting = db.query(Setting).filter(Setting.key == "integration.netdata.url").first()
-    key_setting = db.query(Setting).filter(Setting.key == "integration.netdata.api_key").first()
-    cpu_label = db.query(Setting).filter(Setting.key == "netdata.cpu_label").first()
-    ram_label = db.query(Setting).filter(Setting.key == "netdata.ram_label").first()
-    net_label = db.query(Setting).filter(Setting.key == "netdata.net_label").first()
-    return {
-        "url": url_setting.value.rstrip("/") if url_setting else None,
-        "api_key": key_setting.value if key_setting else None,
-        "cpu_label": cpu_label.value if cpu_label else None,
-        "ram_label": ram_label.value if ram_label else None,
-        "net_label": net_label.value if net_label else None,
-    }
+def _get_config() -> dict:
+    """Read Netdata config from settings table (short-lived session)."""
+    db = SessionLocal()
+    try:
+        url_setting = db.query(Setting).filter(Setting.key == "integration.netdata.url").first()
+        key_setting = db.query(Setting).filter(Setting.key == "integration.netdata.api_key").first()
+        cpu_label = db.query(Setting).filter(Setting.key == "netdata.cpu_label").first()
+        ram_label = db.query(Setting).filter(Setting.key == "netdata.ram_label").first()
+        net_label = db.query(Setting).filter(Setting.key == "netdata.net_label").first()
+        return {
+            "url": url_setting.value.rstrip("/") if url_setting else None,
+            "api_key": key_setting.value if key_setting else None,
+            "cpu_label": cpu_label.value if cpu_label else None,
+            "ram_label": ram_label.value if ram_label else None,
+            "net_label": net_label.value if net_label else None,
+        }
+    finally:
+        db.close()
 
 
 def _build_headers(api_key: str | None) -> dict:
@@ -37,13 +41,13 @@ def _build_headers(api_key: str | None) -> dict:
     return headers
 
 
-async def get_system_stats(db: Session) -> dict:
+async def get_system_stats() -> dict:
     """
     Fetch system stats from Netdata.
     Returns dict with cpu_percent, ram_used_mb, ram_total_mb, ram_percent,
     uptime_seconds, hostname, and ip.
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"]:
         return {"configured": False}
 

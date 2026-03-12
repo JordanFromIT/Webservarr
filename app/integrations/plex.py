@@ -6,7 +6,7 @@ Fetches active streams for dashboard display.
 import logging
 import xml.etree.ElementTree as ET
 import httpx
-from sqlalchemy.orm import Session
+from app.database import SessionLocal
 from app.models import Setting
 
 logger = logging.getLogger(__name__)
@@ -14,14 +14,18 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 10.0
 
 
-def _get_config(db: Session) -> dict:
-    """Read Plex config from settings table."""
-    url_setting = db.query(Setting).filter(Setting.key == "integration.plex.url").first()
-    token_setting = db.query(Setting).filter(Setting.key == "integration.plex.token").first()
-    return {
-        "url": url_setting.value.rstrip("/") if url_setting else None,
-        "token": token_setting.value if token_setting else None,
-    }
+def _get_config() -> dict:
+    """Read Plex config from settings table (short-lived session)."""
+    db = SessionLocal()
+    try:
+        url_setting = db.query(Setting).filter(Setting.key == "integration.plex.url").first()
+        token_setting = db.query(Setting).filter(Setting.key == "integration.plex.token").first()
+        return {
+            "url": url_setting.value.rstrip("/") if url_setting else None,
+            "token": token_setting.value if token_setting else None,
+        }
+    finally:
+        db.close()
 
 
 async def _get_best_media_quality(
@@ -67,12 +71,12 @@ async def _get_best_media_quality(
         return "SD", 0
 
 
-async def get_active_streams(db: Session) -> list:
+async def get_active_streams() -> list:
     """
     Fetch active Plex sessions.
     Returns list of stream dicts with title, user, transcode info, progress, etc.
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"] or not config["token"]:
         return []
 
@@ -240,12 +244,12 @@ async def get_active_streams(db: Session) -> list:
         return []
 
 
-async def get_thumbnail(db: Session, path: str) -> tuple:
+async def get_thumbnail(path: str) -> tuple:
     """
     Fetch a thumbnail image from Plex and return (content_bytes, content_type).
     Returns (None, None) on failure.
     """
-    config = _get_config(db)
+    config = _get_config()
     if not config["url"] or not config["token"]:
         return None, None
 
