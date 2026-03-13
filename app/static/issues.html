@@ -290,7 +290,7 @@ async function performSearch(query) {
         '<p class="text-xs">Searching...</p></div>';
 
     try {
-        var resp = await fetch('/api/integrations/overseerr-search?query=' + encodeURIComponent(query) + '&page=1');
+        var resp = await fetch('/api/integrations/seerr-search?query=' + encodeURIComponent(query) + '&page=1');
         if (!resp.ok) throw new Error('Search failed');
         var data = await resp.json();
 
@@ -317,7 +317,7 @@ async function performSearch(query) {
         console.error('Search error:', error);
         list.innerHTML = '<div class="text-center text-red-400 py-4">' +
             '<span class="material-symbols-outlined text-2xl mb-1 block">error</span>' +
-            '<p class="text-xs">Error searching. Is Overseerr configured?</p></div>';
+            '<p class="text-xs">Error searching. Is Seerr configured?</p></div>';
     }
 }
 

@@ -14,8 +14,8 @@
 - **Live Plex Streams** -- Active stream monitoring with quality indicators (direct play, transcode, resolution details)
 - **Service Health** -- Real-time status tiles powered by Uptime Kuma with auto-fit grid and selfh.st icons
 - **System Gauges** -- CPU, RAM, and network utilization from Netdata displayed as animated SVG gauges
-- **Media Requests** -- Search TMDB, create requests, and track status via Overseerr integration
-- **Issue Tracking** -- Report and manage media issues (audio, video, subtitle) through Overseerr
+- **Media Requests** -- Search TMDB, create requests, and track status via Seerr integration
+- **Issue Tracking** -- Report and manage media issues (audio, video, subtitle) through Seerr
 - **Release Calendar** -- Combined Radarr and Sonarr calendar with month navigation and homepage 7-day strip
 - **News System** -- Publish announcements and maintenance notices with rich text and pinning
 - **Notifications** -- In-app bell notifications and optional browser push (Web Push / VAPID) for request updates, issue responses, service changes, and news posts
@@ -71,7 +71,7 @@ Navigate to **Settings > Integrations** to connect your services:
 |------------|---------------|-----------------|
 | **Plex** | Server URL + API token | Active streams, quality monitoring, Plex OAuth login |
 | **Uptime Kuma** | URL + status page slug | Service health tiles on the homepage |
-| **Overseerr** | URL + API key | Media requests, issue tracking, TMDB search, login backgrounds |
+| **Seerr** | URL + API key | Media requests, issue tracking, TMDB search, login backgrounds |
 | **Radarr** | URL + API key | Upcoming movie releases on calendar |
 | **Sonarr** | URL + API key | Upcoming TV episode releases on calendar |
 | **Netdata** | URL | CPU, RAM, and network gauges on the homepage |
@@ -84,7 +84,7 @@ WebServarr supports three authentication methods, configurable in **Settings > S
 
 1. **Local Auth** (default) -- Username and password login against the local database. Enabled out of the box. Can be disabled once another auth method is configured.
 
-2. **Direct Plex OAuth** -- Users sign in with their Plex account. Same PIN-based flow used by Overseerr and Tautulli. Enable in Settings > System > Authentication after configuring Plex integration.
+2. **Direct Plex OAuth** -- Users sign in with their Plex account. Same PIN-based flow used by Seerr and Tautulli. Enable in Settings > System > Authentication after configuring Plex integration.
 
 3. **Authentik OIDC** -- Plex login through an Authentik identity provider. Best for admins who run multiple services and want centralized SSO. See [docs/authentik.md](docs/authentik.md) for setup instructions.
 
@@ -117,7 +117,7 @@ app/
   seed.py              # Default settings seeded on first startup
   auth.py              # Session manager + OIDC client
   routers/             # API route handlers
-  integrations/        # External service API clients (Plex, Overseerr, etc.)
+  integrations/        # External service API clients (Plex, Seerr, etc.)
   services/            # Background services (notification poller, push dispatch)
   static/              # Frontend HTML/JS/CSS pages
 docs/

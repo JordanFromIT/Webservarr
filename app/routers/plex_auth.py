@@ -1,6 +1,6 @@
 """
 Direct Plex OAuth routes — PIN-based authentication without Authentik.
-Same flow used by Overseerr, Tautulli, and other *arr apps.
+Same flow used by Seerr, Tautulli, and other *arr apps.
 """
 
 import logging
@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.auth import session_manager
 from app.config import settings
 from app.database import get_db
-from app.integrations import overseerr
+from app.integrations import seerr
 from app.limiter import limiter
 from app.models import Setting
 from app.routers.auth import _is_plex_server_owner
@@ -281,14 +281,14 @@ async def plex_callback(
         samesite="lax",
     )
 
-    # Try Overseerr SSO (non-blocking — failure doesn't affect login)
+    # Try Seerr SSO (non-blocking — failure doesn't affect login)
     try:
-        overseerr_sid = await overseerr.authenticate_with_plex_token(auth_token)
-        if overseerr_sid:
-            logger.info("Overseerr SSO successful for %s (plex auth)", email)
+        seerr_sid = await seerr.authenticate_with_plex_token(auth_token)
+        if seerr_sid:
+            logger.info("Seerr SSO successful for %s (plex auth)", email)
             cookie_kwargs = {
                 "key": "connect.sid",
-                "value": overseerr_sid,
+                "value": seerr_sid,
                 "httponly": True,
                 "secure": True,
                 "samesite": "none",
@@ -298,7 +298,7 @@ async def plex_callback(
                 cookie_kwargs["domain"] = "." + settings.app_domain.split(".", 1)[1]
             response.set_cookie(**cookie_kwargs)
     except Exception as e:
-        logger.warning("Overseerr SSO failed (non-fatal, plex auth): %s", str(e))
+        logger.warning("Seerr SSO failed (non-fatal, plex auth): %s", str(e))
 
     return {"success": True, "email": email, "is_admin": is_admin}
 

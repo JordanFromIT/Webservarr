@@ -23,7 +23,7 @@ DEFAULT_SETTINGS = {
     "theme.font": ("Spline Sans", "Google Font family name"),
     "theme.custom_css": ("", "Custom CSS injected into all pages"),
     # Feature flags
-    "features.show_requests": ("false", "Show Overseerr iframe Requests (Embed) page in sidebar"),
+    "features.show_requests": ("false", "Show Seerr iframe Requests (Embed) page in sidebar"),
     "features.show_simple_auth": ("true", "Show local username/password login on login page"),
     "features.login_backgrounds": ("true", "Show rotating TMDB backgrounds on login page"),
     # Sidebar labels
@@ -50,7 +50,7 @@ DEFAULT_SETTINGS = {
     "netdata.ram_label": ("", "Label under RAM gauge (e.g. 64 GB). Auto-detects if empty."),
     "netdata.net_label": ("", "Label under Network gauge (e.g. 1 Gbps). Auto-detects if empty."),
     # Notification polling intervals (seconds)
-    "notifications.poll_interval_overseerr": ("60", "Seconds between Overseerr notification checks"),
+    "notifications.poll_interval_seerr": ("60", "Seconds between Seerr notification checks"),
     "notifications.poll_interval_monitors": ("60", "Seconds between Uptime Kuma notification checks"),
     "notifications.poll_interval_news": ("60", "Seconds between news post notification checks"),
     # Authentik OIDC (overrides env vars when set)
@@ -216,7 +216,7 @@ def seed_default_news(db: Session) -> None:
                 "- **Plex Streams** — Monitor active streams and playback quality in real time\n"
                 "- **Service Health** — Status tiles powered by Uptime Kuma\n"
                 "- **System Gauges** — CPU, RAM, and network stats from Netdata\n"
-                "- **Media Requests** — Search and request movies and TV shows via Overseerr\n"
+                "- **Media Requests** — Search and request movies and TV shows via Seerr\n"
                 "- **Release Calendar** — Upcoming movies and episodes from Radarr and Sonarr\n"
                 "- **Notifications** — In-app and browser push notifications\n"
                 "- **Theme Engine** — Colors, fonts, logos, and custom CSS\n\n"
@@ -232,7 +232,7 @@ def seed_default_news(db: Session) -> None:
                 "We will be performing routine maintenance on **Saturday** from 2:00 AM to 4:00 AM.\n\n"
                 "**Services affected:**\n"
                 "- Media streaming (Plex)\n"
-                "- Media requests (Overseerr)\n\n"
+                "- Media requests (Seerr)\n\n"
                 "Expected downtime: ~30 minutes. Thank you for your patience!"
             ),
             "pinned": False,
@@ -287,7 +287,7 @@ def migrate_news_rebrand(db: Session) -> None:
             "- **Plex Streams** — Monitor active streams and playback quality in real time\n"
             "- **Service Health** — Status tiles powered by Uptime Kuma\n"
             "- **System Gauges** — CPU, RAM, and network stats from Netdata\n"
-            "- **Media Requests** — Search and request movies and TV shows via Overseerr\n"
+            "- **Media Requests** — Search and request movies and TV shows via Seerr\n"
             "- **Release Calendar** — Upcoming movies and episodes from Radarr and Sonarr\n"
             "- **Notifications** — In-app and browser push notifications\n"
             "- **Theme Engine** — Colors, fonts, logos, and custom CSS\n\n"
@@ -308,7 +308,7 @@ def migrate_news_rebrand(db: Session) -> None:
             "We will be performing routine maintenance on **Saturday** from 2:00 AM to 4:00 AM.\n\n"
             "**Services affected:**\n"
             "- Media streaming (Plex)\n"
-            "- Media requests (Overseerr)\n\n"
+            "- Media requests (Seerr)\n\n"
             "Expected downtime: ~30 minutes. Thank you for your patience!"
         )
         maintenance.title = "[Example] Server Maintenance Notice"
@@ -380,3 +380,55 @@ def migrate_requests_rename(db: Session) -> None:
         return
 
     logger.info("Completed one-time requests rename migration")
+
+
+def migrate_overseerr_to_seerr(db: Session) -> None:
+    """One-time migration: rename integration.overseerr.* setting keys to
+    integration.seerr.* and notifications.poll_interval_overseerr to
+    notifications.poll_interval_seerr for existing installs.
+    Guarded by migration.overseerr_to_seerr_v1 marker."""
+    from sqlalchemy.exc import IntegrityError
+
+    if db.query(Setting).filter(Setting.key == "migration.overseerr_to_seerr_v1").first():
+        return
+
+    renames = [
+        ("integration.overseerr.url", "integration.seerr.url"),
+        ("integration.overseerr.api_key", "integration.seerr.api_key"),
+        ("notifications.poll_interval_overseerr", "notifications.poll_interval_seerr"),
+    ]
+
+    renamed = 0
+    for old_key, new_key in renames:
+        row = db.query(Setting).filter(Setting.key == old_key).first()
+        if row:
+            # Delete any existing row at the target key to avoid unique constraint
+            existing_target = db.query(Setting).filter(Setting.key == new_key).first()
+            if existing_target:
+                db.delete(existing_target)
+            row.key = new_key
+            db.flush()
+            renamed += 1
+
+    # Also update the description on features.show_requests if it references Overseerr
+    show_req = db.query(Setting).filter(Setting.key == "features.show_requests").first()
+    if show_req and "Overseerr" in (show_req.description or ""):
+        show_req.description = show_req.description.replace("Overseerr", "Seerr")
+
+    db.add(Setting(
+        key="migration.overseerr_to_seerr_v1",
+        value="done",
+        description="One-time migration: renamed overseerr setting keys to seerr",
+    ))
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.debug("migration.overseerr_to_seerr_v1 marker already exists (race), skipping")
+        return
+
+    if renamed:
+        logger.info("Completed Overseerr -> Seerr migration: renamed %d setting keys", renamed)
+    else:
+        logger.info("Completed Overseerr -> Seerr migration: no old keys found")

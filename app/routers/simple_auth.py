@@ -147,7 +147,7 @@ async def logout_redirect(
         secure=_COOKIE_SECURE,
         samesite="lax",
     )
-    # Clear Overseerr SSO cookie (domain scoping only applies on multi-part hostnames)
+    # Clear Seerr SSO cookie (domain scoping only applies on multi-part hostnames)
     host = request.url.hostname or ""
     if "." in host:
         parent_domain = "." + host.split(".", 1)[1]
@@ -173,7 +173,7 @@ async def simple_logout(
         secure=_COOKIE_SECURE,
         samesite="lax",
     )
-    # Clear Overseerr SSO cookie (domain scoping only applies on multi-part hostnames)
+    # Clear Seerr SSO cookie (domain scoping only applies on multi-part hostnames)
     host = request.url.hostname or ""
     if "." in host:
         parent_domain = "." + host.split(".", 1)[1]

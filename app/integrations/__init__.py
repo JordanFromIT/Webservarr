@@ -1,3 +1,3 @@
 """
-Integration modules for external services (Plex, Uptime Kuma, Overseerr).
+Integration modules for external services (Plex, Uptime Kuma, Seerr).
 """

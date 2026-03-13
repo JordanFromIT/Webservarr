@@ -255,7 +255,7 @@ async function performSearch(query) {
     grid.appendChild(loadingDiv);
 
     try {
-        var resp = await fetch('/api/integrations/overseerr-search?query=' + encodeURIComponent(query) + '&page=' + _currentSearchPage);
+        var resp = await fetch('/api/integrations/seerr-search?query=' + encodeURIComponent(query) + '&page=' + _currentSearchPage);
         if (!resp.ok) throw new Error('Search failed');
         var data = await resp.json();
 
@@ -298,7 +298,7 @@ async function performSearch(query) {
         errIcon.className = 'material-symbols-outlined text-4xl mb-2 block';
         errIcon.textContent = 'error';
         var errP = document.createElement('p');
-        errP.textContent = 'Error searching. Is Overseerr configured?';
+        errP.textContent = 'Error searching. Is Seerr configured?';
         errDiv.appendChild(errIcon);
         errDiv.appendChild(errP);
         grid.appendChild(errDiv);
@@ -453,7 +453,7 @@ async function requestMedia(mediaType, mediaId, is4k, buttonEl) {
     buttonEl.classList.add('opacity-60', 'cursor-not-allowed');
 
     try {
-        var resp = await fetch('/api/integrations/overseerr-request', {
+        var resp = await fetch('/api/integrations/seerr-request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mediaType: mediaType, mediaId: mediaId, is4k: is4k })
@@ -565,7 +565,7 @@ async function loadExistingRequests() {
         errIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
         errIcon.textContent = 'shopping_cart';
         var errP = document.createElement('p');
-        errP.textContent = 'Overseerr not configured';
+        errP.textContent = 'Seerr not configured';
         errDiv.appendChild(errIcon);
         errDiv.appendChild(errP);
         grid.appendChild(errDiv);

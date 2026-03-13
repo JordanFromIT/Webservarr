@@ -2,7 +2,7 @@
 Background notification poller.
 
 Runs three independent polling loops that detect events from
-Overseerr (requests/issues), Uptime Kuma (monitor status), and
+Seerr (requests/issues), Uptime Kuma (monitor status), and
 the local NewsPost table. When an event is detected it creates a
 Notification row (with dedup) and dispatches a Web Push via
 send_push_to_users().
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 _stop_event: Optional[asyncio.Event] = None
 _redis: Optional[aioredis.Redis] = None
 
-# Overseerr media-status codes (used on media objects)
+# Seerr media-status codes (used on media objects)
 MEDIA_STATUS_MAP = {
     1: "unknown",
     2: "pending",
@@ -45,7 +45,7 @@ MEDIA_STATUS_MAP = {
     5: "available",
 }
 
-# Overseerr issue-status codes
+# Seerr issue-status codes
 ISSUE_STATUS_MAP = {
     1: "open",
     2: "resolved",
@@ -55,7 +55,7 @@ ISSUE_STATUS_MAP = {
 MIN_INTERVAL = 30
 
 # Default poll intervals (seconds)
-DEFAULT_OVERSEERR_INTERVAL = 60
+DEFAULT_SEERR_INTERVAL = 60
 DEFAULT_MONITORS_INTERVAL = 60
 DEFAULT_NEWS_INTERVAL = 60
 
@@ -157,15 +157,15 @@ async def _collect_session_emails(r: aioredis.Redis) -> Set[str]:
 
 
 # ---------------------------------------------------------------------------
-# Overseerr config helper
+# Seerr config helper
 # ---------------------------------------------------------------------------
 
-def _get_overseerr_config() -> dict:
-    """Read Overseerr config using a short-lived session."""
+def _get_seerr_config() -> dict:
+    """Read Seerr config using a short-lived session."""
     db = SessionLocal()
     try:
-        url_row = db.query(Setting).filter(Setting.key == "integration.overseerr.url").first()
-        key_row = db.query(Setting).filter(Setting.key == "integration.overseerr.api_key").first()
+        url_row = db.query(Setting).filter(Setting.key == "integration.seerr.url").first()
+        key_row = db.query(Setting).filter(Setting.key == "integration.seerr.api_key").first()
         return {
             "url": url_row.value.rstrip("/") if url_row else None,
             "api_key": key_row.value if key_row else None,
@@ -175,11 +175,11 @@ def _get_overseerr_config() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Poll: Overseerr requests
+# Poll: Seerr requests
 # ---------------------------------------------------------------------------
 
-async def _poll_overseerr_requests(r: aioredis.Redis, first_run: bool) -> None:
-    config = _get_overseerr_config()
+async def _poll_seerr_requests(r: aioredis.Redis, first_run: bool) -> None:
+    config = _get_seerr_config()
     if not config["url"] or not config["api_key"]:
         return
 
@@ -191,7 +191,7 @@ async def _poll_overseerr_requests(r: aioredis.Redis, first_run: bool) -> None:
                 headers={"X-Api-Key": config["api_key"]},
             )
             if resp.status_code != 200:
-                logger.warning("Poller: Overseerr requests HTTP %d", resp.status_code)
+                logger.warning("Poller: Seerr requests HTTP %d", resp.status_code)
                 return
 
             results = resp.json().get("results", [])
@@ -264,15 +264,15 @@ async def _poll_overseerr_requests(r: aioredis.Redis, first_run: bool) -> None:
                         db.close()
 
     except Exception as exc:
-        logger.warning("Poller: Overseerr requests error: %s", exc)
+        logger.warning("Poller: Seerr requests error: %s", exc)
 
 
 # ---------------------------------------------------------------------------
-# Poll: Overseerr issues
+# Poll: Seerr issues
 # ---------------------------------------------------------------------------
 
-async def _poll_overseerr_issues(r: aioredis.Redis, first_run: bool) -> None:
-    config = _get_overseerr_config()
+async def _poll_seerr_issues(r: aioredis.Redis, first_run: bool) -> None:
+    config = _get_seerr_config()
     if not config["url"] or not config["api_key"]:
         return
 
@@ -284,7 +284,7 @@ async def _poll_overseerr_issues(r: aioredis.Redis, first_run: bool) -> None:
                 headers={"X-Api-Key": config["api_key"]},
             )
             if list_resp.status_code != 200:
-                logger.warning("Poller: Overseerr issues HTTP %d", list_resp.status_code)
+                logger.warning("Poller: Seerr issues HTTP %d", list_resp.status_code)
                 return
 
             results = list_resp.json().get("results", [])
@@ -402,7 +402,7 @@ async def _poll_overseerr_issues(r: aioredis.Redis, first_run: bool) -> None:
                         db.close()
 
     except Exception as exc:
-        logger.warning("Poller: Overseerr issues error: %s", exc)
+        logger.warning("Poller: Seerr issues error: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -677,13 +677,13 @@ async def start_poller() -> None:
     r = await _get_redis()
 
     # Track first-run per poller type
-    first_run_overseerr = True
+    first_run_seerr = True
     first_run_monitors = True
     first_run_news = True
     first_run_tickets = True
 
     # Track when each poller last ran (epoch seconds)
-    last_overseerr = 0.0
+    last_seerr = 0.0
     last_monitors = 0.0
     last_news = 0.0
     last_tickets = 0.0
@@ -700,8 +700,8 @@ async def start_poller() -> None:
         # Read intervals from DB with short-lived session
         db = SessionLocal()
         try:
-            interval_overseerr = _get_setting_int(
-                db, "notifications.poll_interval_overseerr", DEFAULT_OVERSEERR_INTERVAL
+            interval_seerr = _get_setting_int(
+                db, "notifications.poll_interval_seerr", DEFAULT_SEERR_INTERVAL
             )
             interval_monitors = _get_setting_int(
                 db, "notifications.poll_interval_monitors", DEFAULT_MONITORS_INTERVAL
@@ -710,21 +710,21 @@ async def start_poller() -> None:
                 db, "notifications.poll_interval_news", DEFAULT_NEWS_INTERVAL
             )
             interval_tickets = _get_setting_int(
-                db, "notifications.poll_interval_tickets", DEFAULT_OVERSEERR_INTERVAL
+                db, "notifications.poll_interval_tickets", DEFAULT_SEERR_INTERVAL
             )
         finally:
             db.close()
 
         try:
-            # --- Overseerr ---
-            if now - last_overseerr >= interval_overseerr:
-                last_overseerr = now
+            # --- Seerr ---
+            if now - last_seerr >= interval_seerr:
+                last_seerr = now
                 try:
-                    await _poll_overseerr_requests(r, first_run_overseerr)
-                    await _poll_overseerr_issues(r, first_run_overseerr)
+                    await _poll_seerr_requests(r, first_run_seerr)
+                    await _poll_seerr_issues(r, first_run_seerr)
                 except Exception as exc:
-                    logger.warning("Poller: overseerr cycle error: %s", exc)
-                first_run_overseerr = False
+                    logger.warning("Poller: seerr cycle error: %s", exc)
+                first_run_seerr = False
 
             # --- Monitors ---
             if now - last_monitors >= interval_monitors:

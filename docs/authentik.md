@@ -2,7 +2,7 @@
 
 ## Why Authentik?
 
-Plex doesn't provide a traditional identity provider -- it's a media server, not an auth platform. If you run multiple services for your users (Overseerr, Organizr, wikis, forums, etc.), each one needs its own login mechanism. Authentik solves this by acting as a **translational authentication layer** between Plex and everything else.
+Plex doesn't provide a traditional identity provider -- it's a media server, not an auth platform. If you run multiple services for your users (Seerr, Organizr, wikis, forums, etc.), each one needs its own login mechanism. Authentik solves this by acting as a **translational authentication layer** between Plex and everything else.
 
 When a user signs in with their Plex account through Authentik, Authentik creates a local identity for them. That identity can then be used to authenticate against any service you connect to Authentik -- not just WebServarr. This gives you:
 
@@ -98,7 +98,7 @@ This custom flow shows only the Plex login button (no username/password fields),
 
 ### Step 3: Create the "Plex Token" Property Mapping
 
-This custom scope mapping passes the user's Plex token through to WebServarr, enabling Plex avatar display and Overseerr SSO.
+This custom scope mapping passes the user's Plex token through to WebServarr, enabling Plex avatar display and Seerr SSO.
 
 1. Navigate to **Customization > Property Mappings**
 2. Click **Create**
@@ -228,7 +228,7 @@ WebServarr checks admin status by comparing the logged-in user's email against:
 
 If neither matches, the user will not have admin access. Set your email explicitly in Settings > System > Admin Account > Admin Email.
 
-**Plex token not available after login (no avatar, no Overseerr SSO)**
+**Plex token not available after login (no avatar, no Seerr SSO)**
 
 Verify that:
 - The "Plex Token Claim" property mapping was created (Step 3)

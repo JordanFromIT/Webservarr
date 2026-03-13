@@ -16,7 +16,7 @@ from app.dependencies import get_current_user
 from app.database import get_db
 from app.limiter import limiter
 from app.models import Setting
-from app.integrations import overseerr
+from app.integrations import seerr
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -188,17 +188,17 @@ async def oidc_callback(request: Request, code: str, state: str, db: Session = D
             is_admin,
         )
 
-        # Authenticate with Overseerr SSO (non-blocking — failure doesn't affect login)
-        overseerr_sid = None
+        # Authenticate with Seerr SSO (non-blocking — failure doesn't affect login)
+        seerr_sid = None
         if plex_token:
             try:
-                overseerr_sid = await overseerr.authenticate_with_plex_token(plex_token)
-                if overseerr_sid:
-                    logger.info("Overseerr SSO successful for %s", user_email)
+                seerr_sid = await seerr.authenticate_with_plex_token(plex_token)
+                if seerr_sid:
+                    logger.info("Seerr SSO successful for %s", user_email)
                 else:
-                    logger.debug("Overseerr SSO returned no session for %s", user_email)
+                    logger.debug("Seerr SSO returned no session for %s", user_email)
             except Exception as e:
-                logger.warning("Overseerr SSO failed (non-fatal): %s", str(e))
+                logger.warning("Seerr SSO failed (non-fatal): %s", str(e))
 
         # Redirect to dashboard after successful OIDC authentication
         response = RedirectResponse(url="/", status_code=302)
@@ -211,12 +211,12 @@ async def oidc_callback(request: Request, code: str, state: str, db: Session = D
             samesite="lax",
         )
 
-        # Set Overseerr session cookie on parent domain for iframe SSO
-        if overseerr_sid:
+        # Set Seerr session cookie on parent domain for iframe SSO
+        if seerr_sid:
             host = request.url.hostname or ""
             cookie_kwargs: dict = {
                 "key": "connect.sid",
-                "value": overseerr_sid,
+                "value": seerr_sid,
                 "httponly": True,
                 "secure": True,
                 "samesite": "none",

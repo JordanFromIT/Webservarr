@@ -234,7 +234,7 @@ async def login_page():
     return _serve_page("/app/app/static/login.html", "Login page")
 
 
-# Requests page (native Overseerr UI)
+# Requests page (native Seerr UI)
 @app.get("/requests", response_class=HTMLResponse, tags=["Pages"])
 async def requests_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
@@ -245,12 +245,12 @@ async def requests_page(
     return _serve_page("/app/app/static/requests.html", "Requests page")
 
 
-# Requests embed page (Overseerr iframe wrapper)
+# Requests embed page (Seerr iframe wrapper)
 @app.get("/requests-embed", response_class=HTMLResponse, tags=["Pages"])
 async def requests_embed_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
-    """Serve the requests embed page (Overseerr iframe)."""
+    """Serve the requests embed page (Seerr iframe)."""
     if not await _require_session(session_id):
         return RedirectResponse(url="/login", status_code=302)
     return _serve_page("/app/app/static/requests-embed.html", "Requests embed page")

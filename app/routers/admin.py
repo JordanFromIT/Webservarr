@@ -59,7 +59,7 @@ class MonitorPreferences(BaseModel):
 
 class TestConnectionRequest(BaseModel):
     """Schema for testing an external API connection."""
-    service: Literal["plex", "uptime_kuma", "overseerr", "netdata", "sonarr", "radarr"]
+    service: Literal["plex", "uptime_kuma", "seerr", "netdata", "sonarr", "radarr"]
     url: str
     credentials: Optional[str] = None
 
@@ -289,7 +289,7 @@ async def test_connection(
 ):
     """
     Test an external API connection.
-    Supports: plex, uptime_kuma, overseerr.
+    Supports: plex, uptime_kuma, seerr.
     Requires admin authentication.
     """
     service = payload.service
@@ -305,7 +305,7 @@ async def test_connection(
                 )
             elif service == "uptime_kuma":
                 resp = await client.get(f"{url}/api/status-page/heartbeat")
-            elif service == "overseerr":
+            elif service == "seerr":
                 resp = await client.get(
                     f"{url}/api/v1/status",
                     headers={"X-Api-Key": credentials}

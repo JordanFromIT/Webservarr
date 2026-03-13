@@ -1,5 +1,5 @@
 """
-Integration API routes - Plex, Uptime Kuma, Overseerr, Netdata endpoints.
+Integration API routes - Plex, Uptime Kuma, Seerr, Netdata endpoints.
 """
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException
@@ -11,7 +11,7 @@ from app.auth import session_manager
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
-from app.integrations import plex, uptime_kuma, overseerr, netdata, sonarr, radarr
+from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr
 
 router = APIRouter()
 
@@ -44,13 +44,13 @@ async def get_backgrounds(db: Session = Depends(get_db)):
     """
     Get TMDB trending backdrop URLs for login page.
     No auth required — login page is pre-authentication.
-    Returns empty list if Overseerr is not configured or feature is disabled.
+    Returns empty list if Seerr is not configured or feature is disabled.
     """
     from app.models import Setting
     flag = db.query(Setting).filter(Setting.key == "features.login_backgrounds").first()
     if flag and flag.value == "false":
         return []
-    return await overseerr.get_backdrops()
+    return await seerr.get_backdrops()
 
 
 # --- Uptime Kuma Endpoints ---
@@ -96,15 +96,15 @@ async def get_service_status(
     return result
 
 
-# --- Overseerr Endpoints ---
+# --- Seerr Endpoints ---
 
 @router.get("/recent-requests")
 async def get_recent_requests(
     limit: int = 10,
     current_user: dict = Depends(get_current_user),
 ):
-    """Get recent Overseerr requests. Requires authentication."""
-    requests = await overseerr.get_recent_requests(limit=limit)
+    """Get recent Seerr requests. Requires authentication."""
+    requests = await seerr.get_recent_requests(limit=limit)
     return requests
 
 
@@ -112,29 +112,29 @@ async def get_recent_requests(
 async def get_request_counts(
     current_user: dict = Depends(get_current_user),
 ):
-    """Get Overseerr request count statistics. Requires authentication."""
-    counts = await overseerr.get_request_counts()
+    """Get Seerr request count statistics. Requires authentication."""
+    counts = await seerr.get_request_counts()
     return counts
 
 
-@router.get("/overseerr-url")
-async def get_overseerr_url(
+@router.get("/seerr-url")
+async def get_seerr_url(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get the configured Overseerr URL for iframe embedding."""
+    """Get the configured Seerr URL for iframe embedding."""
     from app.models import Setting
-    row = db.query(Setting).filter(Setting.key == "integration.overseerr.url").first()
+    row = db.query(Setting).filter(Setting.key == "integration.seerr.url").first()
     return {"url": row.value if row else ""}
 
 
-@router.post("/overseerr-auth")
-async def overseerr_auth(
+@router.post("/seerr-auth")
+async def seerr_auth(
     response: Response,
     current_user: dict = Depends(get_current_user),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
-    """Re-authenticate with Overseerr using stored Plex token. Sets connect.sid cookie."""
+    """Re-authenticate with Seerr using stored Plex token. Sets connect.sid cookie."""
     if not session_id:
         return {"success": False, "reason": "no_session"}
 
@@ -146,14 +146,14 @@ async def overseerr_auth(
     if not plex_token:
         return {"success": False, "reason": "no_plex_token"}
 
-    overseerr_sid = await overseerr.authenticate_with_plex_token(plex_token)
-    if not overseerr_sid:
+    seerr_sid = await seerr.authenticate_with_plex_token(plex_token)
+    if not seerr_sid:
         return {"success": False, "reason": "auth_failed"}
 
     parent_domain = "." + settings.app_domain.split(".", 1)[1]
     response.set_cookie(
         key="connect.sid",
-        value=overseerr_sid,
+        value=seerr_sid,
         httponly=True,
         secure=True,
         samesite="none",
@@ -163,16 +163,16 @@ async def overseerr_auth(
     return {"success": True}
 
 
-@router.get("/overseerr-search")
-async def overseerr_search(
+@router.get("/seerr-search")
+async def seerr_search(
     query: str,
     page: int = 1,
     current_user: dict = Depends(get_current_user),
 ):
-    """Search TMDB via Overseerr. Returns movies and TV shows."""
+    """Search TMDB via Seerr. Returns movies and TV shows."""
     if not query.strip():
         return {"page": 1, "totalPages": 0, "totalResults": 0, "results": []}
-    results = await overseerr.search_media(query=query.strip(), page=page)
+    results = await seerr.search_media(query=query.strip(), page=page)
     return results
 
 
@@ -192,24 +192,24 @@ class RequestCreate(BaseModel):
     is4k: bool = False
 
 
-@router.post("/overseerr-request")
-async def create_overseerr_request(
+@router.post("/seerr-request")
+async def create_seerr_request(
     body: RequestCreate,
     current_user: dict = Depends(get_current_user),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
-    """Create a media request in Overseerr, attributed to the current Plex user when possible."""
+    """Create a media request in Seerr, attributed to the current Plex user when possible."""
     if body.mediaType not in ("movie", "tv"):
         raise HTTPException(status_code=400, detail="mediaType must be 'movie' or 'tv'")
 
     plex_token = await _get_plex_token(session_id)
     if plex_token:
-        result = await overseerr.create_request_as_user(
+        result = await seerr.create_request_as_user(
             plex_token=plex_token,
             media_type=body.mediaType, media_id=body.mediaId, is4k=body.is4k,
         )
     else:
-        result = await overseerr.create_request(
+        result = await seerr.create_request(
             media_type=body.mediaType, media_id=body.mediaId, is4k=body.is4k,
         )
 
@@ -218,7 +218,7 @@ async def create_overseerr_request(
     return result
 
 
-# --- Overseerr Issues ---
+# --- Seerr Issues ---
 
 class IssueCreate(BaseModel):
     issueType: int  # 1=Video, 2=Audio, 3=Subtitles, 4=Other
@@ -237,16 +237,16 @@ async def get_issues(
     sort: str = "added",
     current_user: dict = Depends(get_current_user),
 ):
-    """Get Overseerr issues with media details. Requires authentication."""
-    return await overseerr.get_issues(take=take, skip=skip, sort=sort)
+    """Get Seerr issues with media details. Requires authentication."""
+    return await seerr.get_issues(take=take, skip=skip, sort=sort)
 
 
 @router.get("/issue-counts")
 async def get_issue_counts(
     current_user: dict = Depends(get_current_user),
 ):
-    """Get Overseerr issue count statistics."""
-    return await overseerr.get_issue_counts()
+    """Get Seerr issue count statistics."""
+    return await seerr.get_issue_counts()
 
 
 @router.get("/issues/{issue_id}")
@@ -255,7 +255,7 @@ async def get_issue_detail(
     current_user: dict = Depends(get_current_user),
 ):
     """Get single issue with comments."""
-    issue = await overseerr.get_issue_detail(issue_id)
+    issue = await seerr.get_issue_detail(issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
     return issue
@@ -267,7 +267,7 @@ async def create_issue(
     current_user: dict = Depends(get_current_user),
     session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
-    """Create an issue in Overseerr, attributed to the current Plex user."""
+    """Create an issue in Seerr, attributed to the current Plex user."""
     if body.issueType not in (1, 2, 3, 4):
         raise HTTPException(status_code=400, detail="issueType must be 1 (Video), 2 (Audio), 3 (Subtitles), or 4 (Other)")
     if not body.message.strip():
@@ -277,7 +277,7 @@ async def create_issue(
     if not plex_token:
         raise HTTPException(status_code=400, detail="No Plex token in session. Please sign in with Plex.")
 
-    result = await overseerr.create_issue(
+    result = await seerr.create_issue(
         plex_token=plex_token,
         issue_type=body.issueType, message=body.message.strip(), media_id=body.mediaId,
     )
@@ -301,7 +301,7 @@ async def create_issue_comment(
     if not plex_token:
         raise HTTPException(status_code=400, detail="No Plex token in session. Please sign in with Plex.")
 
-    result = await overseerr.create_issue_comment(
+    result = await seerr.create_issue_comment(
         plex_token=plex_token, issue_id=issue_id, message=body.message.strip(),
     )
     if not result.get("success"):

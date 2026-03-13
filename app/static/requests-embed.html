@@ -33,13 +33,13 @@
 <!-- Main Content Area -->
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
 <div id="header-root" class="hidden lg:block lg:h-16"></div>
-<!-- Overseerr Iframe -->
+<!-- Seerr Iframe -->
 <div class="flex-1 overflow-hidden">
 <div id="iframeContainer" class="w-full h-full">
 <div id="iframePlaceholder" class="flex flex-col items-center justify-center h-full text-center text-steel-blue p-8">
 <span class="material-symbols-outlined text-6xl mb-4 opacity-50">download</span>
-<p class="text-lg mb-2">Loading Overseerr...</p>
-<p class="text-sm">If Overseerr is not configured, set the URL in Settings > Integrations.</p>
+<p class="text-lg mb-2">Loading Seerr...</p>
+<p class="text-sm">If Seerr is not configured, set the URL in Settings > Integrations.</p>
 </div>
 </div>
 </div>
@@ -57,14 +57,14 @@ document.addEventListener('DOMContentLoaded', async function() {
     showAdminNav(user.is_admin);
     loadSystemStatus();
 
-    // Authenticate with Overseerr SSO before loading iframe
+    // Authenticate with Seerr SSO before loading iframe
     try {
-        await fetch('/api/integrations/overseerr-auth', { method: 'POST' });
-    } catch (e) { /* SSO optional — iframe will show Overseerr login if it fails */ }
+        await fetch('/api/integrations/seerr-auth', { method: 'POST' });
+    } catch (e) { /* SSO optional — iframe will show Seerr login if it fails */ }
 
-    // Load Overseerr URL from settings
+    // Load Seerr URL from settings
     try {
-        const resp = await fetch('/api/integrations/overseerr-url');
+        const resp = await fetch('/api/integrations/seerr-url');
         if (resp.ok) {
             const data = await resp.json();
             if (data.url) {
@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         }
     } catch (e) {
-        // Overseerr not configured — keep placeholder
+        // Seerr not configured — keep placeholder
     }
 });
 </script>

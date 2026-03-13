@@ -1,5 +1,5 @@
 """
-Overseerr media request and issue integration.
+Seerr media request and issue integration.
 Fetches recent media requests, request statistics, search, request creation,
 and issue management (list, detail, create, comment).
 """
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT = 5.0
 
-# Overseerr request status codes (used on request objects)
+# Seerr request status codes (used on request objects)
 REQUEST_STATUS_MAP = {
     1: "pending",
     2: "approved",
@@ -23,7 +23,7 @@ REQUEST_STATUS_MAP = {
     5: "partially_available",
 }
 
-# Overseerr media status codes (used on media objects and mediaInfo in search)
+# Seerr media status codes (used on media objects and mediaInfo in search)
 MEDIA_STATUS_MAP = {
     1: "unknown",
     2: "pending",
@@ -32,7 +32,7 @@ MEDIA_STATUS_MAP = {
     5: "available",
 }
 
-# Overseerr issue type codes
+# Seerr issue type codes
 ISSUE_TYPE_MAP = {
     1: "video",
     2: "audio",
@@ -40,7 +40,7 @@ ISSUE_TYPE_MAP = {
     4: "other",
 }
 
-# Overseerr issue status codes
+# Seerr issue status codes
 ISSUE_STATUS_MAP = {
     1: "open",
     2: "resolved",
@@ -48,11 +48,11 @@ ISSUE_STATUS_MAP = {
 
 
 def _get_config() -> dict:
-    """Read Overseerr config from settings table (short-lived session)."""
+    """Read Seerr config from settings table (short-lived session)."""
     db = SessionLocal()
     try:
-        url_setting = db.query(Setting).filter(Setting.key == "integration.overseerr.url").first()
-        key_setting = db.query(Setting).filter(Setting.key == "integration.overseerr.api_key").first()
+        url_setting = db.query(Setting).filter(Setting.key == "integration.seerr.url").first()
+        key_setting = db.query(Setting).filter(Setting.key == "integration.seerr.api_key").first()
         return {
             "url": url_setting.value.rstrip("/") if url_setting else None,
             "api_key": key_setting.value if key_setting else None,
@@ -63,7 +63,7 @@ def _get_config() -> dict:
 
 async def _fetch_media_details(client: httpx.AsyncClient, base_url: str, api_key: str,
                                tmdb_id: int, media_type: str) -> dict:
-    """Fetch title and poster from Overseerr's media detail endpoint."""
+    """Fetch title and poster from Seerr's media detail endpoint."""
     endpoint = "movie" if media_type == "movie" else "tv"
     try:
         resp = await client.get(
@@ -82,7 +82,7 @@ async def _fetch_media_details(client: httpx.AsyncClient, base_url: str, api_key
 
 async def get_recent_requests(limit: int = 10) -> list:
     """
-    Fetch recent media requests from Overseerr.
+    Fetch recent media requests from Seerr.
     Returns list of request dicts with media info, status, and requester.
     """
     config = _get_config()
@@ -97,7 +97,7 @@ async def get_recent_requests(limit: int = 10) -> list:
                 headers={"X-Api-Key": config["api_key"]},
             )
             if resp.status_code != 200:
-                logger.warning("Overseerr requests returned HTTP %d", resp.status_code)
+                logger.warning("Seerr requests returned HTTP %d", resp.status_code)
                 return []
 
             data = resp.json()
@@ -152,19 +152,19 @@ async def get_recent_requests(limit: int = 10) -> list:
             return requests
 
     except httpx.TimeoutException:
-        logger.warning("Overseerr connection timed out")
+        logger.warning("Seerr connection timed out")
         return []
     except httpx.ConnectError:
-        logger.warning("Could not connect to Overseerr at %s", config["url"])
+        logger.warning("Could not connect to Seerr at %s", config["url"])
         return []
     except Exception as e:
-        logger.error("Overseerr integration error: %s", str(e))
+        logger.error("Seerr integration error: %s", str(e))
         return []
 
 
 async def authenticate_with_plex_token(plex_token: str) -> str | None:
     """
-    Authenticate with Overseerr using a Plex token.
+    Authenticate with Seerr using a Plex token.
     Calls POST /api/v1/auth/plex and returns the connect.sid cookie value on success.
     Returns None on failure.
     """
@@ -179,7 +179,7 @@ async def authenticate_with_plex_token(plex_token: str) -> str | None:
                 json={"authToken": plex_token},
             )
             if resp.status_code != 200:
-                logger.warning("Overseerr Plex auth returned HTTP %d", resp.status_code)
+                logger.warning("Seerr Plex auth returned HTTP %d", resp.status_code)
                 return None
 
             # Extract connect.sid from Set-Cookie header
@@ -189,17 +189,17 @@ async def authenticate_with_plex_token(plex_token: str) -> str | None:
                     sid_value = cookie_header.split("connect.sid=")[1].split(";")[0]
                     return sid_value
 
-            logger.warning("Overseerr Plex auth succeeded but no connect.sid cookie in response")
+            logger.warning("Seerr Plex auth succeeded but no connect.sid cookie in response")
             return None
 
     except Exception as e:
-        logger.warning("Overseerr Plex auth error: %s", str(e))
+        logger.warning("Seerr Plex auth error: %s", str(e))
         return None
 
 
 async def search_media(query: str, page: int = 1) -> dict:
     """
-    Search TMDB via Overseerr.
+    Search TMDB via Seerr.
     Returns dict with page, totalPages, totalResults, and normalized results[].
     """
     config = _get_config()
@@ -214,7 +214,7 @@ async def search_media(query: str, page: int = 1) -> dict:
                 headers={"X-Api-Key": config["api_key"]},
             )
             if resp.status_code != 200:
-                logger.warning("Overseerr search returned HTTP %d", resp.status_code)
+                logger.warning("Seerr search returned HTTP %d", resp.status_code)
                 return {"page": 1, "totalPages": 0, "totalResults": 0, "results": []}
 
             data = resp.json()
@@ -232,7 +232,7 @@ async def search_media(query: str, page: int = 1) -> dict:
                 poster_path = item.get("posterPath", "")
                 poster_url = f"https://image.tmdb.org/t/p/w300{poster_path}" if poster_path else ""
 
-                # Check if already in Overseerr (mediaInfo present)
+                # Check if already in Seerr (mediaInfo present)
                 media_info = item.get("mediaInfo")
                 media_status = None
                 media_status_4k = None
@@ -265,18 +265,18 @@ async def search_media(query: str, page: int = 1) -> dict:
             }
 
     except Exception as e:
-        logger.error("Overseerr search error: %s", str(e))
+        logger.error("Seerr search error: %s", str(e))
         return {"page": 1, "totalPages": 0, "totalResults": 0, "results": []}
 
 
 async def create_request(media_type: str, media_id: int, is4k: bool = False) -> dict:
     """
-    Create a media request in Overseerr.
+    Create a media request in Seerr.
     Returns the response dict on success, or error dict on failure.
     """
     config = _get_config()
     if not config["url"] or not config["api_key"]:
-        return {"success": False, "error": "Overseerr not configured"}
+        return {"success": False, "error": "Seerr not configured"}
 
     try:
         body = {"mediaType": media_type, "mediaId": media_id, "is4k": is4k}
@@ -293,16 +293,16 @@ async def create_request(media_type: str, media_id: int, is4k: bool = False) -> 
                 return {"success": True, "data": resp.json()}
             else:
                 error_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-                logger.warning("Overseerr create request returned HTTP %d: %s", resp.status_code, error_data)
+                logger.warning("Seerr create request returned HTTP %d: %s", resp.status_code, error_data)
                 return {"success": False, "error": error_data.get("message", f"HTTP {resp.status_code}")}
 
     except Exception as e:
-        logger.error("Overseerr create request error: %s", str(e))
+        logger.error("Seerr create request error: %s", str(e))
         return {"success": False, "error": str(e)}
 
 
 async def get_request_counts() -> dict:
-    """Fetch request count statistics from Overseerr."""
+    """Fetch request count statistics from Seerr."""
     config = _get_config()
     if not config["url"] or not config["api_key"]:
         return {"total": 0, "pending": 0, "approved": 0, "available": 0}
@@ -325,7 +325,7 @@ async def get_request_counts() -> dict:
             }
 
     except Exception as e:
-        logger.error("Overseerr count error: %s", str(e))
+        logger.error("Seerr count error: %s", str(e))
         return {"total": 0, "pending": 0, "approved": 0, "available": 0}
 
 
@@ -335,11 +335,11 @@ async def create_request_as_user(plex_token: str, media_type: str, media_id: int
     """Create a media request attributed to the individual Plex user."""
     config = _get_config()
     if not config["url"]:
-        return {"success": False, "error": "Overseerr not configured"}
+        return {"success": False, "error": "Seerr not configured"}
 
     connect_sid = await authenticate_with_plex_token(plex_token)
     if not connect_sid:
-        return {"success": False, "error": "Could not authenticate with Overseerr"}
+        return {"success": False, "error": "Could not authenticate with Seerr"}
 
     try:
         body = {"mediaType": media_type, "mediaId": media_id, "is4k": is4k}
@@ -357,7 +357,7 @@ async def create_request_as_user(plex_token: str, media_type: str, media_id: int
                 error_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
                 return {"success": False, "error": error_data.get("message", f"HTTP {resp.status_code}")}
     except Exception as e:
-        logger.error("Overseerr create request (user) error: %s", str(e))
+        logger.error("Seerr create request (user) error: %s", str(e))
         return {"success": False, "error": str(e)}
 
 
@@ -365,7 +365,7 @@ async def create_request_as_user(plex_token: str, media_type: str, media_id: int
 
 async def get_issues(take: int = 20, skip: int = 0, sort: str = "added") -> dict:
     """
-    Fetch issues from Overseerr with media details.
+    Fetch issues from Seerr with media details.
     Returns dict with results list and pageInfo.
     """
     config = _get_config()
@@ -380,7 +380,7 @@ async def get_issues(take: int = 20, skip: int = 0, sort: str = "added") -> dict
                 headers={"X-Api-Key": config["api_key"]},
             )
             if resp.status_code != 200:
-                logger.warning("Overseerr issues returned HTTP %d", resp.status_code)
+                logger.warning("Seerr issues returned HTTP %d", resp.status_code)
                 return {"results": [], "pageInfo": {"pages": 0, "results": 0}}
 
             data = resp.json()
@@ -440,15 +440,15 @@ async def get_issues(take: int = 20, skip: int = 0, sort: str = "added") -> dict
             }
 
     except httpx.TimeoutException:
-        logger.warning("Overseerr issues connection timed out")
+        logger.warning("Seerr issues connection timed out")
         return {"results": [], "pageInfo": {"pages": 0, "results": 0}}
     except Exception as e:
-        logger.error("Overseerr issues error: %s", str(e))
+        logger.error("Seerr issues error: %s", str(e))
         return {"results": [], "pageInfo": {"pages": 0, "results": 0}}
 
 
 async def get_issue_counts() -> dict:
-    """Fetch issue count statistics from Overseerr."""
+    """Fetch issue count statistics from Seerr."""
     config = _get_config()
     if not config["url"] or not config["api_key"]:
         return {"total": 0, "open": 0, "closed": 0, "video": 0, "audio": 0, "subtitles": 0, "other": 0}
@@ -474,12 +474,12 @@ async def get_issue_counts() -> dict:
             }
 
     except Exception as e:
-        logger.error("Overseerr issue count error: %s", str(e))
+        logger.error("Seerr issue count error: %s", str(e))
         return {"total": 0, "open": 0, "closed": 0, "video": 0, "audio": 0, "subtitles": 0, "other": 0}
 
 
 async def get_issue_detail(issue_id: int) -> dict:
-    """Fetch a single issue with comments from Overseerr."""
+    """Fetch a single issue with comments from Seerr."""
     config = _get_config()
     if not config["url"] or not config["api_key"]:
         return {}
@@ -523,22 +523,22 @@ async def get_issue_detail(issue_id: int) -> dict:
             }
 
     except Exception as e:
-        logger.error("Overseerr issue detail error: %s", str(e))
+        logger.error("Seerr issue detail error: %s", str(e))
         return {}
 
 
 async def create_issue(plex_token: str, issue_type: int, message: str, media_id: int) -> dict:
     """
-    Create an issue in Overseerr attributed to the user's Plex account.
+    Create an issue in Seerr attributed to the user's Plex account.
     Uses plex_token -> connect.sid for per-user authentication.
     """
     config = _get_config()
     if not config["url"]:
-        return {"success": False, "error": "Overseerr not configured"}
+        return {"success": False, "error": "Seerr not configured"}
 
     connect_sid = await authenticate_with_plex_token(plex_token)
     if not connect_sid:
-        return {"success": False, "error": "Could not authenticate with Overseerr. Try logging out and back in."}
+        return {"success": False, "error": "Could not authenticate with Seerr. Try logging out and back in."}
 
     try:
         body = {"issueType": issue_type, "message": message, "mediaId": media_id}
@@ -552,11 +552,11 @@ async def create_issue(plex_token: str, issue_type: int, message: str, media_id:
                 return {"success": True, "data": resp.json()}
             else:
                 error_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-                logger.warning("Overseerr create issue returned HTTP %d: %s", resp.status_code, error_data)
+                logger.warning("Seerr create issue returned HTTP %d: %s", resp.status_code, error_data)
                 return {"success": False, "error": error_data.get("message", f"HTTP {resp.status_code}")}
 
     except Exception as e:
-        logger.error("Overseerr create issue error: %s", str(e))
+        logger.error("Seerr create issue error: %s", str(e))
         return {"success": False, "error": str(e)}
 
 
@@ -564,11 +564,11 @@ async def create_issue_comment(plex_token: str, issue_id: int, message: str) -> 
     """Add a comment to an issue, attributed to the user's Plex account."""
     config = _get_config()
     if not config["url"]:
-        return {"success": False, "error": "Overseerr not configured"}
+        return {"success": False, "error": "Seerr not configured"}
 
     connect_sid = await authenticate_with_plex_token(plex_token)
     if not connect_sid:
-        return {"success": False, "error": "Could not authenticate with Overseerr. Try logging out and back in."}
+        return {"success": False, "error": "Could not authenticate with Seerr. Try logging out and back in."}
 
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
@@ -584,13 +584,13 @@ async def create_issue_comment(plex_token: str, issue_id: int, message: str) -> 
                 return {"success": False, "error": error_data.get("message", f"HTTP {resp.status_code}")}
 
     except Exception as e:
-        logger.error("Overseerr create comment error: %s", str(e))
+        logger.error("Seerr create comment error: %s", str(e))
         return {"success": False, "error": str(e)}
 
 
 async def get_backdrops() -> list:
     """
-    Fetch trending backdrop image URLs via Overseerr's /api/v1/backdrops endpoint.
+    Fetch trending backdrop image URLs via Seerr's /api/v1/backdrops endpoint.
     Returns list of full TMDB image URLs. Empty list on failure.
     """
     config = _get_config()
@@ -604,7 +604,7 @@ async def get_backdrops() -> list:
                 headers={"X-Api-Key": config["api_key"]},
             )
             if resp.status_code != 200:
-                logger.warning("Overseerr backdrops returned HTTP %d", resp.status_code)
+                logger.warning("Seerr backdrops returned HTTP %d", resp.status_code)
                 return []
 
             paths = resp.json()
@@ -617,5 +617,5 @@ async def get_backdrops() -> list:
                 if isinstance(p, str) and p.startswith("/")
             ]
     except Exception as e:
-        logger.debug("Failed to fetch Overseerr backdrops: %s", str(e))
+        logger.debug("Failed to fetch Seerr backdrops: %s", str(e))
         return []

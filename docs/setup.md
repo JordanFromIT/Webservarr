@@ -47,9 +47,9 @@ Each integration has a **Test Connection** button to verify your credentials bef
 - Enter the status page slug (the part after `/status/` in your status page URL)
 - Click "Test Connection", then "Save"
 
-**Overseerr:**
-- Enter your Overseerr URL (e.g., `http://10.0.0.5:5055`)
-- Enter your Overseerr API key (found in Overseerr Settings > General)
+**Seerr:**
+- Enter your Seerr URL (e.g., `http://10.0.0.5:5055`)
+- Enter your Seerr API key (found in Seerr Settings > General)
 - Click "Test Connection", then "Save"
 
 **Radarr:**

@@ -51,11 +51,12 @@ def init_db():
     from app.seed import (
         seed_default_settings, seed_vapid_keys,
         seed_default_news, migrate_news_rebrand, migrate_requests_rename,
-        migrate_setup_completed,
+        migrate_setup_completed, migrate_overseerr_to_seerr,
     )
     db = SessionLocal()
     try:
         migrate_requests_rename(db)
+        migrate_overseerr_to_seerr(db)
         seed_default_settings(db)
         migrate_setup_completed(db)
         seed_vapid_keys(db)

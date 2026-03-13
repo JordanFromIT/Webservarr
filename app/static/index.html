@@ -497,7 +497,7 @@ function scrollStreams(direction) {
     loadActiveStreams();
 }
 
-// Load recent requests from Overseerr integration
+// Load recent requests from Seerr integration
 async function loadRecentRequests() {
     const tbody = document.getElementById('requestsBody');
     try {
@@ -560,7 +560,7 @@ async function loadRecentRequests() {
                 ? `background-image: url('${posterUrl}'); background-size: cover; background-position: center;`
                 : '';
 
-            const overseerrId = req.id || '';
+            const seerrId = req.id || '';
 
             return `
                 <tr>
@@ -583,7 +583,7 @@ async function loadRecentRequests() {
             <tr>
                 <td colspan="4" class="px-6 py-8 text-center text-steel-blue">
                     <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
-                    <p>Overseerr not configured</p>
+                    <p>Seerr not configured</p>
                 </td>
             </tr>
         `;
@@ -592,7 +592,7 @@ async function loadRecentRequests() {
 
 // Homelab icon mapping — service name substring → selfh.st icon slug
 var HOMELAB_ICONS = {
-    'plex': 'plex', 'radarr': 'radarr', 'sonarr': 'sonarr', 'overseerr': 'overseerr',
+    'plex': 'plex', 'radarr': 'radarr', 'sonarr': 'sonarr', 'seerr': 'seerr',
     'tautulli': 'tautulli', 'jellyfin': 'jellyfin', 'emby': 'emby', 'lidarr': 'lidarr',
     'prowlarr': 'prowlarr', 'bazarr': 'bazarr', 'readarr': 'readarr', 'sabnzbd': 'sabnzbd',
     'qbittorrent': 'qbittorrent', 'transmission': 'transmission', 'deluge': 'deluge',
