@@ -279,6 +279,8 @@ async def create_request(media_type: str, media_id: int, is4k: bool = False) -> 
 
     try:
         body = {"mediaType": media_type, "mediaId": media_id, "is4k": is4k}
+        if media_type == "tv":
+            body["seasons"] = "all"
 
         async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
             resp = await client.post(
@@ -340,6 +342,8 @@ async def create_request_as_user(plex_token: str, media_type: str, media_id: int
 
     try:
         body = {"mediaType": media_type, "mediaId": media_id, "is4k": is4k}
+        if media_type == "tv":
+            body["seasons"] = "all"
         async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
             resp = await client.post(
                 f"{config['url']}/api/v1/request",
