@@ -238,7 +238,8 @@ async def search_media(query: str, page: int = 1) -> dict:
                 media_status_4k = None
                 if media_info:
                     status_code = media_info.get("status", 0)
-                    media_status = MEDIA_STATUS_MAP.get(status_code)
+                    if status_code and status_code > 1:
+                        media_status = MEDIA_STATUS_MAP.get(status_code)
                     status_code_4k = media_info.get("status4k", 0)
                     if status_code_4k and status_code_4k > 1:
                         media_status_4k = MEDIA_STATUS_MAP.get(status_code_4k)
