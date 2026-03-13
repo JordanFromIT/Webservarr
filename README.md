@@ -1,6 +1,13 @@
-# WebServarr
+<p align="center">
+  <img src="docs/images/webservarr-logo.svg" alt="WebServarr" width="300">
+</p>
 
-A self-hosted web dashboard for Plex media server administration. WebServarr brings together your Plex streams, service health monitoring, media requests, upcoming releases, and news announcements into a single, themeable portal.
+<p align="center">
+  A self-hosted web dashboard for Plex media server administration.<br>
+  WebServarr brings together your Plex streams, service health monitoring, media requests, upcoming releases, and news announcements into a single, themeable portal.
+</p>
+
+---
 
 ## Features
 
@@ -16,6 +23,10 @@ A self-hosted web dashboard for Plex media server administration. WebServarr bri
 - **Ticket System** -- User support tickets with categories, priority levels, image attachments, and admin management
 - **Three Auth Methods** -- Local username/password (default), direct Plex OAuth, or Plex via Authentik OIDC (for multi-service SSO)
 - **Security Hardened** -- Rate limiting on all endpoints, magic number upload verification, authenticated file serving, full dependency pinning
+
+<p align="center">
+  <img src="docs/images/dashboard-preview.png" alt="WebServarr Dashboard" width="800">
+</p>
 
 ## Quick Start
 
