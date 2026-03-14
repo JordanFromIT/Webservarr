@@ -978,8 +978,9 @@ async function loadSystemStats() {
             var netDetail = document.getElementById('netGaugeDetail');
             if (netDetail) netDetail.textContent = stats.net_label;
         }
-        // Scale network gauge: cap at 100 for percentage
-        var netPct = Math.min((dl + ul) / 100 * 100, 100);
+        // Scale network gauge: percentage of configured max throughput
+        var netMax = stats.net_max || 1000;
+        var netPct = Math.min((dl + ul) / netMax * 100, 100);
         document.getElementById('netGaugeCircle').style.strokeDashoffset = 251 - (251 * netPct / 100);
 
     } catch (error) {

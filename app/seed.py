@@ -50,6 +50,7 @@ DEFAULT_SETTINGS = {
     "netdata.ram_label": ("", "Label under RAM gauge (e.g. 64 GB). Auto-detects if empty."),
     "netdata.net_label": ("", "Label under Network gauge (e.g. 1 Gbps). Auto-detects if empty."),
     "netdata.net_unit": ("mbps", "Network speed unit: mbps (megabits/s) or MBps (megabytes/s)"),
+    "netdata.net_max": ("1000", "Max network throughput for gauge percentage (in the selected unit)"),
     # Notification polling intervals (seconds)
     "notifications.poll_interval_seerr": ("60", "Seconds between Seerr notification checks"),
     "notifications.poll_interval_monitors": ("60", "Seconds between Uptime Kuma notification checks"),

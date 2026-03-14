@@ -23,6 +23,7 @@ def _get_config() -> dict:
         ram_label = db.query(Setting).filter(Setting.key == "netdata.ram_label").first()
         net_label = db.query(Setting).filter(Setting.key == "netdata.net_label").first()
         net_unit = db.query(Setting).filter(Setting.key == "netdata.net_unit").first()
+        net_max = db.query(Setting).filter(Setting.key == "netdata.net_max").first()
         return {
             "url": url_setting.value.rstrip("/") if url_setting else None,
             "api_key": key_setting.value if key_setting else None,
@@ -30,6 +31,7 @@ def _get_config() -> dict:
             "ram_label": ram_label.value if ram_label else None,
             "net_label": net_label.value if net_label else None,
             "net_unit": net_unit.value if net_unit else "mbps",
+            "net_max": net_max.value if net_max else "1000",
         }
     finally:
         db.close()
@@ -69,6 +71,7 @@ async def get_system_stats() -> dict:
         "net_download_mbps": None,
         "net_upload_mbps": None,
         "net_unit": config.get("net_unit", "mbps"),
+        "net_max": float(config.get("net_max", "1000") or "1000"),
     }
 
     try:
