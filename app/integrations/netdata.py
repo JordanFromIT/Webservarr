@@ -22,12 +22,14 @@ def _get_config() -> dict:
         cpu_label = db.query(Setting).filter(Setting.key == "netdata.cpu_label").first()
         ram_label = db.query(Setting).filter(Setting.key == "netdata.ram_label").first()
         net_label = db.query(Setting).filter(Setting.key == "netdata.net_label").first()
+        net_unit = db.query(Setting).filter(Setting.key == "netdata.net_unit").first()
         return {
             "url": url_setting.value.rstrip("/") if url_setting else None,
             "api_key": key_setting.value if key_setting else None,
             "cpu_label": cpu_label.value if cpu_label else None,
             "ram_label": ram_label.value if ram_label else None,
             "net_label": net_label.value if net_label else None,
+            "net_unit": net_unit.value if net_unit else "mbps",
         }
     finally:
         db.close()
@@ -66,6 +68,7 @@ async def get_system_stats() -> dict:
         "hostname": None,
         "net_download_mbps": None,
         "net_upload_mbps": None,
+        "net_unit": config.get("net_unit", "mbps"),
     }
 
     try:
@@ -192,11 +195,18 @@ async def get_system_stats() -> dict:
                         for i, label in enumerate(labels):
                             if i > 0 and i < len(row):
                                 values[label.lower()] = row[i]
-                        # Netdata returns kilobits/s; convert to MB/s
+                        # Netdata returns kilobits/s
                         received = abs(values.get("received", 0) or 0)
                         sent = abs(values.get("sent", 0) or 0)
-                        result["net_download_mbps"] = round(received / 8000, 2)
-                        result["net_upload_mbps"] = round(sent / 8000, 2)
+                        net_unit = config.get("net_unit", "mbps")
+                        if net_unit == "MBps":
+                            # kilobits/s -> megabytes/s (divide by 8000)
+                            result["net_download_mbps"] = round(received / 8000, 2)
+                            result["net_upload_mbps"] = round(sent / 8000, 2)
+                        else:
+                            # kilobits/s -> megabits/s (divide by 1000)
+                            result["net_download_mbps"] = round(received / 1000, 2)
+                            result["net_upload_mbps"] = round(sent / 1000, 2)
             except Exception as e:
                 logger.warning("Netdata network fetch error: %s", str(e))
 

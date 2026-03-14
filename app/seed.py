@@ -49,6 +49,7 @@ DEFAULT_SETTINGS = {
     "netdata.cpu_label": ("", "Label under CPU gauge (e.g. 16C/32T)"),
     "netdata.ram_label": ("", "Label under RAM gauge (e.g. 64 GB). Auto-detects if empty."),
     "netdata.net_label": ("", "Label under Network gauge (e.g. 1 Gbps). Auto-detects if empty."),
+    "netdata.net_unit": ("mbps", "Network speed unit: mbps (megabits/s) or MBps (megabytes/s)"),
     # Notification polling intervals (seconds)
     "notifications.poll_interval_seerr": ("60", "Seconds between Seerr notification checks"),
     "notifications.poll_interval_monitors": ("60", "Seconds between Uptime Kuma notification checks"),

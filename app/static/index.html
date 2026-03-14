@@ -88,12 +88,12 @@
 <div class="flex items-center text-[9px] text-frosted-blue space-x-0.5">
 <span class="material-symbols-outlined text-[9px]">arrow_upward</span>
 <span id="netUpText">0.0</span>
-<span class="text-steel-blue/60">MB/s</span>
+<span id="netUpUnit" class="text-steel-blue/60">Mbps</span>
 </div>
 <div class="flex items-center text-[9px] text-frosted-blue space-x-0.5 mt-0.5">
 <span class="material-symbols-outlined text-[9px]">arrow_downward</span>
 <span id="netDownText">0.0</span>
-<span class="text-steel-blue/60">MB/s</span>
+<span id="netDownUnit" class="text-steel-blue/60">Mbps</span>
 </div>
 </div>
 <span id="netGaugeDetail" class="text-[7px] text-steel-blue/60 mt-0.5"></span>
@@ -968,14 +968,17 @@ async function loadSystemStats() {
         // Update Network gauge
         var dl = stats.net_download_mbps != null ? stats.net_download_mbps : 0;
         var ul = stats.net_upload_mbps != null ? stats.net_upload_mbps : 0;
+        var netUnitLabel = stats.net_unit === 'MBps' ? 'MB/s' : 'Mbps';
         document.getElementById('netDownText').textContent = dl.toFixed(1);
         document.getElementById('netUpText').textContent = ul.toFixed(1);
+        document.getElementById('netUpUnit').textContent = netUnitLabel;
+        document.getElementById('netDownUnit').textContent = netUnitLabel;
         // Show network label (configurable)
         if (stats.net_label) {
             var netDetail = document.getElementById('netGaugeDetail');
             if (netDetail) netDetail.textContent = stats.net_label;
         }
-        // Scale network gauge: cap at 100 MB/s for percentage
+        // Scale network gauge: cap at 100 for percentage
         var netPct = Math.min((dl + ul) / 100 * 100, 100);
         document.getElementById('netGaugeCircle').style.strokeDashoffset = 251 - (251 * netPct / 100);
 
