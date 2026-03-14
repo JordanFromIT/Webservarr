@@ -49,54 +49,54 @@
 <div class="flex justify-between items-center">
 <!-- CPU Gauge -->
 <div class="flex flex-col items-center flex-1">
-<div class="relative w-24 h-24 lg:w-28 lg:h-28">
+<div class="relative w-28 h-28 lg:w-36 lg:h-36">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
 <circle id="cpuGaugeCircle" class="text-cyan-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
 </svg>
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
-<span class="text-[10px] text-steel-blue font-medium">CPU</span>
-<span id="cpuGaugeText" class="text-lg font-bold text-frosted-blue">--%</span>
-<span id="cpuGaugeDetail" class="text-[8px] text-steel-blue/70"></span>
+<span class="text-xs text-steel-blue font-medium">CPU</span>
+<span id="cpuGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
+<span id="cpuGaugeDetail" class="text-[10px] text-steel-blue/70"></span>
 </div>
 </div>
 </div>
 <!-- RAM Gauge -->
 <div class="flex flex-col items-center flex-1">
-<div class="relative w-24 h-24 lg:w-28 lg:h-28">
+<div class="relative w-28 h-28 lg:w-36 lg:h-36">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
 <circle id="ramGaugeCircle" class="text-purple-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
 </svg>
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
-<span class="text-[10px] text-steel-blue font-medium">RAM</span>
-<span id="ramGaugeText" class="text-lg font-bold text-frosted-blue">--%</span>
-<span id="ramGaugeDetail" class="text-[8px] text-steel-blue/70"></span>
+<span class="text-xs text-steel-blue font-medium">RAM</span>
+<span id="ramGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
+<span id="ramGaugeDetail" class="text-[10px] text-steel-blue/70"></span>
 </div>
 </div>
 </div>
 <!-- Network Gauge -->
 <div class="flex flex-col items-center flex-1">
-<div class="relative w-24 h-24 lg:w-28 lg:h-28">
+<div class="relative w-28 h-28 lg:w-36 lg:h-36">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
 <circle id="netGaugeCircle" class="text-orange-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
 </svg>
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center pt-1">
-<span class="text-[10px] text-steel-blue font-medium uppercase">Network</span>
+<span class="text-xs text-steel-blue font-medium uppercase">Network</span>
 <div class="flex flex-col items-center leading-none mt-1">
-<div class="flex items-center text-[9px] text-frosted-blue space-x-0.5">
-<span class="material-symbols-outlined text-[9px]">arrow_upward</span>
+<div class="flex items-center text-[11px] text-frosted-blue space-x-0.5">
+<span class="material-symbols-outlined text-[11px]">arrow_upward</span>
 <span id="netUpText">0.0</span>
 <span id="netUpUnit" class="text-steel-blue/60">Mbps</span>
 </div>
-<div class="flex items-center text-[9px] text-frosted-blue space-x-0.5 mt-0.5">
-<span class="material-symbols-outlined text-[9px]">arrow_downward</span>
+<div class="flex items-center text-[11px] text-frosted-blue space-x-0.5 mt-0.5">
+<span class="material-symbols-outlined text-[11px]">arrow_downward</span>
 <span id="netDownText">0.0</span>
 <span id="netDownUnit" class="text-steel-blue/60">Mbps</span>
 </div>
 </div>
-<span id="netGaugeDetail" class="text-[7px] text-steel-blue/60 mt-0.5"></span>
+<span id="netGaugeDetail" class="text-[9px] text-steel-blue/60 mt-0.5"></span>
 </div>
 </div>
 </div>
