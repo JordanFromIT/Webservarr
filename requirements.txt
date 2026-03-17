@@ -103,7 +103,7 @@ propcache==0.4.1
     #   yarl
 py-vapid==1.9.4
     # via pywebpush
-pyasn1==0.6.2
+pyasn1==0.6.3
     # via
     #   python-jose
     #   rsa
