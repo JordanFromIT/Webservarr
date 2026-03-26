@@ -42,7 +42,7 @@ markdown==3.5.2
 bleach==6.1.0
 
 # HTTP client
-requests==2.31.0
+requests==2.33.0
 
 # Date/time utilities
 python-dateutil==2.8.2
