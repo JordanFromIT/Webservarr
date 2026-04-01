@@ -274,6 +274,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     })();
 
+    // Close media modal on Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeMediaModal();
+    });
+
     var user = await checkAuth();
     if (!user) return;
     showAdminNav(user.is_admin);
@@ -921,6 +926,79 @@ function setFilter(filter) {
     });
 
     renderRequests();
+}
+
+// ---- Media Detail Modal ----
+
+function openMediaModal(item) {
+  var modal = document.getElementById('mediaModal');
+  var mediaType = item.media_type || 'movie';
+  var status = item.media_status ? item.media_status.toLowerCase() : null;
+
+  // Poster — reset error fallback state each time
+  var poster = document.getElementById('modalPoster');
+  poster.style.display = '';
+  if (poster.nextElementSibling) poster.nextElementSibling.style.display = 'none';
+  poster.src = item.poster_url || '';
+  poster.alt = item.title || '';
+
+  // Text content
+  document.getElementById('modalTitle').textContent = item.title || 'Unknown';
+  document.getElementById('modalYear').textContent = item.year || '';
+  document.getElementById('modalOverview').textContent = item.overview || 'No description available.';
+
+  // Type badge
+  var typeBadge = document.getElementById('modalTypeBadge');
+  if (mediaType === 'tv') {
+    typeBadge.textContent = 'TV Series';
+    typeBadge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400';
+  } else {
+    typeBadge.textContent = 'Movie';
+    typeBadge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400';
+  }
+
+  // Rating
+  var ratingEl = document.getElementById('modalRating');
+  ratingEl.textContent = (item.vote_average && item.vote_average > 0)
+    ? '\u2605 ' + item.vote_average.toFixed(1)
+    : '';
+
+  // Action area: Request button or status badge
+  var actionArea = document.getElementById('modalActionArea');
+  if (!status) {
+    actionArea.innerHTML =
+      '<button id="modalRequestBtn" ' +
+        'data-media-type="' + escapeHtml(mediaType) + '" ' +
+        'data-media-id="' + item.id + '" ' +
+        'onclick="requestFromModal(this)" ' +
+        'class="w-full py-2 rounded-lg bg-primary hover:bg-primary/80 text-bright text-xs font-bold transition-all">' +
+        'Request' +
+      '</button>';
+  } else {
+    actionArea.innerHTML =
+      '<div class="w-full py-2 flex items-center justify-center">' +
+        getStatusBadge(status) +
+      '</div>';
+  }
+
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+
+function closeMediaModal() {
+  var modal = document.getElementById('mediaModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  // Clear action area to prevent stale button state on next open
+  document.getElementById('modalActionArea').innerHTML = '';
+}
+
+function requestFromModal(buttonEl) {
+  var mediaType = buttonEl.getAttribute('data-media-type');
+  var mediaId = parseInt(buttonEl.getAttribute('data-media-id'), 10);
+  // Reuse existing requestMedia — passes buttonEl so its built-in
+  // spinner/success/error handling works inside the modal action area.
+  requestMedia(mediaType, mediaId, false, buttonEl);
 }
 
 // ---- Toast Notifications ----
