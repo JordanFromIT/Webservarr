@@ -196,6 +196,41 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 .poster-placeholder {
   background: linear-gradient(135deg, rgba(var(--color-primary) / 0.3), rgba(var(--color-secondary) / 0.15));
 }
+/* Discover rows */
+.discover-row {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.discover-row::-webkit-scrollbar {
+  display: none;
+}
+.discover-scroll-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-60%);
+  z-index: 10;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  background: rgb(var(--color-primary) / 0.85);
+  color: rgb(var(--color-background));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+  padding: 0;
+}
+.discover-scroll-btn:hover {
+  background: rgb(var(--color-primary));
+}
+.discover-scroll-btn.left { left: -0.5rem; }
+.discover-scroll-btn.right { right: -0.5rem; }
+.discover-row-wrapper:hover .discover-scroll-btn {
+  opacity: 1;
+}
 </style>
 
 <script src="/static/js/auth.js"></script>
