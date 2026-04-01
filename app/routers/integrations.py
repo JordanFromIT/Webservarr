@@ -309,6 +309,48 @@ async def create_issue_comment(
     return result
 
 
+# --- Seerr Discover Endpoints ---
+
+@router.get("/seerr-discover/trending")
+async def seerr_discover_trending(
+    current_user: dict = Depends(get_current_user),
+):
+    """Get Seerr trending items (mixed movies + TV). Requires authentication."""
+    return await seerr.get_discover_list("trending")
+
+
+@router.get("/seerr-discover/popular-movies")
+async def seerr_discover_popular_movies(
+    current_user: dict = Depends(get_current_user),
+):
+    """Get popular movies from Seerr. Requires authentication."""
+    return await seerr.get_discover_list("popular-movies")
+
+
+@router.get("/seerr-discover/upcoming-movies")
+async def seerr_discover_upcoming_movies(
+    current_user: dict = Depends(get_current_user),
+):
+    """Get upcoming movies from Seerr. Requires authentication."""
+    return await seerr.get_discover_list("upcoming-movies")
+
+
+@router.get("/seerr-discover/popular-series")
+async def seerr_discover_popular_series(
+    current_user: dict = Depends(get_current_user),
+):
+    """Get popular TV series from Seerr. Requires authentication."""
+    return await seerr.get_discover_list("popular-series")
+
+
+@router.get("/seerr-discover/upcoming-series")
+async def seerr_discover_upcoming_series(
+    current_user: dict = Depends(get_current_user),
+):
+    """Get upcoming TV series from Seerr. Requires authentication."""
+    return await seerr.get_discover_list("upcoming-series")
+
+
 # --- Sonarr/Radarr Endpoints ---
 
 @router.get("/upcoming-releases")
