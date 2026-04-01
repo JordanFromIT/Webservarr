@@ -619,3 +619,88 @@ async def get_backdrops() -> list:
     except Exception as e:
         logger.debug("Failed to fetch Seerr backdrops: %s", str(e))
         return []
+
+
+# Discover list type → Seerr endpoint path
+DISCOVER_ENDPOINT_MAP = {
+    "trending": "/api/v1/discover/trending",
+    "popular-movies": "/api/v1/discover/movies",
+    "upcoming-movies": "/api/v1/discover/movies/upcoming",
+    "popular-series": "/api/v1/discover/tv",
+    "upcoming-series": "/api/v1/discover/tv/upcoming",
+}
+
+
+async def get_discover_list(list_type: str, page: int = 1) -> list:
+    """
+    Fetch a Seerr discover list and normalize results to the same shape as search_media.
+    list_type: one of "trending", "popular-movies", "upcoming-movies",
+               "popular-series", "upcoming-series"
+    Returns empty list on config missing, unknown list_type, HTTP error, or timeout.
+    """
+    config = _get_config()
+    if not config["url"] or not config["api_key"]:
+        return []
+
+    endpoint = DISCOVER_ENDPOINT_MAP.get(list_type)
+    if not endpoint:
+        logger.warning("Unknown discover list type: %s", list_type)
+        return []
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+            resp = await client.get(
+                f"{config['url']}{endpoint}",
+                params={"page": page, "language": "en"},
+                headers={"X-Api-Key": config["api_key"]},
+            )
+            if resp.status_code != 200:
+                logger.warning("Seerr discover/%s returned HTTP %d", list_type, resp.status_code)
+                return []
+
+            data = resp.json()
+            results = []
+            for item in data.get("results", []):
+                media_type = item.get("mediaType", "")
+                if media_type not in ("movie", "tv"):
+                    continue
+
+                title = item.get("title") or item.get("name", "Unknown")
+                release_date = item.get("releaseDate") or item.get("firstAirDate", "")
+                year = release_date[:4] if release_date else ""
+
+                poster_path = item.get("posterPath", "")
+                poster_url = f"https://image.tmdb.org/t/p/w300{poster_path}" if poster_path else ""
+
+                media_info = item.get("mediaInfo")
+                media_status = None
+                media_status_4k = None
+                if media_info:
+                    status_code = media_info.get("status", 0)
+                    if status_code and status_code > 1:
+                        media_status = MEDIA_STATUS_MAP.get(status_code)
+                    status_code_4k = media_info.get("status4k", 0)
+                    if status_code_4k and status_code_4k > 1:
+                        media_status_4k = MEDIA_STATUS_MAP.get(status_code_4k)
+
+                results.append({
+                    "id": item.get("id", 0),
+                    "media_type": media_type,
+                    "title": title,
+                    "year": year,
+                    "overview": item.get("overview", ""),
+                    "poster_url": poster_url,
+                    "vote_average": round(item.get("voteAverage", 0), 1),
+                    "media_status": media_status,
+                    "media_status_4k": media_status_4k,
+                    "media_info_id": media_info.get("id") if media_info else None,
+                })
+
+            return results
+
+    except httpx.TimeoutException:
+        logger.warning("Seerr discover/%s connection timed out", list_type)
+        return []
+    except Exception as e:
+        logger.error("Seerr discover/%s error: %s", list_type, e)
+        return []
