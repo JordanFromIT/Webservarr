@@ -347,7 +347,7 @@ function buildDiscoverSkeletons() {
   return html;
 }
 
-async function loadDiscoverLists() {
+function loadDiscoverLists() {
   buildDiscoverSection();
   DISCOVER_ROWS.forEach(function(row) {
     fetch('/api/integrations/seerr-discover/' + row.endpoint)
@@ -413,7 +413,7 @@ function buildDiscoverCard(item) {
   var posterHtml;
   if (posterUrl) {
     posterHtml =
-      '<img src="' + escapeHtml(posterUrl) + '" alt="' + title + '" ' +
+      '<img src="' + escapeHtml(posterUrl) + '" alt="' + escapeHtml(item.title || 'Unknown') + '" ' +
         'class="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" ' +
         'onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"/>' +
       '<div class="absolute inset-0 items-center justify-center poster-placeholder" style="display:none">' +
