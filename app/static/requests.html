@@ -238,6 +238,15 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 <script src="/static/js/sidebar.js?v=11"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
+// Discover row definitions
+var DISCOVER_ROWS = [
+  { id: 'trendingRow',       endpoint: 'trending',        label: 'Trending',        icon: 'trending_up'   },
+  { id: 'popularMoviesRow',  endpoint: 'popular-movies',  label: 'Popular Movies',  icon: 'movie'         },
+  { id: 'upcomingMoviesRow', endpoint: 'upcoming-movies', label: 'Upcoming Movies', icon: 'upcoming'      },
+  { id: 'popularSeriesRow',  endpoint: 'popular-series',  label: 'Popular Series',  icon: 'live_tv'       },
+  { id: 'upcomingSeriesRow', endpoint: 'upcoming-series', label: 'Upcoming Series', icon: 'calendar_month'},
+];
+
 // State
 var _searchDebounceTimer = null;
 var _currentSearchQuery = '';
@@ -287,6 +296,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
 
     // Load initial data
+    loadDiscoverLists();
     loadRequestCounts();
     loadExistingRequests();
 
@@ -296,6 +306,147 @@ document.addEventListener('DOMContentLoaded', async function() {
         loadExistingRequests();
     }, 30000);
 });
+
+// ---- Discover Lists ----
+
+function buildDiscoverSection() {
+  var section = document.getElementById('discoverSection');
+  if (!section) return;
+  DISCOVER_ROWS.forEach(function(row) {
+    var html =
+      '<div class="mb-6">' +
+        '<div class="flex items-center gap-2 mb-3">' +
+          '<span class="material-symbols-outlined text-primary text-xl">' + row.icon + '</span>' +
+          '<h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">' + escapeHtml(row.label) + '</h2>' +
+        '</div>' +
+        '<div class="discover-row-wrapper relative">' +
+          '<button onclick="scrollDiscoverRow(\'' + row.id + '\', -1)" class="discover-scroll-btn left">' +
+            '<span class="material-symbols-outlined text-sm">chevron_left</span>' +
+          '</button>' +
+          '<div id="' + row.id + '" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">' +
+            buildDiscoverSkeletons() +
+          '</div>' +
+          '<button onclick="scrollDiscoverRow(\'' + row.id + '\', 1)" class="discover-scroll-btn right">' +
+            '<span class="material-symbols-outlined text-sm">chevron_right</span>' +
+          '</button>' +
+        '</div>' +
+      '</div>';
+    section.insertAdjacentHTML('beforeend', html);
+  });
+}
+
+function buildDiscoverSkeletons() {
+  var html = '';
+  for (var i = 0; i < 8; i++) {
+    html +=
+      '<div class="shrink-0 w-28 rounded-xl overflow-hidden animate-pulse">' +
+        '<div class="aspect-[2/3] bg-steel-blue/10 rounded-xl"></div>' +
+        '<div class="py-1.5 px-1"><div class="h-2.5 bg-steel-blue/10 rounded w-3/4 mt-1"></div></div>' +
+      '</div>';
+  }
+  return html;
+}
+
+async function loadDiscoverLists() {
+  buildDiscoverSection();
+  DISCOVER_ROWS.forEach(function(row) {
+    fetch('/api/integrations/seerr-discover/' + row.endpoint)
+      .then(function(resp) {
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
+      .then(function(items) {
+        renderDiscoverRow(row.id, items);
+      })
+      .catch(function(err) {
+        console.warn('Discover list ' + row.endpoint + ' failed:', err);
+        renderDiscoverRowError(row.id);
+      });
+  });
+}
+
+function renderDiscoverRow(rowId, items) {
+  var row = document.getElementById(rowId);
+  if (!row) return;
+  if (!items || items.length === 0) {
+    row.innerHTML = '<p class="text-steel-blue/50 text-xs py-4 px-2 italic">Nothing to show</p>';
+    return;
+  }
+  row.textContent = '';
+  var fragment = document.createDocumentFragment();
+  items.forEach(function(item) {
+    var wrapper = document.createElement('div');
+    wrapper.insertAdjacentHTML('beforeend', buildDiscoverCard(item));
+    var card = wrapper.firstChild;
+    // Store item data directly on the element for the modal (avoids a lookup table)
+    card._discoverItem = item;
+    card.addEventListener('click', function() { openMediaModal(this._discoverItem); });
+    fragment.appendChild(card);
+  });
+  row.appendChild(fragment);
+  wirePosterFallbacks(row);
+}
+
+function renderDiscoverRowError(rowId) {
+  var row = document.getElementById(rowId);
+  if (row) row.innerHTML = '<p class="text-steel-blue/50 text-xs py-4 px-2 italic">Could not load</p>';
+}
+
+function buildDiscoverCard(item) {
+  var title = escapeHtml(item.title || 'Unknown');
+  var mediaType = item.media_type || 'movie';
+  var typeBadge = mediaType === 'tv' ? 'TV' : 'Movie';
+  var typeBadgeColor = mediaType === 'tv' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400';
+  var posterUrl = item.poster_url || '';
+  var status = item.media_status ? item.media_status.toLowerCase() : null;
+
+  // Colored dot overlay indicating request/availability status
+  var dotHtml = '';
+  if (status) {
+    var dotColor = 'bg-steel-blue';
+    if (status === 'available') dotColor = 'bg-green-500';
+    else if (status === 'processing' || status === 'approved') dotColor = 'bg-blue-500';
+    else if (status === 'partially_available') dotColor = 'bg-yellow-500';
+    dotHtml = '<div class="absolute top-2 left-2 w-2.5 h-2.5 rounded-full ' + dotColor + ' ring-2 ring-black/60"></div>';
+  }
+
+  var posterHtml;
+  if (posterUrl) {
+    posterHtml =
+      '<img src="' + escapeHtml(posterUrl) + '" alt="' + title + '" ' +
+        'class="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" ' +
+        'onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"/>' +
+      '<div class="absolute inset-0 items-center justify-center poster-placeholder" style="display:none">' +
+        '<span class="material-symbols-outlined text-3xl text-steel-blue/40">movie</span>' +
+      '</div>';
+  } else {
+    posterHtml =
+      '<div class="absolute inset-0 flex items-center justify-center poster-placeholder">' +
+        '<span class="material-symbols-outlined text-3xl text-steel-blue/40">movie</span>' +
+      '</div>';
+  }
+
+  return (
+    '<div class="shrink-0 w-28 rounded-xl overflow-hidden glass-card cursor-pointer group">' +
+      '<div class="aspect-[2/3] relative overflow-hidden">' +
+        posterHtml +
+        '<div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>' +
+        '<div class="absolute top-2 right-2">' +
+          '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
+        '</div>' +
+        dotHtml +
+      '</div>' +
+      '<div class="p-1.5">' +
+        '<p class="text-frosted-blue text-[11px] font-medium leading-tight truncate">' + title + '</p>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function scrollDiscoverRow(rowId, direction) {
+  var row = document.getElementById(rowId);
+  if (row) row.scrollBy({ left: direction * 400, behavior: 'smooth' });
+}
 
 // ---- Search ----
 
