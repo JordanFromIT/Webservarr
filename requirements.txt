@@ -6,7 +6,7 @@
 #
 aiohappyeyeballs==2.6.1
     # via aiohttp
-aiohttp==3.13.3
+aiohttp==3.14.0
     # via pywebpush
 aiosignal==1.4.0
     # via aiohttp
@@ -157,6 +157,7 @@ starlette==0.35.1
     # via fastapi
 typing-extensions==4.15.0
     # via
+    #   aiohttp
     #   aiosignal
     #   anyio
     #   fastapi
