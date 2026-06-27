@@ -16,8 +16,8 @@ from app.dependencies import get_current_user_optional
 from app.limiter import limiter
 from app.models import User, Setting
 
-# Use secure cookies only in production (behind HTTPS)
-_COOKIE_SECURE = settings.app_env == "production"
+# Secure cookies whenever served over HTTPS (see settings.cookie_secure).
+_COOKIE_SECURE = settings.cookie_secure
 
 router = APIRouter()
 

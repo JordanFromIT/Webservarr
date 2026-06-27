@@ -29,6 +29,13 @@ class Settings(BaseSettings):
         return f"{self.app_scheme}://{self.app_domain}"
 
     @property
+    def cookie_secure(self) -> bool:
+        """Set the Secure flag on session cookies whenever the app is served over
+        HTTPS (the default) or running in production — consistent across all auth
+        methods. Only plain-HTTP local dev (app_scheme=http) drops it."""
+        return self.app_scheme.lower() == "https" or self.app_env == "production"
+
+    @property
     def effective_redirect_uri(self) -> str:
         """OIDC redirect URI - uses explicit value or derives from app_url."""
         return self.authentik_redirect_uri or f"{self.app_url}/auth/callback"

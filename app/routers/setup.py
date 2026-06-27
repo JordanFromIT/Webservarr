@@ -6,6 +6,7 @@ integration setup. Once completed, the wizard is permanently locked
 out via the `setup.completed` setting.
 """
 
+import hmac
 import logging
 import secrets
 
@@ -24,6 +25,22 @@ router = APIRouter()
 
 # In-process cache — avoids a DB hit on every single request
 _setup_done: bool = False
+
+# One-time, randomly-generated token that must be supplied to complete first-run
+# setup. It is printed to the container logs at startup and never served to a
+# client, so an anonymous attacker who reaches the origin before the operator
+# cannot race to claim the admin account.
+_setup_token: str = ""
+
+
+def get_or_create_setup_token() -> str:
+    """Return the first-run setup token (lazily generated). Empty once setup done."""
+    global _setup_token
+    if is_setup_completed():
+        return ""
+    if not _setup_token:
+        _setup_token = secrets.token_urlsafe(24)
+    return _setup_token
 
 
 def is_setup_completed() -> bool:
@@ -56,6 +73,7 @@ class SetupRequest(BaseModel):
     username: str
     password: str
     password_confirm: str
+    setup_token: str = ""
     secret_key: str = ""
     plex_url: str = ""
     plex_token: str = ""
@@ -103,6 +121,15 @@ async def complete_setup(request: Request, body: SetupRequest):
         return JSONResponse(
             status_code=403,
             content={"detail": "Setup has already been completed."},
+        )
+
+    # Require the first-run setup token (printed to the container logs at startup).
+    # Blocks an anonymous attacker from racing to create the admin account.
+    expected_token = get_or_create_setup_token()
+    if not body.setup_token or not hmac.compare_digest(body.setup_token, expected_token):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Invalid or missing setup token. Check the container logs for the setup token (docker compose logs webservarr | grep -i 'setup token')."},
         )
 
     # Validate passwords match

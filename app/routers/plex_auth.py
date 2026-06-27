@@ -157,7 +157,9 @@ async def plex_start(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/plex-callback")
+@limiter.limit("60/minute")
 async def plex_callback(
+    request: Request,
     body: PlexCallbackRequest,
     response: Response,
     db: Session = Depends(get_db),
@@ -271,7 +273,7 @@ async def plex_callback(
     logger.info("Plex PIN login successful: %s (admin=%s)", email, is_admin)
 
     # Set session cookie
-    _cookie_secure = settings.app_env == "production"
+    _cookie_secure = settings.cookie_secure
     response.set_cookie(
         key=settings.session_cookie_name,
         value=session_id,

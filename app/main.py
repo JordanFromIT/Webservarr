@@ -46,6 +46,16 @@ async def lifespan(app: FastAPI):
     from app.routers.tickets import migrate_ticket_uploads
     migrate_ticket_uploads()
 
+    # On a fresh install, print the one-time setup token. The operator must enter
+    # it in the setup wizard, so an anonymous attacker cannot race to claim admin.
+    from app.routers.setup import is_setup_completed, get_or_create_setup_token
+    if not is_setup_completed():
+        _setup_token = get_or_create_setup_token()
+        logger.warning("=" * 64)
+        logger.warning("FIRST-RUN SETUP TOKEN: %s", _setup_token)
+        logger.warning("Enter this token in the setup wizard to create the admin account.")
+        logger.warning("=" * 64)
+
     # Load or generate secret key from database
     db = SessionLocal()
     try:

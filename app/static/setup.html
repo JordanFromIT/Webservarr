@@ -101,7 +101,7 @@
     var secretKey = '';
 
     // Stored step data (persists across step navigation)
-    var storedStep1 = { username: 'admin', password: '', passwordConfirm: '' };
+    var storedStep1 = { username: 'admin', password: '', passwordConfirm: '', token: '' };
 
     // --- Generate hex key ---
     function generateSecretKey() {
@@ -233,6 +233,8 @@
             if (u) storedStep1.username = u.value.trim();
             if (p) storedStep1.password = p.value;
             if (pc) storedStep1.passwordConfirm = pc.value;
+            var tk = document.getElementById('setup-token');
+            if (tk) storedStep1.token = tk.value.trim();
         }
     }
 
@@ -254,6 +256,10 @@
                 showFieldError('setup-password-confirm', 'Passwords do not match');
                 valid = false;
             }
+            if (!storedStep1.token) {
+                showFieldError('setup-token', 'Setup token is required (see container logs)');
+                valid = false;
+            }
             return valid;
         }
         return true;
@@ -272,6 +278,11 @@
         form.appendChild(createField('Username', 'setup-username', 'text', 'admin', 'person', storedStep1.username));
         form.appendChild(createField('Password', 'setup-password', 'password', 'Minimum 8 characters', 'lock', storedStep1.password));
         form.appendChild(createField('Confirm Password', 'setup-password-confirm', 'password', 'Re-enter password', 'lock', storedStep1.passwordConfirm));
+        form.appendChild(createField('Setup Token', 'setup-token', 'text', 'From the container logs', 'key', storedStep1.token));
+        var tokenHint = document.createElement('p');
+        tokenHint.className = 'text-steel-blue/50 text-xs -mt-2';
+        tokenHint.textContent = 'Find this in the container logs: docker compose logs webservarr | grep -i "setup token"';
+        form.appendChild(tokenHint);
 
         container.appendChild(form);
     }
@@ -465,8 +476,9 @@
                 var username = storedStep1.username;
                 var password = storedStep1.password;
                 var passwordConfirm = storedStep1.passwordConfirm;
+                var setupToken = storedStep1.token;
 
-                if (!username || password.length < 8 || password !== passwordConfirm) {
+                if (!username || password.length < 8 || password !== passwordConfirm || !setupToken) {
                     showError('Please go back and complete the admin account step.');
                     completeBtn.disabled = false;
                     completeBtn.textContent = 'Complete Setup';
@@ -486,6 +498,7 @@
                             username: username,
                             password: password,
                             password_confirm: passwordConfirm,
+                            setup_token: setupToken,
                             secret_key: secretKey,
                             plex_url: plexUrl,
                             plex_token: plexToken
