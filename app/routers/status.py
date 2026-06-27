@@ -2,7 +2,7 @@
 Service Status API routes
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
@@ -10,7 +10,7 @@ from datetime import datetime
 
 
 from app.database import get_db
-from app.dependencies import require_admin
+from app.dependencies import get_current_user_optional, require_admin
 from app.limiter import limiter
 from app.models import StatusUpdate
 
@@ -49,13 +49,20 @@ class StatusUpdateCreate(BaseModel):
 async def get_status_updates(
     request: Request,
     active_only: bool = True,
-    limit: int = 20,
-    db: Session = Depends(get_db)
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(get_current_user_optional),
 ):
     """
     Get status updates (incidents, maintenance, etc.).
-    Public endpoint.
+    Public endpoint — anonymous callers only ever see active updates; the full
+    historical feed (active_only=false) requires an admin session.
     """
+    if not active_only:
+        is_admin = bool(current_user) and str(current_user.get("is_admin", "false")).lower() == "true"
+        if not is_admin:
+            active_only = True
+
     query = db.query(StatusUpdate)
 
     if active_only:

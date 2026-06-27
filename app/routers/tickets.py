@@ -227,8 +227,8 @@ async def get_ticket_image(
 async def list_tickets(
     status_filter: Optional[str] = Query(None, alias="status"),
     category: Optional[str] = None,
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -468,8 +468,8 @@ async def admin_list_tickets(
     category: Optional[str] = None,
     priority: Optional[str] = None,
     creator: Optional[str] = None,
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
