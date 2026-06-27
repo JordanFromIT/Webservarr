@@ -31,6 +31,27 @@ CONTAINER_NAME = os.environ.get("CONTAINER_NAME", "webservarr")
 router = APIRouter()
 
 
+# --- Sensitive-setting masking ---
+# Any setting whose key contains one of these terms holds a secret that must
+# never be returned to a client in plaintext (Plex token, *arr API keys, the
+# Authentik client_secret, the VAPID private key, the app secret_key, etc.).
+MASK_SENTINEL = "***masked***"
+_SENSITIVE_KEY_TERMS = ("api_key", "token", "secret", "password", "private_key")
+
+
+def _is_sensitive_key(key: str) -> bool:
+    """True if a setting key holds a secret that must be masked in API responses."""
+    k = key.lower()
+    return any(term in k for term in _SENSITIVE_KEY_TERMS)
+
+
+def _mask_setting_value(key: str, value):
+    """Replace a sensitive setting value with the mask sentinel before returning it."""
+    if value and _is_sensitive_key(key):
+        return MASK_SENTINEL
+    return value
+
+
 # Pydantic schemas
 class SettingCreate(BaseModel):
     """Schema for creating/updating a setting."""
@@ -187,7 +208,13 @@ async def get_setting(
             detail="Setting not found"
         )
 
-    return setting
+    # Mask secrets — this endpoint previously returned the raw value, bypassing
+    # the masking applied by the list endpoint.
+    return {
+        "key": setting.key,
+        "value": _mask_setting_value(setting.key, setting.value),
+        "description": setting.description,
+    }
 
 
 @router.put("/settings")
@@ -204,7 +231,15 @@ async def update_setting(
     """
     setting = db.query(Setting).filter(Setting.key == setting_data.key).first()
 
-    if setting:
+    # The UI sends back the mask sentinel for unchanged secrets — never persist
+    # the placeholder, just keep the existing value.
+    if setting_data.value == MASK_SENTINEL:
+        if not setting:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No existing value to preserve for this setting",
+            )
+    elif setting:
         # Update existing
         setting.value = setting_data.value
         if setting_data.description:
@@ -221,7 +256,11 @@ async def update_setting(
     db.commit()
     db.refresh(setting)
 
-    return setting
+    return {
+        "key": setting.key,
+        "value": _mask_setting_value(setting.key, setting.value),
+        "description": setting.description,
+    }
 
 
 @router.get("/settings")
@@ -231,18 +270,15 @@ async def list_settings(
 ):
     """
     List all settings.
-    Masks values for keys containing 'api_key' or 'token'.
-    Requires admin authentication.
+    Masks values for any key holding a secret (api_key, token, secret,
+    password, private_key). Requires admin authentication.
     """
     settings = db.query(Setting).all()
     result = []
     for s in settings:
-        value = s.value
-        if ("api_key" in s.key or "token" in s.key) and value:
-            value = "***masked***"
         result.append({
             "key": s.key,
-            "value": value,
+            "value": _mask_setting_value(s.key, s.value),
             "description": s.description
         })
     return result
@@ -263,6 +299,16 @@ async def bulk_update_settings(
     updated = []
     for item in payload.settings:
         setting = db.query(Setting).filter(Setting.key == item.key).first()
+        # Mask sentinel means "unchanged" — keep the existing value, never
+        # overwrite a real secret with the placeholder.
+        if item.value == MASK_SENTINEL:
+            if setting:
+                updated.append({
+                    "key": setting.key,
+                    "value": _mask_setting_value(setting.key, setting.value),
+                    "description": setting.description,
+                })
+            continue
         if setting:
             setting.value = item.value
             if item.description is not None:
@@ -276,7 +322,11 @@ async def bulk_update_settings(
             db.add(setting)
         db.commit()
         db.refresh(setting)
-        updated.append({"key": setting.key, "value": setting.value, "description": setting.description})
+        updated.append({
+            "key": setting.key,
+            "value": _mask_setting_value(setting.key, setting.value),
+            "description": setting.description,
+        })
     return updated
 
 

@@ -59,12 +59,12 @@ function _buildSidebarHTML(currentPage) {
 
     if (isActive) {
       return '<a class="flex items-center gap-3 px-4 py-3 rounded-lg bg-primary text-background-dark font-bold transition-all shadow-baltic-blue/20" href="' + item.href + '"' + adminAttr + '>' +
-        '<span class="material-symbols-outlined fill-1">' + item.icon + '</span>' +
-        '<span>' + item.label + '</span>' + badge + '</a>';
+        '<span class="material-symbols-outlined fill-1">' + escapeHtml(item.icon) + '</span>' +
+        '<span>' + escapeHtml(item.label) + '</span>' + badge + '</a>';
     }
     return '<a class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="' + item.href + '"' + adminAttr + '>' +
-      '<span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors">' + item.icon + '</span>' +
-      '<span>' + item.label + '</span>' + badge + '</a>';
+      '<span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors">' + escapeHtml(item.icon) + '</span>' +
+      '<span>' + escapeHtml(item.label) + '</span>' + badge + '</a>';
   }).join('\n');
 
   // Logo: image if logo_url set, otherwise icon

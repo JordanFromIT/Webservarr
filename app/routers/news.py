@@ -2,7 +2,7 @@
 News API routes - CRUD operations for news posts
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
@@ -11,7 +11,7 @@ import markdown
 import bleach
 
 from app.database import get_db
-from app.dependencies import get_current_user, require_admin
+from app.dependencies import get_current_user, get_current_user_optional, require_admin
 from app.limiter import limiter
 from app.models import NewsPost
 
@@ -84,13 +84,21 @@ def render_markdown(content: str) -> str:
 @router.get("/", response_model=List[NewsPostResponse])
 async def get_news_posts(
     published_only: bool = True,
-    limit: int = 10,
-    db: Session = Depends(get_db)
+    limit: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(get_current_user_optional),
 ):
     """
     Get news posts.
-    Public endpoint - returns published posts by default.
+    Public endpoint - returns published posts by default. Only an authenticated
+    admin may request unpublished/draft posts (published_only=false); for anyone
+    else the published-only filter is forced on.
     """
+    if not published_only:
+        is_admin = bool(current_user) and str(current_user.get("is_admin", "false")).lower() == "true"
+        if not is_admin:
+            published_only = True
+
     query = db.query(NewsPost)
 
     if published_only:
