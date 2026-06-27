@@ -129,6 +129,9 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    # HSTS — browsers ignore this over plain HTTP, so it is safe to always send.
+    # No includeSubDomains/preload to avoid affecting unrelated subdomains.
+    response.headers["Strict-Transport-Security"] = "max-age=31536000"
 
     # CSP (Content Security Policy) - built from config
     frame_sources = []
@@ -152,6 +155,10 @@ async def add_security_headers(request: Request, call_next):
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data: https:",
         "worker-src 'self'",
+        # Standards-compliant clickjacking defense (supersedes X-Frame-Options).
+        "frame-ancestors 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
     ]
     if frame_sources:
         csp_directives.append(f"frame-src {' '.join(frame_sources)}")

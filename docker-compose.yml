@@ -5,7 +5,15 @@ services:
     container_name: webservarr
     restart: unless-stopped
     ports:
-      - "7979:7979"
+      # Bind to loopback only so the origin is reachable ONLY through the local
+      # cloudflared tunnel, not directly from the public internet (which lets an
+      # attacker bypass Cloudflare's WAF and forge CF-Connecting-IP). The origin
+      # was confirmed reachable at http://<vps-ip>:7979 before this change.
+      # NOTE: if Cloudflare reaches this origin by connecting to the VPS public IP
+      # (orange-cloud proxy) rather than via a cloudflared tunnel, this binding
+      # will break ingress — in that case keep "7979:7979" and instead firewall
+      # port 7979 (OVH/ufw) to Cloudflare's published IP ranges only.
+      - "127.0.0.1:7979:7979"
     environment:
       - DATABASE_URL=sqlite:////app/data/webservarr.db
     volumes:
