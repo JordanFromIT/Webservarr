@@ -111,6 +111,22 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONR
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
+# Reject oversized request bodies early (memory-exhaustion DoS). Uploads are
+# capped at 2 MB in their handlers; 16 MB leaves headroom for multipart envelopes.
+MAX_REQUEST_BYTES = 16 * 1024 * 1024
+
+
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+    return await call_next(request)
+
 # CORS middleware - built from config
 _cors_origins = [settings.app_url]
 if settings.authentik_url:
