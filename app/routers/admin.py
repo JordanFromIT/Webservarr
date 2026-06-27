@@ -22,7 +22,7 @@ from app.limiter import limiter
 from app.models import Setting, Notification, PushSubscription, User
 from app.dependencies import require_admin
 from app.services.push import send_push_to_users
-from app.utils import validate_image_magic
+from app.utils import validate_image_magic, is_safe_integration_url
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,20 @@ def _mask_setting_value(key: str, value):
     if value and _is_sensitive_key(key):
         return MASK_SENTINEL
     return value
+
+
+# Keys of the form integration.<service>.url hold a URL the server will fetch
+# (directly or via the background poller) — validate them against SSRF on write.
+_INTEGRATION_URL_KEY = re.compile(r"^integration\.[^.]+\.url$")
+
+
+def _check_setting_write(key: str, value: str):
+    """Reject writes of integration URLs that point at SSRF-dangerous targets."""
+    if value and _INTEGRATION_URL_KEY.match(key) and not is_safe_integration_url(value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Refusing to save {key}: URL must be http/https and not a loopback, link-local, or metadata address",
+        )
 
 
 # Pydantic schemas
@@ -239,19 +253,21 @@ async def update_setting(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No existing value to preserve for this setting",
             )
-    elif setting:
-        # Update existing
-        setting.value = setting_data.value
-        if setting_data.description:
-            setting.description = setting_data.description
     else:
-        # Create new
-        setting = Setting(
-            key=setting_data.key,
-            value=setting_data.value,
-            description=setting_data.description
-        )
-        db.add(setting)
+        _check_setting_write(setting_data.key, setting_data.value)
+        if setting:
+            # Update existing
+            setting.value = setting_data.value
+            if setting_data.description:
+                setting.description = setting_data.description
+        else:
+            # Create new
+            setting = Setting(
+                key=setting_data.key,
+                value=setting_data.value,
+                description=setting_data.description
+            )
+            db.add(setting)
 
     db.commit()
     db.refresh(setting)
@@ -309,6 +325,7 @@ async def bulk_update_settings(
                     "description": setting.description,
                 })
             continue
+        _check_setting_write(item.key, item.value)
         if setting:
             setting.value = item.value
             if item.description is not None:
@@ -345,6 +362,14 @@ async def test_connection(
     service = payload.service
     url = payload.url.rstrip("/")
     credentials = payload.credentials or ""
+
+    # Anti-SSRF: block loopback/link-local/metadata targets. LAN is allowed since
+    # integrations legitimately live on the LAN.
+    if not is_safe_integration_url(url):
+        return {
+            "success": False,
+            "message": "Refusing to connect: URL must be http/https and not a loopback, link-local, or metadata address",
+        }
 
     try:
         async with httpx.AsyncClient(timeout=5.0, verify=False) as client:

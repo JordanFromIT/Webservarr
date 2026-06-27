@@ -13,6 +13,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.limiter import limiter
 from app.models import Notification, PushSubscription, Setting
+from app.utils import is_safe_push_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +260,14 @@ async def push_subscribe(
     email = _get_user_email(current_user)
     if not email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No email in session")
+
+    # Anti-SSRF: the server POSTs to this endpoint on every notification dispatch.
+    # Only allow public HTTPS browser-push services — never LAN/loopback/metadata.
+    if not is_safe_push_endpoint(body.endpoint):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid push subscription endpoint",
+        )
 
     # Upsert by user_email + endpoint
     existing = (

@@ -2,6 +2,8 @@
 Integration API routes - Plex, Uptime Kuma, Seerr, Netdata endpoints.
 """
 
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -33,6 +35,13 @@ async def plex_thumbnail(
     current_user: dict = Depends(get_current_user),
 ):
     """Proxy a Plex thumbnail image to avoid mixed-content issues."""
+    # Anti-SSRF: 'path' is forwarded verbatim as Plex's transcode 'url' param, so
+    # it must be a Plex-internal RELATIVE path (e.g. /library/metadata/123/thumb/..)
+    # and never a full/protocol-relative URL — otherwise any authenticated user
+    # could make Plex fetch arbitrary LAN/metadata URLs and return the body.
+    _parsed = urlparse(path)
+    if not path.startswith("/") or path.startswith("//") or _parsed.scheme or _parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid thumbnail path")
     content, content_type = await plex.get_thumbnail(path)
     if content is None:
         raise HTTPException(status_code=404, detail="Thumbnail not found")
