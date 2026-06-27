@@ -424,7 +424,9 @@ async def test_connection(
 # --- Logo Upload ---
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "uploads")
-ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/svg+xml", "image/webp"}
+# SVG is intentionally excluded: it is served inline from the public /static tree
+# and an SVG can carry inline <script>/onload, giving stored XSS in the app origin.
+ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 MAX_LOGO_SIZE = 2 * 1024 * 1024  # 2MB
 
 
@@ -438,12 +440,12 @@ async def upload_logo(
 ):
     """
     Upload a logo image file. Saves to /static/uploads/ and updates branding.logo_url.
-    Accepts PNG, JPEG, GIF, SVG, WebP up to 2MB.
+    Accepts PNG, JPEG, GIF, WebP up to 2MB. (SVG is rejected — XSS risk.)
     """
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file type: {file.content_type}. Allowed: PNG, JPEG, GIF, SVG, WebP",
+            detail=f"Unsupported file type: {file.content_type}. Allowed: PNG, JPEG, GIF, WebP",
         )
 
     content = await file.read()
@@ -463,7 +465,7 @@ async def upload_logo(
 
     # Generate unique filename preserving extension
     ext = os.path.splitext(file.filename or "logo.png")[1].lower()
-    if ext not in {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}:
+    if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
         ext = ".png"
     filename = f"logo-{uuid.uuid4().hex[:8]}{ext}"
     filepath = os.path.join(UPLOAD_DIR, filename)

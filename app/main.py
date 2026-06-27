@@ -41,6 +41,11 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     init_db()
 
+    # Move any legacy ticket images out of the public /static tree into the
+    # auth-only data dir (idempotent).
+    from app.routers.tickets import migrate_ticket_uploads
+    migrate_ticket_uploads()
+
     # Load or generate secret key from database
     db = SessionLocal()
     try:

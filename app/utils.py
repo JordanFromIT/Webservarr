@@ -86,7 +86,8 @@ _IMAGE_MAGIC = {
     "image/jpeg": [b"\xff\xd8\xff"],
     "image/webp": [],  # Special handling: RIFF....WEBP
     "image/gif": [b"GIF87a", b"GIF89a"],
-    "image/svg+xml": [],  # Special handling: text prefix
+    # NOTE: image/svg+xml is intentionally not accepted — SVG can carry inline
+    # scripts and is served inline, which would be stored XSS.
 }
 
 
@@ -105,14 +106,6 @@ def validate_image_magic(file_bytes: bytes, content_type: str) -> bool:
             and len(file_bytes) >= 12
             and file_bytes[8:12] == b"WEBP"
         )
-
-    if content_type == "image/svg+xml":
-        # SVG is text-based; check for XML or SVG opening tags
-        try:
-            text_start = file_bytes[:256].decode("utf-8", errors="ignore").strip().lower()
-        except Exception:
-            return False
-        return text_start.startswith("<?xml") or text_start.startswith("<svg")
 
     signatures = _IMAGE_MAGIC.get(content_type)
     if signatures is None:

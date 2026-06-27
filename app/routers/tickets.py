@@ -5,6 +5,7 @@ Ticket system API routes — user support tickets with admin management.
 import logging
 import mimetypes
 import os
+import shutil
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -32,9 +33,35 @@ VALID_CATEGORIES = {"media_request", "playback_issue", "account_issue", "feature
 VALID_STATUSES = {"open", "in_progress", "resolved", "closed"}
 VALID_PRIORITIES = {"low", "medium", "high", "urgent"}
 
-TICKET_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "uploads", "tickets")
+# Ticket images are private: store them OUTSIDE the public /static tree (under the
+# persisted data volume) so they are reachable only through the auth-checked
+# /api/uploads/tickets/{filename} endpoint, never via /static/uploads/tickets/.
+TICKET_UPLOAD_DIR = os.environ.get("TICKET_UPLOAD_DIR", "/app/data/ticket_uploads")
+# Former location inside the public static tree — files here are migrated out on startup.
+LEGACY_TICKET_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "uploads", "tickets")
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
 MAX_IMAGE_SIZE = 2 * 1024 * 1024  # 2MB
+
+
+def migrate_ticket_uploads() -> None:
+    """One-time move of ticket images out of the public /static tree into the
+    auth-only data dir. Closes the unauthenticated /static/uploads/tickets/ leak
+    for images uploaded before this fix. Safe to run on every startup."""
+    try:
+        if not os.path.isdir(LEGACY_TICKET_UPLOAD_DIR):
+            return
+        os.makedirs(TICKET_UPLOAD_DIR, exist_ok=True)
+        moved = 0
+        for name in os.listdir(LEGACY_TICKET_UPLOAD_DIR):
+            src = os.path.join(LEGACY_TICKET_UPLOAD_DIR, name)
+            dst = os.path.join(TICKET_UPLOAD_DIR, name)
+            if os.path.isfile(src) and not os.path.exists(dst):
+                shutil.move(src, dst)  # handles cross-volume (uploads -> data) moves
+                moved += 1
+        if moved:
+            logger.info("Migrated %d ticket image(s) out of the public static tree", moved)
+    except Exception as e:
+        logger.warning("Ticket upload migration failed: %s", e)
 
 
 # --- Pydantic schemas ---
