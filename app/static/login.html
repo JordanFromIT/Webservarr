@@ -44,6 +44,11 @@
       transition: opacity 1.5s ease-in-out;
       will-change: opacity;
     }
+    /* Prevent flash of the wrong auth method on load: keep the login form
+       invisible (space reserved, so no layout shift) until JS has applied the
+       configured auth methods, then reveal via .auth-ready. */
+    #loginForm { visibility: hidden; }
+    #loginForm.auth-ready { visibility: visible; }
 </style>
 </head>
 <body class="bg-background-dark font-display min-h-screen relative flex flex-col overflow-y-auto">
@@ -209,6 +214,14 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
+    // Failsafe: guarantee the form is revealed even if auth-method resolution
+    // below stalls (e.g. a hung /api/branding fetch) — never lock the user out
+    // behind a permanently-hidden form.
+    setTimeout(function() {
+        var f = document.getElementById('loginForm');
+        if (f) f.classList.add('auth-ready');
+    }, 2500);
+
     // --- Rotating TMDB Backgrounds ---
     (async function() {
         try {
@@ -341,6 +354,11 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         }
     }
+
+    // Auth-method visibility is resolved — reveal the form (it starts hidden
+    // via CSS to prevent the simple-auth fields flashing before Plex/SSO).
+    var revealForm = document.getElementById('loginForm');
+    if (revealForm) revealForm.classList.add('auth-ready');
 
     // If already authenticated, redirect to dashboard
     try {
