@@ -4,7 +4,7 @@ Integration API routes - Plex, Uptime Kuma, Seerr, Netdata endpoints.
 
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -14,6 +14,7 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr
+from app.limiter import limiter
 
 router = APIRouter()
 
@@ -103,6 +104,33 @@ async def get_service_status(
             m["icon"] = prefs["icon"]
             result.append(m)
     return result
+
+
+@router.get("/status-summary")
+@limiter.limit("60/minute")
+async def get_status_summary(request: Request, db: Session = Depends(get_db)):
+    """Public aggregate service health for the login page badge.
+
+    Returns ONLY an overall indicator ("online"/"degraded"/"issues"/"unknown")
+    with no per-service names or topology, so it is safe for unauthenticated
+    callers on the login page. Authenticated pages use the detailed
+    /service-status endpoint (which requires a session) instead.
+    """
+    monitors = await uptime_kuma.get_monitors()
+    statuses = [
+        m.get("status")
+        for m in monitors
+        if _get_monitor_preferences(db, m["id"])["enabled"]
+    ]
+    if any(s == "down" for s in statuses):
+        overall = "issues"
+    elif any(s == "degraded" for s in statuses):
+        overall = "degraded"
+    elif statuses:
+        overall = "online"
+    else:
+        overall = "unknown"
+    return {"status": overall}
 
 
 # --- Seerr Endpoints ---
