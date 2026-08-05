@@ -31,7 +31,7 @@ hiredis==2.3.2
 # python-jose removed: it was never imported anywhere in the app and carried
 # CVE-2024-33663 / CVE-2024-33664 (plus vulnerable ecdsa/rsa/pyasn1 transitives).
 passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
+bcrypt==5.0.0
 
 # Rate Limiting
 slowapi==0.1.9
