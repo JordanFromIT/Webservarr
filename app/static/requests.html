@@ -68,25 +68,40 @@
 <!-- Discover Section -->
 <div id="discoverSection" class="mb-8"></div>
 
-<!-- Stat Summary Cards. Also the scroll anchor for the search bar's move: the
-     view settles with these counts on screen above the search field. -->
-<div id="statsRow" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-<div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-frosted-blue" id="statTotal">--</p>
-<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Total</p>
-</div>
-<div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-steel-blue" id="statPending">--</p>
-<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Pending</p>
-</div>
-<div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-blue-500" id="statApproved">--</p>
-<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Approved</p>
-</div>
-<div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-green-500" id="statAvailable">--</p>
-<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Available</p>
-</div>
+<!-- Library summary. Also the scroll anchor for the search bar's move: the view
+     settles with these figures on screen above the search field.
+
+     One rail rather than four boxes. The old grid of equal glass cards carried
+     request-lifecycle counts - Total, Pending, Approved, Available - where
+     Pending is permanently zero under automatic approval and Approved sits
+     within a rounding error of Total, so three of the four said the same thing.
+     These describe what the library actually holds. -->
+<div id="statsRow" class="mb-6">
+  <div class="glass-card rounded-xl px-5 py-4 flex flex-wrap items-center gap-x-8 gap-y-4">
+    <div class="flex items-baseline gap-2">
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statMovies">--</span>
+      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Movies</span>
+    </div>
+    <div class="flex items-baseline gap-2">
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statShows">--</span>
+      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">TV Shows</span>
+    </div>
+    <div class="flex items-baseline gap-2">
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statEpisodes">--</span>
+      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Episodes</span>
+    </div>
+    <!-- Completeness gets the bar, since it is the one figure here that is a
+         proportion rather than a count. -->
+    <div class="flex items-center gap-3 grow min-w-[12rem]">
+      <div class="flex items-baseline gap-2 shrink-0">
+        <span class="text-2xl font-bold text-green-400 tabular-nums" id="statComplete">--</span>
+        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Complete</span>
+      </div>
+      <div class="h-1.5 grow rounded-full bg-steel-blue/20 overflow-hidden">
+        <div id="statCompleteBar" class="h-full rounded-full bg-green-400 transition-[width] duration-700" style="width:0%"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Two-column layout: Search (left) + Requests (right) on desktop, stacked on mobile -->
@@ -364,6 +379,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Load initial data
     loadDiscoverLists();
     loadRequestCounts();
+    loadLibrarySummary();
     loadExistingRequests();
 
     // Auto-refresh every 30 seconds
@@ -1249,7 +1265,12 @@ function getStatusPresentation(status, mediaType, item) {
 
         case 'processing':
         case 'downloading':
-            return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: 'Downloading'};
+            // Not "Downloading". Seerr's processing state only means the
+            // request was handed to Sonarr or Radarr - it may be searching
+            // indexers, waiting on an upgrade, or stalled with no release
+            // found at all. Claiming a download is in progress sets an
+            // expectation nothing here can actually verify.
+            return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: 'Requested'};
 
         case 'approved':
             return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: 'Approved'};
@@ -1294,19 +1315,40 @@ function getStatusBadge(status, mediaType) {
 
 // ---- Request Counts ----
 
+/** Thousands separators, so 39710 reads as a quantity rather than a serial. */
+function formatCount(n) {
+    return (n || 0).toLocaleString();
+}
+
 async function loadRequestCounts() {
+    // The request total still labels "Your Requests"; only the rail changed.
     try {
         var resp = await fetch('/api/integrations/request-counts');
         if (!resp.ok) throw new Error('API error');
         var counts = await resp.json();
-
-        document.getElementById('statTotal').textContent = counts.total || 0;
-        document.getElementById('statPending').textContent = counts.pending || 0;
-        document.getElementById('statApproved').textContent = counts.approved || 0;
-        document.getElementById('statAvailable').textContent = counts.available || 0;
         document.getElementById('requestsTotalCount').textContent = '(' + (counts.total || 0) + ')';
     } catch (e) {
         console.log('Request counts not available');
+    }
+}
+
+async function loadLibrarySummary() {
+    try {
+        var resp = await fetch('/api/integrations/library-summary');
+        if (!resp.ok) throw new Error('API error');
+        var s = await resp.json();
+
+        document.getElementById('statMovies').textContent = formatCount(s.movies);
+        document.getElementById('statShows').textContent = formatCount(s.shows);
+        document.getElementById('statEpisodes').textContent = formatCount(s.episodes);
+        document.getElementById('statComplete').textContent = (s.percent || 0) + '%';
+        // Set after paint so the bar animates out from zero rather than
+        // appearing already filled.
+        requestAnimationFrame(function () {
+            document.getElementById('statCompleteBar').style.width = (s.percent || 0) + '%';
+        });
+    } catch (e) {
+        console.log('Library summary not available');
     }
 }
 
@@ -1438,14 +1480,15 @@ function buildRequestCard(req) {
         '<div class="aspect-[2/3] relative overflow-hidden">' +
             posterHtml +
             '<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>' +
-            // Request status stays an overlay: it is a state marker, glanced at
-            // rather than read, and belongs with the artwork.
-            '<div class="absolute top-2 left-2">' +
+        '</div>' +
+        // Status sits below the artwork rather than over it. As an overlay it
+        // read as a watermark stamped across the cover, and it obscured the
+        // part of the poster people recognise a title by.
+        '<div class="p-3 space-y-1">' +
+            '<div class="flex items-center gap-1.5 flex-wrap">' +
+                '<span class="inline-block text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
                 getStatusBadge(status, mediaType) +
             '</div>' +
-        '</div>' +
-        '<div class="p-3 space-y-1">' +
-            '<span class="inline-block text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
             '<p class="text-frosted-blue text-sm font-bold leading-tight line-clamp-2">' + title + '</p>' +
             (requestedDate ? '<p class="text-[10px] text-steel-blue/60 font-medium uppercase">' + requestedDate + '</p>' : '') +
         '</div>' +

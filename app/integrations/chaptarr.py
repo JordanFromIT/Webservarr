@@ -21,8 +21,11 @@ Two things worth knowing, both established by testing against the live instance:
 
 import asyncio
 import logging
+import re
+from html import unescape
 from typing import Any, Dict, List, Optional
 
+import bleach
 import httpx
 
 from app.database import SessionLocal
@@ -87,6 +90,26 @@ def _is_set_id(value: Any) -> bool:
         return True
 
 
+def _plain_text(value: Any) -> str:
+    """
+    Flatten a Goodreads description to plain text.
+
+    The overviews come back as HTML - "<b>A riveting account...</b><br/><br/>" -
+    and the pages set descriptions with textContent, so the markup was being
+    displayed literally, tags and all. Stripping here rather than in the browser
+    keeps the API returning what it claims to return: text.
+
+    Block breaks become spaces rather than vanishing, so sentences either side
+    of a paragraph break do not run together.
+    """
+    if not value or not isinstance(value, str):
+        return ""
+    spaced = re.sub(r"(?i)<\s*(br|/p|/div|/li)\s*/?\s*>", " ", value)
+    stripped = bleach.clean(spaced, tags=[], attributes={}, strip=True)
+    # bleach escapes what it leaves behind, so &amp; and friends come back out.
+    return re.sub(r"\s+", " ", unescape(stripped)).strip()
+
+
 def _poster_from(images: Any) -> Optional[str]:
     """
     Return a cover URL the browser can actually load, or None.
@@ -144,7 +167,7 @@ def _normalise(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "author": author_name,
         "year": year,
         "poster_url": _poster_from(book.get("images")),
-        "overview": book.get("overview") or "",
+        "overview": _plain_text(book.get("overview")),
         "media_status": "available" if owned else None,
         "rating": (book.get("ratings") or {}).get("value"),
         "votes": (book.get("ratings") or {}).get("votes") or 0,
