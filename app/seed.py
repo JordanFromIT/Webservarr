@@ -65,6 +65,12 @@ DEFAULT_SETTINGS = {
     "features.show_books": ("true", "Show Library page in sidebar (also requires Kavita configured)"),
     "sidebar.label_library": ("Library", "Sidebar label for Library page"),
     "icon.nav_library": ("menu_book", "Sidebar icon for Library page"),
+    # Chaptarr book acquisition (used by the Requests page)
+    "integration.chaptarr.url": ("", "Chaptarr base URL (e.g., http://10.10.0.3:8789)"),
+    "integration.chaptarr.api_key": ("", "Chaptarr API key"),
+    "integration.chaptarr.root_folder": ("", "Chaptarr root folder path for requested books"),
+    "integration.chaptarr.quality_profile_id": ("1", "Chaptarr quality profile id for requested books"),
+    "integration.chaptarr.metadata_profile_id": ("2", "Chaptarr metadata profile id for requested books"),
     # Ticket system
     "features.show_tickets": ("true", "Show Tickets page in sidebar"),
     "sidebar.label_tickets": ("Tickets", "Sidebar label for Tickets page"),

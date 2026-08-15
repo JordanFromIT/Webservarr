@@ -13,7 +13,7 @@ from app.auth import session_manager
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
-from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr
+from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr, chaptarr
 from app.limiter import limiter
 
 router = APIRouter()
@@ -211,6 +211,46 @@ async def seerr_search(
         return {"page": 1, "totalPages": 0, "totalResults": 0, "results": []}
     results = await seerr.search_media(query=query.strip(), page=page)
     return results
+
+
+@router.get("/chaptarr-search")
+@limiter.limit("30/minute")
+async def chaptarr_search(
+    request: Request,
+    query: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Search books via Chaptarr.
+
+    Deliberately never raises: book search sits alongside movie and TV search on
+    the same page, and a Chaptarr outage must not break those. Failures come
+    back as an empty list.
+    """
+    if not query.strip():
+        return {"results": []}
+    return {"results": await chaptarr.search(query.strip())}
+
+
+class BookRequestCreate(BaseModel):
+    # A Chaptarr foreign id such as "gr:3634639" - a string, not an int.
+    bookId: str
+
+
+@router.post("/chaptarr-request")
+@limiter.limit("10/minute")
+async def create_chaptarr_request(
+    request: Request,
+    body: BookRequestCreate,
+    current_user: dict = Depends(get_current_user),
+):
+    """Add a book to Chaptarr and kick off a search for it."""
+    if not body.bookId.strip():
+        raise HTTPException(status_code=400, detail="bookId is required")
+    result = await chaptarr.request_book(body.bookId.strip())
+    if not result["ok"]:
+        raise HTTPException(status_code=502, detail=result["message"])
+    return result
 
 
 async def _get_plex_token(session_id: str) -> str | None:
