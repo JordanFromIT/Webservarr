@@ -60,6 +60,8 @@ DEFAULT_SETTINGS = {
     "integration.authentik.client_id": ("", "Authentik OAuth2 client ID"),
     "integration.authentik.client_secret": ("", "Authentik OAuth2 client secret"),
     "integration.authentik.app_slug": ("", "Authentik application slug (for logout URL)"),
+    # Kavita ebook backend (proxied; never exposed to the browser directly)
+    "integration.kavita.url": ("", "Kavita base URL (e.g., http://10.10.0.3:5000)"),
     # Ticket system
     "features.show_tickets": ("true", "Show Tickets page in sidebar"),
     "sidebar.label_tickets": ("Tickets", "Sidebar label for Tickets page"),
