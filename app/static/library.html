@@ -167,8 +167,16 @@
 
   function bookCard(series) {
     var name = series.name || 'Untitled';
+    // A book opens its detail sheet first, the way clicking a film does
+    // elsewhere. Still an <a> to the reader so middle-click, ctrl-click and
+    // "open in new tab" keep working, and so it is reachable by keyboard.
     var a = document.createElement('a');
     a.href = '/reader?seriesId=' + encodeURIComponent(series.id);
+    a.addEventListener('click', function (e) {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+      e.preventDefault();
+      openBookDetail(series);
+    });
     a.className = 'book-card group block';
     a.innerHTML =
       '<div class="book-cover relative overflow-hidden rounded-xl bg-baltic-blue/20 border border-steel-blue/20">' +
@@ -401,6 +409,149 @@
     if (canAdvance) { state.page++; loadPage(); }
   });
   el('retryBtn').addEventListener('click', function () { loadPage(); loadShelves(); });
+
+  /* ---- Book detail sheet ----
+   *
+   * Assembled from three sources, each filled in as it arrives so the sheet
+   * opens instantly rather than waiting on the slowest one:
+   *   - the series row we already hold (title, cover)
+   *   - Kavita metadata (summary, writer, genres, year)
+   *   - Chaptarr/Goodreads (rating), which is a network hop and may be absent
+   *
+   * Reviews are deliberately absent: Kavita exposes no review endpoint on this
+   * build (every candidate 404s, and external-series-detail is 403), and
+   * Goodreads has no public API for them. Showing an empty "Reviews" heading
+   * would be worse than not claiming to have them.
+   */
+  var _bdSeries = null;
+
+  function bdEl(id) { return document.getElementById(id); }
+
+  function stripHtml(html) {
+    if (!html) return '';
+    var d = document.createElement('div');
+    d.innerHTML = html;
+    return (d.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  function fact(label, value) {
+    if (value === null || value === undefined || value === '') return '';
+    return '<span><span class="text-steel-blue/60">' + label + '</span> ' +
+           '<span class="text-frosted-blue">' + escapeHtml(String(value)) + '</span></span>';
+  }
+
+  function openBookDetail(series) {
+    _bdSeries = series;
+    var modal = bdEl('bookDetail');
+
+    bdEl('bdTitle').textContent = series.name || 'Untitled';
+    bdEl('bdAuthor').textContent = '';
+    bdEl('bdSummary').textContent = 'Loading…';
+    bdEl('bdFacts').innerHTML = '';
+    bdEl('bdGenres').innerHTML = '';
+    bdEl('bdCover').style.visibility = '';
+    bdEl('bdCover').src = coverUrl(series.id);
+    bdEl('bdProgressWrap').classList.add('hidden');
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    bdEl('bdRead').focus();
+
+    loadBookDetail(series);
+  }
+
+  function closeBookDetail() {
+    var modal = bdEl('bookDetail');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+
+  function loadBookDetail(series) {
+    var facts = [];
+
+    // Kavita metadata and the series row in parallel; neither blocks the other.
+    Promise.all([
+      kavita('/api/Series/metadata?seriesId=' + series.id).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
+      kavita('/api/Series/' + series.id).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
+    ]).then(function (res) {
+      if (_bdSeries !== series) return;      // a different book was opened meanwhile
+      var md = res[0] || {};
+      var dt = res[1] || {};
+
+      var author = (md.writers && md.writers.length) ? md.writers[0].name : '';
+      bdEl('bdAuthor').textContent = author;
+
+      var summary = stripHtml(md.summary);
+      bdEl('bdSummary').textContent = summary || 'No description available for this book.';
+
+      if (md.releaseYear) facts.push(fact('Published', md.releaseYear));
+      if (dt.pages) facts.push(fact('Pages', dt.pages.toLocaleString()));
+      if (dt.wordCount) facts.push(fact('Words', Math.round(dt.wordCount / 1000) + 'k'));
+      if (dt.avgHoursToRead) {
+        var h = dt.avgHoursToRead;
+        facts.push(fact('Reading time', h < 1 ? '< 1 hr' : Math.round(h) + ' hr'));
+      }
+      bdEl('bdFacts').innerHTML = facts.join('');
+
+      var chips = (md.genres || []).concat(md.tags || []).slice(0, 8);
+      bdEl('bdGenres').innerHTML = chips.map(function (g) {
+        return '<span class="text-[10px] px-2 py-0.5 rounded-full bg-baltic-blue/30 border border-steel-blue/25 text-steel-blue">' +
+               escapeHtml(g.title || '') + '</span>';
+      }).join('');
+
+      // Your own progress through this book.
+      if (dt.pages && dt.pagesRead) {
+        var pct = Math.min(100, Math.round(100 * dt.pagesRead / dt.pages));
+        bdEl('bdProgressWrap').classList.remove('hidden');
+        bdEl('bdProgressBar').style.width = pct + '%';
+        bdEl('bdProgressText').textContent = pct + '% read';
+        bdEl('bdRead').textContent = 'Continue reading';
+      } else {
+        bdEl('bdRead').textContent = 'Read';
+      }
+
+      // Rating last: it is an outbound lookup and the least important line.
+      var url = '/api/integrations/book-rating?title=' + encodeURIComponent(series.name || '') +
+                '&author=' + encodeURIComponent(author || '');
+      fetch(url, { credentials: 'include' })
+        .then(function (r) { return r.ok ? r.json() : {}; })
+        .then(function (rt) {
+          if (_bdSeries !== series || !rt || !rt.rating) return;
+          var stars = '★ ' + rt.rating.toFixed(2);
+          var votes = rt.votes ? ' (' + Number(rt.votes).toLocaleString() + ' ratings)' : '';
+          facts.unshift('<span class="text-frosted-blue font-semibold">' + stars + '</span>' +
+                        '<span class="text-steel-blue/60">' + votes + ' · ' + escapeHtml(rt.source || '') + '</span>');
+          bdEl('bdFacts').innerHTML = facts.join('');
+        })
+        .catch(function () { /* no rating is fine */ });
+    });
+  }
+
+  /* The sheet's markup sits at the end of <body>, after this script, so it does
+     not exist yet when this runs. Wiring it immediately threw a null reference
+     that killed the rest of this module - including the Kavita reconnect - and
+     left the library stuck on "Loading". Wait for the document instead. */
+  function wireBookDetail() {
+    if (!bdEl('bookDetail')) return;
+    bdEl('bdClose').addEventListener('click', closeBookDetail);
+    bdEl('bookDetail').addEventListener('click', function (e) {
+      if (e.target === this) closeBookDetail();
+    });
+    bdEl('bdRead').addEventListener('click', function () {
+      if (_bdSeries) location.href = '/reader?seriesId=' + encodeURIComponent(_bdSeries.id);
+    });
+    document.addEventListener('keydown', function (e) {
+      var m = bdEl('bookDetail');
+      if (e.key === 'Escape' && m && !m.classList.contains('hidden')) closeBookDetail();
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wireBookDetail);
+  } else {
+    wireBookDetail();
+  }
+
 
   document.addEventListener('DOMContentLoaded', function () {
     // header.js self-initialises on load; calling it again renders a second header.
@@ -671,6 +822,50 @@
           <button id="tourBack" class="px-2.5 py-1 rounded-lg text-[12px] text-frosted-blue/80 hover:text-frosted-blue hover:bg-frosted-blue/10">Back</button>
           <button id="tourNext" class="px-3 py-1.5 rounded-lg bg-frosted-blue text-background-dark text-[12px] font-bold hover:bg-frosted-blue/90">Continue</button>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Book detail sheet. Opens on clicking a cover, the way a film does on Plex:
+     what the book is and whether you want it, before committing to reading it. -->
+<div id="bookDetail" class="hidden fixed inset-0 z-[65] items-center justify-center p-4 bg-black/75" role="dialog" aria-modal="true" aria-labelledby="bdTitle">
+  <div class="glass-card rounded-2xl w-full max-w-3xl max-h-[88vh] overflow-y-auto custom-scrollbar">
+    <div class="flex flex-col sm:flex-row gap-5 p-5 sm:p-6">
+
+      <div class="shrink-0 mx-auto sm:mx-0 w-40">
+        <img id="bdCover" alt="" class="w-40 rounded-xl border border-steel-blue/20 bg-baltic-blue/20"
+             onerror="this.style.visibility='hidden'"/>
+        <button id="bdRead"
+                class="mt-3 w-full py-2.5 rounded-xl bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-colors">
+          Read
+        </button>
+        <div id="bdProgressWrap" class="hidden mt-3">
+          <div class="h-1.5 rounded-full bg-steel-blue/20 overflow-hidden">
+            <div id="bdProgressBar" class="h-full rounded-full bg-frosted-blue" style="width:0%"></div>
+          </div>
+          <p id="bdProgressText" class="mt-1 text-[10px] text-steel-blue"></p>
+        </div>
+      </div>
+
+      <div class="min-w-0 flex-1">
+        <div class="flex items-start gap-3">
+          <div class="min-w-0 flex-1">
+            <h2 id="bdTitle" class="text-xl font-bold text-frosted-blue leading-tight"></h2>
+            <p id="bdAuthor" class="mt-0.5 text-sm text-steel-blue"></p>
+          </div>
+          <button id="bdClose" aria-label="Close"
+                  class="p-1 rounded-lg text-steel-blue hover:text-frosted-blue hover:bg-baltic-blue/30 shrink-0">
+            <span class="material-symbols-outlined text-[20px]">close</span>
+          </button>
+        </div>
+
+        <!-- Facts row: only the ones that exist for this book are rendered. -->
+        <div id="bdFacts" class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-steel-blue"></div>
+
+        <div id="bdGenres" class="mt-3 flex flex-wrap gap-1.5"></div>
+
+        <p id="bdSummary" class="mt-4 text-sm text-frosted-blue/85 leading-relaxed whitespace-pre-line"></p>
       </div>
     </div>
   </div>

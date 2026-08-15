@@ -489,6 +489,27 @@ async def library_summary(request: Request, current_user: dict = Depends(get_cur
     return summary
 
 
+@router.get("/book-rating")
+@limiter.limit("60/minute")
+async def book_rating(
+    request: Request,
+    title: str,
+    author: str = "",
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Goodreads rating for a book, for the eBooks detail sheet.
+
+    Kavita holds no rating of its own worth showing - its endpoints for that
+    are 404 on this build - so the number comes from Chaptarr's metadata
+    provider. Returns {} rather than an error when there is no confident
+    match: the sheet simply omits the line.
+    """
+    if not title.strip():
+        return {}
+    return await chaptarr.book_rating(title.strip(), author.strip())
+
+
 @router.get("/book-cover")
 @limiter.limit("120/minute")
 async def book_cover(

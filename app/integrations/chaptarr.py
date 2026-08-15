@@ -545,6 +545,71 @@ async def _book_files() -> List[Dict[str, Any]]:
     return files
 
 
+# Ratings barely move and a detail sheet is opened repeatedly, so they are held
+# for a day. Keyed by the title+author that was asked for.
+_RATING_TTL = 86400.0
+_rating_cache: Dict[str, Any] = {}
+
+
+async def book_rating(title: str, author: str = "") -> Dict[str, Any]:
+    """
+    Goodreads rating for a book, via Chaptarr's metadata provider.
+
+    Deliberately NOT chaptarr.search(): that also resolves cover art through
+    Open Library, which costs seconds and is pointless here - the detail sheet
+    already has Kavita's own cover.
+
+    Returns {rating, votes} or {} when there is no confident match. A wrong
+    rating is worse than none, so the same title scoring used elsewhere applies
+    and a weak best match is discarded.
+    """
+    import time as _time
+
+    key = (title or "").strip().lower() + "|" + (author or "").strip().lower()
+    hit = _rating_cache.get(key)
+    if hit and (_time.monotonic() - hit[0]) < _RATING_TTL:
+        return hit[1]
+
+    cfg = _get_config()
+    if not cfg["url"] or not cfg["api_key"] or not title:
+        return {}
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+            resp = await client.get(
+                f"{cfg['url']}/api/v1/search",
+                params={"term": title, "provider": SEARCH_PROVIDER},
+                headers={"X-Api-Key": cfg["api_key"]},
+            )
+        if resp.status_code != 200:
+            return {}
+        raw = resp.json()
+    except (httpx.RequestError, ValueError) as exc:
+        logger.warning("Chaptarr rating lookup failed for %r: %s", title, exc)
+        return {}
+
+    entry = {"title": title, "author": author}
+    best, best_score = None, 0.0
+    for result in raw if isinstance(raw, list) else []:
+        norm = _normalise(result)
+        if not norm:
+            continue
+        score = _match_score(entry, norm)
+        if score > best_score:
+            best, best_score = norm, score
+
+    out: Dict[str, Any] = {}
+    if best and best_score >= 0.3 and best.get("rating"):
+        out = {
+            "rating": round(float(best["rating"]), 2),
+            "votes": best.get("votes") or 0,
+            "source": "Goodreads",
+        }
+
+    _rating_cache[key] = (_time.monotonic(), out)
+    return out
+
+
 async def recent_requests(limit: int = 10) -> List[Dict[str, Any]]:
     """
     Recently acquired books, shaped like Seerr's recent requests.
