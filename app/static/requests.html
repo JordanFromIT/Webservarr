@@ -53,8 +53,9 @@
 <!-- Discover Section -->
 <div id="discoverSection" class="mb-8"></div>
 
-<!-- Stat Summary Cards -->
-<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+<!-- Stat Summary Cards. Also the scroll anchor for the search bar's move: the
+     view settles with these counts on screen above the search field. -->
+<div id="statsRow" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
 <div class="glass-card rounded-xl p-4 text-center">
 <p class="text-2xl font-bold text-frosted-blue" id="statTotal">--</p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Total</p>
@@ -853,8 +854,9 @@ var SLOT_SCROLL_GAP = 24;
 
 // How long the bar takes to travel. This is scenery rather than a response to
 // an action, and it runs while the user is still typing, so it should never
-// look like it is hurrying them.
-var SEARCH_MOVE_DURATION = 4500;
+// look like it is hurrying them - but it also holds the scroll for its whole
+// duration, so it cannot linger either.
+var SEARCH_MOVE_DURATION = 3000;
 
 /**
  * Work out how far to scroll to bring a slot into view, without doing it.
@@ -904,8 +906,22 @@ function applyScroll(plan, value) {
     else window.scrollTo(0, value);
 }
 
+/**
+ * What the scroll should bring to the top when the bar lands.
+ *
+ * Not the dock itself. Stopping on the dock puts the search field hard against
+ * the top edge with the page's context scrolled away above it - and any small
+ * error in the arithmetic then clips the field. Stopping on the stat cards
+ * leaves the pending/total counts on screen above the field, which is the more
+ * useful resting view and puts several hundred pixels between the field and the
+ * top edge, so it cannot be cut off.
+ */
+function searchScrollAnchor(slot) {
+    return document.getElementById('statsRow') || slot;
+}
+
 function scrollSlotIntoPlace(slot) {
-    var plan = scrollPlanFor(slot);
+    var plan = scrollPlanFor(searchScrollAnchor(slot));
     applyScroll(plan, plan.to);
 }
 
@@ -1018,20 +1034,10 @@ function moveSearchBar(position) {
     bar.style.zIndex = '50';
     bar.style.transition = 'none';
 
-    // 2. Measure the destination *before* scrolling, then convert it into where
-    //    it will be once the scroll has finished. Scrolling down by D moves
-    //    content up by exactly D, so the arithmetic is exact and nothing has to
-    //    be re-measured mid-flight.
-    var probe = document.createElement('div');
-    probe.style.height = start.height + 'px';
-    probe.className = 'w-full';
-    target.appendChild(probe);
-    var end = probe.getBoundingClientRect();
-    target.removeChild(probe);
-
-    var plan = scrollPlanFor(target);
+    // 2. Work out how far to scroll. The bar's destination is deliberately NOT
+    //    precomputed - see the frame loop.
+    var plan = scrollPlanFor(searchScrollAnchor(target));
     var scrollDelta = plan.to - plan.from;
-    var endTop = end.top - scrollDelta;
 
     // 3. Drive the scroll and the bar from one clock, with one easing curve.
     //
@@ -1055,17 +1061,30 @@ function moveSearchBar(position) {
         var progress = Math.min(1, (now - started) / DURATION);
         var eased = easeInOutCubic(progress);
 
+        applyScroll(plan, progress < 1 ? plan.from + scrollDelta * eased : plan.to);
+
+        // The destination is re-read every frame, after the scroll for that
+        // frame has been applied, rather than computed once up front.
+        //
+        // A precomputed coordinate goes stale: the page reflows underneath the
+        // animation as results render and discover rows resolve, so by the time
+        // the bar arrives, the slot is no longer where it was predicted to be -
+        // and the bar visibly snaps into place when it is finally reparented.
+        // Tracking the live slot means the last frame and the reparented
+        // position are the same position, so there is nothing left to snap.
+        //
+        // The slot is empty while the bar is in flight, so its box is exactly
+        // where the bar will sit once dropped back in.
+        var dest = target.getBoundingClientRect();
+        bar.style.top = (start.top + (dest.top - start.top) * eased) + 'px';
+        bar.style.left = (start.left + (dest.left - start.left) * eased) + 'px';
+        bar.style.width = (start.width + (dest.width - start.width) * eased) + 'px';
+
         if (progress < 1) {
-            applyScroll(plan, plan.from + scrollDelta * eased);
-            bar.style.top = (start.top + (endTop - start.top) * eased) + 'px';
-            bar.style.left = (start.left + (end.left - start.left) * eased) + 'px';
-            bar.style.width = (start.width + (end.width - start.width) * eased) + 'px';
             _searchMoveRaf = requestAnimationFrame(frame);
             return;
         }
 
-        // Land on the exact destination rather than an eased approximation.
-        applyScroll(plan, plan.to);
         _searchMoveRaf = null;
         unlockScroll();
         settle();
