@@ -16,10 +16,12 @@ which is obtained by the OIDC handoff and kept in their Redis session.
 """
 
 import logging
+import re
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 
 from app.auth import session_manager
@@ -35,6 +37,10 @@ router = APIRouter()
 
 # Book pages and cover images are the bulk of traffic; allow a generous ceiling.
 PROXY_TIMEOUT = 60.0
+
+# Rendered book pages need their embedded Kavita URLs rewritten (see
+# rewrite_book_html), so they are buffered rather than streamed.
+_BOOK_PAGE_PATH = re.compile(r"^api/[Bb]ook/\d+/book-page$", re.IGNORECASE)
 
 # Hop-by-hop headers must never be forwarded (RFC 9110 7.6.1).
 #
@@ -113,6 +119,38 @@ def origin_headers(host: str) -> Dict[str, str]:
         "X-Forwarded-Proto": "https",
         "Accept": "*/*",
     }
+
+
+def rewrite_book_html(html: str, base: str) -> str:
+    """
+    Make a rendered book page safe to display from WebServarr's origin.
+
+    Kavita embeds absolute references to itself inside book HTML, for images and
+    embedded fonts:
+
+        //10.10.0.3:5000/api/book/18/book-resources?apiKey=<user key>&file=...
+
+    Two problems. The host is LAN-only, so the browser cannot fetch it at all —
+    every image and font in every book would fail. And the URL carries the
+    user's Kavita API key, putting a credential into markup the page can read.
+
+    Both are fixed by pointing those references back through this proxy and
+    dropping the key, which the proxy re-injects server-side.
+    """
+    host = urlparse(base).netloc
+    if not host:
+        return html
+
+    # //10.10.0.3:5000/api/...  and  http(s)://10.10.0.3:5000/api/...
+    html = re.sub(
+        r"(?:https?:)?//" + re.escape(host) + r"/api/",
+        "/kavita/api/",
+        html,
+    )
+    # Remove the leaked key in either parameter position.
+    html = re.sub(r"([?&])apiKey=[^&\"'\s]*&", r"\1", html)
+    html = re.sub(r"[?&]apiKey=[^&\"'\s]*", "", html)
+    return html
 
 
 def collect_cookies(response: httpx.Response) -> str:
@@ -298,11 +336,15 @@ async def kavita_proxy(
     body = await request.body()
 
     params = dict(request.query_params)
-    # Kavita's image endpoints reject the Bearer token and require an apiKey
-    # query parameter, because they are designed for <img src> tags that cannot
-    # send headers. Inject it here so the key stays server-side and never
-    # appears in markup the browser can read.
-    if path.lower().startswith("api/image/") and "apiKey" not in params:
+    # Kavita's asset endpoints reject the Bearer token and require an apiKey
+    # query parameter, because they are designed for <img src> and CSS url()
+    # references that cannot send headers. Inject it here so the key stays
+    # server-side and never appears in markup the browser can read — book HTML
+    # arrives with the key stripped by rewrite_book_html for exactly that reason.
+    lowered = path.lower()
+    if ("apiKey" not in params) and (
+        lowered.startswith("api/image/") or "book-resources" in lowered
+    ):
         api_key = current_user.get("kavita_api_key")
         if api_key:
             params["apiKey"] = api_key
@@ -329,6 +371,30 @@ async def kavita_proxy(
         await client.aclose()
         raise HTTPException(status_code=401, detail="Kavita session expired")
 
+    response_headers = {
+        k: v
+        for k, v in upstream.headers.items()
+        if k.lower() in _PASSTHROUGH_RESPONSE_HEADERS
+    }
+
+    # Rendered book pages must be rewritten before the browser sees them, which
+    # means buffering. They are ~25 KB, so this is bounded; everything heavy
+    # (covers, downloads) still streams.
+    if _BOOK_PAGE_PATH.match(path):
+        try:
+            raw = await upstream.aread()
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+        body = rewrite_book_html(raw.decode("utf-8", errors="replace"), base)
+        response_headers.pop("content-length", None)
+        return Response(
+            content=body,
+            status_code=upstream.status_code,
+            headers=response_headers,
+            media_type=upstream.headers.get("content-type", "text/html; charset=utf-8"),
+        )
+
     async def stream_body():
         try:
             async for chunk in upstream.aiter_bytes(chunk_size=65536):
@@ -336,12 +402,6 @@ async def kavita_proxy(
         finally:
             await upstream.aclose()
             await client.aclose()
-
-    response_headers = {
-        k: v
-        for k, v in upstream.headers.items()
-        if k.lower() in _PASSTHROUGH_RESPONSE_HEADERS
-    }
 
     return StreamingResponse(
         stream_body(),

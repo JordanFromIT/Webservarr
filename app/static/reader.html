@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<title>WebServarr - Reader</title>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: { "display": ["var(--font-display)", "sans-serif"] },
+    },
+  },
+}</script>
+<style>
+  /* Reader surface. Defaults are seeded from the site theme so a book opens
+     matching the site, then the reader's own theme control takes over. */
+  :root {
+    --reader-bg:   var(--hex-background, #000000);
+    --reader-fg:   var(--hex-text, #BEEEF4);
+    --reader-font-size: 18px;
+    --reader-line-height: 1.7;
+    --reader-measure: 42rem;
+    --reader-columns: 1;
+  }
+  body { overscroll-behavior: none; }
+
+  #readerSurface {
+    background: var(--reader-bg);
+    color: var(--reader-fg);
+    transition: background .2s ease, color .2s ease;
+  }
+
+  /* Kavita's book CSS is namespaced under .book-content, and its annotation
+     xPaths are stored relative to this element. The HTML inside must be
+     inserted verbatim - style it, never restructure it. */
+  /* Centre the column with the surface rather than margin:auto — Kavita's own
+     book CSS sets margins on .book-content and wins otherwise. */
+  #readerSurface { display: flex; flex-direction: column; align-items: center; }
+  #readerSurface > * { width: 100%; }
+
+  /* Reader-controlled typography uses the ID, not the class: Kavita injects its
+     own <style> blocks scoped to .book-content inside this element, and at equal
+     specificity those come later in document order and win. */
+  #bookContent {
+    max-width: var(--reader-measure);
+    padding: 2rem 1.25rem 6rem;
+    column-count: var(--reader-columns);
+    column-gap: 3rem;
+  }
+  #bookContent, #bookContent p, #bookContent div, #bookContent li, #bookContent span {
+    font-size: var(--reader-font-size) !important;
+    line-height: var(--reader-line-height) !important;
+  }
+  /* Headings scale with the body size rather than being pinned flat. */
+  #bookContent h1 { font-size: calc(var(--reader-font-size) * 1.8) !important; }
+  #bookContent h2 { font-size: calc(var(--reader-font-size) * 1.5) !important; }
+  #bookContent h3 { font-size: calc(var(--reader-font-size) * 1.25) !important; }
+  .book-content, .book-content * { color: var(--reader-fg) !important; }
+  /* Full-page art (covers, maps) should fit the screen instead of forcing a
+     long scroll on what is visually a single image. */
+  .book-content img {
+    max-width: 100%;
+    max-height: calc(100vh - 9rem);
+    height: auto;
+    display: block;
+    margin-inline: auto;
+    object-fit: contain;
+  }
+  .book-content a { text-decoration: underline; }
+  .book-content h1, .book-content h2, .book-content h3 { line-height: 1.25; }
+
+  /* Tap zones for phones: left third back, right third forward. */
+  .tap-zone { position: fixed; top: 3.5rem; bottom: 3.5rem; width: 28%; z-index: 10; }
+  #tapPrev { left: 0; } #tapNext { right: 0; }
+  @media (min-width: 1024px) { .tap-zone { display: none; } }
+
+  #tocPanel { transition: transform .25s ease; }
+  #tocPanel.closed { transform: translateX(-100%); }
+  @media (prefers-reduced-motion: reduce) {
+    #tocPanel, #readerSurface { transition: none; }
+  }
+  .toc-link.active { font-weight: 700; }
+</style>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen">
+
+<!-- Top bar -->
+<header class="fixed top-0 inset-x-0 z-30 h-14 bg-background-dark/95 backdrop-blur border-b border-steel-blue/25 flex items-center gap-2 px-3">
+  <a href="/library" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="Back to library" aria-label="Back to library">
+    <span class="material-symbols-outlined text-frosted-blue align-middle">arrow_back</span>
+  </a>
+  <button id="tocBtn" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="Table of contents" aria-label="Table of contents">
+    <span class="material-symbols-outlined text-frosted-blue align-middle">toc</span>
+  </button>
+  <h1 id="bookTitle" class="flex-1 min-w-0 truncate text-sm sm:text-base font-semibold text-frosted-blue px-1">Loading…</h1>
+  <button id="bookmarkBtn" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="Bookmark this page" aria-label="Bookmark this page">
+    <span id="bookmarkIcon" class="material-symbols-outlined text-frosted-blue align-middle">bookmark_add</span>
+  </button>
+  <button id="settingsBtn" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="Reading settings" aria-label="Reading settings">
+    <span class="material-symbols-outlined text-frosted-blue align-middle">text_fields</span>
+  </button>
+</header>
+
+<!-- Table of contents -->
+<aside id="tocPanel" class="closed fixed top-14 bottom-0 left-0 z-40 w-72 bg-background-dark border-r border-steel-blue/25 overflow-y-auto p-4">
+  <p class="text-xs uppercase tracking-wider text-steel-blue mb-3">Contents</p>
+  <div id="tocList" class="space-y-1 text-sm"></div>
+</aside>
+
+<!-- Reading settings -->
+<div id="settingsPanel" class="hidden fixed top-14 right-2 z-40 w-72 bg-background-dark border border-steel-blue/30 rounded-xl p-4 space-y-4 shadow-2xl">
+  <div>
+    <label class="block text-xs uppercase tracking-wider text-steel-blue mb-2">Theme</label>
+    <div class="grid grid-cols-4 gap-2" id="themeButtons">
+      <button data-theme="site"  class="px-2 py-2 rounded-lg border border-steel-blue/30 text-xs">Site</button>
+      <button data-theme="light" class="px-2 py-2 rounded-lg border border-steel-blue/30 text-xs">Light</button>
+      <button data-theme="sepia" class="px-2 py-2 rounded-lg border border-steel-blue/30 text-xs">Sepia</button>
+      <button data-theme="dark"  class="px-2 py-2 rounded-lg border border-steel-blue/30 text-xs">Dark</button>
+    </div>
+  </div>
+  <div>
+    <label class="block text-xs uppercase tracking-wider text-steel-blue mb-1">Font size <span id="fsVal" class="text-frosted-blue"></span></label>
+    <input id="fontSize" type="range" min="14" max="28" step="1" class="w-full"/>
+  </div>
+  <div>
+    <label class="block text-xs uppercase tracking-wider text-steel-blue mb-1">Line height <span id="lhVal" class="text-frosted-blue"></span></label>
+    <input id="lineHeight" type="range" min="12" max="24" step="1" class="w-full"/>
+  </div>
+  <div>
+    <label class="block text-xs uppercase tracking-wider text-steel-blue mb-1">Text width <span id="mwVal" class="text-frosted-blue"></span></label>
+    <input id="measure" type="range" min="28" max="70" step="2" class="w-full"/>
+  </div>
+  <div class="flex items-center justify-between">
+    <label class="text-xs uppercase tracking-wider text-steel-blue">Two columns</label>
+    <input id="columns" type="checkbox" class="rounded"/>
+  </div>
+</div>
+
+<!-- Reading surface -->
+<div id="readerSurface" class="pt-14 pb-14 min-h-screen">
+  <div id="loading" class="py-24 text-center">
+    <span class="material-symbols-outlined animate-spin text-3xl text-steel-blue">progress_activity</span>
+    <p id="loadingText" class="mt-2 text-sm text-steel-blue">Opening book…</p>
+  </div>
+  <div id="errorState" class="hidden py-24 text-center px-6">
+    <span class="material-symbols-outlined text-4xl text-steel-blue/60">error</span>
+    <p id="errorTitle" class="mt-3 font-semibold text-frosted-blue">Couldn't open this book</p>
+    <p id="errorDetail" class="mt-1 text-sm text-steel-blue max-w-md mx-auto"></p>
+    <a href="/library" class="inline-block mt-4 px-4 py-2 rounded-xl bg-baltic-blue/30 border border-steel-blue/30 text-sm text-frosted-blue">Back to library</a>
+  </div>
+  <!-- Kavita's HTML goes in here VERBATIM (annotation xPaths are relative to it) -->
+  <div id="bookContent" class="book-content hidden"></div>
+</div>
+
+<div id="tapPrev" class="tap-zone"></div>
+<div id="tapNext" class="tap-zone"></div>
+
+<!-- Bottom bar -->
+<footer class="fixed bottom-0 inset-x-0 z-30 h-14 bg-background-dark/95 backdrop-blur border-t border-steel-blue/25 flex items-center gap-3 px-3">
+  <button id="prevPage" class="p-2 rounded-lg hover:bg-baltic-blue/30 disabled:opacity-30" aria-label="Previous page">
+    <span class="material-symbols-outlined text-frosted-blue align-middle">chevron_left</span>
+  </button>
+  <input id="scrubber" type="range" min="0" max="0" value="0" class="flex-1" aria-label="Position in book"/>
+  <span id="pageInfo" class="text-xs text-steel-blue tabular-nums whitespace-nowrap"></span>
+  <button id="nextPage" class="p-2 rounded-lg hover:bg-baltic-blue/30 disabled:opacity-30" aria-label="Next page">
+    <span class="material-symbols-outlined text-frosted-blue align-middle">chevron_right</span>
+  </button>
+</footer>
+
+<script src="/static/js/auth.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var PREFS_KEY = 'webservarr_reader_prefs';
+  var SAVE_DEBOUNCE_MS = 5000;
+
+  var book = { seriesId: null, chapterId: null, volumeId: null, libraryId: null, pages: 0, title: '' };
+  var current = { page: 0 };
+  var saveTimer = null;
+  var lastSaved = -1;
+
+  function el(id) { return document.getElementById(id); }
+  function qs(name) { return new URLSearchParams(location.search).get(name); }
+
+  /** Proxy call. A 401 means the Kavita session lapsed - re-run the handshake. */
+  function kavita(path, options) {
+    options = options || {};
+    options.credentials = 'include';
+    return fetch('/kavita' + path, options).then(function (res) {
+      if (res.status === 401) {
+        window.location.href = '/kavita/connect';
+        throw new Error('reconnecting');
+      }
+      return res;
+    });
+  }
+
+  // ---- Preferences (local; reading position itself lives in Kavita) ----
+
+  var prefs = { theme: 'site', fontSize: 18, lineHeight: 17, measure: 42, columns: false };
+
+  function loadPrefs() {
+    try {
+      var raw = localStorage.getItem(PREFS_KEY);
+      if (raw) { var p = JSON.parse(raw); for (var k in p) prefs[k] = p[k]; }
+    } catch (e) { /* defaults are fine */ }
+  }
+  function savePrefs() {
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) {}
+  }
+
+  var THEMES = {
+    site:  null,                                  // follow the site theme
+    light: { bg: '#FBFAF7', fg: '#1A1A1A' },
+    sepia: { bg: '#F4ECD8', fg: '#4A3B28' },
+    dark:  { bg: '#111315', fg: '#D6D6D6' }
+  };
+
+  function applyPrefs() {
+    var root = document.documentElement.style;
+    var t = THEMES[prefs.theme];
+    if (t) {
+      root.setProperty('--reader-bg', t.bg);
+      root.setProperty('--reader-fg', t.fg);
+    } else {
+      // Seed from the site theme so the book opens matching the site.
+      var cs = getComputedStyle(document.documentElement);
+      root.setProperty('--reader-bg', (cs.getPropertyValue('--hex-background') || '#000000').trim());
+      root.setProperty('--reader-fg', (cs.getPropertyValue('--hex-text') || '#BEEEF4').trim());
+    }
+    root.setProperty('--reader-font-size', prefs.fontSize + 'px');
+    root.setProperty('--reader-line-height', (prefs.lineHeight / 10).toString());
+    root.setProperty('--reader-measure', prefs.measure + 'rem');
+    root.setProperty('--reader-columns', prefs.columns ? '2' : '1');
+
+    el('fontSize').value = prefs.fontSize;
+    el('lineHeight').value = prefs.lineHeight;
+    el('measure').value = prefs.measure;
+    el('columns').checked = !!prefs.columns;
+    el('fsVal').textContent = prefs.fontSize + 'px';
+    el('lhVal').textContent = (prefs.lineHeight / 10).toFixed(1);
+    el('mwVal').textContent = prefs.measure + 'rem';
+
+    Array.prototype.forEach.call(el('themeButtons').children, function (b) {
+      b.classList.toggle('bg-baltic-blue/40', b.dataset.theme === prefs.theme);
+    });
+  }
+
+  // ---- Loading ----
+
+  function showError(title, detail) {
+    el('loading').classList.add('hidden');
+    el('bookContent').classList.add('hidden');
+    el('errorTitle').textContent = title;
+    el('errorDetail').textContent = detail || '';
+    el('errorState').classList.remove('hidden');
+  }
+
+  function resolveChapter(seriesId) {
+    return kavita('/api/Series/series-detail?seriesId=' + encodeURIComponent(seriesId))
+      .then(function (r) {
+        if (!r.ok) throw new Error('detail HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (d) {
+        var keys = ['specials', 'chapters', 'volumes', 'storylineChapters'];
+        for (var i = 0; i < keys.length; i++) {
+          var group = d[keys[i]] || [];
+          for (var j = 0; j < group.length; j++) {
+            var item = group[j];
+            var chapters = item.chapters || [item];
+            for (var k = 0; k < chapters.length; k++) {
+              if (chapters[k].id) {
+                return { chapterId: chapters[k].id, volumeId: chapters[k].volumeId || item.id };
+              }
+            }
+          }
+        }
+        throw new Error('no readable chapter in this series');
+      });
+  }
+
+  function loadTOC() {
+    return kavita('/api/Book/' + book.chapterId + '/chapters')
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (nodes) {
+        var list = el('tocList');
+        list.innerHTML = '';
+        function add(items, depth) {
+          (items || []).forEach(function (n) {
+            var a = document.createElement('a');
+            a.href = '#';
+            a.className = 'toc-link block py-1 px-2 rounded hover:bg-baltic-blue/30 text-frosted-blue/90 truncate';
+            a.style.paddingLeft = (8 + depth * 12) + 'px';
+            a.textContent = n.title || 'Untitled';
+            a.dataset.page = n.page;
+            a.addEventListener('click', function (e) {
+              e.preventDefault();
+              goToPage(parseInt(n.page, 10) || 0);
+              toggleTOC(false);
+            });
+            list.appendChild(a);
+            if (n.children && n.children.length) add(n.children, depth + 1);
+          });
+        }
+        add(nodes, 0);
+        if (!list.children.length) {
+          list.innerHTML = '<p class="text-xs text-steel-blue px-2">No contents listed for this book.</p>';
+        }
+      })
+      .catch(function () { /* a missing TOC must not stop reading */ });
+  }
+
+  function renderPage(html) {
+    var container = el('bookContent');
+    // VERBATIM. Kavita's annotation xPaths are relative to .book-content, so
+    // the element tree inside must not be altered.
+    container.innerHTML = html;
+    container.classList.remove('hidden');
+    el('loading').classList.add('hidden');
+    window.scrollTo(0, 0);
+  }
+
+  function goToPage(page, skipSave) {
+    if (page < 0) page = 0;
+    if (book.pages && page > book.pages - 1) page = book.pages - 1;
+    current.page = page;
+    updateChrome();
+
+    el('bookContent').classList.add('hidden');
+    el('loading').classList.remove('hidden');
+    el('loadingText').textContent = 'Loading page ' + (page + 1) + '…';
+
+    return kavita('/api/Book/' + book.chapterId + '/book-page?page=' + page)
+      .then(function (r) {
+        if (!r.ok) throw new Error('page HTTP ' + r.status);
+        return r.text();
+      })
+      .then(function (html) {
+        renderPage(html);
+        if (!skipSave) queueProgress();
+      })
+      .catch(function (err) {
+        if (err && err.message === 'reconnecting') return;
+        showError('Couldn’t load this page', String(err.message || err));
+      });
+  }
+
+  function updateChrome() {
+    el('pageInfo').textContent = book.pages
+      ? (current.page + 1) + ' / ' + book.pages
+      : String(current.page + 1);
+    var s = el('scrubber');
+    s.max = book.pages ? book.pages - 1 : 0;
+    s.value = current.page;
+    el('prevPage').disabled = current.page <= 0;
+    el('nextPage').disabled = book.pages ? current.page >= book.pages - 1 : false;
+  }
+
+  // ---- Progress ----
+
+  function queueProgress() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveProgress, SAVE_DEBOUNCE_MS);
+  }
+
+  function saveProgress(useBeacon) {
+    if (current.page === lastSaved) return;
+    var payload = {
+      libraryId: book.libraryId,
+      seriesId: book.seriesId,
+      volumeId: book.volumeId,
+      chapterId: book.chapterId,
+      pageNum: current.page
+    };
+    var body = JSON.stringify(payload);
+    lastSaved = current.page;
+
+    if (useBeacon && navigator.sendBeacon) {
+      // Fire-and-forget on unload; same-origin so the session cookie rides along.
+      navigator.sendBeacon('/kavita/api/Reader/progress',
+        new Blob([body], { type: 'application/json' }));
+      return;
+    }
+    // A failed progress write must never interrupt reading.
+    kavita('/api/Reader/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body
+    }).catch(function () { lastSaved = -1; });
+  }
+
+  function restoreProgress() {
+    return kavita('/api/Reader/get-progress?chapterId=' + book.chapterId)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (p) {
+        var page = (p && typeof p.pageNum === 'number') ? p.pageNum : 0;
+        lastSaved = page;
+        return page;
+      })
+      .catch(function () { return 0; });
+  }
+
+  // ---- UI wiring ----
+
+  function toggleTOC(force) {
+    var panel = el('tocPanel');
+    var open = typeof force === 'boolean' ? force : panel.classList.contains('closed');
+    panel.classList.toggle('closed', !open);
+  }
+
+  el('tocBtn').addEventListener('click', function () { toggleTOC(); });
+  el('settingsBtn').addEventListener('click', function () {
+    el('settingsPanel').classList.toggle('hidden');
+  });
+
+  el('prevPage').addEventListener('click', function () { goToPage(current.page - 1); });
+  el('nextPage').addEventListener('click', function () { goToPage(current.page + 1); });
+  el('tapPrev').addEventListener('click', function () { goToPage(current.page - 1); });
+  el('tapNext').addEventListener('click', function () { goToPage(current.page + 1); });
+
+  el('scrubber').addEventListener('change', function (e) {
+    goToPage(parseInt(e.target.value, 10) || 0);
+  });
+
+  el('bookmarkBtn').addEventListener('click', function () {
+    kavita('/api/Reader/bookmark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        seriesId: book.seriesId, volumeId: book.volumeId,
+        chapterId: book.chapterId, page: current.page
+      })
+    }).then(function (r) {
+      el('bookmarkIcon').textContent = r.ok ? 'bookmark_added' : 'bookmark_add';
+      setTimeout(function () { el('bookmarkIcon').textContent = 'bookmark_add'; }, 1800);
+    }).catch(function () {});
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'ArrowRight' || e.key === 'j' || e.key === ' ') { e.preventDefault(); goToPage(current.page + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'k') { e.preventDefault(); goToPage(current.page - 1); }
+    else if (e.key === 't') toggleTOC();
+    else if (e.key === 'Escape') { toggleTOC(false); el('settingsPanel').classList.add('hidden'); }
+  });
+
+  function bindPref(id, key, transform) {
+    el(id).addEventListener('input', function (e) {
+      prefs[key] = transform ? transform(e.target) : parseInt(e.target.value, 10);
+      applyPrefs(); savePrefs();
+    });
+  }
+  bindPref('fontSize', 'fontSize');
+  bindPref('lineHeight', 'lineHeight');
+  bindPref('measure', 'measure');
+  bindPref('columns', 'columns', function (t) { return t.checked; });
+
+  Array.prototype.forEach.call(el('themeButtons').children, function (b) {
+    b.addEventListener('click', function () {
+      prefs.theme = b.dataset.theme; applyPrefs(); savePrefs();
+    });
+  });
+
+  // Final write when leaving, so closing the tab never loses the position.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') saveProgress(true);
+  });
+  window.addEventListener('pagehide', function () { saveProgress(true); });
+
+  // ---- Boot ----
+
+  document.addEventListener('DOMContentLoaded', function () {
+    loadPrefs();
+    applyPrefs();
+
+    var seriesId = qs('seriesId');
+    if (!seriesId) { showError('No book selected', 'Open a book from the library.'); return; }
+    book.seriesId = parseInt(seriesId, 10);
+
+    checkAuth().then(function () {
+      return resolveChapter(book.seriesId);
+    }).then(function (res) {
+      book.chapterId = res.chapterId;
+      book.volumeId = res.volumeId;
+      return kavita('/api/Book/' + book.chapterId + '/book-info');
+    }).then(function (r) {
+      if (!r.ok) throw new Error('book-info HTTP ' + r.status);
+      return r.json();
+    }).then(function (info) {
+      book.pages = info.pages || 0;
+      book.libraryId = info.libraryId;
+      book.volumeId = info.volumeId || book.volumeId;
+      book.title = info.bookTitle || info.seriesName || 'Reader';
+      el('bookTitle').textContent = book.title;
+      document.title = book.title + ' - Reader';
+      loadTOC();
+      return restoreProgress();
+    }).then(function (page) {
+      return goToPage(page, true);
+    }).catch(function (err) {
+      if (err && err.message === 'reconnecting') return;
+      showError('Couldn’t open this book', String(err.message || err));
+    });
+  });
+})();
+</script>
+</body></html>
