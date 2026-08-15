@@ -837,6 +837,46 @@ function searchSlot(position) {
     return document.getElementById(position === 'dock' ? 'searchDock' : 'searchHomeSlot');
 }
 
+// Breathing room above the bar once it has landed, so it never sits jammed
+// against the top edge of the scrolling panel.
+var SLOT_SCROLL_GAP = 24;
+
+/**
+ * Scroll just far enough to bring a slot into view, and no further.
+ *
+ * scrollIntoView cannot be used here: it scrolls *every* scrollable ancestor,
+ * so the inner panel and the window both move and the two compound into an
+ * overshoot that pushes the bar up under the header and clips it. This walks up
+ * to the one element that actually scrolls and sets scrollTop directly, clamped
+ * to its real range, so the slot lands exactly SLOT_SCROLL_GAP below the top.
+ */
+function scrollSlotIntoPlace(slot) {
+    var node = slot.parentElement;
+    var container = null;
+    while (node && node !== document.body) {
+        var overflowY = window.getComputedStyle(node).overflowY;
+        if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
+            container = node;
+            break;
+        }
+        node = node.parentElement;
+    }
+
+    if (container) {
+        var delta = slot.getBoundingClientRect().top
+                  - container.getBoundingClientRect().top
+                  - SLOT_SCROLL_GAP;
+        var max = container.scrollHeight - container.clientHeight;
+        container.scrollTop = Math.max(0, Math.min(container.scrollTop + delta, max));
+        return;
+    }
+
+    // Narrow layouts scroll the document instead - the panel is only
+    // overflow-y-auto at the lg breakpoint.
+    var top = window.scrollY + slot.getBoundingClientRect().top - SLOT_SCROLL_GAP;
+    window.scrollTo(0, Math.max(0, top));
+}
+
 function wireSearchBarMotion() {
     var bar = document.getElementById('searchBar');
     var slot = searchSlot('home');
@@ -890,7 +930,7 @@ function moveSearchBar(position) {
 
     if (reducedMotion()) {
         settle();
-        (position === 'dock' ? target : bar).scrollIntoView({block: 'start'});
+        scrollSlotIntoPlace(target);
         return;
     }
 
@@ -913,12 +953,7 @@ function moveSearchBar(position) {
     // backwards-L. Doing the scroll in a single frame leaves exactly one thing
     // moving: the bar, travelling diagonally to its slot. The content jump
     // happens behind the eye's focus, which is on the bar.
-    var scrollAnchor = position === 'dock'
-        ? (document.getElementById('searchResultsSection') || {}).parentElement || target
-        : document.getElementById('discoverSection') || target;
-    if (scrollAnchor && scrollAnchor.scrollIntoView) {
-        scrollAnchor.scrollIntoView({behavior: 'auto', block: 'start'});
-    }
+    scrollSlotIntoPlace(target);
 
     // 3. Glide diagonally into the slot. The destination is measured after the
     //    jump, so it is final - nothing moves underneath mid-animation.
@@ -936,8 +971,8 @@ function moveSearchBar(position) {
         // The bar is the only thing moving on a page that has just jumped
         // underneath it, so the move has to be slow enough to read as travel
         // rather than a cut. It also runs while the user is still typing, so
-        // it must never feel urgent. 1.4s on a long slow-out.
-        var DUR = '1.4s';
+        // it must never feel urgent - it is scenery, not a response.
+        var DUR = '4.5s';
         var EASE = 'cubic-bezier(.22,.68,0,1)';
         bar.style.transition = ['top', 'left', 'width']
             .map(function (p) { return p + ' ' + DUR + ' ' + EASE; })
@@ -946,7 +981,7 @@ function moveSearchBar(position) {
         bar.style.left = end.left + 'px';
         bar.style.width = end.width + 'px';
 
-        _searchMoveTimers.push(setTimeout(settle, 1420));
+        _searchMoveTimers.push(setTimeout(settle, 4520));
     });
 }
 
@@ -1001,7 +1036,7 @@ function getStatusBlock(status, mediaType, typeLabel, item) {
     // An episode count already says "TV Show" by implication, and "TV Show ·
     // 48 of 62 Episodes" overflows the block at this width.
     if (s.selfDescribing) typeLabel = '';
-    var prefix = typeLabel ? typeLabel + ' · ' : '';
+    var prefix = typeLabel ? typeLabel + ' ' : '';
     return '<div class="w-full py-2 px-1 rounded-lg border text-center text-[11px] font-bold ' +
         s.bg + ' ' + s.text + ' ' + s.border + '">' + prefix + s.label + '</div>';
 }
