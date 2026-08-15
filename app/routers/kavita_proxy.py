@@ -19,9 +19,11 @@ import logging
 from typing import Dict, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse, StreamingResponse
 
+from app.auth import session_manager
+from app.config import settings
 from app.database import SessionLocal
 from app.dependencies import get_current_user
 from app.limiter import limiter
@@ -91,6 +93,170 @@ def build_forward_headers(request: Request, token: Optional[str]) -> Dict[str, s
         headers.pop("Authorization", None)
         headers.pop("authorization", None)
     return headers
+
+
+def origin_headers(host: str) -> Dict[str, str]:
+    """
+    Headers that make Kavita generate correct absolute URLs.
+
+    Kavita derives its OIDC redirect_uri from the Host header, so it must see
+    the public WebServarr host rather than its own LAN address — otherwise it
+    would ask Authentik to redirect to http://10.10.0.3:5000/signin-oidc, which
+    is neither registered nor reachable from a browser.
+    """
+    return {
+        "Host": host,
+        "X-Forwarded-Host": host,
+        "X-Forwarded-Proto": "https",
+        "Accept": "*/*",
+    }
+
+
+def collect_cookies(response: httpx.Response) -> str:
+    """Flatten a response's Set-Cookie headers into a Cookie request header."""
+    pairs = [
+        value.split(";", 1)[0]
+        for key, value in response.headers.multi_items()
+        if key.lower() == "set-cookie"
+    ]
+    return "; ".join(p for p in pairs if p)
+
+
+@router.get("/kavita/connect", include_in_schema=False)
+@limiter.limit("30/minute")
+async def kavita_connect(
+    request: Request,
+    current_user: Dict[str, str] = Depends(get_current_user),
+):
+    """
+    Begin the Kavita OIDC handshake.
+
+    The caller already holds a WebServarr session, which means they already hold
+    an Authentik session — so Authentik returns immediately and the user sees no
+    prompt and no consent screen.
+    """
+    base = get_kavita_url()
+    if not base:
+        raise HTTPException(status_code=503, detail="Kavita is not configured")
+
+    host = request.headers.get("host", "")
+
+    try:
+        async with httpx.AsyncClient(timeout=PROXY_TIMEOUT, follow_redirects=False) as client:
+            upstream = await client.get(f"{base}/oidc/login", headers=origin_headers(host))
+    except httpx.RequestError as exc:
+        logger.warning("Kavita connect failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Kavita is unavailable")
+
+    location = upstream.headers.get("location")
+    if not location:
+        logger.warning("Kavita /oidc/login did not redirect (HTTP %d)", upstream.status_code)
+        raise HTTPException(status_code=502, detail="Kavita did not start the login flow")
+
+    response = RedirectResponse(location, status_code=302)
+
+    # Kavita sets its OIDC nonce and correlation cookies here, scoped to
+    # path=/signin-oidc. They must reach the browser or the callback fails with
+    # "message.State is null or empty".
+    for key, value in upstream.headers.multi_items():
+        if key.lower() == "set-cookie":
+            response.headers.append("set-cookie", value)
+
+    return response
+
+
+@router.api_route("/signin-oidc", methods=["GET", "POST"], include_in_schema=False)
+@limiter.limit("30/minute")
+async def signin_oidc(
+    request: Request,
+    session_id: str = Cookie(None, alias=settings.session_cookie_name),
+):
+    """
+    Complete the Kavita OIDC handshake and store the user's Kavita JWT.
+
+    Authentik posts here (response_mode=form_post). This lives at the app root
+    because Kavita scopes its handshake cookies to path=/signin-oidc, and the
+    browser only sends them to that exact path.
+
+    Deliberately does not use get_current_user: an expired session should send
+    the visitor to the login page, not return a bare 401 to a form POST.
+    """
+    if not session_id or not await session_manager.get_session(session_id):
+        return RedirectResponse("/login", status_code=302)
+
+    base = get_kavita_url()
+    if not base:
+        raise HTTPException(status_code=503, detail="Kavita is not configured")
+
+    host = request.headers.get("host", "")
+    headers = origin_headers(host)
+    headers["Cookie"] = request.headers.get("cookie", "")
+    content_type = request.headers.get("content-type")
+    if content_type:
+        headers["Content-Type"] = content_type
+
+    body = await request.body()
+    token = None
+
+    try:
+        async with httpx.AsyncClient(timeout=PROXY_TIMEOUT, follow_redirects=False) as client:
+            callback = await client.request(
+                request.method,
+                f"{base}/signin-oidc",
+                content=body,
+                headers=headers,
+                params=dict(request.query_params),
+            )
+
+            kavita_cookies = collect_cookies(callback)
+            if kavita_cookies:
+                # The callback leaves us holding Kavita's .AspNetCore.Cookies
+                # session. Fetch the account with it to obtain that user's own
+                # API key.
+                #
+                # /api/account returns `token: null` under cookie auth — Kavita
+                # only mints JWTs on its JWT-issuing paths — so the key is what
+                # we actually need. (/api/account/oidc-authenticated is only a
+                # boolean "did OIDC succeed" check, not a token source.)
+                account = await client.get(
+                    f"{base}/api/account",
+                    headers={**origin_headers(host), "Cookie": kavita_cookies},
+                )
+                if account.status_code != 200:
+                    logger.warning(
+                        "Kavita /api/account returned HTTP %d during handshake",
+                        account.status_code,
+                    )
+                else:
+                    api_key = (account.json() or {}).get("apiKey")
+                    if api_key:
+                        # Exchange the user's own API key for their JWT. Every
+                        # proxied call then acts as them, so progress,
+                        # bookmarks and highlights are genuinely per-user.
+                        auth = await client.post(
+                            f"{base}/api/Plugin/authenticate",
+                            params={"apiKey": api_key, "pluginName": "WebServarr"},
+                            headers=origin_headers(host),
+                        )
+                        if auth.status_code == 200:
+                            token = (auth.json() or {}).get("token")
+                        else:
+                            logger.warning(
+                                "Kavita Plugin/authenticate returned HTTP %d",
+                                auth.status_code,
+                            )
+                    else:
+                        logger.warning("Kavita account payload carried no apiKey")
+    except httpx.RequestError as exc:
+        logger.warning("Kavita callback failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Kavita is unavailable")
+
+    if not token:
+        logger.warning("Kavita handshake completed without a token (HTTP %d)", callback.status_code)
+        return RedirectResponse("/library?kavita=error", status_code=302)
+
+    await session_manager.update_session(session_id, {"kavita_token": token})
+    return RedirectResponse("/library", status_code=302)
 
 
 @router.api_route(

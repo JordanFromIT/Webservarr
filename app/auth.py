@@ -165,6 +165,27 @@ class SessionManager:
         await redis.hset(session_key, mapping=mapping)
         await redis.expire(session_key, self.max_age)
 
+    async def update_session(self, session_id: str, fields: Dict[str, Any]) -> None:
+        """
+        Merge fields into an existing session hash.
+
+        Used to attach the user's Kavita JWT after the OIDC handoff, so the
+        ebook proxy can act on their behalf. No-ops when the session has already
+        expired, so a late callback cannot resurrect one.
+
+        Args:
+            session_id: Session identifier
+            fields: Field names and values to merge in
+        """
+        redis = await self.get_redis()
+        session_key = f"session:{session_id}"
+
+        if not await redis.exists(session_key):
+            return
+
+        await redis.hset(session_key, mapping={k: str(v) for k, v in fields.items()})
+        await redis.expire(session_key, self.max_age)
+
     async def get_session(self, session_id: str) -> Optional[Dict[str, str]]:
         """
         Retrieve session data from Redis.
