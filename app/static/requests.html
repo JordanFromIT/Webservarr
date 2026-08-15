@@ -38,16 +38,19 @@
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
-<!-- Search bar rests here on arrival, directly above the trending rows, so it is
-     the first thing seen. It moves down into the results panel once typing
-     starts (see wireSearchBarMotion). -->
-<div id="searchHome" class="mb-6"></div>
+<!-- Search bar rests here on arrival, above the trending rows, so it is the
+     first thing seen. It slides into the results panel once typing starts.
+     Only the bar's own height is reserved - no extra margin - so the trending
+     row sits as close to its original position as it can without the bar
+     covering its heading. -->
+<div id="searchHome" class="flex justify-center mb-3"></div>
 
-<!-- Movable search bar -->
-<div id="searchBar" class="relative">
+<!-- Movable search bar. Constrained and centred when floating at the top;
+     fills its container once docked in the results panel. -->
+<div id="searchBar" class="relative w-full max-w-lg mx-auto">
 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-xl">search</span>
 <input id="searchInput" type="text" placeholder="Search movies, TV shows and books..."
-  class="w-full pl-10 pr-4 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm"/>
+  class="w-full pl-10 pr-4 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm shadow-lg shadow-black/30"/>
 </div>
 
 <!-- Discover Section -->
@@ -859,14 +862,20 @@ function moveSearchBar(position) {
         try { input.setSelectionRange(selStart, selEnd); } catch (e) { /* not selectable */ }
     }
 
-    // The dock sits well below the fold, so moving the bar there without
-    // following it would take the search and its results off screen.
+    // The two slots are ~1700px apart, so the page has to follow the bar in
+    // both directions - otherwise it leaves the viewport and the user is left
+    // looking at whatever happens to be on screen.
+    var behavior = reducedMotion() ? 'auto' : 'smooth';
     if (position === 'dock') {
         var panel = document.getElementById('searchResultsSection');
         var anchor = (panel && panel.parentElement) || target;
-        if (anchor.scrollIntoView) {
-            anchor.scrollIntoView({behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start'});
-        }
+        if (anchor.scrollIntoView) anchor.scrollIntoView({behavior: behavior, block: 'start'});
+    } else if (bar.scrollIntoView) {
+        // Back up to the bar and the trending rows. scrollIntoView is used
+        // rather than reaching for the scroll container: that element's class
+        // is "lg:overflow-y-auto", so a closest('.overflow-y-auto') lookup
+        // silently matches nothing and the page never moves.
+        bar.scrollIntoView({behavior: behavior, block: 'start'});
     }
 
     if (reducedMotion()) return;
