@@ -1033,6 +1033,21 @@ function reducedMotion() {
     return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
+/**
+ * True on phones and tablets - anything driven by a finger rather than a
+ * pointer.
+ *
+ * The bar's travel is a pointer-device affordance: it exists so that someone
+ * who was looking at the search field can follow it to its new home instead of
+ * losing it. On touch it costs far more than it gives, because the move holds
+ * the scroll position for its whole duration and a page that will not scroll
+ * for three seconds reads as a broken page, not a considered one. Touch users
+ * get the same end state, immediately.
+ */
+function coarsePointer() {
+    return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+}
+
 function searchSlot(position) {
     return document.getElementById(position === 'dock' ? 'searchDock' : 'searchHomeSlot');
 }
@@ -1228,7 +1243,7 @@ function moveSearchBar(position) {
         }
     }
 
-    if (reducedMotion()) {
+    if (reducedMotion() || coarsePointer()) {
         settle();
         scrollSlotIntoPlace(target);
         return;
