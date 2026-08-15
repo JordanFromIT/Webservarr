@@ -965,7 +965,29 @@ function unlockScroll() {
 function wireSearchBarMotion() {
     var bar = document.getElementById('searchBar');
     var slot = searchSlot('home');
-    if (bar && slot && bar.parentElement !== slot) slot.appendChild(bar);
+    var dock = searchSlot('dock');
+    if (!bar || !slot || bar.parentElement === slot) return;
+
+    // Hold the dock open at the height the bar occupies, before lifting the bar
+    // out of it.
+    //
+    // The bar spends the whole visit somewhere else - floated at the trending
+    // heading, then in flight - and an empty dock collapses to nothing, so
+    // everything below it sits a bar's height too high until the moment the bar
+    // lands, at which point the copy underneath drops. Measuring the dock while
+    // the bar is still inside it reserves exactly the right space, so the
+    // returning bar displaces nothing.
+    //
+    // The measurement is taken here rather than hardcoded so it stays correct
+    // if the field's padding or type size ever changes. By this point the page
+    // has rendered and an auth round trip has completed, so styles are applied.
+    if (dock && bar.parentElement === dock) {
+        var occupied = dock.getBoundingClientRect().height
+                    || bar.getBoundingClientRect().height;
+        if (occupied > 0) dock.style.minHeight = occupied + 'px';
+    }
+
+    slot.appendChild(bar);
 }
 
 /**
