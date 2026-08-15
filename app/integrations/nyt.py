@@ -43,9 +43,23 @@ LISTS: Dict[str, List[str]] = {
 _TTL = 6 * 3600.0
 _cache: Dict[str, tuple] = {}
 
-# The daily quota is generous but the per-minute rate is not, and a shelf makes
-# two calls back to back.
-_INTER_REQUEST_DELAY = 1.0
+# The daily quota is generous but the per-minute rate is not. Spacing calls
+# within a single shelf is not enough: the warmer builds both shelves one after
+# the other, which put four calls inside a second and had NYT refuse the
+# audiobook half outright. The gap is enforced across every call in the process
+# instead, whichever shelf asked for it.
+_INTER_REQUEST_DELAY = 3.0
+_last_request_at = 0.0
+_rate_lock = asyncio.Lock()
+
+
+async def _throttle() -> None:
+    global _last_request_at
+    async with _rate_lock:
+        wait = _INTER_REQUEST_DELAY - (time.monotonic() - _last_request_at)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_request_at = time.monotonic()
 
 
 def _api_key() -> Optional[str]:
@@ -58,6 +72,7 @@ def _api_key() -> Optional[str]:
 
 
 async def _fetch_list(client: httpx.AsyncClient, list_name: str, key: str) -> List[Dict[str, str]]:
+    await _throttle()
     try:
         resp = await client.get(BASE_URL.format(list_name=list_name), params={"api-key": key})
     except httpx.RequestError as exc:
@@ -111,9 +126,7 @@ async def bestsellers(kind: str = "books") -> List[Dict[str, str]]:
 
     items: List[Dict[str, str]] = []
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        for index, list_name in enumerate(LISTS[kind]):
-            if index:
-                await asyncio.sleep(_INTER_REQUEST_DELAY)
+        for list_name in LISTS[kind]:
             items.extend(await _fetch_list(client, list_name, key))
 
     if items:

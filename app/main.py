@@ -21,6 +21,7 @@ from app.auth import session_manager
 from app.seed import seed_secret_key
 from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy
 from app.services.notification_poller import start_poller, stop_poller
+from app.services.shelf_warmer import start_warmer, stop_warmer
 
 # Configure logging
 logging.basicConfig(
@@ -73,6 +74,12 @@ async def lifespan(app: FastAPI):
     poller_task = asyncio.create_task(start_poller())
     logger.info("Notification poller launched")
 
+    # Trending book shelves are ~46 external round trips to build, against one
+    # for a Seerr row, so they are prepared in the background rather than while
+    # somebody waits.
+    warmer_task = asyncio.create_task(start_warmer())
+    logger.info("Trending shelf warmer launched")
+
     logger.info("WebServarr started successfully!")
 
     yield
@@ -86,6 +93,15 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
     logger.info("Notification poller stopped")
+
+    await stop_warmer()
+    warmer_task.cancel()
+    try:
+        await warmer_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("Trending shelf warmer stopped")
+
     await session_manager.close()
     logger.info("WebServarr shut down")
 
