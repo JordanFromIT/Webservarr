@@ -81,7 +81,7 @@ function _buildSidebarHTML(currentPage) {
     // time the page is opened - a permanent badge stops meaning anything, and
     // an unread marker that never clears is just decoration.
     var newFlag = (item.isNew && !_hasSeen(item.id))
-      ? '<span class="nav-new-badge ml-auto shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded">New</span>'
+      ? '<span class="nav-new-badge text-[11px]">New!</span>'
       : '';
 
     var badge = item.badgeId
@@ -89,11 +89,11 @@ function _buildSidebarHTML(currentPage) {
       : '';
 
     if (isActive) {
-      return '<a class="flex items-center gap-3 px-4 py-3 rounded-lg bg-primary text-background-dark font-bold transition-all shadow-baltic-blue/20" href="' + item.href + '"' + adminAttr + '>' +
+      return '<a class="relative flex items-center gap-3 px-4 py-3 rounded-lg bg-primary text-background-dark font-bold transition-all shadow-baltic-blue/20" href="' + item.href + '"' + adminAttr + '>' +
         '<span class="material-symbols-outlined fill-1">' + escapeHtml(item.icon) + '</span>' +
         '<span>' + escapeHtml(item.label) + '</span>' + newFlag + badge + '</a>';
     }
-    return '<a class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="' + item.href + '"' + adminAttr + '>' +
+    return '<a class="relative flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="' + item.href + '"' + adminAttr + '>' +
       '<span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors">' + escapeHtml(item.icon) + '</span>' +
       '<span>' + escapeHtml(item.label) + '</span>' + newFlag + badge + '</a>';
   }).join('\n');

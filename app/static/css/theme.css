@@ -67,42 +67,134 @@ body {
 
 /* ---- "New" section flag ----
  *
- * A shimmer rather than a blink: it should catch the eye once on the way past,
- * not compete with whatever the person is actually reading. Built from the
- * theme's own accent so it retints with everything else, and it lives only
- * until the section is opened (see markSectionSeen in sidebar.js).
+ * A diagonal gold ribbon sitting over the nav label, glowing and pulsing, with
+ * a highlight that sweeps across it. Loud on purpose: it exists to announce one
+ * newly launched section exactly once, and it removes itself the first time
+ * that section is opened (see markSectionSeen in sidebar.js).
+ *
+ * The gold is --color-media-book, the same token the eBook accents use, so it
+ * still follows the theme rather than being a hardcoded colour.
  */
 .nav-new-badge {
-  position: relative;
-  overflow: hidden;
-  color: rgb(var(--color-background));
-  background: rgb(var(--color-accent));
+  position: absolute;
+  right: 0.4rem;
+  top: 50%;
+  transform: translateY(-50%) rotate(-12deg);
+  transform-origin: center;
+  pointer-events: none;
+
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+
+  color: rgb(var(--color-media-book));
+  text-shadow:
+    0 0 4px rgb(var(--color-media-book) / 0.9),
+    0 0 10px rgb(var(--color-media-book) / 0.55),
+    0 1px 2px rgb(var(--color-background) / 0.9);
+
+  animation: nav-new-pulse 1.9s ease-in-out infinite;
 }
 
+/* The sweeping highlight. Clipped to the text itself so it reads as a shine
+   travelling across the letters rather than a box passing behind them. */
 .nav-new-badge::after {
-  content: "";
+  content: "New!";
   position: absolute;
   inset: 0;
-  /* A narrow highlight that sweeps across the pill. */
+  color: rgb(var(--color-text));
   background: linear-gradient(
     100deg,
-    transparent 20%,
-    rgb(var(--color-text) / 0.85) 50%,
-    transparent 80%
+    transparent 35%,
+    rgb(var(--color-text)) 50%,
+    transparent 65%
   );
-  transform: translateX(-100%);
-  animation: nav-new-shimmer 2.8s ease-in-out infinite;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-size: 250% 100%;
+  background-position: 250% 0;
+  animation: nav-new-shine 2.6s ease-in-out infinite;
 }
 
-@keyframes nav-new-shimmer {
-  /* Most of the cycle is spent off-screen, so the sweep reads as an occasional
-     glint rather than a strobe. */
-  0%, 60% { transform: translateX(-100%); }
-  100%    { transform: translateX(100%); }
+@keyframes nav-new-pulse {
+  0%, 100% { opacity: 1;    transform: translateY(-50%) rotate(-12deg) scale(1); }
+  50%      { opacity: 0.82; transform: translateY(-50%) rotate(-12deg) scale(1.08); }
+}
+
+@keyframes nav-new-shine {
+  /* Idle for most of the cycle so the shine is a glint, not a strobe. */
+  0%, 55%  { background-position: 250% 0; }
+  100%     { background-position: -150% 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .nav-new-badge,
   .nav-new-badge::after { animation: none; }
+}
+
+
+/* ---- Guided tour (coach marks) ----
+ *
+ * A "fog of war" over the page with a hole cut around whatever is being
+ * described, and a bubble beside it pointing at the target.
+ *
+ * The hole is done with a huge box-shadow on a transparent element rather than
+ * four separate dimming panels: one element, no seams where panels meet, and
+ * the browser animates it as a single layer when the spotlight moves between
+ * steps.
+ */
+.tour-spotlight {
+  position: fixed;
+  z-index: 70;
+  border-radius: 12px;
+  pointer-events: none;
+  box-shadow: 0 0 0 9999px rgb(var(--color-background) / 0.82);
+  transition: top .35s cubic-bezier(.4,0,.2,1), left .35s cubic-bezier(.4,0,.2,1),
+              width .35s cubic-bezier(.4,0,.2,1), height .35s cubic-bezier(.4,0,.2,1);
+}
+
+/* A ring so the cut-out edge reads as deliberate rather than as a rendering
+   artefact of the shadow. */
+.tour-spotlight::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 14px;
+  border: 2px solid rgb(var(--color-accent) / 0.9);
+  box-shadow: 0 0 18px rgb(var(--color-accent) / 0.45);
+}
+
+.tour-bubble {
+  position: fixed;
+  z-index: 71;
+  width: min(21rem, calc(100vw - 2rem));
+  background: rgb(var(--color-primary) / 0.96);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgb(var(--color-accent) / 0.45);
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgb(var(--color-background) / 0.6);
+  transition: top .35s cubic-bezier(.4,0,.2,1), left .35s cubic-bezier(.4,0,.2,1);
+}
+
+/* The arrow. Rotated square rather than a border triangle, so it inherits the
+   bubble's own background and border and stays correct on every side. */
+.tour-arrow {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: rgb(var(--color-primary) / 0.96);
+  border: 1px solid rgb(var(--color-accent) / 0.45);
+  transform: rotate(45deg);
+}
+.tour-arrow[data-side="top"]    { bottom: -8px; border-top: 0; border-left: 0; }
+.tour-arrow[data-side="bottom"] { top: -8px;    border-bottom: 0; border-right: 0; }
+.tour-arrow[data-side="left"]   { right: -8px;  border-bottom: 0; border-left: 0; }
+.tour-arrow[data-side="right"]  { left: -8px;   border-top: 0;    border-right: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-spotlight, .tour-bubble { transition: none; }
 }
 
 /* ---- Glass Card ---- */

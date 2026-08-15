@@ -8,7 +8,7 @@
 <script src="/static/js/theme-loader.js"></script>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="/static/css/theme.css?v=2" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=4" rel="stylesheet"/>
 <script>tailwind.config = {
   darkMode: "class",
   theme: {
@@ -47,32 +47,6 @@
 
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8">
 
-
-  <!-- First-visit welcome. Dismissed state lives in localStorage, so it greets
-       someone once rather than every time; the help button below reopens the
-       tour for anyone who dismissed it and later wants it back. -->
-  <div id="ebooksWelcome" class="hidden glass-card rounded-2xl p-5 sm:p-6">
-    <div class="flex items-start gap-4">
-      <span class="material-symbols-outlined text-3xl text-steel-blue shrink-0">auto_stories</span>
-      <div class="min-w-0 flex-1">
-        <h2 class="text-lg font-bold text-frosted-blue">Welcome to eBooks</h2>
-        <p class="mt-1 text-sm text-steel-blue leading-relaxed">
-          Read anything in the library straight in your browser — no app, no download, no account to set up.
-          Your place in a book is saved automatically and is private to you.
-        </p>
-        <div class="mt-4 flex flex-wrap items-center gap-2">
-          <button id="welcomeTourBtn"
-                  class="px-4 py-2 rounded-xl bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-colors">
-            Show me around
-          </button>
-          <button id="welcomeDismissBtn"
-                  class="px-4 py-2 rounded-xl bg-baltic-blue/30 border border-steel-blue/30 text-sm text-frosted-blue hover:bg-baltic-blue/50 transition-colors">
-            Dismiss
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <!-- Discovery shelves: continue reading, recently added, top rated -->
   <div id="shelves" class="space-y-8"></div>
@@ -138,7 +112,7 @@
 
 <script src="/static/js/auth.js"></script>
 <script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=13"></script>
+<script src="/static/js/sidebar.js?v=14"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
 (function () {
@@ -460,63 +434,141 @@
   });
 })();
 
-/* ---- eBooks guide ----
+/* ---- eBooks guide (coach marks) ----
  *
- * Shown once, then reachable forever from the help button. The seen-flag lives
- * in localStorage rather than a user setting because it is a UI hint, not
- * account state - the same place reader preferences already live.
+ * Spotlights each part of the page in turn: the fog dims everything, a hole is
+ * cut around the element being described, and a bubble points at it.
+ *
+ * Starts by itself on a first visit rather than hiding behind a button - a
+ * tour nobody opens teaches nobody anything. The help button re-runs it.
+ *
+ * DEVELOPMENT: set localStorage.webservarr_tour_always = '1' (or append
+ * ?tour=1) and the tour runs on every visit and never records itself as seen.
  */
 (function () {
   'use strict';
 
   var SEEN_KEY = 'webservarr_ebooks_guide_seen';
 
+  function devAlways() {
+    try {
+      if (localStorage.getItem('webservarr_tour_always') === '1') return true;
+    } catch (e) {}
+    return /[?&]tour=1\b/.test(location.search);
+  }
+
+  /* Each step names a target by selector. `fallback` is used when the primary
+     element is absent - shelves only exist once something has been read, and a
+     tour must not break on an empty library. */
   var STEPS = [
     {
+      /* The first shelf row, not the whole shelves block: a spotlight the size
+         of the viewport highlights nothing. */
+      target: '#shelves > *:first-child',
+      fallback: '#bookGrid',
       icon: 'auto_stories',
       title: 'Welcome to eBooks',
-      body: 'Everything here reads in your browser. Nothing to install, nothing to sideload, and no separate account — you are already signed in.',
-      points: [
-        'Your reading position saves by itself, on every device you sign in from',
-        'What you read is yours alone; nobody else can see your progress or your shelf'
-      ]
+      body: 'Everything here reads in your browser — nothing to install, and no separate account. Your place in a book saves itself, and it is private to you.'
     },
     {
+      target: '#shelves > *:first-child',
+      fallback: '#bookGrid',
+      icon: 'bookmark',
+      title: 'Your shelves',
+      body: 'Continue Reading appears once you start a book and follows you between devices. Recently Added is whatever arrived most recently.'
+    },
+    {
+      target: '#searchInput',
       icon: 'search',
-      title: 'Finding something to read',
-      body: 'The shelves at the top surface what is worth opening first. Below them is the whole library.',
-      points: [
-        '<strong class="text-frosted-blue">Continue Reading</strong> holds anything you are partway through — it appears once you start a book',
-        '<strong class="text-frosted-blue">Recently Added</strong> is what arrived most recently',
-        'The search box filters the full library by title or author'
-      ]
+      title: 'Finding a book',
+      body: 'Search the whole library by title or author. Below it is every book we hold, in a grid you can page through.'
     },
     {
+      /* A single cover, so "click a cover" points at an actual cover. */
+      target: '#bookGrid > *:first-child',
+      fallback: '#shelves img',
       icon: 'menu_book',
-      title: 'Reading a book',
-      body: 'Click any cover to open it. The reader is built for long sittings rather than skimming.',
-      points: [
-        'Turn pages by clicking the left or right edge of the page, or with the arrow keys',
-        '<strong class="text-frosted-blue">Contents</strong> jumps between chapters',
-        '<strong class="text-frosted-blue">Settings</strong> changes the theme — including a true black for OLED screens — and the text size',
-        'Click the page number at the bottom to type a page and jump straight to it'
-      ]
+      title: 'Open anything',
+      body: 'Click a cover to read it. In the reader, turn pages from the left and right edges or with the arrow keys, jump chapters from Contents, and click the page number to skip straight to a page.'
     },
     {
+      target: 'a[href="/requests"]',
       icon: 'add_circle',
       title: 'Missing something?',
-      body: 'If a book is not here, ask for it and it will be fetched automatically.',
-      points: [
-        'Go to <strong class="text-frosted-blue">Requests</strong> and search for the title',
-        'Books appear alongside films and TV; press <strong class="text-frosted-blue">Request eBook</strong>',
-        'It lands in this library on its own once found — no need to chase anyone'
-      ]
+      body: 'Search for it under Requests — books sit alongside films and TV. Press Request eBook and it arrives here on its own.'
     }
   ];
 
   var step = 0;
+  var active = false;
 
   function q(id) { return document.getElementById(id); }
+
+  function targetFor(s) {
+    var el = document.querySelector(s.target);
+    if (el && el.offsetParent !== null) return el;
+    return s.fallback ? document.querySelector(s.fallback) : null;
+  }
+
+  function place() {
+    var s = STEPS[step];
+    var el = targetFor(s);
+    var spot = q('tourSpotlight');
+    var bubble = q('tourBubble');
+    var arrow = q('tourArrow');
+
+    var pad = 8;
+    var r = el
+      ? el.getBoundingClientRect()
+      /* Nothing to point at: centre the bubble with a collapsed spotlight so
+         the step still reads rather than pointing at the top-left corner. */
+      : { top: window.innerHeight / 2, left: window.innerWidth / 2, width: 0, height: 0, bottom: window.innerHeight / 2, right: window.innerWidth / 2 };
+
+    spot.style.top = (r.top - pad) + 'px';
+    spot.style.left = (r.left - pad) + 'px';
+    spot.style.width = (r.width + pad * 2) + 'px';
+    spot.style.height = (r.height + pad * 2) + 'px';
+    spot.style.opacity = el ? '1' : '0';
+
+    var bw = bubble.offsetWidth || 336;
+    var bh = bubble.offsetHeight || 160;
+    var gap = 16;
+    var margin = 12;
+    var side, top, left;
+
+    if (r.bottom + gap + bh < window.innerHeight - margin) {
+      side = 'bottom';                       // bubble sits below, arrow on top
+      top = r.bottom + gap;
+      left = r.left + r.width / 2 - bw / 2;
+    } else if (r.top - gap - bh > margin) {
+      side = 'top';
+      top = r.top - gap - bh;
+      left = r.left + r.width / 2 - bw / 2;
+    } else if (r.right + gap + bw < window.innerWidth - margin) {
+      side = 'right';
+      top = r.top + r.height / 2 - bh / 2;
+      left = r.right + gap;
+    } else {
+      side = 'left';
+      top = r.top + r.height / 2 - bh / 2;
+      left = Math.max(margin, r.left - gap - bw);
+    }
+
+    left = Math.max(margin, Math.min(left, window.innerWidth - bw - margin));
+    top = Math.max(margin, Math.min(top, window.innerHeight - bh - margin));
+    bubble.style.top = top + 'px';
+    bubble.style.left = left + 'px';
+
+    arrow.setAttribute('data-side', side);
+    arrow.style.left = arrow.style.top = '';
+    if (side === 'top' || side === 'bottom') {
+      var ax = r.left + r.width / 2 - left - 7;
+      arrow.style.left = Math.max(14, Math.min(ax, bw - 28)) + 'px';
+    } else {
+      var ay = r.top + r.height / 2 - top - 7;
+      arrow.style.top = Math.max(14, Math.min(ay, bh - 28)) + 'px';
+    }
+  }
 
   function render() {
     var s = STEPS[step];
@@ -524,85 +576,69 @@
     q('tourTitle').textContent = s.title;
     q('tourBody').textContent = s.body;
 
-    var ul = q('tourPoints');
-    ul.innerHTML = '';
-    s.points.forEach(function (p) {
-      var li = document.createElement('li');
-      li.className = 'flex gap-2';
-      // Points carry inline <strong> for the control names, which are authored
-      // here rather than derived from user input.
-      li.innerHTML = '<span class="material-symbols-outlined text-[16px] text-steel-blue/70 shrink-0 mt-0.5">chevron_right</span><span>' + p + '</span>';
-      ul.appendChild(li);
-    });
-
     var dots = q('tourDots');
     dots.innerHTML = '';
     STEPS.forEach(function (_, i) {
       var d = document.createElement('span');
-      d.className = 'size-1.5 rounded-full ' + (i === step ? 'bg-frosted-blue' : 'bg-steel-blue/40');
+      d.className = 'size-1.5 rounded-full ' + (i === step ? 'bg-frosted-blue' : 'bg-frosted-blue/30');
       dots.appendChild(d);
     });
 
     q('tourBack').style.visibility = step === 0 ? 'hidden' : 'visible';
-    q('tourNext').textContent = step === STEPS.length - 1 ? 'Start reading' : 'Next';
+    q('tourNext').textContent = step === STEPS.length - 1 ? 'Got it' : 'Continue';
+
+    var el = targetFor(s);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // Let the scroll settle before measuring, or the bubble lands where the
+    // target used to be.
+    setTimeout(place, 380);
   }
 
-  function open_() {
+  function start() {
+    if (active) return;
+    active = true;
     step = 0;
+    q('tourLayer').classList.remove('hidden');
     render();
-    var m = q('tourModal');
-    m.classList.remove('hidden');
-    m.classList.add('flex');
-    q('tourNext').focus();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
   }
 
-  function close_() {
-    var m = q('tourModal');
-    m.classList.add('hidden');
-    m.classList.remove('flex');
-    markSeen();
-  }
-
-  function markSeen() {
-    try { localStorage.setItem(SEEN_KEY, '1'); } catch (e) { /* private mode */ }
-    var w = q('ebooksWelcome');
-    if (w) w.classList.add('hidden');
+  function finish() {
+    active = false;
+    q('tourLayer').classList.add('hidden');
+    window.removeEventListener('resize', place);
+    window.removeEventListener('scroll', place, true);
+    if (!devAlways()) {
+      try { localStorage.setItem(SEEN_KEY, '1'); } catch (e) {}
+    }
   }
 
   function wire() {
-    var seen = false;
-    try { seen = localStorage.getItem(SEEN_KEY) === '1'; } catch (e) {}
-    if (!seen) {
-      var w = q('ebooksWelcome');
-      if (w) w.classList.remove('hidden');
-    }
-
-    var welcomeTour = q('welcomeTourBtn');
-    if (welcomeTour) welcomeTour.addEventListener('click', open_);
-    var dismiss = q('welcomeDismissBtn');
-    if (dismiss) dismiss.addEventListener('click', markSeen);
-    var help = q('helpBtn');
-    if (help) help.addEventListener('click', open_);
-    var close = q('tourClose');
-    if (close) close.addEventListener('click', close_);
-
+    q('tourNext').addEventListener('click', function () {
+      if (step < STEPS.length - 1) { step++; render(); } else { finish(); }
+    });
     q('tourBack').addEventListener('click', function () {
       if (step > 0) { step--; render(); }
     });
-    q('tourNext').addEventListener('click', function () {
-      if (step < STEPS.length - 1) { step++; render(); } else { close_(); }
+    q('tourSkip').addEventListener('click', finish);
+    document.addEventListener('keydown', function (e) {
+      if (!active) return;
+      if (e.key === 'Escape') finish();
+      else if (e.key === 'ArrowRight') q('tourNext').click();
+      else if (e.key === 'ArrowLeft') q('tourBack').click();
     });
 
-    // Click the backdrop or press Escape to leave.
-    q('tourModal').addEventListener('click', function (e) {
-      if (e.target === this) close_();
-    });
-    document.addEventListener('keydown', function (e) {
-      if (q('tourModal').classList.contains('hidden')) return;
-      if (e.key === 'Escape') close_();
-      else if (e.key === 'ArrowRight' && step < STEPS.length - 1) { step++; render(); }
-      else if (e.key === 'ArrowLeft' && step > 0) { step--; render(); }
-    });
+    var help = q('helpBtn');
+    if (help) help.addEventListener('click', start);
+
+    var seen = false;
+    try { seen = localStorage.getItem(SEEN_KEY) === '1'; } catch (e) {}
+    if (!seen || devAlways()) {
+      // Wait for the shelves and grid to render, so the spotlight has real
+      // geometry to sit on rather than empty placeholders.
+      setTimeout(start, 1200);
+    }
   }
 
   if (document.readyState === 'loading') {
@@ -614,29 +650,27 @@
 
 </script>
 
-<!-- Guided tour. Four steps, because that is how many distinct things a reader
-     actually needs: find a book, open it, drive the reader, and ask for one we
-     do not have. Content is specific to this build rather than generic help
-     text - the page-number field and the per-user progress are the two things
-     nobody discovers on their own. -->
-<div id="tourModal" class="hidden fixed inset-0 z-[60] items-center justify-center p-4 bg-black/70" role="dialog" aria-modal="true" aria-labelledby="tourTitle">
-  <div class="glass-card rounded-2xl w-full max-w-lg overflow-hidden">
-    <div class="flex items-center gap-3 px-5 py-4 border-b border-steel-blue/20">
-      <span id="tourIcon" class="material-symbols-outlined text-2xl text-steel-blue">auto_stories</span>
-      <h2 id="tourTitle" class="flex-1 font-bold text-frosted-blue">Welcome to eBooks</h2>
-      <button id="tourClose" aria-label="Close" class="p-1 rounded-lg text-steel-blue hover:text-frosted-blue hover:bg-baltic-blue/30">
-        <span class="material-symbols-outlined text-[20px]">close</span>
-      </button>
-    </div>
-    <div class="px-5 py-5">
-      <p id="tourBody" class="text-sm text-steel-blue leading-relaxed"></p>
-      <ul id="tourPoints" class="mt-3 space-y-2 text-sm text-steel-blue"></ul>
-    </div>
-    <div class="flex items-center gap-3 px-5 py-4 border-t border-steel-blue/20">
-      <div id="tourDots" class="flex items-center gap-1.5"></div>
-      <div class="ml-auto flex items-center gap-2">
-        <button id="tourBack" class="px-3 py-1.5 rounded-lg bg-baltic-blue/30 border border-steel-blue/30 text-sm text-frosted-blue hover:bg-baltic-blue/50 transition-colors">Back</button>
-        <button id="tourNext" class="px-4 py-1.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-colors">Next</button>
+
+<!-- Guided tour: fog-of-war spotlight plus a bubble anchored to the element
+     being described. Both are built at runtime and positioned from the target's
+     real geometry, so they follow the page rather than guessing at it. -->
+<div id="tourLayer" class="hidden">
+  <div id="tourSpotlight" class="tour-spotlight"></div>
+  <div id="tourBubble" class="tour-bubble">
+    <div id="tourArrow" class="tour-arrow" data-side="top"></div>
+    <div class="p-4">
+      <div class="flex items-start gap-2">
+        <span id="tourIcon" class="material-symbols-outlined text-[20px] text-frosted-blue shrink-0">auto_stories</span>
+        <h3 id="tourTitle" class="flex-1 font-bold text-frosted-blue text-sm leading-snug"></h3>
+        <button id="tourSkip" class="text-[11px] text-frosted-blue/60 hover:text-frosted-blue shrink-0">Skip</button>
+      </div>
+      <p id="tourBody" class="mt-2 text-[13px] text-frosted-blue/85 leading-relaxed"></p>
+      <div class="mt-3 flex items-center gap-3">
+        <div id="tourDots" class="flex items-center gap-1.5"></div>
+        <div class="ml-auto flex items-center gap-2">
+          <button id="tourBack" class="px-2.5 py-1 rounded-lg text-[12px] text-frosted-blue/80 hover:text-frosted-blue hover:bg-frosted-blue/10">Back</button>
+          <button id="tourNext" class="px-3 py-1.5 rounded-lg bg-frosted-blue text-background-dark text-[12px] font-bold hover:bg-frosted-blue/90">Continue</button>
+        </div>
       </div>
     </div>
   </div>
