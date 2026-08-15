@@ -415,13 +415,15 @@ async def library_summary(current_user: dict = Depends(get_current_user)):
         sonarr.library_summary(),
         radarr.library_summary(),
         chaptarr.library_summary(),
-        seerr.availability_times(),
+        seerr.request_insights(),
         return_exceptions=True,
     )
     tv = tv if isinstance(tv, dict) else {}
     film = film if isinstance(film, dict) else {}
     books = books if isinstance(books, dict) else {}
     waits = waits if isinstance(waits, dict) else {}
+    requested = waits.get("requested") or {}
+    fulfilled = waits.get("fulfilled") or {}
 
     summary = {
         "movies": film.get("movies", 0),
@@ -440,8 +442,17 @@ async def library_summary(current_user: dict = Depends(get_current_user)):
         # and counting it as one makes the queue look stuck.
         "in_progress": film.get("in_progress", 0) + tv.get("in_progress", 0),
         "unreleased": film.get("unreleased", 0),
-        # Median rather than mean; see seerr.availability_times.
-        "wait_minutes": waits,
+        # Median rather than mean; see seerr.request_insights.
+        "wait_minutes": waits.get("wait") or {},
+        # What was asked for against what actually arrived.
+        "requested": requested,
+        "fulfilled": fulfilled,
+        "partial": waits.get("partial") or {},
+        "removed": waits.get("removed") or {},
+        "fulfilled_percent": (
+            round(100 * fulfilled.get("total", 0) / requested["total"])
+            if requested.get("total") else 0
+        ),
         # Every service reports bytes per title, so the total is free once the
         # lists have been walked. Books are a rounding error against video but
         # are included so "on disk" means the whole library, not most of it.

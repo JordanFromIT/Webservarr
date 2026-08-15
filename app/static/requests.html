@@ -110,37 +110,40 @@
          because a film waiting on its cinema release is not a stuck request,
          and lumping the two together makes the queue look broken. -->
     <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-yellow-300 tabular-nums" id="statInProgress">--</span>
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statInProgress">--</span>
       <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">In Progress</span>
     </div>
     <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-steel-blue tabular-nums" id="statUnreleased">--</span>
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statUnreleased">--</span>
       <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Not Yet Released</span>
     </div>
     <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-green-400 tabular-nums" id="statWait">--</span>
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statWait">--</span>
       <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Typical Wait</span>
+    </div>
+    <!-- Requested against delivered: the one figure here about the service
+         rather than the shelf - it answers "if I ask for something, does it
+         turn up". -->
+    <div class="flex items-baseline gap-2">
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statFulfilled">--</span>
+      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Requests Fulfilled</span>
     </div>
     <!-- Complete shows and complete seasons answer different questions - a
          show counts only when every one of its seasons does - so both are
-         given rather than one standing in for the other. The bar tracks shows,
-         and each figure is named for what it measures rather than the bare
-         word "Complete", which never said complete *what*. -->
-    <div class="flex items-center gap-3 grow min-w-[16rem]">
-      <div class="flex items-baseline gap-2 shrink-0">
-        <span class="text-2xl font-bold text-green-400 tabular-nums" id="statComplete">--</span>
-        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Complete Shows</span>
-      </div>
-      <div class="flex items-baseline gap-2 shrink-0">
-        <span class="text-2xl font-bold text-green-400/80 tabular-nums" id="statSeasons">--</span>
-        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Complete Seasons</span>
-      </div>
-      <div class="h-1.5 grow rounded-full bg-steel-blue/20 overflow-hidden">
-        <div id="statCompleteBar" class="h-full rounded-full bg-green-400 transition-[width] duration-700" style="width:0%"></div>
-      </div>
+         given rather than one standing in for the other, and each is named for
+         what it measures rather than the bare word "Complete", which never
+         said complete *what*. -->
+    <div class="flex items-baseline gap-2">
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statComplete">--</span>
+      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Complete Shows</span>
+    </div>
+    <div class="flex items-baseline gap-2">
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statSeasons">--</span>
+      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Complete Seasons</span>
     </div>
   </div>
   <p id="statsFootnote" class="text-[10px] text-steel-blue/60 mt-2 px-1"></p>
+  <p id="statsFootnote2" class="text-[10px] text-steel-blue/60 mt-0.5 px-1"></p>
 </div>
 
 <!-- Two-column layout: Search (left) + Requests (right) on desktop, stacked on mobile -->
@@ -1410,6 +1413,9 @@ async function loadLibrarySummary() {
 
         var waits = s.wait_minutes || {};
         document.getElementById('statWait').textContent = formatWait(waits.total);
+
+        var requested = s.requested || {}, fulfilled = s.fulfilled || {};
+        document.getElementById('statFulfilled').textContent = (s.fulfilled_percent || 0) + '%';
         document.getElementById('statComplete').textContent = (s.percent || 0) + '%';
 
         var seasonPct = s.seasons
@@ -1436,11 +1442,17 @@ async function loadLibrarySummary() {
                   ' (median of ' + formatCount(waits.sample) + ' requests)'
                 : '');
 
-        // Set after paint so the bar animates out from zero rather than
-        // appearing already filled.
-        requestAnimationFrame(function () {
-            document.getElementById('statCompleteBar').style.width = (s.percent || 0) + '%';
-        });
+        // Second line, because the fulfilment figure needs its own counts and
+        // the first line is already carrying the completeness ones.
+        var partial = s.partial || {}, removed = s.removed || {};
+        document.getElementById('statsFootnote2').textContent = requested.total
+            ? formatCount(fulfilled.total) + ' of ' + formatCount(requested.total) +
+              ' requests are available' +
+              (partial.total ? ' · ' + formatCount(partial.total) + ' partly available' : '') +
+              (removed.total ? ' · ' + formatCount(removed.total) + ' since removed' : '') +
+              ' · films ' + Math.round(100 * (fulfilled.movie || 0) / (requested.movie || 1)) + '%' +
+              ', TV ' + Math.round(100 * (fulfilled.tv || 0) / (requested.tv || 1)) + '%'
+            : '';
     } catch (e) {
         console.log('Library summary not available');
     }

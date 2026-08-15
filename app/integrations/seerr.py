@@ -44,6 +44,14 @@ ISSUE_TYPE_MAP = {
     4: "other",
 }
 
+# Media statuses that matter when tallying what a request became. 6 is
+# blacklisted and 7 deleted - a title removed from the library since is neither
+# outstanding nor fulfilled, so it is counted apart rather than dragging the
+# fulfilment figure down.
+_STATUS_PARTIAL = 4
+_STATUS_AVAILABLE = 5
+_STATUS_DELETED = 7
+
 # Seerr issue status codes
 ISSUE_STATUS_MAP = {
     1: "open",
@@ -765,9 +773,9 @@ def _parse_ts(value):
         return None
 
 
-async def availability_times() -> dict:
+async def request_insights() -> dict:
     """
-    How long requests actually take to become available, by media type.
+    What has been requested, what arrived, and how long it took.
 
     Reports the MEDIAN, not the mean. The two disagree wildly here: the typical
     film lands in about twelve minutes, but a handful requested before release
@@ -775,8 +783,11 @@ async def availability_times() -> dict:
     arithmetically the average and a lie about the experience - nobody waits
     two weeks. The median is what a person should expect.
 
-    Returns {movie: minutes, tv: minutes, total: minutes, sample: n}, with
-    missing types simply absent.
+    Both halves come from one walk of the request list, since it is the same
+    expensive fetch either way.
+
+    Returns {"wait": {...minutes by type}, "requested"/"fulfilled"/"partial"/
+    "removed": {...counts by type}}.
     """
     cached = _wait_cache.get("all")
     if cached and (time.monotonic() - cached[0]) < _WAIT_TTL:
@@ -810,25 +821,47 @@ async def availability_times() -> dict:
         return {}
 
     waits = {}
+    requested, fulfilled, partial, removed = {}, {}, {}, {}
+
     for request in rows:
         media = request.get("media") or {}
+        media_type = request.get("type") or "other"
+        status = media.get("status")
+
+        requested[media_type] = requested.get(media_type, 0) + 1
+        if status == _STATUS_AVAILABLE:
+            fulfilled[media_type] = fulfilled.get(media_type, 0) + 1
+        elif status == _STATUS_PARTIAL:
+            partial[media_type] = partial.get(media_type, 0) + 1
+        elif status == _STATUS_DELETED:
+            removed[media_type] = removed.get(media_type, 0) + 1
+
         asked = _parse_ts(request.get("createdAt"))
         landed = _parse_ts(media.get("mediaAddedAt"))
-        if not asked or not landed or landed <= asked:
-            continue
-        waits.setdefault(request.get("type") or "other", []).append(
-            (landed - asked).total_seconds() / 60
-        )
+        if asked and landed and landed > asked:
+            waits.setdefault(media_type, []).append((landed - asked).total_seconds() / 60)
 
-    result = {}
+    wait = {}
     everything = []
     for media_type, values in waits.items():
         everything.extend(values)
-        result[media_type] = round(median(values))
+        wait[media_type] = round(median(values))
     if everything:
-        result["total"] = round(median(everything))
-        result["sample"] = len(everything)
+        wait["total"] = round(median(everything))
+        wait["sample"] = len(everything)
 
-    if result:
+    def _totalled(counts):
+        out = dict(counts)
+        out["total"] = sum(counts.values())
+        return out
+
+    result = {
+        "wait": wait,
+        "requested": _totalled(requested),
+        "fulfilled": _totalled(fulfilled),
+        "partial": _totalled(partial),
+        "removed": _totalled(removed),
+    }
+    if rows:
         _wait_cache["all"] = (time.monotonic(), result)
     return result
