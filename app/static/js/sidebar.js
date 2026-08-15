@@ -16,7 +16,7 @@ var NAV_ITEMS = [
   { id: 'issues',    label: 'Issues',     icon: 'report_problem',        href: '/issues' },
   { id: 'calendar',  label: 'Calendar',    icon: 'calendar_month',        href: '/calendar' },
   { id: 'tickets',  label: 'Tickets',    icon: 'confirmation_number',   href: '/tickets', feature: 'show_tickets' },
-  { id: 'library',  label: 'eBooks',     icon: 'menu_book',             href: '/library', feature: 'show_books' },
+  { id: 'library',  label: 'eBooks',     icon: 'menu_book',             href: '/library', feature: 'show_books', isNew: true },
   { id: 'settings', label: 'Settings',    icon: 'settings',              href: '/settings', adminOnly: true },
 ];
 
@@ -25,6 +25,29 @@ var NAV_ITEMS = [
  * @param {string} currentPage - id of the active nav item
  * @returns {string} HTML string
  */
+
+/* Sections the user has already opened, so a "New" flag can retire itself.
+   Kept in localStorage rather than a user setting: it is a UI hint about this
+   browser, not account state. */
+var _SEEN_KEY = 'webservarr_seen_sections';
+var _sidebarRebuildWired = false;
+
+function _seenSet() {
+  try { return JSON.parse(localStorage.getItem(_SEEN_KEY) || '[]'); }
+  catch (e) { return []; }
+}
+
+function _hasSeen(id) {
+  return _seenSet().indexOf(id) !== -1;
+}
+
+function markSectionSeen(id) {
+  var seen = _seenSet();
+  if (seen.indexOf(id) !== -1) return;
+  seen.push(id);
+  try { localStorage.setItem(_SEEN_KEY, JSON.stringify(seen)); } catch (e) {}
+}
+
 function _buildSidebarHTML(currentPage) {
   var theme = window.WEBSERVARR_THEME || {};
   var appName = theme.app_name || 'WEBSERVARR';
@@ -54,6 +77,13 @@ function _buildSidebarHTML(currentPage) {
   var navLinks = visibleItems.map(function (item) {
     var isActive = item.id === currentPage;
     var adminAttr = item.adminOnly ? ' data-admin-only="true" style="display:none"' : '';
+    // A "NEW" flag for a freshly launched section. It retires itself the first
+    // time the page is opened - a permanent badge stops meaning anything, and
+    // an unread marker that never clears is just decoration.
+    var newFlag = (item.isNew && !_hasSeen(item.id))
+      ? '<span class="nav-new-badge ml-auto shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded">New</span>'
+      : '';
+
     var badge = item.badgeId
       ? '<span id="' + item.badgeId + '" class="ml-auto bg-primary/20 text-[10px] px-1.5 py-0.5 rounded font-bold hidden"></span>'
       : '';
@@ -61,11 +91,11 @@ function _buildSidebarHTML(currentPage) {
     if (isActive) {
       return '<a class="flex items-center gap-3 px-4 py-3 rounded-lg bg-primary text-background-dark font-bold transition-all shadow-baltic-blue/20" href="' + item.href + '"' + adminAttr + '>' +
         '<span class="material-symbols-outlined fill-1">' + escapeHtml(item.icon) + '</span>' +
-        '<span>' + escapeHtml(item.label) + '</span>' + badge + '</a>';
+        '<span>' + escapeHtml(item.label) + '</span>' + newFlag + badge + '</a>';
     }
     return '<a class="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="' + item.href + '"' + adminAttr + '>' +
       '<span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors">' + escapeHtml(item.icon) + '</span>' +
-      '<span>' + escapeHtml(item.label) + '</span>' + badge + '</a>';
+      '<span>' + escapeHtml(item.label) + '</span>' + newFlag + badge + '</a>';
   }).join('\n');
 
   // Logo: image if logo_url set, otherwise icon
@@ -151,12 +181,12 @@ function _buildSidebarHTML(currentPage) {
  * Initialize the sidebar component.
  * @param {string} currentPage - id of the active nav item (e.g. 'home', 'activity')
  */
-function initSidebar(currentPage) {
-  var root = document.getElementById('sidebar-root');
-  if (!root) return;
-
-  root.innerHTML = _buildSidebarHTML(currentPage);
-
+/**
+ * Attach the drawer, user menu and logout handlers to the current sidebar
+ * markup. Split out of initSidebar so the sidebar can be redrawn - when
+ * branding arrives late - without losing its interactivity.
+ */
+function _wireSidebarChrome() {
   // Wire hamburger / drawer
   var overlay = document.getElementById('drawerOverlay');
   var panel = document.getElementById('drawerPanel');
@@ -202,6 +232,46 @@ function initSidebar(currentPage) {
   // Load version
   loadAppVersion();
 }
+
+function initSidebar(currentPage) {
+  var root = document.getElementById('sidebar-root');
+  if (!root) return;
+
+  // Opening a section retires its "New" flag, so mark it before building.
+  if (currentPage) markSectionSeen(currentPage);
+
+  root.innerHTML = _buildSidebarHTML(currentPage);
+
+  // Rebuild once branding lands.
+  //
+  // Feature-gated items (eBooks, Tickets) are filtered out when
+  // WEBSERVARR_THEME has no features yet, and the sidebar used to be built
+  // once and left alone. On a cold localStorage cache - a first-ever visit,
+  // exactly when someone most needs to find the new section - branding had not
+  // arrived, so those links were silently absent until the next page load.
+  if (!_sidebarRebuildWired) {
+    _sidebarRebuildWired = true;
+    var attempts = 0;
+    var poll = setInterval(function () {
+      attempts++;
+      var t = window.WEBSERVARR_THEME;
+      if (t && t.features) {
+        clearInterval(poll);
+        // Only redraw if the feature set would actually change the nav.
+        var fresh = _buildSidebarHTML(currentPage);
+        if (fresh !== root.innerHTML) {
+          root.innerHTML = fresh;
+          _wireSidebarChrome();
+        }
+      } else if (attempts > 40) {
+        clearInterval(poll);   // ~4s; branding is not coming
+      }
+    }, 100);
+  }
+
+  _wireSidebarChrome();
+}
+
 
 /**
  * Show/hide admin-only nav items based on user role.

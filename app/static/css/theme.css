@@ -64,6 +64,47 @@ body {
   background: rgb(var(--color-media-book) / 0.2);
 }
 
+
+/* ---- "New" section flag ----
+ *
+ * A shimmer rather than a blink: it should catch the eye once on the way past,
+ * not compete with whatever the person is actually reading. Built from the
+ * theme's own accent so it retints with everything else, and it lives only
+ * until the section is opened (see markSectionSeen in sidebar.js).
+ */
+.nav-new-badge {
+  position: relative;
+  overflow: hidden;
+  color: rgb(var(--color-background));
+  background: rgb(var(--color-accent));
+}
+
+.nav-new-badge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* A narrow highlight that sweeps across the pill. */
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgb(var(--color-text) / 0.85) 50%,
+    transparent 80%
+  );
+  transform: translateX(-100%);
+  animation: nav-new-shimmer 2.8s ease-in-out infinite;
+}
+
+@keyframes nav-new-shimmer {
+  /* Most of the cycle is spent off-screen, so the sweep reads as an occasional
+     glint rather than a strobe. */
+  0%, 60% { transform: translateX(-100%); }
+  100%    { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-new-badge::after { animation: none; }
+}
+
 /* ---- Glass Card ---- */
 .glass-card {
   background: rgba(var(--color-primary) / 0.15);
