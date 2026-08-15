@@ -462,12 +462,10 @@ function buildDiscoverCard(item) {
       '<div class="aspect-[2/3] relative overflow-hidden">' +
         posterHtml +
         '<div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>' +
-        '<div class="absolute top-2 right-2">' +
-          '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
-        '</div>' +
         dotHtml +
       '</div>' +
       '<div class="p-1.5">' +
+        '<span class="inline-block text-[8px] font-bold px-1 py-0.5 rounded mb-1 ' + typeBadgeColor + '">' + typeBadge + '</span>' +
         '<p class="text-frosted-blue text-[11px] font-medium leading-tight truncate">' + title + '</p>' +
       '</div>' +
     '</div>'
@@ -641,16 +639,17 @@ function buildSearchCard(item) {
         stdHtml = '<div class="w-full py-2 flex items-center justify-center">' + getStatusBadge(combinedStatus) + '</div>';
     }
 
+    // The type pill sits under the artwork rather than on top of it: cover art
+    // is the thing being scanned, and text over arbitrary artwork has
+    // unpredictable contrast. A fixed position also reads down a grid.
     return '<div class="glass-card rounded-xl overflow-hidden group flex flex-col">' +
         '<div class="aspect-[2/3] relative overflow-hidden">' +
             posterHtml +
             '<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>' +
-            '<div class="absolute top-2 right-2">' +
-                '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
-            '</div>' +
         '</div>' +
         '<div class="p-3 flex flex-col gap-2 flex-1">' +
             '<div class="flex-1">' +
+                '<span class="inline-block text-[9px] font-bold px-1.5 py-0.5 rounded mb-1.5 ' + typeBadgeColor + '">' + typeBadge + '</span>' +
                 '<p class="text-frosted-blue text-sm font-bold leading-tight line-clamp-2">' + title + '</p>' +
                 // Books have no cover art (Chaptarr's are behind its UI login),
                 // so the author does the work the artwork would have done.
@@ -963,14 +962,14 @@ function buildRequestCard(req) {
         '<div class="aspect-[2/3] relative overflow-hidden">' +
             posterHtml +
             '<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>' +
-            '<div class="absolute top-2 right-2">' +
-                '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
-            '</div>' +
+            // Request status stays an overlay: it is a state marker, glanced at
+            // rather than read, and belongs with the artwork.
             '<div class="absolute top-2 left-2">' +
                 getStatusBadge(status) +
             '</div>' +
         '</div>' +
         '<div class="p-3 space-y-1">' +
+            '<span class="inline-block text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
             '<p class="text-frosted-blue text-sm font-bold leading-tight line-clamp-2">' + title + '</p>' +
             (requestedDate ? '<p class="text-[10px] text-steel-blue/60 font-medium uppercase">' + requestedDate + '</p>' : '') +
         '</div>' +

@@ -62,24 +62,81 @@ def clean_title(title: str) -> str:
     return cleaned or title.strip()
 
 
+def _tokens(text: str) -> set:
+    return {t for t in re.split(r"[^a-z0-9]+", (text or "").lower()) if len(t) > 2}
+
+
+def _best_match(docs: list, title: str, author: str) -> Optional[int]:
+    """
+    Pick the best candidate, or none.
+
+    The loose query is what makes obscure editions findable, but it also returns
+    near-misses: searching "Three Past Midnight: The Library Policeman" ranks
+    "Four Past Midnight" first, which is a different book. Taking the top hit
+    would put the wrong cover on the card, so candidates are scored and a weak
+    best match is rejected outright.
+    """
+    want_title = _tokens(clean_title(title))
+    want_author = _tokens(author)
+    if not want_title:
+        return None
+
+    best_id, best_score = None, 0.0
+    for doc in docs:
+        cover_id = doc.get("cover_i")
+        if not isinstance(cover_id, int):
+            continue
+
+        got_title = _tokens(doc.get("title") or "")
+        if not got_title:
+            continue
+
+        # Overlap relative to the shorter title, so an edition subtitle on
+        # either side does not sink an otherwise exact match.
+        overlap = len(want_title & got_title) / min(len(want_title), len(got_title))
+
+        if want_author:
+            got_author = _tokens(" ".join(doc.get("author_name") or []))
+            # A named author that does not match at all is disqualifying - this
+            # is what stops a same-titled book by someone else being used.
+            if got_author and not (want_author & got_author):
+                continue
+
+        if overlap > best_score:
+            best_id, best_score = cover_id, overlap
+
+    # Below this the match is a guess rather than a find.
+    return best_id if best_score >= 0.6 else None
+
+
 async def _lookup_one(client: httpx.AsyncClient, title: str, author: str) -> Optional[int]:
     search_title = clean_title(title)
     key = (search_title.lower(), (author or "").lower().strip())
     if key in _id_cache:
         return _id_cache[key]
 
-    params = {"title": search_title, "limit": 1, "fields": "cover_i"}
-    if author:
-        params["author"] = author
+    cover_id = None
+    fields = "title,author_name,cover_i"
 
-    try:
-        resp = await client.get(SEARCH_URL, params=params)
-        if resp.status_code != 200:
-            return None
-        docs = (resp.json() or {}).get("docs") or []
-        cover_id = docs[0].get("cover_i") if docs else None
-    except (httpx.RequestError, ValueError, KeyError, IndexError):
-        return None
+    # Exact-ish first: title and author as separate fields.
+    attempts = [{"title": search_title, "limit": 3, "fields": fields}]
+    if author:
+        attempts[0]["author"] = author
+        # Then a loose full-text query, which finds editions the field search
+        # misses. Scoring in _best_match keeps it from guessing.
+        attempts.append({"q": f"{search_title} {author}", "limit": 5, "fields": fields})
+
+    for params in attempts:
+        try:
+            resp = await client.get(SEARCH_URL, params=params)
+            if resp.status_code != 200:
+                continue
+            docs = (resp.json() or {}).get("docs") or []
+        except (httpx.RequestError, ValueError):
+            continue
+        cover_id = _best_match(docs, title, author)
+        if cover_id:
+            break
 
     _id_cache[key] = cover_id
     _trim(_id_cache)
