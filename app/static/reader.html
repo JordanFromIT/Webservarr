@@ -163,24 +163,10 @@
     padding-top: 1.25rem;
   }
 
-  /* The slim progress rail reads as an indicator, not a control, until touched. */
-  #scrubber {
-    -webkit-appearance: none; appearance: none;
-    height: 3px; background: rgb(var(--color-accent) / .25);
-    cursor: pointer; margin: 0;
-  }
-  #scrubber::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none;
-    width: 11px; height: 11px; border-radius: 9999px;
-    background: rgb(var(--color-primary)); border: none;
-    opacity: .5; transition: opacity .15s ease;
-  }
-  #scrubber:hover::-webkit-slider-thumb, #scrubber:focus::-webkit-slider-thumb { opacity: 1; }
-  #scrubber::-moz-range-thumb {
-    width: 11px; height: 11px; border-radius: 9999px;
-    background: rgb(var(--color-primary)); border: none;
-  }
-  #scrubber::-moz-range-track { height: 3px; background: rgb(var(--color-accent) / .25); }
+  /* Strip the number input's spinners - they crowd a 16px-wide field. */
+  #pageJumpInput::-webkit-outer-spin-button,
+  #pageJumpInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  #pageJumpInput { -moz-appearance: textfield; appearance: textfield; }
   @media (prefers-reduced-motion: reduce) {
     #tocPanel, #readerSurface { transition: none; }
   }
@@ -266,14 +252,22 @@
   <span class="chev"><span class="material-symbols-outlined">chevron_right</span></span>
 </button>
 
-<!-- Bottom bar: deliberately minimal. Page turning happens at the edges, so
-     this is a position readout, not a control surface. -->
-<footer id="readerFooter" class="fixed bottom-0 inset-x-0 z-30 pointer-events-none">
-  <input id="scrubber" type="range" min="0" max="0" value="0"
-         class="pointer-events-auto block w-full" aria-label="Position in book"/>
-  <div class="flex justify-center">
-    <span id="pageInfo" class="pointer-events-none text-[11px] text-steel-blue/70 tabular-nums pb-1"></span>
-  </div>
+<!-- No bottom bar. Just the position, which doubles as the way to jump: click
+     the number to type a page. Readers turn pages at the edges; nobody scrubs
+     across a novel. -->
+<footer id="readerFooter" class="fixed bottom-0 inset-x-0 z-30 pointer-events-none flex justify-center">
+  <button id="pageInfo" type="button"
+          class="pointer-events-auto text-[11px] text-steel-blue/70 hover:text-frosted-blue tabular-nums
+                 px-3 py-1.5 rounded-md hover:bg-baltic-blue/25 transition-colors"
+          title="Click to jump to a page" aria-label="Current page. Click to jump to a page."></button>
+  <form id="pageJumpForm" class="pointer-events-auto hidden items-center gap-1.5 px-2 py-1">
+    <input id="pageJumpInput" type="number" min="1" inputmode="numeric"
+           class="w-16 bg-baltic-blue/20 border border-steel-blue/40 rounded-md px-2 py-0.5
+                  text-[12px] text-frosted-blue text-center tabular-nums
+                  focus:outline-none focus:ring-2 focus:ring-steel-blue"
+           aria-label="Go to page"/>
+    <span id="pageJumpTotal" class="text-[11px] text-steel-blue/70 tabular-nums"></span>
+  </form>
 </footer>
 
 <script src="/static/js/auth.js"></script>
@@ -463,11 +457,27 @@
     el('pageInfo').textContent = book.pages
       ? (current.page + 1) + ' / ' + book.pages
       : String(current.page + 1);
-    var s = el('scrubber');
-    s.max = book.pages ? book.pages - 1 : 0;
-    s.value = current.page;
+    el('pageJumpTotal').textContent = book.pages ? '/ ' + book.pages : '';
+    el('pageJumpInput').max = book.pages || 1;
     el('navPrev').disabled = current.page <= 0;
     el('navNext').disabled = book.pages ? current.page >= book.pages - 1 : false;
+  }
+
+  /** Swap the page readout for an input so a page can be typed directly. */
+  function openPageJump() {
+    var input = el('pageJumpInput');
+    el('pageInfo').classList.add('hidden');
+    el('pageJumpForm').classList.remove('hidden');
+    el('pageJumpForm').classList.add('flex');
+    input.value = current.page + 1;
+    input.focus();
+    input.select();
+  }
+
+  function closePageJump() {
+    el('pageJumpForm').classList.add('hidden');
+    el('pageJumpForm').classList.remove('flex');
+    el('pageInfo').classList.remove('hidden');
   }
 
   // ---- Progress ----
@@ -530,9 +540,21 @@
   el('navPrev').addEventListener('click', function () { goToPage(current.page - 1); });
   el('navNext').addEventListener('click', function () { goToPage(current.page + 1); });
 
-  el('scrubber').addEventListener('change', function (e) {
-    goToPage(parseInt(e.target.value, 10) || 0);
+  el('pageInfo').addEventListener('click', openPageJump);
+
+  el('pageJumpForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var n = parseInt(el('pageJumpInput').value, 10);
+    closePageJump();
+    if (!isNaN(n)) goToPage(n - 1);   // the field is 1-based, pages are 0-based
   });
+
+  el('pageJumpInput').addEventListener('keydown', function (e) {
+    // Stop the reader's own arrow/space shortcuts firing while typing.
+    e.stopPropagation();
+    if (e.key === 'Escape') closePageJump();
+  });
+  el('pageJumpInput').addEventListener('blur', closePageJump);
 
   el('bookmarkBtn').addEventListener('click', function () {
     kavita('/api/Reader/bookmark', {
