@@ -409,7 +409,8 @@ _library_summary_cache: dict = {}
 
 
 @router.get("/library-summary")
-async def library_summary(current_user: dict = Depends(get_current_user)):
+@limiter.limit("30/minute")
+async def library_summary(request: Request, current_user: dict = Depends(get_current_user)):
     """
     What the library actually holds, for the stats rail.
 
