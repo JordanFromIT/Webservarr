@@ -30,36 +30,35 @@ _TRENDING_BOOKS_TTL = 3600.0
 _trending_books_cache: dict = {}
 
 
-async def _shelf_from_redis(key: str):
+async def _cache_get(key: str):
     """
-    Shared second tier for the trending shelves.
+    Shared second tier for anything expensive enough to cache.
 
-    The in-process cache only helps the worker that filled it, and uvicorn runs
-    several - so with warming done by one worker the others would still build
-    their own copy on demand, which is exactly the wait warming exists to
-    remove. Redis is already here for sessions, so the shelves go through it
-    too and every worker sees the same warm result.
+    An in-process cache only helps the worker that filled it, and uvicorn runs
+    several. That has two costs: work is repeated once per worker, and - worse
+    for anything a person actually looks at - each worker expires on its own
+    clock, so consecutive page loads land on different workers and show
+    different snapshots of the same figures. Redis is already here for
+    sessions, so these go through it and every worker sees one answer.
     """
     try:
         from app.auth import session_manager
 
         redis = await session_manager.get_redis()
-        raw = await redis.get(f"webservarr:shelf:{key}")
+        raw = await redis.get(f"webservarr:cache:{key}")
         return json.loads(raw) if raw else None
     except Exception:  # noqa: BLE001 - a cold cache is not an error
         return None
 
 
-async def _shelf_to_redis(key: str, cards: list) -> None:
+async def _cache_set(key: str, value, ttl: float) -> None:
     try:
         from app.auth import session_manager
 
         redis = await session_manager.get_redis()
-        await redis.set(
-            f"webservarr:shelf:{key}", json.dumps(cards), ex=int(_TRENDING_BOOKS_TTL)
-        )
+        await redis.set(f"webservarr:cache:{key}", json.dumps(value), ex=int(ttl))
     except Exception as exc:  # noqa: BLE001
-        logger.debug("Could not cache shelf %s in Redis: %s", key, exc)
+        logger.debug("Could not cache %s in Redis: %s", key, exc)
 
 
 # --- Plex Endpoints ---
@@ -299,7 +298,7 @@ async def build_books_shelf(period: str = "weekly") -> list:
     if cached and (time.monotonic() - cached[0]) < _TRENDING_BOOKS_TTL:
         return cached[1]
 
-    shared = await _shelf_from_redis(f"books:{period}")
+    shared = await _cache_get(f"shelf:books:{period}")
     if shared:
         _trending_books_cache[period] = (time.monotonic(), shared)
         return shared
@@ -324,7 +323,7 @@ async def build_books_shelf(period: str = "weekly") -> list:
 
     if cards:
         _trending_books_cache[period] = (time.monotonic(), cards)
-        await _shelf_to_redis(f"books:{period}", cards)
+        await _cache_set(f"shelf:books:{period}", cards, _TRENDING_BOOKS_TTL)
     return cards
 
 
@@ -334,7 +333,7 @@ async def build_audiobooks_shelf() -> list:
     if cached and (time.monotonic() - cached[0]) < _TRENDING_BOOKS_TTL:
         return cached[1]
 
-    shared = await _shelf_from_redis("audiobooks")
+    shared = await _cache_get("shelf:audiobooks")
     if shared:
         _trending_books_cache["audiobooks"] = (time.monotonic(), shared)
         return shared
@@ -351,7 +350,7 @@ async def build_audiobooks_shelf() -> list:
 
     if cards:
         _trending_books_cache["audiobooks"] = (time.monotonic(), cards)
-        await _shelf_to_redis("audiobooks", cards)
+        await _cache_set("shelf:audiobooks", cards, _TRENDING_BOOKS_TTL)
     return cards
 
 
@@ -411,6 +410,14 @@ async def library_summary(current_user: dict = Depends(get_current_user)):
     if cached and (time.monotonic() - cached[0]) < _LIBRARY_SUMMARY_TTL:
         return cached[1]
 
+    # Shared before rebuilt, so every worker reports the same snapshot. Without
+    # this each worker expires on its own clock and consecutive reloads flick
+    # between two sets of figures that are both correct and visibly different.
+    shared = await _cache_get("library-summary")
+    if shared:
+        _library_summary_cache["all"] = (time.monotonic(), shared)
+        return shared
+
     tv, film, books, waits = await asyncio.gather(
         sonarr.library_summary(),
         radarr.library_summary(),
@@ -462,6 +469,7 @@ async def library_summary(current_user: dict = Depends(get_current_user)):
     }
     if any(summary.values()):
         _library_summary_cache["all"] = (time.monotonic(), summary)
+        await _cache_set("library-summary", summary, _LIBRARY_SUMMARY_TTL)
     return summary
 
 
