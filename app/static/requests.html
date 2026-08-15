@@ -42,7 +42,21 @@
      first "Trending" heading, so nothing on the page is displaced by it.
      The slot carries the absolute positioning rather than the bar itself - the
      bar must stay position:relative for its own search icon. -->
-<div id="searchHome" class="relative h-0 z-20">
+<!-- sticky, not relative: a user who scrolls down before searching would
+     otherwise lose the search field entirely and find only the gap held open
+     for it further down the page, which reads as a broken layout. Sticking it
+     keeps the field reachable from anywhere on the page. h-0 means it still
+     occupies no space, and at rest it sits below the sticky threshold, so the
+     unscrolled view is unchanged.
+     top-0, not a positive inset: sticky offsets resolve against the
+     scrollport's padding box, which already sits 32px in, so any positive top
+     would push the bar below where it sits today and change the resting view.
+     At 0 the sticky edge coincides with the natural position, so the unscrolled
+     page is pixel-identical and the bar only holds still once scrolled.
+     Sticky - unlike transform - does not become a containing block for the
+     position:fixed the bar takes during its move, so pinning still resolves
+     against the viewport. -->
+<div id="searchHome" class="sticky top-0 h-0 z-20">
   <!-- Centred with auto margins, NOT a transform: a transformed ancestor makes
        position:fixed resolve against that element instead of the viewport,
        which breaks pinning the bar during its move. Nudged up so it centres on
@@ -441,6 +455,24 @@ function mediaTypeBadgeColor(mediaType) {
   return 'bg-purple-500/20 text-purple-400';
 }
 
+/**
+ * Colour for the media-type noun inside a Request button.
+ *
+ * Deliberately not mediaTypeBadgeColor: those tints are tuned for a near-black
+ * card, and its blue-400 would land blue-on-blue against the button's Baltic
+ * Blue fill. These three are picked to carry on that fill and to differ in
+ * lightness as well as hue, so they still separate without colour vision.
+ *
+ * Measured against the button's #125793 - cyan 5.16, amber 5.18, purple 5.49,
+ * all clearing 4.5:1. The button's 11px bold counts as normal text for
+ * contrast, not large, so the weaker purple-300 (4.23) was not good enough.
+ */
+function mediaTypeNounColor(mediaType) {
+  if (mediaType === 'tv') return 'text-cyan-300';
+  if (mediaType === 'book') return 'text-amber-300';
+  return 'text-purple-200';
+}
+
 /** Placeholder glyph when a title has no artwork. */
 function mediaTypeIcon(mediaType) {
   if (mediaType === 'tv') return 'tv';
@@ -674,7 +706,7 @@ function buildSearchCard(item) {
         // ids coerce back to int server-side.
         // border-transparent so the button matches the status block's height
         // exactly - otherwise the card jumps 2px depending on its state.
-        stdHtml = '<button onclick="requestMedia(\'' + mediaType + '\', \'' + escapeHtml(String(mediaId)) + '\', false, this)" class="w-full py-2 px-1 rounded-lg border border-transparent bg-primary hover:bg-primary/80 text-bright text-[11px] font-bold transition-all">Request ' + typeBadge + '</button>';
+        stdHtml = '<button onclick="requestMedia(\'' + mediaType + '\', \'' + escapeHtml(String(mediaId)) + '\', false, this)" class="w-full py-2 px-1 rounded-lg border border-transparent bg-primary hover:bg-primary/80 text-bright text-[11px] font-bold transition-all">Request <span class="' + mediaTypeNounColor(mediaType) + '">' + typeBadge + '</span></button>';
     } else {
         // Same rectangle as the button, so the card keeps its shape. The type
         // is carried here too, since there is no button to state it.
