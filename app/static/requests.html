@@ -71,79 +71,96 @@
 <!-- Library summary. Also the scroll anchor for the search bar's move: the view
      settles with these figures on screen above the search field.
 
-     One rail rather than four boxes. The old grid of equal glass cards carried
-     request-lifecycle counts - Total, Pending, Approved, Available - where
-     Pending is permanently zero under automatic approval and Approved sits
-     within a rounding error of Total, so three of the four said the same thing.
-     These describe what the library actually holds. -->
+     Three named sections, each led by one dominant figure. A flat rail of
+     thirteen equal numbers was scannable on a desktop and a wall on a phone,
+     where it wrapped to five undifferentiated rows; grouping gives the eye
+     somewhere to land, and the hero gives each group an answer rather than a
+     list.
+
+     The grouping is not cosmetic. LIBRARY is what exists, QUEUE is what is
+     moving, COMPLETENESS is how much of what was wanted actually arrived -
+     which is why Requests Fulfilled sits with the completeness figures and
+     Added This Month with the queue, rather than the other way round. -->
 <div id="statsRow" class="mb-6">
-  <div class="glass-card rounded-xl px-5 py-4 flex flex-wrap items-center gap-x-8 gap-y-4">
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statMovies">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Movies</span>
-    </div>
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statShows">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">TV Shows</span>
-    </div>
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statEpisodes">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Episodes</span>
-    </div>
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statEbooks">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">eBooks</span>
-    </div>
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statAudiobooks">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Audiobooks</span>
-    </div>
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statSize">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">On Disk</span>
-    </div>
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statAdded">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Added This Month</span>
-    </div>
-    <!-- What is being worked on, and what simply is not out yet. Separated
-         because a film waiting on its cinema release is not a stuck request,
-         and lumping the two together makes the queue look broken. -->
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statInProgress">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">In Progress</span>
-    </div>
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statUnreleased">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Not Yet Released</span>
-    </div>
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statWait">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Typical Wait</span>
-    </div>
-    <!-- Requested against delivered: the one figure here about the service
-         rather than the shelf - it answers "if I ask for something, does it
-         turn up". -->
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statFulfilled">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Requests Fulfilled</span>
-    </div>
-    <!-- Complete shows and complete seasons answer different questions - a
-         show counts only when every one of its seasons does - so both are
-         given rather than one standing in for the other, and each is named for
-         what it measures rather than the bare word "Complete", which never
-         said complete *what*. -->
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statComplete">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Complete Shows</span>
-    </div>
-    <div class="flex items-baseline gap-2">
-      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statSeasons">--</span>
-      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Complete Seasons</span>
-    </div>
+  <div class="glass-card rounded-xl px-5 py-4 flex flex-col gap-5 lg:flex-row lg:gap-8">
+
+    <section class="flex-1 min-w-0">
+      <p class="text-[10px] text-steel-blue/70 font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Library</p>
+      <div class="flex items-baseline gap-2 mb-3">
+        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statSize">--</span>
+        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">On Disk</span>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statMovies">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Movies</p>
+        </div>
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statShows">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">TV Shows</p>
+        </div>
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statEpisodes">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Episodes</p>
+        </div>
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statEbooks">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">eBooks</p>
+        </div>
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statAudiobooks">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Audiobooks</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="flex-1 min-w-0">
+      <p class="text-[10px] text-steel-blue/70 font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Queue</p>
+      <div class="flex items-baseline gap-2 mb-3">
+        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statWait">--</span>
+        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Typical Wait</span>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statInProgress">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">In Progress</p>
+        </div>
+        <!-- Kept apart from In Progress: a film awaiting its cinema release is
+             not a stuck request, and counting it as one makes the queue look
+             broken. -->
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statUnreleased">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Not Yet Released</p>
+        </div>
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statAdded">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Added This Month</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="flex-1 min-w-0">
+      <p class="text-[10px] text-steel-blue/70 font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Completeness</p>
+      <div class="flex items-baseline gap-2 mb-3">
+        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statFulfilled">--</span>
+        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Requests Fulfilled</span>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
+        <!-- Shows and seasons answer different questions - a show counts only
+             when every one of its seasons does - so both are given rather than
+             one standing in for the other. -->
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statComplete">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Complete Shows</p>
+        </div>
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statSeasons">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Complete Seasons</p>
+        </div>
+      </div>
+    </section>
+
   </div>
-  <p id="statsFootnote" class="text-[10px] text-steel-blue/60 mt-2 px-1"></p>
-  <p id="statsFootnote2" class="text-[10px] text-steel-blue/60 mt-0.5 px-1"></p>
 </div>
 
 <!-- Two-column layout: Search (left) + Requests (right) on desktop, stacked on mobile -->
@@ -1414,7 +1431,6 @@ async function loadLibrarySummary() {
         var waits = s.wait_minutes || {};
         document.getElementById('statWait').textContent = formatWait(waits.total);
 
-        var requested = s.requested || {}, fulfilled = s.fulfilled || {};
         document.getElementById('statFulfilled').textContent = (s.fulfilled_percent || 0) + '%';
         document.getElementById('statComplete').textContent = (s.percent || 0) + '%';
 
@@ -1422,37 +1438,6 @@ async function loadLibrarySummary() {
             ? Math.round(100 * (s.complete_seasons || 0) / s.seasons)
             : 0;
         document.getElementById('statSeasons').textContent = seasonPct + '%';
-
-        // Both percentages are proportions, so the footnote gives the counts
-        // behind them. A reader can check the claim rather than take it on
-        // trust, which is what the old figure asked of them.
-        document.getElementById('statsFootnote').textContent =
-            formatCount(s.complete_shows) + ' of ' + formatCount(s.shows) + ' shows and ' +
-            formatCount(s.complete_seasons) + ' of ' + formatCount(s.seasons) +
-            ' seasons hold every aired episode' +
-            (s.missing_episodes
-                ? ' · ' + formatCount(s.missing_episodes) + ' episodes outstanding'
-                : '') +
-            // The per-type waits belong here rather than in the rail: they are
-            // context for the headline figure, not four more numbers to scan.
-            (waits.sample
-                ? ' · typical wait ' + formatWait(waits.movie) + ' for films, ' +
-                  formatWait(waits.tv) + ' for TV' +
-                  (waits.book ? ', ' + formatWait(waits.book) + ' for books' : '') +
-                  ' (median of ' + formatCount(waits.sample) + ' requests)'
-                : '');
-
-        // Second line, because the fulfilment figure needs its own counts and
-        // the first line is already carrying the completeness ones.
-        var partial = s.partial || {}, removed = s.removed || {};
-        document.getElementById('statsFootnote2').textContent = requested.total
-            ? formatCount(fulfilled.total) + ' of ' + formatCount(requested.total) +
-              ' requests are available' +
-              (partial.total ? ' · ' + formatCount(partial.total) + ' partly available' : '') +
-              (removed.total ? ' · ' + formatCount(removed.total) + ' since removed' : '') +
-              ' · films ' + Math.round(100 * (fulfilled.movie || 0) / (requested.movie || 1)) + '%' +
-              ', TV ' + Math.round(100 * (fulfilled.tv || 0) / (requested.tv || 1)) + '%'
-            : '';
     } catch (e) {
         console.log('Library summary not available');
     }

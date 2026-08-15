@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>WebServarr — Metric Layout Options</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: { extend: { colors: {
+    "primary": "rgb(var(--color-primary) / <alpha-value>)",
+    "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+    "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+    "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+    "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+  }, fontFamily: { "display": ["var(--font-display)", "sans-serif"] } } },
+}</script>
+
+<style>
+:root {
+  --color-primary: 18 87 147;          /* #125793 Baltic Blue */
+  --color-secondary: 44 109 161;       /* #2C6DA1 Cornflower Ocean */
+  --color-accent: 70 132 176;          /* #4684B0 Steel Blue */
+  --color-text: 190 238 244;           /* #BEEEF4 Frosted Blue - PRIMARY TEXT */
+  --color-text-secondary: 255 255 255; /* #FFFFFF */
+  --color-background: 0 0 0;           /* #000000 */
+  --color-media-movie: 233 213 255;    /* #E9D5FF */
+  --color-media-tv: 103 232 249;       /* #67E8F9 */
+  --color-media-book: 252 211 77;      /* #FCD34D */
+  --font-display: "Spline Sans";
+}
+
+html { background: rgb(var(--color-background)); }
+body {
+  background: rgb(var(--color-background));
+  color: rgb(var(--color-text));
+  font-family: "Spline Sans", sans-serif;
+  overflow-x: clip;
+}
+
+/* ---- shared metric primitives (the app's existing conventions) ---- */
+.glass-card {
+  background: rgba(var(--color-primary) / 0.15);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(var(--color-accent) / 0.3);
+}
+.m-val {
+  color: rgb(var(--color-text));
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.m-val .unit {
+  font-size: .58em;
+  font-weight: 600;
+  color: rgb(var(--color-text) / .65);
+  margin-left: .18em;
+  letter-spacing: 0;
+}
+.m-label {
+  color: rgb(var(--color-accent));
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  line-height: 1.4;
+}
+.grp-head {
+  display: flex; align-items: center; gap: .65rem;
+  color: rgb(var(--color-accent));
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .2em;
+}
+.grp-head::after { content: ""; flex: 1; height: 1px; background: rgba(var(--color-accent) / .25); }
+.footnote {
+  font-size: 11px; line-height: 1.55;
+  color: rgb(var(--color-text) / .55);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- showcase chrome ---- */
+.opt-pill {
+  display: inline-flex; align-items: center;
+  padding: 3px 10px; border-radius: 999px;
+  background: rgba(var(--color-primary) / .35);
+  border: 1px solid rgba(var(--color-accent) / .4);
+  color: rgb(var(--color-text));
+  font-size: 10px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase;
+  white-space: nowrap;
+}
+.pane-caption {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .18em;
+  color: rgb(var(--color-accent) / .8);
+  margin-bottom: .5rem;
+}
+.desk-stage {
+  border: 1px dashed rgba(var(--color-accent) / .25);
+  border-radius: 1rem;
+  padding: clamp(10px, 2vw, 20px);
+  background: rgba(var(--color-primary) / .05);
+}
+.phone-frame {
+  width: 390px; max-width: 100%;
+  border: 1px solid rgba(var(--color-accent) / .4);
+  background: rgba(var(--color-primary) / .1);
+  border-radius: 34px; padding: 10px;
+  box-shadow: 0 0 40px rgba(var(--color-primary) / .25);
+}
+.phone-notch { width: 96px; height: 5px; border-radius: 999px; background: rgba(var(--color-accent) / .35); margin: 2px auto 10px; }
+.phone-screen { background: rgb(var(--color-background)); border-radius: 24px; padding: 12px 10px 16px; overflow: hidden; min-height: 100px; }
+
+/* ---- option 3: progressive disclosure ---- */
+details.disclose summary { list-style: none; cursor: pointer; user-select: none; }
+details.disclose summary::-webkit-details-marker { display: none; }
+details.disclose .chev { transition: transform .2s ease; }
+details.disclose[open] .chev { transform: rotate(180deg); }
+
+/* ---- option 4: ledger rows ---- */
+.ledger-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; }
+.ledger-row .dots {
+  flex: 1; min-width: 14px;
+  border-bottom: 1px dotted rgba(var(--color-accent) / .35);
+  align-self: flex-end; margin-bottom: 4px;
+}
+.ledger-row .lv { font-size: 14px; }
+
+/* ---- option 5: chip rail ---- */
+.chip-rail {
+  display: flex; gap: 8px; align-items: stretch;
+  overflow-x: auto;
+  padding: 4px 36px 10px 4px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--color-accent) / .45) transparent;
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 36px), transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 36px), transparent 100%);
+}
+.chip-rail::-webkit-scrollbar { height: 6px; }
+.chip-rail::-webkit-scrollbar-thumb { background: rgba(var(--color-accent) / .35); border-radius: 999px; }
+.chip-rail::-webkit-scrollbar-track { background: transparent; }
+.chip {
+  scroll-snap-align: start;
+  display: flex; align-items: baseline; gap: 7px;
+  white-space: nowrap;
+  padding: 9px 14px; border-radius: 999px;
+  border: 1px solid rgba(var(--color-accent) / .3);
+  background: rgba(var(--color-primary) / .18);
+  flex: 0 0 auto;
+}
+.rail-tag {
+  display: flex; align-items: center; flex: 0 0 auto;
+  font-size: 9px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase;
+  color: rgb(var(--color-accent) / .9);
+  padding-left: 12px; margin-left: 4px;
+  border-left: 1px solid rgba(var(--color-accent) / .3);
+}
+.rail-tag:first-child { border-left: 0; margin-left: 0; padding-left: 2px; }
+
+/* ---- option 6: pure-CSS tabs ---- */
+.tabs { position: relative; }
+.tabs > input { position: absolute; opacity: 0; pointer-events: none; }
+.tabs .tab-bar label { transition: background-color .15s ease, color .15s ease; }
+.tabs .panel { display: none; }
+.tabs > input:nth-of-type(1):checked ~ .tab-panels .panel:nth-of-type(1),
+.tabs > input:nth-of-type(2):checked ~ .tab-panels .panel:nth-of-type(2),
+.tabs > input:nth-of-type(3):checked ~ .tab-panels .panel:nth-of-type(3) { display: block; }
+.tabs > input:nth-of-type(1):checked ~ .tab-bar label:nth-of-type(1),
+.tabs > input:nth-of-type(2):checked ~ .tab-bar label:nth-of-type(2),
+.tabs > input:nth-of-type(3):checked ~ .tab-bar label:nth-of-type(3) {
+  background: rgba(var(--color-primary) / .5);
+  color: rgb(var(--color-text-secondary));
+}
+.tabs > input:focus-visible ~ .tab-bar {
+  outline: 1px solid rgba(var(--color-accent) / .6);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+</style>
+</head>
+
+<body class="bg-background-dark">
+<main class="max-w-[1500px] mx-auto px-3 sm:px-6 py-10">
+
+  <header class="mb-4">
+    <h1 class="text-2xl sm:text-3xl font-bold text-bright">Library Metrics — Layout Options</h1>
+    <p class="mt-2 text-sm text-frosted-blue/60 max-w-3xl">
+      Six treatments of the same 13 figures. Each option renders twice from identical markup —
+      full-width desktop and a 390&nbsp;px phone frame — using container queries, so the mobile
+      behaviour shown is real, not a mock. Numbers are always Frosted Blue; labels are always
+      Steel Blue. Theme tokens only.
+    </p>
+  </header>
+
+  <!-- ============================================================ -->
+  <!-- OPTION 1 — SECTIONED GRID + HERO (chosen direction)           -->
+  <!-- ============================================================ -->
+  <section class="mt-12">
+    <header class="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-2">
+      <span class="opt-pill">Option 1</span>
+      <h2 class="text-xl font-bold text-bright">Sectioned Grid + Hero</h2>
+      <p class="w-full text-sm text-frosted-blue/60 max-w-3xl">
+        Optimises orientation — each group leads with its defining figure (size on disk, typical wait,
+        requests fulfilled) with the rest kept dense — at the cost of an editorial opinion: three numbers
+        are declared to matter most, and the demoted ten are set visibly smaller than before.
+      </p>
+    </header>
+    <div class="flex flex-col xl:flex-row gap-8 items-start">
+      <div class="flex-1 min-w-0 w-full">
+        <div class="pane-caption">Desktop — full width</div>
+        <div class="desk-stage">
+          <div id="demo1" class="@container">
+            <div class="glass-card rounded-2xl p-4 @2xl:p-6">
+              <div class="space-y-4 @2xl:space-y-6">
+                <div>
+                  <div class="grp-head mb-2 @2xl:mb-3">Library</div>
+                  <div class="@2xl:flex @2xl:items-stretch @2xl:gap-8">
+                    <div class="flex items-baseline gap-3 mb-2 @2xl:mb-0 @2xl:w-44 @2xl:shrink-0 @2xl:flex-col @2xl:items-start @2xl:justify-center @2xl:gap-0 @2xl:border-r @2xl:border-steel-blue/20 @2xl:pr-6">
+                      <div class="m-val text-3xl @2xl:text-5xl">53.3<span class="unit">TB</span></div>
+                      <div class="m-label @2xl:mt-2">On Disk</div>
+                    </div>
+                    <div class="flex flex-wrap gap-x-4 gap-y-2 min-w-0 @2xl:flex-1 @2xl:grid @2xl:grid-cols-5 @2xl:gap-x-4 @2xl:gap-y-4 @2xl:content-center">
+                      <div class="flex items-baseline gap-1.5 @2xl:block"><span class="m-val text-base @2xl:block @2xl:text-2xl">3,407</span><span class="m-label @2xl:block @2xl:mt-1">Movies</span></div>
+                      <div class="flex items-baseline gap-1.5 @2xl:block"><span class="m-val text-base @2xl:block @2xl:text-2xl">564</span><span class="m-label @2xl:block @2xl:mt-1">TV Shows</span></div>
+                      <div class="flex items-baseline gap-1.5 @2xl:block"><span class="m-val text-base @2xl:block @2xl:text-2xl">39,710</span><span class="m-label @2xl:block @2xl:mt-1">Episodes</span></div>
+                      <div class="flex items-baseline gap-1.5 @2xl:block"><span class="m-val text-base @2xl:block @2xl:text-2xl">106</span><span class="m-label @2xl:block @2xl:mt-1">eBooks</span></div>
+                      <div class="flex items-baseline gap-1.5 @2xl:block"><span class="m-val text-base @2xl:block @2xl:text-2xl">21</span><span class="m-label @2xl:block @2xl:mt-1">Audiobooks</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <div class="grp-head mb-2 @2xl:mb-3">Queue</div>
+                  <div class="@2xl:flex @2xl:items-stretch @2xl:gap-8">
+                    <div class="flex items-baseline gap-3 mb-2 @2xl:mb-0 @2xl:w-44 @2xl:shrink-0 @2xl:flex-col @2xl:items-start @2xl:justify-center @2xl:gap-0 @2xl:border-r @2xl:border-steel-blue/20 @2xl:pr-6">
+                      <div class="m-val text-3xl @2xl:text-5xl">11<span class="unit">min</span></div>
+                      <div class="m-label @2xl:mt-2">Typical Wait</div>
+                    </div>
+                    <div class="flex flex-wrap gap-x-4 gap-y-2 min-w-0 @2xl:flex-1 @2xl:grid @2xl:grid-cols-5 @2xl:gap-x-4 @2xl:gap-y-4 @2xl:content-center">
+                      <div class="flex items-baseline gap-1.5 @2xl:block"><span class="m-val text-base @2xl:block @2xl:text-2xl">134</span><span class="m-label @2xl:block @2xl:mt-1">In Progress</span></div>
+                      <div class="flex items-baseline gap-1.5 @2xl:block"><span class="m-val text-base @2xl:block @2xl:text-2xl">26</span><span class="m-label @2xl:block @2xl:mt-1">Not Yet Released</span></div>
+                      <div class="flex items-baseline gap-1.5 @2xl:block"><span class="m-val text-base @2xl:block @2xl:text-2xl">38</span><span class="m-label @2xl:block @2xl:mt-1">Added This Month</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <div class="grp-head mb-2 @2xl:mb-3">Completeness</div>
+                  <div class="@2xl:flex @2xl:items-stretch @2xl:gap-8">
+                    <div class="flex items-baseline gap-3 mb-2 @2xl:mb-0 @2xl:w-44 @2xl:shrink-0 @2xl:flex-col @2xl:items-start @2xl:justify-center @2xl:gap-0 @2xl:border-r @2xl:border-steel-blue/20 @2xl:pr-6">
+                      <div class="m-val text-3xl @2xl:text-5xl">77<span class="unit">%</span></div>
+                      <div class="m-label @2xl:mt-2">Requests Fulfilled</div>
+                    </div>
+                    <div class="flex flex-wrap gap-x-4 gap-y-2 min-w-0 @2xl:flex-1 @2xl:grid @2xl:grid-cols-5 @2xl:gap-x-4 @2xl:gap-y-4 @2xl:content-center">
+                      <div class="flex items-baseline gap-1.5 @2xl:block"><span class="m-val text-base @2xl:block @2xl:text-2xl">90<span class="unit">%</span></span><span class="m-label @2xl:block @2xl:mt-1">Complete Shows</span></div>
+                      <div class="flex items-baseline gap-1.5 @2xl:block"><span class="m-val text-base @2xl:block @2xl:text-2xl">86<span class="unit">%</span></span><span class="m-label @2xl:block @2xl:mt-1">Complete Seasons</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="pt-4 border-t border-steel-blue/20 space-y-1.5">
+                  <p class="footnote">506 of 564 shows and 2,269 of 2,642 seasons hold every aired episode &middot; 2,880 episodes outstanding &middot; typical wait 12 min for films, 5 min for TV (median of 1,076 requests)</p>
+                  <p class="footnote">999 of 1,304 requests are available &middot; 83 partly available &middot; 20 since removed &middot; films 82%, TV 54%</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="w-full xl:w-auto shrink-0">
+        <div class="pane-caption">Mobile — 390&nbsp;px frame</div>
+        <div class="phone-frame"><div class="phone-notch"></div><div class="phone-screen"><div data-clone-of="demo1"></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- OPTION 2 — HERO FIGURE                                        -->
+  <!-- ============================================================ -->
+  <section class="mt-16">
+    <header class="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-2">
+      <span class="opt-pill">Option 2</span>
+      <h2 class="text-xl font-bold text-bright">Hero Figure</h2>
+      <p class="w-full text-sm text-frosted-blue/60 max-w-3xl">
+        Optimises instant impact — one headline number (the library's size on disk) with a clear
+        second and third tier — at the cost of demoting nine metrics to small print.
+      </p>
+    </header>
+    <div class="flex flex-col xl:flex-row gap-8 items-start">
+      <div class="flex-1 min-w-0 w-full">
+        <div class="pane-caption">Desktop — full width</div>
+        <div class="desk-stage">
+          <div id="demo2" class="@container">
+            <div class="glass-card rounded-2xl p-5 @2xl:p-7">
+              <div class="flex flex-col @2xl:flex-row gap-6 @2xl:gap-10">
+                <div class="shrink-0 @2xl:w-60 flex flex-col justify-center border-b @2xl:border-b-0 @2xl:border-r border-steel-blue/25 pb-5 @2xl:pb-0 @2xl:pr-8">
+                  <div class="m-label">On Disk</div>
+                  <div class="m-val text-6xl mt-2">53.3<span class="unit">TB</span></div>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="grid grid-cols-3 gap-x-4 gap-y-4 pb-5 border-b border-steel-blue/20">
+                    <div><div class="m-val text-3xl">3,407</div><div class="m-label mt-1">Movies</div></div>
+                    <div><div class="m-val text-3xl">564</div><div class="m-label mt-1">TV Shows</div></div>
+                    <div><div class="m-val text-3xl">39,710</div><div class="m-label mt-1">Episodes</div></div>
+                  </div>
+                  <div class="grid grid-cols-3 @2xl:grid-cols-4 gap-x-4 gap-y-3 pt-5">
+                    <div><div class="m-val text-lg">106</div><div class="m-label mt-0.5">eBooks</div></div>
+                    <div><div class="m-val text-lg">21</div><div class="m-label mt-0.5">Audiobooks</div></div>
+                    <div><div class="m-val text-lg">38</div><div class="m-label mt-0.5">Added This Month</div></div>
+                    <div><div class="m-val text-lg">134</div><div class="m-label mt-0.5">In Progress</div></div>
+                    <div><div class="m-val text-lg">26</div><div class="m-label mt-0.5">Not Yet Released</div></div>
+                    <div><div class="m-val text-lg">11<span class="unit">min</span></div><div class="m-label mt-0.5">Typical Wait</div></div>
+                    <div><div class="m-val text-lg">77<span class="unit">%</span></div><div class="m-label mt-0.5">Requests Fulfilled</div></div>
+                    <div><div class="m-val text-lg">90<span class="unit">%</span></div><div class="m-label mt-0.5">Complete Shows</div></div>
+                    <div><div class="m-val text-lg">86<span class="unit">%</span></div><div class="m-label mt-0.5">Complete Seasons</div></div>
+                  </div>
+                </div>
+              </div>
+              <div class="mt-5 pt-4 border-t border-steel-blue/20 space-y-1.5">
+                <p class="footnote">506 of 564 shows and 2,269 of 2,642 seasons hold every aired episode &middot; 2,880 episodes outstanding &middot; typical wait 12 min for films, 5 min for TV (median of 1,076 requests)</p>
+                <p class="footnote">999 of 1,304 requests are available &middot; 83 partly available &middot; 20 since removed &middot; films 82%, TV 54%</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="w-full xl:w-auto shrink-0">
+        <div class="pane-caption">Mobile — 390&nbsp;px frame</div>
+        <div class="phone-frame"><div class="phone-notch"></div><div class="phone-screen"><div data-clone-of="demo2"></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- OPTION 3 — HEADLINE + EXPAND                                  -->
+  <!-- ============================================================ -->
+  <section class="mt-16">
+    <header class="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-2">
+      <span class="opt-pill">Option 3</span>
+      <h2 class="text-xl font-bold text-bright">Headline + Expand</h2>
+      <p class="w-full text-sm text-frosted-blue/60 max-w-3xl">
+        Optimises mobile compactness — two rows collapsed, everything else one tap away —
+        at the cost of hiding 9 of 13 figures by default, where they may go unread.
+      </p>
+    </header>
+    <div class="flex flex-col xl:flex-row gap-8 items-start">
+      <div class="flex-1 min-w-0 w-full">
+        <div class="pane-caption">Desktop — full width</div>
+        <div class="desk-stage">
+          <div id="demo3" class="@container">
+            <div class="glass-card rounded-2xl overflow-hidden">
+              <div class="p-5 grid grid-cols-2 @2xl:grid-cols-4 gap-x-4 gap-y-5">
+                <div><div class="m-val text-3xl">3,407</div><div class="m-label mt-1">Movies</div></div>
+                <div><div class="m-val text-3xl">564</div><div class="m-label mt-1">TV Shows</div></div>
+                <div><div class="m-val text-3xl">39,710</div><div class="m-label mt-1">Episodes</div></div>
+                <div><div class="m-val text-3xl">53.3<span class="unit">TB</span></div><div class="m-label mt-1">On Disk</div></div>
+              </div>
+              <details class="disclose border-t border-steel-blue/20">
+                <summary class="flex items-center justify-center gap-2 py-3 px-5 hover:bg-primary/10 transition-colors">
+                  <span class="m-label">9 more metrics</span>
+                  <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgb(70 132 176)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                </summary>
+                <div class="px-5 pb-5 pt-1 space-y-5">
+                  <div>
+                    <div class="grp-head mb-3">Queue</div>
+                    <div class="grid grid-cols-2 @2xl:grid-cols-4 gap-x-4 gap-y-4">
+                      <div><div class="m-val text-xl">134</div><div class="m-label mt-1">In Progress</div></div>
+                      <div><div class="m-val text-xl">26</div><div class="m-label mt-1">Not Yet Released</div></div>
+                      <div><div class="m-val text-xl">11<span class="unit">min</span></div><div class="m-label mt-1">Typical Wait</div></div>
+                      <div><div class="m-val text-xl">77<span class="unit">%</span></div><div class="m-label mt-1">Requests Fulfilled</div></div>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="grp-head mb-3">Completeness</div>
+                    <div class="grid grid-cols-3 gap-x-4 gap-y-4">
+                      <div><div class="m-val text-xl">90<span class="unit">%</span></div><div class="m-label mt-1">Complete Shows</div></div>
+                      <div><div class="m-val text-xl">86<span class="unit">%</span></div><div class="m-label mt-1">Complete Seasons</div></div>
+                      <div><div class="m-val text-xl">38</div><div class="m-label mt-1">Added This Month</div></div>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="grp-head mb-3">Books &amp; Audio</div>
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-4">
+                      <div><div class="m-val text-xl">106</div><div class="m-label mt-1">eBooks</div></div>
+                      <div><div class="m-val text-xl">21</div><div class="m-label mt-1">Audiobooks</div></div>
+                    </div>
+                  </div>
+                  <div class="pt-4 border-t border-steel-blue/20 space-y-1.5">
+                    <p class="footnote">506 of 564 shows and 2,269 of 2,642 seasons hold every aired episode &middot; 2,880 episodes outstanding &middot; typical wait 12 min for films, 5 min for TV (median of 1,076 requests)</p>
+                    <p class="footnote">999 of 1,304 requests are available &middot; 83 partly available &middot; 20 since removed &middot; films 82%, TV 54%</p>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="w-full xl:w-auto shrink-0">
+        <div class="pane-caption">Mobile — 390&nbsp;px frame</div>
+        <div class="phone-frame"><div class="phone-notch"></div><div class="phone-screen"><div data-clone-of="demo3"></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- OPTION 4 — LEDGER                                             -->
+  <!-- ============================================================ -->
+  <section class="mt-16">
+    <header class="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-2">
+      <span class="opt-pill">Option 4</span>
+      <h2 class="text-xl font-bold text-bright">Ledger</h2>
+      <p class="w-full text-sm text-frosted-blue/60 max-w-3xl">
+        Optimises density and lookup — every figure right-aligned on a dotted leader, perfect for
+        finding one value fast — at the cost of drama: nothing is emphasised and it reads like a spec sheet.
+      </p>
+    </header>
+    <div class="flex flex-col xl:flex-row gap-8 items-start">
+      <div class="flex-1 min-w-0 w-full">
+        <div class="pane-caption">Desktop — full width</div>
+        <div class="desk-stage">
+          <div id="demo4" class="@container">
+            <div class="glass-card rounded-2xl p-5 @2xl:p-6">
+              <div class="grid grid-cols-1 @2xl:grid-cols-3 gap-x-10 gap-y-6">
+                <div>
+                  <div class="grp-head mb-2">Library</div>
+                  <ul>
+                    <li class="ledger-row"><span class="m-label">Movies</span><span class="dots"></span><span class="m-val lv">3,407</span></li>
+                    <li class="ledger-row"><span class="m-label">TV Shows</span><span class="dots"></span><span class="m-val lv">564</span></li>
+                    <li class="ledger-row"><span class="m-label">Episodes</span><span class="dots"></span><span class="m-val lv">39,710</span></li>
+                    <li class="ledger-row"><span class="m-label">eBooks</span><span class="dots"></span><span class="m-val lv">106</span></li>
+                    <li class="ledger-row"><span class="m-label">Audiobooks</span><span class="dots"></span><span class="m-val lv">21</span></li>
+                    <li class="ledger-row"><span class="m-label">On Disk</span><span class="dots"></span><span class="m-val lv">53.3<span class="unit">TB</span></span></li>
+                  </ul>
+                </div>
+                <div>
+                  <div class="grp-head mb-2">Queue</div>
+                  <ul>
+                    <li class="ledger-row"><span class="m-label">In Progress</span><span class="dots"></span><span class="m-val lv">134</span></li>
+                    <li class="ledger-row"><span class="m-label">Not Yet Released</span><span class="dots"></span><span class="m-val lv">26</span></li>
+                    <li class="ledger-row"><span class="m-label">Typical Wait</span><span class="dots"></span><span class="m-val lv">11<span class="unit">min</span></span></li>
+                    <li class="ledger-row"><span class="m-label">Requests Fulfilled</span><span class="dots"></span><span class="m-val lv">77<span class="unit">%</span></span></li>
+                  </ul>
+                </div>
+                <div>
+                  <div class="grp-head mb-2">Completeness</div>
+                  <ul>
+                    <li class="ledger-row"><span class="m-label">Complete Shows</span><span class="dots"></span><span class="m-val lv">90<span class="unit">%</span></span></li>
+                    <li class="ledger-row"><span class="m-label">Complete Seasons</span><span class="dots"></span><span class="m-val lv">86<span class="unit">%</span></span></li>
+                    <li class="ledger-row"><span class="m-label">Added This Month</span><span class="dots"></span><span class="m-val lv">38</span></li>
+                  </ul>
+                </div>
+              </div>
+              <div class="mt-5 pt-4 border-t border-steel-blue/20 space-y-1.5">
+                <p class="footnote">506 of 564 shows and 2,269 of 2,642 seasons hold every aired episode &middot; 2,880 episodes outstanding &middot; typical wait 12 min for films, 5 min for TV (median of 1,076 requests)</p>
+                <p class="footnote">999 of 1,304 requests are available &middot; 83 partly available &middot; 20 since removed &middot; films 82%, TV 54%</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="w-full xl:w-auto shrink-0">
+        <div class="pane-caption">Mobile — 390&nbsp;px frame</div>
+        <div class="phone-frame"><div class="phone-notch"></div><div class="phone-screen"><div data-clone-of="demo4"></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- OPTION 5 — CHIP RAIL                                          -->
+  <!-- ============================================================ -->
+  <section class="mt-16">
+    <header class="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-2">
+      <span class="opt-pill">Option 5</span>
+      <h2 class="text-xl font-bold text-bright">Chip Rail</h2>
+      <p class="w-full text-sm text-frosted-blue/60 max-w-3xl">
+        Optimises vertical footprint — one swipeable row (~60&nbsp;px tall) at any width — at the cost of
+        visibility: most chips sit off-screen (it scrolls even on desktop) and the footnotes are dropped entirely.
+      </p>
+    </header>
+    <div class="flex flex-col xl:flex-row gap-8 items-start">
+      <div class="flex-1 min-w-0 w-full">
+        <div class="pane-caption">Desktop — full width</div>
+        <div class="desk-stage">
+          <div id="demo5" class="@container">
+            <div class="glass-card rounded-2xl px-2 pt-2 pb-1">
+              <div class="chip-rail">
+                <span class="rail-tag">Library</span>
+                <div class="chip"><span class="m-val text-base">3,407</span><span class="m-label">Movies</span></div>
+                <div class="chip"><span class="m-val text-base">564</span><span class="m-label">TV Shows</span></div>
+                <div class="chip"><span class="m-val text-base">39,710</span><span class="m-label">Episodes</span></div>
+                <div class="chip"><span class="m-val text-base">106</span><span class="m-label">eBooks</span></div>
+                <div class="chip"><span class="m-val text-base">21</span><span class="m-label">Audiobooks</span></div>
+                <div class="chip"><span class="m-val text-base">53.3<span class="unit">TB</span></span><span class="m-label">On Disk</span></div>
+                <span class="rail-tag">Queue</span>
+                <div class="chip"><span class="m-val text-base">134</span><span class="m-label">In Progress</span></div>
+                <div class="chip"><span class="m-val text-base">26</span><span class="m-label">Not Yet Released</span></div>
+                <div class="chip"><span class="m-val text-base">11<span class="unit">min</span></span><span class="m-label">Typical Wait</span></div>
+                <div class="chip"><span class="m-val text-base">77<span class="unit">%</span></span><span class="m-label">Requests Fulfilled</span></div>
+                <span class="rail-tag">Completeness</span>
+                <div class="chip"><span class="m-val text-base">90<span class="unit">%</span></span><span class="m-label">Complete Shows</span></div>
+                <div class="chip"><span class="m-val text-base">86<span class="unit">%</span></span><span class="m-label">Complete Seasons</span></div>
+                <div class="chip"><span class="m-val text-base">38</span><span class="m-label">Added This Month</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="w-full xl:w-auto shrink-0">
+        <div class="pane-caption">Mobile — 390&nbsp;px frame</div>
+        <div class="phone-frame"><div class="phone-notch"></div><div class="phone-screen"><div data-clone-of="demo5"></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- OPTION 6 — GROUPED TABS                                       -->
+  <!-- ============================================================ -->
+  <section class="mt-16">
+    <header class="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-2">
+      <span class="opt-pill">Option 6</span>
+      <h2 class="text-xl font-bold text-bright">Grouped Tabs</h2>
+      <p class="w-full text-sm text-frosted-blue/60 max-w-3xl">
+        Optimises constant compact height with the right footnote shown under its own group —
+        at the cost of the whole picture: only one group is visible and cross-group comparison takes taps.
+      </p>
+    </header>
+    <div class="flex flex-col xl:flex-row gap-8 items-start">
+      <div class="flex-1 min-w-0 w-full">
+        <div class="pane-caption">Desktop — full width</div>
+        <div class="desk-stage">
+          <div id="demo6" class="@container">
+            <div class="glass-card rounded-2xl p-4 @2xl:p-6 tabs">
+              <input type="radio" name="o6" id="o6-1" checked>
+              <input type="radio" name="o6" id="o6-2">
+              <input type="radio" name="o6" id="o6-3">
+              <div class="tab-bar flex gap-1 p-1 rounded-xl bg-primary/10 border border-steel-blue/20 mb-5">
+                <label for="o6-1" class="flex-1 text-center text-[10px] font-bold uppercase tracking-[.18em] py-2.5 rounded-lg cursor-pointer text-steel-blue">Library</label>
+                <label for="o6-2" class="flex-1 text-center text-[10px] font-bold uppercase tracking-[.18em] py-2.5 rounded-lg cursor-pointer text-steel-blue">Queue</label>
+                <label for="o6-3" class="flex-1 text-center text-[10px] font-bold uppercase tracking-[.18em] py-2.5 rounded-lg cursor-pointer text-steel-blue">Completeness</label>
+              </div>
+              <div class="tab-panels">
+                <div class="panel">
+                  <div class="grid grid-cols-2 @md:grid-cols-3 gap-x-4 gap-y-5">
+                    <div><div class="m-val text-2xl">3,407</div><div class="m-label mt-1">Movies</div></div>
+                    <div><div class="m-val text-2xl">564</div><div class="m-label mt-1">TV Shows</div></div>
+                    <div><div class="m-val text-2xl">39,710</div><div class="m-label mt-1">Episodes</div></div>
+                    <div><div class="m-val text-2xl">106</div><div class="m-label mt-1">eBooks</div></div>
+                    <div><div class="m-val text-2xl">21</div><div class="m-label mt-1">Audiobooks</div></div>
+                    <div><div class="m-val text-2xl">53.3<span class="unit">TB</span></div><div class="m-label mt-1">On Disk</div></div>
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="grid grid-cols-2 @2xl:grid-cols-4 gap-x-4 gap-y-5">
+                    <div><div class="m-val text-2xl">134</div><div class="m-label mt-1">In Progress</div></div>
+                    <div><div class="m-val text-2xl">26</div><div class="m-label mt-1">Not Yet Released</div></div>
+                    <div><div class="m-val text-2xl">11<span class="unit">min</span></div><div class="m-label mt-1">Typical Wait</div></div>
+                    <div><div class="m-val text-2xl">77<span class="unit">%</span></div><div class="m-label mt-1">Requests Fulfilled</div></div>
+                  </div>
+                  <p class="footnote mt-5 pt-3 border-t border-steel-blue/20">999 of 1,304 requests are available &middot; 83 partly available &middot; 20 since removed &middot; films 82%, TV 54%</p>
+                </div>
+                <div class="panel">
+                  <div class="grid grid-cols-3 gap-x-4 gap-y-5">
+                    <div><div class="m-val text-2xl">90<span class="unit">%</span></div><div class="m-label mt-1">Complete Shows</div></div>
+                    <div><div class="m-val text-2xl">86<span class="unit">%</span></div><div class="m-label mt-1">Complete Seasons</div></div>
+                    <div><div class="m-val text-2xl">38</div><div class="m-label mt-1">Added This Month</div></div>
+                  </div>
+                  <p class="footnote mt-5 pt-3 border-t border-steel-blue/20">506 of 564 shows and 2,269 of 2,642 seasons hold every aired episode &middot; 2,880 episodes outstanding &middot; typical wait 12 min for films, 5 min for TV (median of 1,076 requests)</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="w-full xl:w-auto shrink-0">
+        <div class="pane-caption">Mobile — 390&nbsp;px frame</div>
+        <div class="phone-frame"><div class="phone-notch"></div><div class="phone-screen"><div data-clone-of="demo6"></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="mt-16 pt-6 border-t border-steel-blue/20">
+    <p class="footnote max-w-3xl">
+      Direction chosen: Option 1, reworked hero-led — each group opens with its defining figure
+      (53.3 TB on disk, 11 min typical wait, 77% requests fulfilled). Note the regrouping: Requests
+      Fulfilled now sits under Completeness and Added This Month under Queue. Options 2–6 remain for
+      comparison. Both phone previews here are live renders of the same markup as the desktop pane,
+      driven by container queries.
+    </p>
+  </footer>
+
+</main>
+
+<script>
+// Clone each desktop demo into its 390px phone frame so both renders are
+// guaranteed-identical markup. Radio names/ids are suffixed so the two
+// instances of Option 6's tabs don't fight over the same group.
+document.querySelectorAll('[data-clone-of]').forEach(function (slot) {
+  var src = document.getElementById(slot.getAttribute('data-clone-of'));
+  if (!src) return;
+  var clone = src.cloneNode(true);
+  clone.removeAttribute('id');
+  clone.querySelectorAll('input[name]').forEach(function (i) { i.name = i.name + '-p'; });
+  clone.querySelectorAll('[id]').forEach(function (el) { el.id = el.id + '-p'; });
+  clone.querySelectorAll('label[for]').forEach(function (l) { l.htmlFor = l.htmlFor + '-p'; });
+  slot.appendChild(clone);
+});
+</script>
+</body>
+</html>
