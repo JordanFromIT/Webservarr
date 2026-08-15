@@ -45,7 +45,7 @@ DEFAULTS = {
     "sidebar.label_issues": "Issues",
     "sidebar.label_calendar": "Calendar",
     "sidebar.label_tickets": "Tickets",
-    "sidebar.label_library": "Library",
+    "sidebar.label_library": "eBooks",
     "sidebar.label_settings": "Settings",
     # Configurable icons
     "icon.nav_home": "home",

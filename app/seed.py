@@ -70,7 +70,7 @@ DEFAULT_SETTINGS = {
     # Kavita ebook backend (proxied; never exposed to the browser directly)
     "integration.kavita.url": ("", "Kavita base URL (e.g., http://10.10.0.3:5000)"),
     "features.show_books": ("true", "Show Library page in sidebar (also requires Kavita configured)"),
-    "sidebar.label_library": ("Library", "Sidebar label for Library page"),
+    "sidebar.label_library": ("eBooks", "Sidebar label for the eBooks/Library page"),
     "icon.nav_library": ("menu_book", "Sidebar icon for Library page"),
     # Chaptarr book acquisition (used by the Requests page)
     "integration.chaptarr.url": ("", "Chaptarr base URL (e.g., http://10.10.0.3:8789)"),

@@ -356,8 +356,12 @@ async def test_connection(
 ):
     """
     Test an external API connection.
-    Supports: plex, uptime_kuma, seerr.
+    Supports: plex, uptime_kuma, seerr, netdata, sonarr, radarr, kavita, chaptarr.
     Requires admin authentication.
+
+    The NYT Books API is deliberately absent: its endpoint is api.nytimes.com
+    rather than something an operator configures, so there is no URL to test
+    and nothing for the anti-SSRF check below to guard.
     """
     service = payload.service
     url = payload.url.rstrip("/")
@@ -401,6 +405,19 @@ async def test_connection(
             elif service == "radarr":
                 resp = await client.get(
                     f"{url}/api/v3/system/status",
+                    headers={"X-Api-Key": credentials}
+                )
+            elif service == "kavita":
+                # No credential: WebServarr never holds a Kavita account of its
+                # own, so the most this can prove is that the server is up and
+                # answering. Per-user auth happens at /kavita/connect.
+                resp = await client.get(f"{url}/api/health")
+            elif service == "chaptarr":
+                # rootfolder rather than system/status: it needs the API key AND
+                # confirms the folders requests will be filed into actually
+                # exist, which is the thing that silently breaks otherwise.
+                resp = await client.get(
+                    f"{url}/api/v1/rootfolder",
                     headers={"X-Api-Key": credentials}
                 )
             else:

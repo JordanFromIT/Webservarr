@@ -205,6 +205,124 @@
         <div id="integrationsSection">
             <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl overflow-hidden" id="integrationsAccordion">
 
+                <!-- Kavita (eBooks) -->
+                <div class="accordion-item border-b border-steel-blue/20 last:border-b-0" data-accordion="kavita">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('kavita')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">menu_book</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Kavita (eBooks)</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotKavita"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyKavita">
+                        <div class="space-y-4 pt-1">
+                            <p class="text-xs text-steel-blue/70">Powers the eBooks page and the reader. No API key is needed: each user authenticates to Kavita through their own login, so nobody shares an account.</p>
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL <span class="text-red-400">*</span></label>
+                                <input type="url" id="integrationKavitaUrl" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary" placeholder="http://10.10.0.3:5000">
+                            </div>
+
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('kavita')" class="bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-lg text-sm font-semibold transition-all">Save</button>
+                                <button onclick="testConnection(&#39;kavita&#39;)" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5"><span class="material-symbols-outlined text-sm">wifi_tethering</span>Test</button>
+                                <button id="clearBtnkavita" onclick="clearIntegration('kavita')" class="hidden bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">delete</span>Clear
+                                </button>
+                                <div id="statusKavita" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chaptarr (Book Requests) -->
+                <div class="accordion-item border-b border-steel-blue/20 last:border-b-0" data-accordion="chaptarr">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('chaptarr')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">library_books</span>
+                        <span class="flex-1 font-bold text-frosted-blue">Chaptarr (Book Requests)</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotChaptarr"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyChaptarr">
+                        <div class="space-y-4 pt-1">
+                            <p class="text-xs text-steel-blue/70">Handles eBook and audiobook requests. The two formats use separate root folders and profiles in Chaptarr.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">URL <span class="text-red-400">*</span></label>
+                                    <input type="url" id="integrationChaptarrUrl" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary" placeholder="http://10.10.0.3:8789">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key <span class="text-red-400">*</span></label>
+                                    <input type="password" id="integrationChaptarrApiKey" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary" placeholder="Settings &gt; General in Chaptarr">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">eBook Root Folder</label>
+                                    <input type="text" id="chaptarrRootFolder" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary" placeholder="/ebooks">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">eBook Quality Profile ID</label>
+                                    <input type="text" id="chaptarrQualityProfileId" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary" placeholder="1">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">eBook Metadata Profile ID</label>
+                                    <input type="text" id="chaptarrMetadataProfileId" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary" placeholder="2">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Audiobook Root Folder</label>
+                                    <input type="text" id="chaptarrAudiobookRootFolder" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary" placeholder="/audiobooks">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Audiobook Quality Profile ID</label>
+                                    <input type="text" id="chaptarrAudiobookQualityProfileId" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary" placeholder="2">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-steel-blue mb-1.5">Audiobook Metadata Profile ID</label>
+                                    <input type="text" id="chaptarrAudiobookMetadataProfileId" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary" placeholder="1">
+                                </div>
+                            </div>
+
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('chaptarr')" class="bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-lg text-sm font-semibold transition-all">Save</button>
+                                <button onclick="testConnection(&#39;chaptarr&#39;)" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5"><span class="material-symbols-outlined text-sm">wifi_tethering</span>Test</button>
+                                <button id="clearBtnchaptarr" onclick="clearIntegration('chaptarr')" class="hidden bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">delete</span>Clear
+                                </button>
+                                <div id="statusChaptarr" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- New York Times Books -->
+                <div class="accordion-item border-b border-steel-blue/20 last:border-b-0" data-accordion="nyt">
+                    <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('nyt')">
+                        <span class="material-symbols-outlined text-xl text-frosted-blue">trending_up</span>
+                        <span class="flex-1 font-bold text-frosted-blue">New York Times Books</span>
+                        <span class="accordion-status size-2 rounded-full bg-steel-blue/40 shrink-0" id="accordionDotNyt"></span>
+                        <span class="material-symbols-outlined text-steel-blue accordion-chevron transition-transform duration-200">expand_more</span>
+                    </button>
+                    <div class="accordion-body hidden px-5 pb-5" id="accordionBodyNyt">
+                        <div class="space-y-4 pt-1">
+                            <p class="text-xs text-steel-blue/70">Optional. Adds the New York Times bestseller lists to the Trending Books shelf and provides the only source for Trending Audiobooks. Free key from <span class="font-mono text-steel-blue">developer.nytimes.com</span> (1,000 requests/day). Without it the book shelf still works from Open Library alone.</p>
+                            <div>
+                                <label class="block text-xs font-semibold text-steel-blue mb-1.5">API Key</label>
+                                <input type="password" id="integrationNytApiKey" class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2.5 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary" placeholder="Leave empty to use Open Library only">
+                            </div>
+
+                            <div class="flex items-center gap-3 pt-1">
+                                <button onclick="saveIntegration('nyt')" class="bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-lg text-sm font-semibold transition-all">Save</button>
+                                
+                                <button id="clearBtnnyt" onclick="clearIntegration('nyt')" class="hidden bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-sm">delete</span>Clear
+                                </button>
+                                <div id="statusNyt" class="flex items-center gap-2 text-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Uptime Kuma -->
                 <div class="accordion-item border-b border-steel-blue/20 last:border-b-0" data-accordion="uptime_kuma">
                     <button type="button" class="accordion-trigger w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-cornflower-ocean/10 transition-colors" onclick="toggleAccordion('uptime_kuma')">
@@ -843,6 +961,22 @@
                             <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/tickets</span>
                         </div>
                         <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconCalendar">calendar_month</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">Calendar</label>
+                            <input type="text" id="sidebarLabelCalendar"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="Calendar">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/calendar</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconLibrary">menu_book</span>
+                            <label class="text-sm text-steel-blue w-28 shrink-0">eBooks</label>
+                            <input type="text" id="sidebarLabelLibrary"
+                                class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                                placeholder="eBooks">
+                            <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/library</span>
+                        </div>
+                        <div class="flex items-center gap-3">
                             <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconSettings">settings</span>
                             <label class="text-sm text-steel-blue w-28 shrink-0">Settings</label>
                             <input type="text" id="sidebarLabelSettings"
@@ -1016,37 +1150,6 @@
                                 class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
                                 placeholder="#000000" maxlength="7">
                         </div>
-                        <div class="flex flex-col items-center gap-1.5">
-                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Movie</label>
-                            <div class="relative group">
-                                <input type="color" id="themeColorMediaMovie" value="#E9D5FF"
-                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
-                            </div>
-                            <input type="text" id="themeColorMediaMovieHex"
-                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
-                                placeholder="#E9D5FF" maxlength="7">
-                        </div>
-                        <div class="flex flex-col items-center gap-1.5">
-                            <label class="text-[10px] font-semibold text-steel-blue uppercase">TV Show</label>
-                            <div class="relative group">
-                                <input type="color" id="themeColorMediaTv" value="#67E8F9"
-                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
-                            </div>
-                            <input type="text" id="themeColorMediaTvHex"
-                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
-                                placeholder="#67E8F9" maxlength="7">
-                        </div>
-                        <div class="flex flex-col items-center gap-1.5">
-                            <label class="text-[10px] font-semibold text-steel-blue uppercase">eBook</label>
-                            <div class="relative group">
-                                <input type="color" id="themeColorMediaBook" value="#FCD34D"
-                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
-                            </div>
-                            <input type="text" id="themeColorMediaBookHex"
-                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
-                                placeholder="#FCD34D" maxlength="7">
-                        </div>
-                    </div>
 
                     <!-- Font -->
                     <div class="mb-6">
@@ -1651,6 +1754,36 @@
 
         // Field mappings: integration key -> { url input id, credential input id, status div id }
         const integrationFields = {
+            kavita: {
+                // URL only - no shared credential. Each user gets their own
+                // Kavita token through the OIDC handshake, which is what keeps
+                // reading progress per-user.
+                urlInput: 'integrationKavitaUrl',
+                urlKey: 'integration.kavita.url',
+                statusDiv: 'statusKavita'
+            },
+            chaptarr: {
+                urlInput: 'integrationChaptarrUrl',
+                credInput: 'integrationChaptarrApiKey',
+                urlKey: 'integration.chaptarr.url',
+                credKey: 'integration.chaptarr.api_key',
+                statusDiv: 'statusChaptarr',
+                extraFields: [
+                    { input: 'chaptarrRootFolder', key: 'integration.chaptarr.root_folder' },
+                    { input: 'chaptarrQualityProfileId', key: 'integration.chaptarr.quality_profile_id' },
+                    { input: 'chaptarrMetadataProfileId', key: 'integration.chaptarr.metadata_profile_id' },
+                    { input: 'chaptarrAudiobookRootFolder', key: 'integration.chaptarr.audiobook_root_folder' },
+                    { input: 'chaptarrAudiobookQualityProfileId', key: 'integration.chaptarr.audiobook_quality_profile_id' },
+                    { input: 'chaptarrAudiobookMetadataProfileId', key: 'integration.chaptarr.audiobook_metadata_profile_id' },
+                ]
+            },
+            nyt: {
+                // Key only - the endpoint is api.nytimes.com, not something an
+                // operator configures.
+                credInput: 'integrationNytApiKey',
+                credKey: 'integration.nyt.api_key',
+                statusDiv: 'statusNyt'
+            },
             uptime_kuma: {
                 urlInput: 'integrationUptimeKumaUrl',
                 credInput: 'integrationUptimeKumaApiKey',
@@ -1721,10 +1854,9 @@
             var statusDiv = document.getElementById(fields.statusDiv);
 
             // Collect all setting keys to clear
-            var settingsToClear = [
-                { key: fields.urlKey, value: '', description: service + ' URL' },
-                { key: fields.credKey, value: '', description: service + ' credentials' }
-            ];
+            var settingsToClear = [];
+            if (fields.urlKey) settingsToClear.push({ key: fields.urlKey, value: '', description: service + ' URL' });
+            if (fields.credKey) settingsToClear.push({ key: fields.credKey, value: '', description: service + ' credentials' });
             if (fields.slugInput && fields.slugKey) {
                 document.getElementById(fields.slugInput).value = '';
                 settingsToClear.push({ key: fields.slugKey, value: '', description: service + ' slug' });
@@ -1738,8 +1870,8 @@
             }
 
             // Clear input fields
-            document.getElementById(fields.urlInput).value = '';
-            document.getElementById(fields.credInput).value = '';
+            if (fields.urlInput) document.getElementById(fields.urlInput).value = '';
+            if (fields.credInput) document.getElementById(fields.credInput).value = '';
 
             try {
                 var resp = await fetch('/api/admin/settings/bulk', {
@@ -1777,10 +1909,10 @@
 
                 // Populate integration fields
                 for (const [svc, fields] of Object.entries(integrationFields)) {
-                    if (settingsMap[fields.urlKey]) {
+                    if (fields.urlKey && fields.urlInput && settingsMap[fields.urlKey]) {
                         document.getElementById(fields.urlInput).value = settingsMap[fields.urlKey];
                     }
-                    if (settingsMap[fields.credKey]) {
+                    if (fields.credKey && fields.credInput && settingsMap[fields.credKey]) {
                         document.getElementById(fields.credInput).value = settingsMap[fields.credKey];
                     }
                     // Show clear button if integration has any saved data
@@ -1834,16 +1966,22 @@
         // Save an integration's settings
         async function saveIntegration(service) {
             const fields = integrationFields[service];
-            const urlVal = document.getElementById(fields.urlInput).value;
-            const credVal = document.getElementById(fields.credInput).value;
+            // Not every integration has both halves: Kavita is a URL with no
+            // credential (each user authenticates through their own OIDC
+            // handshake), and the NYT Books API is a key with no URL.
+            const urlEl = fields.urlInput ? document.getElementById(fields.urlInput) : null;
+            const credEl = fields.credInput ? document.getElementById(fields.credInput) : null;
+            const urlVal = urlEl ? urlEl.value : '';
+            const credVal = credEl ? credEl.value : '';
             const statusDiv = document.getElementById(fields.statusDiv);
 
-            const settingsToSave = [
-                { key: fields.urlKey, value: urlVal, description: `${service} URL` }
-            ];
+            const settingsToSave = [];
+            if (fields.urlKey) {
+                settingsToSave.push({ key: fields.urlKey, value: urlVal, description: `${service} URL` });
+            }
 
             // Save credentials: skip only the masked placeholder (which means "unchanged")
-            if (credVal !== '***masked***') {
+            if (fields.credKey && credVal !== '***masked***') {
                 settingsToSave.push({ key: fields.credKey, value: credVal, description: `${service} credentials` });
             }
 
@@ -2122,11 +2260,6 @@
             { picker: 'themeColorText', hex: 'themeColorTextHex', cssVar: '--color-text', key: 'theme.color_text' },
             { picker: 'themeColorTextSecondary', hex: 'themeColorTextSecondaryHex', cssVar: '--color-text-secondary', key: 'theme.color_text_secondary' },
             { picker: 'themeColorBackground', hex: 'themeColorBackgroundHex', cssVar: '--color-background', key: 'theme.color_background' },
-            // Media type accents - these tint the Request button noun and the
-            // type badge, so a type reads the same everywhere.
-            { picker: 'themeColorMediaMovie', hex: 'themeColorMediaMovieHex', cssVar: '--color-media-movie', key: 'theme.color_media_movie' },
-            { picker: 'themeColorMediaTv', hex: 'themeColorMediaTvHex', cssVar: '--color-media-tv', key: 'theme.color_media_tv' },
-            { picker: 'themeColorMediaBook', hex: 'themeColorMediaBookHex', cssVar: '--color-media-book', key: 'theme.color_media_book' },
         ];
 
         const THEME_DEFAULTS = {
@@ -2139,9 +2272,6 @@
             'theme.color_text': '#BEEEF4',
             'theme.color_text_secondary': '#FFFFFF',
             'theme.color_background': '#000000',
-            'theme.color_media_movie': '#E9D5FF',
-            'theme.color_media_tv': '#67E8F9',
-            'theme.color_media_book': '#FCD34D',
             'theme.font': 'Spline Sans',
             'theme.custom_css': '',
             'sidebar.label_home': 'Home',
@@ -2149,6 +2279,8 @@
             'sidebar.label_requests_embed': 'Requests (Embed)',
             'sidebar.label_issues': 'Issues',
             'sidebar.label_tickets': 'Tickets',
+            'sidebar.label_calendar': 'Calendar',
+            'sidebar.label_library': 'eBooks',
             'sidebar.label_settings': 'Settings',
             'icon.sidebar_logo': 'settings_input_component',
             'icon.nav_home': 'home',
@@ -2394,6 +2526,8 @@
                 document.getElementById('sidebarLabelRequestsEmbed').value = sidebarLabels['requests-embed'] || '';
                 document.getElementById('sidebarLabelIssues').value = sidebarLabels.issues || '';
                 document.getElementById('sidebarLabelTickets').value = sidebarLabels.tickets || '';
+                document.getElementById('sidebarLabelCalendar').value = sidebarLabels.calendar || '';
+                document.getElementById('sidebarLabelLibrary').value = sidebarLabels.library || '';
                 document.getElementById('sidebarLabelSettings').value = sidebarLabels.settings || '';
 
                 // Icons
@@ -2468,6 +2602,8 @@
             settings.push({ key: 'sidebar.label_requests_embed', value: document.getElementById('sidebarLabelRequestsEmbed').value || 'Requests (Embed)', description: 'Sidebar label for Requests (Embed)' });
             settings.push({ key: 'sidebar.label_issues', value: document.getElementById('sidebarLabelIssues').value || 'Issues', description: 'Sidebar label for Issues' });
             settings.push({ key: 'sidebar.label_tickets', value: document.getElementById('sidebarLabelTickets').value || 'Tickets', description: 'Sidebar label for Tickets' });
+            settings.push({ key: 'sidebar.label_calendar', value: document.getElementById('sidebarLabelCalendar').value || 'Calendar', description: 'Sidebar label for Calendar' });
+            settings.push({ key: 'sidebar.label_library', value: document.getElementById('sidebarLabelLibrary').value || 'eBooks', description: 'Sidebar label for the eBooks page' });
             settings.push({ key: 'sidebar.label_settings', value: document.getElementById('sidebarLabelSettings').value || 'Settings', description: 'Sidebar label for Settings' });
 
             // Icons
