@@ -55,6 +55,20 @@
     if (c.media_tv) root.style.setProperty('--hex-media-tv', c.media_tv);
     if (c.media_book) root.style.setProperty('--hex-media-book', c.media_book);
 
+    // Favicon follows the configured logo, so a rebranded install is branded
+    // in the browser tab too. The pages ship a static icon link as well, since
+    // this only runs once /api/branding answers - without it the browser asks
+    // for /favicon.ico and takes a 404 on every page load.
+    if (data.logo_url) {
+      var icon = document.querySelector('link[rel="icon"]');
+      if (!icon) {
+        icon = document.createElement('link');
+        icon.rel = 'icon';
+        document.head.appendChild(icon);
+      }
+      icon.href = data.logo_url;
+    }
+
     // Font
     if (data.font) {
       root.style.setProperty('--font-display', data.font + ', sans-serif');
