@@ -57,7 +57,8 @@
      specificity those come later in document order and win. */
   #bookContent {
     max-width: var(--reader-measure);
-    padding: 2rem 1.25rem 6rem;
+    /* Bottom padding clears the slim footer plus any home-indicator inset. */
+    padding: 2rem 1.25rem calc(3rem + env(safe-area-inset-bottom, 0px));
     column-count: var(--reader-columns);
     column-gap: 3rem;
   }
@@ -83,13 +84,103 @@
   .book-content a { text-decoration: underline; }
   .book-content h1, .book-content h2, .book-content h3 { line-height: 1.25; }
 
-  /* Tap zones for phones: left third back, right third forward. */
-  .tap-zone { position: fixed; top: 3.5rem; bottom: 3.5rem; width: 28%; z-index: 10; }
-  #tapPrev { left: 0; } #tapNext { right: 0; }
-  @media (min-width: 1024px) { .tap-zone { display: none; } }
+  /* Page turning is the primary interaction, so the whole left and right edges
+     are clickable - not just a small button. Excludes the top bar so the
+     controls there stay reachable. */
+  .nav-zone {
+    position: fixed;
+    top: 3.5rem;
+    bottom: 0;
+    width: 18%;
+    min-width: 4.5rem;
+    max-width: 14rem;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #navPrev { left: 0; justify-content: flex-start; padding-left: .5rem; }
+  #navNext { right: 0; justify-content: flex-end; padding-right: .5rem; }
+
+  /* The chevron sits vertically centred and stays quiet until you approach it. */
+  .nav-zone .chev {
+    display: flex; align-items: center; justify-content: center;
+    width: 2.75rem; height: 2.75rem; border-radius: 9999px;
+    background: rgb(var(--color-primary) / .18);
+    color: rgb(var(--color-text));
+    opacity: .35;
+    transition: opacity .18s ease, background .18s ease;
+  }
+  .nav-zone:hover .chev,
+  .nav-zone:focus-visible .chev { opacity: 1; background: rgb(var(--color-primary) / .45); }
+  .nav-zone:disabled { cursor: default; }
+  .nav-zone:disabled .chev { opacity: .08; }
+  .nav-zone:focus-visible { outline: 2px solid rgb(var(--color-accent)); outline-offset: -4px; }
+
+  @media (prefers-reduced-motion: reduce) { .nav-zone .chev { transition: none; } }
+
+  /* On touch there is no hover, and a persistent chevron sits on top of the
+     prose on a narrow screen. Keep the large tap target but hide the mark until
+     the tap actually happens - standard e-reader behaviour. */
+  @media (hover: none) {
+    .nav-zone .chev { opacity: 0; }
+    .nav-zone:active .chev { opacity: .8; }
+  }
+
+  /* ---- Phones ---- */
+  @media (max-width: 640px) {
+    /* Narrower edge targets so more of the line stays selectable, but still a
+       comfortable thumb target at the screen edge. */
+    .nav-zone { width: 22%; min-width: 3.25rem; }
+    .nav-zone .chev { width: 2.25rem; height: 2.25rem; }
+    #bookContent { padding-left: 1rem; padding-right: 1rem; }
+    /* Settings is a panel on desktop and a bottom sheet on a phone. */
+    #settingsPanel {
+      top: auto; right: 0; left: 0; bottom: 0;
+      width: auto; max-height: 75vh; overflow-y: auto;
+      border-radius: 1rem 1rem 0 0;
+      padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    }
+  }
+
+  /* Keep the fixed chrome clear of notches and home indicators. */
+  header { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+  #readerFooter { padding-bottom: env(safe-area-inset-bottom, 0px); }
 
   #tocPanel { transition: transform .25s ease; }
   #tocPanel.closed { transform: translateX(-100%); }
+  /* Firefox honours these; WebKit uses .custom-scrollbar from theme.css. */
+  #tocPanel { scrollbar-width: thin; scrollbar-color: var(--hex-secondary) var(--hex-background); }
+
+  /* Text scrolls beneath the footer, so fade it out into the reading surface -
+     otherwise the page counter collides with the last visible line. Uses the
+     reader background so it follows the chosen reading theme. */
+  #readerFooter {
+    background: linear-gradient(to bottom, transparent, var(--reader-bg) 55%);
+    padding-top: 1.25rem;
+  }
+
+  /* The slim progress rail reads as an indicator, not a control, until touched. */
+  #scrubber {
+    -webkit-appearance: none; appearance: none;
+    height: 3px; background: rgb(var(--color-accent) / .25);
+    cursor: pointer; margin: 0;
+  }
+  #scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 11px; height: 11px; border-radius: 9999px;
+    background: rgb(var(--color-primary)); border: none;
+    opacity: .5; transition: opacity .15s ease;
+  }
+  #scrubber:hover::-webkit-slider-thumb, #scrubber:focus::-webkit-slider-thumb { opacity: 1; }
+  #scrubber::-moz-range-thumb {
+    width: 11px; height: 11px; border-radius: 9999px;
+    background: rgb(var(--color-primary)); border: none;
+  }
+  #scrubber::-moz-range-track { height: 3px; background: rgb(var(--color-accent) / .25); }
   @media (prefers-reduced-motion: reduce) {
     #tocPanel, #readerSurface { transition: none; }
   }
@@ -116,7 +207,7 @@
 </header>
 
 <!-- Table of contents -->
-<aside id="tocPanel" class="closed fixed top-14 bottom-0 left-0 z-40 w-72 bg-background-dark border-r border-steel-blue/25 overflow-y-auto p-4">
+<aside id="tocPanel" class="closed custom-scrollbar fixed top-14 bottom-0 left-0 z-40 w-72 max-w-[85vw] bg-background-dark border-r border-steel-blue/25 overflow-y-auto p-4">
   <p class="text-xs uppercase tracking-wider text-steel-blue mb-3">Contents</p>
   <div id="tocList" class="space-y-1 text-sm"></div>
 </aside>
@@ -125,11 +216,12 @@
 <div id="settingsPanel" class="hidden fixed top-14 right-2 z-40 w-72 bg-background-dark border border-steel-blue/30 rounded-xl p-4 space-y-4 shadow-2xl">
   <div>
     <label class="block text-xs uppercase tracking-wider text-steel-blue mb-2">Theme</label>
-    <div class="grid grid-cols-4 gap-2" id="themeButtons">
-      <button data-theme="site"  class="px-2 py-2 rounded-lg border border-steel-blue/30 text-xs">Site</button>
-      <button data-theme="light" class="px-2 py-2 rounded-lg border border-steel-blue/30 text-xs">Light</button>
-      <button data-theme="sepia" class="px-2 py-2 rounded-lg border border-steel-blue/30 text-xs">Sepia</button>
-      <button data-theme="dark"  class="px-2 py-2 rounded-lg border border-steel-blue/30 text-xs">Dark</button>
+    <div class="grid grid-cols-5 gap-1.5" id="themeButtons">
+      <button data-theme="site"  class="px-1 py-2 rounded-lg border border-steel-blue/30 text-[11px]">Site</button>
+      <button data-theme="light" class="px-1 py-2 rounded-lg border border-steel-blue/30 text-[11px]">Light</button>
+      <button data-theme="sepia" class="px-1 py-2 rounded-lg border border-steel-blue/30 text-[11px]">Sepia</button>
+      <button data-theme="dark"  class="px-1 py-2 rounded-lg border border-steel-blue/30 text-[11px]">Dark</button>
+      <button data-theme="black" class="px-1 py-2 rounded-lg border border-steel-blue/30 text-[11px]">Black</button>
     </div>
   </div>
   <div>
@@ -151,7 +243,7 @@
 </div>
 
 <!-- Reading surface -->
-<div id="readerSurface" class="pt-14 pb-14 min-h-screen">
+<div id="readerSurface" class="pt-14 pb-6 min-h-screen">
   <div id="loading" class="py-24 text-center">
     <span class="material-symbols-outlined animate-spin text-3xl text-steel-blue">progress_activity</span>
     <p id="loadingText" class="mt-2 text-sm text-steel-blue">Opening book…</p>
@@ -166,19 +258,22 @@
   <div id="bookContent" class="book-content hidden"></div>
 </div>
 
-<div id="tapPrev" class="tap-zone"></div>
-<div id="tapNext" class="tap-zone"></div>
+<!-- Page turning: full-height edge targets, chevron centred vertically -->
+<button id="navPrev" class="nav-zone" aria-label="Previous page">
+  <span class="chev"><span class="material-symbols-outlined">chevron_left</span></span>
+</button>
+<button id="navNext" class="nav-zone" aria-label="Next page">
+  <span class="chev"><span class="material-symbols-outlined">chevron_right</span></span>
+</button>
 
-<!-- Bottom bar -->
-<footer class="fixed bottom-0 inset-x-0 z-30 h-14 bg-background-dark/95 backdrop-blur border-t border-steel-blue/25 flex items-center gap-3 px-3">
-  <button id="prevPage" class="p-2 rounded-lg hover:bg-baltic-blue/30 disabled:opacity-30" aria-label="Previous page">
-    <span class="material-symbols-outlined text-frosted-blue align-middle">chevron_left</span>
-  </button>
-  <input id="scrubber" type="range" min="0" max="0" value="0" class="flex-1" aria-label="Position in book"/>
-  <span id="pageInfo" class="text-xs text-steel-blue tabular-nums whitespace-nowrap"></span>
-  <button id="nextPage" class="p-2 rounded-lg hover:bg-baltic-blue/30 disabled:opacity-30" aria-label="Next page">
-    <span class="material-symbols-outlined text-frosted-blue align-middle">chevron_right</span>
-  </button>
+<!-- Bottom bar: deliberately minimal. Page turning happens at the edges, so
+     this is a position readout, not a control surface. -->
+<footer id="readerFooter" class="fixed bottom-0 inset-x-0 z-30 pointer-events-none">
+  <input id="scrubber" type="range" min="0" max="0" value="0"
+         class="pointer-events-auto block w-full" aria-label="Position in book"/>
+  <div class="flex justify-center">
+    <span id="pageInfo" class="pointer-events-none text-[11px] text-steel-blue/70 tabular-nums pb-1"></span>
+  </div>
 </footer>
 
 <script src="/static/js/auth.js"></script>
@@ -228,7 +323,10 @@
     site:  null,                                  // follow the site theme
     light: { bg: '#FBFAF7', fg: '#1A1A1A' },
     sepia: { bg: '#F4ECD8', fg: '#4A3B28' },
-    dark:  { bg: '#111315', fg: '#D6D6D6' }
+    dark:  { bg: '#111315', fg: '#D6D6D6' },
+    // True #000 so OLED pixels switch off entirely. Text is held slightly below
+    // pure white: full-contrast white on black haloes badly on OLED.
+    black: { bg: '#000000', fg: '#C9CCD1' }
   };
 
   function applyPrefs() {
@@ -368,8 +466,8 @@
     var s = el('scrubber');
     s.max = book.pages ? book.pages - 1 : 0;
     s.value = current.page;
-    el('prevPage').disabled = current.page <= 0;
-    el('nextPage').disabled = book.pages ? current.page >= book.pages - 1 : false;
+    el('navPrev').disabled = current.page <= 0;
+    el('navNext').disabled = book.pages ? current.page >= book.pages - 1 : false;
   }
 
   // ---- Progress ----
@@ -429,10 +527,8 @@
     el('settingsPanel').classList.toggle('hidden');
   });
 
-  el('prevPage').addEventListener('click', function () { goToPage(current.page - 1); });
-  el('nextPage').addEventListener('click', function () { goToPage(current.page + 1); });
-  el('tapPrev').addEventListener('click', function () { goToPage(current.page - 1); });
-  el('tapNext').addEventListener('click', function () { goToPage(current.page + 1); });
+  el('navPrev').addEventListener('click', function () { goToPage(current.page - 1); });
+  el('navNext').addEventListener('click', function () { goToPage(current.page + 1); });
 
   el('scrubber').addEventListener('change', function (e) {
     goToPage(parseInt(e.target.value, 10) || 0);
