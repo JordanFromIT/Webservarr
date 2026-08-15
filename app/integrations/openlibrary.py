@@ -31,8 +31,14 @@ SEARCH_URL = "https://openlibrary.org/search.json"
 COVER_URL = "https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
 
 # Short: covers are a nicety and must never hold up a search.
-LOOKUP_TIMEOUT = 6.0
+LOOKUP_TIMEOUT = 3.0
 IMAGE_TIMEOUT = 10.0
+
+# Hard ceiling on the whole cover phase. Per-request timeouts are not enough:
+# each book makes up to two attempts in sequence, so a batch of slow lookups
+# could stack to 12s even running concurrently. Whatever has resolved when this
+# expires is used, and the rest of the books simply show a placeholder glyph.
+COVER_PHASE_BUDGET = 4.0
 
 # Bounded in-process caches. Covers effectively never change, and a search
 # repeats the same titles constantly.
@@ -155,10 +161,16 @@ async def cover_ids(books: List[Tuple[str, str]]) -> Dict[Tuple[str, str], int]:
 
     try:
         async with httpx.AsyncClient(timeout=LOOKUP_TIMEOUT) as client:
-            results = await asyncio.gather(
-                *[_lookup_one(client, t, a) for t, a in books],
-                return_exceptions=True,
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    *[_lookup_one(client, t, a) for t, a in books],
+                    return_exceptions=True,
+                ),
+                timeout=COVER_PHASE_BUDGET,
             )
+    except asyncio.TimeoutError:
+        logger.info("Open Library lookup exceeded %.0fs; showing placeholders", COVER_PHASE_BUDGET)
+        return {}
     except Exception as exc:  # noqa: BLE001 - covers must never break search
         logger.warning("Open Library lookup failed: %s", exc)
         return {}
