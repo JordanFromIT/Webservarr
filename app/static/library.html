@@ -46,14 +46,8 @@
 
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8">
 
-  <!-- Continue reading -->
-  <section id="continueSection" class="hidden">
-    <div class="flex items-center gap-3 mb-4">
-      <span class="material-symbols-outlined text-steel-blue">book_ribbon</span>
-      <h3 class="text-xl font-bold text-frosted-blue">Continue Reading</h3>
-    </div>
-    <div id="continueRow" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8 gap-4"></div>
-  </section>
+  <!-- Discovery shelves: continue reading, recently added, top rated -->
+  <div id="shelves" class="space-y-8"></div>
 
   <!-- Library -->
   <section>
@@ -147,6 +141,11 @@
     var body = { statements: [], combination: 0, limitTo: 0 };
     if (extra) { for (var k in extra) body[k] = extra[k]; }
     return JSON.stringify(body);
+  }
+
+  /** Shelves are browsing aids; they only make sense when not searching. */
+  function setShelvesVisible(visible) {
+    el('shelves').classList.toggle('hidden', !visible);
   }
 
   function show(which) {
@@ -246,6 +245,7 @@
 
   function runSearch(query) {
     state.query = query;
+    setShelvesVisible(!query);
     if (!query) { state.page = 1; loadPage(); return; }
     show('loadingState');
     kavita('/api/Search/search?queryString=' + encodeURIComponent(query))
@@ -287,22 +287,83 @@
       });
   }
 
-  function loadContinue() {
-    kavita('/api/Series/on-deck?pageNumber=1&pageSize=8', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: filterBody()
-    }).then(function (res) {
-      return res.ok ? res.json() : [];
-    }).then(function (items) {
-      if (!items || !items.length) return;
-      var row = el('continueRow');
-      row.innerHTML = '';
-      items.forEach(function (s) { row.appendChild(bookCard(s)); });
-      el('continueSection').classList.remove('hidden');
-    }).catch(function () {
-      /* Continue-reading is a convenience shelf; never block the library on it. */
-    });
+  /**
+   * Discovery shelves, in the spirit of the Plex home screen.
+   *
+   * Note these come from endpoints a normal user can reach. Kavita's
+   * stats/popular-* endpoints return 403 for non-admins — they are server
+   * statistics, not a discovery feed — so "popular" is not available here.
+   * Sorting the catalog is, which is what Top Rated uses.
+   */
+  var SHELVES = [
+    {
+      id: 'continue', title: 'Continue Reading', icon: 'book_ribbon',
+      load: function () {
+        return kavita('/api/Series/on-deck?pageNumber=1&pageSize=8', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: filterBody()
+        });
+      }
+    },
+    {
+      id: 'recent', title: 'Recently Added', icon: 'new_releases',
+      load: function () {
+        return kavita('/api/Series/all-v2?pageNumber=1&pageSize=8', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          // sortField 2 = Created
+          body: filterBody({ sortOptions: { sortField: 2, isAscending: false } })
+        });
+      }
+    },
+    {
+      id: 'toprated', title: 'Top Rated', icon: 'star',
+      // Meaningful only once books have been rated; until then the ordering is
+      // effectively arbitrary, so the shelf hides itself when nothing is rated.
+      requiresRatings: true,
+      load: function () {
+        return kavita('/api/Series/all-v2?pageNumber=1&pageSize=8', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          // sortField 8 = AverageRating
+          body: filterBody({ sortOptions: { sortField: 8, isAscending: false } })
+        });
+      }
+    }
+  ];
+
+  function renderShelf(shelf, items) {
+    if (!items || !items.length) return;
+    if (shelf.requiresRatings) {
+      var anyRated = items.some(function (s) {
+        return (s.userRating || 0) > 0 || (s.avgRating || 0) > 0;
+      });
+      if (!anyRated) return;   // nothing rated yet; an arbitrary order helps nobody
+    }
+
+    var section = document.createElement('section');
+    section.id = 'shelf-' + shelf.id;
+    var head = document.createElement('div');
+    head.className = 'flex items-center gap-3 mb-4';
+    head.innerHTML =
+      '<span class="material-symbols-outlined text-steel-blue">' + shelf.icon + '</span>' +
+      '<h3 class="text-xl font-bold text-frosted-blue">' + escapeHtml(shelf.title) + '</h3>';
+    var row = document.createElement('div');
+    row.className = 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8 gap-4';
+    items.forEach(function (s) { row.appendChild(bookCard(s)); });
+    section.appendChild(head);
+    section.appendChild(row);
+    el('shelves').appendChild(section);
+  }
+
+  function loadShelves() {
+    el('shelves').innerHTML = '';
+    // Sequential so the shelves always render in a stable order.
+    return SHELVES.reduce(function (chain, shelf) {
+      return chain.then(function () {
+        return shelf.load()
+          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (items) { renderShelf(shelf, items); })
+          .catch(function () { /* a shelf is a convenience; never block the library */ });
+      });
+    }, Promise.resolve());
   }
 
   function showUnavailable(err) {
@@ -333,7 +394,7 @@
     var canAdvance = state.totalPages ? state.page < state.totalPages : state.hasNext;
     if (canAdvance) { state.page++; loadPage(); }
   });
-  el('retryBtn').addEventListener('click', function () { loadPage(); loadContinue(); });
+  el('retryBtn').addEventListener('click', function () { loadPage(); loadShelves(); });
 
   document.addEventListener('DOMContentLoaded', function () {
     // header.js self-initialises on load; calling it again renders a second header.
@@ -362,7 +423,7 @@
       /* checkAuth redirects to /login itself when unauthenticated. */
     });
 
-    loadContinue();
+    loadShelves();
     loadPage();
   });
 })();
