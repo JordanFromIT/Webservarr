@@ -8,6 +8,7 @@ import asyncio
 import logging
 import httpx
 from app.database import SessionLocal
+from app.integrations import sonarr
 from app.models import Setting
 
 logger = logging.getLogger(__name__)
@@ -257,6 +258,8 @@ async def search_media(query: str, page: int = 1) -> dict:
                     "media_info_id": media_info.get("id") if media_info else None,
                 })
 
+            await _attach_episode_counts(results)
+
             return {
                 "page": data.get("page", 1),
                 "totalPages": data.get("totalPages", 0),
@@ -267,6 +270,44 @@ async def search_media(query: str, page: int = 1) -> dict:
     except Exception as e:
         logger.error("Seerr search error: %s", str(e))
         return {"page": 1, "totalPages": 0, "totalResults": 0, "results": []}
+
+
+async def _attach_episode_counts(results: list) -> None:
+    """
+    Put an exact episode count on partially-available shows.
+
+    "Partly available" tells a reader nothing; "36 of 44 Episodes" tells them
+    exactly what they would be requesting. The numbers come from Sonarr, which
+    tracks a file per episode - see sonarr.episode_counts() for why Seerr's own
+    data cannot answer this.
+
+    A show whose only gap is its specials season comes back complete here, and
+    is promoted to plain "Available": specials are not what anyone means by a
+    complete show, and flagging one as partial sends people to request
+    something they already have.
+    """
+    targets = [
+        r for r in results
+        if r.get("media_type") == "tv" and r.get("media_status") == "partially_available"
+    ]
+    if not targets:
+        return
+
+    try:
+        counts = await sonarr.episode_counts()
+    except Exception as e:  # noqa: BLE001 - counts are a nicety, never fatal
+        logger.warning("Episode count lookup failed: %s", e)
+        return
+
+    for result in targets:
+        count = counts.get(result.get("id"))
+        if not count:
+            continue
+        available, total = count
+        if available >= total:
+            result["media_status"] = "available"
+        else:
+            result["episodes_available"], result["episodes_total"] = available, total
 
 
 async def create_request(media_type: str, media_id: int, is4k: bool = False) -> dict:
