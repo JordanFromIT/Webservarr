@@ -183,9 +183,22 @@ async def get_recent_requests(
     limit: int = 10,
     current_user: dict = Depends(get_current_user),
 ):
-    """Get recent Seerr requests. Requires authentication."""
-    requests = await seerr.get_recent_requests(limit=limit)
-    return requests
+    """
+    Recent requests across every backend.
+
+    Books live in Chaptarr rather than Seerr, so a Seerr-only panel silently
+    dropped every ebook and audiobook request that was ever made. Both sources
+    are merged and re-sorted by date so the panel shows what was actually
+    requested most recently, whatever kind of thing it was.
+    """
+    screen, books = await asyncio.gather(
+        seerr.get_recent_requests(limit=limit),
+        chaptarr.recent_requests(limit=limit),
+        return_exceptions=True,
+    )
+    merged = (screen if isinstance(screen, list) else []) + (books if isinstance(books, list) else [])
+    merged.sort(key=lambda r: r.get("requested_date") or "", reverse=True)
+    return merged[:limit]
 
 
 @router.get("/request-counts")
@@ -398,15 +411,17 @@ async def library_summary(current_user: dict = Depends(get_current_user)):
     if cached and (time.monotonic() - cached[0]) < _LIBRARY_SUMMARY_TTL:
         return cached[1]
 
-    tv, film, books = await asyncio.gather(
+    tv, film, books, waits = await asyncio.gather(
         sonarr.library_summary(),
         radarr.library_summary(),
         chaptarr.library_summary(),
+        seerr.availability_times(),
         return_exceptions=True,
     )
     tv = tv if isinstance(tv, dict) else {}
     film = film if isinstance(film, dict) else {}
     books = books if isinstance(books, dict) else {}
+    waits = waits if isinstance(waits, dict) else {}
 
     summary = {
         "movies": film.get("movies", 0),
@@ -418,14 +433,19 @@ async def library_summary(current_user: dict = Depends(get_current_user)):
         "seasons": tv.get("seasons", 0),
         "complete_seasons": tv.get("complete_seasons", 0),
         "books": books.get("books", 0),
+        "ebooks": books.get("ebooks", 0),
+        "audiobooks": books.get("audiobooks", 0),
+        # Titles actively being chased, and titles simply not out yet. Kept
+        # apart because a film awaiting its cinema release is not a problem,
+        # and counting it as one makes the queue look stuck.
+        "in_progress": film.get("in_progress", 0) + tv.get("in_progress", 0),
+        "unreleased": film.get("unreleased", 0),
+        # Median rather than mean; see seerr.availability_times.
+        "wait_minutes": waits,
         # Every service reports bytes per title, so the total is free once the
         # lists have been walked. Books are a rounding error against video but
         # are included so "on disk" means the whole library, not most of it.
         "bytes": tv.get("bytes", 0) + film.get("bytes", 0) + books.get("bytes", 0),
-        # Free space is taken, never summed: Sonarr, Radarr and Chaptarr all
-        # sit on the same pool and each report the same figure, so adding them
-        # would report three times the space that exists.
-        "free_bytes": books.get("free_bytes", 0),
         "added_recently": tv.get("added_recently", 0) + film.get("added_recently", 0),
         "recent_days": 30,
     }

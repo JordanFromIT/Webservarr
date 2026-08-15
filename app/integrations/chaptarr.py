@@ -464,52 +464,145 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
 
 async def library_summary() -> dict:
     """
-    Shape of the book library: {books, bytes, free_bytes}.
+    Shape of the book library: {books, ebooks, audiobooks, bytes}.
 
-    Counted from authors rather than books. Chaptarr populates sizeOnDisk and
-    file counts on the author record; the per-book statistics come back as
-    zeroes, so summing books reports an empty library.
+    Totals come from the author records, because Chaptarr leaves the per-book
+    statistics at zero - summing books reports an empty library.
+
+    The count is `availableBookCount`, NOT `bookFileCount`. The latter counts
+    files: 1,608 of them against 127 actual books, because an audiobook is
+    stored as one file per chapter and an ebook often exists in several
+    formats. Reporting files as books overstated the library twelvefold.
+
+    Ebooks and audiobooks are told apart by which root folder their files sit
+    in, the author records carrying no rootFolderPath.
     """
     cfg = _get_config()
-    empty = {"books": 0, "bytes": 0, "free_bytes": 0}
+    empty = {"books": 0, "ebooks": 0, "audiobooks": 0, "bytes": 0}
     if not cfg["url"] or not cfg["api_key"]:
         return empty
 
     try:
         async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
-            authors = await client.get(
+            resp = await client.get(
                 f"{cfg['url']}/api/v1/author", headers={"X-Api-Key": cfg["api_key"]}
             )
-            folders = await client.get(
-                f"{cfg['url']}/api/v1/rootfolder", headers={"X-Api-Key": cfg["api_key"]}
-            )
-    except httpx.RequestError as exc:
+        if resp.status_code != 200:
+            return empty
+        authors = resp.json()
+    except (httpx.RequestError, ValueError) as exc:
         logger.warning("Chaptarr library summary failed: %s", exc)
         return empty
 
-    if authors.status_code != 200:
-        return empty
-
-    try:
-        rows = authors.json()
-    except ValueError:
-        return empty
-
-    free = 0
-    if folders.status_code == 200:
-        try:
-            # Highest rather than summed: every root folder here sits on the
-            # same pool and reports the same figure, so adding them would
-            # multiply the free space by the number of folders.
-            free = max((f.get("freeSpace") or 0) for f in folders.json()) if folders.json() else 0
-        except (ValueError, TypeError):
-            free = 0
+    ebooks, audiobooks = set(), set()
+    for entry in await _book_files():
+        book_id, path = entry.get("bookId"), entry.get("path") or ""
+        if not book_id:
+            continue
+        if "/audiobooks" in path:
+            audiobooks.add(book_id)
+        elif "/ebooks" in path:
+            ebooks.add(book_id)
 
     return {
-        "books": sum((a.get("statistics") or {}).get("bookFileCount", 0) for a in rows),
-        "bytes": sum((a.get("statistics") or {}).get("sizeOnDisk", 0) for a in rows),
-        "free_bytes": free,
+        "books": sum((a.get("statistics") or {}).get("availableBookCount", 0) for a in authors),
+        "ebooks": len(ebooks),
+        "audiobooks": len(audiobooks),
+        "bytes": sum((a.get("statistics") or {}).get("sizeOnDisk", 0) for a in authors),
     }
+
+
+async def _book_files() -> List[Dict[str, Any]]:
+    """
+    Every book file Chaptarr holds, with its book id, path and date.
+
+    The bookfile endpoint refuses an unfiltered listing ("authorId, bookId,
+    bookFileIds or unmapped must be provided"), so files are gathered per
+    author and stitched back together. One call per author, twelve authors.
+    """
+    cfg = _get_config()
+    if not cfg["url"] or not cfg["api_key"]:
+        return []
+
+    headers = {"X-Api-Key": cfg["api_key"]}
+    files: List[Dict[str, Any]] = []
+    try:
+        async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
+            authors = await client.get(f"{cfg['url']}/api/v1/author", headers=headers)
+            if authors.status_code != 200:
+                return []
+            for author in authors.json():
+                resp = await client.get(
+                    f"{cfg['url']}/api/v1/bookfile",
+                    params={"authorId": author.get("id")},
+                    headers=headers,
+                )
+                if resp.status_code == 200:
+                    files.extend(resp.json())
+    except (httpx.RequestError, ValueError) as exc:
+        logger.warning("Chaptarr book files failed: %s", exc)
+        return []
+    return files
+
+
+async def recent_requests(limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    Recently acquired books, shaped like Seerr's recent requests.
+
+    Without this the home page's Recent Requests panel reads Seerr only, so
+    someone who requests an ebook sees no trace of it anywhere - the request
+    succeeds and the site never mentions it again.
+
+    Dated from the file rather than the book: Chaptarr book records carry only
+    a releaseDate, which is when the book was published, not when anyone here
+    asked for it. The file's dateAdded is when it actually arrived.
+    """
+    files = await _book_files()
+    if not files:
+        return []
+
+    cfg = _get_config()
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+            resp = await client.get(
+                f"{cfg['url']}/api/v1/book", headers={"X-Api-Key": cfg["api_key"]}
+            )
+        titles = {
+            b.get("id"): b
+            for b in (resp.json() if resp.status_code == 200 else [])
+            if isinstance(b, dict)
+        }
+    except (httpx.RequestError, ValueError):
+        titles = {}
+
+    # One entry per book, dated by its earliest file - an audiobook arrives as
+    # hundreds of chapter files and would otherwise flood the panel.
+    first_seen: Dict[Any, Dict[str, Any]] = {}
+    for entry in files:
+        book_id, added = entry.get("bookId"), entry.get("dateAdded")
+        if not book_id or not added:
+            continue
+        current = first_seen.get(book_id)
+        if not current or added < current["added"]:
+            first_seen[book_id] = {"added": added, "path": entry.get("path") or ""}
+
+    ordered = sorted(first_seen.items(), key=lambda kv: kv[1]["added"], reverse=True)
+
+    out = []
+    for book_id, info in ordered[:limit]:
+        book = titles.get(book_id) or {}
+        author = book.get("author") or {}
+        out.append({
+            "id": book_id,
+            "media_title": book.get("title") or "Unknown",
+            "media_type": "audiobook" if "/audiobooks" in info["path"] else "book",
+            "poster_url": "",
+            "author": author.get("authorName") or book.get("authorTitle") or "",
+            "status": "available",
+            "requested_date": info["added"],
+            "updated_date": info["added"],
+        })
+    return out
 
 
 async def test_connection() -> tuple:

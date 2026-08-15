@@ -6,6 +6,9 @@ and issue management (list, detail, create, comment).
 
 import asyncio
 import logging
+import time
+from datetime import datetime
+from statistics import median
 import httpx
 from app.database import SessionLocal
 from app.integrations import sonarr
@@ -745,3 +748,87 @@ async def get_discover_list(list_type: str, page: int = 1) -> list:
     except Exception as e:
         logger.error("Seerr discover/%s error: %s", list_type, e)
         return []
+
+
+# Time-to-availability walks every request, so it is cached hard. The figure
+# barely moves and is far too expensive to compute per page load.
+_WAIT_TTL = 3600.0
+_wait_cache: dict = {}
+
+
+def _parse_ts(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
+async def availability_times() -> dict:
+    """
+    How long requests actually take to become available, by media type.
+
+    Reports the MEDIAN, not the mean. The two disagree wildly here: the typical
+    film lands in about twelve minutes, but a handful requested before release
+    and fulfilled months later drag the mean past thirteen days. The mean is
+    arithmetically the average and a lie about the experience - nobody waits
+    two weeks. The median is what a person should expect.
+
+    Returns {movie: minutes, tv: minutes, total: minutes, sample: n}, with
+    missing types simply absent.
+    """
+    cached = _wait_cache.get("all")
+    if cached and (time.monotonic() - cached[0]) < _WAIT_TTL:
+        return cached[1]
+
+    config = _get_config()
+    if not config["url"] or not config["api_key"]:
+        return {}
+
+    rows = []
+    try:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+            skip, total = 0, None
+            while total is None or skip < min(total, 2000):
+                resp = await client.get(
+                    f"{config['url']}/api/v1/request",
+                    params={"take": 100, "skip": skip, "sort": "added"},
+                    headers={"X-Api-Key": config["api_key"]},
+                )
+                if resp.status_code != 200:
+                    break
+                payload = resp.json()
+                page = payload.get("results") or []
+                if not page:
+                    break
+                rows.extend(page)
+                total = (payload.get("pageInfo") or {}).get("results") or len(rows)
+                skip += 100
+    except (httpx.RequestError, ValueError) as exc:
+        logger.warning("Seerr availability times failed: %s", exc)
+        return {}
+
+    waits = {}
+    for request in rows:
+        media = request.get("media") or {}
+        asked = _parse_ts(request.get("createdAt"))
+        landed = _parse_ts(media.get("mediaAddedAt"))
+        if not asked or not landed or landed <= asked:
+            continue
+        waits.setdefault(request.get("type") or "other", []).append(
+            (landed - asked).total_seconds() / 60
+        )
+
+    result = {}
+    everything = []
+    for media_type, values in waits.items():
+        everything.extend(values)
+        result[media_type] = round(median(values))
+    if everything:
+        result["total"] = round(median(everything))
+        result["sample"] = len(everything)
+
+    if result:
+        _wait_cache["all"] = (time.monotonic(), result)
+    return result

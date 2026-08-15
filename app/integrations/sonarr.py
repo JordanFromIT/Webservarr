@@ -168,7 +168,7 @@ async def library_summary() -> dict:
     empty = {
         "shows": 0, "episodes": 0, "episodes_total": 0, "complete_shows": 0,
         "missing_episodes": 0, "percent": 0, "bytes": 0, "added_recently": 0,
-        "seasons": 0, "complete_seasons": 0,
+        "seasons": 0, "complete_seasons": 0, "in_progress": 0,
     }
     if not started:
         return empty
@@ -186,6 +186,9 @@ async def library_summary() -> dict:
         # Share of shows that are complete, which is a fact a reader can check
         # rather than a statistic they have to take on trust.
         "percent": round(100 * complete / len(started)),
+        # Shows with aired episodes still missing - the ones actually being
+        # chased, as distinct from shows simply waiting on a broadcast.
+        "in_progress": len(started) - complete,
         "seasons": _last_seasons_total,
         "complete_seasons": _last_seasons_complete,
         "bytes": _last_series_bytes,

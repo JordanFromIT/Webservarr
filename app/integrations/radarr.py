@@ -40,7 +40,7 @@ async def library_summary() -> dict:
     """
     config = _get_config()
     if not config["url"] or not config["api_key"]:
-        return {"movies": 0, "tracked": 0, "bytes": 0, "added_recently": 0}
+        return {"movies": 0, "tracked": 0, "bytes": 0, "added_recently": 0, "in_progress": 0, "unreleased": 0}
 
     try:
         async with httpx.AsyncClient(timeout=20.0, verify=False) as client:
@@ -65,11 +65,23 @@ async def library_summary() -> dict:
         return {"movies": 0, "tracked": 0}
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS)).isoformat()
+
+    # Wanted films split by whether the film exists yet. Radarr's status is the
+    # authority: "released" means it is out and simply has not been found, while
+    # "announced" and "inCinemas" mean no home release exists to find. Lumping
+    # them together would report two dozen films as stuck when nothing is wrong
+    # with them.
+    wanted = [m for m in movies if m.get("monitored") and not m.get("hasFile")]
+    in_progress = sum(1 for m in wanted if m.get("status") == "released")
+    unreleased = sum(1 for m in wanted if m.get("status") in ("announced", "inCinemas", "tba"))
+
     return {
         "movies": sum(1 for m in movies if m.get("hasFile")),
         "tracked": len(movies),
         "bytes": sum(m.get("sizeOnDisk") or 0 for m in movies),
         "added_recently": sum(1 for m in movies if (m.get("added") or "") > cutoff),
+        "in_progress": in_progress,
+        "unreleased": unreleased,
     }
 
 
