@@ -43,7 +43,11 @@
      The slot carries the absolute positioning rather than the bar itself - the
      bar must stay position:relative for its own search icon. -->
 <div id="searchHome" class="relative h-0 z-20">
-  <div id="searchHomeSlot" class="absolute right-0 top-0 w-full max-w-lg"></div>
+  <!-- Centred with auto margins, NOT a transform: a transformed ancestor makes
+       position:fixed resolve against that element instead of the viewport,
+       which breaks pinning the bar during its move. Nudged up so it centres on
+       the heading band rather than hanging into the poster row. -->
+  <div id="searchHomeSlot" class="absolute inset-x-0 -top-1 w-full max-w-lg mx-auto"></div>
 </div>
 
 <!-- Discover Section -->
@@ -659,7 +663,7 @@ function buildSearchCard(item) {
     } else {
         // Same rectangle as the button, so the card keeps its shape. The type
         // is carried here too, since there is no button to state it.
-        stdHtml = getStatusBlock(combinedStatus, mediaType, typeBadge);
+        stdHtml = getStatusBlock(combinedStatus, mediaType, typeBadge, item);
     }
 
     // No type pill on the card: the media type is carried by the action itself
@@ -859,15 +863,21 @@ function moveSearchBar(position) {
     _searchMoveTimers = [];
 
     var input = document.getElementById('searchInput');
-    var hadFocus = document.activeElement === input;
-    var selStart = hadFocus ? input.selectionStart : null;
-    var selEnd = hadFocus ? input.selectionEnd : null;
 
     function settle() {
+        // The caret is read here, immediately before the move - NOT when the
+        // move was scheduled. The animation runs for half a second and the user
+        // keeps typing through it; restoring a caret captured back then drops
+        // it into the middle of what they have since written, so "Test" comes
+        // out "Tste".
+        var hadFocus = document.activeElement === input;
+        var selStart = hadFocus ? input.selectionStart : null;
+        var selEnd = hadFocus ? input.selectionEnd : null;
+
         target.appendChild(bar);
         bar.style.cssText = '';
-        // Reparenting blurs a focused descendant, so the caret is restored or
-        // the next keystroke goes nowhere.
+
+        // Reparenting blurs a focused descendant, so focus and caret go back.
         if (hadFocus) {
             input.focus({preventScroll: true});
             try { input.setSelectionRange(selStart, selEnd); } catch (e) { /* not selectable */ }
@@ -880,7 +890,7 @@ function moveSearchBar(position) {
         return;
     }
 
-    // 1. Pin the bar where it currently appears, so the scroll does not drag it.
+    // 1. Pin the bar where it currently appears, so the scroll cannot drag it.
     var start = bar.getBoundingClientRect();
     bar.style.position = 'fixed';
     bar.style.top = start.top + 'px';
@@ -891,48 +901,24 @@ function moveSearchBar(position) {
     bar.style.zIndex = '50';
     bar.style.transition = 'none';
 
-    // 2. Scroll the destination into view underneath it.
+    // 2. Jump the page to the destination instantly.
+    //
+    // Deliberately not a smooth scroll. Scrolling smoothly and then gliding
+    // produces two separate motions - the content slides up, which reads as the
+    // bar moving down, and only then does the bar move sideways. That is the
+    // backwards-L. Doing the scroll in a single frame leaves exactly one thing
+    // moving: the bar, travelling diagonally to its slot. The content jump
+    // happens behind the eye's focus, which is on the bar.
     var scrollAnchor = position === 'dock'
         ? (document.getElementById('searchResultsSection') || {}).parentElement || target
         : document.getElementById('discoverSection') || target;
     if (scrollAnchor && scrollAnchor.scrollIntoView) {
-        scrollAnchor.scrollIntoView({behavior: 'smooth', block: 'start'});
+        scrollAnchor.scrollIntoView({behavior: 'auto', block: 'start'});
     }
 
-    // 3. Once the scroll has actually settled, glide the bar into its slot.
-    //
-    // Waiting a fixed delay is not enough: a smooth scroll of ~1700px is still
-    // running at that point, so the slot gets measured mid-flight and the bar
-    // animates toward a stale target, then snaps when it finally lands.
-    var scroller = bar.closest('.custom-scrollbar');
-    var glided = false;
-
-    function whenScrollSettles(run) {
-        if (!scroller) { _searchMoveTimers.push(setTimeout(run, 420)); return; }
-        var lastTop = scroller.scrollTop;
-        var stableFor = 0;
-        (function poll() {
-            _searchMoveTimers.push(setTimeout(function () {
-                if (glided) return;
-                if (scroller.scrollTop === lastTop) {
-                    stableFor += 60;
-                    // Two consecutive still frames means the scroll has stopped.
-                    if (stableFor >= 120) { run(); return; }
-                } else {
-                    lastTop = scroller.scrollTop;
-                    stableFor = 0;
-                }
-                poll();
-            }, 60));
-        })();
-        // Hard ceiling, so a scroll that never reports settling still resolves.
-        _searchMoveTimers.push(setTimeout(function () { if (!glided) run(); }, 900));
-    }
-
-    whenScrollSettles(function () {
-        if (glided) return;
-        glided = true;
-        // Measure the slot by briefly placing a stand-in of the bar's size.
+    // 3. Glide diagonally into the slot. The destination is measured after the
+    //    jump, so it is final - nothing moves underneath mid-animation.
+    requestAnimationFrame(function () {
         var probe = document.createElement('div');
         probe.style.height = start.height + 'px';
         probe.className = 'w-full';
@@ -940,28 +926,38 @@ function moveSearchBar(position) {
         var end = probe.getBoundingClientRect();
         target.removeChild(probe);
 
-        bar.style.transition = 'top .45s cubic-bezier(.4,0,.2,1), left .45s cubic-bezier(.4,0,.2,1), width .45s cubic-bezier(.4,0,.2,1)';
+        // One transition over all three properties, so position and width
+        // resolve together and the path is a straight line.
+        //
+        // 0.85s with a slow-out curve: the bar is the only thing moving on a
+        // page that just jumped, so it has to be followable. At half a second
+        // it reads as a snap rather than a glide.
+        var EASE = 'cubic-bezier(.32,.72,0,1)';
+        bar.style.transition = 'top .85s ' + EASE + ', left .85s ' + EASE + ', width .85s ' + EASE;
         bar.style.top = end.top + 'px';
         bar.style.left = end.left + 'px';
         bar.style.width = end.width + 'px';
 
-        _searchMoveTimers.push(setTimeout(settle, 470));
+        _searchMoveTimers.push(setTimeout(settle, 870));
     });
 }
 
-function getStatusPresentation(status, mediaType) {
+function getStatusPresentation(status, mediaType, item) {
     switch (status) {
         case 'available':
         case 'completed':
             return {bg: 'bg-green-500/15', text: 'text-green-400', border: 'border-green-500/30', label: 'Available'};
 
         case 'partially_available':
-            // Seerr only sets this when some seasons or episodes exist, so name
-            // the actual situation rather than saying "Partial", which tells a
-            // person nothing about what they can watch.
+            // A count beats any adjective: "48 of 62 Episodes" tells someone
+            // exactly what they are getting, where "Partial" tells them
+            // nothing. Falls back to words when the count is unavailable.
             return {
                 bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30',
-                label: mediaType === 'tv' ? 'Some Episodes' : 'Partly Available'
+                label: (item && item.episodes_total)
+                    ? item.episodes_available + ' of ' + item.episodes_total + ' Episodes'
+                    : 'Partly Available',
+                selfDescribing: !!(item && item.episodes_total)
             };
 
         case 'processing':
@@ -992,8 +988,11 @@ function getStatusPresentation(status, mediaType) {
  * the action slot stays the same rectangle and only its colour and words
  * change.
  */
-function getStatusBlock(status, mediaType, typeLabel) {
-    var s = getStatusPresentation(status, mediaType);
+function getStatusBlock(status, mediaType, typeLabel, item) {
+    var s = getStatusPresentation(status, mediaType, item);
+    // An episode count already says "TV Show" by implication, and "TV Show ·
+    // 48 of 62 Episodes" overflows the block at this width.
+    if (s.selfDescribing) typeLabel = '';
     var prefix = typeLabel ? typeLabel + ' · ' : '';
     return '<div class="w-full py-2 px-1 rounded-lg border text-center text-[11px] font-bold ' +
         s.bg + ' ' + s.text + ' ' + s.border + '">' + prefix + s.label + '</div>';
