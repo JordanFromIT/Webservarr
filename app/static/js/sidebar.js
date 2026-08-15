@@ -38,6 +38,15 @@ function _seenSet() {
 }
 
 function _hasSeen(id) {
+  // DEVELOPMENT: webservarr_tour_always (or ?tour=1) keeps the onboarding
+  // visible while it is being worked on. It holds the "New" flag open too -
+  // otherwise the flag vanishes the first time the section is opened and
+  // cannot be looked at again without clearing storage by hand.
+  try {
+    if (localStorage.getItem('webservarr_tour_always') === '1') return false;
+  } catch (e) {}
+  if (/[?&]tour=1\b/.test(location.search)) return false;
+
   return _seenSet().indexOf(id) !== -1;
 }
 
@@ -81,7 +90,7 @@ function _buildSidebarHTML(currentPage) {
     // time the page is opened - a permanent badge stops meaning anything, and
     // an unread marker that never clears is just decoration.
     var newFlag = (item.isNew && !_hasSeen(item.id))
-      ? '<span class="nav-new-badge text-[11px]">New!</span>'
+      ? '<span class="nav-new-badge">New!</span>'
       : '';
 
     var badge = item.badgeId
@@ -91,11 +100,11 @@ function _buildSidebarHTML(currentPage) {
     if (isActive) {
       return '<a class="relative flex items-center gap-3 px-4 py-3 rounded-lg bg-primary text-background-dark font-bold transition-all shadow-baltic-blue/20" href="' + item.href + '"' + adminAttr + '>' +
         '<span class="material-symbols-outlined fill-1">' + escapeHtml(item.icon) + '</span>' +
-        '<span>' + escapeHtml(item.label) + '</span>' + newFlag + badge + '</a>';
+        '<span>' + escapeHtml(item.label) + newFlag + '</span>' + badge + '</a>';
     }
     return '<a class="relative flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="' + item.href + '"' + adminAttr + '>' +
       '<span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors">' + escapeHtml(item.icon) + '</span>' +
-      '<span>' + escapeHtml(item.label) + '</span>' + newFlag + badge + '</a>';
+      '<span>' + escapeHtml(item.label) + newFlag + '</span>' + badge + '</a>';
   }).join('\n');
 
   // Logo: image if logo_url set, otherwise icon

@@ -43,6 +43,7 @@
     if (c.media_movie) root.style.setProperty('--color-media-movie', hexToRgb(c.media_movie));
     if (c.media_tv) root.style.setProperty('--color-media-tv', hexToRgb(c.media_tv));
     if (c.media_book) root.style.setProperty('--color-media-book', hexToRgb(c.media_book));
+    if (c.new_flag) root.style.setProperty('--color-new-flag', hexToRgb(c.new_flag));
 
     // Raw hex values (for non-Tailwind use like scrollbar styling)
     if (c.primary) root.style.setProperty('--hex-primary', c.primary);
