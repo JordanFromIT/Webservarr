@@ -851,6 +851,11 @@ function searchSlot(position) {
 // against the top edge of the scrolling panel.
 var SLOT_SCROLL_GAP = 24;
 
+// How long the bar takes to travel. This is scenery rather than a response to
+// an action, and it runs while the user is still typing, so it should never
+// look like it is hurrying them.
+var SEARCH_MOVE_DURATION = 4500;
+
 /**
  * Work out how far to scroll to bring a slot into view, without doing it.
  *
@@ -909,6 +914,38 @@ function easeInOutCubic(t) {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+// ---- Scroll lock ----
+//
+// While the bar is travelling it owns the scroll position, so wheel and touch
+// input are swallowed for the duration. A stuck lock would leave the page
+// unscrollable with nothing to show why, so unlocking is made unconditional:
+// the animation unlocks when it finishes, and a failsafe timer unlocks anyway
+// if it somehow never does.
+
+var _scrollLockFailsafe = null;
+
+function swallowScroll(e) {
+    e.preventDefault();
+}
+
+function lockScroll() {
+    if (_scrollLockFailsafe !== null) clearTimeout(_scrollLockFailsafe);
+    // passive:false is required - a passive listener may not preventDefault,
+    // and wheel/touchmove default to passive on window in most browsers.
+    window.addEventListener('wheel', swallowScroll, {passive: false});
+    window.addEventListener('touchmove', swallowScroll, {passive: false});
+    _scrollLockFailsafe = setTimeout(unlockScroll, SEARCH_MOVE_DURATION + 2000);
+}
+
+function unlockScroll() {
+    window.removeEventListener('wheel', swallowScroll, {passive: false});
+    window.removeEventListener('touchmove', swallowScroll, {passive: false});
+    if (_scrollLockFailsafe !== null) {
+        clearTimeout(_scrollLockFailsafe);
+        _scrollLockFailsafe = null;
+    }
+}
+
 function wireSearchBarMotion() {
     var bar = document.getElementById('searchBar');
     var slot = searchSlot('home');
@@ -938,6 +975,8 @@ function moveSearchBar(position) {
     if (_searchMoveRaf !== null) {
         cancelAnimationFrame(_searchMoveRaf);
         _searchMoveRaf = null;
+        // A cancelled move never reaches its own unlock, so release here too.
+        unlockScroll();
     }
 
     var input = document.getElementById('searchInput');
@@ -1002,25 +1041,20 @@ function moveSearchBar(position) {
     // is itself travelling, and the whole thing reads as one movement. A CSS
     // transition cannot do this: the bar is position:fixed, so its viewport
     // coordinates have to be recomputed against the scroll on every frame.
-    var DURATION = 4500;
+    var DURATION = SEARCH_MOVE_DURATION;
     var started = null;
 
-    // Four and a half seconds is a long time to be holding the scroll position
-    // hostage. If the user reaches for the wheel the animation is losing an
-    // argument it should not be having, so it finishes on the spot and hands
-    // the page back rather than dragging the view out from under them.
-    var interrupted = false;
-    function interrupt() { interrupted = true; }
-    window.addEventListener('wheel', interrupt, {passive: true});
-    window.addEventListener('touchmove', interrupt, {passive: true});
+    // The move owns the scroll position for its whole duration, so wheel and
+    // touch scrolling are held off rather than allowed to fight it. Keyboard is
+    // deliberately left alone: the user is typing in the search field, where
+    // arrows move the caret and space is a character.
+    lockScroll();
 
     function frame(now) {
         if (started === null) started = now;
-        var progress = interrupted ? 1 : Math.min(1, (now - started) / DURATION);
+        var progress = Math.min(1, (now - started) / DURATION);
         var eased = easeInOutCubic(progress);
 
-        // A finished move lands on the exact destination rather than an eased
-        // approximation of it.
         if (progress < 1) {
             applyScroll(plan, plan.from + scrollDelta * eased);
             bar.style.top = (start.top + (endTop - start.top) * eased) + 'px';
@@ -1030,10 +1064,10 @@ function moveSearchBar(position) {
             return;
         }
 
-        if (!interrupted) applyScroll(plan, plan.to);
-        window.removeEventListener('wheel', interrupt);
-        window.removeEventListener('touchmove', interrupt);
+        // Land on the exact destination rather than an eased approximation.
+        applyScroll(plan, plan.to);
         _searchMoveRaf = null;
+        unlockScroll();
         settle();
     }
 
