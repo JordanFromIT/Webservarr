@@ -62,6 +62,9 @@ DEFAULT_SETTINGS = {
     "integration.authentik.app_slug": ("", "Authentik application slug (for logout URL)"),
     # Kavita ebook backend (proxied; never exposed to the browser directly)
     "integration.kavita.url": ("", "Kavita base URL (e.g., http://10.10.0.3:5000)"),
+    "features.show_books": ("true", "Show Library page in sidebar (also requires Kavita configured)"),
+    "sidebar.label_library": ("Library", "Sidebar label for Library page"),
+    "icon.nav_library": ("menu_book", "Sidebar icon for Library page"),
     # Ticket system
     "features.show_tickets": ("true", "Show Tickets page in sidebar"),
     "sidebar.label_tickets": ("Tickets", "Sidebar label for Tickets page"),

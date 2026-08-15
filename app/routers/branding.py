@@ -32,6 +32,9 @@ DEFAULTS = {
     "features.show_authentik_auth": "false",
     "features.login_backgrounds": "true",
     "features.show_tickets": "true",
+    "features.show_books": "true",
+    # Kavita ebook backend; show_books also requires this to be set
+    "integration.kavita.url": "",
     # Sidebar labels
     "sidebar.label_home": "Home",
     "sidebar.label_requests": "Requests",
@@ -39,6 +42,7 @@ DEFAULTS = {
     "sidebar.label_issues": "Issues",
     "sidebar.label_calendar": "Calendar",
     "sidebar.label_tickets": "Tickets",
+    "sidebar.label_library": "Library",
     "sidebar.label_settings": "Settings",
     # Configurable icons
     "icon.nav_home": "home",
@@ -47,6 +51,7 @@ DEFAULTS = {
     "icon.nav_issues": "report_problem",
     "icon.nav_calendar": "calendar_month",
     "icon.nav_tickets": "confirmation_number",
+    "icon.nav_library": "menu_book",
     "icon.nav_settings": "settings",
     "icon.sidebar_logo": "settings_input_component",
     "icon.section_services": "health_metrics",
@@ -119,6 +124,12 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "show_authentik_auth": get("features.show_authentik_auth") == "true",
             "login_backgrounds": get("features.login_backgrounds") == "true",
             "show_tickets": get("features.show_tickets") == "true",
+            # Requires both the admin toggle and a configured Kavita, so the nav
+            # entry can never point at a library that does not exist.
+            "show_books": (
+                get("features.show_books") == "true"
+                and bool(get("integration.kavita.url"))
+            ),
         },
         "sidebar_labels": {
             "home": get("sidebar.label_home"),
@@ -127,6 +138,7 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "issues": get("sidebar.label_issues"),
             "calendar": get("sidebar.label_calendar"),
             "tickets": get("sidebar.label_tickets"),
+            "library": get("sidebar.label_library"),
             "settings": get("sidebar.label_settings"),
         },
         "icons": {
@@ -136,6 +148,7 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "nav_issues": get("icon.nav_issues"),
             "nav_calendar": get("icon.nav_calendar"),
             "nav_tickets": get("icon.nav_tickets"),
+            "nav_library": get("icon.nav_library"),
             "nav_settings": get("icon.nav_settings"),
             "sidebar_logo": get("icon.sidebar_logo"),
             "section_services": get("icon.section_services"),

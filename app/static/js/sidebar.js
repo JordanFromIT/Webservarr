@@ -16,6 +16,7 @@ var NAV_ITEMS = [
   { id: 'issues',    label: 'Issues',     icon: 'report_problem',        href: '/issues' },
   { id: 'calendar',  label: 'Calendar',    icon: 'calendar_month',        href: '/calendar' },
   { id: 'tickets',  label: 'Tickets',    icon: 'confirmation_number',   href: '/tickets', feature: 'show_tickets' },
+  { id: 'library',  label: 'Library',    icon: 'menu_book',             href: '/library', feature: 'show_books' },
   { id: 'settings', label: 'Settings',    icon: 'settings',              href: '/settings', adminOnly: true },
 ];
 

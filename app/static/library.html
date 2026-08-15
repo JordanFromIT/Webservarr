@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Library</title>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: {
+        "display": ["var(--font-display)", "sans-serif"]
+      },
+    },
+  },
+}</script>
+<style>
+  /* Cover aspect ratio kept stable so the grid never reflows as images land. */
+  .book-cover { aspect-ratio: 2 / 3; }
+  .book-card:hover .book-cover-img { transform: scale(1.04); }
+  .book-cover-img { transition: transform .35s ease; }
+  @media (prefers-reduced-motion: reduce) {
+    .book-cover-img { transition: none; }
+    .book-card:hover .book-cover-img { transform: none; }
+  }
+</style>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<div id="header-root" class="hidden lg:block lg:h-16"></div>
+
+<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8">
+
+  <!-- Continue reading -->
+  <section id="continueSection" class="hidden">
+    <div class="flex items-center gap-3 mb-4">
+      <span class="material-symbols-outlined text-steel-blue">book_ribbon</span>
+      <h3 class="text-xl font-bold text-frosted-blue">Continue Reading</h3>
+    </div>
+    <div id="continueRow" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8 gap-4"></div>
+  </section>
+
+  <!-- Library -->
+  <section>
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+      <span id="iconLibrary" class="material-symbols-outlined text-steel-blue">menu_book</span>
+      <h3 class="text-xl font-bold text-frosted-blue">Library</h3>
+      <span id="libraryCount" class="text-[11px] text-steel-blue"></span>
+      <div class="ml-auto relative">
+        <span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-steel-blue text-[18px]">search</span>
+        <input id="searchInput" type="search" placeholder="Search books…" autocomplete="off"
+               class="bg-baltic-blue/10 border border-steel-blue/30 rounded-xl pl-8 pr-3 py-2 text-sm text-frosted-blue
+                      placeholder:text-steel-blue/60 focus:outline-none focus:ring-2 focus:ring-steel-blue w-48 sm:w-64"/>
+      </div>
+    </div>
+
+    <!-- States -->
+    <div id="loadingState" class="py-16 text-center text-steel-blue">
+      <span class="material-symbols-outlined animate-spin text-3xl">progress_activity</span>
+      <p class="mt-2 text-sm">Loading your library…</p>
+    </div>
+
+    <div id="unavailableState" class="hidden py-16 text-center">
+      <span class="material-symbols-outlined text-4xl text-steel-blue/60">cloud_off</span>
+      <p class="mt-3 text-frosted-blue font-semibold">Library unavailable</p>
+      <p id="unavailableDetail" class="mt-1 text-sm text-steel-blue max-w-md mx-auto">
+        The book service isn't responding right now. Everything else on the site is unaffected.
+      </p>
+      <button id="retryBtn" class="mt-4 px-4 py-2 rounded-xl bg-baltic-blue/30 border border-steel-blue/30
+                                   text-sm text-frosted-blue hover:bg-baltic-blue/50">Try again</button>
+    </div>
+
+    <div id="emptyState" class="hidden py-16 text-center">
+      <span class="material-symbols-outlined text-4xl text-steel-blue/60">search_off</span>
+      <p class="mt-3 text-frosted-blue font-semibold">No books found</p>
+      <p id="emptyDetail" class="mt-1 text-sm text-steel-blue">Try a different search.</p>
+    </div>
+
+    <div id="bookGrid" class="hidden grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-8 gap-4"></div>
+
+    <!-- Pagination -->
+    <div id="pager" class="hidden mt-8 flex items-center justify-center gap-2">
+      <button id="prevBtn" class="px-3 py-2 rounded-xl bg-baltic-blue/20 border border-steel-blue/30 text-sm
+                                  text-frosted-blue disabled:opacity-30 disabled:cursor-not-allowed hover:bg-baltic-blue/40">
+        <span class="material-symbols-outlined text-[18px] align-middle">chevron_left</span>
+      </button>
+      <span id="pageLabel" class="text-sm text-steel-blue tabular-nums px-2"></span>
+      <button id="nextBtn" class="px-3 py-2 rounded-xl bg-baltic-blue/20 border border-steel-blue/30 text-sm
+                                  text-frosted-blue disabled:opacity-30 disabled:cursor-not-allowed hover:bg-baltic-blue/40">
+        <span class="material-symbols-outlined text-[18px] align-middle">chevron_right</span>
+      </button>
+    </div>
+  </section>
+
+</div>
+</main>
+
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/sidebar.js?v=12"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+<script>
+(function () {
+  'use strict';
+
+  var PAGE_SIZE = 24;
+  var state = { page: 1, totalPages: 0, total: 0, query: '', hasNext: false };
+
+  var el = function (id) { return document.getElementById(id); };
+
+  /**
+   * Call Kavita through WebServarr's proxy.
+   *
+   * A 401 means this session has no Kavita token yet (or it expired). The
+   * handshake is a full-page OIDC redirect chain, so it cannot be done inside
+   * fetch() - send the browser to /kavita/connect, which silently reauthenticates
+   * and redirects back here.
+   */
+  function kavita(path, options) {
+    options = options || {};
+    options.credentials = 'include';
+    return fetch('/kavita' + path, options).then(function (res) {
+      if (res.status === 401) {
+        window.location.href = '/kavita/connect';
+        throw new Error('reconnecting');
+      }
+      return res;
+    });
+  }
+
+  function filterBody(extra) {
+    var body = { statements: [], combination: 0, limitTo: 0 };
+    if (extra) { for (var k in extra) body[k] = extra[k]; }
+    return JSON.stringify(body);
+  }
+
+  function show(which) {
+    ['loadingState', 'unavailableState', 'emptyState', 'bookGrid'].forEach(function (id) {
+      el(id).classList.toggle('hidden', id !== which);
+    });
+    if (which !== 'bookGrid') el('pager').classList.add('hidden');
+  }
+
+  function coverUrl(seriesId) {
+    return '/kavita/api/image/series-cover?seriesId=' + encodeURIComponent(seriesId);
+  }
+
+  function bookCard(series) {
+    var name = series.name || 'Untitled';
+    var a = document.createElement('a');
+    a.href = '/reader?seriesId=' + encodeURIComponent(series.id);
+    a.className = 'book-card group block';
+    a.innerHTML =
+      '<div class="book-cover relative overflow-hidden rounded-xl bg-baltic-blue/20 border border-steel-blue/20">' +
+        '<img class="book-cover-img w-full h-full object-cover" loading="lazy" alt="" src="' + coverUrl(series.id) + '"' +
+             ' onerror="this.style.display=\'none\'"/>' +
+      '</div>' +
+      '<p class="mt-2 text-sm text-frosted-blue leading-snug line-clamp-2">' + escapeHtml(name) + '</p>';
+    return a;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function renderGrid(items) {
+    var grid = el('bookGrid');
+    grid.innerHTML = '';
+    if (!items.length) {
+      el('emptyDetail').textContent = state.query
+        ? 'Nothing matched "' + state.query + '".'
+        : 'This library has no books yet.';
+      show('emptyState');
+      return;
+    }
+    items.forEach(function (s) { grid.appendChild(bookCard(s)); });
+    show('bookGrid');
+    updatePager();
+  }
+
+  function updatePager() {
+    // Hide only when searching, or when there is genuinely a single page.
+    if (state.query || (state.page === 1 && !state.hasNext)) {
+      el('pager').classList.add('hidden');
+      return;
+    }
+    el('pager').classList.remove('hidden');
+    // Kavita does not always return an x-pagination header on Series/all-v2, so
+    // the total can be unknown. Fall back to a page number without a total
+    // rather than disabling navigation entirely.
+    el('pageLabel').textContent = state.totalPages
+      ? 'Page ' + state.page + ' of ' + state.totalPages
+      : 'Page ' + state.page;
+    el('prevBtn').disabled = state.page <= 1;
+    el('nextBtn').disabled = state.totalPages
+      ? state.page >= state.totalPages
+      : !state.hasNext;
+  }
+
+  function loadPage() {
+    show('loadingState');
+    kavita('/api/Series/all-v2?pageNumber=' + state.page + '&pageSize=' + PAGE_SIZE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: filterBody()
+    }).then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      // Kavita reports paging totals here when it sends them at all.
+      var pagination = res.headers.get('x-pagination');
+      if (pagination) {
+        try {
+          var p = JSON.parse(pagination);
+          state.total = p.totalItems || 0;
+          state.totalPages = p.totalPages || 0;
+        } catch (e) { /* header shape changed; fall back to count-based paging */ }
+      }
+      return res.json();
+    }).then(function (items) {
+      items = items || [];
+      // With no totals header, a full page implies there is probably another.
+      state.hasNext = items.length >= PAGE_SIZE;
+      el('libraryCount').textContent = state.total ? state.total + ' books' : '';
+      renderGrid(items);
+    }).catch(function (err) {
+      if (err && err.message === 'reconnecting') return;
+      showUnavailable(err);
+    });
+  }
+
+  function runSearch(query) {
+    state.query = query;
+    if (!query) { state.page = 1; loadPage(); return; }
+    show('loadingState');
+    kavita('/api/Search/search?queryString=' + encodeURIComponent(query))
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        var items = (data && data.series) ? data.series : [];
+        // Searching an author name matches a person, not a series, so resolve
+        // matched people to the books they are known for. Without this,
+        // "abnett" returns nothing even though he wrote a dozen of these.
+        var people = (data && data.persons) ? data.persons.slice(0, 3) : [];
+        if (!items.length && people.length) {
+          return Promise.all(people.map(function (p) {
+            return kavita('/api/Person/series-known-for?personId=' + encodeURIComponent(p.id))
+              .then(function (r) { return r.ok ? r.json() : []; })
+              .catch(function () { return []; });
+          })).then(function (lists) {
+            var seen = {}, merged = [];
+            lists.forEach(function (list) {
+              (list || []).forEach(function (s) {
+                if (!seen[s.id]) { seen[s.id] = true; merged.push(s); }
+              });
+            });
+            return merged;
+          });
+        }
+        return items;
+      })
+      .then(function (items) {
+        if (state.query !== query) return;   // a newer keystroke already won
+        el('libraryCount').textContent = items.length + ' result' + (items.length === 1 ? '' : 's');
+        renderGrid(items);
+      })
+      .catch(function (err) {
+        if (err && err.message === 'reconnecting') return;
+        showUnavailable(err);
+      });
+  }
+
+  function loadContinue() {
+    kavita('/api/Series/on-deck?pageNumber=1&pageSize=8', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: filterBody()
+    }).then(function (res) {
+      return res.ok ? res.json() : [];
+    }).then(function (items) {
+      if (!items || !items.length) return;
+      var row = el('continueRow');
+      row.innerHTML = '';
+      items.forEach(function (s) { row.appendChild(bookCard(s)); });
+      el('continueSection').classList.remove('hidden');
+    }).catch(function () {
+      /* Continue-reading is a convenience shelf; never block the library on it. */
+    });
+  }
+
+  function showUnavailable(err) {
+    if (err) console.warn('Library load failed:', err);
+    show('unavailableState');
+  }
+
+  // Apply the admin's configured icon, like other pages do.
+  function applyBrandingIcons() {
+    var theme = window.WEBSERVARR_THEME || {};
+    var icons = theme.icons || {};
+    if (icons.nav_library) el('iconLibrary').textContent = icons.nav_library;
+  }
+
+  var searchTimer = null;
+  el('searchInput').addEventListener('input', function (e) {
+    var value = e.target.value.trim();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(function () { runSearch(value); }, 300);
+  });
+
+  el('prevBtn').addEventListener('click', function () {
+    if (state.page > 1) { state.page--; loadPage(); }
+  });
+  el('nextBtn').addEventListener('click', function () {
+    // totalPages is 0 when Kavita sends no x-pagination header, so gate on
+    // hasNext in that case rather than on a total we do not have.
+    var canAdvance = state.totalPages ? state.page < state.totalPages : state.hasNext;
+    if (canAdvance) { state.page++; loadPage(); }
+  });
+  el('retryBtn').addEventListener('click', function () { loadPage(); loadContinue(); });
+
+  document.addEventListener('DOMContentLoaded', function () {
+    // header.js self-initialises on load; calling it again renders a second header.
+    if (typeof initSidebar === 'function') initSidebar('library');
+    setTimeout(applyBrandingIcons, 300);
+
+    // The sidebar nav renders at opacity-0 and is only faded in by
+    // showAdminNav(), which every page calls after checkAuth(). Without this the
+    // nav is present in the DOM but never painted.
+    checkAuth().then(function (user) {
+      var uEl = document.getElementById('headerUsername');
+      var rEl = document.getElementById('headerRole');
+      if (uEl) uEl.textContent = user.display_name || user.username;
+      if (rEl) rEl.textContent = user.is_admin ? 'Admin' : 'Member';
+      showAdminNav(user.is_admin);
+
+      var menuBtn = document.getElementById('userMenuBtn');
+      var menuDrop = document.getElementById('userMenuDropdown');
+      if (menuBtn && menuDrop) {
+        menuBtn.addEventListener('click', function () { menuDrop.classList.toggle('hidden'); });
+        document.addEventListener('click', function (e) {
+          if (!menuBtn.contains(e.target) && !menuDrop.contains(e.target)) menuDrop.classList.add('hidden');
+        });
+      }
+    }).catch(function () {
+      /* checkAuth redirects to /login itself when unauthenticated. */
+    });
+
+    loadContinue();
+    loadPage();
+  });
+})();
+</script>
+</body></html>

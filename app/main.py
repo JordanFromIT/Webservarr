@@ -338,6 +338,17 @@ async def tickets_page(
     return _serve_page("/app/app/static/tickets.html", "Tickets page")
 
 
+# Ebook library page
+@app.get("/library", response_class=HTMLResponse, tags=["Pages"])
+async def library_page(
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve the ebook library browse page."""
+    if not await _require_session(session_id):
+        return RedirectResponse(url="/login", status_code=302)
+    return _serve_page("/app/app/static/library.html", "Library page")
+
+
 # Settings page (admin)
 @app.get("/settings", response_class=HTMLResponse, tags=["Pages"])
 async def settings_page(

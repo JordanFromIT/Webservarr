@@ -67,6 +67,9 @@ _PASSTHROUGH_RESPONSE_HEADERS = {
     "etag",
     "last-modified",
     "content-disposition",
+    # Kavita returns paging totals here; without it the library page cannot
+    # tell how many pages exist.
+    "x-pagination",
 }
 
 
@@ -197,6 +200,7 @@ async def signin_oidc(
 
     body = await request.body()
     token = None
+    kavita_api_key = None
 
     try:
         async with httpx.AsyncClient(timeout=PROXY_TIMEOUT, follow_redirects=False) as client:
@@ -230,6 +234,12 @@ async def signin_oidc(
                 else:
                     api_key = (account.json() or {}).get("apiKey")
                     if api_key:
+                        # Stored alongside the JWT because Kavita's image
+                        # endpoints only accept a key as a query parameter
+                        # (they are built for <img src>, which cannot send
+                        # headers). The proxy injects it; the browser never
+                        # sees it.
+                        kavita_api_key = api_key
                         # Exchange the user's own API key for their JWT. Every
                         # proxied call then acts as them, so progress,
                         # bookmarks and highlights are genuinely per-user.
@@ -255,7 +265,10 @@ async def signin_oidc(
         logger.warning("Kavita handshake completed without a token (HTTP %d)", callback.status_code)
         return RedirectResponse("/library?kavita=error", status_code=302)
 
-    await session_manager.update_session(session_id, {"kavita_token": token})
+    await session_manager.update_session(
+        session_id,
+        {"kavita_token": token, "kavita_api_key": kavita_api_key or ""},
+    )
     return RedirectResponse("/library", status_code=302)
 
 
@@ -284,6 +297,16 @@ async def kavita_proxy(
     headers = build_forward_headers(request, token)
     body = await request.body()
 
+    params = dict(request.query_params)
+    # Kavita's image endpoints reject the Bearer token and require an apiKey
+    # query parameter, because they are designed for <img src> tags that cannot
+    # send headers. Inject it here so the key stays server-side and never
+    # appears in markup the browser can read.
+    if path.lower().startswith("api/image/") and "apiKey" not in params:
+        api_key = current_user.get("kavita_api_key")
+        if api_key:
+            params["apiKey"] = api_key
+
     client = httpx.AsyncClient(timeout=PROXY_TIMEOUT)
     try:
         upstream_request = client.build_request(
@@ -291,7 +314,7 @@ async def kavita_proxy(
             f"{base}/{path}",
             headers=headers,
             content=body,
-            params=dict(request.query_params),
+            params=params,
         )
         upstream = await client.send(upstream_request, stream=True)
     except httpx.RequestError as exc:
