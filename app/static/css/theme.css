@@ -13,6 +13,13 @@
   --color-text-secondary: 255 255 255;
   --color-background: 0 0 0;
 
+  /* Media type accents. Three distinct hues rather than shades of the brand
+     palette, because they identify what a thing is rather than decorate it.
+     Defaults clear 4.5:1 against the primary fill they sit on. */
+  --color-media-movie: 233 213 255;
+  --color-media-tv: 103 232 249;
+  --color-media-book: 252 211 77;
+
   --hex-primary: #125793;
   --hex-secondary: #2C6DA1;
   --hex-accent: #4684B0;
@@ -20,12 +27,41 @@
   --hex-text-secondary: #FFFFFF;
   --hex-background: #000000;
 
+  --hex-media-movie: #E9D5FF;
+  --hex-media-tv: #67E8F9;
+  --hex-media-book: #FCD34D;
+
   --font-display: "Spline Sans", sans-serif;
 }
 
 /* ---- Base ---- */
 body {
   font-family: var(--font-display);
+}
+
+/* ---- Media Type Accents ----
+ *
+ * Defined here rather than in each page's tailwind.config so a media type has
+ * one colour everywhere and an admin changing it in Settings changes every
+ * surface at once. Tailwind generates nothing for these names, so there is no
+ * collision with its utilities.
+ */
+.text-media-movie { color: rgb(var(--color-media-movie)); }
+.text-media-tv    { color: rgb(var(--color-media-tv)); }
+.text-media-book  { color: rgb(var(--color-media-book)); }
+
+/* Badge form: the same hue as a tint behind its own text. */
+.badge-media-movie {
+  color: rgb(var(--color-media-movie));
+  background: rgb(var(--color-media-movie) / 0.2);
+}
+.badge-media-tv {
+  color: rgb(var(--color-media-tv));
+  background: rgb(var(--color-media-tv) / 0.2);
+}
+.badge-media-book {
+  color: rgb(var(--color-media-book));
+  background: rgb(var(--color-media-book) / 0.2);
 }
 
 /* ---- Glass Card ---- */

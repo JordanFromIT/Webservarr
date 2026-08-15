@@ -37,6 +37,13 @@
     if (c.text_secondary) root.style.setProperty('--color-text-secondary', hexToRgb(c.text_secondary));
     if (c.background) root.style.setProperty('--color-background', hexToRgb(c.background));
 
+    // Media type accents. Consumed by the .text-media-* / .badge-media-*
+    // classes in theme.css rather than by Tailwind, so they work on every page
+    // without each page's tailwind.config having to know about them.
+    if (c.media_movie) root.style.setProperty('--color-media-movie', hexToRgb(c.media_movie));
+    if (c.media_tv) root.style.setProperty('--color-media-tv', hexToRgb(c.media_tv));
+    if (c.media_book) root.style.setProperty('--color-media-book', hexToRgb(c.media_book));
+
     // Raw hex values (for non-Tailwind use like scrollbar styling)
     if (c.primary) root.style.setProperty('--hex-primary', c.primary);
     if (c.secondary) root.style.setProperty('--hex-secondary', c.secondary);
@@ -44,6 +51,9 @@
     if (c.text) root.style.setProperty('--hex-text', c.text);
     if (c.text_secondary) root.style.setProperty('--hex-text-secondary', c.text_secondary);
     if (c.background) root.style.setProperty('--hex-background', c.background);
+    if (c.media_movie) root.style.setProperty('--hex-media-movie', c.media_movie);
+    if (c.media_tv) root.style.setProperty('--hex-media-tv', c.media_tv);
+    if (c.media_book) root.style.setProperty('--hex-media-book', c.media_book);
 
     // Font
     if (data.font) {

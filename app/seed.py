@@ -20,6 +20,13 @@ DEFAULT_SETTINGS = {
     "theme.color_text": ("#BEEEF4", "Text primary color (Frosted Blue)"),
     "theme.color_text_secondary": ("#FFFFFF", "Text secondary color (contrast/buttons)"),
     "theme.color_background": ("#000000", "Background color"),
+    # Media type accents. These identify what a card is - the noun in "Request
+    # eBook", the type badge - so unlike the palette above they are deliberately
+    # three distinct hues rather than shades of the brand colour. Defaults are
+    # chosen to clear 4.5:1 against the primary fill they sit on.
+    "theme.color_media_movie": ("#E9D5FF", "Accent for Movie results and badges"),
+    "theme.color_media_tv": ("#67E8F9", "Accent for TV Show results and badges"),
+    "theme.color_media_book": ("#FCD34D", "Accent for eBook results and badges"),
     "theme.font": ("Spline Sans", "Google Font family name"),
     "theme.custom_css": ("", "Custom CSS injected into all pages"),
     # Feature flags

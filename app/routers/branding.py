@@ -23,6 +23,9 @@ DEFAULTS = {
     "theme.color_text": "#BEEEF4",
     "theme.color_text_secondary": "#FFFFFF",
     "theme.color_background": "#000000",
+    "theme.color_media_movie": "#E9D5FF",
+    "theme.color_media_tv": "#67E8F9",
+    "theme.color_media_book": "#FCD34D",
     "theme.font": "Spline Sans",
     "theme.custom_css": "",
     # Feature flags
@@ -114,6 +117,10 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "text": get("theme.color_text"),
             "text_secondary": get("theme.color_text_secondary"),
             "background": get("theme.color_background"),
+            # Media type accents - see seed.py for why these are distinct hues.
+            "media_movie": get("theme.color_media_movie"),
+            "media_tv": get("theme.color_media_tv"),
+            "media_book": get("theme.color_media_book"),
         },
         "font": get("theme.font"),
         "custom_css": get("theme.custom_css"),

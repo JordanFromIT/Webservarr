@@ -449,28 +449,35 @@ function mediaTypeLabel(mediaType) {
   return 'Movie';
 }
 
+/**
+ * Media type accent, as a theme class rather than a fixed palette value.
+ *
+ * The three hues are theme settings (theme.color_media_movie / _tv / _book),
+ * so an admin retheming the site retints these too, and a media type keeps one
+ * colour across the badge and the Request button alike. The classes live in
+ * theme.css - see the note there.
+ */
+function mediaTypeAccent(mediaType) {
+  if (mediaType === 'tv') return 'media-tv';
+  if (mediaType === 'book') return 'media-book';
+  return 'media-movie';
+}
+
 function mediaTypeBadgeColor(mediaType) {
-  if (mediaType === 'tv') return 'bg-blue-500/20 text-blue-400';
-  if (mediaType === 'book') return 'bg-amber-500/20 text-amber-300';
-  return 'bg-purple-500/20 text-purple-400';
+  return 'badge-' + mediaTypeAccent(mediaType);
 }
 
 /**
  * Colour for the media-type noun inside a Request button.
  *
- * Deliberately not mediaTypeBadgeColor: those tints are tuned for a near-black
- * card, and its blue-400 would land blue-on-blue against the button's Baltic
- * Blue fill. These three are picked to carry on that fill and to differ in
- * lightness as well as hue, so they still separate without colour vision.
- *
- * Measured against the button's #125793 - cyan 5.16, amber 5.18, purple 5.49,
- * all clearing 4.5:1. The button's 11px bold counts as normal text for
- * contrast, not large, so the weaker purple-300 (4.23) was not good enough.
+ * The shipped defaults are measured against the button's #125793 fill - cyan
+ * 5.16, amber 5.18, purple 5.49, all clearing 4.5:1. The button's 11px bold
+ * counts as normal text for contrast rather than large, which is why the
+ * obvious purple-300 (4.23) was not good enough. An admin picking their own
+ * accents owns that tradeoff.
  */
 function mediaTypeNounColor(mediaType) {
-  if (mediaType === 'tv') return 'text-cyan-300';
-  if (mediaType === 'book') return 'text-amber-300';
-  return 'text-purple-200';
+  return 'text-' + mediaTypeAccent(mediaType);
 }
 
 /** Placeholder glyph when a title has no artwork. */
@@ -669,7 +676,6 @@ function buildSearchCard(item) {
     var year = item.year ? escapeHtml(String(item.year)) : '';
     var mediaType = item.media_type || 'movie';
     var typeBadge = mediaTypeLabel(mediaType);
-    var typeBadgeColor = mediaTypeBadgeColor(mediaType);
     var posterUrl = item.poster_url || '';
     var status = item.media_status ? item.media_status.toLowerCase() : null;
     var status4k = item.media_status_4k ? item.media_status_4k.toLowerCase() : null;

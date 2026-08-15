@@ -1015,6 +1015,36 @@
                                 class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
                                 placeholder="#000000" maxlength="7">
                         </div>
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">Movie</label>
+                            <div class="relative group">
+                                <input type="color" id="themeColorMediaMovie" value="#E9D5FF"
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
+                            </div>
+                            <input type="text" id="themeColorMediaMovieHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
+                                placeholder="#E9D5FF" maxlength="7">
+                        </div>
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">TV Show</label>
+                            <div class="relative group">
+                                <input type="color" id="themeColorMediaTv" value="#67E8F9"
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
+                            </div>
+                            <input type="text" id="themeColorMediaTvHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
+                                placeholder="#67E8F9" maxlength="7">
+                        </div>
+                        <div class="flex flex-col items-center gap-1.5">
+                            <label class="text-[10px] font-semibold text-steel-blue uppercase">eBook</label>
+                            <div class="relative group">
+                                <input type="color" id="themeColorMediaBook" value="#FCD34D"
+                                    class="w-10 h-10 rounded-full cursor-pointer border-2 border-steel-blue/30 bg-transparent appearance-none hover:border-primary transition-colors [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0">
+                            </div>
+                            <input type="text" id="themeColorMediaBookHex"
+                                class="w-20 bg-transparent border-0 text-center text-[10px] text-steel-blue/70 font-mono focus:outline-none focus:text-frosted-blue"
+                                placeholder="#FCD34D" maxlength="7">
+                        </div>
                     </div>
 
                     <!-- Font -->
@@ -2091,6 +2121,11 @@
             { picker: 'themeColorText', hex: 'themeColorTextHex', cssVar: '--color-text', key: 'theme.color_text' },
             { picker: 'themeColorTextSecondary', hex: 'themeColorTextSecondaryHex', cssVar: '--color-text-secondary', key: 'theme.color_text_secondary' },
             { picker: 'themeColorBackground', hex: 'themeColorBackgroundHex', cssVar: '--color-background', key: 'theme.color_background' },
+            // Media type accents - these tint the Request button noun and the
+            // type badge, so a type reads the same everywhere.
+            { picker: 'themeColorMediaMovie', hex: 'themeColorMediaMovieHex', cssVar: '--color-media-movie', key: 'theme.color_media_movie' },
+            { picker: 'themeColorMediaTv', hex: 'themeColorMediaTvHex', cssVar: '--color-media-tv', key: 'theme.color_media_tv' },
+            { picker: 'themeColorMediaBook', hex: 'themeColorMediaBookHex', cssVar: '--color-media-book', key: 'theme.color_media_book' },
         ];
 
         const THEME_DEFAULTS = {
@@ -2103,6 +2138,9 @@
             'theme.color_text': '#BEEEF4',
             'theme.color_text_secondary': '#FFFFFF',
             'theme.color_background': '#000000',
+            'theme.color_media_movie': '#E9D5FF',
+            'theme.color_media_tv': '#67E8F9',
+            'theme.color_media_book': '#FCD34D',
             'theme.font': 'Spline Sans',
             'theme.custom_css': '',
             'sidebar.label_home': 'Home',
