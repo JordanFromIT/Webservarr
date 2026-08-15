@@ -51,6 +51,14 @@ async def episode_counts() -> dict:
     deleted scenes - 106 entries for The Office against 201 real episodes - and
     counting it makes a complete library look badly incomplete.
 
+    The denominator is `episodeCount`, not `totalEpisodeCount`. The latter
+    counts every episode the series will ever have, including ones that have
+    not aired and seasons deliberately left unmonitored - so Ted Lasso reads 36
+    of 44 while actually being complete, and Law & Order: SVU reads 22 of 596
+    when 22 is every episode being tracked. `episodeCount` is Sonarr's
+    monitored-and-aired figure, which is the only denominator a reader would
+    recognise as "how much of this show do we have".
+
     Returns {} when Sonarr is unconfigured or unreachable, which simply means
     no counts are shown.
     """
@@ -94,7 +102,7 @@ async def episode_counts() -> dict:
                 continue
             stats = season.get("statistics") or {}
             have += stats.get("episodeFileCount") or 0
-            total += stats.get("totalEpisodeCount") or 0
+            total += stats.get("episodeCount") or 0
 
         if total:
             counts[tmdb_id] = (have, total)
