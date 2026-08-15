@@ -8,7 +8,7 @@
 <script src="/static/js/theme-loader.js"></script>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="/static/css/theme.css?v=10" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=11" rel="stylesheet"/>
 <script>tailwind.config = {
   darkMode: "class",
   theme: {
@@ -29,6 +29,12 @@
   },
 }</script>
 <style>
+  /* Hover cannot reveal anything on a touch screen, so the Continue Reading
+     dismiss button is always visible there. */
+  @media (pointer: coarse) {
+    .card-dismiss { opacity: 1 !important; }
+  }
+
   /* Cover aspect ratio kept stable so the grid never reflows as images land. */
   .book-cover { aspect-ratio: 2 / 3; }
   .book-card:hover .book-cover-img { transform: scale(1.04); }
@@ -57,13 +63,43 @@
       <span id="iconLibrary" class="material-symbols-outlined text-steel-blue">menu_book</span>
       <h3 class="text-xl font-bold text-frosted-blue">Library</h3>
       <span id="libraryCount" class="text-[11px] text-steel-blue"></span>
+      <button id="backToAuthors" type="button"
+              class="hidden inline-flex items-center gap-1 text-xs text-steel-blue hover:text-frosted-blue transition-colors">
+        <span class="material-symbols-outlined text-[16px]">arrow_back</span>All authors
+      </button>
       <button id="helpBtn" title="How eBooks works" aria-label="How eBooks works"
               class="p-1 rounded-lg text-steel-blue hover:text-frosted-blue hover:bg-baltic-blue/30 transition-colors">
         <span class="material-symbols-outlined text-[20px]">help</span>
       </button>
+      <!-- View toggle. Books and Authors only: in a Kavita book library each
+           book IS a series, so a "Series" view would just repeat Books. Real
+           series grouping would need Kavita collections, of which there are
+           none configured. -->
+      <div id="viewToggle" class="flex items-center rounded-xl border border-steel-blue/30 overflow-hidden">
+        <button data-view="books" class="view-btn px-3 py-1.5 text-xs font-semibold transition-colors">Books</button>
+        <button data-view="authors" class="view-btn px-3 py-1.5 text-xs font-semibold transition-colors border-l border-steel-blue/30">Authors</button>
+      </div>
+
+      <div class="relative">
+        <select id="sortSelect"
+                class="appearance-none bg-baltic-blue/10 border border-steel-blue/30 rounded-xl pl-3 pr-8 py-2
+                       text-xs text-frosted-blue focus:outline-none focus:ring-2 focus:ring-steel-blue cursor-pointer">
+          <option value="1|1">Title A–Z</option>
+          <option value="1|0">Title Z–A</option>
+          <option value="2|0">Recently added</option>
+          <option value="4|0">Recently updated</option>
+          <option value="6|0">Newest published</option>
+          <option value="6|1">Oldest published</option>
+          <option value="5|1">Shortest read</option>
+          <option value="5|0">Longest read</option>
+          <option value="7|0">Most read</option>
+        </select>
+        <span class="material-symbols-outlined absolute right-1.5 top-1/2 -translate-y-1/2 text-steel-blue text-[18px] pointer-events-none">expand_more</span>
+      </div>
+
       <div class="ml-auto relative">
         <span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-steel-blue text-[18px]">search</span>
-        <input id="searchInput" type="search" placeholder="Search books…" autocomplete="off"
+        <input id="searchInput" type="search" placeholder="Search by title, author, series…" autocomplete="off"
                class="bg-baltic-blue/10 border border-steel-blue/30 rounded-xl pl-8 pr-3 py-2 text-sm text-frosted-blue
                       placeholder:text-steel-blue/60 focus:outline-none focus:ring-2 focus:ring-steel-blue w-48 sm:w-64"/>
       </div>
@@ -91,6 +127,8 @@
       <p id="emptyDetail" class="mt-1 text-sm text-steel-blue">Try a different search.</p>
     </div>
 
+    <div id="authorGrid" class="hidden grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3"></div>
+
     <div id="bookGrid" class="hidden grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-8 gap-4"></div>
 
     <!-- Pagination -->
@@ -114,12 +152,18 @@
 <script src="/static/js/header.js?v=2"></script>
 <script src="/static/js/sidebar.js?v=18"></script>
 <script src="/static/js/notifications.js?v=3"></script>
+<script src="/static/js/tour.js?v=2"></script>
 <script>
 (function () {
   'use strict';
 
   var PAGE_SIZE = 24;
-  var state = { page: 1, totalPages: 0, total: 0, query: '', hasNext: false };
+  var state = {
+    page: 1, totalPages: 0, total: 0, query: '', hasNext: false,
+    view: 'books', author: null,
+    // Kavita's SortField enum. 1 = SortName, which is its own default.
+    sortField: 1, sortAsc: true
+  };
 
   var el = function (id) { return document.getElementById(id); };
 
@@ -144,7 +188,11 @@
   }
 
   function filterBody(extra) {
-    var body = { statements: [], combination: 0, limitTo: 0 };
+    var body = {
+      statements: [], combination: 0, limitTo: 0,
+      sortOptions: { sortField: state.sortField, isAscending: state.sortAsc }
+    };
+    // Shelves pass their own sortOptions and must override, not merge.
     if (extra) { for (var k in extra) body[k] = extra[k]; }
     return JSON.stringify(body);
   }
@@ -155,7 +203,7 @@
   }
 
   function show(which) {
-    ['loadingState', 'unavailableState', 'emptyState', 'bookGrid'].forEach(function (id) {
+    ['loadingState', 'unavailableState', 'emptyState', 'bookGrid', 'authorGrid'].forEach(function (id) {
       el(id).classList.toggle('hidden', id !== which);
     });
     if (which !== 'bookGrid') el('pager').classList.add('hidden');
@@ -165,7 +213,7 @@
     return '/kavita/api/image/series-cover?seriesId=' + encodeURIComponent(seriesId);
   }
 
-  function bookCard(series) {
+  function bookCard(series, onDismiss) {
     var name = series.name || 'Untitled';
     // A book opens its detail sheet first, the way clicking a film does
     // elsewhere. Still an <a> to the reader so middle-click, ctrl-click and
@@ -177,13 +225,34 @@
       e.preventDefault();
       openBookDetail(series);
     });
-    a.className = 'book-card group block';
+    a.className = 'book-card group block relative';
     a.innerHTML =
       '<div class="book-cover relative overflow-hidden rounded-xl bg-baltic-blue/20 border border-steel-blue/20">' +
         '<img class="book-cover-img w-full h-full object-cover" loading="lazy" alt="" src="' + coverUrl(series.id) + '"' +
              ' onerror="this.style.display=\'none\'"/>' +
       '</div>' +
       '<p class="mt-2 text-sm text-frosted-blue leading-snug line-clamp-2">' + escapeHtml(name) + '</p>';
+
+    // Continue Reading is the only shelf you can prune: it is a personal queue,
+    // and a book you abandoned sits there forever otherwise. The button lives
+    // inside the <a>, so it has to swallow the click that would open the book.
+    if (onDismiss) {
+      var x = document.createElement('button');
+      x.type = 'button';
+      x.title = 'Remove from Continue Reading';
+      x.setAttribute('aria-label', 'Remove ' + name + ' from Continue Reading');
+      x.className = 'card-dismiss absolute top-1.5 right-1.5 z-10 grid place-items-center ' +
+                    'w-7 h-7 rounded-full bg-black/70 text-frosted-blue border border-steel-blue/40 ' +
+                    'opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity ' +
+                    'hover:bg-black hover:text-white';
+      x.innerHTML = '<span class="material-symbols-outlined text-[16px] leading-none">close</span>';
+      x.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        onDismiss(series, a);
+      });
+      a.appendChild(x);
+    }
     return a;
   }
 
@@ -259,6 +328,8 @@
 
   function runSearch(query) {
     state.query = query;
+    if (query && state.view === 'authors') { setView('books'); return; }
+    if (state.author) { state.author = null; el('backToAuthors').classList.add('hidden'); }
     setShelvesVisible(!query);
     if (!query) { state.page = 1; loadPage(); return; }
     show('loadingState');
@@ -312,6 +383,7 @@
   var SHELVES = [
     {
       id: 'continue', title: 'Continue Reading', icon: 'book_ribbon',
+      dismissible: true,
       load: function () {
         return kavita('/api/Series/on-deck?pageNumber=1&pageSize=8', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: filterBody()
@@ -361,10 +433,40 @@
       '<h3 class="text-xl font-bold text-frosted-blue">' + escapeHtml(shelf.title) + '</h3>';
     var row = document.createElement('div');
     row.className = 'grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8 gap-4';
-    items.forEach(function (s) { row.appendChild(bookCard(s)); });
+    items.forEach(function (s) {
+      row.appendChild(bookCard(s, shelf.dismissible ? dismissFromOnDeck : null));
+    });
     section.appendChild(head);
     section.appendChild(row);
     el('shelves').appendChild(section);
+  }
+
+  /**
+   * Drop a book off the Continue Reading shelf.
+   *
+   * Kavita's removal is per-user and not permanent: opening the book again puts
+   * it back. Nothing is deleted and no progress is lost, so this needs no
+   * confirmation. The card goes immediately rather than after the round trip -
+   * a failed call puts it back with a message.
+   */
+  function dismissFromOnDeck(series, card) {
+    card.style.display = 'none';
+    kavita('/api/Series/remove-from-on-deck?seriesId=' + encodeURIComponent(series.id), { method: 'POST' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var row = card.parentElement;
+        card.remove();
+        // An empty shelf is just a heading over nothing; hide the section.
+        if (row && !row.querySelector('.book-card')) {
+          var section = document.getElementById('shelf-continue');
+          if (section) section.remove();
+        }
+      })
+      .catch(function (err) {
+        if (err && err.message === 'reconnecting') return;
+        console.warn('Could not remove from Continue Reading:', err);
+        card.style.display = '';
+      });
   }
 
   function loadShelves() {
@@ -391,6 +493,187 @@
     var icons = theme.icons || {};
     if (icons.nav_library) el('iconLibrary').textContent = icons.nav_library;
   }
+
+  /* ---- Sorting ----
+   *
+   * The values are Kavita's own SortField enum, so the server does the sorting
+   * and paging stays correct. The choice is remembered per browser, because a
+   * reader who wants newest-first almost always wants it every visit.
+   */
+  var SORT_KEY = 'webservarr_library_sort';
+
+  function applySort(value, reload) {
+    var parts = String(value).split('|');
+    state.sortField = parseInt(parts[0], 10) || 1;
+    state.sortAsc = parts[1] === '1';
+    try { localStorage.setItem(SORT_KEY, value); } catch (e) { /* private mode */ }
+    if (reload) { state.page = 1; loadPage(); }
+  }
+
+  (function restoreSort() {
+    var saved = null;
+    try { saved = localStorage.getItem(SORT_KEY); } catch (e) { /* private mode */ }
+    var select = el('sortSelect');
+    if (saved && select.querySelector('option[value="' + saved + '"]')) {
+      select.value = saved;
+    }
+    applySort(select.value, false);
+  })();
+
+  el('sortSelect').addEventListener('change', function (e) {
+    if (state.view === 'authors') {
+      // Author names sort by name; Kavita's book sort fields do not apply.
+      applySort(e.target.value, false);
+      return;
+    }
+    applySort(e.target.value, true);
+    if (state.query) runSearch(state.query);
+  });
+
+  /* ---- Books / Authors view ----
+   *
+   * No Series view: in a Kavita book library every book is itself a Series, so
+   * the tab would be a duplicate of Books. Real series grouping would need
+   * Kavita collections, and this server has none.
+   */
+  function setViewChrome(view) {
+    Array.prototype.forEach.call(document.querySelectorAll('.view-btn'), function (b) {
+      var on = b.dataset.view === view;
+      b.classList.toggle('bg-steel-blue/30', on);
+      b.classList.toggle('text-frosted-blue', on);
+      b.classList.toggle('text-steel-blue', !on);
+    });
+    // Sorting a list of people by "longest read" is meaningless.
+    el('sortSelect').disabled = (view === 'authors');
+    el('sortSelect').classList.toggle('opacity-40', view === 'authors');
+  }
+
+  function setView(view) {
+    state.view = view;
+    setViewChrome(view);
+
+    if (view === 'authors') {
+      el('pager').classList.add('hidden');
+      loadAuthors();
+    } else {
+      state.author = null;
+      setShelvesVisible(!state.query);
+      if (state.query) runSearch(state.query); else loadPage();
+    }
+  }
+
+  function authorCard(person) {
+    var books = person.seriesCount || 0;
+    var card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'text-left rounded-xl border border-steel-blue/25 bg-baltic-blue/15 ' +
+                     'px-4 py-3 hover:bg-baltic-blue/30 hover:border-steel-blue/50 transition-colors';
+    card.innerHTML =
+      '<p class="text-sm font-semibold text-frosted-blue leading-snug line-clamp-2">' +
+        escapeHtml(person.name) + '</p>' +
+      '<p class="mt-1 text-xs text-steel-blue">' + books + ' book' + (books === 1 ? '' : 's') + '</p>';
+    card.addEventListener('click', function () { openAuthor(person); });
+    return card;
+  }
+
+  /* Kavita magic numbers, named so the intent survives.
+     PersonRole.Writer is 3; every other role on this server is a publisher
+     (10) or a cover artist (5), and neither belongs in an author list.
+     SeriesFilterField.Writers is 17, and comparison 0 is Equals. */
+  var ROLE_WRITER = 3;
+  var FIELD_WRITER = 17;
+  var CMP_EQUALS = 0;
+
+  function loadAuthors() {
+    show('loadingState');
+    setShelvesVisible(false);
+    // Two calls because neither endpoint alone is enough: people-by-role says
+    // WHO the writers are but carries no counts, and person/all carries counts
+    // but lists publishers as though they were authors.
+    Promise.all([
+      kavita('/api/metadata/people-by-role?role=' + ROLE_WRITER)
+        .then(function (r) { return r.ok ? r.json() : []; }),
+      kavita('/api/person/all', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+      }).then(function (r) { return r.ok ? r.json() : []; })
+    ]).then(function (results) {
+      var writers = results[0] || [];
+      var counts = {};
+      (results[1] || []).forEach(function (p) { counts[p.id] = p.seriesCount || 0; });
+
+      // A one- or two-character name is parsing debris, not an author.
+      var people = writers.filter(function (p) {
+        return p && p.name && p.name.trim().length > 2;
+      }).map(function (p) {
+        return { id: p.id, name: p.name, seriesCount: counts[p.id] || 0 };
+      }).sort(function (a, b) {
+        return b.seriesCount - a.seriesCount || a.name.localeCompare(b.name);
+      });
+
+      var grid = el('authorGrid');
+      grid.innerHTML = '';
+      if (!people.length) {
+        el('emptyDetail').textContent = 'No authors are listed on these books yet.';
+        show('emptyState');
+        return;
+      }
+      el('libraryCount').textContent = people.length + ' author' + (people.length === 1 ? '' : 's');
+      people.forEach(function (p) { grid.appendChild(authorCard(p)); });
+      show('authorGrid');
+    }).catch(function (err) {
+      if (err && err.message === 'reconnecting') return;
+      showUnavailable(err);
+    });
+  }
+
+  /**
+   * Show one author's books.
+   *
+   * Filters the catalog by writer rather than calling Person/series-known-for,
+   * which caps its answer at 20 - George R. R. Martin's 28 books came back as
+   * 20 and contradicted the count on his own card.
+   */
+  function openAuthor(person) {
+    state.author = person;
+    show('loadingState');
+    kavita('/api/Series/all-v2?pageNumber=1&pageSize=200', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: filterBody({
+        statements: [{ comparison: CMP_EQUALS, field: FIELD_WRITER, value: String(person.id) }]
+      })
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (items) {
+        items = items || [];
+        el('libraryCount').textContent = person.name + ' \u00b7 ' + items.length +
+          ' book' + (items.length === 1 ? '' : 's');
+        el('backToAuthors').classList.remove('hidden');
+        renderGrid(items);
+        el('pager').classList.add('hidden');
+      })
+      .catch(function (err) {
+        if (err && err.message === 'reconnecting') return;
+        showUnavailable(err);
+      });
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.view-btn'), function (b) {
+    b.addEventListener('click', function () {
+      if (state.view === b.dataset.view && !state.author) return;
+      el('backToAuthors').classList.add('hidden');
+      setView(b.dataset.view);
+    });
+  });
+
+  el('backToAuthors').addEventListener('click', function () {
+    el('backToAuthors').classList.add('hidden');
+    state.author = null;
+    loadAuthors();
+  });
 
   var searchTimer = null;
   el('searchInput').addEventListener('input', function (e) {
@@ -580,6 +863,9 @@
       /* checkAuth redirects to /login itself when unauthenticated. */
     });
 
+    // Paints the Books tab as selected. The load itself is done below, so this
+    // must not reload; setView('books') would fetch the same page twice.
+    setViewChrome('books');
     loadShelves();
     loadPage();
   });
@@ -587,30 +873,15 @@
 
 /* ---- eBooks guide (coach marks) ----
  *
- * Spotlights each part of the page in turn: the fog dims everything, a hole is
- * cut around the element being described, and a bubble points at it.
+ * The engine lives in /static/js/tour.js and is shared with the reader; this
+ * page only supplies its own steps.
  *
  * Starts by itself on a first visit rather than hiding behind a button - a
  * tour nobody opens teaches nobody anything. The help button re-runs it.
- *
- * DEVELOPMENT: set localStorage.webservarr_tour_always = '1' (or append
- * ?tour=1) and the tour runs on every visit and never records itself as seen.
  */
 (function () {
   'use strict';
 
-  var SEEN_KEY = 'webservarr_ebooks_guide_seen';
-
-  function devAlways() {
-    try {
-      if (localStorage.getItem('webservarr_tour_always') === '1') return true;
-    } catch (e) {}
-    return /[?&]tour=1\b/.test(location.search);
-  }
-
-  /* Each step names a target by selector. `fallback` is used when the primary
-     element is absent - shelves only exist once something has been read, and a
-     tour must not break on an empty library. */
   var STEPS = [
     {
       /* The first shelf row, not the whole shelves block: a spotlight the size
@@ -619,20 +890,27 @@
       fallback: '#bookGrid',
       icon: 'auto_stories',
       title: 'Welcome to eBooks',
-      body: 'Everything here reads in your browser — nothing to install, and no separate account. Your place in a book saves itself, and it is private to you.'
+      body: 'Everything here reads in your browser. Nothing to install, and no separate account. Your place in a book saves itself, and it is private to you.'
     },
     {
       target: '#shelves > *:first-child',
       fallback: '#bookGrid',
       icon: 'bookmark',
       title: 'Your shelves',
-      body: 'Continue Reading appears once you start a book and follows you between devices. Recently Added is whatever arrived most recently.'
+      body: 'Continue Reading appears once you start a book and follows you between devices. Hover a cover and press the x to drop a book you have given up on. Recently Added is whatever arrived most recently.'
     },
     {
       target: '#searchInput',
       icon: 'search',
       title: 'Finding a book',
-      body: 'Search the whole library by title or author. Below it is every book we hold, in a grid you can page through.'
+      body: 'Search the whole library by title, author or series. Below it is every book we hold, in a grid you can page through.'
+    },
+    {
+      target: '#viewToggle',
+      fallback: '#sortSelect',
+      icon: 'tune',
+      title: 'Sort and browse',
+      body: 'Sort the grid by title, by what arrived most recently, or by length. Switch to Authors to browse by writer instead, then pick one to see everything of theirs we hold.'
     },
     {
       /* A single cover, so "click a cover" points at an actual cover. */
@@ -640,156 +918,26 @@
       fallback: '#shelves img',
       icon: 'menu_book',
       title: 'Open anything',
-      body: 'Click a cover to read it. In the reader, turn pages from the left and right edges or with the arrow keys, jump chapters from Contents, and click the page number to skip straight to a page.'
+      body: 'Click a cover to open its details: description, rating, length and how far through it you are. From there, Read opens the book itself.'
     },
     {
       target: 'a[href="/requests"]',
       icon: 'add_circle',
       title: 'Missing something?',
-      body: 'Search for it under Requests — books sit alongside films and TV. Press Request eBook and it arrives here on its own.'
+      body: 'Search for it under Requests, where books sit alongside films and TV. Press Request eBook and it arrives here on its own. Audiobooks can be requested there too, but they play in Plex rather than here.'
     }
   ];
 
-  var step = 0;
-  var active = false;
-
-  function q(id) { return document.getElementById(id); }
-
-  function targetFor(s) {
-    var el = document.querySelector(s.target);
-    if (el && el.offsetParent !== null) return el;
-    return s.fallback ? document.querySelector(s.fallback) : null;
-  }
-
-  function place() {
-    var s = STEPS[step];
-    var el = targetFor(s);
-    var spot = q('tourSpotlight');
-    var bubble = q('tourBubble');
-    var arrow = q('tourArrow');
-
-    var pad = 8;
-    var r = el
-      ? el.getBoundingClientRect()
-      /* Nothing to point at: centre the bubble with a collapsed spotlight so
-         the step still reads rather than pointing at the top-left corner. */
-      : { top: window.innerHeight / 2, left: window.innerWidth / 2, width: 0, height: 0, bottom: window.innerHeight / 2, right: window.innerWidth / 2 };
-
-    spot.style.top = (r.top - pad) + 'px';
-    spot.style.left = (r.left - pad) + 'px';
-    spot.style.width = (r.width + pad * 2) + 'px';
-    spot.style.height = (r.height + pad * 2) + 'px';
-    spot.style.opacity = el ? '1' : '0';
-
-    var bw = bubble.offsetWidth || 336;
-    var bh = bubble.offsetHeight || 160;
-    var gap = 16;
-    var margin = 12;
-    var side, top, left;
-
-    if (r.bottom + gap + bh < window.innerHeight - margin) {
-      side = 'bottom';                       // bubble sits below, arrow on top
-      top = r.bottom + gap;
-      left = r.left + r.width / 2 - bw / 2;
-    } else if (r.top - gap - bh > margin) {
-      side = 'top';
-      top = r.top - gap - bh;
-      left = r.left + r.width / 2 - bw / 2;
-    } else if (r.right + gap + bw < window.innerWidth - margin) {
-      side = 'right';
-      top = r.top + r.height / 2 - bh / 2;
-      left = r.right + gap;
-    } else {
-      side = 'left';
-      top = r.top + r.height / 2 - bh / 2;
-      left = Math.max(margin, r.left - gap - bw);
-    }
-
-    left = Math.max(margin, Math.min(left, window.innerWidth - bw - margin));
-    top = Math.max(margin, Math.min(top, window.innerHeight - bh - margin));
-    bubble.style.top = top + 'px';
-    bubble.style.left = left + 'px';
-
-    arrow.setAttribute('data-side', side);
-    arrow.style.left = arrow.style.top = '';
-    if (side === 'top' || side === 'bottom') {
-      var ax = r.left + r.width / 2 - left - 7;
-      arrow.style.left = Math.max(14, Math.min(ax, bw - 28)) + 'px';
-    } else {
-      var ay = r.top + r.height / 2 - top - 7;
-      arrow.style.top = Math.max(14, Math.min(ay, bh - 28)) + 'px';
-    }
-  }
-
-  function render() {
-    var s = STEPS[step];
-    q('tourIcon').textContent = s.icon;
-    q('tourTitle').textContent = s.title;
-    q('tourBody').textContent = s.body;
-
-    var dots = q('tourDots');
-    dots.innerHTML = '';
-    STEPS.forEach(function (_, i) {
-      var d = document.createElement('span');
-      d.className = 'size-1.5 rounded-full ' + (i === step ? 'bg-frosted-blue' : 'bg-frosted-blue/30');
-      dots.appendChild(d);
-    });
-
-    q('tourBack').style.visibility = step === 0 ? 'hidden' : 'visible';
-    q('tourNext').textContent = step === STEPS.length - 1 ? 'Got it' : 'Continue';
-
-    var el = targetFor(s);
-    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    // Let the scroll settle before measuring, or the bubble lands where the
-    // target used to be.
-    setTimeout(place, 380);
-  }
-
-  function start() {
-    if (active) return;
-    active = true;
-    step = 0;
-    q('tourLayer').classList.remove('hidden');
-    render();
-    window.addEventListener('resize', place);
-    window.addEventListener('scroll', place, true);
-  }
-
-  function finish() {
-    active = false;
-    q('tourLayer').classList.add('hidden');
-    window.removeEventListener('resize', place);
-    window.removeEventListener('scroll', place, true);
-    if (!devAlways()) {
-      try { localStorage.setItem(SEEN_KEY, '1'); } catch (e) {}
-    }
-  }
-
   function wire() {
-    q('tourNext').addEventListener('click', function () {
-      if (step < STEPS.length - 1) { step++; render(); } else { finish(); }
-    });
-    q('tourBack').addEventListener('click', function () {
-      if (step > 0) { step--; render(); }
-    });
-    q('tourSkip').addEventListener('click', finish);
-    document.addEventListener('keydown', function (e) {
-      if (!active) return;
-      if (e.key === 'Escape') finish();
-      else if (e.key === 'ArrowRight') q('tourNext').click();
-      else if (e.key === 'ArrowLeft') q('tourBack').click();
-    });
-
-    var help = q('helpBtn');
-    if (help) help.addEventListener('click', start);
-
-    var seen = false;
-    try { seen = localStorage.getItem(SEEN_KEY) === '1'; } catch (e) {}
-    if (!seen || devAlways()) {
+    WebServarrTour.init({
+      seenKey: 'webservarr_ebooks_guide_seen',
+      steps: STEPS,
+      helpBtn: 'helpBtn',
+      autoStart: true,
       // Wait for the shelves and grid to render, so the spotlight has real
       // geometry to sit on rather than empty placeholders.
-      setTimeout(start, 1200);
-    }
+      startDelay: 1200
+    });
   }
 
   if (document.readyState === 'loading') {
@@ -801,31 +949,6 @@
 
 </script>
 
-
-<!-- Guided tour: fog-of-war spotlight plus a bubble anchored to the element
-     being described. Both are built at runtime and positioned from the target's
-     real geometry, so they follow the page rather than guessing at it. -->
-<div id="tourLayer" class="hidden">
-  <div id="tourSpotlight" class="tour-spotlight"></div>
-  <div id="tourBubble" class="tour-bubble">
-    <div id="tourArrow" class="tour-arrow" data-side="top"></div>
-    <div class="p-4">
-      <div class="flex items-start gap-2">
-        <span id="tourIcon" class="material-symbols-outlined text-[20px] text-frosted-blue shrink-0">auto_stories</span>
-        <h3 id="tourTitle" class="flex-1 font-bold text-frosted-blue text-sm leading-snug"></h3>
-        <button id="tourSkip" class="text-[11px] text-frosted-blue/60 hover:text-frosted-blue shrink-0">Skip</button>
-      </div>
-      <p id="tourBody" class="mt-2 text-[13px] text-frosted-blue/85 leading-relaxed"></p>
-      <div class="mt-3 flex items-center gap-3">
-        <div id="tourDots" class="flex items-center gap-1.5"></div>
-        <div class="ml-auto flex items-center gap-2">
-          <button id="tourBack" class="px-2.5 py-1 rounded-lg text-[12px] text-frosted-blue/80 hover:text-frosted-blue hover:bg-frosted-blue/10">Back</button>
-          <button id="tourNext" class="px-3 py-1.5 rounded-lg bg-frosted-blue text-background-dark text-[12px] font-bold hover:bg-frosted-blue/90">Continue</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- Book detail sheet. Opens on clicking a cover, the way a film does on Plex:
      what the book is and whether you want it, before committing to reading it. -->
@@ -865,7 +988,7 @@
 
         <div id="bdGenres" class="mt-3 flex flex-wrap gap-1.5"></div>
 
-        <p id="bdSummary" class="mt-4 text-sm text-frosted-blue/85 leading-relaxed whitespace-pre-line"></p>
+        <p id="bdSummary" class="mt-4 text-sm text-bright leading-relaxed whitespace-pre-line"></p>
       </div>
     </div>
   </div>

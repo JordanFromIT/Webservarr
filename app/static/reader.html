@@ -8,7 +8,7 @@
 <script src="/static/js/theme-loader.js"></script>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="/static/css/theme.css?v=10" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=11" rel="stylesheet"/>
 <script>tailwind.config = {
   darkMode: "class",
   theme: {
@@ -109,16 +109,19 @@
   /* The chevron sits vertically centred and stays quiet until you approach it. */
   .nav-zone .chev {
     display: flex; align-items: center; justify-content: center;
-    width: 2.75rem; height: 2.75rem; border-radius: 9999px;
+    width: 3.5rem; height: 3.5rem; border-radius: 9999px;
     background: rgb(var(--color-primary) / .18);
-    color: rgb(var(--color-text));
-    opacity: .35;
+    /* Secondary text colour: the arrows sit over the page itself, and the
+       primary tint disappeared against a light reading theme. */
+    color: rgb(var(--color-text-secondary));
+    opacity: .55;
     transition: opacity .18s ease, background .18s ease;
   }
+  .nav-zone .chev .material-symbols-outlined { font-size: 2.25rem; }
   .nav-zone:hover .chev,
   .nav-zone:focus-visible .chev { opacity: 1; background: rgb(var(--color-primary) / .45); }
   .nav-zone:disabled { cursor: default; }
-  .nav-zone:disabled .chev { opacity: .08; }
+  .nav-zone:disabled .chev { opacity: .12; }
   .nav-zone:focus-visible { outline: 2px solid rgb(var(--color-accent)); outline-offset: -4px; }
 
   @media (prefers-reduced-motion: reduce) { .nav-zone .chev { transition: none; } }
@@ -191,6 +194,9 @@
   <button id="settingsBtn" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="Reading settings" aria-label="Reading settings">
     <span class="material-symbols-outlined text-frosted-blue align-middle">text_fields</span>
   </button>
+  <button id="helpBtn" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="How the reader works" aria-label="How the reader works">
+    <span class="material-symbols-outlined text-frosted-blue align-middle">help</span>
+  </button>
 </header>
 
 <!-- Table of contents -->
@@ -258,7 +264,7 @@
      across a novel. -->
 <footer id="readerFooter" class="fixed bottom-0 inset-x-0 z-30 pointer-events-none flex justify-center">
   <button id="pageInfo" type="button"
-          class="pointer-events-auto text-[11px] text-steel-blue/70 hover:text-frosted-blue tabular-nums
+          class="pointer-events-auto text-[13px] font-medium text-bright/80 hover:text-bright tabular-nums
                  px-3 py-1.5 rounded-md hover:bg-baltic-blue/25 transition-colors"
           title="Click to jump to a page" aria-label="Current page. Click to jump to a page."></button>
   <form id="pageJumpForm" class="pointer-events-auto hidden items-center gap-1.5 px-2 py-1">
@@ -267,11 +273,12 @@
                   text-[12px] text-frosted-blue text-center tabular-nums
                   focus:outline-none focus:ring-2 focus:ring-steel-blue"
            aria-label="Go to page"/>
-    <span id="pageJumpTotal" class="text-[11px] text-steel-blue/70 tabular-nums"></span>
+    <span id="pageJumpTotal" class="text-[13px] text-bright/80 tabular-nums"></span>
   </form>
 </footer>
 
 <script src="/static/js/auth.js"></script>
+<script src="/static/js/tour.js?v=2"></script>
 <script>
 (function () {
   'use strict';
@@ -632,11 +639,92 @@
       return restoreProgress();
     }).then(function (page) {
       return goToPage(page, true);
+    }).then(function () {
+      // Only once there is a rendered page to point at. Starting earlier
+      // spotlights an empty loading spinner.
+      if (window.readerTour) window.readerTour.maybeStart();
     }).catch(function (err) {
       if (err && err.message === 'reconnecting') return;
       showError('Couldn’t open this book', String(err.message || err));
     });
   });
+})();
+
+/* ---- Reader guide (coach marks) ----
+ *
+ * Same engine as the library tour, in /static/js/tour.js. Started from the boot
+ * chain above rather than on a timer, because half these steps point at
+ * controls that do not settle until the first page is on screen.
+ */
+(function () {
+  'use strict';
+
+  var panel = function () { return document.getElementById('settingsPanel'); };
+
+  function openSettings() { panel().classList.remove('hidden'); }
+  function closeSettings() { panel().classList.add('hidden'); }
+
+  var STEPS = [
+    {
+      target: '#navNext',
+      fallback: '#bookContent',
+      icon: 'auto_stories',
+      title: 'Turning pages',
+      body: 'Click either edge of the page to move forward or back, or use the arrow keys. Your place saves itself as you go, so you can close the tab and pick up here on any device.'
+    },
+    {
+      target: '#pageInfo',
+      icon: 'tag',
+      title: 'Where you are',
+      body: 'The counter at the bottom shows the page you are on and how many there are. Click it to type a page number and jump straight there.'
+    },
+    {
+      target: '#tocBtn',
+      icon: 'toc',
+      title: 'Chapters',
+      body: 'Opens the table of contents. The chapter you are in is highlighted, and picking any other one takes you to it.'
+    },
+    {
+      target: '#bookmarkBtn',
+      icon: 'bookmark_add',
+      title: 'Bookmarks',
+      body: 'Marks the current page so you can find it again later. Separate from your reading position, which is always saved anyway.'
+    },
+    {
+      target: '#settingsPanel',
+      fallback: '#settingsBtn',
+      icon: 'text_fields',
+      title: 'Make it comfortable',
+      body: 'Text size, line spacing, how wide the lines run, and two columns if you prefer. The five swatches change the page colour, from black through to paper white. Your choices carry to every book you open.',
+      before: openSettings
+    },
+    {
+      target: 'header a[href="/library"]',
+      icon: 'arrow_back',
+      title: 'When you are done',
+      body: 'The arrow at the top left goes back to the library. Nothing needs saving first, and the book reappears under Continue Reading.',
+      before: closeSettings
+    }
+  ];
+
+  function wire() {
+    window.readerTour = WebServarrTour.init({
+      seenKey: 'webservarr_reader_guide_seen',
+      steps: STEPS,
+      helpBtn: 'helpBtn',
+      // Started from the boot chain instead, once a page has rendered.
+      autoStart: false,
+      // Leaving the settings panel hanging open after a skipped tour would look
+      // like a bug.
+      onFinish: closeSettings
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wire);
+  } else {
+    wire();
+  }
 })();
 </script>
 </body></html>
