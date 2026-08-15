@@ -38,19 +38,12 @@
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
-<!-- Search bar rests here on arrival, above the trending rows, so it is the
-     first thing seen. It slides into the results panel once typing starts.
-     Only the bar's own height is reserved - no extra margin - so the trending
-     row sits as close to its original position as it can without the bar
-     covering its heading. -->
-<div id="searchHome" class="flex justify-center mb-3"></div>
-
-<!-- Movable search bar. Constrained and centred when floating at the top;
-     fills its container once docked in the results panel. -->
-<div id="searchBar" class="relative w-full max-w-lg mx-auto">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-xl">search</span>
-<input id="searchInput" type="text" placeholder="Search movies, TV shows and books..."
-  class="w-full pl-10 pr-4 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm shadow-lg shadow-black/30"/>
+<!-- Zero-height host: the bar floats in the empty space to the right of the
+     first "Trending" heading, so nothing on the page is displaced by it.
+     The slot carries the absolute positioning rather than the bar itself - the
+     bar must stay position:relative for its own search icon. -->
+<div id="searchHome" class="relative h-0 z-20">
+  <div id="searchHomeSlot" class="absolute right-0 top-0 w-full max-w-lg"></div>
 </div>
 
 <!-- Discover Section -->
@@ -82,7 +75,15 @@
 <!-- Left column: Search -->
 <div class="w-full lg:w-1/2 min-w-0 rounded-xl glass-card p-4 lg:p-5">
 <!-- Where the search bar lands once a search is under way -->
-<div id="searchDock" class="mb-4"></div>
+<div id="searchDock" class="mb-4">
+<!-- Movable search bar. Starts life here so it inherits the dock's width, then
+     is floated up to the trending heading on load. -->
+<div id="searchBar" class="relative w-full">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-xl">search</span>
+<input id="searchInput" type="text" placeholder="Search movies, TV shows and books..."
+  class="w-full pl-10 pr-4 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm shadow-lg shadow-black/30"/>
+</div>
+</div>
 <div class="space-y-1.5 mb-4 text-[11px] leading-relaxed text-steel-blue/80">
 <p><strong class="text-steel-blue">Requests</strong> are processed automatically and should be available within an hour, though there is no guarantee the content is available.</p>
 </div>
@@ -824,82 +825,128 @@ function reducedMotion() {
     return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
+function searchSlot(position) {
+    return document.getElementById(position === 'dock' ? 'searchDock' : 'searchHomeSlot');
+}
+
 function wireSearchBarMotion() {
     var bar = document.getElementById('searchBar');
-    var home = document.getElementById('searchHome');
-    if (bar && home && bar.parentElement !== home) home.appendChild(bar);
+    var slot = searchSlot('home');
+    if (bar && slot && bar.parentElement !== slot) slot.appendChild(bar);
 }
 
 /**
- * Move the search bar between its two positions using FLIP: read the old box,
- * reparent, read the new box, then animate the difference away.
+ * Move the search bar between the trending heading and the results panel.
  *
- * The two slots differ in width as well as position, so max-width is animated
- * alongside the transform - a transform alone would snap the width and only
- * slide the position.
+ * The two slots are roughly 1700px apart, so no animation can show that whole
+ * journey - the bar would spend it off screen. Instead the bar is lifted out of
+ * the flow and pinned to its current screen position while the page scrolls
+ * beneath it, then glides the short remaining distance into its slot. What the
+ * user sees is the bar travelling to its new home, rather than the page moving
+ * under a stationary bar.
  */
+var _searchMoveTimers = [];
+
 function moveSearchBar(position) {
     if (position === _searchBarPosition) return;
+    _searchBarPosition = position;
 
     var bar = document.getElementById('searchBar');
-    var target = document.getElementById(position === 'dock' ? 'searchDock' : 'searchHome');
+    var target = searchSlot(position);
     if (!bar || !target) return;
 
+    _searchMoveTimers.forEach(clearTimeout);
+    _searchMoveTimers = [];
+
     var input = document.getElementById('searchInput');
-    // Reparenting a node blurs any focused descendant, so the caret has to be
-    // put back or the next keystroke goes nowhere.
     var hadFocus = document.activeElement === input;
     var selStart = hadFocus ? input.selectionStart : null;
     var selEnd = hadFocus ? input.selectionEnd : null;
 
-    var first = bar.getBoundingClientRect();
-    target.appendChild(bar);
-    _searchBarPosition = position;
-    var last = bar.getBoundingClientRect();
-
-    if (hadFocus) {
-        input.focus({preventScroll: true});
-        try { input.setSelectionRange(selStart, selEnd); } catch (e) { /* not selectable */ }
+    function settle() {
+        target.appendChild(bar);
+        bar.style.cssText = '';
+        // Reparenting blurs a focused descendant, so the caret is restored or
+        // the next keystroke goes nowhere.
+        if (hadFocus) {
+            input.focus({preventScroll: true});
+            try { input.setSelectionRange(selStart, selEnd); } catch (e) { /* not selectable */ }
+        }
     }
 
-    // The two slots are ~1700px apart, so the page has to follow the bar in
-    // both directions - otherwise it leaves the viewport and the user is left
-    // looking at whatever happens to be on screen.
-    var behavior = reducedMotion() ? 'auto' : 'smooth';
-    if (position === 'dock') {
-        var panel = document.getElementById('searchResultsSection');
-        var anchor = (panel && panel.parentElement) || target;
-        if (anchor.scrollIntoView) anchor.scrollIntoView({behavior: behavior, block: 'start'});
-    } else if (bar.scrollIntoView) {
-        // Back up to the bar and the trending rows. scrollIntoView is used
-        // rather than reaching for the scroll container: that element's class
-        // is "lg:overflow-y-auto", so a closest('.overflow-y-auto') lookup
-        // silently matches nothing and the page never moves.
-        bar.scrollIntoView({behavior: behavior, block: 'start'});
+    if (reducedMotion()) {
+        settle();
+        (position === 'dock' ? target : bar).scrollIntoView({block: 'start'});
+        return;
     }
 
-    if (reducedMotion()) return;
-
-    var dx = first.left - last.left;
-    var dy = first.top - last.top;
-    if (!dx && !dy && Math.abs(first.width - last.width) < 1) return;
-
+    // 1. Pin the bar where it currently appears, so the scroll does not drag it.
+    var start = bar.getBoundingClientRect();
+    bar.style.position = 'fixed';
+    bar.style.top = start.top + 'px';
+    bar.style.left = start.left + 'px';
+    bar.style.width = start.width + 'px';
+    bar.style.maxWidth = 'none';
+    bar.style.margin = '0';
+    bar.style.zIndex = '50';
     bar.style.transition = 'none';
-    bar.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
-    bar.style.maxWidth = first.width + 'px';
 
-    requestAnimationFrame(function () {
-        bar.style.transition = 'transform .42s cubic-bezier(.4,0,.2,1), max-width .42s cubic-bezier(.4,0,.2,1)';
-        bar.style.transform = 'translate(0, 0)';
-        bar.style.maxWidth = last.width + 'px';
+    // 2. Scroll the destination into view underneath it.
+    var scrollAnchor = position === 'dock'
+        ? (document.getElementById('searchResultsSection') || {}).parentElement || target
+        : document.getElementById('discoverSection') || target;
+    if (scrollAnchor && scrollAnchor.scrollIntoView) {
+        scrollAnchor.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+
+    // 3. Once the scroll has actually settled, glide the bar into its slot.
+    //
+    // Waiting a fixed delay is not enough: a smooth scroll of ~1700px is still
+    // running at that point, so the slot gets measured mid-flight and the bar
+    // animates toward a stale target, then snaps when it finally lands.
+    var scroller = bar.closest('.custom-scrollbar');
+    var glided = false;
+
+    function whenScrollSettles(run) {
+        if (!scroller) { _searchMoveTimers.push(setTimeout(run, 420)); return; }
+        var lastTop = scroller.scrollTop;
+        var stableFor = 0;
+        (function poll() {
+            _searchMoveTimers.push(setTimeout(function () {
+                if (glided) return;
+                if (scroller.scrollTop === lastTop) {
+                    stableFor += 60;
+                    // Two consecutive still frames means the scroll has stopped.
+                    if (stableFor >= 120) { run(); return; }
+                } else {
+                    lastTop = scroller.scrollTop;
+                    stableFor = 0;
+                }
+                poll();
+            }, 60));
+        })();
+        // Hard ceiling, so a scroll that never reports settling still resolves.
+        _searchMoveTimers.push(setTimeout(function () { if (!glided) run(); }, 900));
+    }
+
+    whenScrollSettles(function () {
+        if (glided) return;
+        glided = true;
+        // Measure the slot by briefly placing a stand-in of the bar's size.
+        var probe = document.createElement('div');
+        probe.style.height = start.height + 'px';
+        probe.className = 'w-full';
+        target.appendChild(probe);
+        var end = probe.getBoundingClientRect();
+        target.removeChild(probe);
+
+        bar.style.transition = 'top .45s cubic-bezier(.4,0,.2,1), left .45s cubic-bezier(.4,0,.2,1), width .45s cubic-bezier(.4,0,.2,1)';
+        bar.style.top = end.top + 'px';
+        bar.style.left = end.left + 'px';
+        bar.style.width = end.width + 'px';
+
+        _searchMoveTimers.push(setTimeout(settle, 470));
     });
-
-    // Drop the inline sizing afterwards so the bar stays responsive to resizes.
-    setTimeout(function () {
-        bar.style.transition = '';
-        bar.style.transform = '';
-        bar.style.maxWidth = '';
-    }, 480);
 }
 
 function getStatusPresentation(status, mediaType) {
