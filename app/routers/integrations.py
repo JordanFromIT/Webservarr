@@ -92,11 +92,16 @@ async def plex_thumbnail(
 
 
 @router.get("/backgrounds")
-async def get_backgrounds(db: Session = Depends(get_db)):
+@limiter.limit("60/minute")
+async def get_backgrounds(request: Request, db: Session = Depends(get_db)):
     """
     Get TMDB trending backdrop URLs for login page.
     No auth required — login page is pre-authentication.
     Returns empty list if Seerr is not configured or feature is disabled.
+
+    Rate limited because it is unauthenticated and every call reaches Seerr:
+    without a limit an anonymous caller can use the login page to amplify
+    traffic against it. Same reasoning as /status-summary.
     """
     from app.models import Setting
     flag = db.query(Setting).filter(Setting.key == "features.login_backgrounds").first()
@@ -287,6 +292,13 @@ async def chaptarr_search(
     return {"results": await chaptarr.search(query.strip())}
 
 
+# Open Library's trending windows. Anything else is not a period, and more to
+# the point must never reach a cache key - the value is caller-supplied and is
+# interpolated into a Redis key, so an unvalidated one lets a client mint
+# unbounded distinct keys, each holding a full shelf for an hour.
+_TRENDING_PERIODS = ("daily", "weekly", "monthly", "yearly")
+
+
 async def build_books_shelf(period: str = "weekly") -> list:
     """
     Build the trending books shelf, from cache when it is fresh.
@@ -294,6 +306,9 @@ async def build_books_shelf(period: str = "weekly") -> list:
     Kept separate from the route so the background warmer can call it without
     faking a request or an authenticated user.
     """
+    if period not in _TRENDING_PERIODS:
+        period = "weekly"
+
     cached = _trending_books_cache.get(period)
     if cached and (time.monotonic() - cached[0]) < _TRENDING_BOOKS_TTL:
         return cached[1]

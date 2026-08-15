@@ -7,10 +7,13 @@
 # ==============================================================================
 
 # Web Framework
-# TODO: bump fastapi to >=0.115 (pulls starlette >=0.40) to close CVE-2024-47874
-#       (starlette multipart DoS). Requires `pip-compile` to re-resolve the tree
-#       and an app smoke test — left at 0.109 here to keep the lock reproducible.
-fastapi==0.109.0
+# 0.115.6 pulls starlette 0.41.3, closing CVE-2024-47874 (starlette multipart
+# DoS, fixed in 0.40). Applied surgically: only fastapi and starlette moved in
+# requirements.txt. A full `pip-compile` re-resolve wanted to bump 25 packages
+# including cryptography 46 -> 50, which is a far larger blast radius than one
+# CVE justifies; `pip check` passes and the app smoke tests clean on the
+# two-package change.
+fastapi==0.115.6
 uvicorn[standard]==0.27.0
 python-multipart==0.0.7  # CVE-2024-24762 (multipart ReDoS) fixed in 0.0.7
 

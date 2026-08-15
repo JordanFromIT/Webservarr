@@ -50,6 +50,14 @@ _BOOK_PAGE_PATH = re.compile(r"^api/[Bb]ook/\d+/book-page$", re.IGNORECASE)
 # relayed while Content-Encoding is dropped, so the browser would render
 # garbage. Asking upstream for identity keeps the proxy correct. The hop to
 # Kavita is a ~23ms LAN link over WireGuard, so compression buys little here.
+# "cookie" is stripped for a different reason again: the browser's cookie header
+# for this origin carries the WebServarr *session id*, and forwarding it would
+# disclose a live session credential to Kavita on every single proxied request -
+# for nothing, since the catch-all authenticates with a Bearer token. It cannot
+# be carrying anything Kavita wants either: set-cookie is filtered out of every
+# proxied response, so the browser never holds a Kavita cookie to send back. The
+# OIDC handshake routes build their own headers and set Cookie explicitly, so
+# they are unaffected by this.
 _HOP_BY_HOP = {
     "host",
     "connection",
@@ -62,6 +70,7 @@ _HOP_BY_HOP = {
     "trailers",
     "content-length",
     "accept-encoding",
+    "cookie",
 }
 
 # Only these response headers are passed back to the browser. Notably absent:
