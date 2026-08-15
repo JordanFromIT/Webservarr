@@ -271,6 +271,10 @@ function initSidebar(currentPage) {
         if (fresh !== root.innerHTML) {
           root.innerHTML = fresh;
           _wireSidebarChrome();
+          // The fresh markup is back to opacity-0 with admin items hidden, so
+          // the reveal has to be replayed - it already ran against the markup
+          // this just discarded.
+          if (_navRevealed) showAdminNav(_navIsAdmin);
         }
       } else if (attempts > 40) {
         clearInterval(poll);   // ~4s; branding is not coming
@@ -287,7 +291,16 @@ function initSidebar(currentPage) {
  * Call after checkAuth() returns the user.
  * @param {boolean} isAdmin
  */
+/* The last reveal state. Rebuilding the sidebar replaces its markup, which
+   restores the nav to its initial opacity-0 and re-hides admin items; without
+   replaying this, a rebuild leaves the whole nav invisible. */
+var _navRevealed = false;
+var _navIsAdmin = false;
+
 function showAdminNav(isAdmin) {
+  _navRevealed = true;
+  _navIsAdmin = !!isAdmin;
+
   if (isAdmin) {
     var items = document.querySelectorAll('[data-admin-only]');
     items.forEach(function (el) {
