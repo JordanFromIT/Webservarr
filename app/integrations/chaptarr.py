@@ -36,6 +36,10 @@ TIMEOUT = 15.0
 # The only provider that returns results; see module docstring.
 SEARCH_PROVIDER = "goodreads"
 
+# How many trending titles to resolve at once. Each is a Goodreads round trip
+# made on Chaptarr's behalf, and it degrades badly under a full shelf at once.
+_RESOLVE_CONCURRENCY = 5
+
 
 def _get_config() -> dict:
     """Read Chaptarr config from the settings table (short-lived session)."""
@@ -52,6 +56,12 @@ def _get_config() -> dict:
             "root_folder": _val("integration.chaptarr.root_folder") or "",
             "quality_profile_id": _val("integration.chaptarr.quality_profile_id") or "1",
             "metadata_profile_id": _val("integration.chaptarr.metadata_profile_id") or "2",
+            # Chaptarr keeps audiobooks in their own root folder with their own
+            # profiles, so an audiobook request is the same call with a
+            # different trio. Defaults match a stock Chaptarr install.
+            "audiobook_root_folder": _val("integration.chaptarr.audiobook_root_folder") or "",
+            "audiobook_quality_profile_id": _val("integration.chaptarr.audiobook_quality_profile_id") or "2",
+            "audiobook_metadata_profile_id": _val("integration.chaptarr.audiobook_metadata_profile_id") or "1",
         }
     finally:
         db.close()
@@ -305,7 +315,20 @@ async def resolve_trending(books: List[Dict[str, Any]], limit: int = 20) -> List
             best["poster_url"] = f"/api/integrations/book-cover?coverId={entry['cover_id']}"
         return best
 
-    results = await asyncio.gather(*[_one(b) for b in books[:limit]], return_exceptions=True)
+    # Chaptarr proxies each of these to Goodreads, and firing the whole shelf at
+    # it at once makes it start failing: 24 simultaneous lookups returned 4
+    # usable results in 15s, where the same shelf a few at a time returns nearly
+    # all of them in a fraction of that. Concurrency is capped rather than
+    # removed - serial would be far too slow.
+    gate = asyncio.Semaphore(_RESOLVE_CONCURRENCY)
+
+    async def _guarded(entry):
+        async with gate:
+            return await _one(entry)
+
+    results = await asyncio.gather(
+        *[_guarded(b) for b in books[:limit]], return_exceptions=True
+    )
     return [r for r in results if isinstance(r, dict)]
 
 
@@ -342,17 +365,26 @@ async def _lookup_book(cfg: dict, foreign_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-async def request_book(foreign_id: str) -> Dict[str, Any]:
+async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
     """
     Add a book to Chaptarr and start searching for it.
+
+    `fmt` is "ebook" or "audiobook" and selects which root folder and profile
+    pair the request lands in - Chaptarr keeps the two apart, so requesting an
+    audiobook into the ebook folder would download the wrong edition.
 
     Returns {"ok": bool, "message": str}.
     """
     cfg = _get_config()
     if not cfg["url"] or not cfg["api_key"]:
         return {"ok": False, "message": "Chaptarr is not configured"}
-    if not cfg["root_folder"]:
-        return {"ok": False, "message": "No Chaptarr root folder configured"}
+
+    audiobook = fmt == "audiobook"
+    prefix = "audiobook_" if audiobook else ""
+    root_folder = cfg[f"{prefix}root_folder"]
+    if not root_folder:
+        label = "audiobook" if audiobook else "book"
+        return {"ok": False, "message": f"No Chaptarr {label} root folder configured"}
 
     book = await _lookup_book(cfg, foreign_id)
     if not book:
@@ -361,9 +393,9 @@ async def request_book(foreign_id: str) -> Dict[str, Any]:
     payload = dict(book)
     payload.update({
         "monitored": True,
-        "rootFolderPath": cfg["root_folder"],
-        "qualityProfileId": int(cfg["quality_profile_id"]),
-        "metadataProfileId": int(cfg["metadata_profile_id"]),
+        "rootFolderPath": root_folder,
+        "qualityProfileId": int(cfg[f"{prefix}quality_profile_id"]),
+        "metadataProfileId": int(cfg[f"{prefix}metadata_profile_id"]),
         "addOptions": {"searchForNewBook": True},
     })
 

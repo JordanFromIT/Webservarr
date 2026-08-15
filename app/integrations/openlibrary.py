@@ -19,6 +19,7 @@ kept shallow:
 """
 
 import asyncio
+from itertools import zip_longest
 import re
 import logging
 from typing import Dict, List, Optional, Tuple
@@ -236,6 +237,39 @@ async def trending(period: str = "weekly", limit: int = 24) -> List[Dict[str, st
 
     _trending_cache[period] = (time.monotonic(), items)
     return items[:limit]
+
+
+def merge_trending(*sources: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """
+    Interleave several trending sources, dropping duplicates.
+
+    Interleaved rather than concatenated: appending would make the shelf read
+    as one source followed by another, and whichever came second would sit off
+    the end of the row where nobody scrolls. Taking one from each in turn keeps
+    the front of the shelf representative.
+
+    Two entries are the same book when their titles match after cleaning and
+    they share an author surname - the lists disagree on punctuation and casing
+    constantly ("THE CALAMITY CLUB" against "The Calamity Club"), so raw string
+    equality would let obvious duplicates through.
+    """
+    seen = set()
+    merged = []
+    for row in zip_longest(*sources):
+        for entry in row:
+            if not entry or not entry.get("title"):
+                continue
+            title_key = " ".join(sorted(_tokens(clean_title(entry["title"]))))
+            author_key = ""
+            author_tokens = _tokens(entry.get("author") or "")
+            if author_tokens:
+                author_key = sorted(author_tokens)[-1]
+            key = (title_key, author_key)
+            if not title_key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(entry)
+    return merged
 
 
 async def fetch_cover(cover_id: int) -> Optional[Tuple[bytes, str]]:

@@ -2,6 +2,7 @@
 Integration API routes - Plex, Uptime Kuma, Seerr, Netdata endpoints.
 """
 
+import asyncio
 import logging
 import time
 from urllib.parse import urlparse
@@ -15,7 +16,7 @@ from app.auth import session_manager
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
-from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr, chaptarr, openlibrary
+from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr, chaptarr, openlibrary, nyt
 from app.limiter import limiter
 
 logger = logging.getLogger(__name__)
@@ -261,7 +262,18 @@ async def books_trending(
         return cached[1]
 
     try:
-        ranked = await openlibrary.trending(period=period)
+        # Two sources that disagree usefully: Open Library ranks what people
+        # look up, which skews to perennials, while the NYT lists are what is
+        # selling now. Either failing just thins the shelf.
+        looked_up, selling = await asyncio.gather(
+            openlibrary.trending(period=period),
+            nyt.bestsellers("books"),
+            return_exceptions=True,
+        )
+        ranked = openlibrary.merge_trending(
+            looked_up if isinstance(looked_up, list) else [],
+            selling if isinstance(selling, list) else [],
+        )
         cards = await chaptarr.resolve_trending(ranked)
     except Exception as exc:  # noqa: BLE001 - a shelf must never break the page
         logger.warning("Trending books failed: %s", exc)
@@ -272,6 +284,39 @@ async def books_trending(
     # visitor after the hour pays for it.
     if cards:
         _trending_books_cache[period] = (time.monotonic(), cards)
+    return cards
+
+
+@router.get("/audiobooks-trending")
+@limiter.limit("30/minute")
+async def audiobooks_trending(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Trending audiobooks, as requestable cards.
+
+    NYT's Audio Fiction and Audio Nonfiction lists are the only sanctioned
+    source for this - Audible publishes no API and no feed. Cards resolve
+    through Chaptarr like the book shelf, but are marked so the request goes to
+    Chaptarr's audiobook profile and root folder rather than the ebook one.
+    """
+    cached = _trending_books_cache.get("audiobooks")
+    if cached and (time.monotonic() - cached[0]) < _TRENDING_BOOKS_TTL:
+        return cached[1]
+
+    try:
+        ranked = await nyt.bestsellers("audiobooks")
+        cards = await chaptarr.resolve_trending(ranked)
+    except Exception as exc:  # noqa: BLE001 - a shelf must never break the page
+        logger.warning("Trending audiobooks failed: %s", exc)
+        return []
+
+    for card in cards:
+        card["media_type"] = "audiobook"
+
+    if cards:
+        _trending_books_cache["audiobooks"] = (time.monotonic(), cards)
     return cards
 
 
@@ -303,6 +348,10 @@ async def book_cover(
 class BookRequestCreate(BaseModel):
     # A Chaptarr foreign id such as "gr:3634639" - a string, not an int.
     bookId: str
+    # "ebook" or "audiobook"; picks which Chaptarr root folder and profiles the
+    # request lands in. Anything else is treated as an ebook rather than
+    # rejected, so an older client keeps working.
+    format: str = "ebook"
 
 
 @router.post("/chaptarr-request")
@@ -315,7 +364,8 @@ async def create_chaptarr_request(
     """Add a book to Chaptarr and kick off a search for it."""
     if not body.bookId.strip():
         raise HTTPException(status_code=400, detail="bookId is required")
-    result = await chaptarr.request_book(body.bookId.strip())
+    fmt = "audiobook" if body.format == "audiobook" else "ebook"
+    result = await chaptarr.request_book(body.bookId.strip(), fmt=fmt)
     if not result["ok"]:
         raise HTTPException(status_code=502, detail=result["message"])
     return result

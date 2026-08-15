@@ -78,6 +78,14 @@ DEFAULT_SETTINGS = {
     "integration.chaptarr.root_folder": ("", "Chaptarr root folder path for requested books"),
     "integration.chaptarr.quality_profile_id": ("1", "Chaptarr quality profile id for requested books"),
     "integration.chaptarr.metadata_profile_id": ("2", "Chaptarr metadata profile id for requested books"),
+    # Chaptarr keeps audiobooks in their own root folder with their own
+    # profiles, so requesting one is the same call with a different trio.
+    # Defaults match a stock Chaptarr install (Audiobook quality, Audiobook
+    # Default metadata).
+    "integration.chaptarr.audiobook_root_folder": ("", "Chaptarr root folder path for requested audiobooks"),
+    "integration.chaptarr.audiobook_quality_profile_id": ("2", "Chaptarr quality profile id for requested audiobooks"),
+    "integration.chaptarr.audiobook_metadata_profile_id": ("1", "Chaptarr metadata profile id for requested audiobooks"),
+    "integration.nyt.api_key": ("", "New York Times Books API key (developer.nytimes.com) for trending shelves"),
     # Ticket system
     "features.show_tickets": ("true", "Show Tickets page in sidebar"),
     "sidebar.label_tickets": ("Tickets", "Sidebar label for Tickets page"),

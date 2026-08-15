@@ -295,6 +295,8 @@ var DISCOVER_ROWS = [
   { id: 'upcomingSeriesRow', endpoint: 'upcoming-series', label: 'Upcoming Series', icon: 'calendar_month'},
   { id: 'trendingBooksRow',  url: '/api/integrations/books-trending',
                              label: 'Trending Books',  icon: 'menu_book' },
+  { id: 'trendingAudiobooksRow', url: '/api/integrations/audiobooks-trending',
+                             label: 'Trending Audiobooks', icon: 'headphones' },
 ];
 
 // State
@@ -486,6 +488,7 @@ function renderDiscoverRowError(rowId) {
 function mediaTypeLabel(mediaType) {
   if (mediaType === 'tv') return 'TV Show';
   if (mediaType === 'book') return 'eBook';
+  if (mediaType === 'audiobook') return 'Audiobook';
   return 'Movie';
 }
 
@@ -499,7 +502,7 @@ function mediaTypeLabel(mediaType) {
  */
 function mediaTypeAccent(mediaType) {
   if (mediaType === 'tv') return 'media-tv';
-  if (mediaType === 'book') return 'media-book';
+  if (mediaType === 'book' || mediaType === 'audiobook') return 'media-book';
   return 'media-movie';
 }
 
@@ -524,6 +527,7 @@ function mediaTypeNounColor(mediaType) {
 function mediaTypeIcon(mediaType) {
   if (mediaType === 'tv') return 'tv';
   if (mediaType === 'book') return 'menu_book';
+  if (mediaType === 'audiobook') return 'headphones';
   return 'movie';
 }
 
@@ -886,7 +890,7 @@ async function requestMedia(mediaType, mediaId, is4k, buttonEl) {
     try {
         // Books go to Chaptarr, films and TV to Seerr. Book ids are strings
         // such as "gr:3634639", not numbers.
-        var isBook = mediaType === 'book';
+        var isBook = mediaType === 'book' || mediaType === 'audiobook';
         var resp = await fetch(
             isBook ? '/api/integrations/chaptarr-request' : '/api/integrations/seerr-request',
             {
@@ -894,7 +898,7 @@ async function requestMedia(mediaType, mediaId, is4k, buttonEl) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(
                     isBook
-                        ? { bookId: String(mediaId) }
+                        ? { bookId: String(mediaId), format: mediaType === 'audiobook' ? 'audiobook' : 'ebook' }
                         : { mediaType: mediaType, mediaId: mediaId, is4k: is4k }
                 )
             }
