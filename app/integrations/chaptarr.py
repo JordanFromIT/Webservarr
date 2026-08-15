@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.database import SessionLocal
+from app.integrations import openlibrary
 from app.models import Setting
 
 logger = logging.getLogger(__name__)
@@ -176,7 +177,29 @@ async def search(term: str, limit: int = 20) -> List[Dict[str, Any]]:
     # Most-rated first: with no relevance score, popularity is the best proxy
     # for "the edition the person actually meant".
     items.sort(key=lambda b: b.get("votes") or 0, reverse=True)
+
+    await _attach_covers(items)
     return items
+
+
+async def _attach_covers(items: List[Dict[str, Any]]) -> None:
+    """
+    Fill in cover art from Open Library for books that have none.
+
+    Chaptarr's own covers are unreachable (see _poster_from). Failure here is
+    silent by design: a book card without art is still perfectly usable.
+    """
+    needed = [(b["title"], b.get("author") or "") for b in items if not b.get("poster_url")]
+    if not needed:
+        return
+
+    found = await openlibrary.cover_ids(needed)
+    for book in items:
+        if book.get("poster_url"):
+            continue
+        cover_id = found.get((book["title"], book.get("author") or ""))
+        if cover_id:
+            book["poster_url"] = f"/api/integrations/book-cover?coverId={cover_id}"
 
 
 async def _lookup_book(cfg: dict, foreign_id: str) -> Optional[Dict[str, Any]]:

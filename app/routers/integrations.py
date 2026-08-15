@@ -13,7 +13,7 @@ from app.auth import session_manager
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
-from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr, chaptarr
+from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr, chaptarr, openlibrary
 from app.limiter import limiter
 
 router = APIRouter()
@@ -230,6 +230,31 @@ async def chaptarr_search(
     if not query.strip():
         return {"results": []}
     return {"results": await chaptarr.search(query.strip())}
+
+
+@router.get("/book-cover")
+@limiter.limit("120/minute")
+async def book_cover(
+    request: Request,
+    coverId: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Proxy an Open Library book cover.
+
+    Served through here rather than linked directly so readers' browsers never
+    contact Open Library — only the VPS does. Takes an integer id, so it cannot
+    be pointed at an arbitrary URL.
+    """
+    result = await openlibrary.fetch_cover(coverId)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Cover not found")
+    content, content_type = result
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Cache-Control": "private, max-age=604800"},
+    )
 
 
 class BookRequestCreate(BaseModel):
