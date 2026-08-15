@@ -95,6 +95,15 @@ async def _fetch_media_details(client: httpx.AsyncClient, base_url: str, api_key
 async def get_recent_requests(limit: int = 10) -> list:
     """
     Fetch recent media requests from Seerr.
+
+    NOTE: these are SERVER-WIDE, not the caller's own. The Seerr admin API key
+    is used with no requestedBy filter, so this returns every user's requests -
+    12 different people in the current data. That is a deliberate shared view
+    on a family server, but it means the panel showing this must never be
+    labelled as the viewer's own; it is headed "Recent Requests" for that
+    reason. Scoping it per user would mean passing the caller's Seerr user id
+    (obtainable from their Plex token, as create_request_as_user already does).
+
     Returns list of request dicts with media info, status, and requester.
     """
     config = _get_config()

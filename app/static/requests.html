@@ -213,7 +213,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 <div class="w-full lg:w-1/2 min-w-0 rounded-xl glass-card p-4 lg:p-5">
 <div class="flex items-center gap-3 mb-4 pb-3 border-b border-steel-blue/30">
 <span class="material-symbols-outlined text-primary">shopping_cart</span>
-<h3 class="text-lg font-bold text-frosted-blue">Your Requests</h3>
+<h3 class="text-lg font-bold text-frosted-blue">Recent Requests</h3>
 <span id="requestsTotalCount" class="text-sm text-steel-blue font-medium"></span>
 </div>
 <section>
@@ -1416,7 +1416,7 @@ function formatBytes(bytes) {
 }
 
 async function loadRequestCounts() {
-    // The request total still labels "Your Requests"; only the rail changed.
+    // Counts the whole server's requests, which is what the panel shows.
     try {
         var resp = await fetch('/api/integrations/request-counts');
         if (!resp.ok) throw new Error('API error');
