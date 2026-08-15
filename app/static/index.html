@@ -523,7 +523,11 @@ async function loadRecentRequests() {
 
         tbody.innerHTML = requests.map(req => {
             const title = escapeHtml(req.media_title || 'Unknown');
-            const user = escapeHtml(req.requested_by || 'Unknown');
+            // Deliberately no requester name here. Recent Requests is a
+            // server-wide view - it shows everyone's requests - so attributing
+            // them would tell every user what every other user asked for. The
+            // API does not return a requester field at all; this comment marks
+            // that as intentional rather than an oversight to be "fixed".
             const status = (req.status || 'pending').toLowerCase();
             const posterUrl = req.poster_url || '';
 
