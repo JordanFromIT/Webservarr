@@ -281,13 +281,20 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 <script src="/static/js/sidebar.js?v=11"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
-// Discover row definitions
+// Discover row definitions.
+//
+// Most rows come from Seerr's discover endpoints and are named by their
+// endpoint suffix. A row can instead carry an explicit `url` when its source is
+// something else entirely - books come from Open Library by way of Chaptarr,
+// not from Seerr.
 var DISCOVER_ROWS = [
   { id: 'trendingRow',       endpoint: 'trending',        label: 'Trending',        icon: 'trending_up'   },
   { id: 'popularMoviesRow',  endpoint: 'popular-movies',  label: 'Popular Movies',  icon: 'movie'         },
   { id: 'upcomingMoviesRow', endpoint: 'upcoming-movies', label: 'Upcoming Movies', icon: 'upcoming'      },
   { id: 'popularSeriesRow',  endpoint: 'popular-series',  label: 'Popular Series',  icon: 'live_tv'       },
   { id: 'upcomingSeriesRow', endpoint: 'upcoming-series', label: 'Upcoming Series', icon: 'calendar_month'},
+  { id: 'trendingBooksRow',  url: '/api/integrations/books-trending',
+                             label: 'Trending Books',  icon: 'menu_book' },
 ];
 
 // State
@@ -421,7 +428,7 @@ function buildDiscoverSkeletons() {
 function loadDiscoverLists() {
   buildDiscoverSection();
   DISCOVER_ROWS.forEach(function(row) {
-    fetch('/api/integrations/seerr-discover/' + row.endpoint)
+    fetch(row.url || ('/api/integrations/seerr-discover/' + row.endpoint))
       .then(function(resp) {
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         return resp.json();
@@ -545,12 +552,12 @@ function buildDiscoverCard(item) {
         'class="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" ' +
         'onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"/>' +
       '<div class="absolute inset-0 items-center justify-center poster-placeholder" style="display:none">' +
-        '<span class="material-symbols-outlined text-3xl text-steel-blue/40">movie</span>' +
+        '<span class="material-symbols-outlined text-3xl text-steel-blue/40">' + mediaTypeIcon(mediaType) + '</span>' +
       '</div>';
   } else {
     posterHtml =
       '<div class="absolute inset-0 flex items-center justify-center poster-placeholder">' +
-        '<span class="material-symbols-outlined text-3xl text-steel-blue/40">movie</span>' +
+        '<span class="material-symbols-outlined text-3xl text-steel-blue/40">' + mediaTypeIcon(mediaType) + '</span>' +
       '</div>';
   }
 
@@ -1478,15 +1485,11 @@ function openMediaModal(item) {
   document.getElementById('modalYear').textContent = item.year || '';
   document.getElementById('modalOverview').textContent = item.overview || 'No description available.';
 
-  // Type badge
+  // Type badge. Driven by the same theme accents as the cards, so a type reads
+  // identically here and in the grid - and so books are not labelled "Movie".
   var typeBadge = document.getElementById('modalTypeBadge');
-  if (mediaType === 'tv') {
-    typeBadge.textContent = 'TV Series';
-    typeBadge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400';
-  } else {
-    typeBadge.textContent = 'Movie';
-    typeBadge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400';
-  }
+  typeBadge.textContent = mediaTypeLabel(mediaType);
+  typeBadge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded ' + mediaTypeBadgeColor(mediaType);
 
   // Rating
   var ratingEl = document.getElementById('modalRating');
@@ -1500,10 +1503,10 @@ function openMediaModal(item) {
     actionArea.innerHTML =
       '<button id="modalRequestBtn" ' +
         'data-media-type="' + escapeHtml(mediaType) + '" ' +
-        'data-media-id="' + item.id + '" ' +
+        'data-media-id="' + escapeHtml(String(item.id)) + '" ' +
         'onclick="requestFromModal(this)" ' +
         'class="w-full py-2 rounded-lg bg-primary hover:bg-primary/80 text-bright text-xs font-bold transition-all">' +
-        'Request' +
+        'Request <span class="' + mediaTypeNounColor(mediaType) + '">' + mediaTypeLabel(mediaType) + '</span>' +
       '</button>';
   } else {
     actionArea.innerHTML =

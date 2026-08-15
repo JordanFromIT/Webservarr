@@ -19,6 +19,7 @@ Two things worth knowing, both established by testing against the live instance:
    editions exist.
 """
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -200,6 +201,112 @@ async def _attach_covers(items: List[Dict[str, Any]]) -> None:
         cover_id = found.get((book["title"], book.get("author") or ""))
         if cover_id:
             book["poster_url"] = f"/api/integrations/book-cover?coverId={cover_id}"
+
+
+def _main_title(title: str) -> str:
+    """
+    The part of a title before its subtitle.
+
+    Real books carry long explanatory subtitles - "Atomic Habits: An Easy &
+    Proven Way to Build Good Habits" - and judging the whole string against a
+    bare trending title would punish the genuine edition for being descriptive.
+    Everything from the first colon is dropped so only the name is compared.
+    """
+    return openlibrary.clean_title((title or "").split(":")[0])
+
+
+def _title_score(wanted: str, candidate: str) -> float:
+    """
+    How well a Chaptarr result matches the title that was asked for, 0..1.
+
+    Multiplies recall by precision deliberately. Recall alone would accept
+    "Summary of Atomic Habits by James Clear" for "Atomic Habits", since it
+    contains every wanted word; dividing by the candidate's own length as well
+    penalises the padding. Against "Atomic Habits" the real edition scores 1.0,
+    the workbook 0.67 and the summary 0.4.
+    """
+    want = openlibrary._tokens(_main_title(wanted))
+    got = openlibrary._tokens(_main_title(candidate))
+    if not want or not got:
+        return 0.0
+    shared = len(want & got)
+    return (shared / len(want)) * (shared / len(got))
+
+
+# A candidate by a different author than the one trending is almost always an
+# unauthorised summary or companion rather than the book itself. Scaled down
+# rather than excluded, since author metadata is often missing entirely.
+_WRONG_AUTHOR_PENALTY = 0.2
+
+
+def _match_score(entry: Dict[str, Any], candidate: Dict[str, Any]) -> float:
+    score = _title_score(entry.get("title") or "", candidate.get("title") or "")
+    want_author = openlibrary._tokens(entry.get("author") or "")
+    got_author = openlibrary._tokens(candidate.get("author") or "")
+    if want_author and got_author and not (want_author & got_author):
+        score *= _WRONG_AUTHOR_PENALTY
+    return score
+
+
+async def resolve_trending(books: List[Dict[str, Any]], limit: int = 20) -> List[Dict[str, Any]]:
+    """
+    Turn a list of {title, author, cover_id} into requestable book cards.
+
+    A trending shelf is only worth showing if its cards can be acted on, and a
+    title from an outside source means nothing to Chaptarr on its own. Each one
+    is looked up through Chaptarr so the card carries a real foreignId, and
+    anything Chaptarr cannot find is dropped rather than shown as a dead tile.
+
+    Covers come from the trending source, which already supplies them, so this
+    avoids a second round of Open Library matching per book.
+    """
+    cfg = _get_config()
+    if not cfg["url"] or not cfg["api_key"] or not books:
+        return []
+
+    async def _one(entry):
+        # Title only. Adding the author makes Goodreads answer with author
+        # records instead of books - searching "Atomic Habits James Clear"
+        # returns five authors and no Atomic Habits, while "Atomic Habits"
+        # returns the book. The author is used for ranking instead.
+        term = entry.get("title") or ""
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+                resp = await client.get(
+                    f"{cfg['url']}/api/v1/search",
+                    params={"term": term, "provider": SEARCH_PROVIDER},
+                    headers={"X-Api-Key": cfg["api_key"]},
+                )
+            if resp.status_code != 200:
+                return None
+            raw = resp.json()
+        except (httpx.RequestError, ValueError):
+            return None
+
+        candidates = []
+        for result in raw if isinstance(raw, list) else []:
+            norm = _normalise(result)
+            if norm and norm["id"]:
+                candidates.append(norm)
+        if not candidates:
+            return None
+
+        # Best match, not first match. Goodreads ranks the unauthorised
+        # "Summary of Atomic Habits by James Clear" cash-ins above Atomic
+        # Habits itself, so taking the top hit fills the shelf with summaries
+        # of the books people actually wanted.
+        best = max(candidates, key=lambda b: (_match_score(entry, b), b.get("votes") or 0))
+        if _match_score(entry, best) < 0.3:
+            return None
+
+        # Prefer the trending source's cover; it is already known good and
+        # skips a per-book Open Library match.
+        if entry.get("cover_id"):
+            best["poster_url"] = f"/api/integrations/book-cover?coverId={entry['cover_id']}"
+        return best
+
+    results = await asyncio.gather(*[_one(b) for b in books[:limit]], return_exceptions=True)
+    return [r for r in results if isinstance(r, dict)]
 
 
 async def _lookup_book(cfg: dict, foreign_id: str) -> Optional[Dict[str, Any]]:

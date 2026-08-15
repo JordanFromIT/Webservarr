@@ -2,6 +2,8 @@
 Integration API routes - Plex, Uptime Kuma, Seerr, Netdata endpoints.
 """
 
+import logging
+import time
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
@@ -16,7 +18,14 @@ from app.dependencies import get_current_user, require_admin
 from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr, chaptarr, openlibrary
 from app.limiter import limiter
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# Trending books: {period: (fetched_at, cards)}. Matches the upstream trending
+# TTL, since resolving the shelf is far more expensive than fetching it.
+_TRENDING_BOOKS_TTL = 3600.0
+_trending_books_cache: dict = {}
 
 
 # --- Plex Endpoints ---
@@ -230,6 +239,40 @@ async def chaptarr_search(
     if not query.strip():
         return {"results": []}
     return {"results": await chaptarr.search(query.strip())}
+
+
+@router.get("/books-trending")
+@limiter.limit("30/minute")
+async def books_trending(
+    request: Request,
+    period: str = "weekly",
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Trending books, as requestable cards.
+
+    Open Library supplies the ranking - it is the only trending source needing
+    no key - and Chaptarr resolves each title so every card can actually be
+    requested. Like the rest of the discover rows this never raises: an empty
+    list simply means the shelf does not appear.
+    """
+    cached = _trending_books_cache.get(period)
+    if cached and (time.monotonic() - cached[0]) < _TRENDING_BOOKS_TTL:
+        return cached[1]
+
+    try:
+        ranked = await openlibrary.trending(period=period)
+        cards = await chaptarr.resolve_trending(ranked)
+    except Exception as exc:  # noqa: BLE001 - a shelf must never break the page
+        logger.warning("Trending books failed: %s", exc)
+        return []
+
+    # Resolving costs one Chaptarr lookup per book - several seconds in total -
+    # and this row is on a page people reload constantly, so only the first
+    # visitor after the hour pays for it.
+    if cards:
+        _trending_books_cache[period] = (time.monotonic(), cards)
+    return cards
 
 
 @router.get("/book-cover")

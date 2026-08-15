@@ -182,6 +182,62 @@ async def cover_ids(books: List[Tuple[str, str]]) -> Dict[Tuple[str, str], int]:
     return found
 
 
+TRENDING_URL = "https://openlibrary.org/trending/{period}.json"
+
+# Trending shifts slowly and the row is on a page people reload constantly, so
+# it is fetched once an hour rather than per visit.
+_TRENDING_TTL = 3600.0
+_trending_cache: Dict[str, Tuple[float, list]] = {}
+
+
+async def trending(period: str = "weekly", limit: int = 24) -> List[Dict[str, str]]:
+    """
+    Fetch Open Library's trending works.
+
+    Returns [{title, author, cover_id}], newest ranking first, or [] on any
+    failure - a missing shelf is better than a broken page.
+
+    Open Library is the one trending source that needs no key and no
+    registration, which is why it goes first; other sources merge in beside it.
+    """
+    import time
+
+    if period not in ("daily", "weekly", "monthly", "yearly"):
+        period = "weekly"
+
+    hit = _trending_cache.get(period)
+    if hit and (time.monotonic() - hit[0]) < _TRENDING_TTL:
+        return hit[1][:limit]
+
+    try:
+        async with httpx.AsyncClient(timeout=LOOKUP_TIMEOUT) as client:
+            resp = await client.get(
+                TRENDING_URL.format(period=period), params={"limit": limit}
+            )
+        if resp.status_code != 200:
+            logger.warning("Open Library trending returned HTTP %d", resp.status_code)
+            return []
+        works = (resp.json() or {}).get("works") or []
+    except (httpx.RequestError, ValueError) as exc:
+        logger.warning("Open Library trending failed: %s", exc)
+        return []
+
+    items = []
+    for work in works:
+        title = (work.get("title") or "").strip()
+        if not title:
+            continue
+        authors = work.get("author_name") or []
+        items.append({
+            "title": title,
+            "author": (authors[0] if authors else "").strip(),
+            "cover_id": work.get("cover_i"),
+        })
+
+    _trending_cache[period] = (time.monotonic(), items)
+    return items[:limit]
+
+
 async def fetch_cover(cover_id: int) -> Optional[Tuple[bytes, str]]:
     """Fetch a cover image by id. Returns (bytes, content_type) or None."""
     if cover_id in _image_cache:
