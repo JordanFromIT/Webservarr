@@ -308,7 +308,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     searchInput.addEventListener('input', function() {
         var query = searchInput.value.trim();
         clearTimeout(_searchDebounceTimer);
-        moveSearchBar(query.length ? 'dock' : 'home');
+        // One-way: once the bar has settled into the results panel it stays
+        // there. Sending it back up on an empty field means the bar flies away
+        // the moment someone clears the box to retype, taking the field out
+        // from under them mid-correction.
+        if (query.length) moveSearchBar('dock');
         if (query.length === 0) {
             clearSearch();
             return;
@@ -929,16 +933,20 @@ function moveSearchBar(position) {
         // One transition over all three properties, so position and width
         // resolve together and the path is a straight line.
         //
-        // 0.85s with a slow-out curve: the bar is the only thing moving on a
-        // page that just jumped, so it has to be followable. At half a second
-        // it reads as a snap rather than a glide.
-        var EASE = 'cubic-bezier(.32,.72,0,1)';
-        bar.style.transition = 'top .85s ' + EASE + ', left .85s ' + EASE + ', width .85s ' + EASE;
+        // The bar is the only thing moving on a page that has just jumped
+        // underneath it, so the move has to be slow enough to read as travel
+        // rather than a cut. It also runs while the user is still typing, so
+        // it must never feel urgent. 1.4s on a long slow-out.
+        var DUR = '1.4s';
+        var EASE = 'cubic-bezier(.22,.68,0,1)';
+        bar.style.transition = ['top', 'left', 'width']
+            .map(function (p) { return p + ' ' + DUR + ' ' + EASE; })
+            .join(', ');
         bar.style.top = end.top + 'px';
         bar.style.left = end.left + 'px';
         bar.style.width = end.width + 'px';
 
-        _searchMoveTimers.push(setTimeout(settle, 870));
+        _searchMoveTimers.push(setTimeout(settle, 1420));
     });
 }
 
