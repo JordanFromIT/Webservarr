@@ -3,6 +3,7 @@ Integration API routes - Plex, Uptime Kuma, Seerr, Netdata endpoints.
 """
 
 import asyncio
+import json
 import logging
 import time
 from urllib.parse import urlparse
@@ -27,6 +28,38 @@ router = APIRouter()
 # TTL, since resolving the shelf is far more expensive than fetching it.
 _TRENDING_BOOKS_TTL = 3600.0
 _trending_books_cache: dict = {}
+
+
+async def _shelf_from_redis(key: str):
+    """
+    Shared second tier for the trending shelves.
+
+    The in-process cache only helps the worker that filled it, and uvicorn runs
+    several - so with warming done by one worker the others would still build
+    their own copy on demand, which is exactly the wait warming exists to
+    remove. Redis is already here for sessions, so the shelves go through it
+    too and every worker sees the same warm result.
+    """
+    try:
+        from app.auth import session_manager
+
+        redis = await session_manager.get_redis()
+        raw = await redis.get(f"webservarr:shelf:{key}")
+        return json.loads(raw) if raw else None
+    except Exception:  # noqa: BLE001 - a cold cache is not an error
+        return None
+
+
+async def _shelf_to_redis(key: str, cards: list) -> None:
+    try:
+        from app.auth import session_manager
+
+        redis = await session_manager.get_redis()
+        await redis.set(
+            f"webservarr:shelf:{key}", json.dumps(cards), ex=int(_TRENDING_BOOKS_TTL)
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not cache shelf %s in Redis: %s", key, exc)
 
 
 # --- Plex Endpoints ---
@@ -242,24 +275,21 @@ async def chaptarr_search(
     return {"results": await chaptarr.search(query.strip())}
 
 
-@router.get("/books-trending")
-@limiter.limit("30/minute")
-async def books_trending(
-    request: Request,
-    period: str = "weekly",
-    current_user: dict = Depends(get_current_user),
-):
+async def build_books_shelf(period: str = "weekly") -> list:
     """
-    Trending books, as requestable cards.
+    Build the trending books shelf, from cache when it is fresh.
 
-    Open Library supplies the ranking - it is the only trending source needing
-    no key - and Chaptarr resolves each title so every card can actually be
-    requested. Like the rest of the discover rows this never raises: an empty
-    list simply means the shelf does not appear.
+    Kept separate from the route so the background warmer can call it without
+    faking a request or an authenticated user.
     """
     cached = _trending_books_cache.get(period)
     if cached and (time.monotonic() - cached[0]) < _TRENDING_BOOKS_TTL:
         return cached[1]
+
+    shared = await _shelf_from_redis(f"books:{period}")
+    if shared:
+        _trending_books_cache[period] = (time.monotonic(), shared)
+        return shared
 
     try:
         # Two sources that disagree usefully: Open Library ranks what people
@@ -279,31 +309,22 @@ async def books_trending(
         logger.warning("Trending books failed: %s", exc)
         return []
 
-    # Resolving costs one Chaptarr lookup per book - several seconds in total -
-    # and this row is on a page people reload constantly, so only the first
-    # visitor after the hour pays for it.
     if cards:
         _trending_books_cache[period] = (time.monotonic(), cards)
+        await _shelf_to_redis(f"books:{period}", cards)
     return cards
 
 
-@router.get("/audiobooks-trending")
-@limiter.limit("30/minute")
-async def audiobooks_trending(
-    request: Request,
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Trending audiobooks, as requestable cards.
-
-    NYT's Audio Fiction and Audio Nonfiction lists are the only sanctioned
-    source for this - Audible publishes no API and no feed. Cards resolve
-    through Chaptarr like the book shelf, but are marked so the request goes to
-    Chaptarr's audiobook profile and root folder rather than the ebook one.
-    """
+async def build_audiobooks_shelf() -> list:
+    """Build the trending audiobooks shelf, from cache when it is fresh."""
     cached = _trending_books_cache.get("audiobooks")
     if cached and (time.monotonic() - cached[0]) < _TRENDING_BOOKS_TTL:
         return cached[1]
+
+    shared = await _shelf_from_redis("audiobooks")
+    if shared:
+        _trending_books_cache["audiobooks"] = (time.monotonic(), shared)
+        return shared
 
     try:
         ranked = await nyt.bestsellers("audiobooks")
@@ -317,7 +338,82 @@ async def audiobooks_trending(
 
     if cards:
         _trending_books_cache["audiobooks"] = (time.monotonic(), cards)
+        await _shelf_to_redis("audiobooks", cards)
     return cards
+
+
+@router.get("/books-trending")
+@limiter.limit("30/minute")
+async def books_trending(
+    request: Request,
+    period: str = "weekly",
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Trending books, as requestable cards.
+
+    Merged from Open Library and the NYT bestseller lists, resolved through
+    Chaptarr so every card can actually be requested. Normally served from a
+    cache the background warmer keeps filled - see services/shelf_warmer.py for
+    why this row cannot be built on demand as cheaply as the Seerr ones.
+    """
+    return await build_books_shelf(period)
+
+
+@router.get("/audiobooks-trending")
+@limiter.limit("30/minute")
+async def audiobooks_trending(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Trending audiobooks, as requestable cards.
+
+    NYT's Audio Fiction and Audio Nonfiction lists are the only sanctioned
+    source - Audible publishes no API and no feed. Requests from this shelf
+    carry an audiobook format so Chaptarr files them under its audiobook root
+    folder rather than the ebook one.
+    """
+    return await build_audiobooks_shelf()
+
+
+_LIBRARY_SUMMARY_TTL = 300.0
+_library_summary_cache: dict = {}
+
+
+@router.get("/library-summary")
+async def library_summary(current_user: dict = Depends(get_current_user)):
+    """
+    What the library actually holds, for the stats rail.
+
+    Replaces the request-lifecycle counts that used to sit there. Those said
+    almost nothing: with automatic approval, Pending is permanently zero and
+    Approved is within a rounding error of Total, so three of the four numbers
+    were the same fact. These describe the library instead.
+
+    Cached briefly - it walks every series and film in Sonarr and Radarr, and
+    the answer moves slowly.
+    """
+    cached = _library_summary_cache.get("all")
+    if cached and (time.monotonic() - cached[0]) < _LIBRARY_SUMMARY_TTL:
+        return cached[1]
+
+    tv, film = await asyncio.gather(
+        sonarr.library_summary(), radarr.library_summary(), return_exceptions=True
+    )
+    tv = tv if isinstance(tv, dict) else {}
+    film = film if isinstance(film, dict) else {}
+
+    summary = {
+        "movies": film.get("movies", 0),
+        "shows": tv.get("shows", 0),
+        "episodes": tv.get("episodes", 0),
+        "complete_shows": tv.get("complete_shows", 0),
+        "percent": tv.get("percent", 0),
+    }
+    if any(summary.values()):
+        _library_summary_cache["all"] = (time.monotonic(), summary)
+    return summary
 
 
 @router.get("/book-cover")

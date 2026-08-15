@@ -28,6 +28,44 @@ def _get_config() -> dict:
         db.close()
 
 
+async def library_summary() -> dict:
+    """
+    Shape of the film library: {movies, tracked}.
+
+    `movies` counts films actually on disk. `tracked` includes ones Radarr is
+    monitoring but has not found yet, which are wanted rather than owned.
+    """
+    config = _get_config()
+    if not config["url"] or not config["api_key"]:
+        return {"movies": 0, "tracked": 0}
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0, verify=False) as client:
+            resp = await client.get(
+                f"{config['url']}/api/v3/movie",
+                headers={"X-Api-Key": config["api_key"]},
+            )
+    except httpx.RequestError as exc:
+        logger.warning("Radarr movie list failed: %s", exc)
+        return {"movies": 0, "tracked": 0}
+
+    if resp.status_code != 200:
+        logger.warning("Radarr movie list returned HTTP %d", resp.status_code)
+        return {"movies": 0, "tracked": 0}
+
+    try:
+        movies = resp.json()
+    except ValueError:
+        return {"movies": 0, "tracked": 0}
+
+    if not isinstance(movies, list):
+        return {"movies": 0, "tracked": 0}
+    return {
+        "movies": sum(1 for m in movies if m.get("hasFile")),
+        "tracked": len(movies),
+    }
+
+
 async def get_calendar(days: int = 14, start: str = "") -> list:
     """
     Fetch upcoming movies from Radarr's calendar.

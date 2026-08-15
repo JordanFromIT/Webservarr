@@ -113,6 +113,40 @@ async def episode_counts() -> dict:
     return _counts_cache
 
 
+async def library_summary() -> dict:
+    """
+    Shape of the TV library: {shows, episodes, episodes_total, complete_shows,
+    percent}.
+
+    Only shows with at least one episode on disk are counted. A show that was
+    added but never acquired says nothing about how the library is kept, and
+    including them made a well-maintained library look neglected.
+
+    `percent` is the mean completeness across shows rather than across episodes.
+    Six enormous back-catalogues - a 1,300-episode series, a 600-episode one -
+    hold 58% of everything missing, so an episode-weighted figure is really a
+    statement about those six. Averaging per show gives each series one vote,
+    which is the fairer answer to "is this library well kept".
+    """
+    counts = await episode_counts()
+    started = {k: v for k, v in counts.items() if v[0] > 0}
+    if not started:
+        return {"shows": 0, "episodes": 0, "episodes_total": 0, "complete_shows": 0, "percent": 0}
+
+    episodes = sum(have for have, _ in started.values())
+    total = sum(want for _, want in started.values())
+    complete = sum(1 for have, want in started.values() if have >= want)
+    per_show = [min(1.0, have / want) for have, want in started.values() if want]
+
+    return {
+        "shows": len(started),
+        "episodes": episodes,
+        "episodes_total": total,
+        "complete_shows": complete,
+        "percent": round(100 * sum(per_show) / len(per_show)) if per_show else 0,
+    }
+
+
 async def get_calendar(days: int = 14, start: str = "") -> list:
     """
     Fetch upcoming episodes from Sonarr's calendar.
