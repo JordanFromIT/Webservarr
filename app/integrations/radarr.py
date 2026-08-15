@@ -4,7 +4,7 @@ Fetches upcoming movies from Radarr's calendar API.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import httpx
 from app.database import SessionLocal
 from app.models import Setting
@@ -12,6 +12,9 @@ from app.models import Setting
 logger = logging.getLogger(__name__)
 
 TIMEOUT = 5.0
+
+# What counts as a recent addition, for the "added this month" figure.
+RECENT_DAYS = 30
 
 
 def _get_config() -> dict:
@@ -30,14 +33,14 @@ def _get_config() -> dict:
 
 async def library_summary() -> dict:
     """
-    Shape of the film library: {movies, tracked}.
+    Shape of the film library: {movies, tracked, bytes, added_recently}.
 
     `movies` counts films actually on disk. `tracked` includes ones Radarr is
     monitoring but has not found yet, which are wanted rather than owned.
     """
     config = _get_config()
     if not config["url"] or not config["api_key"]:
-        return {"movies": 0, "tracked": 0}
+        return {"movies": 0, "tracked": 0, "bytes": 0, "added_recently": 0}
 
     try:
         async with httpx.AsyncClient(timeout=20.0, verify=False) as client:
@@ -60,9 +63,13 @@ async def library_summary() -> dict:
 
     if not isinstance(movies, list):
         return {"movies": 0, "tracked": 0}
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS)).isoformat()
     return {
         "movies": sum(1 for m in movies if m.get("hasFile")),
         "tracked": len(movies),
+        "bytes": sum(m.get("sizeOnDisk") or 0 for m in movies),
+        "added_recently": sum(1 for m in movies if (m.get("added") or "") > cutoff),
     }
 
 

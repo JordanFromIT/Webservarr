@@ -7,7 +7,7 @@ requests page.
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import httpx
 from app.database import SessionLocal
 from app.models import Setting
@@ -22,6 +22,14 @@ _COUNTS_TTL = 300.0
 _SERIES_TIMEOUT = 20.0
 _counts_cache: dict = {}
 _counts_fetched_at = 0.0
+
+# Gathered on the same pass as the episode counts, so the summary does not need
+# a second walk of every series.
+_last_series_bytes = 0
+_last_series_added = 0
+
+# What counts as a recent addition, for the "added this month" figure.
+RECENT_DAYS = 30
 
 
 def _get_config() -> dict:
@@ -90,8 +98,19 @@ async def episode_counts() -> dict:
     except ValueError:
         return {}
 
+    global _last_series_bytes, _last_series_added
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS)
+    ).isoformat()
+    total_bytes = 0
+    added_recently = 0
+
     counts = {}
     for series in series_list if isinstance(series_list, list) else []:
+        total_bytes += (series.get("statistics") or {}).get("sizeOnDisk") or 0
+        if (series.get("added") or "") > cutoff:
+            added_recently += 1
+
         tmdb_id = series.get("tmdbId")
         if not tmdb_id:
             continue
@@ -107,6 +126,8 @@ async def episode_counts() -> dict:
         if total:
             counts[tmdb_id] = (have, total)
 
+    _last_series_bytes = total_bytes
+    _last_series_added = added_recently
     _counts_cache.clear()
     _counts_cache.update(counts)
     _counts_fetched_at = time.monotonic()
@@ -115,35 +136,42 @@ async def episode_counts() -> dict:
 
 async def library_summary() -> dict:
     """
-    Shape of the TV library: {shows, episodes, episodes_total, complete_shows,
-    percent}.
+    Shape of the TV library.
 
     Only shows with at least one episode on disk are counted. A show that was
     added but never acquired says nothing about how the library is kept, and
     including them made a well-maintained library look neglected.
 
-    `percent` is the mean completeness across shows rather than across episodes.
-    Six enormous back-catalogues - a 1,300-episode series, a 600-episode one -
-    hold 58% of everything missing, so an episode-weighted figure is really a
-    statement about those six. Averaging per show gives each series one vote,
-    which is the fairer answer to "is this library well kept".
+    `percent` is the share of shows that are complete - 506 of 564 - rather
+    than a mean of per-show percentages. Both are defensible, but only one can
+    be checked: "90% of shows are complete" is a claim about a number the rail
+    prints right next to it, where a mean-of-means is a statistic a reader has
+    to take on trust, which is exactly why the old 98% did not ring true.
     """
     counts = await episode_counts()
     started = {k: v for k, v in counts.items() if v[0] > 0}
+    empty = {
+        "shows": 0, "episodes": 0, "episodes_total": 0, "complete_shows": 0,
+        "missing_episodes": 0, "percent": 0, "bytes": 0, "added_recently": 0,
+    }
     if not started:
-        return {"shows": 0, "episodes": 0, "episodes_total": 0, "complete_shows": 0, "percent": 0}
+        return empty
 
     episodes = sum(have for have, _ in started.values())
     total = sum(want for _, want in started.values())
     complete = sum(1 for have, want in started.values() if have >= want)
-    per_show = [min(1.0, have / want) for have, want in started.values() if want]
 
     return {
         "shows": len(started),
         "episodes": episodes,
         "episodes_total": total,
         "complete_shows": complete,
-        "percent": round(100 * sum(per_show) / len(per_show)) if per_show else 0,
+        "missing_episodes": total - episodes,
+        # Share of shows that are complete, which is a fact a reader can check
+        # rather than a statistic they have to take on trust.
+        "percent": round(100 * complete / len(started)),
+        "bytes": _last_series_bytes,
+        "added_recently": _last_series_added,
     }
 
 

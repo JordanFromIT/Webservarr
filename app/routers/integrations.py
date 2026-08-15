@@ -409,7 +409,13 @@ async def library_summary(current_user: dict = Depends(get_current_user)):
         "shows": tv.get("shows", 0),
         "episodes": tv.get("episodes", 0),
         "complete_shows": tv.get("complete_shows", 0),
+        "missing_episodes": tv.get("missing_episodes", 0),
         "percent": tv.get("percent", 0),
+        # Sonarr and Radarr each report bytes on disk per title, so the total
+        # is free once the lists have been walked.
+        "bytes": tv.get("bytes", 0) + film.get("bytes", 0),
+        "added_recently": tv.get("added_recently", 0) + film.get("added_recently", 0),
+        "recent_days": 30,
     }
     if any(summary.values()):
         _library_summary_cache["all"] = (time.monotonic(), summary)

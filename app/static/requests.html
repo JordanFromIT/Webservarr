@@ -90,18 +90,28 @@
       <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statEpisodes">--</span>
       <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Episodes</span>
     </div>
-    <!-- Completeness gets the bar, since it is the one figure here that is a
-         proportion rather than a count. -->
-    <div class="flex items-center gap-3 grow min-w-[12rem]">
+    <div class="flex items-baseline gap-2">
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statSize">--</span>
+      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">On Disk</span>
+    </div>
+    <div class="flex items-baseline gap-2">
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statAdded">--</span>
+      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Added This Month</span>
+    </div>
+    <!-- "Full Seasons" gets the bar, being the one proportion among counts.
+         Named for what it measures - shows with every aired episode - rather
+         than the bare word "Complete", which never said complete *what*. -->
+    <div class="flex items-center gap-3 grow min-w-[14rem]">
       <div class="flex items-baseline gap-2 shrink-0">
         <span class="text-2xl font-bold text-green-400 tabular-nums" id="statComplete">--</span>
-        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Complete</span>
+        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Full Seasons</span>
       </div>
       <div class="h-1.5 grow rounded-full bg-steel-blue/20 overflow-hidden">
         <div id="statCompleteBar" class="h-full rounded-full bg-green-400 transition-[width] duration-700" style="width:0%"></div>
       </div>
     </div>
   </div>
+  <p id="statsFootnote" class="text-[10px] text-steel-blue/60 mt-2 px-1"></p>
 </div>
 
 <!-- Two-column layout: Search (left) + Requests (right) on desktop, stacked on mobile -->
@@ -1320,6 +1330,14 @@ function formatCount(n) {
     return (n || 0).toLocaleString();
 }
 
+/** Binary units, matching what Sonarr, Radarr and the NAS all report. */
+function formatBytes(bytes) {
+    if (!bytes) return '0 GB';
+    var tb = bytes / Math.pow(1024, 4);
+    if (tb >= 1) return tb.toFixed(1) + ' TB';
+    return Math.round(bytes / Math.pow(1024, 3)) + ' GB';
+}
+
 async function loadRequestCounts() {
     // The request total still labels "Your Requests"; only the rail changed.
     try {
@@ -1341,7 +1359,20 @@ async function loadLibrarySummary() {
         document.getElementById('statMovies').textContent = formatCount(s.movies);
         document.getElementById('statShows').textContent = formatCount(s.shows);
         document.getElementById('statEpisodes').textContent = formatCount(s.episodes);
+        document.getElementById('statSize').textContent = formatBytes(s.bytes);
+        document.getElementById('statAdded').textContent = formatCount(s.added_recently);
         document.getElementById('statComplete').textContent = (s.percent || 0) + '%';
+
+        // The bar's number is a proportion, so the footnote gives the two
+        // counts it came from. A reader can check the claim rather than take
+        // it on trust, which is what the old figure asked of them.
+        document.getElementById('statsFootnote').textContent =
+            formatCount(s.complete_shows) + ' of ' + formatCount(s.shows) +
+            ' shows have every aired episode' +
+            (s.missing_episodes
+                ? ' · ' + formatCount(s.missing_episodes) + ' episodes outstanding'
+                : '');
+
         // Set after paint so the bar animates out from zero rather than
         // appearing already filled.
         requestAnimationFrame(function () {
