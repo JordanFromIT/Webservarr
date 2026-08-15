@@ -462,6 +462,56 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
     return {"ok": False, "message": detail or f"Chaptarr rejected the request ({resp.status_code})"}
 
 
+async def library_summary() -> dict:
+    """
+    Shape of the book library: {books, bytes, free_bytes}.
+
+    Counted from authors rather than books. Chaptarr populates sizeOnDisk and
+    file counts on the author record; the per-book statistics come back as
+    zeroes, so summing books reports an empty library.
+    """
+    cfg = _get_config()
+    empty = {"books": 0, "bytes": 0, "free_bytes": 0}
+    if not cfg["url"] or not cfg["api_key"]:
+        return empty
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+            authors = await client.get(
+                f"{cfg['url']}/api/v1/author", headers={"X-Api-Key": cfg["api_key"]}
+            )
+            folders = await client.get(
+                f"{cfg['url']}/api/v1/rootfolder", headers={"X-Api-Key": cfg["api_key"]}
+            )
+    except httpx.RequestError as exc:
+        logger.warning("Chaptarr library summary failed: %s", exc)
+        return empty
+
+    if authors.status_code != 200:
+        return empty
+
+    try:
+        rows = authors.json()
+    except ValueError:
+        return empty
+
+    free = 0
+    if folders.status_code == 200:
+        try:
+            # Highest rather than summed: every root folder here sits on the
+            # same pool and reports the same figure, so adding them would
+            # multiply the free space by the number of folders.
+            free = max((f.get("freeSpace") or 0) for f in folders.json()) if folders.json() else 0
+        except (ValueError, TypeError):
+            free = 0
+
+    return {
+        "books": sum((a.get("statistics") or {}).get("bookFileCount", 0) for a in rows),
+        "bytes": sum((a.get("statistics") or {}).get("sizeOnDisk", 0) for a in rows),
+        "free_bytes": free,
+    }
+
+
 async def test_connection() -> tuple:
     """Return (ok, message) for the admin test-connection UI."""
     cfg = _get_config()

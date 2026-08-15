@@ -91,20 +91,34 @@
       <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Episodes</span>
     </div>
     <div class="flex items-baseline gap-2">
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statBooks">--</span>
+      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Books</span>
+    </div>
+    <div class="flex items-baseline gap-2">
       <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statSize">--</span>
       <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">On Disk</span>
+    </div>
+    <div class="flex items-baseline gap-2">
+      <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statFree">--</span>
+      <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Free</span>
     </div>
     <div class="flex items-baseline gap-2">
       <span class="text-2xl font-bold text-frosted-blue tabular-nums" id="statAdded">--</span>
       <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Added This Month</span>
     </div>
-    <!-- "Full Seasons" gets the bar, being the one proportion among counts.
-         Named for what it measures - shows with every aired episode - rather
-         than the bare word "Complete", which never said complete *what*. -->
-    <div class="flex items-center gap-3 grow min-w-[14rem]">
+    <!-- Complete shows and complete seasons answer different questions - a
+         show counts only when every one of its seasons does - so both are
+         given rather than one standing in for the other. The bar tracks shows,
+         and each figure is named for what it measures rather than the bare
+         word "Complete", which never said complete *what*. -->
+    <div class="flex items-center gap-3 grow min-w-[16rem]">
       <div class="flex items-baseline gap-2 shrink-0">
         <span class="text-2xl font-bold text-green-400 tabular-nums" id="statComplete">--</span>
-        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Full Seasons</span>
+        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Shows Complete</span>
+      </div>
+      <div class="flex items-baseline gap-2 shrink-0">
+        <span class="text-2xl font-bold text-green-400/80 tabular-nums" id="statSeasons">--</span>
+        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Seasons</span>
       </div>
       <div class="h-1.5 grow rounded-full bg-steel-blue/20 overflow-hidden">
         <div id="statCompleteBar" class="h-full rounded-full bg-green-400 transition-[width] duration-700" style="width:0%"></div>
@@ -1359,16 +1373,24 @@ async function loadLibrarySummary() {
         document.getElementById('statMovies').textContent = formatCount(s.movies);
         document.getElementById('statShows').textContent = formatCount(s.shows);
         document.getElementById('statEpisodes').textContent = formatCount(s.episodes);
+        document.getElementById('statBooks').textContent = formatCount(s.books);
         document.getElementById('statSize').textContent = formatBytes(s.bytes);
+        document.getElementById('statFree').textContent = formatBytes(s.free_bytes);
         document.getElementById('statAdded').textContent = formatCount(s.added_recently);
         document.getElementById('statComplete').textContent = (s.percent || 0) + '%';
 
-        // The bar's number is a proportion, so the footnote gives the two
-        // counts it came from. A reader can check the claim rather than take
-        // it on trust, which is what the old figure asked of them.
+        var seasonPct = s.seasons
+            ? Math.round(100 * (s.complete_seasons || 0) / s.seasons)
+            : 0;
+        document.getElementById('statSeasons').textContent = seasonPct + '%';
+
+        // Both percentages are proportions, so the footnote gives the counts
+        // behind them. A reader can check the claim rather than take it on
+        // trust, which is what the old figure asked of them.
         document.getElementById('statsFootnote').textContent =
-            formatCount(s.complete_shows) + ' of ' + formatCount(s.shows) +
-            ' shows have every aired episode' +
+            formatCount(s.complete_shows) + ' of ' + formatCount(s.shows) + ' shows and ' +
+            formatCount(s.complete_seasons) + ' of ' + formatCount(s.seasons) +
+            ' seasons hold every aired episode' +
             (s.missing_episodes
                 ? ' · ' + formatCount(s.missing_episodes) + ' episodes outstanding'
                 : '');

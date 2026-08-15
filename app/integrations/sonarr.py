@@ -27,6 +27,8 @@ _counts_fetched_at = 0.0
 # a second walk of every series.
 _last_series_bytes = 0
 _last_series_added = 0
+_last_seasons_total = 0
+_last_seasons_complete = 0
 
 # What counts as a recent addition, for the "added this month" figure.
 RECENT_DAYS = 30
@@ -99,6 +101,8 @@ async def episode_counts() -> dict:
         return {}
 
     global _last_series_bytes, _last_series_added
+    global _last_seasons_total, _last_seasons_complete
+    seasons_total = seasons_complete = 0
     cutoff = (
         datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS)
     ).isoformat()
@@ -120,14 +124,25 @@ async def episode_counts() -> dict:
             if not season.get("seasonNumber"):  # skip specials
                 continue
             stats = season.get("statistics") or {}
-            have += stats.get("episodeFileCount") or 0
-            total += stats.get("episodeCount") or 0
+            season_have = stats.get("episodeFileCount") or 0
+            season_want = stats.get("episodeCount") or 0
+            have += season_have
+            total += season_want
+            # Season-level completeness is stricter than show-level and worth
+            # reporting separately: a show is only complete when every one of
+            # its seasons is, so the two answer different questions.
+            if season_want > 0:
+                seasons_total += 1
+                if season_have >= season_want:
+                    seasons_complete += 1
 
         if total:
             counts[tmdb_id] = (have, total)
 
     _last_series_bytes = total_bytes
     _last_series_added = added_recently
+    _last_seasons_total = seasons_total
+    _last_seasons_complete = seasons_complete
     _counts_cache.clear()
     _counts_cache.update(counts)
     _counts_fetched_at = time.monotonic()
@@ -153,6 +168,7 @@ async def library_summary() -> dict:
     empty = {
         "shows": 0, "episodes": 0, "episodes_total": 0, "complete_shows": 0,
         "missing_episodes": 0, "percent": 0, "bytes": 0, "added_recently": 0,
+        "seasons": 0, "complete_seasons": 0,
     }
     if not started:
         return empty
@@ -170,6 +186,8 @@ async def library_summary() -> dict:
         # Share of shows that are complete, which is a fact a reader can check
         # rather than a statistic they have to take on trust.
         "percent": round(100 * complete / len(started)),
+        "seasons": _last_seasons_total,
+        "complete_seasons": _last_seasons_complete,
         "bytes": _last_series_bytes,
         "added_recently": _last_series_added,
     }

@@ -398,11 +398,15 @@ async def library_summary(current_user: dict = Depends(get_current_user)):
     if cached and (time.monotonic() - cached[0]) < _LIBRARY_SUMMARY_TTL:
         return cached[1]
 
-    tv, film = await asyncio.gather(
-        sonarr.library_summary(), radarr.library_summary(), return_exceptions=True
+    tv, film, books = await asyncio.gather(
+        sonarr.library_summary(),
+        radarr.library_summary(),
+        chaptarr.library_summary(),
+        return_exceptions=True,
     )
     tv = tv if isinstance(tv, dict) else {}
     film = film if isinstance(film, dict) else {}
+    books = books if isinstance(books, dict) else {}
 
     summary = {
         "movies": film.get("movies", 0),
@@ -411,9 +415,17 @@ async def library_summary(current_user: dict = Depends(get_current_user)):
         "complete_shows": tv.get("complete_shows", 0),
         "missing_episodes": tv.get("missing_episodes", 0),
         "percent": tv.get("percent", 0),
-        # Sonarr and Radarr each report bytes on disk per title, so the total
-        # is free once the lists have been walked.
-        "bytes": tv.get("bytes", 0) + film.get("bytes", 0),
+        "seasons": tv.get("seasons", 0),
+        "complete_seasons": tv.get("complete_seasons", 0),
+        "books": books.get("books", 0),
+        # Every service reports bytes per title, so the total is free once the
+        # lists have been walked. Books are a rounding error against video but
+        # are included so "on disk" means the whole library, not most of it.
+        "bytes": tv.get("bytes", 0) + film.get("bytes", 0) + books.get("bytes", 0),
+        # Free space is taken, never summed: Sonarr, Radarr and Chaptarr all
+        # sit on the same pool and each report the same figure, so adding them
+        # would report three times the space that exists.
+        "free_bytes": books.get("free_bytes", 0),
         "added_recently": tv.get("added_recently", 0) + film.get("added_recently", 0),
         "recent_days": 30,
     }
