@@ -231,6 +231,12 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 .discover-row {
   scrollbar-width: none;
   -ms-overflow-style: none;
+  /* overflow-x:auto silently forces overflow-y to auto as well, which turns
+     every poster row into its own vertical scroll container. A row only ever
+     needs a pixel or two of stray height for the wheel to be captured by it
+     instead of the page, which reads as the section juddering as you scroll
+     past. Rows scroll sideways only. */
+  overflow-y: hidden;
 }
 .discover-row::-webkit-scrollbar {
   display: none;
@@ -261,6 +267,12 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 .discover-scroll-btn.right { right: -0.5rem; }
 .discover-row-wrapper:hover .discover-scroll-btn {
   opacity: 1;
+}
+/* An arrow that cannot scroll anywhere is a promise the row does not keep, so
+   it is removed rather than dimmed - the row is already at that end, and there
+   is nothing for a disabled-looking control to explain. */
+.discover-scroll-btn[disabled] {
+  display: none;
 }
 </style>
 
@@ -376,7 +388,22 @@ function buildDiscoverSection() {
         '</div>' +
       '</div>';
     section.insertAdjacentHTML('beforeend', html);
+    // Set the arrows correctly from the outset - the skeleton row starts at its
+    // left edge, so the left arrow must not be offered before any data arrives.
+    var el = document.getElementById(row.id);
+    wireDiscoverArrows(el);
+    updateDiscoverArrows(el);
   });
+
+  // Widening the window can make a row fit entirely, which retires both arrows.
+  if (!buildDiscoverSection._resizeWired) {
+    buildDiscoverSection._resizeWired = true;
+    window.addEventListener('resize', function () {
+      DISCOVER_ROWS.forEach(function (r) {
+        updateDiscoverArrows(document.getElementById(r.id));
+      });
+    });
+  }
 }
 
 function buildDiscoverSkeletons() {
@@ -414,6 +441,7 @@ function renderDiscoverRow(rowId, items) {
   if (!row) return;
   if (!items || items.length === 0) {
     row.innerHTML = '<p class="text-steel-blue/50 text-xs py-4 px-2 italic">Nothing to show</p>';
+    updateDiscoverArrows(row);
     return;
   }
   row.textContent = '';
@@ -429,11 +457,16 @@ function renderDiscoverRow(rowId, items) {
   });
   row.appendChild(fragment);
   wirePosterFallbacks(row);
+  wireDiscoverArrows(row);
+  updateDiscoverArrows(row);
 }
 
 function renderDiscoverRowError(rowId) {
   var row = document.getElementById(rowId);
-  if (row) row.innerHTML = '<p class="text-steel-blue/50 text-xs py-4 px-2 italic">Could not load</p>';
+  if (!row) return;
+  row.innerHTML = '<p class="text-steel-blue/50 text-xs py-4 px-2 italic">Could not load</p>';
+  // A failed row has nothing to scroll, so it should not offer to.
+  updateDiscoverArrows(row);
 }
 
 /**
@@ -539,6 +572,37 @@ function buildDiscoverCard(item) {
 function scrollDiscoverRow(rowId, direction) {
   var row = document.getElementById(rowId);
   if (row) row.scrollBy({ left: direction * 400, behavior: 'smooth' });
+}
+
+/**
+ * Show each arrow only when the row can actually travel that way.
+ *
+ * A row that is already at its left edge still offered a left arrow, which did
+ * nothing when clicked.
+ *
+ * The 1px tolerance matters: scrollLeft is fractional on fractional-width
+ * layouts and at the right-hand end rarely equals the maximum exactly, so an
+ * exact comparison would leave a dead arrow showing at the end of every row.
+ */
+function updateDiscoverArrows(row) {
+  if (!row) return;
+  var wrapper = row.closest('.discover-row-wrapper');
+  if (!wrapper) return;
+
+  var maxScroll = row.scrollWidth - row.clientWidth;
+  var left = wrapper.querySelector('.discover-scroll-btn.left');
+  var right = wrapper.querySelector('.discover-scroll-btn.right');
+
+  if (left) left.disabled = row.scrollLeft <= 1;
+  // Also covers rows whose content fits, where maxScroll is 0 and neither
+  // direction has anywhere to go.
+  if (right) right.disabled = row.scrollLeft >= maxScroll - 1;
+}
+
+function wireDiscoverArrows(row) {
+  if (!row || row.dataset.arrowsWired) return;
+  row.dataset.arrowsWired = '1';
+  row.addEventListener('scroll', function () { updateDiscoverArrows(row); }, {passive: true});
 }
 
 // ---- Search ----
