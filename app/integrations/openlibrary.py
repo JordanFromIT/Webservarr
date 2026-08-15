@@ -41,6 +41,15 @@ IMAGE_TIMEOUT = 10.0
 # expires is used, and the rest of the books simply show a placeholder glyph.
 COVER_PHASE_BUDGET = 4.0
 
+# A shelf that is resolved once an hour and cached can afford to wait; a search
+# a user is sitting in front of cannot. Callers pick.
+TRENDING_COVER_BUDGET = 20.0
+
+# Open Library throttles a burst of concurrent lookups, which is what made a
+# 23-book shelf blow its budget when each individual lookup takes well under a
+# second. Kept in flight a few at a time instead.
+_COVER_CONCURRENCY = 6
+
 # Bounded in-process caches. Covers effectively never change, and a search
 # repeats the same titles constantly.
 _MAX_CACHE = 500
@@ -150,7 +159,9 @@ async def _lookup_one(client: httpx.AsyncClient, title: str, author: str) -> Opt
     return cover_id
 
 
-async def cover_ids(books: List[Tuple[str, str]]) -> Dict[Tuple[str, str], int]:
+async def cover_ids(
+    books: List[Tuple[str, str]], budget: float = COVER_PHASE_BUDGET
+) -> Dict[Tuple[str, str], int]:
     """
     Look up Open Library cover ids for (title, author) pairs.
 
@@ -160,26 +171,42 @@ async def cover_ids(books: List[Tuple[str, str]]) -> Dict[Tuple[str, str], int]:
     if not books:
         return {}
 
+    found = {}
     try:
         async with httpx.AsyncClient(timeout=LOOKUP_TIMEOUT) as client:
-            results = await asyncio.wait_for(
-                asyncio.gather(
-                    *[_lookup_one(client, t, a) for t, a in books],
-                    return_exceptions=True,
-                ),
-                timeout=COVER_PHASE_BUDGET,
-            )
-    except asyncio.TimeoutError:
-        logger.info("Open Library lookup exceeded %.0fs; showing placeholders", COVER_PHASE_BUDGET)
-        return {}
+            gate = asyncio.Semaphore(_COVER_CONCURRENCY)
+
+            async def _guarded(title, author):
+                async with gate:
+                    return await _lookup_one(client, title, author)
+
+            tasks = {
+                asyncio.ensure_future(_guarded(t, a)): (t, a)
+                for t, a in books
+            }
+            # Harvested rather than awaited as one unit. Wrapping the whole
+            # batch in a single timeout throws away every finished lookup when
+            # any of them runs long, which is how a 23-book shelf ended up with
+            # no covers at all while a 5-book search was fine. Whatever has
+            # landed when the budget expires is kept; the rest are abandoned.
+            done, pending = await asyncio.wait(tasks, timeout=budget)
+            for task in pending:
+                task.cancel()
+            if pending:
+                logger.info(
+                    "Open Library: %d of %d covers resolved within %.0fs",
+                    len(done), len(tasks), budget,
+                )
+            for task in done:
+                try:
+                    cover_id = task.result()
+                except Exception:  # noqa: BLE001 - one bad lookup, not a failure
+                    continue
+                if isinstance(cover_id, int):
+                    found[tasks[task]] = cover_id
     except Exception as exc:  # noqa: BLE001 - covers must never break search
         logger.warning("Open Library lookup failed: %s", exc)
-        return {}
 
-    found = {}
-    for (title, author), cover_id in zip(books, results):
-        if isinstance(cover_id, int):
-            found[(title, author)] = cover_id
     return found
 
 

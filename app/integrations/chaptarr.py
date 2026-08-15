@@ -193,7 +193,7 @@ async def search(term: str, limit: int = 20) -> List[Dict[str, Any]]:
     return items
 
 
-async def _attach_covers(items: List[Dict[str, Any]]) -> None:
+async def _attach_covers(items: List[Dict[str, Any]], budget: float = None) -> None:
     """
     Fill in cover art from Open Library for books that have none.
 
@@ -204,7 +204,9 @@ async def _attach_covers(items: List[Dict[str, Any]]) -> None:
     if not needed:
         return
 
-    found = await openlibrary.cover_ids(needed)
+    found = await openlibrary.cover_ids(
+        needed, budget=budget or openlibrary.COVER_PHASE_BUDGET
+    )
     for book in items:
         if book.get("poster_url"):
             continue
@@ -329,7 +331,14 @@ async def resolve_trending(books: List[Dict[str, Any]], limit: int = 20) -> List
     results = await asyncio.gather(
         *[_guarded(b) for b in books[:limit]], return_exceptions=True
     )
-    return [r for r in results if isinstance(r, dict)]
+    cards = [r for r in results if isinstance(r, dict)]
+
+    # Only some sources carry cover ids - Open Library does, the NYT lists do
+    # not - so anything still without art gets looked up by title and author,
+    # the same way search results do. Without this the audiobook shelf, which
+    # is entirely NYT, renders as a row of placeholder glyphs.
+    await _attach_covers(cards, budget=openlibrary.TRENDING_COVER_BUDGET)
+    return cards
 
 
 async def _lookup_book(cfg: dict, foreign_id: str) -> Optional[Dict[str, Any]]:
