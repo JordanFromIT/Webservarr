@@ -245,9 +245,9 @@ measurement justifies it.
 | Rate limiting | Existing slowapi tiers; a tighter dedicated tier for page and file fetches. |
 | Secrets | Kavita URL in settings; the per-user JWT in Redis session only, never sent to the browser as a durable credential. |
 
-⚠️ **Rotate Kavita's `TokenKey`** before real users exist — it was exposed during
-investigation. It lives in `/kavita/config/appsettings.json`; changing it invalidates existing
-Kavita sessions, which is harmless now.
+✅ **Kavita's `TokenKey` has been rotated** (2026-08-16). It lives in
+`/kavita/config/appsettings.json` — note that the OIDC settings beside it are read from
+`ServerSetting` key 40 in Kavita's database instead, so editing them in the file does nothing.
 
 ---
 
