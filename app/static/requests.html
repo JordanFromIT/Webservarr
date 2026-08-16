@@ -1708,14 +1708,14 @@ function showToast(message, type) {
         toast.classList.add('translate-x-0');
     });
 
-    // Animate out after 3 seconds
+    // Animate out after 10 seconds
     setTimeout(function() {
         toast.classList.remove('translate-x-0');
         toast.classList.add('translate-x-full');
         setTimeout(function() {
             if (toast.parentNode) toast.parentNode.removeChild(toast);
         }, 300);
-    }, 3000);
+    }, 10000);
 }
 
 // ---- Poster Fallbacks ----
