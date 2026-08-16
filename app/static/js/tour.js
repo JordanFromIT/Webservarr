@@ -152,21 +152,13 @@
       }
     }
 
-    /* Step bodies name on-screen things ("Your Bookshelf", "Recently Added"),
-       and those read better in bold than in quotes. Escaped first, so the only
-       markup that can reach the DOM is the <strong> this puts there. */
-    function bodyHtml(text) {
-      var escaped = String(text).replace(/[&<>"']/g, function (c) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-      });
-      return escaped.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-frosted-blue">$1</strong>');
-    }
-
     function render() {
       var s = STEPS[step];
       q('tourIcon').textContent = s.icon;
       q('tourTitle').textContent = s.title;
-      q('tourBody').innerHTML = bodyHtml(s.body);
+      // Plain text by design. Emphasis inside a step body fights the bold
+      // title above it and makes a short blurb look busy.
+      q('tourBody').textContent = s.body;
 
       var dots = q('tourDots');
       dots.innerHTML = '';

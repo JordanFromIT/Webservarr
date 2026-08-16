@@ -99,7 +99,7 @@
 
       <div class="ml-auto relative">
         <span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-steel-blue text-[18px]">search</span>
-        <input id="searchInput" type="search" placeholder="Search by title, author, series…" autocomplete="off"
+        <input id="searchInput" type="search" placeholder="Search by title or author…" autocomplete="off"
                class="bg-baltic-blue/10 border border-steel-blue/30 rounded-xl pl-8 pr-3 py-2 text-sm text-frosted-blue
                       placeholder:text-steel-blue/60 focus:outline-none focus:ring-2 focus:ring-steel-blue w-48 sm:w-64"/>
       </div>
@@ -152,7 +152,7 @@
 <script src="/static/js/header.js?v=2"></script>
 <script src="/static/js/sidebar.js?v=18"></script>
 <script src="/static/js/notifications.js?v=3"></script>
-<script src="/static/js/tour.js?v=3"></script>
+<script src="/static/js/tour.js?v=4"></script>
 <script>
 (function () {
   'use strict';
@@ -899,20 +899,20 @@
       fallback: '#shelf-recent',
       icon: 'bookmark',
       title: 'Your bookshelf',
-      body: '**Your Bookshelf** appears once you start a book and follows you between devices. Hover over a book for more options.'
+      body: 'Your Bookshelf appears once you start a book and follows you between devices. Hover over a book for more options.'
     },
     {
       target: '#shelf-recent',
       fallback: '#bookGrid',
       icon: 'new_releases',
       title: 'Recently Added',
-      body: '**Recently Added** is where newly added books will appear.'
+      body: 'Recently Added is where newly added books will appear.'
     },
     {
       target: '#searchInput',
       icon: 'search',
       title: 'Finding a book',
-      body: 'Search the whole library by title, author or series.'
+      body: 'Search the whole library by title or author.'
     },
     {
       target: '#viewToggle',
