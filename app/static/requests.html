@@ -1037,12 +1037,12 @@ function reducedMotion() {
  * True on phones and tablets - anything driven by a finger rather than a
  * pointer.
  *
- * The bar's travel is a pointer-device affordance: it exists so that someone
- * who was looking at the search field can follow it to its new home instead of
- * losing it. On touch it costs far more than it gives, because the move holds
- * the scroll position for its whole duration and a page that will not scroll
- * for three seconds reads as a broken page, not a considered one. Touch users
- * get the same end state, immediately.
+ * Touch still gets the glide - jumping straight to the end state read as a
+ * broken page on a real device (confirmed on a Galaxy S26+), not a
+ * considered one. What touch loses is the duration: SEARCH_MOVE_DURATION_TOUCH
+ * keeps the scroll lock brief instead of holding it for the full pointer-length
+ * animation, which is what made the instant jump seem worth it in the first
+ * place.
  */
 function coarsePointer() {
     return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
@@ -1061,6 +1061,12 @@ var SLOT_SCROLL_GAP = 24;
 // look like it is hurrying them - but it also holds the scroll for its whole
 // duration, so it cannot linger either.
 var SEARCH_MOVE_DURATION = 3000;
+
+// Touch gets the same glide, not the pointer duration: a scroll lock that
+// lingers for multiple seconds on a real phone (confirmed on a Galaxy S26+)
+// reads as a hung page rather than scenery. Kept short enough that the hold
+// is barely noticeable while still visibly animating instead of teleporting.
+var SEARCH_MOVE_DURATION_TOUCH = 700;
 
 /**
  * Work out how far to scroll to bring a slot into view, without doing it.
@@ -1243,7 +1249,7 @@ function moveSearchBar(position) {
         }
     }
 
-    if (reducedMotion() || coarsePointer()) {
+    if (reducedMotion()) {
         settle();
         scrollSlotIntoPlace(target);
         return;
@@ -1273,7 +1279,7 @@ function moveSearchBar(position) {
     // is itself travelling, and the whole thing reads as one movement. A CSS
     // transition cannot do this: the bar is position:fixed, so its viewport
     // coordinates have to be recomputed against the scroll on every frame.
-    var DURATION = SEARCH_MOVE_DURATION;
+    var DURATION = coarsePointer() ? SEARCH_MOVE_DURATION_TOUCH : SEARCH_MOVE_DURATION;
     var started = null;
 
     // The move owns the scroll position for its whole duration, so wheel and

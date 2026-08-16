@@ -29,10 +29,10 @@
   },
 }</script>
 <style>
-  /* Hover cannot reveal anything on a touch screen, so Your Bookshelf's
-     dismiss button is always visible there. */
+  /* Hover cannot reveal anything on a touch screen, so the card menu button
+     is always visible there. */
   @media (pointer: coarse) {
-    .card-dismiss { opacity: 1 !important; }
+    .card-menu-btn { opacity: 1 !important; }
   }
 
   /* Cover aspect ratio kept stable so the grid never reflows as images land. */
@@ -213,7 +213,7 @@
     return '/kavita/api/image/series-cover?seriesId=' + encodeURIComponent(seriesId);
   }
 
-  function bookCard(series, onDismiss) {
+  function bookCard(series, onRemoveFromBookshelf) {
     var name = series.name || 'Untitled';
     // A book opens its detail sheet first, the way clicking a film does
     // elsewhere. Still an <a> to the reader so middle-click, ctrl-click and
@@ -233,27 +233,170 @@
       '</div>' +
       '<p class="mt-2 text-sm text-frosted-blue leading-snug line-clamp-2">' + escapeHtml(name) + '</p>';
 
-    // Your Bookshelf is the only shelf you can prune: it is a personal queue,
-    // and a book you abandoned sits there forever otherwise. The button lives
-    // inside the <a>, so it has to swallow the click that would open the book.
-    if (onDismiss) {
-      var x = document.createElement('button');
-      x.type = 'button';
-      x.title = 'Remove from Your Bookshelf';
-      x.setAttribute('aria-label', 'Remove ' + name + ' from Your Bookshelf');
-      x.className = 'card-dismiss absolute top-1.5 right-1.5 z-10 grid place-items-center ' +
-                    'w-7 h-7 rounded-full bg-black/70 text-frosted-blue border border-steel-blue/40 ' +
-                    'opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity ' +
-                    'hover:bg-black hover:text-white';
-      x.innerHTML = '<span class="material-symbols-outlined text-[16px] leading-none">close</span>';
-      x.addEventListener('click', function (e) {
+    a.appendChild(buildCardMenu(series, a, onRemoveFromBookshelf));
+    return a;
+  }
+
+  /**
+   * Hover (or, on touch, always-visible) 3-dot menu for a book card: want to
+   * read, mark read/unread, remove from Your Bookshelf. One control on every
+   * card everywhere, rather than the old bare "x" that only ever appeared on
+   * Your Bookshelf cards and did only one of these four things.
+   *
+   * onRemoveFromBookshelf, when given, is the same per-shelf removal callback
+   * bookCard used to hand to the old dismiss button (dismissFromOnDeck for
+   * Your Bookshelf) - it still owns removing the card from that shelf's DOM.
+   * Everywhere else "Remove from Bookshelf" is just the on-deck API call:
+   * harmless if the book was never on deck, since there is no shelf card here
+   * to remove.
+   */
+  function buildCardMenu(series, cardEl, onRemoveFromBookshelf) {
+    var wrap = document.createElement('div');
+    wrap.className = 'absolute top-1.5 right-1.5 z-10';
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.title = 'More options';
+    btn.setAttribute('aria-label', 'More options for ' + (series.name || 'this book'));
+    btn.className = 'card-menu-btn grid place-items-center w-7 h-7 rounded-full bg-black/70 text-frosted-blue ' +
+                     'border border-steel-blue/40 opacity-0 group-hover:opacity-100 focus:opacity-100 ' +
+                     'transition-opacity hover:bg-black hover:text-white';
+    btn.innerHTML = '<span class="material-symbols-outlined text-[16px] leading-none">more_vert</span>';
+
+    var dropdown = document.createElement('div');
+    dropdown.className = 'hidden absolute right-0 top-full mt-1 w-48 rounded-xl bg-background-dark ' +
+                          'border border-steel-blue/30 shadow-xl shadow-black/40 py-1 z-20';
+
+    function menuItem(icon, label, handler) {
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-frosted-blue ' +
+                        'hover:bg-baltic-blue/30 transition-colors';
+      item.innerHTML = '<span class="material-symbols-outlined text-[16px]">' + icon + '</span><span>' +
+                        escapeHtml(label) + '</span>';
+      item.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        onDismiss(series, a);
+        closeMenu();
+        handler();
       });
-      a.appendChild(x);
+      return item;
     }
-    return a;
+
+    function isRead() {
+      return !!(series.pages && series.pagesRead >= series.pages);
+    }
+
+    var wantItem = menuItem('star_border', 'Want to Read', toggleWantToRead);
+    var readItem = menuItem(isRead() ? 'visibility_off' : 'done', isRead() ? 'Mark as Unread' : 'Mark as Read', toggleReadStatus);
+    var removeItem = menuItem('remove_circle_outline', 'Remove from Bookshelf', removeFromBookshelf);
+    dropdown.appendChild(wantItem);
+    dropdown.appendChild(readItem);
+    dropdown.appendChild(removeItem);
+
+    function onDocClick(e) {
+      if (!wrap.contains(e.target)) closeMenu();
+    }
+
+    function closeMenu() {
+      dropdown.classList.add('hidden');
+      document.removeEventListener('click', onDocClick);
+    }
+
+    function openMenu() {
+      dropdown.classList.remove('hidden');
+      document.addEventListener('click', onDocClick);
+      // The check is a network hop; it fills in after the menu is already
+      // visible rather than delaying it, the same way the detail sheet's
+      // facts fill in as each source arrives.
+      fetchWantToRead(series.id).then(function (wanted) {
+        if (wanted === null) return;
+        series._wantToRead = wanted;
+        setWantLabel();
+      });
+    }
+
+    function setWantLabel() {
+      var wanted = !!series._wantToRead;
+      wantItem.querySelector('span:last-child').textContent = wanted ? 'Remove from Want to Read' : 'Add to Want to Read';
+      wantItem.querySelector('span:first-child').textContent = wanted ? 'star' : 'star_border';
+    }
+
+    function setReadLabel() {
+      var read = isRead();
+      readItem.querySelector('span:last-child').textContent = read ? 'Mark as Unread' : 'Mark as Read';
+      readItem.querySelector('span:first-child').textContent = read ? 'visibility_off' : 'done';
+    }
+
+    function toggleWantToRead() {
+      var wasWanted = !!series._wantToRead;
+      series._wantToRead = !wasWanted;   // optimistic; the next menu open re-checks and corrects it
+      setWantToRead(series.id, !wasWanted).catch(function (err) {
+        series._wantToRead = wasWanted;
+        if (err && err.message === 'reconnecting') return;
+        console.warn('Could not update Want to Read:', err);
+      });
+    }
+
+    function toggleReadStatus() {
+      var wasRead = isRead();
+      var path = wasRead ? '/api/Reader/mark-unread' : '/api/Reader/mark-read';
+      kavita(path, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({seriesId: series.id, generateReadingSession: false})
+      }).then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        series.pagesRead = wasRead ? 0 : (series.pages || 0);
+        setReadLabel();
+      }).catch(function (err) {
+        if (err && err.message === 'reconnecting') return;
+        console.warn('Could not update read status:', err);
+      });
+    }
+
+    /**
+     * Drop a book off Your Bookshelf.
+     *
+     * Kavita's removal is per-user and not permanent: opening the book again
+     * puts it back. Nothing is deleted and no progress is lost, so this needs
+     * no confirmation.
+     */
+    function removeFromBookshelf() {
+      if (onRemoveFromBookshelf) { onRemoveFromBookshelf(series, cardEl); return; }
+      kavita('/api/Series/remove-from-on-deck?seriesId=' + encodeURIComponent(series.id), { method: 'POST' })
+        .catch(function (err) {
+          if (err && err.message === 'reconnecting') return;
+          console.warn('Could not remove from Your Bookshelf:', err);
+        });
+    }
+
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (dropdown.classList.contains('hidden')) openMenu(); else closeMenu();
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(dropdown);
+    return wrap;
+  }
+
+  /** Shared with the book detail sheet's Want to Read button. */
+  function fetchWantToRead(seriesId) {
+    return kavita('/api/want-to-read?seriesId=' + encodeURIComponent(seriesId))
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .catch(function () { return null; });
+  }
+
+  function setWantToRead(seriesId, wanted) {
+    var path = wanted ? '/api/want-to-read/add-series' : '/api/want-to-read/remove-series';
+    return kavita(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seriesIds: [seriesId] })
+    }).then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res;
+    });
   }
 
   function escapeHtml(s) {
@@ -723,6 +866,19 @@
            '<span class="text-bright">' + escapeHtml(String(value)) + '</span></span>';
   }
 
+  /** A fact led by an icon instead of a text label - file size, read count. */
+  function factIcon(icon, value) {
+    if (value === null || value === undefined || value === '') return '';
+    return '<span class="inline-flex items-center gap-1">' +
+           '<span class="material-symbols-outlined text-[14px] text-frosted-blue/60">' + icon + '</span>' +
+           '<span class="text-bright">' + escapeHtml(String(value)) + '</span></span>';
+  }
+
+  function formatBytes(bytes) {
+    var mb = bytes / (1024 * 1024);
+    return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : Math.round(mb) + ' MB';
+  }
+
   function openBookDetail(series) {
     _bdSeries = series;
     var modal = bdEl('bookDetail');
@@ -735,6 +891,7 @@
     bdEl('bdCover').style.visibility = '';
     bdEl('bdCover').src = coverUrl(series.id);
     bdEl('bdProgressWrap').classList.add('hidden');
+    setBdWantToReadUI(false);
 
     modal.classList.remove('hidden');
     modal.classList.add('flex');
@@ -774,6 +931,8 @@
         var h = dt.avgHoursToRead;
         facts.push(fact('Reading time', h < 1 ? '< 1 hr' : Math.round(h) + ' hr'));
       }
+      // totalReads comes free on the same SeriesDto - no extra network hop.
+      if (dt.totalReads) facts.push(factIcon('visibility', dt.totalReads + (dt.totalReads === 1 ? ' read' : ' reads')));
       bdEl('bdFacts').innerHTML = facts.join('');
 
       var chips = (md.genres || []).concat(md.tags || []).slice(0, 8);
@@ -808,6 +967,29 @@
         })
         .catch(function () { /* no rating is fine */ });
     });
+
+    // File size: its own network hop (Kavita's Download endpoints are a
+    // separate controller), and gated behind Kavita's Download role - a
+    // member account without it gets a 403, which is handled the same way
+    // as a missing rating: the fact is just omitted, nothing else changes.
+    kavita('/api/Download/series-size?seriesId=' + series.id)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (bytes) {
+        if (_bdSeries !== series || !bytes) return;
+        facts.push(factIcon('database', formatBytes(bytes)));
+        bdEl('bdFacts').innerHTML = facts.join('');
+      })
+      .catch(function () { /* no size is fine */ });
+
+    fetchWantToRead(series.id).then(function (wanted) {
+      if (_bdSeries !== series || wanted === null) return;
+      setBdWantToReadUI(wanted);
+    });
+  }
+
+  function setBdWantToReadUI(wanted) {
+    bdEl('bdWantToReadIcon').textContent = wanted ? 'star' : 'star_border';
+    bdEl('bdWantToReadLabel').textContent = wanted ? 'On Your Want to Read List' : 'Want to Read';
   }
 
   /* The sheet's markup sits at the end of <body>, after this script, so it does
@@ -822,6 +1004,18 @@
     });
     bdEl('bdRead').addEventListener('click', function () {
       if (_bdSeries) location.href = '/reader?seriesId=' + encodeURIComponent(_bdSeries.id);
+    });
+    bdEl('bdWantToRead').addEventListener('click', function () {
+      if (!_bdSeries) return;
+      var series = _bdSeries;
+      var wasWanted = bdEl('bdWantToReadIcon').textContent === 'star';
+      setBdWantToReadUI(!wasWanted);
+      setWantToRead(series.id, !wasWanted).catch(function (err) {
+        if (_bdSeries !== series) return;   // a different book is open now; leave it alone
+        setBdWantToReadUI(wasWanted);
+        if (err && err.message === 'reconnecting') return;
+        console.warn('Could not update Want to Read:', err);
+      });
     });
     document.addEventListener('keydown', function (e) {
       var m = bdEl('bookDetail');
@@ -969,6 +1163,12 @@
         <button id="bdRead"
                 class="mt-3 w-full py-2.5 rounded-xl bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-colors">
           Read
+        </button>
+        <button id="bdWantToRead" type="button"
+                class="mt-2 w-full py-2 rounded-xl border border-steel-blue/30 text-frosted-blue text-xs font-bold
+                       flex items-center justify-center gap-1.5 hover:bg-baltic-blue/20 transition-colors">
+          <span id="bdWantToReadIcon" class="material-symbols-outlined text-[16px]">star_border</span>
+          <span id="bdWantToReadLabel">Want to Read</span>
         </button>
         <div id="bdProgressWrap" class="hidden mt-3">
           <div class="h-1.5 rounded-full bg-steel-blue/20 overflow-hidden">
