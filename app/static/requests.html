@@ -959,7 +959,7 @@ function searchNextPage() {
 async function requestMedia(mediaType, mediaId, is4k, buttonEl) {
     // Disable button immediately
     buttonEl.disabled = true;
-    var origLabel = 'Request';
+    var origHtml = buttonEl.innerHTML;
     buttonEl.innerHTML = '<span class="material-symbols-outlined text-xs animate-spin">progress_activity</span>';
     buttonEl.classList.add('opacity-60', 'cursor-not-allowed');
 
@@ -1003,7 +1003,7 @@ async function requestMedia(mediaType, mediaId, is4k, buttonEl) {
     } catch (error) {
         console.error('Request error:', error);
         buttonEl.disabled = false;
-        buttonEl.innerHTML = '<span class="material-symbols-outlined text-xs">add</span> ' + origLabel;
+        buttonEl.innerHTML = origHtml;
         buttonEl.classList.remove('opacity-60', 'cursor-not-allowed');
         showToast(error.message || 'Failed to submit request', 'error');
     }

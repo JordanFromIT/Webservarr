@@ -20,6 +20,7 @@ Two things worth knowing, both established by testing against the live instance:
 """
 
 import asyncio
+import json
 import logging
 import re
 from html import unescape
@@ -27,7 +28,9 @@ from typing import Any, Dict, List, Optional
 
 import bleach
 import httpx
+import redis.asyncio as aioredis
 
+from app.config import settings
 from app.database import SessionLocal
 from app.integrations import openlibrary
 from app.models import Setting
@@ -139,30 +142,34 @@ def _poster_from(images: Any) -> Optional[str]:
 # find its own book again. Instead, every book object Chaptarr hands back is
 # kept here, keyed by foreignId, so a request can reuse the exact object the
 # user already saw instead of gambling on a second search.
-_BOOK_CACHE_TTL = 3600.0
-_book_cache: Dict[str, Any] = {}
+#
+# Redis rather than an in-process dict: uvicorn runs multiple workers (see
+# supervisord.conf), and a plain module-level cache is only visible to
+# whichever worker happens to populate it - the request commonly lands on a
+# different worker than the search that primed it.
+_BOOK_CACHE_TTL = 3600
+_book_cache_redis: Optional[aioredis.Redis] = None
 
 
-def _cache_book(book_id: Optional[str], book: Dict[str, Any]) -> None:
+def _redis() -> aioredis.Redis:
+    global _book_cache_redis
+    if _book_cache_redis is None:
+        _book_cache_redis = aioredis.from_url(settings.redis_url)
+    return _book_cache_redis
+
+
+async def _cache_book(book_id: Optional[str], book: Dict[str, Any]) -> None:
     if not book_id:
         return
-    import time as _time
-    _book_cache[book_id] = (_time.monotonic(), book)
+    await _redis().set(f"chaptarr:book:{book_id}", json.dumps(book), ex=_BOOK_CACHE_TTL)
 
 
-def _get_cached_book(book_id: str) -> Optional[Dict[str, Any]]:
-    import time as _time
-    hit = _book_cache.get(book_id)
-    if not hit:
-        return None
-    cached_at, book = hit
-    if (_time.monotonic() - cached_at) >= _BOOK_CACHE_TTL:
-        del _book_cache[book_id]
-        return None
-    return book
+async def _get_cached_book(book_id: str) -> Optional[Dict[str, Any]]:
+    raw = await _redis().get(f"chaptarr:book:{book_id}")
+    return json.loads(raw) if raw else None
 
 
-def _normalise(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+async def _normalise(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Convert a Chaptarr search result into the shape the requests page already
     uses for Seerr items, so book cards render through the same code path.
@@ -190,7 +197,7 @@ def _normalise(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     owned = _is_set_id(result.get("existingLocalId")) or _is_set_id(book.get("localBookId"))
 
     book_id = result.get("foreignId") or book.get("foreignBookId")
-    _cache_book(book_id, book)
+    await _cache_book(book_id, book)
 
     return {
         "id": book_id,
@@ -234,7 +241,7 @@ async def search(term: str, limit: int = 20) -> List[Dict[str, Any]]:
 
     items = []
     for result in raw if isinstance(raw, list) else []:
-        norm = _normalise(result)
+        norm = await _normalise(result)
         if norm and norm["id"]:
             items.append(norm)
         if len(items) >= limit:
@@ -352,7 +359,7 @@ async def resolve_trending(books: List[Dict[str, Any]], limit: int = 20) -> List
 
         candidates = []
         for result in raw if isinstance(raw, list) else []:
-            norm = _normalise(result)
+            norm = await _normalise(result)
             if norm and norm["id"]:
                 candidates.append(norm)
         if not candidates:
@@ -450,7 +457,9 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
         label = "audiobook" if audiobook else "book"
         return {"ok": False, "message": f"No Chaptarr {label} root folder configured"}
 
-    book = _get_cached_book(foreign_id) or await _lookup_book(cfg, foreign_id)
+    book = await _get_cached_book(foreign_id)
+    if not book:
+        book = await _lookup_book(cfg, foreign_id)
     if not book:
         return {"ok": False, "message": "Could not find that book in Chaptarr"}
 
@@ -623,7 +632,7 @@ async def book_rating(title: str, author: str = "") -> Dict[str, Any]:
     entry = {"title": title, "author": author}
     best, best_score = None, 0.0
     for result in raw if isinstance(raw, list) else []:
-        norm = _normalise(result)
+        norm = await _normalise(result)
         if not norm:
             continue
         score = _match_score(entry, norm)
