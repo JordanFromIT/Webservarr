@@ -86,6 +86,16 @@ DEFAULT_SETTINGS = {
     "integration.chaptarr.audiobook_quality_profile_id": ("2", "Chaptarr quality profile id for requested audiobooks"),
     "integration.chaptarr.audiobook_metadata_profile_id": ("1", "Chaptarr metadata profile id for requested audiobooks"),
     "integration.nyt.api_key": ("", "New York Times Books API key (developer.nytimes.com) for trending shelves"),
+    # Per-page sidebar visibility (Settings > Customization). ANDed with the
+    # features.* flags above, so a gated page needs both. No key for Settings:
+    # hiding it would lock the admin out of the page that turns it back on.
+    "sidebar.enabled_home": ("true", "Show Home in the sidebar"),
+    "sidebar.enabled_requests": ("true", "Show Requests in the sidebar"),
+    "sidebar.enabled_requests_embed": ("true", "Show Requests (Embed) in the sidebar"),
+    "sidebar.enabled_issues": ("true", "Show Issues in the sidebar"),
+    "sidebar.enabled_calendar": ("true", "Show Calendar in the sidebar"),
+    "sidebar.enabled_tickets": ("true", "Show Tickets in the sidebar"),
+    "sidebar.enabled_library": ("true", "Show eBooks in the sidebar"),
     # Ticket system
     "features.show_tickets": ("true", "Show Tickets page in sidebar"),
     "sidebar.label_tickets": ("Tickets", "Sidebar label for Tickets page"),

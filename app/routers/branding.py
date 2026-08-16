@@ -59,6 +59,19 @@ DEFAULTS = {
     "sidebar.new_tickets": "false",
     "sidebar.new_library": "false",
     "sidebar.new_settings": "false",
+    # Per-page sidebar visibility. Separate keys from the features.* flags so no
+    # setting is written from two places in the UI - a Customization save and a
+    # System save would otherwise race and clobber each other. Both must be true
+    # for a gated page to appear.
+    "sidebar.enabled_home": "true",
+    "sidebar.enabled_requests": "true",
+    "sidebar.enabled_requests_embed": "true",
+    "sidebar.enabled_issues": "true",
+    "sidebar.enabled_calendar": "true",
+    "sidebar.enabled_tickets": "true",
+    "sidebar.enabled_library": "true",
+    # Settings is deliberately absent: hiding it locks the admin out of the only
+    # page that could turn it back on.
     # Configurable icons
     "icon.nav_home": "home",
     "icon.nav_requests": "movie",
@@ -159,6 +172,17 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "tickets": get("sidebar.label_tickets"),
             "library": get("sidebar.label_library"),
             "settings": get("sidebar.label_settings"),
+        },
+        "sidebar_enabled": {
+            "home": get("sidebar.enabled_home") != "false",
+            "requests": get("sidebar.enabled_requests") != "false",
+            "requests-embed": get("sidebar.enabled_requests_embed") != "false",
+            "issues": get("sidebar.enabled_issues") != "false",
+            "calendar": get("sidebar.enabled_calendar") != "false",
+            "tickets": get("sidebar.enabled_tickets") != "false",
+            "library": get("sidebar.enabled_library") != "false",
+            # Always true; there is no key for it. See DEFAULTS.
+            "settings": True,
         },
         "sidebar_new": {
             "home": get("sidebar.new_home") == "true",

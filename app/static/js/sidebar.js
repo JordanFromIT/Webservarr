@@ -48,7 +48,12 @@ function _buildSidebarHTML(currentPage) {
   var logoUrl = theme.logo_url || '';
 
   // Filter by feature flags and apply label/icon overrides
+  var enabled = theme.sidebar_enabled || {};
   var visibleItems = NAV_ITEMS.filter(function (item) {
+    // Admin's per-page switch (Settings > Customization). Defaults to visible
+    // when branding has not loaded yet, so a slow /api/branding never blanks
+    // the nav. Settings has no key and is always present.
+    if (item.id !== 'settings' && enabled[item.id] === false) return false;
     if (item.feature && !features[item.feature]) return false;
     return true;
   }).map(function (item) {
