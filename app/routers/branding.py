@@ -47,6 +47,18 @@ DEFAULTS = {
     "sidebar.label_tickets": "Tickets",
     "sidebar.label_library": "eBooks",
     "sidebar.label_settings": "Settings",
+    # Per-page "New!" flags. Admin-controlled rather than self-retiring: the
+    # admin decides how long a section counts as new, and turns it off when it
+    # stops being news. Off everywhere on a fresh install - nothing is new when
+    # the whole site is.
+    "sidebar.new_home": "false",
+    "sidebar.new_requests": "false",
+    "sidebar.new_requests_embed": "false",
+    "sidebar.new_issues": "false",
+    "sidebar.new_calendar": "false",
+    "sidebar.new_tickets": "false",
+    "sidebar.new_library": "false",
+    "sidebar.new_settings": "false",
     # Configurable icons
     "icon.nav_home": "home",
     "icon.nav_requests": "movie",
@@ -147,6 +159,16 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "tickets": get("sidebar.label_tickets"),
             "library": get("sidebar.label_library"),
             "settings": get("sidebar.label_settings"),
+        },
+        "sidebar_new": {
+            "home": get("sidebar.new_home") == "true",
+            "requests": get("sidebar.new_requests") == "true",
+            "requests-embed": get("sidebar.new_requests_embed") == "true",
+            "issues": get("sidebar.new_issues") == "true",
+            "calendar": get("sidebar.new_calendar") == "true",
+            "tickets": get("sidebar.new_tickets") == "true",
+            "library": get("sidebar.new_library") == "true",
+            "settings": get("sidebar.new_settings") == "true",
         },
         "icons": {
             "nav_home": get("icon.nav_home"),

@@ -918,7 +918,7 @@
                 <!-- Sidebar Labels — compact inline layout -->
                 <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6">
                     <h2 class="text-xl font-bold mb-2 text-frosted-blue">Sidebar Labels</h2>
-                    <p class="text-xs text-steel-blue/70 mb-5">Rename navigation items in the sidebar</p>
+                    <p class="text-xs text-steel-blue/70 mb-5">Rename navigation items, and flag any of them as new. A flagged item wears an animated <span class="text-frosted-blue">New!</span> badge for everyone until you clear it.</p>
                     <div class="space-y-2.5">
                         <div class="flex items-center gap-3">
                             <span class="material-symbols-outlined text-steel-blue text-lg w-6 text-center" id="labelIconHome">home</span>
@@ -926,6 +926,11 @@
                             <input type="text" id="sidebarLabelHome"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Home">
+                            <label class="flex items-center gap-1.5 shrink-0 cursor-pointer select-none" title="Show an animated New! flag beside this item in the sidebar">
+                                <input type="checkbox" id="sidebarNewHome"
+                                    class="rounded border-steel-blue/40 bg-black/50 text-primary focus:ring-primary focus:ring-offset-0">
+                                <span class="text-[10px] uppercase tracking-wider text-steel-blue/70">New!</span>
+                            </label>
                             <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/</span>
                         </div>
                         <div class="flex items-center gap-3">
@@ -934,6 +939,11 @@
                             <input type="text" id="sidebarLabelRequests"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Requests">
+                            <label class="flex items-center gap-1.5 shrink-0 cursor-pointer select-none" title="Show an animated New! flag beside this item in the sidebar">
+                                <input type="checkbox" id="sidebarNewRequests"
+                                    class="rounded border-steel-blue/40 bg-black/50 text-primary focus:ring-primary focus:ring-offset-0">
+                                <span class="text-[10px] uppercase tracking-wider text-steel-blue/70">New!</span>
+                            </label>
                             <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/requests</span>
                         </div>
                         <div class="flex items-center gap-3">
@@ -942,6 +952,11 @@
                             <input type="text" id="sidebarLabelRequestsEmbed"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Requests (Embed)">
+                            <label class="flex items-center gap-1.5 shrink-0 cursor-pointer select-none" title="Show an animated New! flag beside this item in the sidebar">
+                                <input type="checkbox" id="sidebarNewRequestsEmbed"
+                                    class="rounded border-steel-blue/40 bg-black/50 text-primary focus:ring-primary focus:ring-offset-0">
+                                <span class="text-[10px] uppercase tracking-wider text-steel-blue/70">New!</span>
+                            </label>
                             <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/requests-embed</span>
                         </div>
                         <div class="flex items-center gap-3">
@@ -950,6 +965,11 @@
                             <input type="text" id="sidebarLabelIssues"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Issues">
+                            <label class="flex items-center gap-1.5 shrink-0 cursor-pointer select-none" title="Show an animated New! flag beside this item in the sidebar">
+                                <input type="checkbox" id="sidebarNewIssues"
+                                    class="rounded border-steel-blue/40 bg-black/50 text-primary focus:ring-primary focus:ring-offset-0">
+                                <span class="text-[10px] uppercase tracking-wider text-steel-blue/70">New!</span>
+                            </label>
                             <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/issues</span>
                         </div>
                         <div class="flex items-center gap-3">
@@ -958,6 +978,11 @@
                             <input type="text" id="sidebarLabelTickets"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Tickets">
+                            <label class="flex items-center gap-1.5 shrink-0 cursor-pointer select-none" title="Show an animated New! flag beside this item in the sidebar">
+                                <input type="checkbox" id="sidebarNewTickets"
+                                    class="rounded border-steel-blue/40 bg-black/50 text-primary focus:ring-primary focus:ring-offset-0">
+                                <span class="text-[10px] uppercase tracking-wider text-steel-blue/70">New!</span>
+                            </label>
                             <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/tickets</span>
                         </div>
                         <div class="flex items-center gap-3">
@@ -966,6 +991,11 @@
                             <input type="text" id="sidebarLabelCalendar"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Calendar">
+                            <label class="flex items-center gap-1.5 shrink-0 cursor-pointer select-none" title="Show an animated New! flag beside this item in the sidebar">
+                                <input type="checkbox" id="sidebarNewCalendar"
+                                    class="rounded border-steel-blue/40 bg-black/50 text-primary focus:ring-primary focus:ring-offset-0">
+                                <span class="text-[10px] uppercase tracking-wider text-steel-blue/70">New!</span>
+                            </label>
                             <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/calendar</span>
                         </div>
                         <div class="flex items-center gap-3">
@@ -974,6 +1004,11 @@
                             <input type="text" id="sidebarLabelLibrary"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="eBooks">
+                            <label class="flex items-center gap-1.5 shrink-0 cursor-pointer select-none" title="Show an animated New! flag beside this item in the sidebar">
+                                <input type="checkbox" id="sidebarNewLibrary"
+                                    class="rounded border-steel-blue/40 bg-black/50 text-primary focus:ring-primary focus:ring-offset-0">
+                                <span class="text-[10px] uppercase tracking-wider text-steel-blue/70">New!</span>
+                            </label>
                             <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/library</span>
                         </div>
                         <div class="flex items-center gap-3">
@@ -982,6 +1017,11 @@
                             <input type="text" id="sidebarLabelSettings"
                                 class="flex-1 bg-black/50 border border-steel-blue/30 rounded-lg px-3 py-2 text-frosted-blue text-sm placeholder:text-steel-blue/50 focus:outline-none focus:ring-2 focus:ring-primary"
                                 placeholder="Settings">
+                            <label class="flex items-center gap-1.5 shrink-0 cursor-pointer select-none" title="Show an animated New! flag beside this item in the sidebar">
+                                <input type="checkbox" id="sidebarNewSettings"
+                                    class="rounded border-steel-blue/40 bg-black/50 text-primary focus:ring-primary focus:ring-offset-0">
+                                <span class="text-[10px] uppercase tracking-wider text-steel-blue/70">New!</span>
+                            </label>
                             <span class="text-[10px] text-steel-blue/50 font-mono w-24 text-right shrink-0">/settings</span>
                         </div>
                     </div>
@@ -1398,7 +1438,7 @@
 
     <script src="/static/js/auth.js"></script>
     <script src="/static/js/header.js?v=2"></script>
-    <script src="/static/js/sidebar.js?v=18"></script>
+    <script src="/static/js/sidebar.js?v=19"></script>
     <script src="/static/js/notifications.js?v=3"></script>
     <script>
         // Initialize sidebar and auth
@@ -2262,6 +2302,20 @@
             { picker: 'themeColorBackground', hex: 'themeColorBackgroundHex', cssVar: '--color-background', key: 'theme.color_background' },
         ];
 
+
+        /* Sidebar "New!" flags: DOM id -> settings key -> branding field.
+           One table so load, save and reset cannot drift apart. */
+        const SIDEBAR_NEW_FIELDS = [
+            { el: 'sidebarNewHome',          key: 'sidebar.new_home',           page: 'home' },
+            { el: 'sidebarNewRequests',      key: 'sidebar.new_requests',       page: 'requests' },
+            { el: 'sidebarNewRequestsEmbed', key: 'sidebar.new_requests_embed', page: 'requests-embed' },
+            { el: 'sidebarNewIssues',        key: 'sidebar.new_issues',         page: 'issues' },
+            { el: 'sidebarNewTickets',       key: 'sidebar.new_tickets',        page: 'tickets' },
+            { el: 'sidebarNewCalendar',      key: 'sidebar.new_calendar',       page: 'calendar' },
+            { el: 'sidebarNewLibrary',       key: 'sidebar.new_library',        page: 'library' },
+            { el: 'sidebarNewSettings',      key: 'sidebar.new_settings',       page: 'settings' },
+        ];
+
         const THEME_DEFAULTS = {
             'branding.app_name': 'WebServarr',
             'branding.tagline': 'Media Server Management',
@@ -2530,6 +2584,11 @@
                 document.getElementById('sidebarLabelLibrary').value = sidebarLabels.library || '';
                 document.getElementById('sidebarLabelSettings').value = sidebarLabels.settings || '';
 
+                var sidebarNew = data.sidebar_new || {};
+                SIDEBAR_NEW_FIELDS.forEach(function (f) {
+                    document.getElementById(f.el).checked = !!sidebarNew[f.page];
+                });
+
                 // Icons
                 var iconsData = data.icons || {};
                 var iconFields = {
@@ -2605,6 +2664,15 @@
             settings.push({ key: 'sidebar.label_calendar', value: document.getElementById('sidebarLabelCalendar').value || 'Calendar', description: 'Sidebar label for Calendar' });
             settings.push({ key: 'sidebar.label_library', value: document.getElementById('sidebarLabelLibrary').value || 'eBooks', description: 'Sidebar label for the eBooks page' });
             settings.push({ key: 'sidebar.label_settings', value: document.getElementById('sidebarLabelSettings').value || 'Settings', description: 'Sidebar label for Settings' });
+
+            // Sidebar "New!" flags
+            SIDEBAR_NEW_FIELDS.forEach(function (f) {
+                settings.push({
+                    key: f.key,
+                    value: document.getElementById(f.el).checked ? 'true' : 'false',
+                    description: 'Show a New! flag beside ' + f.page + ' in the sidebar'
+                });
+            });
 
             // Icons
             var iconSaveMap = {
@@ -2684,6 +2752,11 @@
             document.getElementById('sidebarLabelIssues').value = THEME_DEFAULTS['sidebar.label_issues'];
             document.getElementById('sidebarLabelTickets').value = THEME_DEFAULTS['sidebar.label_tickets'];
             document.getElementById('sidebarLabelSettings').value = THEME_DEFAULTS['sidebar.label_settings'];
+
+            // Nothing is new on a fresh install.
+            SIDEBAR_NEW_FIELDS.forEach(function (f) {
+                document.getElementById(f.el).checked = false;
+            });
 
             // Icons
             var iconResetMap = {

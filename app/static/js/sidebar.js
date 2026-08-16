@@ -16,7 +16,7 @@ var NAV_ITEMS = [
   { id: 'issues',    label: 'Issues',     icon: 'report_problem',        href: '/issues' },
   { id: 'calendar',  label: 'Calendar',    icon: 'calendar_month',        href: '/calendar' },
   { id: 'tickets',  label: 'Tickets',    icon: 'confirmation_number',   href: '/tickets', feature: 'show_tickets' },
-  { id: 'library',  label: 'eBooks',     icon: 'menu_book',             href: '/library', feature: 'show_books', isNew: true },
+  { id: 'library',  label: 'eBooks',     icon: 'menu_book',             href: '/library', feature: 'show_books' },
   { id: 'settings', label: 'Settings',    icon: 'settings',              href: '/settings', adminOnly: true },
 ];
 
@@ -26,35 +26,16 @@ var NAV_ITEMS = [
  * @returns {string} HTML string
  */
 
-/* Sections the user has already opened, so a "New" flag can retire itself.
-   Kept in localStorage rather than a user setting: it is a UI hint about this
-   browser, not account state. */
-var _SEEN_KEY = 'webservarr_seen_sections';
 var _sidebarRebuildWired = false;
 
-function _seenSet() {
-  try { return JSON.parse(localStorage.getItem(_SEEN_KEY) || '[]'); }
-  catch (e) { return []; }
-}
-
-function _hasSeen(id) {
-  // DEVELOPMENT: webservarr_tour_always (or ?tour=1) keeps the onboarding
-  // visible while it is being worked on. It holds the "New" flag open too -
-  // otherwise the flag vanishes the first time the section is opened and
-  // cannot be looked at again without clearing storage by hand.
-  try {
-    if (localStorage.getItem('webservarr_tour_always') === '1') return false;
-  } catch (e) {}
-  if (/[?&]tour=1\b/.test(location.search)) return false;
-
-  return _seenSet().indexOf(id) !== -1;
-}
-
-function markSectionSeen(id) {
-  var seen = _seenSet();
-  if (seen.indexOf(id) !== -1) return;
-  seen.push(id);
-  try { localStorage.setItem(_SEEN_KEY, JSON.stringify(seen)); } catch (e) {}
+/* Whether a nav item wears a "New!" flag.
+   Admin-controlled, from Settings > Customization, rather than retiring itself
+   the first time each browser opens the page. Two reasons: the admin knows how
+   long a launch stays newsworthy, and a self-retiring flag is invisible to the
+   person who has to decide whether it is still working. */
+function _isFlaggedNew(id) {
+  var theme = window.WEBSERVARR_THEME || {};
+  return !!(theme.sidebar_new || {})[id];
 }
 
 function _buildSidebarHTML(currentPage) {
@@ -86,10 +67,7 @@ function _buildSidebarHTML(currentPage) {
   var navLinks = visibleItems.map(function (item) {
     var isActive = item.id === currentPage;
     var adminAttr = item.adminOnly ? ' data-admin-only="true" style="display:none"' : '';
-    // A "NEW" flag for a freshly launched section. It retires itself the first
-    // time the page is opened - a permanent badge stops meaning anything, and
-    // an unread marker that never clears is just decoration.
-    var newFlag = (item.isNew && !_hasSeen(item.id))
+    var newFlag = _isFlaggedNew(item.id)
       ? '<span class="nav-new-badge">New!</span>'
       : '';
 
@@ -245,9 +223,6 @@ function _wireSidebarChrome() {
 function initSidebar(currentPage) {
   var root = document.getElementById('sidebar-root');
   if (!root) return;
-
-  // Opening a section retires its "New" flag, so mark it before building.
-  if (currentPage) markSectionSeen(currentPage);
 
   root.innerHTML = _buildSidebarHTML(currentPage);
 
