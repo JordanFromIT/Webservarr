@@ -98,24 +98,42 @@
       var bubble = q('tourBubble');
       var arrow = q('tourArrow');
 
+      var bw = bubble.offsetWidth || 336;
+      var bh = bubble.offsetHeight || 160;
+      var gap = 16;
+      var margin = 12;
+
+      /* A step with nothing to point at - an opening welcome, or a target that
+         is not on the page this time - dims the whole screen and sits the
+         bubble dead centre. The spotlight stays at full opacity because the fog
+         IS its box-shadow; collapsing it to nothing keeps the dimming and cuts
+         no hole. The ring and the arrow are hidden, since neither has anything
+         to mark. */
+      if (!el) {
+        spot.style.top = (window.innerHeight / 2) + 'px';
+        spot.style.left = (window.innerWidth / 2) + 'px';
+        spot.style.width = '0px';
+        spot.style.height = '0px';
+        spot.style.opacity = '1';
+        spot.classList.add('tour-spotlight-empty');
+        arrow.style.display = 'none';
+        bubble.style.top = Math.max(margin, (window.innerHeight - bh) / 2) + 'px';
+        bubble.style.left = Math.max(margin, (window.innerWidth - bw) / 2) + 'px';
+        return;
+      }
+
+      spot.classList.remove('tour-spotlight-empty');
+      arrow.style.display = '';
+
       var pad = 8;
-      var r = el
-        ? el.getBoundingClientRect()
-        /* Nothing to point at: centre the bubble with a collapsed spotlight so
-           the step still reads rather than pointing at the top-left corner. */
-        : { top: window.innerHeight / 2, left: window.innerWidth / 2, width: 0, height: 0,
-            bottom: window.innerHeight / 2, right: window.innerWidth / 2 };
+      var r = el.getBoundingClientRect();
 
       spot.style.top = (r.top - pad) + 'px';
       spot.style.left = (r.left - pad) + 'px';
       spot.style.width = (r.width + pad * 2) + 'px';
       spot.style.height = (r.height + pad * 2) + 'px';
-      spot.style.opacity = el ? '1' : '0';
+      spot.style.opacity = '1';
 
-      var bw = bubble.offsetWidth || 336;
-      var bh = bubble.offsetHeight || 160;
-      var gap = 16;
-      var margin = 12;
       var side, top, left;
 
       if (r.bottom + gap + bh < window.innerHeight - margin) {

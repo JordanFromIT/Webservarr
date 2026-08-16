@@ -186,6 +186,10 @@ body {
   box-shadow: 0 0 18px rgb(var(--color-accent) / 0.45);
 }
 
+/* A step with no target keeps the fog but cuts no hole, so there is no edge
+   for the ring to trace. */
+.tour-spotlight-empty::after { display: none; }
+
 .tour-bubble {
   position: fixed;
   z-index: 71;

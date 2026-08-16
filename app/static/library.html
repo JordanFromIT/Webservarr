@@ -8,7 +8,7 @@
 <script src="/static/js/theme-loader.js"></script>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="/static/css/theme.css?v=11" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 <script>tailwind.config = {
   darkMode: "class",
   theme: {
@@ -152,7 +152,7 @@
 <script src="/static/js/header.js?v=2"></script>
 <script src="/static/js/sidebar.js?v=18"></script>
 <script src="/static/js/notifications.js?v=3"></script>
-<script src="/static/js/tour.js?v=4"></script>
+<script src="/static/js/tour.js?v=5"></script>
 <script>
 (function () {
   'use strict';
@@ -884,10 +884,8 @@
 
   var STEPS = [
     {
-      /* The first shelf row, not the whole shelves block: a spotlight the size
-         of the viewport highlights nothing. */
-      target: '#shelves > *:first-child',
-      fallback: '#bookGrid',
+      /* No target: the welcome dims the page and sits centred, rather than
+         spotlighting a shelf it is not talking about yet. */
       icon: 'auto_stories',
       title: 'Welcome to HMServer eBooks',
       body: 'Everything here is readable in your browser. No app install, no separate account, and free! Your place in a book saves itself server-side, and it is private to you.'
