@@ -719,8 +719,8 @@
 
   function fact(label, value) {
     if (value === null || value === undefined || value === '') return '';
-    return '<span><span class="text-steel-blue/60">' + label + '</span> ' +
-           '<span class="text-frosted-blue">' + escapeHtml(String(value)) + '</span></span>';
+    return '<span><span class="text-frosted-blue/75">' + label + '</span> ' +
+           '<span class="text-bright">' + escapeHtml(String(value)) + '</span></span>';
   }
 
   function openBookDetail(series) {
@@ -778,7 +778,7 @@
 
       var chips = (md.genres || []).concat(md.tags || []).slice(0, 8);
       bdEl('bdGenres').innerHTML = chips.map(function (g) {
-        return '<span class="text-[10px] px-2 py-0.5 rounded-full bg-baltic-blue/30 border border-steel-blue/25 text-steel-blue">' +
+        return '<span class="text-[10px] px-2 py-0.5 rounded-full bg-baltic-blue/30 border border-steel-blue/25 text-frosted-blue">' +
                escapeHtml(g.title || '') + '</span>';
       }).join('');
 
@@ -802,8 +802,8 @@
           if (_bdSeries !== series || !rt || !rt.rating) return;
           var stars = '★ ' + rt.rating.toFixed(2);
           var votes = rt.votes ? ' (' + Number(rt.votes).toLocaleString() + ' ratings)' : '';
-          facts.unshift('<span class="text-frosted-blue font-semibold">' + stars + '</span>' +
-                        '<span class="text-steel-blue/60">' + votes + ' · ' + escapeHtml(rt.source || '') + '</span>');
+          facts.unshift('<span class="text-bright font-semibold">' + stars + '</span>' +
+                        '<span class="text-frosted-blue/75">' + votes + ' · ' + escapeHtml(rt.source || '') + '</span>');
           bdEl('bdFacts').innerHTML = facts.join('');
         })
         .catch(function () { /* no rating is fine */ });
@@ -967,7 +967,7 @@
           <div class="h-1.5 rounded-full bg-steel-blue/20 overflow-hidden">
             <div id="bdProgressBar" class="h-full rounded-full bg-frosted-blue" style="width:0%"></div>
           </div>
-          <p id="bdProgressText" class="mt-1 text-[10px] text-steel-blue"></p>
+          <p id="bdProgressText" class="mt-1 text-[10px] text-frosted-blue/75"></p>
         </div>
       </div>
 
@@ -975,7 +975,7 @@
         <div class="flex items-start gap-3">
           <div class="min-w-0 flex-1">
             <h2 id="bdTitle" class="text-xl font-bold text-frosted-blue leading-tight"></h2>
-            <p id="bdAuthor" class="mt-0.5 text-sm text-steel-blue"></p>
+            <p id="bdAuthor" class="mt-0.5 text-sm text-frosted-blue/80"></p>
           </div>
           <button id="bdClose" aria-label="Close"
                   class="p-1 rounded-lg text-steel-blue hover:text-frosted-blue hover:bg-baltic-blue/30 shrink-0">
@@ -984,7 +984,7 @@
         </div>
 
         <!-- Facts row: only the ones that exist for this book are rendered. -->
-        <div id="bdFacts" class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-steel-blue"></div>
+        <div id="bdFacts" class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-frosted-blue/75"></div>
 
         <div id="bdGenres" class="mt-3 flex flex-wrap gap-1.5"></div>
 
