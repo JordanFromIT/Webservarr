@@ -29,7 +29,7 @@
   },
 }</script>
 <style>
-  /* Hover cannot reveal anything on a touch screen, so the Continue Reading
+  /* Hover cannot reveal anything on a touch screen, so Your Bookshelf's
      dismiss button is always visible there. */
   @media (pointer: coarse) {
     .card-dismiss { opacity: 1 !important; }
@@ -152,7 +152,7 @@
 <script src="/static/js/header.js?v=2"></script>
 <script src="/static/js/sidebar.js?v=18"></script>
 <script src="/static/js/notifications.js?v=3"></script>
-<script src="/static/js/tour.js?v=2"></script>
+<script src="/static/js/tour.js?v=3"></script>
 <script>
 (function () {
   'use strict';
@@ -233,14 +233,14 @@
       '</div>' +
       '<p class="mt-2 text-sm text-frosted-blue leading-snug line-clamp-2">' + escapeHtml(name) + '</p>';
 
-    // Continue Reading is the only shelf you can prune: it is a personal queue,
+    // Your Bookshelf is the only shelf you can prune: it is a personal queue,
     // and a book you abandoned sits there forever otherwise. The button lives
     // inside the <a>, so it has to swallow the click that would open the book.
     if (onDismiss) {
       var x = document.createElement('button');
       x.type = 'button';
-      x.title = 'Remove from Continue Reading';
-      x.setAttribute('aria-label', 'Remove ' + name + ' from Continue Reading');
+      x.title = 'Remove from Your Bookshelf';
+      x.setAttribute('aria-label', 'Remove ' + name + ' from Your Bookshelf');
       x.className = 'card-dismiss absolute top-1.5 right-1.5 z-10 grid place-items-center ' +
                     'w-7 h-7 rounded-full bg-black/70 text-frosted-blue border border-steel-blue/40 ' +
                     'opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity ' +
@@ -382,7 +382,7 @@
    */
   var SHELVES = [
     {
-      id: 'continue', title: 'Continue Reading', icon: 'book_ribbon',
+      id: 'bookshelf', title: 'Your Bookshelf', icon: 'book_ribbon',
       dismissible: true,
       load: function () {
         return kavita('/api/Series/on-deck?pageNumber=1&pageSize=8', {
@@ -442,7 +442,7 @@
   }
 
   /**
-   * Drop a book off the Continue Reading shelf.
+   * Drop a book off Your Bookshelf.
    *
    * Kavita's removal is per-user and not permanent: opening the book again puts
    * it back. Nothing is deleted and no progress is lost, so this needs no
@@ -458,13 +458,13 @@
         card.remove();
         // An empty shelf is just a heading over nothing; hide the section.
         if (row && !row.querySelector('.book-card')) {
-          var section = document.getElementById('shelf-continue');
+          var section = document.getElementById('shelf-bookshelf');
           if (section) section.remove();
         }
       })
       .catch(function (err) {
         if (err && err.message === 'reconnecting') return;
-        console.warn('Could not remove from Continue Reading:', err);
+        console.warn('Could not remove from Your Bookshelf:', err);
         card.style.display = '';
       });
   }
@@ -889,15 +889,24 @@
       target: '#shelves > *:first-child',
       fallback: '#bookGrid',
       icon: 'auto_stories',
-      title: 'Welcome to eBooks',
-      body: 'Everything here reads in your browser. Nothing to install, and no separate account. Your place in a book saves itself, and it is private to you.'
+      title: 'Welcome to HMServer eBooks',
+      body: 'Everything here is readable in your browser. No app install, no separate account, and free! Your place in a book saves itself server-side, and it is private to you.'
     },
     {
-      target: '#shelves > *:first-child',
-      fallback: '#bookGrid',
+      /* Falls back to Recently Added: Your Bookshelf does not exist until you
+         have opened something, and a new reader is exactly who sees this. */
+      target: '#shelf-bookshelf',
+      fallback: '#shelf-recent',
       icon: 'bookmark',
-      title: 'Your shelves',
-      body: 'Continue Reading appears once you start a book and follows you between devices. Hover a cover and press the x to drop a book you have given up on. Recently Added is whatever arrived most recently.'
+      title: 'Your bookshelf',
+      body: '**Your Bookshelf** appears once you start a book and follows you between devices. Hover over a book for more options.'
+    },
+    {
+      target: '#shelf-recent',
+      fallback: '#bookGrid',
+      icon: 'new_releases',
+      title: 'Recently Added',
+      body: '**Recently Added** is where newly added books will appear.'
     },
     {
       target: '#searchInput',
@@ -910,7 +919,7 @@
       fallback: '#sortSelect',
       icon: 'tune',
       title: 'Sort and browse',
-      body: 'Sort the grid by title, by what arrived most recently, or by length. Switch to Authors to browse by writer instead, then pick one to see everything of theirs we hold.'
+      body: 'Sort the grid by title, by what arrived most recently, or by length. Switch to Authors, then pick one to see everything of theirs we hold.'
     },
     {
       /* A single cover, so "click a cover" points at an actual cover. */
@@ -918,13 +927,13 @@
       fallback: '#shelves img',
       icon: 'menu_book',
       title: 'Open anything',
-      body: 'Click a cover to open its details: description, rating, length and how far through it you are. From there, Read opens the book itself.'
+      body: 'Click a cover to open its details: description, rating, length and how far through it you are. Read opens the book itself.'
     },
     {
       target: 'a[href="/requests"]',
       icon: 'add_circle',
       title: 'Missing something?',
-      body: 'Search for it under Requests, where books sit alongside films and TV. Press Request eBook and it arrives here on its own. Audiobooks can be requested there too, but they play in Plex rather than here.'
+      body: 'Search for it under Requests, where books sit alongside Movies and TV Shows. Press Request eBook and it arrives here on its own. Audiobooks can be requested there too, but they play in Plex rather than here.'
     }
   ];
 
