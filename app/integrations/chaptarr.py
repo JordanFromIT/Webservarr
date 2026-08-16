@@ -463,12 +463,31 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
     if not book:
         return {"ok": False, "message": "Could not find that book in Chaptarr"}
 
+    quality_profile_id = int(cfg[f"{prefix}quality_profile_id"])
+    metadata_profile_id = int(cfg[f"{prefix}metadata_profile_id"])
+
+    # A book from a brand-new author arrives with an author record that has
+    # no profiles or root folder of its own (it isn't tracked yet), and
+    # Chaptarr validates the author, not just the book, when adding one -
+    # rejecting with "At least one quality profile must be selected" if only
+    # the book carries these fields. "none"/False here so the add pulls in
+    # just this book, not the author's whole back catalogue.
+    author = dict(book.get("author") or {})
+    author.update({
+        "monitored": True,
+        "rootFolderPath": root_folder,
+        "qualityProfileId": quality_profile_id,
+        "metadataProfileId": metadata_profile_id,
+        "addOptions": {"monitor": "none", "searchForMissingBooks": False},
+    })
+
     payload = dict(book)
     payload.update({
         "monitored": True,
         "rootFolderPath": root_folder,
-        "qualityProfileId": int(cfg[f"{prefix}quality_profile_id"]),
-        "metadataProfileId": int(cfg[f"{prefix}metadata_profile_id"]),
+        "qualityProfileId": quality_profile_id,
+        "metadataProfileId": metadata_profile_id,
+        "author": author,
         "addOptions": {"searchForNewBook": True},
     })
 
