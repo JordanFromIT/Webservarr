@@ -557,7 +557,10 @@ async def create_chaptarr_request(
     fmt = "audiobook" if body.format == "audiobook" else "ebook"
     result = await chaptarr.request_book(body.bookId.strip(), fmt=fmt)
     if not result["ok"]:
-        raise HTTPException(status_code=502, detail=result["message"])
+        # 502 gets its body replaced by Cloudflare's own generic error page,
+        # so the real reason (e.g. "Could not find that book in Chaptarr")
+        # never reaches the browser. 400 matches the Seerr request path below.
+        raise HTTPException(status_code=400, detail=result["message"])
     return result
 
 

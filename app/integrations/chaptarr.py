@@ -133,6 +133,35 @@ def _poster_from(images: Any) -> Optional[str]:
     return None
 
 
+# Re-searching Chaptarr by foreignId at request time (see _lookup_book) only
+# round-trips to the same book about half the time - Chaptarr's search is a
+# fuzzy text match, not an id lookup, so the raw id string doesn't reliably
+# find its own book again. Instead, every book object Chaptarr hands back is
+# kept here, keyed by foreignId, so a request can reuse the exact object the
+# user already saw instead of gambling on a second search.
+_BOOK_CACHE_TTL = 3600.0
+_book_cache: Dict[str, Any] = {}
+
+
+def _cache_book(book_id: Optional[str], book: Dict[str, Any]) -> None:
+    if not book_id:
+        return
+    import time as _time
+    _book_cache[book_id] = (_time.monotonic(), book)
+
+
+def _get_cached_book(book_id: str) -> Optional[Dict[str, Any]]:
+    import time as _time
+    hit = _book_cache.get(book_id)
+    if not hit:
+        return None
+    cached_at, book = hit
+    if (_time.monotonic() - cached_at) >= _BOOK_CACHE_TTL:
+        del _book_cache[book_id]
+        return None
+    return book
+
+
 def _normalise(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Convert a Chaptarr search result into the shape the requests page already
@@ -160,8 +189,11 @@ def _normalise(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # per-edition fields stay empty.
     owned = _is_set_id(result.get("existingLocalId")) or _is_set_id(book.get("localBookId"))
 
+    book_id = result.get("foreignId") or book.get("foreignBookId")
+    _cache_book(book_id, book)
+
     return {
-        "id": result.get("foreignId") or book.get("foreignBookId"),
+        "id": book_id,
         "media_type": "book",
         "title": title,
         "author": author_name,
@@ -418,7 +450,7 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
         label = "audiobook" if audiobook else "book"
         return {"ok": False, "message": f"No Chaptarr {label} root folder configured"}
 
-    book = await _lookup_book(cfg, foreign_id)
+    book = _get_cached_book(foreign_id) or await _lookup_book(cfg, foreign_id)
     if not book:
         return {"ok": False, "message": "Could not find that book in Chaptarr"}
 
