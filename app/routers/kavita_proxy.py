@@ -18,7 +18,7 @@ which is obtained by the OIDC handoff and kept in their Redis session.
 import logging
 import re
 from typing import Dict, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
@@ -172,6 +172,30 @@ def collect_cookies(response: httpx.Response) -> str:
     return "; ".join(p for p in pairs if p)
 
 
+def force_query_response_mode(location: str) -> str:
+    """
+    Swap response_mode=form_post for response_mode=query on an Authentik
+    authorize URL.
+
+    Kavita's OIDC client always asks for form_post, even though it only ever
+    runs the plain authorization-code flow (no id_token in the front
+    channel), where form_post buys nothing query mode doesn't already give -
+    a code and a state, which a redirect carries just as well. form_post
+    instead sends back an auto-submitting HTML page, and that page has to
+    render before its onload script fires, which is the Authentik page
+    users see flash before eBooks loads. ASP.NET Core's OIDC callback
+    handler parses the response from the query string or the POST body
+    depending on which one actually arrives, so Kavita's own callback
+    handling is unaffected by which mode Authentik was told to use.
+    """
+    parsed = urlparse(location)
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    if params.get("response_mode") != "form_post":
+        return location
+    params["response_mode"] = "query"
+    return parsed._replace(query=urlencode(params)).geturl()
+
+
 @router.get("/kavita/connect", include_in_schema=False)
 @limiter.limit("30/minute")
 async def kavita_connect(
@@ -201,8 +225,11 @@ async def kavita_connect(
     location = upstream.headers.get("location")
     if not location:
         logger.warning("Kavita /oidc/login did not redirect (HTTP %d)", upstream.status_code)
-        raise HTTPException(status_code=502, detail="Kavita did not start the login flow")
+        # 503, not 502: Cloudflare replaces 502/504/520-526 response bodies
+        # with its own generic error page regardless of what origin sends.
+        raise HTTPException(status_code=503, detail="Kavita did not start the login flow")
 
+    location = force_query_response_mode(location)
     response = RedirectResponse(location, status_code=302)
 
     # Kavita sets its OIDC nonce and correlation cookies here, scoped to
