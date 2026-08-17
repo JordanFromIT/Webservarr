@@ -434,21 +434,26 @@ async def library_summary(request: Request, current_user: dict = Depends(get_cur
         _library_summary_cache["all"] = (time.monotonic(), shared)
         return shared
 
-    tv, film, books, waits = await asyncio.gather(
+    tv, film, books, waits, quality = await asyncio.gather(
         sonarr.library_summary(),
         radarr.library_summary(),
         chaptarr.library_summary(),
         seerr.request_insights(),
+        plex.quality_breakdown(),
         return_exceptions=True,
     )
     tv = tv if isinstance(tv, dict) else {}
     film = film if isinstance(film, dict) else {}
     books = books if isinstance(books, dict) else {}
     waits = waits if isinstance(waits, dict) else {}
+    quality = quality if isinstance(quality, dict) else {}
     requested = waits.get("requested") or {}
     fulfilled = waits.get("fulfilled") or {}
 
     summary = {
+        # Resolution split, from Plex rather than the *arrs - see
+        # plex.quality_breakdown for why.
+        "quality": quality,
         "movies": film.get("movies", 0),
         "shows": tv.get("shows", 0),
         "episodes": tv.get("episodes", 0),

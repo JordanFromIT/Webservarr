@@ -139,6 +139,35 @@
       </div>
     </section>
 
+    <!-- Resolution split. The hero is the share of everything that is 1080p or
+         better, because that is the question behind "is this a good library" -
+         the per-bucket counts underneath answer "how much 4K have you got". -->
+    <section class="flex-1 min-w-0">
+      <p class="text-sm text-steel-blue font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Quality</p>
+      <div class="flex items-baseline gap-2 mb-3">
+        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statHdPct">--</span>
+        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">HD or Better</span>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kMovies">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">4K Movies</p>
+        </div>
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kEpisodes">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">4K Episodes</p>
+        </div>
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat1080Movies">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">1080p Movies</p>
+        </div>
+        <div class="min-w-0">
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat1080Episodes">--</p>
+          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">1080p Episodes</p>
+        </div>
+      </div>
+    </section>
+
     <section class="flex-1 min-w-0">
       <p class="text-sm text-steel-blue font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Completeness</p>
       <div class="flex items-baseline gap-2 mb-3">
@@ -1459,6 +1488,15 @@ async function loadLibrarySummary() {
             ? Math.round(100 * (s.complete_seasons || 0) / s.seasons)
             : 0;
         document.getElementById('statSeasons').textContent = seasonPct + '%';
+
+        var q = s.quality || {};
+        var qm = q.movies || {};
+        var qe = q.episodes || {};
+        document.getElementById('statHdPct').textContent = (q.hd_or_better_pct || 0) + '%';
+        document.getElementById('stat4kMovies').textContent = formatCount(qm['4k']);
+        document.getElementById('stat4kEpisodes').textContent = formatCount(qe['4k']);
+        document.getElementById('stat1080Movies').textContent = formatCount(qm['1080']);
+        document.getElementById('stat1080Episodes').textContent = formatCount(qe['1080']);
     } catch (e) {
         console.log('Library summary not available');
     }

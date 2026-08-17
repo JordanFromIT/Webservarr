@@ -273,3 +273,91 @@ async def get_thumbnail(path: str) -> tuple:
         logger.warning("Failed to fetch Plex thumbnail: %s", str(e))
 
     return None, None
+
+
+# Resolution buckets we report, in the order they are shown. Plex's own filter
+# values; "sd" is deliberately absent because it overlaps 480/576 rather than
+# being disjoint from them, which made the buckets sum past the library total.
+# Anything not 4K/1080/720 is derived as SD instead, so the parts always add up.
+_QUALITY_BUCKETS = ("4k", "1080", "720")
+
+
+async def _section_count(client: httpx.AsyncClient, config: dict, section: str,
+                         extra: str = "") -> int:
+    """
+    How many items match, without fetching any of them.
+
+    X-Plex-Container-Size=0 asks for a zero-length page, so Plex answers with
+    just the MediaContainer header carrying totalSize. That turns a resolution
+    breakdown into a handful of tiny requests instead of pulling ~57MB of
+    episode records out of Sonarr to count them here.
+    """
+    url = (f"{config['url']}/library/sections/{section}/all"
+           f"?X-Plex-Container-Start=0&X-Plex-Container-Size=0{extra}")
+    resp = await client.get(url, headers={"X-Plex-Token": config["token"],
+                                          "Accept": "application/json"})
+    if resp.status_code != 200:
+        raise httpx.HTTPError(f"HTTP {resp.status_code}")
+    container = (resp.json() or {}).get("MediaContainer") or {}
+    return int(container.get("totalSize") or 0)
+
+
+async def quality_breakdown() -> dict:
+    """
+    Resolution split of the film and episode libraries.
+
+    Returns {"movies": {...}, "episodes": {...}, "hd_or_better_pct": int}, each
+    inner dict holding 4k / 1080 / 720 / sd / total.
+
+    Plex rather than Radarr/Sonarr because it answers with a count instead of a
+    payload, and because it is what viewers actually see. Cross-checked against
+    Radarr: both report the same 4K film count.
+    """
+    empty = {"4k": 0, "1080": 0, "720": 0, "sd": 0, "total": 0}
+    config = _get_config()
+    if not config["url"] or not config["token"]:
+        return {"movies": dict(empty), "episodes": dict(empty), "hd_or_better_pct": 0}
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+            resp = await client.get(
+                f"{config['url']}/library/sections",
+                headers={"X-Plex-Token": config["token"], "Accept": "application/json"},
+            )
+            if resp.status_code != 200:
+                logger.warning("Plex sections returned HTTP %d", resp.status_code)
+                return {"movies": dict(empty), "episodes": dict(empty), "hd_or_better_pct": 0}
+
+            directories = ((resp.json() or {}).get("MediaContainer") or {}).get("Directory") or []
+            # Every movie/show section, not a hardcoded key: section numbering
+            # differs per install, and an admin can add a second film library.
+            movie_sections = [d["key"] for d in directories if d.get("type") == "movie"]
+            show_sections = [d["key"] for d in directories if d.get("type") == "show"]
+
+            async def bucket(sections: list, extra: str) -> dict:
+                out = dict(empty)
+                for key in sections:
+                    out["total"] += await _section_count(client, config, key, extra)
+                    for b in _QUALITY_BUCKETS:
+                        out[b] += await _section_count(client, config, key,
+                                                       f"{extra}&resolution={b}")
+                # Whatever is left is standard definition. Derived rather than
+                # queried so the buckets always sum to the total.
+                out["sd"] = max(0, out["total"] - out["4k"] - out["1080"] - out["720"])
+                return out
+
+            movies = await bucket(movie_sections, "")
+            episodes = await bucket(show_sections, "&type=4")   # type=4 = episode
+    except (httpx.RequestError, httpx.HTTPError, ValueError, KeyError) as exc:
+        logger.warning("Plex quality breakdown failed: %s", exc)
+        return {"movies": dict(empty), "episodes": dict(empty), "hd_or_better_pct": 0}
+
+    total = movies["total"] + episodes["total"]
+    # 720p counts as HD - that is what the term means. Excluding it would
+    # understate the library and mislabel the figure.
+    hd = sum(movies[b] + episodes[b] for b in _QUALITY_BUCKETS)
+    return {
+        "movies": movies,
+        "episodes": episodes,
+        "hd_or_better_pct": round(100 * hd / total) if total else 0,
+    }
