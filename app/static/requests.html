@@ -157,10 +157,6 @@
           <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kEpisodes">--</p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">4K Episodes</p>
         </div>
-        <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat1080Movies">--</p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">1080p Movies</p>
-        </div>
       </div>
     </section>
 
@@ -1491,7 +1487,6 @@ async function loadLibrarySummary() {
         document.getElementById('statHdPct').textContent = (q.hd_or_better_pct || 0) + '%';
         document.getElementById('stat4kMovies').textContent = formatCount(qm['4k']);
         document.getElementById('stat4kEpisodes').textContent = formatCount(qe['4k']);
-        document.getElementById('stat1080Movies').textContent = formatCount(qm['1080']);
     } catch (e) {
         console.log('Library summary not available');
     }
