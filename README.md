@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A self-hosted web dashboard for Plex media server administration.<br>
+  A self-hosted portal for the people who use your Plex server.<br>
   WebServarr brings together your Plex streams, service health monitoring, media requests, upcoming releases, and news announcements into a single, themeable portal.
 </p>
 
