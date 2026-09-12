@@ -483,6 +483,35 @@ async def news_page(
     return _serve_page("/app/app/static/news.html", "News page", request)
 
 
+# Wiki
+@app.get("/wiki", response_class=HTMLResponse, tags=["Pages"])
+async def wiki_page(
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve the wiki index."""
+    if not await _require_session(session_id):
+        return RedirectResponse(url="/login", status_code=302)
+    return _serve_page("/app/app/static/wiki.html", "Wiki page", request)
+
+
+@app.get("/wiki/{slug}", response_class=HTMLResponse, tags=["Pages"])
+async def wiki_article_page(
+    slug: str,
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve one wiki page.
+
+    Same file as the index: the client reads location.pathname and renders the
+    matching view, so a pasted deep link cold-loads onto that page instead of
+    flashing the index first.
+    """
+    if not await _require_session(session_id):
+        return RedirectResponse(url="/login", status_code=302)
+    return _serve_page("/app/app/static/wiki.html", "Wiki page", request)
+
+
 # Calendar page
 @app.get("/calendar", response_class=HTMLResponse, tags=["Pages"])
 async def calendar_page(

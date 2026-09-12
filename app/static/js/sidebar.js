@@ -21,6 +21,7 @@ var NAV_ITEMS = [
   { id: 'calendar', label: 'Calendar',    icon: 'calendar_month',       href: '/calendar',        sublabel: 'See upcoming releases' },
   { id: 'tickets',  label: 'Tickets',     icon: 'confirmation_number',  href: '/tickets',         sublabel: 'Get help from the admin', feature: 'show_tickets' },
   { id: 'library',  label: 'eBooks',      icon: 'menu_book',            href: '/library',         sublabel: 'Read books in your browser', feature: 'show_books' },
+  { id: 'wiki',     label: 'Wiki',        icon: 'library_books',         href: '/wiki', sublabel: 'Guides and how-tos' },
   { id: 'settings', label: 'Settings',    icon: 'settings',             href: '/settings',        sublabel: 'Manage the site', adminOnly: true },
 ];
 
