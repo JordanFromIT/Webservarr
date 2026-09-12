@@ -1,0 +1,4 @@
+/* Input for the Tailwind CLI. Output: app/static/css/app.css (committed). */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

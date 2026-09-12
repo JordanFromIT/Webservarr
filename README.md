@@ -104,7 +104,7 @@ For most users, the Settings UI is sufficient. Advanced users can override defau
 ## Tech Stack
 
 - **Backend:** FastAPI (Python 3.11), SQLite, Redis sessions
-- **Frontend:** Vanilla JavaScript, Tailwind CSS (CDN), Material Design Icons
+- **Frontend:** Vanilla JavaScript, precompiled Tailwind CSS, Material Design Icons
 - **Deployment:** Docker Compose (single container with embedded Redis)
 
 ## Project Structure
@@ -122,6 +122,25 @@ app/
   static/              # Frontend HTML/JS/CSS pages
 docs/
   setup.md             # Installation and operations guide
+```
+
+## Development
+
+The stylesheet is compiled with the Tailwind CLI and the output
+(`app/static/css/app.css`) is committed, so the running app never needs Node.
+After editing any HTML or JS under `app/static/`:
+
+```bash
+npm install          # once
+npm run build:css    # or: npm run watch:css while editing
+```
+
+A unit test fails if the committed CSS is older than the markup it was built
+from. The Python tests use the standard library only:
+
+```bash
+# on a Docker host, inside the running container
+docker exec webservarr python -m unittest discover -s /app/app/tests -t /app -v
 ```
 
 ## Updating
