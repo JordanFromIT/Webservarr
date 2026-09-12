@@ -50,6 +50,17 @@ DEFAULT_SETTINGS = {
     "sidebar.sublabel_settings": ("Manage the site", "Sidebar sublabel for Settings"),
     "sidebar.label_calendar": ("Calendar", "Sidebar label for Calendar page"),
     "sidebar.label_settings": ("Settings", "Sidebar label for Settings page"),
+    # Wiki. library_books rather than menu_book, which eBooks already uses.
+    "sidebar.label_wiki": ("Wiki", "Sidebar label for the Wiki page"),
+    "sidebar.sublabel_wiki": ("Guides and how-tos", "Sidebar sublabel for Wiki"),
+    "sidebar.enabled_wiki": ("true", "Show Wiki in the sidebar"),
+    "sidebar.new_wiki": ("false", "Show a New! flag on the Wiki nav item"),
+    "icon.nav_wiki": ("library_books", "Sidebar icon for Wiki page"),
+    # Contextual pointers into the wiki. Each holds a page slug, or is empty.
+    # Empty or dangling slugs render nothing rather than a broken link.
+    "wiki.hook_tickets": ("", "Wiki page slug linked above the support ticket form"),
+    "wiki.hook_issues": ("", "Wiki page slug linked above the media-issue form"),
+    "wiki.hook_playback": ("", "Wiki page slug linked on the Playback Issue category"),
     # Configurable icons (Material Symbols icon names)
     "icon.nav_home": ("home", "Sidebar icon for Home page"),
     "icon.nav_requests": ("movie", "Sidebar icon for Requests page"),
