@@ -40,7 +40,7 @@ DEFAULT_SETTINGS = {
     "sidebar.label_issues": ("Issues", "Sidebar label for the media-issue page"),
     "sidebar.label_tickets": ("Tickets", "Sidebar label for the support ticket page"),
     # Every nav item gets a sublabel; see branding.DEFAULTS for why.
-    "sidebar.sublabel_home": ("See what's playing", "Sidebar sublabel for Home"),
+    "sidebar.sublabel_home": ("See what's happening", "Sidebar sublabel for Home"),
     "sidebar.sublabel_requests": ("Request a movie or show", "Sidebar sublabel for Requests"),
     "sidebar.sublabel_requests_embed": ("Request through Seerr", "Sidebar sublabel for Requests (Embed)"),
     "sidebar.sublabel_issues": ("Report a problem with media", "Sidebar sublabel for Issues"),
@@ -418,6 +418,47 @@ def migrate_nav_sublabels_v2(db: Session) -> None:
         logger.info("Completed nav sublabel migration (updated: %s)", ", ".join(changed))
     else:
         logger.info("Nav sublabel migration: nothing to change (labels are customised)")
+
+
+def migrate_home_sublabel_v3(db: Session) -> None:
+    """
+    One-time migration: Home's sublabel becomes "See what's happening".
+
+    "See what's playing" implied the page was only about active streams. The
+    homepage also carries news, service health, system gauges and upcoming
+    releases, so the wider phrasing describes what is actually there.
+
+    Conditional on the stored value, as always -- an admin who wrote their own
+    keeps it. Installs with no row yet get the new text from
+    seed_default_settings instead.
+
+    Guarded by migration.home_sublabel_v3.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    if db.query(Setting).filter(Setting.key == "migration.home_sublabel_v3").first():
+        return
+
+    row = db.query(Setting).filter(Setting.key == "sidebar.sublabel_home").first()
+    changed = False
+    if row and (row.value or "").strip() == "See what's playing":
+        row.value = "See what's happening"
+        changed = True
+
+    db.add(Setting(
+        key="migration.home_sublabel_v3",
+        value="done",
+        description="One-time Home sublabel rewording",
+    ))
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.debug("migration.home_sublabel_v3 marker already exists (race), skipping")
+        return
+
+    logger.info("Home sublabel migration: %s", "updated" if changed else "nothing to change (customised)")
 
 
 def migrate_overseerr_to_seerr(db: Session) -> None:

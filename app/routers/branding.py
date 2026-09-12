@@ -52,7 +52,7 @@ DEFAULTS = {
     # read as unfinished, and the pair only tells Issues apart from Tickets if
     # the whole list speaks in one voice. All are verb phrases for that reason.
     # Blank still hides the line, so an admin can opt any item out.
-    "sidebar.sublabel_home": "See what's playing",
+    "sidebar.sublabel_home": "See what's happening",
     "sidebar.sublabel_requests": "Request a movie or show",
     "sidebar.sublabel_requests_embed": "Request through Seerr",
     "sidebar.sublabel_issues": "Report a problem with media",

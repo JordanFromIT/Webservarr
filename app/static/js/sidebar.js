@@ -14,7 +14,7 @@ var NAV_ITEMS = [
   // item carries one -- descriptions on only some items read as unfinished,
   // and the pair only disambiguates Issues from Tickets if the whole list is
   // written in the same voice. All sublabels are verb phrases for that reason.
-  { id: 'home',     label: 'Home',        icon: 'home',                 href: '/',                sublabel: "See what's playing" },
+  { id: 'home',     label: 'Home',        icon: 'home',                 href: '/',                sublabel: "See what's happening" },
   { id: 'requests', label: 'Requests',    icon: 'movie',                href: '/requests',        sublabel: 'Request a movie or show' },
   { id: 'requests-embed', label: 'Requests (Embed)', icon: 'download',  href: '/requests-embed',  sublabel: 'Request through Seerr', badgeId: 'requestsBadge', feature: 'show_requests' },
   { id: 'issues',   label: 'Issues',      icon: 'report_problem',       href: '/issues',          sublabel: 'Report a problem with media' },
