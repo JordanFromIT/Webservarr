@@ -51,15 +51,15 @@ Anything else, use <a href="/tickets" class="text-primary hover:underline font-s
 <!-- Stat Summary Cards -->
 <div class="grid grid-cols-3 gap-3 mb-6">
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-frosted-blue" id="statTotal">--</p>
+<p class="text-2xl font-bold text-frosted-blue" id="statTotal"><span class="ws-skel inline-block h-6 w-10"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Total</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-amber-400" id="statOpen">--</p>
+<p class="text-2xl font-bold text-amber-400" id="statOpen"><span class="ws-skel inline-block h-6 w-10"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Open</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-green-500" id="statClosed">--</p>
+<p class="text-2xl font-bold text-green-500" id="statClosed"><span class="ws-skel inline-block h-6 w-10"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Resolved</p>
 </div>
 </div>
@@ -162,10 +162,11 @@ Submit Issue
 
 <!-- Issues List -->
 <div id="issuesList" class="space-y-2">
-<div class="text-center text-steel-blue py-8">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">report_problem</span>
-<p>Loading issues...</p>
-</div>
+<!-- Skeleton reserves 3 rows at the real card shape (see buildIssueCard())
+     so nothing shifts once real issues, or an empty/error state, land. -->
+<div class="glass-card rounded-xl p-3 flex gap-3 items-start"><span class="ws-skel w-12 h-[72px] rounded shrink-0"></span><div class="flex-1 min-w-0 space-y-2 pt-1"><span class="ws-skel h-4 w-2/3 rounded block"></span><span class="ws-skel h-3 w-20 rounded block"></span></div></div>
+<div class="glass-card rounded-xl p-3 flex gap-3 items-start"><span class="ws-skel w-12 h-[72px] rounded shrink-0"></span><div class="flex-1 min-w-0 space-y-2 pt-1"><span class="ws-skel h-4 w-2/3 rounded block"></span><span class="ws-skel h-3 w-20 rounded block"></span></div></div>
+<div class="glass-card rounded-xl p-3 flex gap-3 items-start"><span class="ws-skel w-12 h-[72px] rounded shrink-0"></span><div class="flex-1 min-w-0 space-y-2 pt-1"><span class="ws-skel h-4 w-2/3 rounded block"></span><span class="ws-skel h-3 w-20 rounded block"></span></div></div>
 </div>
 </div>
 
@@ -472,6 +473,11 @@ async function loadIssueCounts() {
         document.getElementById('issuesTotalCount').textContent = '(' + (counts.total || 0) + ')';
     } catch (e) {
         console.log('Issue counts not available');
+        // Clear the skeleton rather than let it shimmer forever -- same box
+        // size as a real count, so this never shifts anything either.
+        ['statTotal', 'statOpen', 'statClosed'].forEach(function (id) {
+            document.getElementById(id).textContent = '0';
+        });
     }
 }
 
