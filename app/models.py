@@ -2,7 +2,7 @@
 Database models for WebServarr.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Enum
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Enum, ForeignKey
 from sqlalchemy.sql import func
 from datetime import datetime
 from app.database import Base
@@ -196,3 +196,66 @@ class TicketComment(Base):
 
     def __repr__(self):
         return f"<TicketComment(id={self.id}, ticket_id={self.ticket_id})>"
+
+
+class WikiCategory(Base):
+    """One level of grouping for wiki pages. There is no nesting below this."""
+    __tablename__ = "wiki_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    slug = Column(String(120), unique=True, nullable=False, index=True)
+    description = Column(String(300), nullable=True)
+    icon = Column(String(60), nullable=True)  # Material Symbols name
+    sort_order = Column(Integer, default=0, nullable=False)
+
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<WikiCategory(id={self.id}, slug='{self.slug}')>"
+
+
+class WikiPage(Base):
+    """One guide within the wiki."""
+    __tablename__ = "wiki_pages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # SET NULL, not CASCADE: deleting a category must never silently delete the
+    # guides inside it. Orphans surface in the editor as "Uncategorised".
+    # NB: SQLite does not enforce ON DELETE without PRAGMA foreign_keys=ON, which
+    # this app does not set, so the delete-category endpoint nulls these
+    # explicitly in Python. See app/routers/wiki.py. The declaration stays
+    # because it documents intent and is correct on any other backend.
+    category_id = Column(
+        Integer,
+        ForeignKey("wiki_categories.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    title = Column(String(200), nullable=False)
+    # The page's public identity. URLs are /wiki/<slug>, never /wiki/<id>, so a
+    # link survives a retitle and reads sensibly when pasted to someone.
+    slug = Column(String(220), unique=True, nullable=False, index=True)
+    summary = Column(String(300), nullable=True)
+
+    content = Column(Text, nullable=False)       # markdown source
+    content_html = Column(Text, nullable=False)  # rendered + sanitized on write
+
+    # A wiki is not chronological; a guide does not become more useful because
+    # it was edited recently. Order is explicit, title-alphabetical as tiebreak.
+    sort_order = Column(Integer, default=0, nullable=False)
+
+    published = Column(Boolean, default=False, nullable=False)
+    # Set only on the page shipped with a fresh install, so it can wear a
+    # "delete me" banner that operator-authored pages never get. Testing a flag
+    # rather than matching the title keeps that working after a rename.
+    is_example = Column(Boolean, default=False, nullable=False)
+
+    author_name = Column(String(100), nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<WikiPage(id={self.id}, slug='{self.slug}')>"
