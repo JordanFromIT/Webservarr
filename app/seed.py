@@ -358,7 +358,12 @@ def seed_wiki_example(db: Session) -> None:
         "```\n"
         "one exact thing to type\n"
         "```\n\n"
-        "Group related pages into categories from **Settings > Wiki**."
+        "## Organising the wiki\n\n"
+        "Group related pages into categories from **Settings > Wiki**. Pages "
+        "without a category still show up on the wiki index under "
+        "\"Uncategorised\", so nothing gets lost while you decide.\n\n"
+        "This page has three headings, which is why the **On this page** list "
+        "appears beside it. Shorter pages do not get one."
     )
 
     page = WikiPage(
