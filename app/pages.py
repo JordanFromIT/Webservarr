@@ -340,10 +340,11 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
     avatar = (user or {}).get("avatar_url") or ""
     avatar_style = ""
     if avatar:
-        # Percent-encode anything that could end the CSS string or the url()
-        # token; the scheme was already checked by public_user().
-        css_url = urllib.parse.quote(avatar, safe="/:?&=%.-_~+@#,;").replace("&", "&amp;")
-        avatar_style = f"background-image:url('{css_url}');background-size:cover;background-position:center"
+        # Unquoted url(): percent-encoding removes every character that could
+        # end the token (quotes, parens, whitespace, backslash), and the value
+        # is then attribute-escaped by fill(). Scheme checked by public_user().
+        css_url = urllib.parse.quote(avatar, safe="/:?&=%.-_~+@#,;")
+        avatar_style = f"background-image:url({css_url});background-size:cover;background-position:center"
 
     return {
         "app_name": branding.get("app_name") or "WebServarr",
