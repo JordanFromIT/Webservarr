@@ -7,18 +7,29 @@
 # ==============================================================================
 
 # Web Framework
-# 0.115.6 pulls starlette 0.41.3, closing CVE-2024-47874 (starlette multipart
-# DoS, fixed in 0.40). Applied surgically: only fastapi and starlette moved in
-# requirements.txt. A full `pip-compile` re-resolve wanted to bump 25 packages
-# including cryptography 46 -> 50, which is a far larger blast radius than one
-# CVE justifies; `pip check` passes and the app smoke tests clean on the
-# two-package change.
-fastapi==0.115.6
+#
+# The previous surgical approach -- move only fastapi and starlette, leave the
+# rest -- was the right call when one CVE was outstanding. It stopped being the
+# right call at 64 open advisories across a dozen packages, several of them
+# high and one critical, so this is a deliberate full re-resolve instead.
+#
+# What made it safe enough to attempt: the app imports nothing from starlette
+# directly (it is purely transitive through fastapi), touches authlib through a
+# single symbol, and uses only the long-stable core of fastapi -- APIRouter,
+# Depends, HTTPException, Request, Response, status, Query, File, Form,
+# UploadFile, Cookie. None of that surface changed across these versions.
+#
+# fastapi 0.141 declares `starlette>=0.46.0` with no upper bound, which is what
+# allows starlette to reach 1.x and clear its advisories at all.
+fastapi==0.141.1
 uvicorn[standard]==0.27.0
-python-multipart==0.0.7  # CVE-2024-24762 (multipart ReDoS) fixed in 0.0.7
+# Pinned directly rather than left transitive: the advisories are against
+# starlette itself, so the floor has to be stated where it can be seen.
+starlette>=1.3.1
+python-multipart==0.0.32  # <0.0.30 carries a chain of parser advisories
 
 # OIDC Authentication
-authlib==1.3.1  # CVE-2024-37568 (JWS alg confusion) fixed in 1.3.1
+authlib==1.8.0  # 1.3.1 -> 1.8.0 clears a critical plus four highs
 httpx==0.26.0
 itsdangerous==2.1.2
 
@@ -40,16 +51,25 @@ bcrypt==4.0.1
 slowapi==0.1.9
 
 # Utilities
-python-dotenv==1.0.1
-pydantic==2.5.3
-pydantic-settings==2.1.0
+python-dotenv==1.2.2
+# fastapi 0.141 requires pydantic>=2.9. Both stay within pydantic v2, whose
+# BaseModel/BaseSettings surface is what the app uses and has not changed.
+pydantic>=2.9.0
+pydantic-settings>=2.5.0
 
 # Markdown rendering (for news posts)
-markdown==3.5.2
-bleach==6.1.0
+markdown==3.8.1
+bleach==6.4.0
 
 # HTTP client
-requests==2.32.3  # CVE-2024-35195 fixed in 2.32.x
+requests==2.33.0  # CVE-2024-47081 / CVE-2026-25645
+
+# Transitive packages carrying their own advisories. Stated here so the floor
+# survives a future re-resolve rather than drifting back down.
+cryptography>=50.0.0
+urllib3>=2.7.0
+idna>=3.15
+aiohttp>=3.14.3
 
 # Date/time utilities
 python-dateutil==2.8.2
