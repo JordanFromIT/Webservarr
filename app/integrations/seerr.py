@@ -938,3 +938,63 @@ async def get_all_requests() -> list:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Seerr request list failed: %s", exc)
         return []
+
+
+async def lookup_titles(items: list) -> dict:
+    """
+    Resolve titles for media the arrs cannot name.
+
+    A request that was never added to Radarr or Sonarr has no title anywhere in
+    the local stack -- Seerr's request objects carry only ids. Those are also
+    the oldest requests, so they sort to the top of the page, and a column of
+    "Request #2" is worse than useless to the person who asked for Zootopia 2.
+
+    Seerr proxies TMDB for exactly this and caches the answers, so the second
+    run is cheap. Concurrency is capped because this fans out over the tunnel to
+    a service that is also serving the requests page.
+
+    ``items`` is [{"tmdb_id": int, "media_type": "movie"|"tv"}].
+    Returns {tmdb_id: {"title": str, "year": int|None}} for whatever resolved;
+    anything that fails is simply absent and the row keeps its fallback.
+    """
+    config = _get_config()
+    if not config["url"] or not config["api_key"] or not items:
+        return {}
+
+    resolved = {}
+    semaphore = asyncio.Semaphore(5)
+
+    async def _one(client, tmdb_id, media_type):
+        path = "tv" if media_type == "tv" else "movie"
+        async with semaphore:
+            try:
+                resp = await client.get(
+                    f"{config['url']}/api/v1/{path}/{tmdb_id}",
+                    headers={"X-Api-Key": config["api_key"]},
+                )
+                if resp.status_code != 200:
+                    return
+                data = resp.json()
+                title = data.get("title") or data.get("name")
+                if not title:
+                    return
+                date = data.get("releaseDate") or data.get("firstAirDate") or ""
+                year = None
+                if len(date) >= 4 and date[:4].isdigit():
+                    year = int(date[:4])
+                resolved[tmdb_id] = {"title": title, "year": year}
+            except Exception:  # noqa: BLE001
+                # A dead TMDB id 500s here. One unresolvable title must not cost
+                # the batch; that row keeps its fallback label.
+                return
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
+            await asyncio.gather(*(
+                _one(client, i["tmdb_id"], i.get("media_type"))
+                for i in items if i.get("tmdb_id")
+            ))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Seerr title lookup failed: %s", exc)
+
+    return resolved

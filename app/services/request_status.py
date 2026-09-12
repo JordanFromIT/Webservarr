@@ -409,6 +409,21 @@ async def build_snapshot() -> dict:
     rows = collapse_duplicates(rows)
     rows = _enrich_titles(rows, movies, series)
 
+    # Anything the arrs could not name is asked of Seerr, which proxies TMDB.
+    # These are the never-added requests -- also the oldest, so they sort to the
+    # top, where a column of "Request #2" would be the first thing anyone sees.
+    unnamed = [
+        {"tmdb_id": int(r["tmdb_id"]), "media_type": r["media_type"]}
+        for r in rows if not r["title"] and r.get("tmdb_id")
+    ]
+    if unnamed:
+        looked_up = await seerr.lookup_titles(unnamed)
+        for row in rows:
+            found = looked_up.get(row.get("tmdb_id")) if not row["title"] else None
+            if found:
+                row["title"] = found["title"]
+                row["year"] = row.get("year") or found.get("year")
+
     # Longest wait first within each group: the page's job is to surface what
     # has been stuck, and a six-month-old request matters more than yesterday's.
     rows.sort(key=lambda r: r.get("requested_at") or "")
