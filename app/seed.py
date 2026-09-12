@@ -37,14 +37,18 @@ DEFAULT_SETTINGS = {
     "sidebar.label_home": ("Home", "Sidebar label for Home page"),
     "sidebar.label_requests": ("Requests", "Sidebar label for Requests page"),
     "sidebar.label_requests_embed": ("Requests (Embed)", "Sidebar label for Requests (Embed) page"),
-    "sidebar.label_issues": ("Issues", "Sidebar label for Issues page"),
+    "sidebar.label_issues": ("Report a Problem", "Sidebar label for the media-issue page"),
+    "sidebar.label_tickets": ("Contact Support", "Sidebar label for the support ticket page"),
+    "sidebar.sublabel_issues": ("Issue with a movie or show", "Sidebar sublabel for the media-issue page"),
+    "sidebar.sublabel_tickets": ("Everything else", "Sidebar sublabel for the support ticket page"),
     "sidebar.label_calendar": ("Calendar", "Sidebar label for Calendar page"),
     "sidebar.label_settings": ("Settings", "Sidebar label for Settings page"),
     # Configurable icons (Material Symbols icon names)
     "icon.nav_home": ("home", "Sidebar icon for Home page"),
     "icon.nav_requests": ("movie", "Sidebar icon for Requests page"),
     "icon.nav_requests_embed": ("download", "Sidebar icon for Requests (Embed) page"),
-    "icon.nav_issues": ("report_problem", "Sidebar icon for Issues page"),
+    "icon.nav_issues": ("report_problem", "Sidebar icon for the media-issue page"),
+    "icon.nav_tickets": ("support_agent", "Sidebar icon for the support ticket page"),
     "icon.nav_calendar": ("calendar_month", "Sidebar icon for Calendar page"),
     "icon.nav_settings": ("settings", "Sidebar icon for Settings page"),
     "icon.sidebar_logo": ("settings_input_component", "Icon shown in sidebar logo area"),
@@ -418,6 +422,72 @@ def migrate_requests_rename(db: Session) -> None:
         return
 
     logger.info("Completed one-time requests rename migration")
+
+
+def migrate_help_nav_rename(db: Session) -> None:
+    """
+    One-time migration: adopt the clearer "Report a Problem" / "Contact Support"
+    nav names on installs that already have rows for the old ones.
+
+    Necessary because seed_default_settings only *inserts* missing keys -- it
+    never touches an existing row, by design, so an admin's customisations
+    survive upgrades. That same rule means any install where Customization has
+    ever been saved keeps the stored "Issues" and "Tickets" forever and never
+    sees the rename.
+
+    The upgrade is therefore conditional on the stored value still being the old
+    shipped default. A label the admin actually chose is left exactly as it is --
+    this migration exists to move installs off a default, not to overwrite
+    anyone's wording. Sublabels are inserted only when absent for the same reason.
+
+    Guarded by migration.help_nav_rename_v1.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    if db.query(Setting).filter(Setting.key == "migration.help_nav_rename_v1").first():
+        return
+
+    # (key, value to replace, replacement). Anything else stays untouched.
+    upgrades = [
+        ("sidebar.label_issues", "Issues", "Report a Problem"),
+        ("sidebar.label_tickets", "Tickets", "Contact Support"),
+        ("icon.nav_tickets", "confirmation_number", "support_agent"),
+    ]
+    changed = []
+    for key, old_value, new_value in upgrades:
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row and (row.value or "").strip() == old_value:
+            row.value = new_value
+            changed.append(key)
+
+    # Sublabels are new keys, so they only need inserting where absent. An admin
+    # who has since blanked one keeps it blank.
+    sublabels = [
+        ("sidebar.sublabel_issues", "Issue with a movie or show", "Sidebar sublabel for the media-issue page"),
+        ("sidebar.sublabel_tickets", "Everything else", "Sidebar sublabel for the support ticket page"),
+    ]
+    for key, value, description in sublabels:
+        if not db.query(Setting).filter(Setting.key == key).first():
+            db.add(Setting(key=key, value=value, description=description))
+            changed.append(key)
+
+    db.add(Setting(
+        key="migration.help_nav_rename_v1",
+        value="done",
+        description="One-time Issues/Tickets -> Report a Problem/Contact Support nav rename",
+    ))
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.debug("migration.help_nav_rename_v1 marker already exists (race), skipping")
+        return
+
+    if changed:
+        logger.info("Completed help nav rename migration (updated: %s)", ", ".join(changed))
+    else:
+        logger.info("Help nav rename migration: nothing to change (labels are customised)")
 
 
 def migrate_overseerr_to_seerr(db: Session) -> None:
