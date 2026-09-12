@@ -52,7 +52,19 @@ function paintUser(user) {
  * (the redirect below, and requireAdmin) only ever acts on the fresh server
  * answer -- a stale cache can change what's painted, never what's allowed.
  * wsCache isn't loaded on every page that includes auth.js (e.g. the ebook
- * reader), so every use of it is guarded.
+ * reader); that path skips the cache entirely rather than guard every line.
+ *
+ * The actual write to the `ws.user` cache happens inside the apply()
+ * callback passed to wsCache.swr() -- not out here after the await -- so it
+ * shares swr()'s generation guard: if a logout races this call and clears
+ * the cache before the fetch resolves, that write (and the repaint) is
+ * silently dropped instead of restoring a signed-out (or, on a shared tab,
+ * another user's) identity into sessionStorage. `ws.session` is a second,
+ * internal-only cache key that exists purely to give swr() something to
+ * diff/expire on the endpoint's actual `{authenticated, user}` response
+ * shape -- nothing outside this function ever reads it. `ws.user` itself
+ * stays the flat user object every other consumer (paintUser, Task 5's
+ * admin gating) expects.
  * @param {Object} [options]
  * @param {boolean} [options.requireAdmin] - Redirect non-admins to /
  * @returns {Promise<Object|null>}
@@ -60,32 +72,67 @@ function paintUser(user) {
 async function checkAuth(options) {
   options = options || {};
 
-  var cachedUser = window.wsCache ? window.wsCache.read('ws.user', null) : null;
-  if (cachedUser) paintUser(cachedUser);
-
-  try {
-    var resp = await fetch('/auth/check-session');
-    var data = await resp.json();
-    if (!data.authenticated) {
-      if (window.wsCache) window.wsCache.clear();
+  if (!window.wsCache) {
+    try {
+      var resp = await fetch('/auth/check-session');
+      var data = await resp.json();
+      if (!data.authenticated) {
+        window.location.href = '/login';
+        return null;
+      }
+      if (options.requireAdmin && !data.user.is_admin) {
+        window.location.href = '/';
+        return null;
+      }
+      paintUser(data.user);
+      return data.user;
+    } catch (e) {
       window.location.href = '/login';
       return null;
     }
-    var user = data.user;
+  }
 
-    if (options.requireAdmin && !user.is_admin) {
-      window.location.href = '/';
-      return null;
-    }
+  var cachedUser = wsCache.read('ws.user', null);
+  if (cachedUser) paintUser(cachedUser);
 
-    if (window.wsCache) window.wsCache.write('ws.user', user);
-    paintUser(user);
+  var redirectTo = null;
 
-    return user;
+  try {
+    await wsCache.swr('ws.session', '/auth/check-session', 60000, function (data, isStale) {
+      // The unbounded ws.user read above already painted the equivalent of
+      // this stale replay; nothing new to do with it here.
+      if (isStale) return;
+
+      if (!data || !data.authenticated) {
+        wsCache.clear();
+        redirectTo = '/login';
+        return;
+      }
+      if (options.requireAdmin && !data.user.is_admin) {
+        redirectTo = '/';
+        return;
+      }
+      wsCache.write('ws.user', data.user);
+      paintUser(data.user);
+    });
   } catch (e) {
-    window.location.href = '/login';
+    // Either a genuine 401 (swr's own handling) or a network/parse failure
+    // -- both redirect to /login, matching the historical behavior of this
+    // function on any check-session failure.
+    redirectTo = '/login';
+  }
+
+  if (redirectTo) {
+    window.location.href = redirectTo;
     return null;
   }
+
+  // apply() may not have run at all -- e.g. ws.session was young enough
+  // that swr() skipped the network round trip -- or it may have run and
+  // been dropped by the generation guard because a logout raced this call.
+  // Either way ws.user is now the single source of truth: still valid in
+  // the first case, wiped by clear() in the second.
+  return wsCache.read('ws.user', null);
 }
 
 /**

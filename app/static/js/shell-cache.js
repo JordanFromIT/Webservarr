@@ -4,6 +4,17 @@
  * if the answer changed. Display-only: authorization stays server-side.
  */
 window.wsCache = (function () {
+  // Bumped by clear() (logout, or a 401 discovered mid-request). A fetch
+  // that was already in flight when that happened cannot be cancelled --
+  // location.href doesn't abort pending promises -- so every swr()
+  // continuation checks this against the generation it started with and
+  // silently drops its own result (no sessionStorage write, no repaint) if
+  // it moved. Otherwise a slow request racing a logout could write the
+  // previous session's identity/status/notifications back into
+  // sessionStorage just after clear() ran, where it would survive into the
+  // next sign-in on the same tab.
+  var generation = 0;
+
   function read(key, maxAgeMs) {
     try {
       var raw = sessionStorage.getItem(key);
@@ -17,6 +28,7 @@ window.wsCache = (function () {
     try { sessionStorage.setItem(key, JSON.stringify({ t: Date.now(), d: data })); } catch (e) {}
   }
   function clear() {
+    generation++;
     try {
       Object.keys(sessionStorage).forEach(function (k) {
         if (k.indexOf('ws.') === 0) sessionStorage.removeItem(k);
@@ -24,6 +36,7 @@ window.wsCache = (function () {
     } catch (e) {}
   }
   function swr(key, url, maxAgeMs, apply) {
+    var startGeneration = generation;
     var cached = read(key, null); // stale is fine for paint
     if (cached !== null) apply(cached, true);
     var fresh = read(key, maxAgeMs);
@@ -35,6 +48,11 @@ window.wsCache = (function () {
         return r.json();
       })
       .then(function (data) {
+        // A clear() (logout, or the 401 branch above, from this call or
+        // any other in-flight one) landed while this fetch was in the air.
+        // Its answer is stale/foreign now -- surface it to the caller but
+        // never let it touch storage or the DOM.
+        if (generation !== startGeneration) return data;
         var changed = JSON.stringify(data) !== JSON.stringify(cached);
         write(key, data);
         if (changed) apply(data, false);
