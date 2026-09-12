@@ -67,7 +67,7 @@ DEFAULTS = {
     "sidebar.sublabel_tickets": "Get help from the admin",
     "sidebar.sublabel_library": "Read books in your browser",
     "sidebar.sublabel_settings": "Manage the site",
-    "sidebar.sublabel_wiki": "Guides and how-tos",
+    "sidebar.sublabel_wiki": "Read guides and how-tos",
     # Per-page "New!" flags. Admin-controlled rather than self-retiring: the
     # admin decides how long a section counts as new, and turns it off when it
     # stops being news. Off everywhere on a fresh install - nothing is new when

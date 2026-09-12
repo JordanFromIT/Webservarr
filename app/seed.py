@@ -52,7 +52,10 @@ DEFAULT_SETTINGS = {
     "sidebar.label_settings": ("Settings", "Sidebar label for Settings page"),
     # Wiki. library_books rather than menu_book, which eBooks already uses.
     "sidebar.label_wiki": ("Wiki", "Sidebar label for the Wiki page"),
-    "sidebar.sublabel_wiki": ("Guides and how-tos", "Sidebar sublabel for Wiki"),
+    "sidebar.sublabel_wiki": ("Read guides and how-tos", "Sidebar sublabel for Wiki"),
+    "sidebar.sublabel_request_status": ("Track what you asked for", "Sidebar sublabel for Request Status"),
+    "sidebar.label_request_status": ("Request Status", "Sidebar label for Request Status"),
+    "icon.nav_request_status": ("pending_actions", "Sidebar icon for Request Status"),
     "sidebar.enabled_wiki": ("true", "Show Wiki in the sidebar"),
     "sidebar.new_wiki": ("false", "Show a New! flag on the Wiki nav item"),
     "icon.nav_wiki": ("library_books", "Sidebar icon for Wiki page"),
@@ -495,6 +498,48 @@ def migrate_nav_sublabels_v2(db: Session) -> None:
         logger.info("Completed nav sublabel migration (updated: %s)", ", ".join(changed))
     else:
         logger.info("Nav sublabel migration: nothing to change (labels are customised)")
+
+
+def migrate_wiki_sublabel_v4(db: Session) -> None:
+    """
+    One-time migration: the Wiki sublabel becomes a verb phrase like the rest.
+
+    Every other nav sublabel starts with a verb -- "Request a movie or show",
+    "Report a problem with media", "Read books in your browser". Wiki shipped
+    with "Guides and how-tos", a noun phrase, which is the exact inconsistency
+    the sublabels were introduced to remove: a list that changes voice partway
+    down reads as unfinished.
+
+    Conditional on the stored value as always, so an admin who has since written
+    their own keeps it.
+
+    Guarded by migration.wiki_sublabel_v4.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    if db.query(Setting).filter(Setting.key == "migration.wiki_sublabel_v4").first():
+        return
+
+    row = db.query(Setting).filter(Setting.key == "sidebar.sublabel_wiki").first()
+    changed = False
+    if row and (row.value or "").strip() == "Guides and how-tos":
+        row.value = "Read guides and how-tos"
+        changed = True
+
+    db.add(Setting(
+        key="migration.wiki_sublabel_v4",
+        value="done",
+        description="One-time Wiki sublabel rewording to match the nav's verb-phrase voice",
+    ))
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.debug("migration.wiki_sublabel_v4 marker already exists (race), skipping")
+        return
+
+    logger.info("Wiki sublabel migration: %s", "updated" if changed else "nothing to change (customised)")
 
 
 def migrate_home_sublabel_v3(db: Session) -> None:

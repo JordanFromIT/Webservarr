@@ -394,6 +394,28 @@ def _preview_meta(request: Optional[Request]) -> tuple[str, str]:
     return app_name, "\n".join(tags)
 
 
+# Cache-busting for local scripts and stylesheets.
+#
+# Every page carries hand-written "?v=NN" markers on its own script and link
+# tags, which means adding a nav entry to the shared sidebar requires bumping
+# that number in all eleven pages by hand. Two separate sessions have now added
+# a nav item, missed a page, and shipped a sidebar that browsers never
+# re-fetched -- the file on the server was correct and the nav was still stale
+# in everyone's browser.
+#
+# The marker is therefore rewritten at serve time to the running app version.
+# The number in the HTML no longer matters, every release invalidates the cache
+# exactly once, and nobody has to remember. Only local /static/ assets are
+# touched, and only an existing ?v= marker is replaced, so nothing gains a
+# query string that did not already have one.
+_ASSET_VERSION_RE = re.compile(r'(?P<attr>(?:src|href)="/static/[^"?]+\?v=)[^"]*"')
+
+
+def _stamp_asset_versions(content: str) -> str:
+    version = (settings.app_version or "dev").strip() or "dev"
+    return _ASSET_VERSION_RE.sub(lambda m: f'{m.group("attr")}{version}"', content)
+
+
 def _inject_preview_meta(content: str, request: Optional[Request]) -> str:
     """Rewrite <title> and append the preview meta tags immediately after it."""
     app_name, tags = _preview_meta(request)
@@ -425,6 +447,10 @@ def _serve_page(filepath: str, label: str = "Page", request: Optional[Request] =
         content = _inject_preview_meta(content, request)
     except Exception:  # pragma: no cover - a preview must never break a page
         logger.warning("Link-preview injection failed for %s", label, exc_info=True)
+    try:
+        content = _stamp_asset_versions(content)
+    except Exception:  # pragma: no cover - a stale asset beats a broken page
+        logger.warning("Asset version stamping failed for %s", label, exc_info=True)
     return HTMLResponse(content=content)
 
 

@@ -52,7 +52,7 @@ def init_db():
         seed_default_settings, seed_vapid_keys,
         seed_default_news, migrate_requests_rename, seed_wiki_example,
         migrate_setup_completed, migrate_overseerr_to_seerr,
-        migrate_nav_sublabels_v2, migrate_home_sublabel_v3,
+        migrate_nav_sublabels_v2, migrate_home_sublabel_v3, migrate_wiki_sublabel_v4,
     )
     db = SessionLocal()
     try:
@@ -63,6 +63,7 @@ def init_db():
         # one is upgraded in the same pass.
         migrate_nav_sublabels_v2(db)
         migrate_home_sublabel_v3(db)
+        migrate_wiki_sublabel_v4(db)
         migrate_setup_completed(db)
         seed_vapid_keys(db)
         seed_default_news(db)
