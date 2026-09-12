@@ -21,7 +21,7 @@ from app.limiter import limiter
 from app.database import init_db, SessionLocal
 from app.auth import session_manager
 from app.seed import seed_secret_key
-from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy
+from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki
 from app.services.notification_poller import start_poller, stop_poller
 from app.services.shelf_warmer import start_warmer, stop_warmer
 
@@ -243,6 +243,7 @@ app.include_router(integrations.router, prefix="/api/integrations", tags=["Integ
 app.include_router(branding.router, prefix="/api", tags=["Branding"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(tickets.router, prefix="/api", tags=["Tickets"])
+app.include_router(wiki.router, prefix="/api/wiki", tags=["Wiki"])
 # No /api prefix: this router owns /kavita/* and /signin-oidc at the app root.
 # /signin-oidc must be at root because Kavita sets its OIDC correlation cookies
 # with path=/signin-oidc, and the browser only sends them to that exact path.
