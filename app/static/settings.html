@@ -1312,6 +1312,32 @@
         <!-- News Section -->
         <div id="newsSection" class="hidden">
 
+            <!-- Homepage news window -->
+            <div class="mb-6 bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-5">
+                <h3 class="text-sm font-bold text-frosted-blue mb-1">Homepage news</h3>
+                <p class="text-xs text-steel-blue mb-4">
+                    Controls the short feed on the home page only. Nothing is deleted &mdash; every post stays on the
+                    <a href="/news" class="text-primary hover:underline">news archive</a>. Pinned posts always show, whatever these say.
+                </p>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-steel-blue mb-2" for="newsHomepageCount">Posts to show</label>
+                        <input type="number" id="newsHomepageCount" min="1" max="20"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2.5 text-frosted-blue focus:outline-none focus:ring-2 focus:ring-primary">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-steel-blue mb-2" for="newsHomepageMaxAge">Hide posts older than (days)</label>
+                        <input type="number" id="newsHomepageMaxAge" min="0" max="3650"
+                            class="w-full bg-black/50 border border-steel-blue/30 rounded-lg px-4 py-2.5 text-frosted-blue focus:outline-none focus:ring-2 focus:ring-primary">
+                        <p class="text-[11px] text-steel-blue/70 mt-1.5">0 keeps posts on the homepage forever.</p>
+                    </div>
+                </div>
+                <button id="btnSaveNewsSettings" type="button"
+                    class="mt-4 bg-primary hover:bg-primary/90 text-bright px-5 py-2 rounded-lg font-semibold text-sm transition-all">
+                    Save homepage settings
+                </button>
+            </div>
+
             <!-- Create New Post Button -->
             <div class="mb-6">
                 <button id="btnNewPost" class="bg-primary hover:bg-primary/90 text-bright px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-all">
@@ -1437,23 +1463,34 @@
                     <!-- Options -->
                     <div class="flex gap-6">
                         <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" id="postPublished"
-                                class="w-5 h-5 rounded border-steel-blue/30 bg-black/50 text-primary focus:ring-primary">
-                            <span class="text-sm text-steel-blue">Published</span>
-                        </label>
-                        <label class="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" id="postPinned"
                                 class="w-5 h-5 rounded border-steel-blue/30 bg-black/50 text-primary focus:ring-primary">
-                            <span class="text-sm text-steel-blue">Pinned</span>
+                            <span class="text-sm text-steel-blue">Pin to top</span>
                         </label>
                     </div>
 
+                    <!--
+                        Publishing state is a button, not a checkbox. A checkbox
+                        left unticked read as "the post was thrown away" - the
+                        work was saved as a draft, but nothing on screen said so.
+                        Two named actions make the outcome unambiguous, and the
+                        status line below says where the post currently stands.
+                    -->
+                    <p id="postStatusLine" class="hidden items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg"></p>
+
                     <!-- Buttons -->
-                    <div class="flex gap-3 pt-4">
-                        <button type="submit" class="bg-primary hover:bg-primary/90 text-bright px-6 py-2 rounded-lg font-semibold transition-all">
-                            Save Post
+                    <div class="flex flex-wrap gap-3 pt-2">
+                        <button type="submit" id="btnPublishPost" data-publish="true"
+                            class="bg-primary hover:bg-primary/90 text-bright px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                            <span class="material-symbols-outlined text-[18px]">send</span>
+                            <span id="btnPublishPostText">Publish</span>
                         </button>
-                        <button type="button" id="btnCancelNewsForm" class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all">
+                        <button type="submit" id="btnSaveDraft" data-publish="false"
+                            class="bg-steel-blue/20 hover:bg-steel-blue/30 text-frosted-blue px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2">
+                            <span class="material-symbols-outlined text-[18px]">draft</span>
+                            <span id="btnSaveDraftText">Save draft</span>
+                        </button>
+                        <button type="button" id="btnCancelNewsForm" class="bg-steel-blue/10 hover:bg-steel-blue/20 text-steel-blue px-6 py-2 rounded-lg font-semibold transition-all">
                             Cancel
                         </button>
                     </div>
@@ -1479,7 +1516,7 @@
 
     <script src="/static/js/auth.js"></script>
     <script src="/static/js/header.js?v=2"></script>
-    <script src="/static/js/sidebar.js?v=20"></script>
+    <script src="/static/js/sidebar.js?v=21"></script>
     <script src="/static/js/notifications.js?v=3"></script>
     <script>
         // Initialize sidebar and auth
@@ -2254,6 +2291,60 @@
                 }
             });
         }
+
+        // --- Homepage news window ---
+        //
+        // Read back through /api/branding rather than /api/admin/settings so the
+        // form shows the same effective values the homepage uses, defaults
+        // included, instead of blanks wherever a row has never been written.
+        async function loadNewsSettings() {
+            try {
+                const resp = await fetch('/api/branding');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const news = data.news || {};
+                document.getElementById('newsHomepageCount').value = news.homepage_count != null ? news.homepage_count : 3;
+                document.getElementById('newsHomepageMaxAge').value = news.homepage_max_age_days != null ? news.homepage_max_age_days : 30;
+            } catch (e) {
+                console.error('Could not load news settings:', e);
+            }
+        }
+
+        document.getElementById('btnSaveNewsSettings').addEventListener('click', async () => {
+            const countEl = document.getElementById('newsHomepageCount');
+            const ageEl = document.getElementById('newsHomepageMaxAge');
+            const count = parseInt(countEl.value, 10);
+            const age = parseInt(ageEl.value, 10);
+
+            if (!Number.isFinite(count) || count < 1 || count > 20) {
+                alert('Posts to show must be between 1 and 20.');
+                countEl.focus();
+                return;
+            }
+            if (!Number.isFinite(age) || age < 0 || age > 3650) {
+                alert('Hide posts older than must be between 0 and 3650 days.');
+                ageEl.focus();
+                return;
+            }
+
+            try {
+                const resp = await fetch('/api/admin/settings/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        settings: [
+                            { key: 'news.homepage_count', value: String(count), description: 'Posts shown in the homepage news feed' },
+                            { key: 'news.homepage_max_age_days', value: String(age), description: 'Homepage news age cutoff in days (0 = no cutoff)' }
+                        ]
+                    })
+                });
+                alert(resp.ok ? 'Homepage news settings saved.' : 'Failed to save homepage news settings.');
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        });
+
+        loadNewsSettings();
 
         // --- System Settings ---
 
@@ -3162,12 +3253,50 @@
         }
 
         // Show/hide post form
+        // Which submit button was pressed. `submit` events do not carry the
+        // button, and the two buttons differ only in what they do to the
+        // `published` flag, so the click is recorded here and read on submit.
+        var pendingPublish = true;
+
+        // Reflect the post's real state above the buttons. Without this the
+        // only signal that a post is unpublished is its absence from the site,
+        // which is exactly what read as "my work disappeared".
+        function setPostStatus(state) {
+            var line = document.getElementById('postStatusLine');
+            var publishText = document.getElementById('btnPublishPostText');
+            var draftText = document.getElementById('btnSaveDraftText');
+            line.className = 'flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg';
+
+            if (state === 'draft') {
+                line.innerHTML = '<span class="material-symbols-outlined text-[16px]">visibility_off</span>' +
+                    'Draft &mdash; saved, but not visible to users yet.';
+                line.classList.add('bg-steel-blue/15', 'text-steel-blue');
+                publishText.textContent = 'Publish now';
+                draftText.textContent = 'Save draft';
+            } else if (state === 'published') {
+                line.innerHTML = '<span class="material-symbols-outlined text-[16px]">public</span>' +
+                    'Published &mdash; live on the site.';
+                line.classList.add('bg-primary/15', 'text-primary');
+                publishText.textContent = 'Save changes';
+                draftText.textContent = 'Unpublish to draft';
+            } else {
+                line.classList.add('hidden');
+                publishText.textContent = 'Publish';
+                draftText.textContent = 'Save draft';
+            }
+        }
+
+        document.getElementById('btnPublishPost').addEventListener('click', function () { pendingPublish = true; });
+        document.getElementById('btnSaveDraft').addEventListener('click', function () { pendingPublish = false; });
+
         document.getElementById('btnNewPost').addEventListener('click', () => {
             editingPostId = null;
             document.getElementById('newsFormTitle').textContent = 'Create News Post';
             document.getElementById('newsForm').reset();
             document.getElementById('postId').value = '';
             clearEditor();
+            setPostStatus('new');
+            pendingPublish = true;
             document.getElementById('postForm').classList.remove('hidden');
         });
 
@@ -3175,6 +3304,7 @@
             document.getElementById('postForm').classList.add('hidden');
             document.getElementById('newsForm').reset();
             clearEditor();
+            setPostStatus('new');
             editingPostId = null;
         });
 
@@ -3193,7 +3323,7 @@
             const postData = {
                 title: document.getElementById('postTitle').value,
                 content: editorContent,
-                published: document.getElementById('postPublished').checked,
+                published: pendingPublish,
                 pinned: document.getElementById('postPinned').checked
             };
 
@@ -3214,10 +3344,15 @@
                 }
 
                 if (response.ok) {
-                    alert(editingPostId ? 'Post updated successfully!' : 'Post created successfully!');
+                    // Name the outcome. "Saved successfully" after an unticked
+                    // publish box is what made a draft feel like lost work.
+                    alert(pendingPublish
+                        ? 'Published. This post is now live on the site.'
+                        : 'Draft saved. It stays in this list and is not visible to users until you publish it.');
                     document.getElementById('postForm').classList.add('hidden');
                     document.getElementById('newsForm').reset();
                     clearEditor();
+                    setPostStatus('new');
                     editingPostId = null;
                     loadPosts();
                 } else {
@@ -3247,14 +3382,19 @@
                     return;
                 }
 
+                // Drafts are dimmed, dashed-bordered and badged. The admin list
+                // is the only place an unpublished post exists, so it has to be
+                // obvious which rows the public can actually see.
                 postsList.innerHTML = posts.map(post => `
-                    <div class="bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-6 hover:border-primary/30 transition-all">
+                    <div class="bg-cornflower-ocean/10 border rounded-xl p-6 hover:border-primary/30 transition-all ${post.published ? 'border-steel-blue/20' : 'border-dashed border-steel-blue/40 opacity-70'}">
                         <div class="flex items-start justify-between">
                             <div class="flex-1">
-                                <div class="flex items-center gap-3 mb-2">
+                                <div class="flex items-center gap-3 mb-2 flex-wrap">
                                     <h3 class="text-xl font-bold text-frosted-blue">${escapeHtml(post.title)}</h3>
-                                    ${post.pinned ? '<span class="bg-primary/20 text-primary text-xs px-2 py-1 rounded">PINNED</span>' : ''}
-                                    ${post.published ? '<span class="bg-green-500/20 text-green-400 text-xs px-2 py-1 rounded">PUBLISHED</span>' : '<span class="bg-steel-blue/20 text-steel-blue text-xs px-2 py-1 rounded">DRAFT</span>'}
+                                    ${post.pinned ? '<span class="bg-primary/20 text-primary text-[10px] font-bold tracking-wider px-2 py-1 rounded">PINNED</span>' : ''}
+                                    ${post.published
+                                        ? '<span class="bg-primary/20 text-primary text-[10px] font-bold tracking-wider px-2 py-1 rounded">PUBLISHED</span>'
+                                        : '<span class="bg-steel-blue/25 text-steel-blue text-[10px] font-bold tracking-wider px-2 py-1 rounded border border-steel-blue/40">DRAFT &mdash; NOT VISIBLE TO USERS</span>'}
                                 </div>
                                 <p class="text-steel-blue text-sm mb-3">
                                     By ${escapeHtml(post.author_name)} • ${new Date(post.created_at).toLocaleString()}
@@ -3289,6 +3429,14 @@
         async function editPost(id) {
             try {
                 const response = await fetch(`/api/news/${id}`);
+                // A failed fetch used to fall straight through to the field
+                // assignments below, filling the editor with `undefined` and
+                // making an intact post look destroyed. Stop on the status code.
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    alert('Could not open this post: ' + (err.detail || response.status));
+                    return;
+                }
                 const post = await response.json();
 
                 editingPostId = id;
@@ -3296,8 +3444,9 @@
                 document.getElementById('postId').value = id;
                 document.getElementById('postTitle').value = post.title;
                 editor.innerHTML = post.content;
-                document.getElementById('postPublished').checked = post.published;
                 document.getElementById('postPinned').checked = post.pinned;
+                setPostStatus(post.published ? 'published' : 'draft');
+                pendingPublish = post.published;
                 document.getElementById('postForm').classList.remove('hidden');
 
                 // Switch to news tab if not already there

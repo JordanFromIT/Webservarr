@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - News</title>
+<link rel="icon" href="/static/webservarr.svg"/>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: {
+        "display": ["var(--font-display)", "sans-serif"]
+      },
+    },
+  },
+}</script>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+
+<!-- Toast notification container -->
+<div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
+
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-y-auto">
+<div id="header-root" class="hidden lg:block lg:h-16"></div>
+
+<div class="p-4 lg:p-8 max-w-4xl w-full mx-auto">
+
+  <!-- Page header -->
+  <div class="mb-6">
+    <a href="/" class="inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors mb-3">
+      <span class="material-symbols-outlined text-sm">chevron_left</span>Back to home
+    </a>
+    <div class="flex items-center gap-3">
+      <span class="material-symbols-outlined text-steel-blue text-3xl">newspaper</span>
+      <div>
+        <h1 class="text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight">News &amp; Updates</h1>
+        <p class="text-sm text-steel-blue mt-0.5">Everything posted so far, newest first.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Post list -->
+  <div id="newsArchive" class="grid gap-3">
+    <div class="text-center text-steel-blue py-12">
+      <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>
+      <p>Loading news…</p>
+    </div>
+  </div>
+
+  <!-- Pagination -->
+  <div class="flex justify-center mt-6">
+    <button id="newsLoadMore" type="button"
+      class="hidden items-center gap-2 px-5 py-2.5 rounded-lg bg-primary/15 text-primary border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all">
+      <span class="material-symbols-outlined text-base">expand_more</span>
+      <span id="newsLoadMoreText">Load older posts</span>
+    </button>
+  </div>
+
+</div>
+
+<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+  <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
+</div>
+
+</main>
+
+<!-- Scripts -->
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/sidebar.js?v=21"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+<script>
+// WebServarr — News Archive
+//
+// The counterpart to the homepage feed. The homepage deliberately shows only a
+// handful of recent posts and retires anything past the configured age window;
+// this page is where those posts keep living. No age filter, no cap — just
+// pagination, so the list can grow indefinitely without the homepage doing so.
+(function () {
+  'use strict';
+
+  var PAGE_SIZE = 20;
+  var FRESH_MS = 72 * 60 * 60 * 1000; // matches the homepage's "New" threshold
+  var _offset = 0;
+  var _loading = false;
+
+  var listEl = document.getElementById('newsArchive');
+  var moreBtn = document.getElementById('newsLoadMore');
+  var moreText = document.getElementById('newsLoadMoreText');
+
+  function excerpt(html, limit) {
+    var tmp = document.createElement('div');
+    tmp.innerHTML = html || '';
+    var text = (tmp.textContent || '').replace(/\s+/g, ' ').trim();
+    return text.length > limit ? text.slice(0, limit).trimEnd() + '…' : text;
+  }
+
+  function dateLabel(date) {
+    var secondsAgo = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (secondsAgo < 60) return 'Just now';
+    if (secondsAgo < 3600) return Math.floor(secondsAgo / 60) + 'm ago';
+    if (secondsAgo < 86400) return Math.floor(secondsAgo / 3600) + 'h ago';
+    if (secondsAgo < 604800) return Math.floor(secondsAgo / 86400) + 'd ago';
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  // Same card shape as the homepage so a post is recognisable in both places.
+  // Archive cards start collapsed regardless of age — this is a list to scan,
+  // not a feed to read straight through.
+  function renderCard(post) {
+    var created = new Date(post.created_at);
+    var isFresh = (Date.now() - created.getTime()) < FRESH_MS;
+    var accent = post.pinned ? 'border-l-primary' : (isFresh ? 'border-l-frosted-blue' : 'border-l-steel-blue/40');
+    var icon = post.pinned ? 'push_pin' : (isFresh ? 'campaign' : 'article');
+    var iconColor = post.pinned ? 'text-primary' : (isFresh ? 'text-frosted-blue' : 'text-steel-blue');
+
+    var flag = '';
+    if (post.pinned) {
+      flag = '<span class="shrink-0 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-primary/20 text-primary">Pinned</span>';
+    } else if (isFresh) {
+      flag = '<span class="shrink-0 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-frosted-blue/15 text-frosted-blue">New</span>';
+    }
+
+    var bodyClasses = 'text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none [&>div]:mb-2 [&>p]:mb-2 [&_br]:block';
+
+    return '<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 ' + accent + '">' +
+      '<span class="material-symbols-outlined ' + iconColor + ' mt-0.5 shrink-0">' + icon + '</span>' +
+      '<div class="flex-1 min-w-0">' +
+        '<div class="flex items-start justify-between gap-3">' +
+          '<div class="flex items-center gap-2 min-w-0">' +
+            flag +
+            '<h2 class="font-bold text-frosted-blue truncate">' + escapeHtml(post.title) + '</h2>' +
+          '</div>' +
+          '<span class="shrink-0 text-[10px] text-steel-blue font-bold uppercase">' + escapeHtml(dateLabel(created)) + '</span>' +
+        '</div>' +
+        '<p class="text-xs text-steel-blue/70 mt-0.5">By ' + escapeHtml(post.author_name || 'Unknown') + '</p>' +
+        '<p class="text-sm text-frosted-blue/60 mt-1 line-clamp-2">' + escapeHtml(excerpt(post.content_html, 180)) + '</p>' +
+        '<div class="' + bodyClasses + ' hidden" data-news-body style="white-space:pre-line">' + post.content_html + '</div>' +
+        '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-[11px] font-bold text-steel-blue hover:text-primary transition-colors">' +
+          '<span data-news-toggle-text>Read more</span>' +
+          '<span class="material-symbols-outlined text-sm transition-transform" data-news-chevron>expand_more</span>' +
+        '</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // Delegated so it keeps working for cards appended by "Load older posts".
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('[data-news-toggle]') : null;
+    if (!btn) return;
+    var card = btn.parentElement;
+    var full = card.querySelector('[data-news-body]');
+    var teaser = card.querySelector('.line-clamp-2');
+    if (!full) return;
+    var nowOpen = full.classList.toggle('hidden') === false;
+    if (teaser) teaser.classList.toggle('hidden', nowOpen);
+    btn.querySelector('[data-news-toggle-text]').textContent = nowOpen ? 'Show less' : 'Read more';
+    btn.querySelector('[data-news-chevron]').style.transform = nowOpen ? 'rotate(180deg)' : '';
+  });
+
+  function emptyState() {
+    return '<div class="text-center text-steel-blue py-12">' +
+      '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>' +
+      '<p>No news posts yet.</p>' +
+    '</div>';
+  }
+
+  async function loadPage() {
+    if (_loading) return;
+    _loading = true;
+    moreText.textContent = 'Loading…';
+
+    try {
+      // Fetch one past the page size: if it comes back, there is another page.
+      // Cheaper than a separate count query and never goes stale against it.
+      var res = await fetch('/api/news/?limit=' + (PAGE_SIZE + 1) + '&offset=' + _offset);
+      if (!res.ok) throw new Error('Request failed (' + res.status + ')');
+      var posts = await res.json();
+      if (!Array.isArray(posts)) throw new Error('Unexpected response');
+
+      var hasMore = posts.length > PAGE_SIZE;
+      var page = posts.slice(0, PAGE_SIZE);
+
+      if (_offset === 0) {
+        listEl.innerHTML = page.length ? page.map(renderCard).join('') : emptyState();
+      } else {
+        listEl.insertAdjacentHTML('beforeend', page.map(renderCard).join(''));
+      }
+
+      _offset += page.length;
+      moreBtn.classList.toggle('hidden', !hasMore);
+      moreBtn.classList.toggle('flex', hasMore);
+      moreText.textContent = 'Load older posts';
+    } catch (err) {
+      console.error('Error loading news archive:', err);
+      if (_offset === 0) {
+        listEl.innerHTML = '<div class="text-center text-steel-blue py-12">' +
+          '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">cloud_off</span>' +
+          '<p>Could not load news right now.</p>' +
+          '<p class="text-xs opacity-60 mt-1">Try refreshing the page.</p>' +
+        '</div>';
+      }
+      moreText.textContent = 'Try again';
+    } finally {
+      _loading = false;
+    }
+  }
+
+  moreBtn.addEventListener('click', loadPage);
+
+  // ---- Init ----
+  initSidebar('home');
+
+  (function () {
+    var hint = document.getElementById('scrollDownHint');
+    if (!hint) return;
+    window.addEventListener('scroll', function () {
+      var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+      hint.style.opacity = atBottom ? '0' : '1';
+    });
+  })();
+
+  checkAuth().then(function () {
+    loadPage();
+  });
+})();
+</script>
+</body>
+</html>

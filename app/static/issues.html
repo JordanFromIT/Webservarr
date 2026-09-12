@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>WebServarr - Issues</title>
+<title>WebServarr - Report a Problem</title>
 <link rel="icon" href="/static/webservarr.svg"/>
 <script src="/static/js/theme-loader.js"></script>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
@@ -54,6 +54,16 @@
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
+<!-- Page intro. Users kept landing on the wrong one of the two help pages, so
+     each now states what it is for and links to the other. -->
+<div class="mb-5">
+<h1 class="text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight">Report a Problem</h1>
+<p class="text-sm text-steel-blue mt-1">
+Something wrong with a specific movie or show &mdash; won&rsquo;t play, bad audio, wrong subtitles, missing episodes.
+Anything else, use <a href="/tickets" class="text-primary hover:underline font-semibold">Contact Support</a>.
+</p>
+</div>
+
 <!-- Stat Summary Cards -->
 <div class="grid grid-cols-3 gap-3 mb-6">
 <div class="glass-card rounded-xl p-4 text-center">
@@ -77,13 +87,13 @@
 <div class="w-full lg:w-1/2 min-w-0 rounded-xl glass-card p-4 lg:p-5">
 <div class="flex items-center gap-3 mb-4 pb-3 border-b border-steel-blue/30">
 <span class="material-symbols-outlined text-primary">add_circle</span>
-<h3 class="text-lg font-bold text-frosted-blue">Report an Issue</h3>
+<h3 class="text-lg font-bold text-frosted-blue">Which title is having the problem?</h3>
 </div>
 
 <!-- Search Bar -->
 <div class="relative mb-4">
 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-xl">search</span>
-<input id="searchInput" type="text" placeholder="Search for the media with the issue..."
+<input id="searchInput" type="text" placeholder="Search for the movie or show..."
   class="w-full pl-10 pr-4 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm"/>
 </div>
 
@@ -96,7 +106,7 @@
 <!-- Search Empty State -->
 <div id="searchEmptyState" class="text-center text-steel-blue py-8">
 <span class="material-symbols-outlined text-4xl mb-2 block opacity-30">search</span>
-<p class="text-sm">Search for the movie or TV show you're having an issue with</p>
+<p class="text-sm">Start typing the name of the movie or show you're having trouble with</p>
 </div>
 
 <!-- Issue Form (shown after selecting media) -->
@@ -114,7 +124,7 @@
 </div>
 
 <!-- Issue type selector -->
-<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-2">Issue Type</p>
+<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-2">What's wrong?</p>
 <div class="grid grid-cols-2 gap-2 mb-4">
 <button onclick="selectIssueType(1)" data-type="1" class="issue-type-btn py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5">
 <span class="material-symbols-outlined text-sm">videocam</span> Video
@@ -132,7 +142,7 @@
 
 <!-- Description -->
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-2">Description</p>
-<textarea id="issueMessage" placeholder="Describe the issue (e.g., 'Audio out of sync in Season 1 Episode 3')..."
+<textarea id="issueMessage" placeholder="Tell us what happened (e.g. 'Audio is out of sync in Season 1, Episode 3')..."
   class="w-full p-3 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm resize-none h-24 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"></textarea>
 
 <!-- Submit -->
@@ -218,7 +228,7 @@ Submit Issue
 
 <script src="/static/js/auth.js"></script>
 <script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=20"></script>
+<script src="/static/js/sidebar.js?v=21"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
 // State
@@ -306,7 +316,7 @@ async function performSearch(query) {
             list.innerHTML = '<div class="text-center text-steel-blue py-4">' +
                 '<span class="material-symbols-outlined text-2xl mb-1 block opacity-50">search_off</span>' +
                 '<p class="text-xs">No library items found for "' + escapeHtml(query) + '"</p>' +
-                '<p class="text-[10px] text-steel-blue/50 mt-1">Issues can only be reported for media already in the library</p></div>';
+                '<p class="text-[10px] text-steel-blue/50 mt-1">Only titles already in the library can be reported here</p></div>';
             return;
         }
 

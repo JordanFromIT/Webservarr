@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>WebServarr - Tickets</title>
+<title>WebServarr - Contact Support</title>
 <link rel="icon" href="/static/webservarr.svg"/>
 <script src="/static/js/theme-loader.js"></script>
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
@@ -42,10 +42,11 @@
 <button onclick="closeCreateModal()" class="absolute top-3 right-3 text-steel-blue hover:text-bright transition-colors">
 <span class="material-symbols-outlined">close</span>
 </button>
-<h3 class="text-lg font-bold text-frosted-blue mb-4">New Ticket</h3>
+<h3 class="text-lg font-bold text-frosted-blue mb-1">Message support</h3>
+<p class="text-xs text-steel-blue mb-4">Goes straight to the server admin. You&rsquo;ll get replies right here.</p>
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Title</label>
-<input id="createTitle" type="text" maxlength="200" placeholder="Brief summary of your issue..."
+<input id="createTitle" type="text" maxlength="200" placeholder="What do you need help with?"
   class="w-full px-3 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"/>
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Category</label>
@@ -57,9 +58,13 @@
 <option value="feature_suggestion">Feature Suggestion</option>
 <option value="other">Other</option>
 </select>
+<p id="playbackRedirectHint" class="hidden text-xs text-steel-blue bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3">
+<span class="material-symbols-outlined text-[14px] align-text-bottom mr-1">info</span>
+If this is about one specific movie or show, <a href="/issues" class="text-primary hover:underline font-semibold">Report a Problem</a> gets it to the right place faster.
+</p>
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Description</label>
-<textarea id="createDescription" rows="4" placeholder="Describe your request or issue in detail..."
+<textarea id="createDescription" rows="4" placeholder="Give us the details — what you tried, what happened, and which device you were on."
   class="w-full px-3 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"></textarea>
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Screenshot (optional)</label>
@@ -67,7 +72,7 @@
   class="w-full text-sm text-steel-blue file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-primary/20 file:text-primary hover:file:bg-primary/30 transition-all mb-4"/>
 
 <button onclick="submitNewTicket()" id="createSubmitBtn" class="w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all">
-Submit Ticket
+Send to support
 </button>
 </div>
 </div>
@@ -120,10 +125,20 @@ Submit Ticket
 </div>
 </div>
 
+<!-- Page intro. Paired with the same block on /issues so the two help pages
+     each say what they are for and point at the other. -->
+<div class="mb-5">
+<h1 class="text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight">Contact Support</h1>
+<p class="text-sm text-steel-blue mt-1">
+Questions, account trouble, requests, or anything that isn&rsquo;t about one specific title.
+For a problem with a particular movie or show, use <a href="/issues" class="text-primary hover:underline font-semibold">Report a Problem</a>.
+</p>
+</div>
+
 <!-- New Ticket Button + Filter Tabs -->
 <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
 <button onclick="openCreateModal()" class="px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all flex items-center gap-2 shrink-0">
-<span class="material-symbols-outlined text-sm">add</span> New Ticket
+<span class="material-symbols-outlined text-sm">add</span> New message
 </button>
 <div class="flex flex-wrap gap-2">
 <button onclick="setFilter('all')" data-filter="all" class="filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All</button>
@@ -166,8 +181,8 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 <!-- Empty State -->
 <div id="emptyState" class="hidden text-center text-steel-blue py-12">
 <span class="material-symbols-outlined text-5xl mb-3 block opacity-30">confirmation_number</span>
-<p class="text-sm mb-1">No tickets yet</p>
-<p class="text-xs opacity-60">Click "New Ticket" to submit a support request</p>
+<p class="text-sm mb-1">No messages yet</p>
+<p class="text-xs opacity-60">Click &ldquo;New message&rdquo; to reach the server admin</p>
 </div>
 
 <!-- Scroll down indicator (mobile only) -->
@@ -181,7 +196,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 <!-- Scripts -->
 <script src="/static/js/auth.js"></script>
 <script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=20"></script>
+<script src="/static/js/sidebar.js?v=21"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
 // WebServarr — Tickets Page
@@ -720,6 +735,21 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
   document.head.appendChild(styleEl);
 
   // ---- Init ----
+
+  // Show the cross-link hint only while Playback Issue is selected - it is the
+  // one ticket category that belongs on the other help page more often than not.
+  (function () {
+    var cat = document.getElementById('createCategory');
+    var hint = document.getElementById('playbackRedirectHint');
+    if (!cat || !hint) return;
+    function sync() {
+      var overlaps = cat.value === 'playback_issue';
+      hint.classList.toggle('hidden', !overlaps);
+      hint.classList.toggle('block', overlaps);
+    }
+    cat.addEventListener('change', sync);
+    sync();
+  })();
 
   initSidebar('tickets');
   loadSystemStatus();

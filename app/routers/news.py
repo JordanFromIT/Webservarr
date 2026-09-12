@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+from sqlalchemy import or_
 import markdown
 import bleach
 
@@ -85,6 +86,8 @@ def render_markdown(content: str) -> str:
 async def get_news_posts(
     published_only: bool = True,
     limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    max_age_days: Optional[int] = Query(None, ge=1),
     db: Session = Depends(get_db),
     current_user: Optional[dict] = Depends(get_current_user_optional),
 ):
@@ -93,6 +96,12 @@ async def get_news_posts(
     Public endpoint - returns published posts by default. Only an authenticated
     admin may request unpublished/draft posts (published_only=false); for anyone
     else the published-only filter is forced on.
+
+    ``max_age_days`` retires stale news from the homepage without deleting it:
+    posts older than the window drop out of the response, but the archive page
+    (which omits the param) still lists everything. Pinned posts are exempt --
+    a pin is the admin saying "this stays up", and an age cutoff must not
+    silently override that.
     """
     if not published_only:
         is_admin = bool(current_user) and str(current_user.get("is_admin", "false")).lower() == "true"
@@ -104,22 +113,35 @@ async def get_news_posts(
     if published_only:
         query = query.filter(NewsPost.published == True)
 
+    if max_age_days:
+        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+        query = query.filter(
+            or_(NewsPost.pinned == True, NewsPost.created_at >= cutoff)
+        )
+
     # Order by pinned first, then by created_at descending
     query = query.order_by(
         NewsPost.pinned.desc(),
         NewsPost.created_at.desc()
     )
 
-    posts = query.limit(limit).all()
+    posts = query.offset(offset).limit(limit).all()
     return posts
 
 
 @router.get("/{post_id}", response_model=NewsPostResponse)
 async def get_news_post(
     post_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(get_current_user_optional),
 ):
-    """Get a single news post by ID."""
+    """
+    Get a single news post by ID.
+
+    Drafts are readable by an authenticated admin only -- without this the
+    editor could not reopen its own unpublished work, which reads to the
+    author as the draft having been thrown away.
+    """
     post = db.query(NewsPost).filter(NewsPost.id == post_id).first()
 
     if not post:
@@ -128,13 +150,13 @@ async def get_news_post(
             detail="News post not found"
         )
 
-    # Only show published posts to non-admins
-    # TODO: Add user check for unpublished posts
     if not post.published:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="News post not found"
-        )
+        is_admin = bool(current_user) and str(current_user.get("is_admin", "false")).lower() == "true"
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="News post not found"
+            )
 
     return post
 

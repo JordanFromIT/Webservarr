@@ -117,6 +117,9 @@
 <div class="flex items-center gap-3 mb-4">
 <span id="iconSectionNews" class="material-symbols-outlined text-steel-blue">newspaper</span>
 <h3 class="text-xl font-bold text-frosted-blue">News &amp; Updates</h3>
+<a href="/news" id="newsViewAll" class="ml-auto hidden items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors">
+View all<span class="material-symbols-outlined text-sm">chevron_right</span>
+</a>
 </div>
 <div id="newsContainer" class="grid gap-3">
 <!-- News posts will be loaded here dynamically -->
@@ -212,7 +215,7 @@ View Requests
 
 <script src="/static/js/auth.js"></script>
 <script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=20"></script>
+<script src="/static/js/sidebar.js?v=21"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
 // WebServarr - Main Page
@@ -283,47 +286,141 @@ document.addEventListener('DOMContentLoaded', async function() {
 });
 
 // Load news from API
+//
+// The homepage carries only current news. Two rules keep it that way, both
+// admin-configurable from Settings > News:
+//   * homepage_count caps how many posts can ever stack up down the page
+//   * homepage_max_age_days retires stale posts from the homepage entirely
+// Nothing is deleted -- /news lists the full archive. Pinned posts ignore both
+// rules, because a pin is the admin saying "this stays up".
+var NEWS_FRESH_MS = 72 * 60 * 60 * 1000; // under 3 days reads as "new"
+
+function newsSettings() {
+    var cfg = (window.WEBSERVARR_THEME || {}).news || {};
+    return {
+        count: cfg.homepage_count || 3,
+        maxAgeDays: cfg.homepage_max_age_days === 0 ? 0 : (cfg.homepage_max_age_days || 30)
+    };
+}
+
+// Plain-text excerpt for a collapsed card. Built from the sanitized HTML the
+// API already returned, so no new trust boundary is crossed here.
+function newsExcerpt(html, limit) {
+    var tmp = document.createElement('div');
+    tmp.innerHTML = html || '';
+    var text = (tmp.textContent || '').replace(/\s+/g, ' ').trim();
+    return text.length > limit ? text.slice(0, limit).trimEnd() + '…' : text;
+}
+
+function newsDateLabel(date) {
+    var secondsAgo = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (secondsAgo < 60) return 'Just now';
+    if (secondsAgo < 3600) return Math.floor(secondsAgo / 60) + 'm ago';
+    if (secondsAgo < 86400) return Math.floor(secondsAgo / 3600) + 'h ago';
+    if (secondsAgo < 604800) return Math.floor(secondsAgo / 86400) + 'd ago';
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Shared by the homepage and the /news archive so a post looks the same in both.
+// `expanded` decides whether the body is open on arrival; a collapsed card keeps
+// its full content in the DOM behind a toggle rather than re-fetching.
+function renderNewsCard(post, expanded) {
+    var created = new Date(post.created_at);
+    var isFresh = (Date.now() - created.getTime()) < NEWS_FRESH_MS;
+    var accent = post.pinned ? 'border-l-primary' : (isFresh ? 'border-l-frosted-blue' : 'border-l-steel-blue/40');
+    var icon = post.pinned ? 'push_pin' : (isFresh ? 'campaign' : 'article');
+    var iconColor = post.pinned ? 'text-primary' : (isFresh ? 'text-frosted-blue' : 'text-steel-blue');
+
+    var flag = '';
+    if (post.pinned) {
+        flag = '<span class="shrink-0 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-primary/20 text-primary">Pinned</span>';
+    } else if (isFresh) {
+        flag = '<span class="shrink-0 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-frosted-blue/15 text-frosted-blue">New</span>';
+    }
+
+    var open = expanded || post.pinned || isFresh;
+    var excerpt = newsExcerpt(post.content_html, 140);
+    var bodyClasses = 'text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none [&>div]:mb-2 [&>p]:mb-2 [&_br]:block';
+
+    var body = open
+        ? '<div class="' + bodyClasses + '" style="white-space:pre-line">' + post.content_html + '</div>'
+        : '<p class="text-sm text-frosted-blue/60 mt-1 line-clamp-2">' + escapeHtml(excerpt) + '</p>' +
+          '<div class="' + bodyClasses + ' hidden" data-news-body style="white-space:pre-line">' + post.content_html + '</div>';
+
+    var toggle = open
+        ? ''
+        : '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-[11px] font-bold text-steel-blue hover:text-primary transition-colors">' +
+            '<span data-news-toggle-text>Read more</span>' +
+            '<span class="material-symbols-outlined text-sm transition-transform" data-news-chevron>expand_more</span>' +
+          '</button>';
+
+    return '<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 ' + accent + (open ? '' : ' opacity-80') + '">' +
+        '<span class="material-symbols-outlined ' + iconColor + ' mt-0.5 shrink-0">' + icon + '</span>' +
+        '<div class="flex-1 min-w-0">' +
+            '<div class="flex items-start justify-between gap-3">' +
+                '<div class="flex items-center gap-2 min-w-0">' +
+                    flag +
+                    '<h4 class="font-bold text-frosted-blue truncate">' + escapeHtml(post.title) + '</h4>' +
+                '</div>' +
+                '<span class="shrink-0 text-[10px] text-steel-blue font-bold uppercase">' + escapeHtml(newsDateLabel(created)) + '</span>' +
+            '</div>' +
+            body +
+            toggle +
+        '</div>' +
+    '</div>';
+}
+
+// One delegated listener for every expand toggle, on the homepage and the
+// archive alike - cards are re-rendered often and per-card listeners would leak.
+document.addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('[data-news-toggle]') : null;
+    if (!btn) return;
+    var card = btn.parentElement;
+    var full = card.querySelector('[data-news-body]');
+    var excerpt = card.querySelector('.line-clamp-2');
+    if (!full) return;
+    var nowOpen = full.classList.toggle('hidden') === false;
+    if (excerpt) excerpt.classList.toggle('hidden', nowOpen);
+    btn.querySelector('[data-news-toggle-text]').textContent = nowOpen ? 'Show less' : 'Read more';
+    btn.querySelector('[data-news-chevron]').style.transform = nowOpen ? 'rotate(180deg)' : '';
+});
+
 async function loadNews() {
     try {
-        const response = await fetch('/api/news/?limit=5');
+        var cfg = newsSettings();
+        // Ask for one extra post: if the server has more than fits, the
+        // "View all" link is worth showing. The extra is never rendered.
+        var url = '/api/news/?limit=' + (cfg.count + 1);
+        if (cfg.maxAgeDays > 0) url += '&max_age_days=' + cfg.maxAgeDays;
+
+        const response = await fetch(url);
         const posts = await response.json();
 
         const newsContainer = document.getElementById('newsContainer');
+        const viewAll = document.getElementById('newsViewAll');
 
-        if (posts.length === 0) {
+        if (!Array.isArray(posts) || posts.length === 0) {
             newsContainer.innerHTML = `
                 <div class="text-center text-steel-blue py-8">
                     <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>
                     <p>No news posts yet.</p>
                 </div>
             `;
+            // Older posts may still exist beyond the age window, so the archive
+            // link stays available even when the homepage feed is empty.
+            if (viewAll) {
+                viewAll.classList.remove('hidden');
+                viewAll.classList.add('flex');
+            }
             return;
         }
 
-        newsContainer.innerHTML = posts.map(post => {
-            const isRecent = (new Date() - new Date(post.created_at)) < 86400000; // 24 hours
-            const icon = post.pinned ? 'push_pin' : (isRecent ? 'fiber_new' : 'article');
-            const borderColor = post.pinned ? 'border-l-primary' : (isRecent ? 'border-l-green-500' : 'border-l-steel-blue');
-            const iconColor = post.pinned ? 'text-primary' : (isRecent ? 'text-green-500' : 'text-steel-blue');
-            const postDate = new Date(post.created_at);
-            const secondsAgo = Math.floor((new Date() - postDate) / 1000);
-            const timeAgo = secondsAgo < 60 ? 'Just now' : postDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-
-            return `
-                <div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 ${borderColor}">
-                    <span class="material-symbols-outlined ${iconColor} mt-1">${icon}</span>
-                    <div class="flex-1">
-                        <div class="flex justify-between items-start">
-                            <h4 class="font-bold text-frosted-blue">${escapeHtml(post.title)}</h4>
-                            <span class="text-[10px] text-steel-blue font-bold uppercase">${timeAgo}</span>
-                        </div>
-                        <div class="text-sm text-frosted-blue/80 mt-1 prose prose-invert max-w-none [&>div]:mb-2 [&>p]:mb-2 [&_br]:block" style="white-space:pre-line">
-                            ${post.content_html}
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
+        var shown = posts.slice(0, cfg.count);
+        newsContainer.innerHTML = shown.map(function (post) { return renderNewsCard(post, false); }).join('');
+        if (viewAll) {
+            viewAll.classList.remove('hidden');
+            viewAll.classList.add('flex');
+        }
 
     } catch (error) {
         console.error('Error loading news:', error);

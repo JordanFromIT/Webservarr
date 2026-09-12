@@ -13,9 +13,12 @@ var NAV_ITEMS = [
   { id: 'home',     label: 'Home',        icon: 'home',                   href: '/' },
   { id: 'requests', label: 'Requests',    icon: 'movie',                 href: '/requests' },
   { id: 'requests-embed', label: 'Requests (Embed)', icon: 'download',  href: '/requests-embed', badgeId: 'requestsBadge', feature: 'show_requests' },
-  { id: 'issues',    label: 'Issues',     icon: 'report_problem',        href: '/issues' },
+  // "Issues" and "Tickets" both read as jargon, and neither tells a user which
+  // one their problem belongs in. The labels name the thing being reported and
+  // the sublabels draw the line between them. Both are settings-overridable.
+  { id: 'issues',    label: 'Report a Problem', icon: 'report_problem',   href: '/issues', sublabel: 'Issue with a movie or show' },
   { id: 'calendar',  label: 'Calendar',    icon: 'calendar_month',        href: '/calendar' },
-  { id: 'tickets',  label: 'Tickets',    icon: 'confirmation_number',   href: '/tickets', feature: 'show_tickets' },
+  { id: 'tickets',  label: 'Contact Support', icon: 'support_agent',   href: '/tickets', feature: 'show_tickets', sublabel: 'Everything else' },
   { id: 'library',  label: 'eBooks',     icon: 'menu_book',             href: '/library', feature: 'show_books' },
   { id: 'settings', label: 'Settings',    icon: 'settings',              href: '/settings', adminOnly: true },
 ];
@@ -43,6 +46,7 @@ function _buildSidebarHTML(currentPage) {
   var appName = theme.app_name || 'WEBSERVARR';
   var features = theme.features || {};
   var labels = theme.sidebar_labels || {};
+  var sublabels = theme.sidebar_sublabels || {};
   var icons = theme.icons || {};
   var logoIcon = icons.sidebar_logo || 'settings_input_component';
   var logoUrl = theme.logo_url || '';
@@ -62,6 +66,10 @@ function _buildSidebarHTML(currentPage) {
     if (customLabel) overrides.label = customLabel;
     var customIcon = icons['nav_' + item.id];
     if (customIcon) overrides.icon = customIcon;
+    // Unlike label and icon, an empty sublabel is a real choice ("hide the
+    // second line"), so test for presence rather than truthiness. Absent means
+    // branding has not loaded yet -- keep the built-in default.
+    if (sublabels[item.id] !== undefined) overrides.sublabel = sublabels[item.id];
     if (Object.keys(overrides).length > 0) {
       return Object.assign({}, item, overrides);
     }
@@ -80,14 +88,26 @@ function _buildSidebarHTML(currentPage) {
       ? '<span id="' + item.badgeId + '" class="ml-auto bg-primary/20 text-[10px] px-1.5 py-0.5 rounded font-bold hidden"></span>'
       : '';
 
+    // A sublabel stacks under the label instead of sitting beside it, so the
+    // nav keeps one scannable column of names with the clarification as
+    // secondary text. On the active pill it rides the inherited colour at
+    // reduced opacity rather than introducing a second one.
+    var sub = item.sublabel || '';
+    var labelBlock = sub
+      ? '<span class="flex flex-col min-w-0 leading-tight">' +
+          '<span class="truncate">' + escapeHtml(item.label) + newFlag + '</span>' +
+          '<span class="text-[10px] font-normal truncate mt-0.5 ' + (isActive ? 'opacity-70' : 'text-steel-blue') + '">' + escapeHtml(sub) + '</span>' +
+        '</span>'
+      : '<span>' + escapeHtml(item.label) + newFlag + '</span>';
+
     if (isActive) {
       return '<a class="relative flex items-center gap-3 px-4 py-3 rounded-lg bg-primary text-background-dark font-bold transition-all shadow-baltic-blue/20" href="' + item.href + '"' + adminAttr + '>' +
-        '<span class="material-symbols-outlined fill-1">' + escapeHtml(item.icon) + '</span>' +
-        '<span>' + escapeHtml(item.label) + newFlag + '</span>' + badge + '</a>';
+        '<span class="material-symbols-outlined fill-1 shrink-0">' + escapeHtml(item.icon) + '</span>' +
+        labelBlock + badge + '</a>';
     }
     return '<a class="relative flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="' + item.href + '"' + adminAttr + '>' +
-      '<span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors">' + escapeHtml(item.icon) + '</span>' +
-      '<span>' + escapeHtml(item.label) + newFlag + '</span>' + badge + '</a>';
+      '<span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">' + escapeHtml(item.icon) + '</span>' +
+      labelBlock + badge + '</a>';
   }).join('\n');
 
   // Logo: image if logo_url set, otherwise icon

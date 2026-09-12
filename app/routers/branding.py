@@ -42,11 +42,24 @@ DEFAULTS = {
     "sidebar.label_home": "Home",
     "sidebar.label_requests": "Requests",
     "sidebar.label_requests_embed": "Requests (Embed)",
-    "sidebar.label_issues": "Issues",
+    # "Issues" and "Tickets" both read as jargon to a non-technical viewer, and
+    # neither says which one to pick. The labels now name the thing being
+    # reported; the sublabels below draw the line between them.
+    "sidebar.label_issues": "Report a Problem",
     "sidebar.label_calendar": "Calendar",
-    "sidebar.label_tickets": "Tickets",
+    "sidebar.label_tickets": "Contact Support",
     "sidebar.label_library": "eBooks",
     "sidebar.label_settings": "Settings",
+    # Sidebar sublabels. Only the two help destinations carry one by default --
+    # they are the pair users confuse. Blank hides the line entirely.
+    "sidebar.sublabel_home": "",
+    "sidebar.sublabel_requests": "",
+    "sidebar.sublabel_requests_embed": "",
+    "sidebar.sublabel_issues": "Issue with a movie or show",
+    "sidebar.sublabel_calendar": "",
+    "sidebar.sublabel_tickets": "Everything else",
+    "sidebar.sublabel_library": "",
+    "sidebar.sublabel_settings": "",
     # Per-page "New!" flags. Admin-controlled rather than self-retiring: the
     # admin decides how long a section counts as new, and turns it off when it
     # stops being news. Off everywhere on a fresh install - nothing is new when
@@ -78,7 +91,7 @@ DEFAULTS = {
     "icon.nav_requests_embed": "download",
     "icon.nav_issues": "report_problem",
     "icon.nav_calendar": "calendar_month",
-    "icon.nav_tickets": "confirmation_number",
+    "icon.nav_tickets": "support_agent",
     "icon.nav_library": "menu_book",
     "icon.nav_settings": "settings",
     "icon.sidebar_logo": "settings_input_component",
@@ -87,7 +100,26 @@ DEFAULTS = {
     "icon.section_streams": "play_circle",
     "icon.section_releases": "calendar_month",
     "icon.section_requests": "shopping_cart",
+    # Homepage news window. Old posts stop appearing on the homepage rather than
+    # accumulating down the page forever; the /news archive still holds them all.
+    "news.homepage_count": "3",
+    "news.homepage_max_age_days": "30",
 }
+
+
+def _int_setting(raw: str, fallback: int, low: int, high: int) -> int:
+    """
+    Coerce a settings-table string to an int inside [low, high].
+
+    Settings are free-text rows, so a hand-edited or half-saved value must not
+    be able to blank the homepage news feed. Anything unparseable falls back to
+    the default rather than raising.
+    """
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return fallback
+    return max(low, min(high, value))
 
 
 @router.get("/branding")
@@ -173,6 +205,16 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "library": get("sidebar.label_library"),
             "settings": get("sidebar.label_settings"),
         },
+        "sidebar_sublabels": {
+            "home": get("sidebar.sublabel_home"),
+            "requests": get("sidebar.sublabel_requests"),
+            "requests-embed": get("sidebar.sublabel_requests_embed"),
+            "issues": get("sidebar.sublabel_issues"),
+            "calendar": get("sidebar.sublabel_calendar"),
+            "tickets": get("sidebar.sublabel_tickets"),
+            "library": get("sidebar.sublabel_library"),
+            "settings": get("sidebar.sublabel_settings"),
+        },
         "sidebar_enabled": {
             "home": get("sidebar.enabled_home") != "false",
             "requests": get("sidebar.enabled_requests") != "false",
@@ -209,6 +251,10 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "section_streams": get("icon.section_streams"),
             "section_releases": get("icon.section_releases"),
             "section_requests": get("icon.section_requests"),
+        },
+        "news": {
+            "homepage_count": _int_setting(get("news.homepage_count"), 3, 1, 20),
+            "homepage_max_age_days": _int_setting(get("news.homepage_max_age_days"), 30, 0, 3650),
         },
         "auth_methods": auth_methods,
         "vapid_public_key": vapid_row.value if vapid_row else None,
