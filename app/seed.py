@@ -248,7 +248,7 @@ def seed_default_news(db: Session) -> None:
     """Seed default news posts for fresh installs. Guarded by migration marker."""
     from sqlalchemy.exc import IntegrityError
     from app.models import NewsPost
-    from app.routers.news import render_markdown
+    from app.content import render_markdown
     from datetime import datetime, timezone
 
     if db.query(Setting).filter(Setting.key == "seed.default_news_v1").first():

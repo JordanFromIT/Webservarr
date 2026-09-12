@@ -8,9 +8,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy import or_
-import markdown
-import bleach
 
+from app.content import sanitize_html
 from app.database import get_db
 from app.dependencies import get_current_user, get_current_user_optional, require_admin
 from app.limiter import limiter
@@ -51,35 +50,6 @@ class NewsPostResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-def sanitize_html(html: str) -> str:
-    """
-    Sanitize HTML to prevent XSS attacks.
-    Allows safe tags only.
-    """
-    allowed_tags = [
-        'p', 'br', 'b', 'strong', 'i', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-        'ul', 'ol', 'li', 'a', 'code', 'pre', 'blockquote', 'hr',
-        'img', 's', 'del', 'div', 'span', 'sub', 'sup'
-    ]
-    allowed_attributes = {
-        'a': ['href', 'title', 'target', 'rel'],
-        'img': ['src', 'alt', 'width', 'height']
-    }
-
-    return bleach.clean(
-        html,
-        tags=allowed_tags,
-        attributes=allowed_attributes,
-        strip=True
-    )
-
-
-def render_markdown(content: str) -> str:
-    """Render markdown to sanitized HTML."""
-    html = markdown.markdown(content, extensions=['extra', 'codehilite'])
-    return sanitize_html(html)
 
 
 @router.get("/", response_model=List[NewsPostResponse])
