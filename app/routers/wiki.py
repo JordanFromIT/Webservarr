@@ -7,11 +7,15 @@ tier and no crawler handling appear in this file.
 """
 
 import logging
+import mimetypes
+import os
 import re
 import unicodedata
+import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -20,11 +24,19 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.limiter import limiter
 from app.models import WikiCategory, WikiPage
+from app.utils import validate_image_magic
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 SNIPPET_RADIUS = 80  # characters either side of a search hit
+
+# Outside the public /static tree, on the persisted data volume, so images are
+# reachable only through the auth-checked endpoint below.
+WIKI_UPLOAD_DIR = os.environ.get("WIKI_UPLOAD_DIR", "/app/data/wiki_uploads")
+ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
+MAX_IMAGE_SIZE = 4 * 1024 * 1024  # 4MB - screenshots of a large desktop are big
+ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 # ============================================================
@@ -497,3 +509,73 @@ async def delete_category(
     db.delete(cat)
     db.commit()
     return {"deleted": slug, "pages_uncategorised": orphaned}
+
+
+# ============================================================
+# Images
+# ============================================================
+
+@router.post("/images", status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
+async def upload_image(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_admin),
+):
+    """Validate and store a wiki image.
+
+    Content-Type is attacker-controlled, so the magic-number check is the one
+    that actually matters; the allowlist above only gives a clearer error first.
+    """
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type: {file.content_type}. Allowed: PNG, JPEG, WebP",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_IMAGE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File too large. Maximum size is 4MB.",
+        )
+
+    if not validate_image_magic(content, file.content_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File content does not match declared image type",
+        )
+
+    os.makedirs(WIKI_UPLOAD_DIR, exist_ok=True)
+    ext = os.path.splitext(file.filename or "image.png")[1].lower()
+    if ext not in ALLOWED_EXTS:
+        ext = ".png"
+    filename = f"wiki-{uuid.uuid4().hex[:12]}{ext}"
+
+    with open(os.path.join(WIKI_UPLOAD_DIR, filename), "wb") as fh:
+        fh.write(content)
+
+    return {"url": f"/api/wiki/images/{filename}", "filename": filename}
+
+
+@router.get("/images/{filename}")
+@limiter.limit("120/minute")
+async def get_image(
+    filename: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Serve a wiki image to any signed-in user.
+
+    Unlike ticket images there is no per-page ownership to check: the whole wiki
+    is visible to everyone who can sign in, so a session is the whole rule.
+    """
+    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    filepath = os.path.join(WIKI_UPLOAD_DIR, filename)
+    if not os.path.isfile(filepath):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    content_type, _ = mimetypes.guess_type(filepath)
+    return FileResponse(filepath, media_type=content_type or "application/octet-stream")
