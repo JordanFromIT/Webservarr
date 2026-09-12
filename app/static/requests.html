@@ -1639,9 +1639,25 @@ function searchSlot(position) {
     return document.getElementById(position === 'dock' ? 'searchDock' : 'searchHomeSlot');
 }
 
-// Breathing room above the bar once it has landed, so it never sits jammed
-// against the top edge of the scrolling panel.
-var SLOT_SCROLL_GAP = 24;
+// Where the search field comes to rest, measured from the top of whatever is
+// scrolling. Both numbers were taken from the positions Jordan scrolled to by
+// hand rather than guessed at.
+//
+// Desktop scrolls the inner panel, which has nothing overlapping it, so the
+// field sits just below its top edge.
+var SLOT_SCROLL_GAP = 34;
+
+// Mobile scrolls the document, and the nav bar is sticky across the top, so a
+// field placed at the same 34px would sit underneath it. The bar is measured
+// rather than hardcoded so this stays correct if its height changes.
+var SLOT_SCROLL_CLEARANCE_MOBILE = 61;
+
+function slotScrollGap() {
+    if (window.innerWidth >= 1024) return SLOT_SCROLL_GAP;
+    var bar = document.getElementById('mobileTopBar');
+    var barHeight = bar ? Math.round(bar.getBoundingClientRect().height) : 0;
+    return barHeight + SLOT_SCROLL_CLEARANCE_MOBILE;
+}
 
 // How long the bar takes to travel. This is scenery rather than a response to
 // an action, and it runs while the user is still typing, so it should never
@@ -1649,11 +1665,14 @@ var SLOT_SCROLL_GAP = 24;
 // duration, so it cannot linger either.
 var SEARCH_MOVE_DURATION = 3000;
 
-// Touch gets the same glide, not the pointer duration: a scroll lock that
-// lingers for multiple seconds on a real phone (confirmed on a Galaxy S26+)
-// reads as a hung page rather than scenery. Kept short enough that the hold
-// is barely noticeable while still visibly animating instead of teleporting.
-var SEARCH_MOVE_DURATION_TOUCH = 700;
+// Touch runs shorter than pointer, but 700ms turned out to be too short to read
+// as movement at all -- on a phone it looked like the bar snapped rather than
+// travelled. The constraint it was protecting is real: a scroll lock lingering
+// for multiple seconds on a real device (confirmed on a Galaxy S26+) reads as a
+// hung page. 1800ms sits between the two, long enough to be visibly a glide and
+// short enough that the hold is never mistaken for the page having stopped
+// responding.
+var SEARCH_MOVE_DURATION_TOUCH = 1800;
 
 /**
  * Work out how far to scroll to bring a slot into view, without doing it.
@@ -1665,7 +1684,7 @@ var SEARCH_MOVE_DURATION_TOUCH = 700;
  * so the inner panel and the window both move and the two compound into an
  * overshoot that pushes the bar up under the header and clips it. This walks up
  * to the one element that actually scrolls, clamped to its real range, so the
- * slot lands exactly SLOT_SCROLL_GAP below the top.
+ * slot lands exactly slotScrollGap() below the top.
  */
 function scrollPlanFor(slot) {
     var node = slot.parentElement;
@@ -1682,7 +1701,7 @@ function scrollPlanFor(slot) {
     if (container) {
         var delta = slot.getBoundingClientRect().top
                   - container.getBoundingClientRect().top
-                  - SLOT_SCROLL_GAP;
+                  - slotScrollGap();
         var max = Math.max(0, container.scrollHeight - container.clientHeight);
         return {
             el: container,
@@ -1693,7 +1712,7 @@ function scrollPlanFor(slot) {
 
     // Narrow layouts scroll the document instead - the panel is only
     // overflow-y-auto at the lg breakpoint.
-    var top = window.scrollY + slot.getBoundingClientRect().top - SLOT_SCROLL_GAP;
+    var top = window.scrollY + slot.getBoundingClientRect().top - slotScrollGap();
     var docMax = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     return {el: null, from: window.scrollY, to: Math.max(0, Math.min(top, docMax))};
 }
@@ -1713,8 +1732,22 @@ function applyScroll(plan, value) {
  * useful resting view and puts several hundred pixels between the field and the
  * top edge, so it cannot be cut off.
  */
+/**
+ * What the page scrolls to bring into view when the search bar moves.
+ *
+ * The panel that CONTAINS the bar, not a nearby landmark. This used to anchor
+ * on the stats row, which worked only because the search columns sat directly
+ * beneath it -- scrolling the stats to the top happened to leave the bar just
+ * below. That coupling was invisible until the request-status grid was inserted
+ * between them, at which point the same scroll put the stats at the top and the
+ * bar roughly 400px below the fold.
+ *
+ * Anchoring on the search columns themselves states the actual intent: land the
+ * panel the bar is flying into at the top of the view. Nothing added above it
+ * can break that again.
+ */
 function searchScrollAnchor(slot) {
-    return document.getElementById('statsRow') || slot;
+    return slot;
 }
 
 function scrollSlotIntoPlace(slot) {
