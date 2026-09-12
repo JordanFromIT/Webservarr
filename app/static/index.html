@@ -333,9 +333,9 @@ function renderNewsCard(post, expanded) {
 
     var flag = '';
     if (post.pinned) {
-        flag = '<span class="shrink-0 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-primary/20 text-primary">Pinned</span>';
+        flag = '<span class="shrink-0 mt-0.5 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-primary/20 text-primary">Pinned</span>';
     } else if (isFresh) {
-        flag = '<span class="shrink-0 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-frosted-blue/15 text-frosted-blue">New</span>';
+        flag = '<span class="shrink-0 mt-0.5 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-frosted-blue/15 text-frosted-blue">New</span>';
     }
 
     var open = expanded || post.pinned || isFresh;
@@ -354,13 +354,19 @@ function renderNewsCard(post, expanded) {
             '<span class="material-symbols-outlined text-sm transition-transform" data-news-chevron>expand_more</span>' +
           '</button>';
 
-    return '<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 ' + accent + (open ? '' : ' opacity-80') + '">' +
+    // min-w-0 is load-bearing: the card is a grid item, and grid items default
+    // to min-width:auto, so without it the card refuses to shrink below its
+    // min-content width and pushes the whole page into horizontal scroll on a
+    // phone. The title wraps rather than truncating for the same reason it is
+    // not clipped -- on a narrow screen a cut-off headline is unreadable, and
+    // there is room for two lines.
+    return '<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 min-w-0 ' + accent + (open ? '' : ' opacity-80') + '">' +
         '<span class="material-symbols-outlined ' + iconColor + ' mt-0.5 shrink-0">' + icon + '</span>' +
         '<div class="flex-1 min-w-0">' +
             '<div class="flex items-start justify-between gap-3">' +
-                '<div class="flex items-center gap-2 min-w-0">' +
+                '<div class="flex items-start gap-2 min-w-0">' +
                     flag +
-                    '<h4 class="font-bold text-frosted-blue truncate">' + escapeHtml(post.title) + '</h4>' +
+                    '<h4 class="font-bold text-frosted-blue break-words min-w-0">' + escapeHtml(post.title) + '</h4>' +
                 '</div>' +
                 '<span class="shrink-0 text-[10px] text-steel-blue font-bold uppercase">' + escapeHtml(newsDateLabel(created)) + '</span>' +
             '</div>' +

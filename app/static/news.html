@@ -131,20 +131,22 @@
 
     var flag = '';
     if (post.pinned) {
-      flag = '<span class="shrink-0 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-primary/20 text-primary">Pinned</span>';
+      flag = '<span class="shrink-0 mt-0.5 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-primary/20 text-primary">Pinned</span>';
     } else if (isFresh) {
-      flag = '<span class="shrink-0 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-frosted-blue/15 text-frosted-blue">New</span>';
+      flag = '<span class="shrink-0 mt-0.5 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-frosted-blue/15 text-frosted-blue">New</span>';
     }
 
     var bodyClasses = 'text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none [&>div]:mb-2 [&>p]:mb-2 [&_br]:block';
 
-    return '<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 ' + accent + '">' +
+    // min-w-0: see the matching note on the homepage renderer. Grid items
+    // default to min-width:auto and will otherwise overflow the page on mobile.
+    return '<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 min-w-0 ' + accent + '">' +
       '<span class="material-symbols-outlined ' + iconColor + ' mt-0.5 shrink-0">' + icon + '</span>' +
       '<div class="flex-1 min-w-0">' +
         '<div class="flex items-start justify-between gap-3">' +
-          '<div class="flex items-center gap-2 min-w-0">' +
+          '<div class="flex items-start gap-2 min-w-0">' +
             flag +
-            '<h2 class="font-bold text-frosted-blue truncate">' + escapeHtml(post.title) + '</h2>' +
+            '<h2 class="font-bold text-frosted-blue break-words min-w-0">' + escapeHtml(post.title) + '</h2>' +
           '</div>' +
           '<span class="shrink-0 text-[10px] text-steel-blue font-bold uppercase">' + escapeHtml(dateLabel(created)) + '</span>' +
         '</div>' +
