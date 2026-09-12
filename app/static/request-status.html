@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Request Status</title>
+<link rel="icon" href="/static/webservarr.svg"/>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: { "display": ["var(--font-display)", "sans-serif"] },
+    },
+  },
+}</script>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
+
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-y-auto">
+<div id="header-root" class="hidden lg:block lg:h-16"></div>
+
+<div class="p-4 lg:p-8 max-w-5xl w-full mx-auto">
+
+  <div class="mb-6">
+    <h1 class="text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight">Request Status</h1>
+    <p class="text-sm text-steel-blue mt-1">
+      Everything that has been asked for and hasn&rsquo;t turned up yet, and what&rsquo;s happening with it.
+    </p>
+  </div>
+
+  <!-- Filter: mine vs everyone -->
+  <div class="flex flex-wrap items-center gap-2 mb-5">
+    <button id="filterMine" type="button" data-scope="mine"
+      class="scope-tab px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider transition-all">My requests</button>
+    <button id="filterAll" type="button" data-scope="all"
+      class="scope-tab px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider transition-all">Everyone</button>
+    <span id="freshness" class="ml-auto text-[11px] text-steel-blue/70"></span>
+  </div>
+
+  <div id="statusBody">
+    <div class="text-center text-steel-blue py-16">
+      <span class="material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin">progress_activity</span>
+      <p class="text-sm">Working out where everything stands&hellip;</p>
+      <p class="text-xs opacity-60 mt-1">This checks Radarr, Sonarr and Plex, so it can take a moment.</p>
+    </div>
+  </div>
+
+</div>
+
+<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+  <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
+</div>
+
+</main>
+
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/sidebar.js?v=22"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+<script>
+// WebServarr — Request Status
+//
+// Answers "where is the thing I asked for". Everything here is presentation:
+// the classification arrives pre-computed from /api/request-status.
+//
+// Two rules shape the copy. Nothing may use arr vocabulary — no "monitored",
+// no "indexer", no "queue" — because the audience has never opened those
+// applications. And nothing may imply a title is watchable unless the server
+// confirmed it against Plex, because sending someone to a film that is not
+// there is the one mistake this page cannot recover from.
+(function () {
+  'use strict';
+
+  var _snapshot = null;
+  var _scope = 'mine';
+  var _me = '';
+  var _meId = null;
+
+  // Group order is the page's argument: good news first, then things that are
+  // working, then things that need time, then things that need a person, then
+  // things that are not going to happen.
+  var GROUPS = [
+    { id: 'ready',       title: 'Ready to watch now', icon: 'check_circle',
+      note: 'These are on the server already. If they don’t show up in your app, try pulling down to refresh, or sign out and back in.',
+      accent: 'border-l-primary', tone: 'text-primary' },
+    { id: 'on_the_way',  title: 'On the way', icon: 'downloading',
+      note: 'Found and being fetched, or still being looked for. Nothing needed from you.',
+      accent: 'border-l-frosted-blue', tone: 'text-frosted-blue' },
+    { id: 'waiting',     title: 'Waiting', icon: 'schedule',
+      note: 'Nothing has gone wrong — these just aren’t out yet, or need approving.',
+      accent: 'border-l-steel-blue', tone: 'text-steel-blue' },
+    { id: 'needs_look',  title: 'Needs a look', icon: 'build',
+      note: 'Something is stuck and needs the server admin.',
+      accent: 'border-l-steel-blue', tone: 'text-steel-blue' },
+    { id: 'cant_fulfil', title: 'Can’t be fulfilled', icon: 'block',
+      note: 'These can’t be delivered as requested.',
+      accent: 'border-l-steel-blue/40', tone: 'text-steel-blue/70', collapsed: true }
+  ];
+
+  // Plain-language explanation per reason code. The server sends codes so this
+  // wording stays here, where it can be changed without touching the backend.
+  var REASONS = {
+    ALREADY_AVAILABLE: 'Already on the server — your app may just need a refresh',
+    DOWNLOADING:       'Downloading now',
+    DOWNLOAD_STALLED:  'The copy we found stalled — looking for another',
+    IMPORT_BLOCKED:    'Downloaded, but it couldn’t be added to the library',
+    NO_RELEASE_FOUND:  'No copy has turned up online yet — still checking',
+    TV_PARTIAL:        'Some episodes are here, the rest are still being found',
+    NOT_RELEASED_YET:  'Not released yet',
+    AWAITING_APPROVAL: 'Waiting to be approved',
+    NOT_MONITORED:     'Not currently being searched for',
+    NOT_TRACKED:       'Never got added to the download system',
+    DECLINED:          'This request was turned down',
+    UNSATISFIABLE:     'This can’t be fetched as requested',
+    DEAD_END:          'Tried repeatedly without success',
+    UNKNOWN:           'Being looked at'
+  };
+
+  function reasonText(code) {
+    // Unknown codes render as a neutral row rather than breaking one. The
+    // server's vocabulary can grow without this page needing to know.
+    return REASONS[code] || 'Being looked at';
+  }
+
+  function waitingSince(iso) {
+    if (!iso) return '';
+    var then = new Date(iso);
+    if (isNaN(then)) return '';
+    var days = Math.floor((Date.now() - then.getTime()) / 86400000);
+    if (days < 1) return 'asked today';
+    if (days === 1) return 'asked yesterday';
+    if (days < 30) return 'asked ' + days + ' days ago';
+    var months = Math.round(days / 30);
+    return 'asked ' + months + (months === 1 ? ' month ago' : ' months ago');
+  }
+
+  function scopeLabel(row) {
+    var parts = [];
+    if (row.is_4k) parts.push('4K');
+    if (row.seasons && row.seasons.length) {
+      var s = row.seasons.slice().sort(function (a, b) { return a - b; });
+      // Season 0 is "Specials" to a viewer; "Season 0" is arr vocabulary.
+      if (s.length === 1) {
+        parts.push(s[0] === 0 ? 'Specials' : 'Season ' + s[0]);
+      } else if (s.indexOf(0) === -1 && s[s.length - 1] - s[0] === s.length - 1) {
+        parts.push('Seasons ' + s[0] + '–' + s[s.length - 1]);
+      } else {
+        parts.push(s.map(function (n) { return n === 0 ? 'Specials' : 'S' + n; }).join(', '));
+      }
+    }
+    return parts.join(' · ');
+  }
+
+  function renderRow(row) {
+    var title = row.title || ('Request #' + row.request_id);
+    var year = row.year ? ' (' + row.year + ')' : '';
+    var scope = scopeLabel(row);
+    var who = row.requested_by ? escapeHtml(row.requested_by) : '';
+    var since = waitingSince(row.requested_at);
+
+    return '<div class="flex items-start gap-3 px-4 py-3 border-b border-steel-blue/10 last:border-0">' +
+      '<span class="material-symbols-outlined text-steel-blue/60 text-[20px] mt-0.5 shrink-0">' +
+        (row.media_type === 'tv' ? 'live_tv' : 'movie') + '</span>' +
+      '<div class="flex-1 min-w-0">' +
+        '<p class="font-bold text-frosted-blue break-words">' + escapeHtml(title) + escapeHtml(year) +
+          (scope ? ' <span class="text-[10px] font-bold uppercase tracking-wider text-steel-blue">' + escapeHtml(scope) + '</span>' : '') +
+        '</p>' +
+        '<p class="text-sm text-frosted-blue/70 mt-0.5 break-words">' + escapeHtml(reasonText(row.reason_code)) + '</p>' +
+        '<p class="text-[11px] text-steel-blue/60 mt-1">' +
+          (who ? escapeHtml(who) : '') + (who && since ? ' · ' : '') + escapeHtml(since) +
+        '</p>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderGroup(group, rows) {
+    if (!rows.length) return '';
+    var open = !group.collapsed;
+    return '<section class="mb-4">' +
+      '<details class="glass-card rounded-xl border-l-4 ' + group.accent + ' overflow-hidden"' + (open ? ' open' : '') + '>' +
+        '<summary class="flex items-center gap-3 px-4 py-3 cursor-pointer select-none list-none">' +
+          '<span class="material-symbols-outlined ' + group.tone + '">' + group.icon + '</span>' +
+          '<span class="font-bold text-frosted-blue">' + escapeHtml(group.title) + '</span>' +
+          '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-steel-blue/20 text-steel-blue">' + rows.length + '</span>' +
+          '<span class="material-symbols-outlined text-steel-blue/60 ml-auto text-[20px]">expand_more</span>' +
+        '</summary>' +
+        '<p class="px-4 pb-3 text-xs text-steel-blue/80 border-b border-steel-blue/10">' + escapeHtml(group.note) + '</p>' +
+        rows.map(renderRow).join('') +
+      '</details>' +
+    '</section>';
+  }
+
+  function visibleRows() {
+    var items = (_snapshot && _snapshot.items) || [];
+    if (_scope !== 'mine') return items;
+    return items.filter(function (r) {
+      if (_meId != null && r.requested_by_id != null) return r.requested_by_id === _meId;
+      return _me && r.requested_by && r.requested_by.toLowerCase() === _me.toLowerCase();
+    });
+  }
+
+  function render() {
+    var body = document.getElementById('statusBody');
+    var rows = visibleRows();
+
+    if (!rows.length) {
+      var mine = _scope === 'mine';
+      body.innerHTML = '<div class="glass-card rounded-xl text-center py-16 px-6">' +
+        '<span class="material-symbols-outlined text-5xl mb-3 block text-primary">check_circle</span>' +
+        '<p class="text-frosted-blue font-bold">' +
+          (mine ? 'Nothing of yours is waiting' : 'Nothing is waiting') + '</p>' +
+        '<p class="text-sm text-steel-blue mt-1">' +
+          (mine ? 'Everything you’ve asked for has arrived.' : 'Every request has been fulfilled.') + '</p>' +
+        (mine ? '<button type="button" data-scope="all" class="scope-jump mt-4 text-xs font-bold text-primary hover:underline">See everyone’s requests</button>' : '') +
+      '</div>';
+      return;
+    }
+
+    var html = '';
+    GROUPS.forEach(function (g) {
+      html += renderGroup(g, rows.filter(function (r) { return r.group === g.id; }));
+    });
+
+    // Any row whose group the server sent but this page doesn't know about
+    // still has to appear somewhere rather than vanish silently.
+    var known = GROUPS.map(function (g) { return g.id; });
+    var orphans = rows.filter(function (r) { return known.indexOf(r.group) === -1; });
+    if (orphans.length) {
+      html += renderGroup({ id: 'other', title: 'Being looked at', icon: 'help',
+        note: 'We don’t have a status for these yet.',
+        accent: 'border-l-steel-blue/40', tone: 'text-steel-blue' }, orphans);
+    }
+
+    body.innerHTML = html;
+  }
+
+  function renderFreshness() {
+    var el = document.getElementById('freshness');
+    if (!_snapshot || !_snapshot.generated_at) { el.textContent = ''; return; }
+    var mins = Math.floor((Date.now() - new Date(_snapshot.generated_at).getTime()) / 60000);
+    if (isNaN(mins) || mins < 0) { el.textContent = ''; return; }
+    // Only worth saying once it is old enough to matter; a fresh number on
+    // every page load is noise.
+    el.textContent = mins >= 30 ? 'Last checked ' + (mins < 60 ? mins + ' min' : Math.floor(mins / 60) + 'h') + ' ago' : '';
+  }
+
+  function setScope(scope) {
+    _scope = scope;
+    document.querySelectorAll('.scope-tab').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.scope === scope);
+    });
+    render();
+  }
+
+  document.addEventListener('click', function (e) {
+    var tab = e.target.closest && e.target.closest('.scope-tab, .scope-jump');
+    if (tab && tab.dataset.scope) setScope(tab.dataset.scope);
+  });
+
+  var styleEl = document.createElement('style');
+  styleEl.textContent =
+    '.scope-tab { background: rgb(var(--color-accent) / 0.1); color: rgb(var(--color-accent)); border: 1px solid transparent; }' +
+    '.scope-tab.active { background: rgb(var(--color-primary) / 0.2); color: rgb(var(--color-primary)); border-color: rgb(var(--color-primary) / 0.3); }' +
+    '.scope-tab:hover { background: rgb(var(--color-accent) / 0.2); }' +
+    'details > summary::-webkit-details-marker { display: none; }' +
+    'details[open] > summary .material-symbols-outlined:last-child { transform: rotate(180deg); }';
+  document.head.appendChild(styleEl);
+
+  async function load() {
+    try {
+      var resp = await fetch('/api/request-status/');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      _snapshot = await resp.json();
+      if (_snapshot.error) {
+        document.getElementById('statusBody').innerHTML =
+          '<div class="glass-card rounded-xl text-center py-16 px-6">' +
+          '<span class="material-symbols-outlined text-4xl mb-2 block text-steel-blue/60">cloud_off</span>' +
+          '<p class="text-frosted-blue font-bold">Still working it out</p>' +
+          '<p class="text-sm text-steel-blue mt-1">' + escapeHtml(_snapshot.message || 'Try again shortly.') + '</p></div>';
+        return;
+      }
+      renderFreshness();
+      render();
+    } catch (err) {
+      console.error('Request status failed:', err);
+      document.getElementById('statusBody').innerHTML =
+        '<div class="glass-card rounded-xl text-center py-16 px-6">' +
+        '<span class="material-symbols-outlined text-4xl mb-2 block text-steel-blue/60">cloud_off</span>' +
+        '<p class="text-frosted-blue font-bold">Couldn’t load request status</p>' +
+        '<p class="text-sm text-steel-blue mt-1">Try refreshing the page.</p></div>';
+    }
+  }
+
+  // ---- Init ----
+  initSidebar('request-status');
+
+  (function () {
+    var hint = document.getElementById('scrollDownHint');
+    if (!hint) return;
+    window.addEventListener('scroll', function () {
+      var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+      hint.style.opacity = atBottom ? '0' : '1';
+    });
+  })();
+
+  checkAuth().then(function (user) {
+    _me = user.display_name || user.username || '';
+    var uEl = document.getElementById('headerUsername');
+    var rEl = document.getElementById('headerRole');
+    if (uEl) uEl.textContent = _me;
+    if (rEl) rEl.textContent = user.is_admin ? 'Admin' : 'Member';
+    showAdminNav(user.is_admin);
+
+    var menuBtn = document.getElementById('userMenuBtn');
+    var menuDrop = document.getElementById('userMenuDropdown');
+    if (menuBtn && menuDrop) {
+      menuBtn.addEventListener('click', function () { menuDrop.classList.toggle('hidden'); });
+      document.addEventListener('click', function (e) {
+        if (!menuBtn.contains(e.target) && !menuDrop.contains(e.target)) menuDrop.classList.add('hidden');
+      });
+    }
+
+    loadSystemStatus();
+    initNotifications();
+    setScope('mine');
+    load();
+  });
+})();
+</script>
+</body>
+</html>

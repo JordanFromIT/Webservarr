@@ -151,3 +151,108 @@ async def get_calendar(days: int = 14, start: str = "") -> list:
     except Exception as e:
         logger.error("Radarr integration error: %s", str(e))
         return []
+
+
+# --- Request-status support -------------------------------------------------
+#
+# The calendar above answers "what is coming out". These answer "what happened
+# to the thing someone asked for", which needs the library and the download
+# queue rather than a date window.
+
+# Both calls return the whole of something over the tunnel, so they get a
+# longer ceiling than the calendar's five seconds.
+_LIBRARY_TIMEOUT = 30.0
+
+
+async def get_movies_by_tmdb() -> dict:
+    """
+    Every movie Radarr knows about, keyed by TMDB id.
+
+    Only the fields the classifier reads are kept; the raw response runs to
+    several MB on a large library and none of the rest reaches the page.
+
+    Returns {} when Radarr is unconfigured or unreachable. The classifier reads
+    that as "not tracked" rather than raising, so the page degrades to the
+    Seerr-derived columns instead of failing outright.
+    """
+    config = _get_config()
+    if not config["url"] or not config["api_key"]:
+        return {}
+
+    try:
+        async with httpx.AsyncClient(timeout=_LIBRARY_TIMEOUT, verify=False) as client:
+            resp = await client.get(
+                f"{config['url']}/api/v3/movie",
+                headers={"X-Api-Key": config["api_key"]},
+            )
+            if resp.status_code != 200:
+                logger.warning("Radarr movie list returned HTTP %d", resp.status_code)
+                return {}
+
+            movies = {}
+            for m in resp.json():
+                tmdb_id = m.get("tmdbId")
+                if not tmdb_id:
+                    continue
+                movies[int(tmdb_id)] = {
+                    "id": m.get("id"),
+                    "title": m.get("title"),
+                    "year": m.get("year"),
+                    "has_file": bool(m.get("hasFile")),
+                    "monitored": bool(m.get("monitored")),
+                    "is_available": bool(m.get("isAvailable")),
+                    "status": m.get("status"),
+                    "digital_release": m.get("digitalRelease"),
+                    "physical_release": m.get("physicalRelease"),
+                    "in_cinemas": m.get("inCinemas"),
+                }
+            return movies
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Radarr movie list failed: %s", exc)
+        return {}
+
+
+async def get_queue_by_movie_id() -> dict:
+    """
+    Active Radarr queue entries, keyed by Radarr movie id.
+
+    Carries the fields that separate "downloading normally" from "stuck": the
+    tracked download state, any warning messages, and how far along it is.
+    """
+    config = _get_config()
+    if not config["url"] or not config["api_key"]:
+        return {}
+
+    try:
+        async with httpx.AsyncClient(timeout=_LIBRARY_TIMEOUT, verify=False) as client:
+            resp = await client.get(
+                f"{config['url']}/api/v3/queue",
+                params={"pageSize": 1000, "includeMovie": "false"},
+                headers={"X-Api-Key": config["api_key"]},
+            )
+            if resp.status_code != 200:
+                logger.warning("Radarr queue returned HTTP %d", resp.status_code)
+                return {}
+
+            queue = {}
+            for q in resp.json().get("records", []):
+                movie_id = q.get("movieId")
+                if not movie_id:
+                    continue
+                size = q.get("size") or 0
+                left = q.get("sizeleft")
+                queue[int(movie_id)] = {
+                    "status": (q.get("status") or "").lower(),
+                    "tracked_state": (q.get("trackedDownloadState") or "").lower(),
+                    "tracked_status": (q.get("trackedDownloadStatus") or "").lower(),
+                    "error_message": q.get("errorMessage") or "",
+                    "messages": [m.get("title", "") for m in (q.get("statusMessages") or [])],
+                    "percent": (
+                        round(100 * (size - left) / size, 1)
+                        if size and left is not None else None
+                    ),
+                }
+            return queue
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Radarr queue failed: %s", exc)
+        return {}

@@ -21,9 +21,13 @@ from app.limiter import limiter
 from app.database import init_db, SessionLocal
 from app.auth import session_manager
 from app.seed import seed_secret_key
-from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki
+from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status
 from app.services.notification_poller import start_poller, stop_poller
 from app.services.shelf_warmer import start_warmer, stop_warmer
+from app.services.request_status_warmer import (
+    start_warmer as start_request_status_warmer,
+    stop_warmer as stop_request_status_warmer,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -82,6 +86,12 @@ async def lifespan(app: FastAPI):
     warmer_task = asyncio.create_task(start_warmer())
     logger.info("Trending shelf warmer launched")
 
+    # Working out why every outstanding request is stuck costs five integration
+    # calls plus a Plex lookup per title, so it is built on a timer and served
+    # from cache rather than computed while somebody waits.
+    request_status_task = asyncio.create_task(start_request_status_warmer())
+    logger.info("Request status warmer launched")
+
     logger.info("WebServarr started successfully!")
 
     yield
@@ -103,6 +113,14 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
     logger.info("Trending shelf warmer stopped")
+
+    await stop_request_status_warmer()
+    request_status_task.cancel()
+    try:
+        await request_status_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("Request status warmer stopped")
 
     await session_manager.close()
     logger.info("WebServarr shut down")
@@ -244,6 +262,7 @@ app.include_router(branding.router, prefix="/api", tags=["Branding"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(tickets.router, prefix="/api", tags=["Tickets"])
 app.include_router(wiki.router, prefix="/api/wiki", tags=["Wiki"])
+app.include_router(request_status.router, prefix="/api/request-status", tags=["Request Status"])
 # No /api prefix: this router owns /kavita/* and /signin-oidc at the app root.
 # /signin-oidc must be at root because Kavita sets its OIDC correlation cookies
 # with path=/signin-oidc, and the browser only sends them to that exact path.
@@ -522,6 +541,18 @@ async def calendar_page(
     if not await _require_session(session_id):
         return RedirectResponse(url="/login", status_code=302)
     return _serve_page("/app/app/static/calendar.html", "Calendar page", request)
+
+
+# Request status page
+@app.get("/request-status", response_class=HTMLResponse, tags=["Pages"])
+async def request_status_page(
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve the page explaining why requested media has not arrived yet."""
+    if not await _require_session(session_id):
+        return RedirectResponse(url="/login", status_code=302)
+    return _serve_page("/app/app/static/request-status.html", "Request status page", request)
 
 
 # Tickets page
