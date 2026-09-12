@@ -402,3 +402,24 @@ body[data-page="wiki"]           [data-nav-id="wiki"]           > .material-symb
 body[data-page="settings"]       [data-nav-id="settings"]       > .material-symbols-outlined {
   color: inherit;
 }
+
+/* Cross-document view transitions: the shell holds still, content crossfades. */
+@view-transition { navigation: auto; }
+#appSidebar { view-transition-name: ws-sidebar; }
+#appHeader  { view-transition-name: ws-header; }
+#appTopbar  { view-transition-name: ws-topbar; }
+main        { view-transition-name: ws-main; }
+
+::view-transition-old(ws-sidebar), ::view-transition-new(ws-sidebar),
+::view-transition-old(ws-header),  ::view-transition-new(ws-header),
+::view-transition-old(ws-topbar),  ::view-transition-new(ws-topbar) {
+  animation: none;
+}
+::view-transition-old(ws-main) { animation: ws-vt-out 120ms ease-out both; }
+::view-transition-new(ws-main) { animation: ws-vt-in 180ms ease-out both; }
+@keyframes ws-vt-out { to { opacity: 0; } }
+@keyframes ws-vt-in  { from { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
