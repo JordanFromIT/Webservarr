@@ -34,9 +34,13 @@ SNIPPET_RADIUS = 80  # characters either side of a search hit
 # Outside the public /static tree, on the persisted data volume, so images are
 # reachable only through the auth-checked endpoint below.
 WIKI_UPLOAD_DIR = os.environ.get("WIKI_UPLOAD_DIR", "/app/data/wiki_uploads")
-ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
-MAX_IMAGE_SIZE = 4 * 1024 * 1024  # 4MB - screenshots of a large desktop are big
-ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+# GIF is allowed here but not on tickets: a wiki guide often needs a short
+# screen recording ("click here, then here"), and validate_image_magic already
+# knows the GIF87a/GIF89a signatures. SVG stays out -- it can carry inline
+# script and is served inline, which would be stored XSS.
+ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+MAX_IMAGE_SIZE = 8 * 1024 * 1024  # 8MB - an animated GIF walkthrough is large
+ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
 
 # ============================================================
@@ -566,14 +570,14 @@ async def upload_image(
     if file.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file type: {file.content_type}. Allowed: PNG, JPEG, WebP",
+            detail=f"Unsupported file type: {file.content_type}. Allowed: PNG, JPEG, WebP, GIF",
         )
 
     content = await file.read()
     if len(content) > MAX_IMAGE_SIZE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File too large. Maximum size is 4MB.",
+            detail="File too large. Maximum size is 8MB.",
         )
 
     if not validate_image_magic(content, file.content_type):
