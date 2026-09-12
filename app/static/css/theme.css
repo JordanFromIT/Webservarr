@@ -24,6 +24,14 @@
      entry is a true yellow-gold - the eBook amber turns orange under a glow. */
   --color-new-flag: 255 214 10;
 
+  /* Status pill (header). No palette entry reads as "healthy green" or
+     "danger red" either, so these get dedicated tokens the same way the
+     media-type accents do, instead of the header pill reaching for
+     Tailwind's default red-500/yellow-500/green-500 utilities directly. */
+  --color-status-online: 34 197 94;
+  --color-status-degraded: 234 179 8;
+  --color-status-issues: 239 68 68;
+
   --hex-primary: #125793;
   --hex-secondary: #2C6DA1;
   --hex-accent: #4684B0;
@@ -67,6 +75,42 @@ body {
 .badge-media-book {
   color: rgb(var(--color-media-book));
   background: rgb(var(--color-media-book) / 0.2);
+}
+
+/* ---- Status pill (header) ----
+ *
+ * header.js sets #systemStatus[data-state] once real Uptime Kuma data
+ * arrives; the pill ships in the neutral steel-blue treatment already on
+ * the element (see the static shell partial) and stays there until then.
+ * ID + attribute beats the shipped Tailwind utility classes on specificity
+ * alone, so no !important is needed here.
+ */
+#systemStatus[data-state="online"] {
+  background: rgb(var(--color-status-online) / 0.1);
+  border-color: rgb(var(--color-status-online) / 0.3);
+}
+#systemStatus[data-state="online"] span:first-child {
+  background: rgb(var(--color-status-online));
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; /* matches Tailwind's .animate-pulse */
+}
+#systemStatus[data-state="online"] span:last-child { color: rgb(var(--color-status-online)); }
+
+#systemStatus[data-state="degraded"] {
+  background: rgb(var(--color-status-degraded) / 0.1);
+  border-color: rgb(var(--color-status-degraded) / 0.3);
+}
+#systemStatus[data-state="degraded"] span:first-child { background: rgb(var(--color-status-degraded)); }
+#systemStatus[data-state="degraded"] span:last-child { color: rgb(var(--color-status-degraded)); }
+
+#systemStatus[data-state="issues"] {
+  background: rgb(var(--color-status-issues) / 0.1);
+  border-color: rgb(var(--color-status-issues) / 0.3);
+}
+#systemStatus[data-state="issues"] span:first-child { background: rgb(var(--color-status-issues)); }
+#systemStatus[data-state="issues"] span:last-child { color: rgb(var(--color-status-issues)); }
+
+@media (prefers-reduced-motion: reduce) {
+  #systemStatus[data-state="online"] span:first-child { animation: none; }
 }
 
 

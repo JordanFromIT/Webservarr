@@ -1,140 +1,83 @@
 /**
- * WebServarr — Shared Header Component
- * Desktop only: system status, notification bell, user menu with dropdown.
- * Mobile uses the top bar from sidebar.js.
+ * WebServarr — Shared Header Decorator
+ * Desktop only: system status pill, user menu dropdown. The notification
+ * bell itself is wired by notifications.js; mobile uses the top bar wired
+ * by sidebar.js.
  *
- * Usage:
- *   <div id="header-root"></div>
- *   <script src="/static/js/header.js"></script>
+ * The <header> markup ships from the server (see
+ * app/static/partials/shell.html) -- this file only wires interactivity and
+ * hydrates the status pill on top of it. It used to build the whole header
+ * at runtime (see git history for _buildHeader()); that's dead now that the
+ * static shell partial ships it already rendered.
  */
 
-function _buildHeader() {
-  var header = document.createElement('header');
-  header.className = 'h-16 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-black/40 backdrop-blur-md relative z-50';
-
-  // Left: system status
-  var left = document.createElement('div');
-  left.className = 'flex items-center gap-6';
-  var statusBadge = document.createElement('div');
-  statusBadge.id = 'systemStatus';
-  statusBadge.className = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-steel-blue/10 border border-steel-blue/30';
-  var dot = document.createElement('span');
-  dot.className = 'flex size-2 rounded-full bg-steel-blue';
-  var statusText = document.createElement('span');
-  statusText.className = 'text-steel-blue text-xs font-bold uppercase tracking-widest';
-  statusText.textContent = 'Loading...';
-  statusBadge.appendChild(dot);
-  statusBadge.appendChild(statusText);
-  left.appendChild(statusBadge);
-
-  // Right: notification bell + user menu
-  var right = document.createElement('div');
-  right.className = 'flex items-center gap-4';
-
-  // Notification bell
-  var bellBtn = document.createElement('button');
-  bellBtn.className = 'relative p-2 text-steel-blue hover:text-frosted-blue transition-colors group';
-  bellBtn.title = 'Notifications';
-  var bellIcon = document.createElement('span');
-  bellIcon.className = 'material-symbols-outlined';
-  bellIcon.textContent = 'notifications';
-  bellBtn.appendChild(bellIcon);
-  right.appendChild(bellBtn);
-
-  // User menu container
-  var menuWrap = document.createElement('div');
-  menuWrap.className = 'relative';
-
-  // Menu button
-  var menuBtn = document.createElement('button');
-  menuBtn.id = 'userMenuBtn';
-  menuBtn.className = 'flex items-center gap-3 pl-4 cursor-pointer hover:opacity-80 transition-opacity';
-
-  var nameBlock = document.createElement('div');
-  nameBlock.className = 'text-right';
-  var username = document.createElement('p');
-  username.id = 'headerUsername';
-  username.className = 'text-sm font-bold text-frosted-blue leading-none';
-  var role = document.createElement('p');
-  role.id = 'headerRole';
-  role.className = 'text-[10px] text-frosted-blue/60 mt-1';
-  nameBlock.appendChild(username);
-  nameBlock.appendChild(role);
-
-  var avatar = document.createElement('div');
-  avatar.id = 'headerAvatar';
-  avatar.className = 'size-9 rounded-full bg-gradient-to-br from-baltic-blue to-cornflower-ocean border border-steel-blue/40';
-
-  menuBtn.appendChild(nameBlock);
-  menuBtn.appendChild(avatar);
-
-  // Dropdown
-  var dropdown = document.createElement('div');
-  dropdown.id = 'userMenuDropdown';
-  dropdown.className = 'hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50';
-
-  // Account Settings link (admin-only)
-  var settingsLink = document.createElement('a');
-  settingsLink.href = '/settings';
-  settingsLink.className = 'flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors';
-  settingsLink.setAttribute('data-admin-only', 'true');
-  settingsLink.style.display = 'none';
-  var settingsIcon = document.createElement('span');
-  settingsIcon.className = 'material-symbols-outlined text-steel-blue text-sm';
-  settingsIcon.textContent = 'manage_accounts';
-  settingsLink.appendChild(settingsIcon);
-  settingsLink.appendChild(document.createTextNode('Account Settings'));
-
-  // Sign Out button
-  var logoutBtn = document.createElement('button');
-  logoutBtn.className = 'w-full flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors text-left';
-  logoutBtn.setAttribute('data-logout', '');
-  var logoutIcon = document.createElement('span');
-  logoutIcon.className = 'material-symbols-outlined text-steel-blue text-sm';
-  logoutIcon.textContent = 'logout';
-  logoutBtn.appendChild(logoutIcon);
-  logoutBtn.appendChild(document.createTextNode('Sign Out'));
-
-  dropdown.appendChild(settingsLink);
-  dropdown.appendChild(logoutBtn);
-
-  menuWrap.appendChild(menuBtn);
-  menuWrap.appendChild(dropdown);
-  right.appendChild(menuWrap);
-
-  header.appendChild(left);
-  header.appendChild(right);
-
-  return header;
-}
-
-function initHeader() {
-  // Interim (Task 2 of the nav-load-feel work): the static shell partial
-  // (app/static/partials/shell.html) now ships the header markup directly
-  // from the server, so #header-root no longer exists on any page and
-  // _buildHeader() is dead code here. Guard it rather than delete it -- a
-  // later task rewrites this file into a decorator and removes the builder
-  // for good. Either way, #userMenuBtn/#userMenuDropdown already exist (from
-  // the static partial, or from this legacy build path), so the dropdown
-  // wiring below still needs to run unconditionally.
-  var root = document.getElementById('header-root');
-  if (root) {
-    var header = _buildHeader();
-    root.appendChild(header);
-  }
-
-  // Wire dropdown toggle
+// ---- User menu dropdown ----
+(function () {
   var userMenuBtn = document.getElementById('userMenuBtn');
   var userMenuDropdown = document.getElementById('userMenuDropdown');
-  if (userMenuBtn && userMenuDropdown) {
-    userMenuBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      userMenuDropdown.classList.toggle('hidden');
-    });
-    document.addEventListener('click', function() {
-      userMenuDropdown.classList.add('hidden');
-    });
-  }
-}
+  if (!userMenuBtn || !userMenuDropdown) return;
 
-initHeader();
+  userMenuBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    userMenuDropdown.classList.toggle('hidden');
+  });
+  document.addEventListener('click', function () {
+    userMenuDropdown.classList.add('hidden');
+  });
+})();
+
+// ---- Status pill ----
+//
+// Hydrated from the sessionStorage cache (see shell-cache.js) so a warm tab
+// never sits on the neutral placeholder while the request is in flight --
+// the static shell ships #systemStatus with a blank (&nbsp;) label
+// precisely so this is the only thing that ever fills it in. Exposed as the
+// global loadSystemStatus() because every shell page's own inline script
+// already calls that by name, both on first load and on its own 30s
+// refresh interval -- this just changes what runs underneath that call.
+(function () {
+  var pill = document.getElementById('systemStatus');
+  if (!pill) {
+    window.loadSystemStatus = function () {};
+    return;
+  }
+  var textEl = pill.querySelector('span:last-child');
+
+  function paint(services) {
+    // /api/integrations/service-status returns a bare array of the
+    // admin's enabled Uptime Kuma monitors, each with a `status` of
+    // "up"/"down"/"degraded"/"maintenance" (see
+    // app/integrations/uptime_kuma.py). An empty or malformed response
+    // leaves the pill exactly as it was rather than claiming a state we
+    // don't actually know.
+    if (!Array.isArray(services) || services.length === 0) return;
+
+    var hasDown = services.some(function (s) { return s.status === 'down'; });
+    var hasDegraded = services.some(function (s) { return s.status === 'degraded'; });
+
+    var state, label;
+    if (hasDown) {
+      state = 'issues';
+      label = 'System Issues Detected';
+    } else if (hasDegraded) {
+      state = 'degraded';
+      label = 'Degraded Performance';
+    } else {
+      state = 'online';
+      label = 'All Systems Online';
+    }
+
+    textEl.textContent = label;
+    pill.dataset.state = state; // drives dot/text/background color, theme.css
+  }
+
+  window.loadSystemStatus = function () {
+    return wsCache.swr('ws.status', '/api/integrations/service-status', 30000, paint)
+      .catch(function () { /* keep whatever was last painted; never show "Loading" */ });
+  };
+
+  // Hydrate immediately -- don't wait for the page's own script to call
+  // loadSystemStatus(), which runs only after checkAuth()'s network round
+  // trip resolves.
+  window.loadSystemStatus();
+})();

@@ -112,6 +112,10 @@
       var suffix = dashIndex !== -1 ? currentTitle.substring(dashIndex) : '';
       document.title = data.app_name + suffix;
     }
+
+    // Tell already-parsed scripts (the sidebar/header branding decorators)
+    // that theme data has landed -- there was no other signal for this.
+    document.dispatchEvent(new CustomEvent('webservarr:theme', { detail: data }));
   }
 
   /**

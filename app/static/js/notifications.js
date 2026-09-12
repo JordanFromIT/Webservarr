@@ -642,16 +642,32 @@
     // Register service worker
     registerServiceWorker();
 
-    // Fetch initial count
-    fetchUnreadCount().then(function(count) {
-      _lastCount = -1; // Ensure first update doesn't pulse
-      updateBadge(count);
-    });
+    _lastCount = -1; // Ensure the very first paint never pulses, whether
+                      // that paint comes from cache or the network.
 
-    // Poll every 30 seconds
-    _pollTimer = setInterval(function() {
-      fetchUnreadCount().then(updateBadge);
-    }, 30000);
+    // Extracted so both the cached (instant, possibly stale) paint and the
+    // network refresh funnel through the same "only touch the DOM when the
+    // count changed" gate.
+    function applyCount(data) {
+      var count = (data && data.count) || 0;
+      if (count === _lastCount) return;
+      updateBadge(count);
+    }
+
+    function refresh() {
+      if (!window.wsCache) {
+        fetchUnreadCount().then(function (n) { applyCount({ count: n }); });
+        return;
+      }
+      // wsCache.swr paints from the sessionStorage cache synchronously (if
+      // any), then revalidates against the network -- matching the old
+      // 30s poll cadence, since maxAgeMs here equals the interval below.
+      wsCache.swr('ws.notifCount', '/api/notifications/unread-count', 30000, applyCount)
+        .catch(function () { /* keep whatever was last painted */ });
+    }
+
+    refresh();
+    _pollTimer = setInterval(refresh, 30000);
 
     // Close dropdown on outside click
     document.addEventListener('click', handleOutsideClick);

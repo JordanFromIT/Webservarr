@@ -4,18 +4,70 @@
  */
 
 /**
+ * Paint a user's identity into the header/sidebar chrome. Runs once
+ * synchronously from a cached (possibly stale) user object for an instant
+ * first paint, and again once the server confirms it. Display-only: it
+ * never decides whether the caller is allowed to be here -- checkAuth does
+ * that, and only ever off the fresh server answer (see the comment there).
+ * @param {Object} user
+ */
+function paintUser(user) {
+  if (!user) return;
+
+  var usernameEl = document.getElementById('headerUsername');
+  var roleEl = document.getElementById('headerRole');
+  if (usernameEl) usernameEl.textContent = user.display_name || user.username;
+  if (roleEl) roleEl.textContent = user.is_admin ? 'Admin' : 'User';
+
+  // Populate avatar if available
+  var avatarEl = document.getElementById('headerAvatar');
+  if (avatarEl && user.avatar_url) {
+    avatarEl.style.backgroundImage = 'url(' + user.avatar_url + ')';
+    avatarEl.style.backgroundSize = 'cover';
+    avatarEl.style.backgroundPosition = 'center';
+  }
+
+  // Admin-gated nav/menu entries. Display-only -- every admin API route
+  // (and the requireAdmin check in checkAuth below) still enforces this
+  // server-side, so a stale or tampered cache can change what's shown here
+  // but never what's allowed to succeed.
+  document.querySelectorAll('[data-admin-only]').forEach(function (el) {
+    el.hidden = !user.is_admin;
+  });
+
+  // Mobile top bar mirrors the desktop header's identity block.
+  var mobileUsername = document.getElementById('mobileUsername');
+  var mobileRole = document.getElementById('mobileRole');
+  if (mobileUsername) mobileUsername.textContent = user.display_name || user.username;
+  if (mobileRole) mobileRole.textContent = user.is_admin ? 'Admin' : 'User';
+}
+
+/**
  * Check if user has an active session. Redirects to /login if not.
  * Returns the user object on success, or null if redirecting.
+ *
+ * Paints from the sessionStorage cache (window.wsCache, see shell-cache.js)
+ * synchronously before the network call, so a warm tab never shows a blank
+ * avatar/username/admin nav while check-session is in flight. Enforcement
+ * (the redirect below, and requireAdmin) only ever acts on the fresh server
+ * answer -- a stale cache can change what's painted, never what's allowed.
+ * wsCache isn't loaded on every page that includes auth.js (e.g. the ebook
+ * reader), so every use of it is guarded.
  * @param {Object} [options]
  * @param {boolean} [options.requireAdmin] - Redirect non-admins to /
  * @returns {Promise<Object|null>}
  */
 async function checkAuth(options) {
   options = options || {};
+
+  var cachedUser = window.wsCache ? window.wsCache.read('ws.user', null) : null;
+  if (cachedUser) paintUser(cachedUser);
+
   try {
     var resp = await fetch('/auth/check-session');
     var data = await resp.json();
     if (!data.authenticated) {
+      if (window.wsCache) window.wsCache.clear();
       window.location.href = '/login';
       return null;
     }
@@ -26,19 +78,8 @@ async function checkAuth(options) {
       return null;
     }
 
-    // Populate header elements if they exist
-    var usernameEl = document.getElementById('headerUsername');
-    var roleEl = document.getElementById('headerRole');
-    if (usernameEl) usernameEl.textContent = user.display_name || user.username;
-    if (roleEl) roleEl.textContent = user.is_admin ? 'Admin' : 'User';
-
-    // Populate avatar if available
-    var avatarEl = document.getElementById('headerAvatar');
-    if (avatarEl && user.avatar_url) {
-      avatarEl.style.backgroundImage = 'url(' + user.avatar_url + ')';
-      avatarEl.style.backgroundSize = 'cover';
-      avatarEl.style.backgroundPosition = 'center';
-    }
+    if (window.wsCache) window.wsCache.write('ws.user', user);
+    paintUser(user);
 
     return user;
   } catch (e) {
@@ -55,6 +96,11 @@ function wireLogout() {
   var btns = document.querySelectorAll('#logoutBtn, [data-logout]');
   btns.forEach(function (btn) {
     btn.addEventListener('click', function () {
+      // Every logout path clears the cache -- otherwise the next person to
+      // sign in on this tab would paint from the previous user's identity/
+      // status/notification cache for an instant before the fresh fetch
+      // lands.
+      if (window.wsCache) window.wsCache.clear();
       window.location.href = '/auth/logout';
     });
   });
@@ -97,52 +143,6 @@ function formatUptime(seconds) {
   if (days > 0) return days + 'd ' + hours + 'h';
   if (hours > 0) return hours + 'h ' + mins + 'm';
   return mins + 'm';
-}
-
-/**
- * Load system status from Uptime Kuma and update the status banner.
- * Can be called from any page that has a #systemStatus element.
- */
-async function loadSystemStatus() {
-  var banner = document.getElementById('systemStatus');
-  if (!banner) return;
-  try {
-    var resp = await fetch('/api/integrations/service-status');
-    if (!resp.ok) return;
-    var services = await resp.json();
-    if (!Array.isArray(services) || services.length === 0) return;
-
-    var hasDown = services.some(function(s) { return s.status === 'down'; });
-    var hasDegraded = services.some(function(s) { return s.status === 'degraded'; });
-
-    var dotColor, textColor, label, bgClass;
-    if (hasDown) {
-      dotColor = 'bg-red-500'; textColor = 'text-red-500';
-      label = 'System Issues Detected';
-      bgClass = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/30';
-    } else if (hasDegraded) {
-      dotColor = 'bg-yellow-500'; textColor = 'text-yellow-500';
-      label = 'Degraded Performance';
-      bgClass = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-yellow-500/10 border border-yellow-500/30';
-    } else {
-      dotColor = 'bg-green-500 animate-pulse'; textColor = 'text-green-500';
-      label = 'All Systems Online';
-      bgClass = 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30';
-    }
-
-    // Build using DOM methods (no innerHTML with dynamic content)
-    banner.className = bgClass;
-    while (banner.firstChild) banner.removeChild(banner.firstChild);
-    var dot = document.createElement('span');
-    dot.className = 'flex size-2 rounded-full ' + dotColor;
-    var text = document.createElement('span');
-    text.className = textColor + ' text-xs font-bold uppercase tracking-widest';
-    text.textContent = label;
-    banner.appendChild(dot);
-    banner.appendChild(text);
-  } catch (e) {
-    // silently fail — status stays at "Loading..."
-  }
 }
 
 /**

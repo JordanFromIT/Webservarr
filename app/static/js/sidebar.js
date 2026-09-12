@@ -1,207 +1,124 @@
 /**
- * WebServarr — Shared Sidebar Component
- * Desktop: persistent 256px sidebar.
- * Mobile (<1024px): sticky top bar with hamburger + slide-out drawer.
+ * WebServarr — Shared Sidebar Decorator
+ * Desktop: persistent 256px sidebar. Mobile (<1024px): sticky top bar with
+ * hamburger + slide-out drawer.
  *
- * Usage:
- *   <div id="sidebar-root"></div>
- *   <script src="/static/js/sidebar.js"></script>
- *   <script>initSidebar('home');</script>
+ * The sidebar/topbar/drawer markup ships from the server (see
+ * app/static/partials/shell.html) -- this file only wires interactivity
+ * (drawer, mobile user menu, logout) and re-applies an operator's own
+ * branding (Settings > Customization) on top of the shipped generic
+ * defaults. It used to build the whole sidebar at runtime (see git history
+ * for _buildSidebarHTML()/NAV_ITEMS); that's dead now that the static shell
+ * partial ships it already rendered.
  */
 
-var NAV_ITEMS = [
-  // Label is the destination's name; sublabel says what you do there. Every
-  // item carries one -- descriptions on only some items read as unfinished,
-  // and the pair only disambiguates Issues from Tickets if the whole list is
-  // written in the same voice. All sublabels are verb phrases for that reason.
-  { id: 'home',     label: 'Home',        icon: 'home',                 href: '/',                sublabel: "See what's happening" },
-  { id: 'requests', label: 'Requests',    icon: 'movie',                href: '/requests',        sublabel: 'Request a movie or show' },
-  { id: 'requests-embed', label: 'Requests (Embed)', icon: 'download',  href: '/requests-embed',  sublabel: 'Request through Seerr', badgeId: 'requestsBadge', feature: 'show_requests' },
-  { id: 'issues',   label: 'Issues',      icon: 'report_problem',       href: '/issues',          sublabel: 'Report a problem with media' },
-  { id: 'calendar', label: 'Calendar',    icon: 'calendar_month',       href: '/calendar',        sublabel: 'See upcoming releases' },
-  { id: 'tickets',  label: 'Tickets',     icon: 'confirmation_number',  href: '/tickets',         sublabel: 'Get help from the admin', feature: 'show_tickets' },
-  { id: 'library',  label: 'eBooks',      icon: 'menu_book',            href: '/library',         sublabel: 'Read books in your browser', feature: 'show_books' },
-  { id: 'wiki',     label: 'Wiki',        icon: 'library_books',        href: '/wiki',            sublabel: 'Read guides and how-tos' },
-  { id: 'settings', label: 'Settings',    icon: 'settings',             href: '/settings',        sublabel: 'Manage the site', adminOnly: true },
-];
+// ---- Branding overrides ----
+//
+// Patches the static markup in place rather than rebuilding it: hides items
+// disabled via sidebar_enabled or a false feature flag (both ship VISIBLE
+// by default in the static partial, so a slow or missing branding fetch
+// never blanks the nav -- this only ever hides), swaps label/sublabel/icon
+// text, applies "New!" flags, and sets the app name/logo.
+//
+// Reads window.WEBSERVARR_THEME, which theme-loader.js populates
+// synchronously from its own localStorage cache before this script runs
+// (script order: theme-loader -> shell-cache -> auth -> header -> sidebar),
+// so a warm branding cache patches in before first paint. Re-runs on
+// theme-loader's 'webservarr:theme' event once a fresh /api/branding
+// answer lands, so a cold cache (or a changed setting) still reaches every
+// page without a reload.
 
 /**
- * Build the sidebar HTML.
- * @param {string} currentPage - id of the active nav item
- * @returns {string} HTML string
+ * Add or remove the "New!" flag on a nav item's label span, without
+ * touching whatever text is already there.
  */
-
-var _sidebarRebuildWired = false;
-
-/* Whether a nav item wears a "New!" flag.
-   Admin-controlled, from Settings > Customization, rather than retiring itself
-   the first time each browser opens the page. Two reasons: the admin knows how
-   long a launch stays newsworthy, and a self-retiring flag is invisible to the
-   person who has to decide whether it is still working. */
-function _isFlaggedNew(id) {
-  var theme = window.WEBSERVARR_THEME || {};
-  return !!(theme.sidebar_new || {})[id];
+function _applyNavNewBadge(labelEl, isNew) {
+  var badge = labelEl.querySelector('.nav-new-badge');
+  if (isNew && !badge) {
+    badge = document.createElement('span');
+    badge.className = 'nav-new-badge';
+    badge.textContent = 'New!';
+    labelEl.appendChild(badge);
+  } else if (!isNew && badge) {
+    badge.remove();
+  }
 }
 
-function _buildSidebarHTML(currentPage) {
-  var theme = window.WEBSERVARR_THEME || {};
-  var appName = theme.app_name || 'WEBSERVARR';
+/**
+ * Overwrite a nav item's label text, preserving its "New!" badge (if any)
+ * rather than clobbering it with a plain textContent assignment.
+ */
+function _setNavLabelText(labelEl, text) {
+  var badge = labelEl.querySelector('.nav-new-badge');
+  if (badge) badge.remove();
+  labelEl.textContent = text;
+  if (badge) labelEl.appendChild(badge);
+}
+
+function _applySidebarBranding() {
+  var theme = window.WEBSERVARR_THEME;
+  if (!theme) return;
+
+  if (theme.app_name) {
+    document.querySelectorAll('#appSidebar h1, #drawerPanel h1').forEach(function (h1) {
+      h1.textContent = theme.app_name;
+    });
+    var topbarName = document.querySelector('#appTopbar > span.font-bold');
+    if (topbarName) topbarName.textContent = theme.app_name;
+  }
+  if (theme.logo_url) {
+    document.querySelectorAll('#appSidebar img[alt="Logo"], #drawerPanel img[alt="Logo"]').forEach(function (img) {
+      img.src = theme.logo_url;
+    });
+  }
+
   var features = theme.features || {};
+  var enabled = theme.sidebar_enabled || {};
   var labels = theme.sidebar_labels || {};
   var sublabels = theme.sidebar_sublabels || {};
   var icons = theme.icons || {};
-  var logoIcon = icons.sidebar_logo || 'settings_input_component';
-  var logoUrl = theme.logo_url || '';
+  var news = theme.sidebar_new || {};
 
-  // Filter by feature flags and apply label/icon overrides
-  var enabled = theme.sidebar_enabled || {};
-  var visibleItems = NAV_ITEMS.filter(function (item) {
-    // Admin's per-page switch (Settings > Customization). Defaults to visible
-    // when branding has not loaded yet, so a slow /api/branding never blanks
-    // the nav. Settings has no key and is always present.
-    if (item.id !== 'settings' && enabled[item.id] === false) return false;
-    if (item.feature && !features[item.feature]) return false;
-    return true;
-  }).map(function (item) {
-    var overrides = {};
-    var customLabel = labels[item.id];
-    if (customLabel) overrides.label = customLabel;
-    var customIcon = icons['nav_' + item.id];
-    if (customIcon) overrides.icon = customIcon;
-    // Unlike label and icon, an empty sublabel is a real choice ("hide the
-    // second line"), so test for presence rather than truthiness. Absent means
-    // branding has not loaded yet -- keep the built-in default.
-    if (sublabels[item.id] !== undefined) overrides.sublabel = sublabels[item.id];
-    if (Object.keys(overrides).length > 0) {
-      return Object.assign({}, item, overrides);
+  // Every nav item exists twice (desktop nav + mobile drawer copy); both
+  // carry the same data-nav-id, so one pass over the whole document patches
+  // both.
+  document.querySelectorAll('[data-nav-id]').forEach(function (link) {
+    var id = link.dataset.navId;
+
+    // Settings has no sidebar_enabled key (hiding it would lock the admin
+    // out of the only page that could turn it back on) -- see branding.py.
+    var hide = id !== 'settings' && enabled[id] === false;
+    if (!hide && link.dataset.feature && features[link.dataset.feature] === false) hide = true;
+    link.hidden = hide;
+
+    var iconEl = link.querySelector('.material-symbols-outlined');
+    if (iconEl && icons['nav_' + id]) iconEl.textContent = icons['nav_' + id];
+
+    // The sublabel span also carries a `.truncate` class, so exclude it
+    // explicitly rather than relying on document order to pick the label.
+    var labelEl = link.querySelector('.truncate:not(.nav-sublabel)');
+    if (labelEl) {
+      if (labels[id] !== undefined) _setNavLabelText(labelEl, labels[id]);
+      _applyNavNewBadge(labelEl, !!news[id]);
     }
-    return item;
+
+    var subEl = link.querySelector('.nav-sublabel');
+    if (subEl && sublabels[id] !== undefined) {
+      // An empty sublabel is a real choice (hide the line), not "no
+      // override yet" -- that's why this checks `!== undefined` rather
+      // than truthiness.
+      subEl.hidden = sublabels[id] === '';
+      if (sublabels[id] !== '') subEl.textContent = sublabels[id];
+    }
   });
-
-  // Nav links
-  var navLinks = visibleItems.map(function (item) {
-    var isActive = item.id === currentPage;
-    var adminAttr = item.adminOnly ? ' data-admin-only="true" style="display:none"' : '';
-    var newFlag = _isFlaggedNew(item.id)
-      ? '<span class="nav-new-badge">New!</span>'
-      : '';
-
-    var badge = item.badgeId
-      ? '<span id="' + item.badgeId + '" class="ml-auto bg-primary/20 text-[10px] px-1.5 py-0.5 rounded font-bold hidden"></span>'
-      : '';
-
-    // A sublabel stacks under the label instead of sitting beside it, so the
-    // nav keeps one scannable column of names with the clarification as
-    // secondary text. On the active pill it rides the inherited colour at
-    // reduced opacity rather than introducing a second one.
-    var sub = item.sublabel || '';
-    var labelBlock = sub
-      ? '<span class="flex flex-col min-w-0 leading-tight">' +
-          '<span class="truncate">' + escapeHtml(item.label) + newFlag + '</span>' +
-          '<span class="text-[10px] font-normal truncate mt-0.5 ' + (isActive ? 'opacity-70' : 'text-steel-blue') + '">' + escapeHtml(sub) + '</span>' +
-        '</span>'
-      : '<span>' + escapeHtml(item.label) + newFlag + '</span>';
-
-    if (isActive) {
-      return '<a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary text-background-dark font-bold transition-all shadow-baltic-blue/20 py-2.5" href="' + item.href + '"' + adminAttr + '>' +
-        '<span class="material-symbols-outlined fill-1 shrink-0">' + escapeHtml(item.icon) + '</span>' +
-        labelBlock + badge + '</a>';
-    }
-    return '<a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="' + item.href + '"' + adminAttr + '>' +
-      '<span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">' + escapeHtml(item.icon) + '</span>' +
-      labelBlock + badge + '</a>';
-  }).join('\n');
-
-  // Logo: image if logo_url set, otherwise icon
-  var logoHtml = logoUrl
-    ? '<img src="' + escapeHtml(logoUrl) + '" alt="Logo" class="w-full h-auto rounded-lg object-contain mb-3">'
-    : '<div class="size-14 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-baltic-blue/20 mb-3">' +
-        '<span class="material-symbols-outlined text-background-dark font-bold text-3xl">' + escapeHtml(logoIcon) + '</span>' +
-      '</div>';
-
-  // Desktop sidebar
-  var desktopSidebar = '' +
-    '<aside id="desktopSidebar" class="hidden lg:flex w-64 bg-baltic-blue/20 border-r border-steel-blue/30 flex-col h-screen shrink-0">' +
-      '<div class="p-6 flex flex-col items-center">' +
-        logoHtml +
-        '<h1 class="text-frosted-blue font-bold text-lg leading-none text-center">' + escapeHtml(appName) + '</h1>' +
-      '</div>' +
-      '<nav class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1 opacity-0 transition-opacity duration-200" id="desktopNav">' + navLinks + '</nav>' +
-      '<div class="p-4 border-t border-steel-blue/20">' +
-        '<p id="appVersion" class="text-steel-blue text-[10px] text-center" data-admin-only="true" style="display:none"></p>' +
-      '</div>' +
-    '</aside>';
-
-  // Mobile top bar + drawer
-  var mobileTopBar = '' +
-    '<div id="mobileTopBar" class="lg:hidden sticky top-0 z-40 h-14 bg-black/80 backdrop-blur-md border-b border-steel-blue/20 flex items-center justify-between px-4">' +
-      '<button id="hamburgerBtn" class="p-2 text-steel-blue hover:text-bright transition-colors">' +
-        '<span class="material-symbols-outlined">menu</span>' +
-      '</button>' +
-      '<span class="text-frosted-blue font-bold text-sm truncate max-w-[40%]">' + escapeHtml(appName) + '</span>' +
-      '<div class="relative flex items-center gap-1 sm:gap-2 min-w-0">' +
-        '<button class="relative p-1.5 sm:p-2 text-steel-blue hover:text-frosted-blue transition-colors shrink-0" title="Notifications">' +
-          '<span class="material-symbols-outlined">notifications</span>' +
-        '</button>' +
-        '<button id="mobileUserMenuBtn" class="flex items-center gap-1.5 sm:gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0">' +
-          '<div class="text-right min-w-0">' +
-            '<p id="mobileUsername" class="text-xs font-bold text-frosted-blue leading-none truncate max-w-[80px] sm:max-w-[120px]"></p>' +
-            '<p id="mobileRole" class="text-[10px] text-steel-blue hidden sm:block"></p>' +
-          '</div>' +
-        '</button>' +
-        '<div id="mobileUserMenuDropdown" class="hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">' +
-          '<a href="/settings" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors" data-admin-only="true" style="display:none">' +
-            '<span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>' +
-            'Account Settings' +
-          '</a>' +
-          '<button data-logout class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors text-left">' +
-            '<span class="material-symbols-outlined text-steel-blue text-sm">logout</span>' +
-            'Sign Out' +
-          '</button>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-
-  // Mobile drawer overlay
-  var mobileDrawer = '' +
-    '<div id="drawerOverlay" class="lg:hidden fixed inset-0 z-50 bg-black/60 hidden" style="backdrop-filter:blur(2px)">' +
-      '<aside id="drawerPanel" class="w-72 bg-background-dark border-r border-steel-blue/30 h-full flex flex-col transform -translate-x-full transition-transform duration-300">' +
-        '<div class="p-6">' +
-          '<div class="flex items-center justify-between mb-3">' +
-            '<div class="flex-1"></div>' +
-            '<button id="drawerCloseBtn" class="p-1 text-steel-blue hover:text-bright transition-colors">' +
-              '<span class="material-symbols-outlined">close</span>' +
-            '</button>' +
-          '</div>' +
-          '<div class="flex flex-col items-center">' +
-            logoHtml +
-            '<h1 class="text-frosted-blue font-bold text-lg leading-none text-center">' + escapeHtml(appName) + '</h1>' +
-          '</div>' +
-        '</div>' +
-        '<nav class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1 opacity-0 transition-opacity duration-200" id="drawerNav">' + navLinks + '</nav>' +
-        '<div class="p-4 border-t border-steel-blue/20">' +
-          '<button data-logout class="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-steel-blue hover:text-bright transition-colors">' +
-            '<span class="material-symbols-outlined text-sm">logout</span> Sign Out' +
-          '</button>' +
-          '<p class="appVersionMobile text-steel-blue text-[10px] text-center mt-2" data-admin-only="true" style="display:none"></p>' +
-        '</div>' +
-      '</aside>' +
-    '</div>';
-
-  return desktopSidebar + mobileTopBar + mobileDrawer;
 }
 
-/**
- * Initialize the sidebar component.
- * @param {string} currentPage - id of the active nav item (e.g. 'home', 'activity')
- */
-/**
- * Attach the drawer, user menu and logout handlers to the current sidebar
- * markup. Split out of initSidebar so the sidebar can be redrawn - when
- * branding arrives late - without losing its interactivity.
- */
+_applySidebarBranding();
+document.addEventListener('webservarr:theme', _applySidebarBranding);
+
+// ---- Drawer, mobile user menu, logout ----
+
 function _wireSidebarChrome() {
-  // Wire hamburger / drawer
   var overlay = document.getElementById('drawerOverlay');
   var panel = document.getElementById('drawerPanel');
   var hamburger = document.getElementById('hamburgerBtn');
@@ -231,11 +148,11 @@ function _wireSidebarChrome() {
   var mobileUserBtn = document.getElementById('mobileUserMenuBtn');
   var mobileUserDropdown = document.getElementById('mobileUserMenuDropdown');
   if (mobileUserBtn && mobileUserDropdown) {
-    mobileUserBtn.addEventListener('click', function(e) {
+    mobileUserBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       mobileUserDropdown.classList.toggle('hidden');
     });
-    document.addEventListener('click', function() {
+    document.addEventListener('click', function () {
       mobileUserDropdown.classList.add('hidden');
     });
   }
@@ -247,105 +164,31 @@ function _wireSidebarChrome() {
   loadAppVersion();
 }
 
-function initSidebar(currentPage) {
-  // Interim (Task 2 of the nav-load-feel work): the static shell partial
-  // (app/static/partials/shell.html) now ships the sidebar/topbar/drawer
-  // markup directly from the server, so #sidebar-root no longer exists on
-  // any page and this rebuild path is dead. A later task rewrites this file
-  // into a decorator that patches the static markup instead of replacing
-  // it; until then this is a no-op guard so pages that stop calling
-  // initSidebar() (or ones a future page still calls it from) don't error.
-  var root = document.getElementById('sidebar-root');
-  if (!root) return;
-
-  root.innerHTML = _buildSidebarHTML(currentPage);
-
-  // Rebuild once branding lands.
-  //
-  // Feature-gated items (eBooks, Tickets) are filtered out when
-  // WEBSERVARR_THEME has no features yet, and the sidebar used to be built
-  // once and left alone. On a cold localStorage cache - a first-ever visit,
-  // exactly when someone most needs to find the new section - branding had not
-  // arrived, so those links were silently absent until the next page load.
-  if (!_sidebarRebuildWired) {
-    _sidebarRebuildWired = true;
-    var attempts = 0;
-    var poll = setInterval(function () {
-      attempts++;
-      var t = window.WEBSERVARR_THEME;
-      if (t && t.features) {
-        clearInterval(poll);
-        // Only redraw if the feature set would actually change the nav.
-        var fresh = _buildSidebarHTML(currentPage);
-        if (fresh !== root.innerHTML) {
-          root.innerHTML = fresh;
-          _wireSidebarChrome();
-          // The fresh markup is back to opacity-0 with admin items hidden, so
-          // the reveal has to be replayed - it already ran against the markup
-          // this just discarded.
-          if (_navRevealed) showAdminNav(_navIsAdmin);
-        }
-      } else if (attempts > 40) {
-        clearInterval(poll);   // ~4s; branding is not coming
-      }
-    }, 100);
-  }
-
+if (document.getElementById('appSidebar') || document.getElementById('appTopbar')) {
   _wireSidebarChrome();
 }
 
-
 /**
  * Show/hide admin-only nav items based on user role.
- * Call after checkAuth() returns the user.
+ *
+ * Kept for backward compatibility: every shell page still calls
+ * showAdminNav(user.is_admin) right after checkAuth() resolves. auth.js's
+ * paintUser() already reveals/hides every [data-admin-only] element (from
+ * cache for an instant paint, then again from the server's answer) and
+ * mirrors the mobile username/role onto the top bar -- this just re-applies
+ * the same idempotent result, so those call sites keep working with
+ * nothing left for this to actually change.
  * @param {boolean} isAdmin
  */
-/* The last reveal state. Rebuilding the sidebar replaces its markup, which
-   restores the nav to its initial opacity-0 and re-hides admin items; without
-   replaying this, a rebuild leaves the whole nav invisible. */
-var _navRevealed = false;
-var _navIsAdmin = false;
-
 function showAdminNav(isAdmin) {
-  _navRevealed = true;
-  _navIsAdmin = !!isAdmin;
+  document.querySelectorAll('[data-admin-only]').forEach(function (el) {
+    el.hidden = !isAdmin;
+  });
 
-  if (isAdmin) {
-    var items = document.querySelectorAll('[data-admin-only]');
-    items.forEach(function (el) {
-      // The static shell partial (Task 2) marks these with the `hidden`
-      // boolean attribute; the old JS-built markup used
-      // style="display:none". Clear both so either source reveals correctly.
-      el.hidden = false;
-      el.style.display = '';
-    });
-  }
-
-  // Fade in nav sections (prevents flicker of admin items popping in).
-  // No-op against the static shell partial, which no longer ships
-  // opacity-0 -- the nav paints complete immediately and only individual
-  // admin-gated items start hidden, so there is nothing left to fade in.
-  var desktopNav = document.getElementById('desktopNav');
-  var drawerNav = document.getElementById('drawerNav');
-  if (desktopNav) desktopNav.classList.replace('opacity-0', 'opacity-100');
-  if (drawerNav) drawerNav.classList.replace('opacity-0', 'opacity-100');
-
-  // Also populate mobile user info
   var mobileUsername = document.getElementById('mobileUsername');
   var mobileRole = document.getElementById('mobileRole');
   var headerUsername = document.getElementById('headerUsername');
   var headerRole = document.getElementById('headerRole');
   if (mobileUsername && headerUsername) mobileUsername.textContent = headerUsername.textContent;
   if (mobileRole && headerRole) mobileRole.textContent = headerRole.textContent;
-}
-
-// Interim (Task 2): pages no longer call initSidebar('...') to build the
-// sidebar, since the static shell partial ships it already rendered -- so
-// nothing was wiring up the drawer toggle, the mobile user menu, or the
-// logout buttons any more. Wire them unconditionally, the same way
-// header.js wires its own dropdown at the bottom of that file. A later task
-// (the decorator rewrite) replaces this with the real init path; this stays
-// the smallest change that keeps the shell interactive in the meantime.
-if (document.getElementById('appSidebar') || document.getElementById('appTopbar')) {
-  _wireSidebarChrome();
 }
