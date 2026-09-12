@@ -401,7 +401,9 @@ async function loadNews() {
 
 // Load request count for sidebar badge
 async function loadRequestCount() {
+    // The badge exists only when the embedded requests page is enabled.
     const badge = document.getElementById('requestsBadge');
+    if (!badge) return;
     try {
         const response = await fetch('/api/integrations/request-counts');
         if (!response.ok) throw new Error('API error');

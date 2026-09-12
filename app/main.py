@@ -185,6 +185,11 @@ async def add_security_headers(request: Request, call_next):
     """Add security headers to all responses."""
     response = await call_next(request)
 
+    # The push service worker lives under /static/ but must control the whole
+    # origin; without this header the browser rejects the registration.
+    if request.url.path == "/static/sw.js":
+        response.headers["Service-Worker-Allowed"] = "/"
+
     # Security headers
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
