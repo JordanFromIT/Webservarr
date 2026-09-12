@@ -334,3 +334,27 @@ body[data-page="settings"]       [data-nav-id="settings"] .nav-sublabel {
   color: inherit;
   opacity: 0.7;
 }
+
+/* The icon rode the active link's own dark color too -- the old JS-built
+   markup never put a color class on the active item's icon span, so it
+   inherited `color: rgb(var(--color-background))` straight from the parent
+   <a> above. The static partial ships every icon with a hardcoded
+   `text-steel-blue`, which -- being set directly on the icon itself -- wins
+   over that inheritance and leaves the active icon looking identical to an
+   inactive one. Restore the inheritance explicitly. (The old markup's other
+   icon-only class, `fill-1`, is not reproduced here: it maps to no rule in
+   this file, the compiled tailwind.css, or any stylesheet the app has ever
+   shipped -- grep and `git log -S` back to the v1.0.0 tag confirm it has
+   always been inert. There is no Material Symbols FILL axis behavior to
+   match; the only real visual delta was always this color.) */
+body[data-page="home"]           [data-nav-id="home"]           > .material-symbols-outlined,
+body[data-page="requests"]       [data-nav-id="requests"]       > .material-symbols-outlined,
+body[data-page="requests-embed"] [data-nav-id="requests-embed"] > .material-symbols-outlined,
+body[data-page="issues"]         [data-nav-id="issues"]         > .material-symbols-outlined,
+body[data-page="calendar"]       [data-nav-id="calendar"]       > .material-symbols-outlined,
+body[data-page="tickets"]        [data-nav-id="tickets"]        > .material-symbols-outlined,
+body[data-page="library"]        [data-nav-id="library"]        > .material-symbols-outlined,
+body[data-page="wiki"]           [data-nav-id="wiki"]           > .material-symbols-outlined,
+body[data-page="settings"]       [data-nav-id="settings"]       > .material-symbols-outlined {
+  color: inherit;
+}
