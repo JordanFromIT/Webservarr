@@ -53,9 +53,6 @@ DEFAULT_SETTINGS = {
     # Wiki. library_books rather than menu_book, which eBooks already uses.
     "sidebar.label_wiki": ("Wiki", "Sidebar label for the Wiki page"),
     "sidebar.sublabel_wiki": ("Read guides and how-tos", "Sidebar sublabel for Wiki"),
-    "sidebar.sublabel_request_status": ("Track what you asked for", "Sidebar sublabel for Request Status"),
-    "sidebar.label_request_status": ("Request Status", "Sidebar label for Request Status"),
-    "icon.nav_request_status": ("pending_actions", "Sidebar icon for Request Status"),
     "sidebar.enabled_wiki": ("true", "Show Wiki in the sidebar"),
     "sidebar.new_wiki": ("false", "Show a New! flag on the Wiki nav item"),
     "icon.nav_wiki": ("library_books", "Sidebar icon for Wiki page"),

@@ -569,19 +569,6 @@ async def calendar_page(
     return _serve_page("/app/app/static/calendar.html", "Calendar page", request)
 
 
-# Request status page
-@app.get("/request-status", response_class=HTMLResponse, tags=["Pages"])
-async def request_status_page(
-    request: Request,
-    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
-):
-    """Serve the page explaining why requested media has not arrived yet."""
-    if not await _require_session(session_id):
-        return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/request-status.html", "Request status page", request)
-
-
-# Tickets page
 @app.get("/tickets", response_class=HTMLResponse, tags=["Pages"])
 async def tickets_page(
     request: Request,

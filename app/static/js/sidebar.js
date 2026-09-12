@@ -17,7 +17,6 @@ var NAV_ITEMS = [
   { id: 'home',     label: 'Home',        icon: 'home',                 href: '/',                sublabel: "See what's happening" },
   { id: 'requests', label: 'Requests',    icon: 'movie',                href: '/requests',        sublabel: 'Request a movie or show' },
   { id: 'requests-embed', label: 'Requests (Embed)', icon: 'download',  href: '/requests-embed',  sublabel: 'Request through Seerr', badgeId: 'requestsBadge', feature: 'show_requests' },
-  { id: 'request-status', label: 'Request Status', icon: 'pending_actions', href: '/request-status', sublabel: 'Track what you asked for', feature: 'show_request_status' },
   { id: 'issues',   label: 'Issues',      icon: 'report_problem',       href: '/issues',          sublabel: 'Report a problem with media' },
   { id: 'calendar', label: 'Calendar',    icon: 'calendar_month',       href: '/calendar',        sublabel: 'See upcoming releases' },
   { id: 'tickets',  label: 'Tickets',     icon: 'confirmation_number',  href: '/tickets',         sublabel: 'Get help from the admin', feature: 'show_tickets' },

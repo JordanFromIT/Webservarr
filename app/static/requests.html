@@ -184,6 +184,50 @@
   </div>
 </div>
 
+<!-- Request status grid.
+     Full width and above the search columns: it answers "where is the thing I
+     already asked for", which is the question people arrive with, and it would
+     be buried under discover + stats + search anywhere lower. -->
+<section id="rsSection" class="mb-8">
+  <div class="flex flex-wrap items-center gap-3 mb-3">
+    <span class="material-symbols-outlined text-steel-blue">pending_actions</span>
+    <h3 class="text-lg font-bold text-frosted-blue">Request Status</h3>
+    <span id="rsCount" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-steel-blue/20 text-steel-blue"></span>
+    <span id="rsFresh" class="text-[11px] text-steel-blue/60"></span>
+    <button id="rsMineToggle" type="button"
+      class="ml-auto px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all rs-tab active">Mine</button>
+    <button id="rsAllToggle" type="button"
+      class="px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all rs-tab">Everyone</button>
+  </div>
+
+  <!-- Search + per-column filters -->
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    <div class="relative flex-1 min-w-[200px]">
+      <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-lg">search</span>
+      <input id="rsSearch" type="text" placeholder="Search titles…"
+        class="w-full pl-10 pr-3 py-2 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"/>
+    </div>
+    <select id="rsFilterStatus" class="rs-select"><option value="">All statuses</option></select>
+    <select id="rsFilterWho" class="rs-select"><option value="">Anyone</option></select>
+    <select id="rsFilterType" class="rs-select">
+      <option value="">Films &amp; shows</option>
+      <option value="movie">Films</option>
+      <option value="tv">Shows</option>
+    </select>
+  </div>
+
+  <!-- The grid. Scrolls inside itself; the page never scrolls sideways. -->
+  <div id="rsScroll" class="rs-scroll glass-card rounded-xl">
+    <table class="rs-grid" id="rsGrid">
+      <thead>
+        <tr id="rsHead"></tr>
+      </thead>
+      <tbody id="rsBody"></tbody>
+    </table>
+  </div>
+  <p id="rsEmpty" class="hidden text-center text-steel-blue text-sm py-10"></p>
+</section>
+
 <!-- Two-column layout: Search (left) + Requests (right) on desktop, stacked on mobile -->
 <div class="flex flex-col lg:flex-row gap-6">
 
@@ -306,6 +350,120 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 </main>
 
 <style>
+/* ---- Request Status grid ------------------------------------------------
+   A data grid that still has to read well to someone checking on one film.
+   Columns auto-fit (table-layout:auto + min-widths) rather than being fixed,
+   the header and the title column stay pinned while the rest scrolls, and the
+   scroll container carries edge shadows so it is obvious there is more to the
+   right rather than looking cut off. Below lg the extra columns are dropped
+   and a tapped row reveals them, so nothing is ever hidden off-screen on a
+   phone. */
+.rs-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  position: relative;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--color-accent) / 0.4) transparent;
+}
+.rs-scroll::-webkit-scrollbar { height: 8px; }
+.rs-scroll::-webkit-scrollbar-track { background: transparent; }
+.rs-scroll::-webkit-scrollbar-thumb {
+  background: rgb(var(--color-accent) / 0.35);
+  border-radius: 4px;
+}
+.rs-scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--color-accent) / 0.6); }
+/* Fades that appear only when there is actually more table that way. */
+.rs-scroll.rs-more-right::after,
+.rs-scroll.rs-more-left::before {
+  content: ''; position: sticky; top: 0; height: 100%;
+  width: 28px; display: block; pointer-events: none; z-index: 3;
+}
+.rs-scroll.rs-more-right::after {
+  float: right; margin-left: -28px;
+  background: linear-gradient(to left, rgb(var(--color-background)), transparent);
+}
+.rs-scroll.rs-more-left::before {
+  float: left; margin-right: -28px;
+  background: linear-gradient(to right, rgb(var(--color-background)), transparent);
+}
+.rs-grid { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; }
+.rs-th {
+  position: sticky; top: 0; z-index: 2;
+  background: rgb(var(--color-primary) / 0.12);
+  backdrop-filter: blur(8px);
+  text-align: left; white-space: nowrap;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid rgb(var(--color-accent) / 0.25);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgb(var(--color-accent));
+}
+.rs-sort {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer;
+}
+.rs-sort:hover { color: rgb(var(--color-primary)); }
+.rs-resizer {
+  position: absolute; top: 0; right: 0; width: 7px; height: 100%;
+  cursor: col-resize; user-select: none;
+}
+.rs-resizer:hover { background: rgb(var(--color-primary) / 0.4); }
+.rs-th { position: sticky; }
+.rs-th, .rs-td { position: relative; }
+body.rs-resizing { cursor: col-resize; user-select: none; }
+.rs-td {
+  padding: 0.65rem 0.9rem; font-size: 0.875rem; vertical-align: top;
+  border-bottom: 1px solid rgb(var(--color-accent) / 0.1);
+}
+.rs-row:hover .rs-td { background: rgb(var(--color-text) / 0.04); }
+/* The title column stays put while the rest scrolls — without it a wide grid
+   loses the only thing identifying each row. */
+@media (min-width: 1024px) {
+  .rs-th.rs-sticky, .rs-td.rs-sticky {
+    position: sticky; left: 0; z-index: 1;
+    background: rgb(var(--color-background));
+    box-shadow: 1px 0 0 rgb(var(--color-accent) / 0.15);
+  }
+  .rs-th.rs-sticky { z-index: 3; background: rgb(var(--color-primary) / 0.12); }
+  .rs-row:hover .rs-td.rs-sticky { background: rgb(var(--color-background)); }
+  .rs-only-sm { display: none; }
+  .rs-only-sm-row { display: none; }
+}
+@media (max-width: 1023px) {
+  .rs-hide-sm { display: none; }
+  .rs-row { cursor: pointer; }
+  .rs-detail .rs-td { background: rgb(var(--color-primary) / 0.06); }
+}
+.rs-chip {
+  display: inline-block; white-space: nowrap;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 0.2rem 0.5rem; border-radius: 9999px;
+}
+.rs-chip-ready { background: rgb(var(--color-primary) / 0.22); color: rgb(var(--color-primary)); }
+.rs-chip-go    { background: rgb(var(--color-text) / 0.14);    color: rgb(var(--color-text)); }
+.rs-chip-wait  { background: rgb(var(--color-accent) / 0.18);  color: rgb(var(--color-accent)); }
+.rs-chip-stuck { background: rgb(var(--color-secondary) / 0.3); color: rgb(var(--color-text)); }
+.rs-chip-dead  { background: rgb(var(--color-accent) / 0.12);  color: rgb(var(--color-accent) / 0.75); }
+.rs-select {
+  background: rgb(0 0 0 / 0.4);
+  border: 1px solid rgb(var(--color-accent) / 0.2);
+  border-radius: 0.5rem; padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem; color: rgb(var(--color-text));
+}
+.rs-select:focus { outline: none; border-color: rgb(var(--color-primary) / 0.6); }
+.rs-tab {
+  background: rgb(var(--color-accent) / 0.1);
+  color: rgb(var(--color-accent));
+  border: 1px solid transparent;
+}
+.rs-tab.active {
+  background: rgb(var(--color-primary) / 0.2);
+  color: rgb(var(--color-primary));
+  border-color: rgb(var(--color-primary) / 0.3);
+}
+.rs-tab:hover { background: rgb(var(--color-accent) / 0.2); }
+
 .filter-tab {
   background: rgba(var(--color-accent) / 0.1);
   border: 1px solid rgba(var(--color-accent) / 0.2);
@@ -408,6 +566,341 @@ var _requestsDisplayPage = 1;
 var _refreshInterval = null;
 var CARDS_PER_PAGE = 9;
 
+// ---------------------------------------------------------------------------
+// Request Status grid
+//
+// Answers "where is the thing I asked for" for every outstanding request. The
+// classification arrives pre-computed from /api/request-status; everything here
+// is presentation.
+//
+// It is a real data grid rather than a list because the admin triages a few
+// hundred rows, but it has to stay legible to a family member checking on one
+// film. That shapes three decisions: columns auto-fit their content instead of
+// being fixed, the title column and the header stay pinned while the rest
+// scrolls, and on a phone the whole thing becomes a two-column list that
+// expands on tap rather than something to drag sideways.
+//
+// No arr vocabulary anywhere in the copy — the audience has never opened those
+// applications.
+var RS = (function () {
+  'use strict';
+
+  var _rows = [];
+  var _snapshot = null;
+  var _scope = 'mine';
+  var _me = '';
+  var _meId = null;
+  var _sort = { key: 'waited', dir: 'desc' };
+  var _expanded = {};
+
+  var REASONS = {
+    ALREADY_AVAILABLE: 'Ready to watch — your app may need a refresh',
+    DOWNLOADING:       'Downloading now',
+    DOWNLOAD_STALLED:  'That copy stalled — looking for another',
+    IMPORT_BLOCKED:    'Downloaded, but couldn’t be added to the library',
+    NO_RELEASE_FOUND:  'No copy online yet — still checking',
+    TV_PARTIAL:        'Some episodes here, rest still coming',
+    NOT_RELEASED_YET:  'Not released yet',
+    AWAITING_APPROVAL: 'Waiting to be approved',
+    NOT_MONITORED:     'Not being searched for',
+    NOT_TRACKED:       'Never got added to the download system',
+    DECLINED:          'Turned down',
+    UNSATISFIABLE:     'Can’t be fetched as requested',
+    DEAD_END:          'Tried repeatedly without success',
+    UNKNOWN:           'Being looked at'
+  };
+  // Short chip text for the Status column; the sentence lives in "Why".
+  var STATUS = {
+    ready:       { label: 'Ready',     cls: 'rs-chip-ready' },
+    on_the_way:  { label: 'On the way', cls: 'rs-chip-go' },
+    waiting:     { label: 'Waiting',   cls: 'rs-chip-wait' },
+    needs_look:  { label: 'Stuck',     cls: 'rs-chip-stuck' },
+    cant_fulfil: { label: 'Can’t get', cls: 'rs-chip-dead' }
+  };
+
+  var COLUMNS = [
+    { key: 'title',  label: 'Title',   min: 180, grow: true },
+    { key: 'status', label: 'Status',  min: 110 },
+    { key: 'why',    label: 'Why',     min: 220, hideMobile: true },
+    { key: 'who',    label: 'Asked by', min: 110, hideMobile: true },
+    { key: 'waited', label: 'Waiting', min: 100, hideMobile: true, numeric: true },
+    { key: 'type',   label: 'Type',    min: 90,  hideMobile: true }
+  ];
+
+  function reasonText(c) { return REASONS[c] || 'Being looked at'; }
+  function statusOf(g) { return STATUS[g] || { label: 'Pending', cls: 'rs-chip-wait' }; }
+
+  function daysWaiting(iso) {
+    if (!iso) return 0;
+    var t = new Date(iso);
+    return isNaN(t) ? 0 : Math.max(0, Math.floor((Date.now() - t.getTime()) / 86400000));
+  }
+  function waitedText(d) {
+    if (d < 1) return 'today';
+    if (d === 1) return '1 day';
+    if (d < 30) return d + ' days';
+    var m = Math.round(d / 30);
+    return m < 12 ? m + (m === 1 ? ' month' : ' months')
+                  : Math.round(d / 365) + 'y';
+  }
+  function scopeText(r) {
+    var p = [];
+    if (r.is_4k) p.push('4K');
+    if (r.seasons && r.seasons.length) {
+      var s = r.seasons.slice().sort(function (a, b) { return a - b; });
+      if (s.length === 1) p.push(s[0] === 0 ? 'Specials' : 'Season ' + s[0]);
+      else if (s.indexOf(0) === -1 && s[s.length - 1] - s[0] === s.length - 1)
+        p.push('Seasons ' + s[0] + '–' + s[s.length - 1]);
+      else p.push(s.length + ' seasons');
+    }
+    return p.join(' · ');
+  }
+
+  function cellValue(r, key) {
+    switch (key) {
+      case 'title':  return r.title || ('Request #' + r.request_id);
+      case 'status': return statusOf(r.group).label;
+      case 'why':    return reasonText(r.reason_code);
+      case 'who':    return r.requested_by || '';
+      case 'waited': return daysWaiting(r.requested_at);
+      case 'type':   return r.media_type === 'tv' ? 'Show' : 'Film';
+      default:       return '';
+    }
+  }
+
+  function visible() {
+    var q = (document.getElementById('rsSearch').value || '').trim().toLowerCase();
+    var fs = document.getElementById('rsFilterStatus').value;
+    var fw = document.getElementById('rsFilterWho').value;
+    var ft = document.getElementById('rsFilterType').value;
+
+    var out = _rows.filter(function (r) {
+      if (_scope === 'mine') {
+        var mine = (_meId != null && r.requested_by_id != null)
+          ? r.requested_by_id === _meId
+          : (_me && r.requested_by && r.requested_by.toLowerCase() === _me.toLowerCase());
+        if (!mine) return false;
+      }
+      if (fs && r.group !== fs) return false;
+      if (fw && r.requested_by !== fw) return false;
+      if (ft && r.media_type !== ft) return false;
+      if (q) {
+        var hay = (cellValue(r, 'title') + ' ' + cellValue(r, 'why') + ' ' + cellValue(r, 'who')).toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+
+    var col = COLUMNS.filter(function (c) { return c.key === _sort.key; })[0] || {};
+    var dir = _sort.dir === 'asc' ? 1 : -1;
+    out.sort(function (a, b) {
+      var x = cellValue(a, _sort.key), y = cellValue(b, _sort.key);
+      if (col.numeric) return (x - y) * dir;
+      return String(x).localeCompare(String(y), undefined, { sensitivity: 'base' }) * dir;
+    });
+    return out;
+  }
+
+  function renderHead() {
+    document.getElementById('rsHead').innerHTML = COLUMNS.map(function (c) {
+      var active = _sort.key === c.key;
+      var arrow = active ? (_sort.dir === 'asc' ? 'arrow_upward' : 'arrow_downward') : 'unfold_more';
+      return '<th data-col="' + c.key + '" class="rs-th' + (c.hideMobile ? ' rs-hide-sm' : '') +
+               (c.key === 'title' ? ' rs-sticky' : '') + '" style="min-width:' + c.min + 'px">' +
+        '<button type="button" class="rs-sort" data-sort="' + c.key + '">' +
+          escapeHtml(c.label) +
+          '<span class="material-symbols-outlined text-[14px] ' + (active ? 'text-primary' : 'opacity-40') + '">' + arrow + '</span>' +
+        '</button>' +
+        '<span class="rs-resizer" data-resize="' + c.key + '"></span>' +
+      '</th>';
+    }).join('');
+  }
+
+  function renderBody() {
+    var rows = visible();
+    var body = document.getElementById('rsBody');
+    var empty = document.getElementById('rsEmpty');
+    document.getElementById('rsCount').textContent = rows.length;
+
+    if (!rows.length) {
+      body.innerHTML = '';
+      empty.textContent = _scope === 'mine'
+        ? 'Nothing of yours is waiting — everything you’ve asked for has arrived.'
+        : 'Nothing is waiting.';
+      empty.classList.remove('hidden');
+      document.getElementById('rsScroll').classList.add('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    document.getElementById('rsScroll').classList.remove('hidden');
+
+    body.innerHTML = rows.map(function (r) {
+      var st = statusOf(r.group);
+      var id = String(r.request_id);
+      var open = !!_expanded[id];
+      var scope = scopeText(r);
+      var main =
+        '<tr class="rs-row" data-id="' + escapeHtml(id) + '">' +
+          '<td class="rs-td rs-sticky">' +
+            '<div class="flex items-center gap-2 min-w-0">' +
+              '<span class="material-symbols-outlined text-steel-blue/50 text-[18px] shrink-0 rs-only-sm">' +
+                (open ? 'expand_less' : 'expand_more') + '</span>' +
+              '<div class="min-w-0">' +
+                '<span class="font-bold text-frosted-blue break-words">' + escapeHtml(cellValue(r, 'title')) + '</span>' +
+                (r.year ? ' <span class="text-steel-blue/60 text-xs">' + escapeHtml(String(r.year)) + '</span>' : '') +
+                (scope ? '<span class="block text-[10px] uppercase tracking-wider text-steel-blue">' + escapeHtml(scope) + '</span>' : '') +
+              '</div>' +
+            '</div>' +
+          '</td>' +
+          '<td class="rs-td"><span class="rs-chip ' + st.cls + '">' + escapeHtml(st.label) + '</span></td>' +
+          '<td class="rs-td rs-hide-sm text-frosted-blue/75">' + escapeHtml(cellValue(r, 'why')) + '</td>' +
+          '<td class="rs-td rs-hide-sm text-steel-blue">' + escapeHtml(cellValue(r, 'who')) + '</td>' +
+          '<td class="rs-td rs-hide-sm text-steel-blue whitespace-nowrap">' + escapeHtml(waitedText(daysWaiting(r.requested_at))) + '</td>' +
+          '<td class="rs-td rs-hide-sm text-steel-blue">' + escapeHtml(cellValue(r, 'type')) + '</td>' +
+        '</tr>';
+      // Phone-only detail row: everything the narrow layout drops, revealed on tap.
+      var detail = open
+        ? '<tr class="rs-detail rs-only-sm-row"><td class="rs-td" colspan="6">' +
+            '<p class="text-sm text-frosted-blue/75">' + escapeHtml(cellValue(r, 'why')) + '</p>' +
+            '<p class="text-[11px] text-steel-blue mt-1">' +
+              escapeHtml(cellValue(r, 'who')) + ' · waiting ' + escapeHtml(waitedText(daysWaiting(r.requested_at))) +
+              ' · ' + escapeHtml(cellValue(r, 'type')) +
+            '</p>' +
+          '</td></tr>'
+        : '';
+      return main + detail;
+    }).join('');
+    updateScrollShadows();
+  }
+
+  function renderFilters() {
+    var statusSel = document.getElementById('rsFilterStatus');
+    var whoSel = document.getElementById('rsFilterWho');
+    var groups = [], people = [];
+    _rows.forEach(function (r) {
+      if (groups.indexOf(r.group) === -1) groups.push(r.group);
+      if (r.requested_by && people.indexOf(r.requested_by) === -1) people.push(r.requested_by);
+    });
+    statusSel.innerHTML = '<option value="">All statuses</option>' + groups.map(function (g) {
+      return '<option value="' + escapeHtml(g) + '">' + escapeHtml(statusOf(g).label) + '</option>';
+    }).join('');
+    whoSel.innerHTML = '<option value="">Anyone</option>' + people.sort().map(function (p) {
+      return '<option value="' + escapeHtml(p) + '">' + escapeHtml(p) + '</option>';
+    }).join('');
+  }
+
+  // Edge shadows are what tell someone there is more table to the right. Without
+  // them a horizontally scrollable region just looks cut off.
+  function updateScrollShadows() {
+    var el = document.getElementById('rsScroll');
+    if (!el) return;
+    var max = el.scrollWidth - el.clientWidth;
+    el.classList.toggle('rs-more-right', max > 2 && el.scrollLeft < max - 2);
+    el.classList.toggle('rs-more-left', el.scrollLeft > 2);
+  }
+
+  // Drag a header edge to resize. Columns auto-fit their content until someone
+  // decides otherwise, at which point that width sticks for the session.
+  function wireResizers() {
+    var startX = 0, startW = 0, key = null, th = null;
+    function move(e) {
+      if (!th) return;
+      var x = (e.touches ? e.touches[0].clientX : e.clientX);
+      var w = Math.max(60, startW + (x - startX));
+      th.style.minWidth = w + 'px';
+      th.style.width = w + 'px';
+      updateScrollShadows();
+    }
+    function stop() {
+      th = null; key = null;
+      document.body.classList.remove('rs-resizing');
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('touchmove', move);
+    }
+    document.getElementById('rsHead').addEventListener('mousedown', function (e) {
+      var handle = e.target.closest('[data-resize]');
+      if (!handle) return;
+      e.preventDefault();
+      key = handle.dataset.resize;
+      th = handle.closest('th');
+      startX = e.clientX;
+      startW = th.getBoundingClientRect().width;
+      document.body.classList.add('rs-resizing');
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', stop, { once: true });
+    });
+  }
+
+  function setScope(scope) {
+    _scope = scope;
+    document.getElementById('rsMineToggle').classList.toggle('active', scope === 'mine');
+    document.getElementById('rsAllToggle').classList.toggle('active', scope === 'all');
+    renderBody();
+  }
+
+  function wire() {
+    ['rsSearch', 'rsFilterStatus', 'rsFilterWho', 'rsFilterType'].forEach(function (id) {
+      var el = document.getElementById(id);
+      el.addEventListener(id === 'rsSearch' ? 'input' : 'change', renderBody);
+    });
+    document.getElementById('rsMineToggle').addEventListener('click', function () { setScope('mine'); });
+    document.getElementById('rsAllToggle').addEventListener('click', function () { setScope('all'); });
+
+    document.getElementById('rsHead').addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-sort]');
+      if (!btn) return;
+      var key = btn.dataset.sort;
+      if (_sort.key === key) _sort.dir = _sort.dir === 'asc' ? 'desc' : 'asc';
+      else { _sort.key = key; _sort.dir = key === 'waited' ? 'desc' : 'asc'; }
+      renderHead();
+      renderBody();
+    });
+
+    // Row tap expands the dropped columns. Only meaningful on a narrow screen,
+    // where those columns are not rendered.
+    document.getElementById('rsBody').addEventListener('click', function (e) {
+      var row = e.target.closest('.rs-row');
+      if (!row || window.innerWidth >= 1024) return;
+      var id = row.dataset.id;
+      _expanded[id] = !_expanded[id];
+      renderBody();
+    });
+
+    document.getElementById('rsScroll').addEventListener('scroll', updateScrollShadows, { passive: true });
+    window.addEventListener('resize', updateScrollShadows);
+    wireResizers();
+  }
+
+  async function load(user) {
+    _me = (user && (user.display_name || user.username)) || '';
+    try {
+      var resp = await fetch('/api/request-status/');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      _snapshot = await resp.json();
+      if (_snapshot.error) { document.getElementById('rsSection').classList.add('hidden'); return; }
+      _rows = _snapshot.items || [];
+      if (!_rows.length) { document.getElementById('rsSection').classList.add('hidden'); return; }
+
+      var mins = Math.floor((Date.now() - new Date(_snapshot.generated_at).getTime()) / 60000);
+      document.getElementById('rsFresh').textContent =
+        (isFinite(mins) && mins >= 30) ? 'checked ' + (mins < 60 ? mins + 'm' : Math.floor(mins / 60) + 'h') + ' ago' : '';
+
+      renderFilters();
+      renderHead();
+      wire();
+      // Start on the viewer's own requests; fall back to everyone when they
+      // have none, so the grid is never empty on arrival.
+      setScope('mine');
+      if (!document.getElementById('rsBody').children.length) setScope('all');
+    } catch (err) {
+      console.error('Request status failed:', err);
+      document.getElementById('rsSection').classList.add('hidden');
+    }
+  }
+
+  return { load: load };
+})();
+
 document.addEventListener('DOMContentLoaded', async function() {
     initSidebar('requests');
     initNotifications();
@@ -431,6 +924,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (!user) return;
     showAdminNav(user.is_admin);
     loadSystemStatus();
+
+    // Not awaited: the status grid is five integration calls behind a cache and
+    // must never hold up the search UI that most visits are here for.
+    RS.load(user);
 
     // Search starts above the trending rows, then slides into the results panel
     wireSearchBarMotion();
