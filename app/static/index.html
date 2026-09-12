@@ -38,7 +38,7 @@
 </svg>
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
 <span class="text-xs text-steel-blue font-medium">CPU</span>
-<span id="cpuGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
+<span id="cpuGaugeText" class="text-xl font-bold text-frosted-blue"><span class="ws-skel inline-block h-5 w-10 align-middle"></span></span>
 <span id="cpuGaugeDetail" class="text-[10px] text-steel-blue/70"></span>
 </div>
 </div>
@@ -52,7 +52,7 @@
 </svg>
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
 <span class="text-xs text-steel-blue font-medium">RAM</span>
-<span id="ramGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
+<span id="ramGaugeText" class="text-xl font-bold text-frosted-blue"><span class="ws-skel inline-block h-5 w-10 align-middle"></span></span>
 <span id="ramGaugeDetail" class="text-[10px] text-steel-blue/70"></span>
 </div>
 </div>
@@ -69,12 +69,12 @@
 <div class="flex flex-col items-center leading-none mt-1">
 <div class="flex items-center text-[11px] text-frosted-blue space-x-0.5">
 <span class="material-symbols-outlined text-[11px]">arrow_upward</span>
-<span id="netUpText">0.0</span>
+<span id="netUpText"><span class="ws-skel inline-block h-3 w-6 align-middle"></span></span>
 <span id="netUpUnit" class="text-steel-blue/60">Mbps</span>
 </div>
 <div class="flex items-center text-[11px] text-frosted-blue space-x-0.5 mt-0.5">
 <span class="material-symbols-outlined text-[11px]">arrow_downward</span>
-<span id="netDownText">0.0</span>
+<span id="netDownText"><span class="ws-skel inline-block h-3 w-6 align-middle"></span></span>
 <span id="netDownUnit" class="text-steel-blue/60">Mbps</span>
 </div>
 </div>
@@ -84,12 +84,39 @@
 </div>
 </div>
 </div>
+<!-- The Netdata gauges block is admin-only telemetry (UI-DESIGN-REVIEW-2026-08-15
+     part 5/6). It ships `hidden` above; this synchronous, inline script runs
+     immediately as the parser reaches this point -- before the sibling service
+     tiles below are parsed and laid out -- so a cached admin's tab reveals the
+     block (in its skeleton state) with no visible pop once the browser starts
+     painting. A genuinely fresh admin tab (no ws.user cache yet) stays hidden
+     here and gets a one-time reveal from the page's own script once checkAuth()
+     confirms admin -- see DOMContentLoaded below. -->
+<script>
+(function () {
+    if (!window.wsCache) return;
+    var cached = wsCache.read('ws.user', null);
+    if (cached && cached.is_admin) {
+        var g = document.getElementById('netdataGauges');
+        if (g) g.classList.remove('hidden');
+    }
+})();
+</script>
 <!-- Service Tiles -->
 <div id="servicesContainer" class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr))">
-<!-- Services will be loaded here dynamically -->
-<div class="text-center text-steel-blue py-8 col-span-full">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span>
-<p>Loading services...</p>
+<!-- Skeleton reserves the exact tile shape (see loadServices()) so nothing
+     shifts once real tiles, or the "no services" empty state, land. -->
+<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col">
+<div class="flex-1 p-3 min-h-[80px] flex items-center justify-center"><span class="ws-skel h-8 w-8 rounded-full"></span></div>
+<div class="py-1 flex justify-center"><span class="ws-skel h-3 w-16 rounded"></span></div>
+</div>
+<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col">
+<div class="flex-1 p-3 min-h-[80px] flex items-center justify-center"><span class="ws-skel h-8 w-8 rounded-full"></span></div>
+<div class="py-1 flex justify-center"><span class="ws-skel h-3 w-16 rounded"></span></div>
+</div>
+<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col">
+<div class="flex-1 p-3 min-h-[80px] flex items-center justify-center"><span class="ws-skel h-8 w-8 rounded-full"></span></div>
+<div class="py-1 flex justify-center"><span class="ws-skel h-3 w-16 rounded"></span></div>
 </div>
 </div>
 </section>
@@ -102,11 +129,21 @@
 View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </a>
 </div>
-<div id="newsContainer" class="grid gap-3">
-<!-- News posts will be loaded here dynamically -->
-<div class="text-center text-steel-blue py-8">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>
-<p>Loading news...</p>
+<!-- Fixed height + internal scroll: a pinned/fresh post renders fully expanded
+     (see renderNewsCard()) and can run to any length, so the widget's own
+     height must stay constant regardless of how much content lands inside it
+     -- otherwise a long post would push everything below it (Active Streams,
+     Upcoming Releases, Recent Requests) down the page the moment it loads. -->
+<div id="newsContainer" class="grid gap-3 auto-rows-min content-start h-[400px] overflow-y-auto custom-scrollbar pr-1">
+<!-- Skeleton reserves one card's shape (see renderNewsCard()) so nothing
+     shifts once a real post, or the "no news" empty state, land. -->
+<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 border-l-steel-blue/40 min-w-0">
+<span class="ws-skel h-6 w-6 rounded-full shrink-0"></span>
+<div class="flex-1 min-w-0 space-y-2">
+<div class="ws-skel h-4 w-2/3 rounded"></div>
+<div class="ws-skel h-3 w-full rounded"></div>
+<div class="ws-skel h-3 w-4/5 rounded"></div>
+</div>
 </div>
 </div>
 </section>
@@ -128,10 +165,18 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </div>
 </div>
 <div id="streamsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-<!-- Stream cards will be loaded here dynamically -->
-<div class="text-center text-steel-blue py-8 col-span-3">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
-<p>Loading streams...</p>
+<!-- Skeleton reserves one 16:9 card's shape (see loadActiveStreams()) so
+     nothing shifts once real streams, or the "no active streams" empty
+     state, land. -->
+<div class="glass-card rounded-xl overflow-hidden">
+<div class="aspect-video ws-skel rounded-none"></div>
+<div class="p-4 space-y-3">
+<div class="ws-skel h-4 w-32 rounded"></div>
+<div class="space-y-1">
+<div class="ws-skel h-3 w-16 rounded"></div>
+<div class="ws-skel h-1 w-full rounded-full"></div>
+</div>
+</div>
 </div>
 </div>
 </section>
@@ -148,9 +193,34 @@ View Calendar
 </a>
 </div>
 <div id="releasesContainer">
-<div class="text-center text-steel-blue py-8">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">calendar_month</span>
-<p>Loading releases...</p>
+<!-- Skeleton mirrors both layouts loadUpcomingReleases() can pick (desktop
+     7-column grid, mobile day list) at the same lg: breakpoint the JS uses,
+     with cells sized identically to the real ones (min-h-[130px] / p-3 bg-
+     black/30) so whichever renders lands with no shift. -->
+<div class="hidden lg:block">
+<div class="grid grid-cols-7 gap-1 mb-1">
+<div class="ws-skel h-3 w-8 mx-auto rounded"></div>
+<div class="ws-skel h-3 w-8 mx-auto rounded"></div>
+<div class="ws-skel h-3 w-8 mx-auto rounded"></div>
+<div class="ws-skel h-3 w-8 mx-auto rounded"></div>
+<div class="ws-skel h-3 w-8 mx-auto rounded"></div>
+<div class="ws-skel h-3 w-8 mx-auto rounded"></div>
+<div class="ws-skel h-3 w-8 mx-auto rounded"></div>
+</div>
+<div class="grid grid-cols-7 gap-1">
+<div class="rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col gap-1 bg-black/30"><div class="ws-skel h-3 w-4 rounded mb-1"></div><div class="ws-skel h-2.5 w-full rounded"></div></div>
+<div class="rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col gap-1 bg-black/30"><div class="ws-skel h-3 w-4 rounded mb-1"></div><div class="ws-skel h-2.5 w-full rounded"></div></div>
+<div class="rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col gap-1 bg-black/30"><div class="ws-skel h-3 w-4 rounded mb-1"></div><div class="ws-skel h-2.5 w-full rounded"></div></div>
+<div class="rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col gap-1 bg-black/30"><div class="ws-skel h-3 w-4 rounded mb-1"></div><div class="ws-skel h-2.5 w-full rounded"></div></div>
+<div class="rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col gap-1 bg-black/30"><div class="ws-skel h-3 w-4 rounded mb-1"></div><div class="ws-skel h-2.5 w-full rounded"></div></div>
+<div class="rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col gap-1 bg-black/30"><div class="ws-skel h-3 w-4 rounded mb-1"></div><div class="ws-skel h-2.5 w-full rounded"></div></div>
+<div class="rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col gap-1 bg-black/30"><div class="ws-skel h-3 w-4 rounded mb-1"></div><div class="ws-skel h-2.5 w-full rounded"></div></div>
+</div>
+</div>
+<div class="lg:hidden flex flex-col gap-2">
+<!-- A day with no releases only renders a row for "today" (see
+     loadUpcomingReleases()) -- one row skel matches that common case. -->
+<div class="rounded-lg p-3 bg-black/30 flex gap-3"><div class="shrink-0 w-12 flex flex-col items-center gap-1"><div class="ws-skel h-2.5 w-6 rounded"></div><div class="ws-skel h-5 w-5 rounded"></div></div><div class="flex-1"><div class="ws-skel h-3 w-full rounded"></div></div></div>
 </div>
 </div>
 </section>
@@ -175,12 +245,11 @@ View Requests
 </tr>
 </thead>
 <tbody id="requestsBody" class="divide-y divide-steel-blue/10">
-<tr>
-<td colspan="2" class="px-6 py-8 text-center text-steel-blue">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
-<p>Loading requests...</p>
-</td>
-</tr>
+<!-- Skeleton reserves 3 rows at the real row height (px-4/6 py-4) so nothing
+     shifts once real requests, or the "no recent requests" empty state, land. -->
+<tr><td class="px-4 lg:px-6 py-4"><div class="flex items-center gap-3"><span class="ws-skel size-8 rounded shrink-0"></span><span class="ws-skel h-4 w-32 rounded inline-block"></span></div></td><td class="px-4 lg:px-6 py-4"><span class="ws-skel h-4 w-16 rounded inline-block"></span></td></tr>
+<tr><td class="px-4 lg:px-6 py-4"><div class="flex items-center gap-3"><span class="ws-skel size-8 rounded shrink-0"></span><span class="ws-skel h-4 w-32 rounded inline-block"></span></div></td><td class="px-4 lg:px-6 py-4"><span class="ws-skel h-4 w-16 rounded inline-block"></span></td></tr>
+<tr><td class="px-4 lg:px-6 py-4"><div class="flex items-center gap-3"><span class="ws-skel size-8 rounded shrink-0"></span><span class="ws-skel h-4 w-32 rounded inline-block"></span></div></td><td class="px-4 lg:px-6 py-4"><span class="ws-skel h-4 w-16 rounded inline-block"></span></td></tr>
 </tbody>
 </table>
 </div>
@@ -240,7 +309,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     loadActiveStreams();
     loadRecentRequests();
     loadRequestCount();
-    loadSystemStats();
     loadUpcomingReleases();
 
     // Auto-refresh dynamic sections every 30 seconds
@@ -252,8 +320,16 @@ document.addEventListener('DOMContentLoaded', async function() {
         loadUpcomingReleases();
     }, 30000);
 
-    // Real-time Netdata gauges — poll every 1 second
-    setInterval(loadSystemStats, 1000);
+    // Netdata gauges are admin-only telemetry (see markGaugesUnavailable()
+    // and the early-paint script by the gauges markup). A cached-admin tab
+    // was already revealed before this ran; this is the one-time reveal for
+    // a genuinely fresh admin tab that had no ws.user cache to paint from.
+    if (user.is_admin) {
+        var gauges = document.getElementById('netdataGauges');
+        if (gauges) gauges.classList.remove('hidden');
+        loadSystemStats();
+        setInterval(loadSystemStats, 1000); // real-time gauges — poll every 1 second
+    }
 
     // Live-update "Last checked" timer every second
     setInterval(function() {
@@ -385,12 +461,10 @@ async function loadNews() {
         const viewAll = document.getElementById('newsViewAll');
 
         if (!Array.isArray(posts) || posts.length === 0) {
-            newsContainer.innerHTML = `
-                <div class="text-center text-steel-blue py-8">
-                    <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>
-                    <p>No news posts yet.</p>
-                </div>
-            `;
+            // Same glass-card/border-l-4 shape as a real post and the loading
+            // skeleton -- an empty result swaps in at the same size instead of
+            // collapsing to a smaller centered blurb.
+            setHtmlIfChanged(newsContainer, newsMessageCard('newspaper', 'No news posts yet.'));
             // Older posts may still exist beyond the age window, so the archive
             // link stays available even when the homepage feed is empty.
             if (viewAll) {
@@ -401,7 +475,7 @@ async function loadNews() {
         }
 
         var shown = posts.slice(0, cfg.count);
-        newsContainer.innerHTML = shown.map(function (post) { return renderNewsCard(post, false); }).join('');
+        setHtmlIfChanged(newsContainer, shown.map(function (post) { return renderNewsCard(post, false); }).join(''));
         if (viewAll) {
             viewAll.classList.remove('hidden');
             viewAll.classList.add('flex');
@@ -409,13 +483,24 @@ async function loadNews() {
 
     } catch (error) {
         console.error('Error loading news:', error);
-        document.getElementById('newsContainer').innerHTML = `
-            <div class="text-center text-red-400 py-8">
-                <span class="material-symbols-outlined text-4xl mb-2 block">error</span>
-                <p>Error loading news</p>
-            </div>
-        `;
+        setHtmlIfChanged(document.getElementById('newsContainer'), newsMessageCard('error', 'Error loading news'));
     }
+}
+
+// Shared shape for the news section's empty/error states -- same glass-card
+// wrapper as a real post (and the loading skeleton) so swapping in never
+// resizes the card.
+function newsMessageCard(icon, message) {
+    return '<div class="glass-card p-4 rounded-xl flex items-center gap-4 border-l-4 border-l-steel-blue/40 min-w-0 text-steel-blue">' +
+        '<span class="material-symbols-outlined text-2xl shrink-0 opacity-50">' + icon + '</span>' +
+        '<p class="text-sm">' + escapeHtml(message) + '</p>' +
+    '</div>';
+}
+
+// Write innerHTML only when it actually changed -- a poll that returns
+// identical data never rebuilds identical DOM (no flicker, no wasted paint).
+function setHtmlIfChanged(el, html) {
+    if (el && el.innerHTML !== html) el.innerHTML = html;
 }
 
 
@@ -461,12 +546,7 @@ async function loadActiveStreams() {
         _lastStreams = streams;
 
         if (!Array.isArray(streams) || streams.length === 0) {
-            container.innerHTML = `
-                <div class="text-center text-steel-blue py-8 col-span-3">
-                    <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
-                    <p>No active streams</p>
-                </div>
-            `;
+            setHtmlIfChanged(container, streamMessageCard('play_circle', 'No active streams'));
             return;
         }
 
@@ -544,9 +624,7 @@ async function loadActiveStreams() {
         }).join('');
 
         // Only update DOM if content actually changed (prevents flicker)
-        if (container.innerHTML !== newHtml) {
-            container.innerHTML = newHtml;
-        }
+        setHtmlIfChanged(container, newHtml);
 
         // Show/hide pagination chevrons based on stream count
         const chevrons = document.getElementById('streamChevrons');
@@ -561,13 +639,25 @@ async function loadActiveStreams() {
         // On error, keep showing previous data if available
         if (_lastStreams && _lastStreams.length > 0) return;
         document.getElementById('streamChevrons').classList.add('hidden');
-        container.innerHTML = `
-            <div class="text-center text-steel-blue py-8 col-span-3">
-                <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
-                <p>Plex not configured</p>
-            </div>
-        `;
+        setHtmlIfChanged(container, streamMessageCard('play_circle', 'Plex not configured'));
     }
+}
+
+// Shared shape for the streams section's empty/error states -- same
+// glass-card/aspect-video wrapper as a real card (and the loading skeleton),
+// with an invisible filler standing in for the content area below the
+// media block so the card's total height never changes across states.
+function streamMessageCard(icon, message) {
+    return '<div class="glass-card rounded-xl overflow-hidden">' +
+        '<div class="aspect-video flex flex-col items-center justify-center text-steel-blue">' +
+            '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">' + icon + '</span>' +
+            '<p class="text-sm">' + escapeHtml(message) + '</p>' +
+        '</div>' +
+        '<div class="p-4 space-y-3 invisible" aria-hidden="true">' +
+            '<div class="h-4 w-32"></div>' +
+            '<div class="space-y-1"><div class="h-3 w-16"></div><div class="h-1 w-full"></div></div>' +
+        '</div>' +
+    '</div>';
 }
 
 // Paginate streams
@@ -592,18 +682,11 @@ async function loadRecentRequests() {
 
 
         if (!Array.isArray(requests) || requests.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="2" class="px-6 py-8 text-center text-steel-blue">
-                        <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
-                        <p>No recent requests</p>
-                    </td>
-                </tr>
-            `;
+            setHtmlIfChanged(tbody, requestsMessageRow('shopping_cart', 'No recent requests'));
             return;
         }
 
-        tbody.innerHTML = requests.map(req => {
+        var newBodyHtml = requests.map(req => {
             const title = escapeHtml(req.media_title || 'Unknown');
             // Deliberately no requester name here. Recent Requests is a
             // server-wide view - it shows everyone's requests - so attributing
@@ -674,18 +757,24 @@ async function loadRecentRequests() {
                 </tr>
             `;
         }).join('');
+        setHtmlIfChanged(tbody, newBodyHtml);
 
     } catch (error) {
         console.error('Error loading recent requests:', error);
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="4" class="px-6 py-8 text-center text-steel-blue">
-                    <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
-                    <p>Seerr not configured</p>
-                </td>
-            </tr>
-        `;
+        setHtmlIfChanged(tbody, requestsMessageRow('shopping_cart', 'Seerr not configured'));
     }
+}
+
+// Shared shape for the recent-requests table's empty/error states -- one row
+// tall enough to match the 3-row skeleton (and the loading placeholder it
+// replaced) so resolving to "nothing to show" never shrinks the table.
+function requestsMessageRow(icon, message) {
+    return '<tr><td colspan="2" class="px-6 py-4 text-center text-steel-blue">' +
+        '<div class="min-h-[192px] flex flex-col items-center justify-center gap-2">' +
+            '<span class="material-symbols-outlined text-4xl block opacity-50">' + icon + '</span>' +
+            '<p>' + escapeHtml(message) + '</p>' +
+        '</div>' +
+    '</td></tr>';
 }
 
 // Homelab icon mapping — service name substring → selfh.st icon slug
@@ -733,12 +822,12 @@ async function loadServices() {
         }
     } catch (error) {
         console.error('Error loading services:', error);
-        servicesContainer.innerHTML = '<div class="text-center text-red-400 py-8 col-span-full"><span class="material-symbols-outlined text-4xl mb-2 block">error</span><p>Error loading services</p></div>';
+        setHtmlIfChanged(servicesContainer, serviceMessageTile('error', 'Error loading services'));
         return;
     }
 
     if (services.length === 0) {
-        servicesContainer.innerHTML = '<div class="text-center text-steel-blue py-8 col-span-full"><span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span><p>No services configured yet.</p></div>';
+        setHtmlIfChanged(servicesContainer, serviceMessageTile('dns', 'No services configured yet.'));
         return;
     }
 
@@ -756,7 +845,7 @@ async function loadServices() {
         timerEl.dataset.lastCheck = latestCheck.toISOString();
     }
 
-    servicesContainer.innerHTML = services.map(function(service) {
+    var newServicesHtml = services.map(function(service) {
         var barBg, statusLabel;
 
         switch(service.status) {
@@ -796,6 +885,23 @@ async function loadServices() {
             '</div>' +
         '</div>';
     }).join('');
+    setHtmlIfChanged(servicesContainer, newServicesHtml);
+}
+
+// Shared shape for the service-tiles section's empty/error states -- the
+// same tile wrapper (and content/status-bar split) as a real tile and the
+// loading skeleton, so resolving to "nothing to show" never changes the
+// grid's row height.
+function serviceMessageTile(icon, message) {
+    return '<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col col-span-full">' +
+        '<div class="flex-1 p-3 flex flex-col items-center justify-center text-center gap-2 min-h-[80px]">' +
+            '<span class="material-symbols-outlined text-3xl text-steel-blue opacity-50">' + icon + '</span>' +
+            '<span class="text-[11px] font-medium leading-tight text-steel-blue">' + escapeHtml(message) + '</span>' +
+        '</div>' +
+        '<div class="bg-steel-blue/20 py-1 flex justify-center">' +
+            '<span class="text-[10px] font-bold text-steel-blue uppercase tracking-wider">&mdash;</span>' +
+        '</div>' +
+    '</div>';
 }
 
 // Load upcoming releases from Sonarr/Radarr
@@ -805,7 +911,19 @@ async function loadUpcomingReleases() {
         var response = await fetch('/api/integrations/upcoming-releases?days=7');
         if (!response.ok) throw new Error('API error');
         var releases = await response.json();
+        renderReleasesGrid(container, releases);
+    } catch (error) {
+        // Sonarr/Radarr return an empty list rather than an error when
+        // unconfigured (see app/integrations/{sonarr,radarr}.py), so this
+        // only fires on a genuine network/parse failure -- render the same
+        // grid shape (every day empty) rather than a smaller error blob, so
+        // even this rare path lands with no shift.
+        console.log('Upcoming releases not available');
+        renderReleasesGrid(container, []);
+    }
+}
 
+function renderReleasesGrid(container, releases) {
         // Clear container
         while (container.firstChild) container.removeChild(container.firstChild);
 
@@ -988,21 +1106,6 @@ async function loadUpcomingReleases() {
             }
             container.appendChild(grid);
         }
-
-    } catch (error) {
-        console.log('Upcoming releases not available');
-        while (container.firstChild) container.removeChild(container.firstChild);
-        var errDiv = document.createElement('div');
-        errDiv.className = 'text-center text-steel-blue py-8';
-        var errIcon = document.createElement('span');
-        errIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
-        errIcon.textContent = 'calendar_month';
-        var errText = document.createElement('p');
-        errText.textContent = 'Sonarr/Radarr not configured';
-        errDiv.appendChild(errIcon);
-        errDiv.appendChild(errText);
-        container.appendChild(errDiv);
-    }
 }
 
 // Format Date to YYYY-MM-DD
@@ -1013,21 +1116,34 @@ function _fmtDate(d) {
     return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
 }
 
+// Fills the gauge text spots with a static "no data" dash instead of
+// collapsing/hiding the whole block -- this is admin-only chrome, and its
+// visibility is decided once (see DOMContentLoaded and the early-paint
+// script by the gauges markup), not re-litigated on every poll. Netdata
+// being unconfigured swaps the skeleton for this same-size empty state
+// rather than yanking the service tiles below it back up.
+function markGaugesUnavailable() {
+    ['cpuGaugeText', 'ramGaugeText'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = '--%';
+    });
+    ['netUpText', 'netDownText'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = '--';
+    });
+}
+
 // Load system stats from Netdata integration
 async function loadSystemStats() {
-    var gaugesEl = document.getElementById('netdataGauges');
     try {
         var response = await fetch('/api/integrations/system-stats');
         if (!response.ok) throw new Error('API error');
         var stats = await response.json();
 
         if (!stats.configured || stats.error) {
-            gaugesEl.classList.add('hidden');
+            markGaugesUnavailable();
             return;
         }
-
-        // Show gauges
-        gaugesEl.classList.remove('hidden');
 
         // Update CPU gauge
         if (stats.cpu_percent !== null) {
@@ -1083,7 +1199,7 @@ async function loadSystemStats() {
 
     } catch (error) {
         console.log('System stats not available');
-        gaugesEl.classList.add('hidden');
+        markGaugesUnavailable();
     }
 }
 
