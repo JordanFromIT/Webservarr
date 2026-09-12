@@ -10,13 +10,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 </head>
-<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden" data-page="calendar">
+<!--WEBSERVARR:SHELL-->
 <!-- Toast notification container -->
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 <!-- Main Content Area -->
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
 <!-- Scrollable Content -->
 <div class="flex-1 flex flex-col min-h-0 lg:overflow-hidden relative">
 
@@ -81,7 +80,6 @@ var _selectedDate = null; // "YYYY-MM-DD" or null
 
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', async function() {
-    initSidebar('calendar');
     initNotifications();
 
     // Scroll-down hint — fade out at bottom

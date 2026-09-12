@@ -10,13 +10,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 </head>
-<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden" data-page="requests">
+<!--WEBSERVARR:SHELL-->
 <!-- Toast notification container -->
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 <!-- Main Content Area -->
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
@@ -952,7 +951,6 @@ var RS = (function () {
 })();
 
 document.addEventListener('DOMContentLoaded', async function() {
-    initSidebar('requests');
     initNotifications();
 
     // Scroll-down hint — fade when at bottom
@@ -1635,7 +1633,7 @@ var SLOT_SCROLL_CLEARANCE_MOBILE = 61;
 
 function slotScrollGap() {
     if (window.innerWidth >= 1024) return SLOT_SCROLL_GAP;
-    var bar = document.getElementById('mobileTopBar');
+    var bar = document.getElementById('appTopbar');
     var barHeight = bar ? Math.round(bar.getBoundingClientRect().height) : 0;
     return barHeight + SLOT_SCROLL_CLEARANCE_MOBILE;
 }

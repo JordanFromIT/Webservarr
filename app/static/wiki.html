@@ -52,13 +52,12 @@
   @keyframes wikiPulse { 0%,100% { opacity: .5 } 50% { opacity: .9 } }
 </style>
 </head>
-<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden" data-page="wiki">
+<!--WEBSERVARR:SHELL-->
 
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-y-auto">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
 
 <div class="p-4 lg:p-8 max-w-5xl w-full mx-auto">
   <div id="wikiRoot">
@@ -650,8 +649,6 @@ var WikiView = (function () {
 
 (function () {
   'use strict';
-
-  initSidebar('wiki');
 
   (function () {
     var hint = document.getElementById('scrollDownHint');

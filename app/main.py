@@ -12,6 +12,7 @@ import asyncio
 import html
 import logging
 import re
+from pathlib import Path
 
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -433,6 +434,34 @@ def _inject_preview_meta(content: str, request: Optional[Request]) -> str:
     return content
 
 
+# Static shell partial (sidebar + header + mobile top bar/drawer).
+#
+# The shell used to be built client-side by sidebar.js/header.js after page
+# load, which meant every page painted an empty nav until JS ran. The marker
+# below is swapped for the partial's raw markup at serve time instead, so the
+# nav is part of the HTML the browser receives -- it paints before any script
+# executes. `Path(__file__).parent`-relative so this works from any checkout,
+# not just the container's `/app/app/...` layout.
+SHELL_MARKER = "<!--WEBSERVARR:SHELL-->"
+_SHELL_PARTIAL_PATH = Path(__file__).parent / "static" / "partials" / "shell.html"
+_shell_partial_cache: Optional[str] = None
+
+
+def _load_shell_partial() -> str:
+    global _shell_partial_cache
+    if _shell_partial_cache is None:
+        _shell_partial_cache = _SHELL_PARTIAL_PATH.read_text(encoding="utf-8")
+    return _shell_partial_cache
+
+
+def _inject_shell(content: str) -> str:
+    """Replace the shell marker with the static partial. A no-op for pages
+    that carry no marker (login, setup, reader)."""
+    if SHELL_MARKER not in content:
+        return content
+    return content.replace(SHELL_MARKER, _load_shell_partial(), 1)
+
+
 def _serve_page(filepath: str, label: str = "Page", request: Optional[Request] = None):
     """Read an HTML file, stamp in the link-preview tags, and return it, or 404."""
     try:
@@ -447,6 +476,10 @@ def _serve_page(filepath: str, label: str = "Page", request: Optional[Request] =
         content = _inject_preview_meta(content, request)
     except Exception:  # pragma: no cover - a preview must never break a page
         logger.warning("Link-preview injection failed for %s", label, exc_info=True)
+    try:
+        content = _inject_shell(content)
+    except Exception:  # pragma: no cover - a missing partial must never break a page
+        logger.warning("Shell injection failed for %s", label, exc_info=True)
     try:
         content = _stamp_asset_versions(content)
     except Exception:  # pragma: no cover - a stale asset beats a broken page

@@ -248,6 +248,13 @@ function _wireSidebarChrome() {
 }
 
 function initSidebar(currentPage) {
+  // Interim (Task 2 of the nav-load-feel work): the static shell partial
+  // (app/static/partials/shell.html) now ships the sidebar/topbar/drawer
+  // markup directly from the server, so #sidebar-root no longer exists on
+  // any page and this rebuild path is dead. A later task rewrites this file
+  // into a decorator that patches the static markup instead of replacing
+  // it; until then this is a no-op guard so pages that stop calling
+  // initSidebar() (or ones a future page still calls it from) don't error.
   var root = document.getElementById('sidebar-root');
   if (!root) return;
 
@@ -306,11 +313,18 @@ function showAdminNav(isAdmin) {
   if (isAdmin) {
     var items = document.querySelectorAll('[data-admin-only]');
     items.forEach(function (el) {
+      // The static shell partial (Task 2) marks these with the `hidden`
+      // boolean attribute; the old JS-built markup used
+      // style="display:none". Clear both so either source reveals correctly.
+      el.hidden = false;
       el.style.display = '';
     });
   }
 
-  // Fade in nav sections (prevents flicker of admin items popping in)
+  // Fade in nav sections (prevents flicker of admin items popping in).
+  // No-op against the static shell partial, which no longer ships
+  // opacity-0 -- the nav paints complete immediately and only individual
+  // admin-gated items start hidden, so there is nothing left to fade in.
   var desktopNav = document.getElementById('desktopNav');
   var drawerNav = document.getElementById('drawerNav');
   if (desktopNav) desktopNav.classList.replace('opacity-0', 'opacity-100');
@@ -323,4 +337,15 @@ function showAdminNav(isAdmin) {
   var headerRole = document.getElementById('headerRole');
   if (mobileUsername && headerUsername) mobileUsername.textContent = headerUsername.textContent;
   if (mobileRole && headerRole) mobileRole.textContent = headerRole.textContent;
+}
+
+// Interim (Task 2): pages no longer call initSidebar('...') to build the
+// sidebar, since the static shell partial ships it already rendered -- so
+// nothing was wiring up the drawer toggle, the mobile user menu, or the
+// logout buttons any more. Wire them unconditionally, the same way
+// header.js wires its own dropdown at the bottom of that file. A later task
+// (the decorator rewrite) replaces this with the real init path; this stays
+// the smallest change that keeps the shell interactive in the meantime.
+if (document.getElementById('appSidebar') || document.getElementById('appTopbar')) {
+  _wireSidebarChrome();
 }

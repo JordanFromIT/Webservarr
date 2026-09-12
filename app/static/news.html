@@ -10,14 +10,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 </head>
-<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden" data-page="">
+<!--WEBSERVARR:SHELL-->
 
 <!-- Toast notification container -->
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-y-auto">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
 
 <div class="p-4 lg:p-8 max-w-4xl w-full mx-auto">
 
@@ -207,8 +206,6 @@
   moreBtn.addEventListener('click', loadPage);
 
   // ---- Init ----
-  initSidebar('home');
-
   (function () {
     var hint = document.getElementById('scrollDownHint');
     if (!hint) return;

@@ -1,0 +1,152 @@
+<!--
+  WebServarr — Static shell partial (sidebar + header + mobile top bar/drawer)
+
+  Injected server-side by `_inject_shell()` in app/main.py wherever a page's
+  HTML contains the SHELL_MARKER comment, so the nav paints before any JS
+  runs. This is the same markup sidebar.js/header.js used to build at
+  runtime (see their `_buildSidebarHTML`/`_buildHeader` for the generating
+  source) -- it now ships as plain HTML instead.
+
+  Deltas from the pre-existing JS-built markup:
+    - The three root elements below (the desktop aside, the header, and the
+      mobile top bar) carry new stable ids that Tasks 3-5 target: the aside
+      was id "desktopSidebar", the header had no id at all, and the mobile
+      bar was id "mobileTopBar" -- see each element's opening tag for its
+      current id.
+    - Every nav <a> carries data-nav-id matching sidebar.js's NAV_ITEMS ids.
+      None carry hard-coded active-state classes; app/static/css/theme.css
+      draws the active item from `body[data-page]` instead, so it is correct
+      at first paint.
+    - #systemStatus ships its text node as a non-breaking space, not
+      "Loading..." -- a later task hydrates it from cache before paint.
+    - Admin-only entries (Settings nav link, both "Account Settings" dropdown
+      links, both app-version labels) ship `data-admin-only hidden` instead
+      of the old `style="display:none"`, and stay hidden until JS reveals
+      them for an admin session.
+    - Feature-flagged nav entries (Requests via Seerr, Tickets, eBooks) carry
+      `data-feature="show_requests|show_tickets|show_books"` and ship
+      visible -- the nav paints complete immediately; JS only ever hides.
+    - app name and logo are the shipped generic defaults (WebServarr /
+      /static/webservarr.svg). A later task re-applies an operator's own
+      branding on top of this once it loads.
+-->
+<aside id="appSidebar" class="hidden lg:flex w-64 bg-baltic-blue/20 border-r border-steel-blue/30 flex-col h-screen shrink-0">
+  <div class="p-6 flex flex-col items-center">
+    <img src="/static/webservarr.svg" alt="Logo" class="w-full h-auto rounded-lg object-contain mb-3">
+    <h1 class="text-frosted-blue font-bold text-lg leading-none text-center">WebServarr</h1>
+  </div>
+  <nav class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1" id="desktopNav">
+    <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/" data-nav-id="home"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">home</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Home</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">See what's happening</span></span></a>
+    <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/requests" data-nav-id="requests"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">movie</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Requests</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Request a movie or show</span></span></a>
+    <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/requests-embed" data-nav-id="requests-embed" data-feature="show_requests"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">download</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Requests (Embed)</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Request through Seerr</span></span><span id="requestsBadge" class="ml-auto bg-primary/20 text-[10px] px-1.5 py-0.5 rounded font-bold hidden"></span></a>
+    <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/issues" data-nav-id="issues"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">report_problem</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Issues</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Report a problem with media</span></span></a>
+    <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/calendar" data-nav-id="calendar"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">calendar_month</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Calendar</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">See upcoming releases</span></span></a>
+    <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/tickets" data-nav-id="tickets" data-feature="show_tickets"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">confirmation_number</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Tickets</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Get help from the admin</span></span></a>
+    <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/library" data-nav-id="library" data-feature="show_books"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">menu_book</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">eBooks</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Read books in your browser</span></span></a>
+    <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/wiki" data-nav-id="wiki"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">library_books</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Wiki</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Read guides and how-tos</span></span></a>
+    <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/settings" data-nav-id="settings" data-admin-only hidden><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">settings</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Settings</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Manage the site</span></span></a>
+  </nav>
+  <div class="p-4 border-t border-steel-blue/20">
+    <p id="appVersion" class="text-steel-blue text-[10px] text-center" data-admin-only hidden></p>
+  </div>
+</aside>
+<div id="appTopbar" class="lg:hidden sticky top-0 z-40 h-14 bg-black/80 backdrop-blur-md border-b border-steel-blue/20 flex items-center justify-between px-4">
+  <button id="hamburgerBtn" class="p-2 text-steel-blue hover:text-bright transition-colors">
+    <span class="material-symbols-outlined">menu</span>
+  </button>
+  <span class="text-frosted-blue font-bold text-sm truncate max-w-[40%]">WebServarr</span>
+  <div class="relative flex items-center gap-1 sm:gap-2 min-w-0">
+    <button class="relative p-1.5 sm:p-2 text-steel-blue hover:text-frosted-blue transition-colors shrink-0" title="Notifications">
+      <span class="material-symbols-outlined">notifications</span>
+    </button>
+    <button id="mobileUserMenuBtn" class="flex items-center gap-1.5 sm:gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0">
+      <div class="text-right min-w-0">
+        <p id="mobileUsername" class="text-xs font-bold text-frosted-blue leading-none truncate max-w-[80px] sm:max-w-[120px]"></p>
+        <p id="mobileRole" class="text-[10px] text-steel-blue hidden sm:block"></p>
+      </div>
+    </button>
+    <div id="mobileUserMenuDropdown" class="hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
+      <a href="/settings" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors" data-admin-only hidden>
+        <span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>
+        Account Settings
+      </a>
+      <button data-logout class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors text-left">
+        <span class="material-symbols-outlined text-steel-blue text-sm">logout</span>
+        Sign Out
+      </button>
+    </div>
+  </div>
+</div>
+<div id="drawerOverlay" class="lg:hidden fixed inset-0 z-50 bg-black/60 hidden" style="backdrop-filter:blur(2px)">
+  <aside id="drawerPanel" class="w-72 bg-background-dark border-r border-steel-blue/30 h-full flex flex-col transform -translate-x-full transition-transform duration-300">
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex-1"></div>
+        <button id="drawerCloseBtn" class="p-1 text-steel-blue hover:text-bright transition-colors">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="flex flex-col items-center">
+        <img src="/static/webservarr.svg" alt="Logo" class="w-full h-auto rounded-lg object-contain mb-3">
+        <h1 class="text-frosted-blue font-bold text-lg leading-none text-center">WebServarr</h1>
+      </div>
+    </div>
+    <nav class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1" id="drawerNav">
+      <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/" data-nav-id="home"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">home</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Home</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">See what's happening</span></span></a>
+      <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/requests" data-nav-id="requests"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">movie</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Requests</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Request a movie or show</span></span></a>
+      <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/requests-embed" data-nav-id="requests-embed" data-feature="show_requests"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">download</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Requests (Embed)</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Request through Seerr</span></span><span id="requestsBadge" class="ml-auto bg-primary/20 text-[10px] px-1.5 py-0.5 rounded font-bold hidden"></span></a>
+      <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/issues" data-nav-id="issues"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">report_problem</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Issues</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Report a problem with media</span></span></a>
+      <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/calendar" data-nav-id="calendar"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">calendar_month</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Calendar</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">See upcoming releases</span></span></a>
+      <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/tickets" data-nav-id="tickets" data-feature="show_tickets"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">confirmation_number</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Tickets</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Get help from the admin</span></span></a>
+      <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/library" data-nav-id="library" data-feature="show_books"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">menu_book</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">eBooks</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Read books in your browser</span></span></a>
+      <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/wiki" data-nav-id="wiki"><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">library_books</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Wiki</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Read guides and how-tos</span></span></a>
+      <a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="/settings" data-nav-id="settings" data-admin-only hidden><span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">settings</span><span class="flex flex-col min-w-0 leading-tight"><span class="truncate">Settings</span><span class="text-[10px] font-normal truncate mt-0.5 text-steel-blue nav-sublabel">Manage the site</span></span></a>
+    </nav>
+    <div class="p-4 border-t border-steel-blue/20">
+      <button data-logout class="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-steel-blue hover:text-bright transition-colors">
+        <span class="material-symbols-outlined text-sm">logout</span> Sign Out
+      </button>
+      <p class="appVersionMobile text-steel-blue text-[10px] text-center mt-2" data-admin-only hidden></p>
+    </div>
+  </aside>
+</div>
+<header id="appHeader" class="h-16 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-black/40 backdrop-blur-md relative z-50">
+  <div class="flex items-center gap-6">
+    <div id="systemStatus" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-steel-blue/10 border border-steel-blue/30">
+      <span class="flex size-2 rounded-full bg-steel-blue"></span>
+      <span class="text-steel-blue text-xs font-bold uppercase tracking-widest">&nbsp;</span>
+    </div>
+  </div>
+  <div class="flex items-center gap-4">
+    <button class="relative p-2 text-steel-blue hover:text-frosted-blue transition-colors group" title="Notifications">
+      <span class="material-symbols-outlined">notifications</span>
+    </button>
+    <div class="relative">
+      <button id="userMenuBtn" class="flex items-center gap-3 pl-4 cursor-pointer hover:opacity-80 transition-opacity">
+        <div class="text-right">
+          <p id="headerUsername" class="text-sm font-bold text-frosted-blue leading-none"></p>
+          <p id="headerRole" class="text-[10px] text-frosted-blue/60 mt-1"></p>
+        </div>
+        <div id="headerAvatar" class="size-9 rounded-full bg-gradient-to-br from-baltic-blue to-cornflower-ocean border border-steel-blue/40"></div>
+      </button>
+      <div id="userMenuDropdown" class="hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
+        <a href="/settings" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors" data-admin-only hidden>
+          <span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>
+          Account Settings
+        </a>
+        <button class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors text-left" data-logout>
+          <span class="material-symbols-outlined text-steel-blue text-sm">logout</span>
+          Sign Out
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+<script type="speculationrules">
+{"prefetch": [{"where": {"and": [
+  {"href_matches": "/*"},
+  {"not": {"href_matches": "/auth/*"}},
+  {"not": {"href_matches": "/kavita/*"}},
+  {"not": {"href_matches": "/api/*"}}
+]}, "eagerness": "moderate"}]}
+</script>

@@ -264,3 +264,73 @@ body {
 .animate-pulse-once {
   animation: pulse-once 0.3s ease-out;
 }
+
+/* ---- Static shell layout (desktop) ----
+ *
+ * The shell partial (see app/static/partials/shell.html) ships #appSidebar,
+ * #appHeader and #appTopbar as flat siblings inserted at one point in the
+ * page, ahead of <main>, so the server can send the whole nav as plain HTML
+ * instead of building it with JS after load. #appHeader used to be a DOM
+ * descendant of <main> (which is how it got its full width and sat above the
+ * scrollable content -- a flex column stretches a block child to its own
+ * width); as a flat sibling it needs a layout that can place it there without
+ * that nesting. A grid does it: column 1 is the sidebar for the full height,
+ * column 2 splits into the header row and the main row.
+ *
+ * Below 1024px this block does not apply -- mobile keeps the plain
+ * document-flow stack (topbar, drawer, content) it always had, and
+ * #appSidebar/#appHeader are `hidden` there anyway.
+ */
+@media (min-width: 1024px) {
+  body[data-page] {
+    display: grid;
+    grid-template-columns: 16rem 1fr;
+    grid-template-rows: 4rem 1fr;
+    height: 100vh;
+  }
+  body[data-page] #appSidebar { grid-column: 1; grid-row: 1 / span 2; }
+  body[data-page] #appHeader { grid-column: 2; grid-row: 1; }
+  /* main's own `lg:h-screen` utility class is left untouched in the HTML
+     (Task 2 keeps that markup intact) but is overridden here: it now fills
+     its grid row instead of the full viewport, which is what "row 2" already
+     works out to (100vh minus the header's 4rem). */
+  body[data-page] main { grid-column: 2; grid-row: 2; height: 100%; }
+}
+
+/* ---- Active nav item ----
+ *
+ * CSS-only so the right item is highlighted at first paint, before any JS
+ * (sidebar.js or its later decorator rewrite) has run. Declarations match
+ * what the old .bg-primary/.text-background-dark utility pair computed:
+ * background rgb(18 87 147) = --color-primary, text rgb(0 0 0) =
+ * --color-background, bold. Matches both the desktop sidebar and the mobile
+ * drawer's copy of the nav, since both share the same data-nav-id values.
+ */
+body[data-page="home"]           [data-nav-id="home"],
+body[data-page="requests"]       [data-nav-id="requests"],
+body[data-page="requests-embed"] [data-nav-id="requests-embed"],
+body[data-page="issues"]         [data-nav-id="issues"],
+body[data-page="calendar"]       [data-nav-id="calendar"],
+body[data-page="tickets"]        [data-nav-id="tickets"],
+body[data-page="library"]        [data-nav-id="library"],
+body[data-page="wiki"]           [data-nav-id="wiki"],
+body[data-page="settings"]       [data-nav-id="settings"] {
+  background: rgb(var(--color-primary) / 1);
+  color: rgb(var(--color-background) / 1);
+  font-weight: 700;
+}
+/* The sublabel line rode the active link's inherited color at reduced
+   opacity rather than its own steel-blue -- reproduce that instead of
+   inheriting the plain hover state's colour. */
+body[data-page="home"]           [data-nav-id="home"] .nav-sublabel,
+body[data-page="requests"]       [data-nav-id="requests"] .nav-sublabel,
+body[data-page="requests-embed"] [data-nav-id="requests-embed"] .nav-sublabel,
+body[data-page="issues"]         [data-nav-id="issues"] .nav-sublabel,
+body[data-page="calendar"]       [data-nav-id="calendar"] .nav-sublabel,
+body[data-page="tickets"]        [data-nav-id="tickets"] .nav-sublabel,
+body[data-page="library"]        [data-nav-id="library"] .nav-sublabel,
+body[data-page="wiki"]           [data-nav-id="wiki"] .nav-sublabel,
+body[data-page="settings"]       [data-nav-id="settings"] .nav-sublabel {
+  color: inherit;
+  opacity: 0.7;
+}

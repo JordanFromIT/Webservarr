@@ -109,11 +109,19 @@ function _buildHeader() {
 }
 
 function initHeader() {
+  // Interim (Task 2 of the nav-load-feel work): the static shell partial
+  // (app/static/partials/shell.html) now ships the header markup directly
+  // from the server, so #header-root no longer exists on any page and
+  // _buildHeader() is dead code here. Guard it rather than delete it -- a
+  // later task rewrites this file into a decorator and removes the builder
+  // for good. Either way, #userMenuBtn/#userMenuDropdown already exist (from
+  // the static partial, or from this legacy build path), so the dropdown
+  // wiring below still needs to run unconditionally.
   var root = document.getElementById('header-root');
-  if (!root) return;
-
-  var header = _buildHeader();
-  root.appendChild(header);
+  if (root) {
+    var header = _buildHeader();
+    root.appendChild(header);
+  }
 
   // Wire dropdown toggle
   var userMenuBtn = document.getElementById('userMenuBtn');
