@@ -874,3 +874,67 @@ async def request_insights() -> dict:
     if rows:
         _wait_cache["all"] = (time.monotonic(), result)
     return result
+
+
+# --- Request-status support -------------------------------------------------
+
+_ALL_REQUESTS_TIMEOUT = 30.0
+
+
+async def get_all_requests() -> list:
+    """
+    Every request Seerr holds, normalised to the fields the classifier needs.
+
+    Fetched in one call rather than paged: the whole set is in the low
+    thousands, and a single response is both faster over the tunnel and free of
+    the drift that paging through a changing list introduces.
+
+    Each row carries who asked and when, because the page sorts by wait time
+    and defaults to showing a viewer their own requests first.
+    """
+    config = _get_config()
+    if not config["url"] or not config["api_key"]:
+        return []
+
+    try:
+        async with httpx.AsyncClient(timeout=_ALL_REQUESTS_TIMEOUT, verify=False) as client:
+            resp = await client.get(
+                f"{config['url']}/api/v1/request",
+                params={"take": 5000, "filter": "all", "sort": "added"},
+                headers={"X-Api-Key": config["api_key"]},
+            )
+            if resp.status_code != 200:
+                logger.warning("Seerr request list returned HTTP %d", resp.status_code)
+                return []
+
+            rows = []
+            for r in resp.json().get("results", []):
+                media = r.get("media") or {}
+                requested_by = r.get("requestedBy") or {}
+                seasons = [
+                    s.get("seasonNumber")
+                    for s in (r.get("seasons") or [])
+                    if s.get("seasonNumber") is not None
+                ]
+                rows.append({
+                    "request_id": r.get("id"),
+                    "media_type": r.get("type"),
+                    "tmdb_id": media.get("tmdbId"),
+                    "tvdb_id": media.get("tvdbId"),
+                    "media_status": media.get("status"),
+                    "request_status": r.get("status"),
+                    "is_4k": bool(r.get("is4k")),
+                    "seasons": sorted(seasons) if seasons else None,
+                    "requested_by_id": requested_by.get("id"),
+                    "requested_by": (
+                        requested_by.get("displayName")
+                        or requested_by.get("plexUsername")
+                        or requested_by.get("username")
+                        or ""
+                    ),
+                    "requested_at": r.get("createdAt"),
+                })
+            return rows
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Seerr request list failed: %s", exc)
+        return []

@@ -361,3 +361,85 @@ async def quality_breakdown() -> dict:
         "episodes": episodes,
         "hd_or_better_pct": round(100 * hd / total) if total else 0,
     }
+
+
+# --- Availability verification ----------------------------------------------
+#
+# Seerr's record of what is available drifts: a sizeable set of titles that play
+# fine in Plex are held in Seerr as DELETED with no rating key, and Seerr's own
+# nightly availability sync does not repair them. Telling someone a film they
+# can already watch is "not available" is the single most trust-destroying thing
+# the request-status page could do, so availability is confirmed here instead of
+# being taken from Seerr, Radarr's hasFile flag, or a Sonarr episode count.
+#
+# The rule this exists to enforce: a row may only be reported as already
+# available if a Plex lookup returned an item carrying the same TMDB id. Nothing
+# weaker counts. On any doubt the row stays in the missing set -- sending
+# someone to Plex for a film that is not there costs far more than leaving a
+# present film listed as missing for one more cycle.
+
+_AVAILABILITY_TIMEOUT = 15.0
+
+
+async def _search_titles(client: "httpx.AsyncClient", config: dict, query: str) -> list:
+    """Raw Plex search hits for a title string, with external ids attached."""
+    resp = await client.get(
+        f"{config['url']}/search",
+        params={"query": query, "includeGuids": 1},
+        headers={"X-Plex-Token": config["token"], "Accept": "application/json"},
+    )
+    if resp.status_code != 200:
+        return []
+    return resp.json().get("MediaContainer", {}).get("Metadata", []) or []
+
+
+async def tmdb_ids_present(candidates: list) -> set:
+    """
+    Of the given candidates, which are genuinely in Plex.
+
+    ``candidates`` is a list of {"tmdb_id": int, "title": str, "media_type":
+    "movie"|"tv"}. Returns the subset of tmdb_ids confirmed present.
+
+    Plex has no usable lookup by external id on this server -- querying
+    /library/all by guid returns nothing -- so each candidate is searched by
+    title and the results are then filtered on ``tmdb://<id>`` from the Guid
+    array. That filter is the whole point: Plex's search is fuzzy and answers a
+    nonsense query with several unrelated hits, so "the search returned
+    something" proves nothing. Only an exact id match does.
+
+    Searches run sequentially. This is called from a background warmer against
+    a few dozen candidates, never on a user's request, so being gentle with the
+    Plex server matters more than finishing quickly.
+    """
+    config = _get_config()
+    if not config["url"] or not config["token"] or not candidates:
+        return set()
+
+    wanted_type = {"movie": "movie", "tv": "show"}
+    present = set()
+
+    try:
+        async with httpx.AsyncClient(timeout=_AVAILABILITY_TIMEOUT, verify=False) as client:
+            for c in candidates:
+                tmdb_id, title = c.get("tmdb_id"), (c.get("title") or "").strip()
+                if not tmdb_id or not title:
+                    continue
+                expected = wanted_type.get(c.get("media_type"), "movie")
+                try:
+                    for item in await _search_titles(client, config, title):
+                        if item.get("type") != expected:
+                            continue
+                        guids = [g.get("id", "") for g in (item.get("Guid") or [])]
+                        if f"tmdb://{tmdb_id}" in guids:
+                            present.add(int(tmdb_id))
+                            break
+                except Exception as exc:  # noqa: BLE001
+                    # One bad title must not cost the whole batch; an unchecked
+                    # candidate simply stays in the missing set, which is the
+                    # safe direction.
+                    logger.debug("Plex availability check failed for %r: %s", title, exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Plex availability verification failed: %s", exc)
+        return set()
+
+    return present
