@@ -193,12 +193,12 @@
     <span class="material-symbols-outlined text-steel-blue">pending_actions</span>
     <h3 class="text-lg font-bold text-frosted-blue">Request Status</h3>
     <span id="rsCount" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-steel-blue/20 text-steel-blue"></span>
-    <span id="rsFresh" class="text-[11px] text-steel-blue/60"></span>
-    <button id="rsMineToggle" type="button"
-      class="ml-auto px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all rs-tab active">Mine</button>
-    <button id="rsAllToggle" type="button"
-      class="px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all rs-tab">Everyone</button>
+    <span id="rsFresh" class="ml-auto text-[11px] text-steel-blue/60"></span>
   </div>
+  <p class="text-xs text-steel-blue/80 mb-3">
+    Everything that&rsquo;s been asked for and isn&rsquo;t on the server yet, and why.
+    Once something arrives it drops off this list.
+  </p>
 
   <!-- Search + per-column filters -->
   <div class="flex flex-wrap items-center gap-2 mb-3">
@@ -208,10 +208,9 @@
         class="w-full pl-10 pr-3 py-2 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"/>
     </div>
     <select id="rsFilterStatus" class="rs-select"><option value="">All statuses</option></select>
-    <select id="rsFilterWho" class="rs-select"><option value="">Anyone</option></select>
     <select id="rsFilterType" class="rs-select">
-      <option value="">Films &amp; shows</option>
-      <option value="movie">Films</option>
+      <option value="">Movies &amp; shows</option>
+      <option value="movie">Movies</option>
       <option value="tv">Shows</option>
     </select>
   </div>
@@ -362,12 +361,16 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
   overflow-x: auto;
   overflow-y: hidden;
   scroll-behavior: smooth;
+  scroll-snap-type: y proximity;
   -webkit-overflow-scrolling: touch;
   position: relative;
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--color-accent) / 0.4) transparent;
 }
-.rs-scroll::-webkit-scrollbar { height: 8px; }
+/* Only once capped does the body scroll vertically; below five rows it sits at
+   its natural height with no scrollbar at all. */
+.rs-scroll.rs-capped { overflow-y: auto; }
+.rs-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
 .rs-scroll::-webkit-scrollbar-track { background: transparent; }
 .rs-scroll::-webkit-scrollbar-thumb {
   background: rgb(var(--color-accent) / 0.35);
@@ -587,9 +590,6 @@ var RS = (function () {
 
   var _rows = [];
   var _snapshot = null;
-  var _scope = 'mine';
-  var _me = '';
-  var _meId = null;
   var _sort = { key: 'waited', dir: 'desc' };
   var _expanded = {};
 
@@ -609,26 +609,45 @@ var RS = (function () {
     DEAD_END:          'Tried repeatedly without success',
     UNKNOWN:           'Being looked at'
   };
-  // Short chip text for the Status column; the sentence lives in "Why".
+  // Short chip for the Status column; the sentence lives in "Why".
+  //
+  // Derived from reason_code, NOT from the coarse group. The group put 93 rows
+  // that are still being searched for under the same "On the way" chip as the
+  // 16 genuinely downloading, which reads as "minutes away" for requests that
+  // have found nothing in a year. Each chip now says only what is true.
   var STATUS = {
-    ready:       { label: 'Ready',     cls: 'rs-chip-ready' },
-    on_the_way:  { label: 'On the way', cls: 'rs-chip-go' },
-    waiting:     { label: 'Waiting',   cls: 'rs-chip-wait' },
-    needs_look:  { label: 'Stuck',     cls: 'rs-chip-stuck' },
-    cant_fulfil: { label: 'Can’t get', cls: 'rs-chip-dead' }
+    DOWNLOADING:       { key: 'downloading', label: 'Downloading', cls: 'rs-chip-go' },
+    DOWNLOAD_STALLED:  { key: 'retrying',    label: 'Retrying',    cls: 'rs-chip-go' },
+    TV_PARTIAL:        { key: 'partial',     label: 'Partly here', cls: 'rs-chip-go' },
+    NO_RELEASE_FOUND:  { key: 'searching',   label: 'Searching',   cls: 'rs-chip-wait' },
+    NOT_MONITORED:     { key: 'paused',      label: 'Paused',      cls: 'rs-chip-wait' },
+    NOT_RELEASED_YET:  { key: 'unreleased',  label: 'Not out yet', cls: 'rs-chip-wait' },
+    AWAITING_APPROVAL: { key: 'approval',    label: 'Needs approval', cls: 'rs-chip-stuck' },
+    NOT_TRACKED:       { key: 'notadded',    label: 'Not added',   cls: 'rs-chip-stuck' },
+    IMPORT_BLOCKED:    { key: 'stuck',       label: 'Stuck',       cls: 'rs-chip-stuck' },
+    DECLINED:          { key: 'declined',    label: 'Declined',    cls: 'rs-chip-dead' },
+    UNSATISFIABLE:     { key: 'cantget',     label: 'Can’t get',   cls: 'rs-chip-dead' },
+    DEAD_END:          { key: 'cantget',     label: 'Can’t get',   cls: 'rs-chip-dead' },
+    UNKNOWN:           { key: 'checking',    label: 'Checking',    cls: 'rs-chip-wait' }
   };
 
   var COLUMNS = [
     { key: 'title',  label: 'Title',   min: 180, grow: true },
-    { key: 'status', label: 'Status',  min: 110 },
-    { key: 'why',    label: 'Why',     min: 220, hideMobile: true },
-    { key: 'who',    label: 'Asked by', min: 110, hideMobile: true },
+    { key: 'status', label: 'Status',  min: 120 },
+    { key: 'why',    label: 'Why',     min: 240, hideMobile: true },
     { key: 'waited', label: 'Waiting', min: 100, hideMobile: true, numeric: true },
     { key: 'type',   label: 'Type',    min: 90,  hideMobile: true }
   ];
 
+  // Five rows, then the body scrolls. Measured from the rendered rows rather
+  // than assumed, because a row with a season/4K line under the title is taller
+  // than one without and a hardcoded height would cut the fifth row in half.
+  var MAX_ROWS = 5;
+
   function reasonText(c) { return REASONS[c] || 'Being looked at'; }
-  function statusOf(g) { return STATUS[g] || { label: 'Pending', cls: 'rs-chip-wait' }; }
+  function statusOf(r) {
+    return STATUS[r.reason_code] || { key: 'checking', label: 'Checking', cls: 'rs-chip-wait' };
+  }
 
   function daysWaiting(iso) {
     if (!iso) return 0;
@@ -659,11 +678,10 @@ var RS = (function () {
   function cellValue(r, key) {
     switch (key) {
       case 'title':  return r.title || ('Request #' + r.request_id);
-      case 'status': return statusOf(r.group).label;
+      case 'status': return statusOf(r).label;
       case 'why':    return reasonText(r.reason_code);
-      case 'who':    return r.requested_by || '';
       case 'waited': return daysWaiting(r.requested_at);
-      case 'type':   return r.media_type === 'tv' ? 'Show' : 'Film';
+      case 'type':   return r.media_type === 'tv' ? 'Show' : 'Movie';
       default:       return '';
     }
   }
@@ -671,21 +689,13 @@ var RS = (function () {
   function visible() {
     var q = (document.getElementById('rsSearch').value || '').trim().toLowerCase();
     var fs = document.getElementById('rsFilterStatus').value;
-    var fw = document.getElementById('rsFilterWho').value;
     var ft = document.getElementById('rsFilterType').value;
 
     var out = _rows.filter(function (r) {
-      if (_scope === 'mine') {
-        var mine = (_meId != null && r.requested_by_id != null)
-          ? r.requested_by_id === _meId
-          : (_me && r.requested_by && r.requested_by.toLowerCase() === _me.toLowerCase());
-        if (!mine) return false;
-      }
-      if (fs && r.group !== fs) return false;
-      if (fw && r.requested_by !== fw) return false;
+      if (fs && statusOf(r).key !== fs) return false;
       if (ft && r.media_type !== ft) return false;
       if (q) {
-        var hay = (cellValue(r, 'title') + ' ' + cellValue(r, 'why') + ' ' + cellValue(r, 'who')).toLowerCase();
+        var hay = (cellValue(r, 'title') + ' ' + cellValue(r, 'why') + ' ' + cellValue(r, 'status')).toLowerCase();
         if (hay.indexOf(q) === -1) return false;
       }
       return true;
@@ -724,9 +734,9 @@ var RS = (function () {
 
     if (!rows.length) {
       body.innerHTML = '';
-      empty.textContent = _scope === 'mine'
-        ? 'Nothing of yours is waiting — everything you’ve asked for has arrived.'
-        : 'Nothing is waiting.';
+      empty.textContent = _rows.length
+        ? 'Nothing matches those filters.'
+        : 'Everything that has been asked for is on the server.';
       empty.classList.remove('hidden');
       document.getElementById('rsScroll').classList.add('hidden');
       return;
@@ -735,7 +745,7 @@ var RS = (function () {
     document.getElementById('rsScroll').classList.remove('hidden');
 
     body.innerHTML = rows.map(function (r) {
-      var st = statusOf(r.group);
+      var st = statusOf(r);
       var id = String(r.request_id);
       var open = !!_expanded[id];
       var scope = scopeText(r);
@@ -754,39 +764,67 @@ var RS = (function () {
           '</td>' +
           '<td class="rs-td"><span class="rs-chip ' + st.cls + '">' + escapeHtml(st.label) + '</span></td>' +
           '<td class="rs-td rs-hide-sm text-frosted-blue/75">' + escapeHtml(cellValue(r, 'why')) + '</td>' +
-          '<td class="rs-td rs-hide-sm text-steel-blue">' + escapeHtml(cellValue(r, 'who')) + '</td>' +
           '<td class="rs-td rs-hide-sm text-steel-blue whitespace-nowrap">' + escapeHtml(waitedText(daysWaiting(r.requested_at))) + '</td>' +
           '<td class="rs-td rs-hide-sm text-steel-blue">' + escapeHtml(cellValue(r, 'type')) + '</td>' +
         '</tr>';
       // Phone-only detail row: everything the narrow layout drops, revealed on tap.
       var detail = open
-        ? '<tr class="rs-detail rs-only-sm-row"><td class="rs-td" colspan="6">' +
+        ? '<tr class="rs-detail rs-only-sm-row"><td class="rs-td" colspan="5">' +
             '<p class="text-sm text-frosted-blue/75">' + escapeHtml(cellValue(r, 'why')) + '</p>' +
             '<p class="text-[11px] text-steel-blue mt-1">' +
-              escapeHtml(cellValue(r, 'who')) + ' · waiting ' + escapeHtml(waitedText(daysWaiting(r.requested_at))) +
+              'Waiting ' + escapeHtml(waitedText(daysWaiting(r.requested_at))) +
               ' · ' + escapeHtml(cellValue(r, 'type')) +
             '</p>' +
           '</td></tr>'
         : '';
       return main + detail;
     }).join('');
+    applyRowCap();
     updateScrollShadows();
   }
 
-  function renderFilters() {
-    var statusSel = document.getElementById('rsFilterStatus');
-    var whoSel = document.getElementById('rsFilterWho');
-    var groups = [], people = [];
-    _rows.forEach(function (r) {
-      if (groups.indexOf(r.group) === -1) groups.push(r.group);
-      if (r.requested_by && people.indexOf(r.requested_by) === -1) people.push(r.requested_by);
+  // Cap the body at five rows and let the rest scroll vertically.
+  //
+  // The height is measured from the rows that actually rendered rather than
+  // assumed: a row carrying a season or 4K line under its title is taller than
+  // one without, so a fixed pixel height would slice the fifth row in half on
+  // some filters and leave a gap on others. The header is excluded from the cap
+  // so it stays pinned above the scrolling rows.
+  function applyRowCap() {
+    var scroll = document.getElementById('rsScroll');
+    var body = document.getElementById('rsBody');
+    var visibleRows = [].slice.call(body.children).filter(function (tr) {
+      return !tr.classList.contains('rs-detail') || tr.offsetParent !== null;
     });
-    statusSel.innerHTML = '<option value="">All statuses</option>' + groups.map(function (g) {
-      return '<option value="' + escapeHtml(g) + '">' + escapeHtml(statusOf(g).label) + '</option>';
-    }).join('');
-    whoSel.innerHTML = '<option value="">Anyone</option>' + people.sort().map(function (p) {
-      return '<option value="' + escapeHtml(p) + '">' + escapeHtml(p) + '</option>';
-    }).join('');
+    if (visibleRows.length <= MAX_ROWS) {
+      scroll.style.maxHeight = '';
+      scroll.classList.remove('rs-capped');
+      return;
+    }
+    var head = document.getElementById('rsHead');
+    var headH = head ? head.getBoundingClientRect().height : 0;
+    var total = 0;
+    for (var i = 0; i < MAX_ROWS && i < visibleRows.length; i++) {
+      total += visibleRows[i].getBoundingClientRect().height;
+    }
+    if (!total) return;
+    scroll.style.maxHeight = Math.ceil(headH + total) + 'px';
+    scroll.classList.add('rs-capped');
+  }
+
+  // Built from the statuses actually present, so the dropdown never offers a
+  // filter that would return nothing.
+  function renderFilters() {
+    var seen = [], opts = [];
+    _rows.forEach(function (r) {
+      var st = statusOf(r);
+      if (seen.indexOf(st.key) === -1) { seen.push(st.key); opts.push(st); }
+    });
+    opts.sort(function (a, b) { return a.label.localeCompare(b.label); });
+    document.getElementById('rsFilterStatus').innerHTML =
+      '<option value="">All statuses</option>' + opts.map(function (o) {
+        return '<option value="' + escapeHtml(o.key) + '">' + escapeHtml(o.label) + '</option>';
+      }).join('');
   }
 
   // Edge shadows are what tell someone there is more table to the right. Without
@@ -831,20 +869,11 @@ var RS = (function () {
     });
   }
 
-  function setScope(scope) {
-    _scope = scope;
-    document.getElementById('rsMineToggle').classList.toggle('active', scope === 'mine');
-    document.getElementById('rsAllToggle').classList.toggle('active', scope === 'all');
-    renderBody();
-  }
-
   function wire() {
-    ['rsSearch', 'rsFilterStatus', 'rsFilterWho', 'rsFilterType'].forEach(function (id) {
+    ['rsSearch', 'rsFilterStatus', 'rsFilterType'].forEach(function (id) {
       var el = document.getElementById(id);
       el.addEventListener(id === 'rsSearch' ? 'input' : 'change', renderBody);
     });
-    document.getElementById('rsMineToggle').addEventListener('click', function () { setScope('mine'); });
-    document.getElementById('rsAllToggle').addEventListener('click', function () { setScope('all'); });
 
     document.getElementById('rsHead').addEventListener('click', function (e) {
       var btn = e.target.closest('[data-sort]');
@@ -872,7 +901,6 @@ var RS = (function () {
   }
 
   async function load(user) {
-    _me = (user && (user.display_name || user.username)) || '';
     try {
       var resp = await fetch('/api/request-status/');
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -888,10 +916,7 @@ var RS = (function () {
       renderFilters();
       renderHead();
       wire();
-      // Start on the viewer's own requests; fall back to everyone when they
-      // have none, so the grid is never empty on arrival.
-      setScope('mine');
-      if (!document.getElementById('rsBody').children.length) setScope('all');
+      renderBody();
     } catch (err) {
       console.error('Request status failed:', err);
       document.getElementById('rsSection').classList.add('hidden');

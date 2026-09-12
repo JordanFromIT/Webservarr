@@ -266,8 +266,10 @@ def classify(requests, movies, movie_queue, series, series_queue, plex_tmdb_ids)
             "year": req.get("year"),
             "is_4k": req.get("is_4k", False),
             "seasons": req.get("seasons"),
-            "requested_by": req.get("requested_by", ""),
-            "requested_by_id": req.get("requested_by_id"),
+            # No requester identity at all -- not the name, not the id. The page
+            # shows the state of the request queue, and who asked for what is
+            # nobody else's business. Nothing identifying is emitted, so nothing
+            # identifying can leak through the API either.
             "requested_at": req.get("requested_at"),
             "reason_code": reason,
             "state_code": state,
@@ -285,12 +287,12 @@ def collapse_duplicates(rows):
     A page that lists it twice with no visible difference between the rows reads
     as a bug to the audience this is built for.
 
-    The key is all five of media type, TMDB id, 4K, season scope and requester.
-    Requester is part of it deliberately: the page leads with a viewer's own
-    requests, so collapsing two different people's identical requests would
-    erase one of them from their own view -- a worse failure than the duplicate
-    being fixed. Any difference in season scope or 4K keeps the rows apart too,
-    because "Season 2" and "Specials" are genuinely different asks.
+    The key is media type, TMDB id, 4K and season scope. Requester is
+    deliberately NOT part of it: the list describes the state of the queue, not
+    who is waiting, so two people asking for the same film are one thing the
+    server is trying to fetch and belong on one row. Season scope and 4K do stay
+    in the key, because "Season 2" and "Specials" are genuinely different asks
+    and one can be satisfied while the other is not.
 
     The surviving row keeps the newest request id, which reflects current
     intent, but takes the EARLIEST requested_at. Someone who first asked in June
@@ -305,7 +307,6 @@ def collapse_duplicates(rows):
             row.get("tmdb_id"),
             bool(row.get("is_4k")),
             seasons,
-            row.get("requested_by_id"),
         )
         groups.setdefault(key, []).append(row)
 
@@ -406,6 +407,17 @@ async def build_snapshot() -> dict:
     plex_ids = await plex.tmdb_ids_present(candidates)
 
     rows = classify(requests, movies, movie_queue, series, series_queue, plex_ids)
+
+    # Anything confirmed present is dropped rather than shown. This list exists
+    # to explain what has NOT arrived; a row saying "this one is fine" is noise
+    # in a list of problems.
+    #
+    # The Plex verification above is still doing the work even though none of it
+    # is rendered -- it is what stops a title that is actually on the server from
+    # appearing here as missing. Removing the check would not simplify this, it
+    # would put 38 wrong rows back.
+    rows = [r for r in rows if r["reason_code"] != "ALREADY_AVAILABLE"]
+
     rows = collapse_duplicates(rows)
     rows = _enrich_titles(rows, movies, series)
 
