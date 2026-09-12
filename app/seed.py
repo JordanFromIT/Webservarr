@@ -50,6 +50,17 @@ DEFAULT_SETTINGS = {
     "sidebar.sublabel_settings": ("Manage the site", "Sidebar sublabel for Settings"),
     "sidebar.label_calendar": ("Calendar", "Sidebar label for Calendar page"),
     "sidebar.label_settings": ("Settings", "Sidebar label for Settings page"),
+    # Wiki. library_books rather than menu_book, which eBooks already uses.
+    "sidebar.label_wiki": ("Wiki", "Sidebar label for the Wiki page"),
+    "sidebar.sublabel_wiki": ("Guides and how-tos", "Sidebar sublabel for Wiki"),
+    "sidebar.enabled_wiki": ("true", "Show Wiki in the sidebar"),
+    "sidebar.new_wiki": ("false", "Show a New! flag on the Wiki nav item"),
+    "icon.nav_wiki": ("library_books", "Sidebar icon for Wiki page"),
+    # Contextual pointers into the wiki. Each holds a page slug, or is empty.
+    # Empty or dangling slugs render nothing rather than a broken link.
+    "wiki.hook_tickets": ("", "Wiki page slug linked above the support ticket form"),
+    "wiki.hook_issues": ("", "Wiki page slug linked above the media-issue form"),
+    "wiki.hook_playback": ("", "Wiki page slug linked on the Playback Issue category"),
     # Configurable icons (Material Symbols icon names)
     "icon.nav_home": ("home", "Sidebar icon for Home page"),
     "icon.nav_requests": ("movie", "Sidebar icon for Requests page"),
@@ -248,7 +259,7 @@ def seed_default_news(db: Session) -> None:
     """Seed default news posts for fresh installs. Guarded by migration marker."""
     from sqlalchemy.exc import IntegrityError
     from app.models import NewsPost
-    from app.routers.news import render_markdown
+    from app.content import render_markdown
     from datetime import datetime, timezone
 
     if db.query(Setting).filter(Setting.key == "seed.default_news_v1").first():
@@ -314,6 +325,72 @@ def seed_default_news(db: Session) -> None:
     except IntegrityError:
         db.rollback()
         logger.debug("Default news already seeded (race condition), skipping")
+
+
+def seed_wiki_example(db: Session) -> None:
+    """Seed the single example wiki page on a fresh install.
+
+    Guarded by a marker key rather than by checking whether the page exists: an
+    existence check would resurrect the page on the next restart after the
+    operator deletes it, which is the opposite of what deleting it means.
+    """
+    from sqlalchemy.exc import IntegrityError
+    from app.content import render_markdown
+    from app.models import WikiPage
+
+    if db.query(Setting).filter(Setting.key == "seed.wiki_example_v1").first():
+        return
+
+    content = (
+        "This page is an example shipped with WebServarr. Edit it, or delete it, "
+        "from the **Edit this page** button above.\n\n"
+        "## Writing a page\n\n"
+        "Wiki pages are written in Markdown. Headings like the one above become "
+        "entries in the **On this page** list, so a longer guide stays easy to "
+        "skim.\n\n"
+        "- Use bullet lists for steps a reader follows in order\n"
+        "- Use **bold** for the thing they should click\n"
+        "- Link to another wiki page with `[its title](/wiki/its-slug)`\n\n"
+        "## Adding pictures and code\n\n"
+        "Drop an image into the editor to upload it. Images are only visible to "
+        "signed-in users, the same as the rest of the wiki.\n\n"
+        "For anything that should be typed exactly, use a code block:\n\n"
+        "```\n"
+        "one exact thing to type\n"
+        "```\n\n"
+        "## Organising the wiki\n\n"
+        "Group related pages into categories from **Settings > Wiki**. Pages "
+        "without a category still show up on the wiki index under "
+        "\"Uncategorised\", so nothing gets lost while you decide.\n\n"
+        "This page has three headings, which is why the **On this page** list "
+        "appears beside it. Shorter pages do not get one."
+    )
+
+    page = WikiPage(
+        title="Welcome to the Wiki",
+        slug="welcome-to-the-wiki",
+        summary="How to write, organise and link wiki pages.",
+        content=content,
+        content_html=render_markdown(content),
+        category_id=None,
+        sort_order=0,
+        published=True,
+        is_example=True,
+        author_name="WebServarr",
+    )
+    db.add(page)
+    db.add(Setting(
+        key="seed.wiki_example_v1",
+        value="done",
+        description="Example wiki page has been seeded",
+    ))
+
+    try:
+        db.commit()
+        logger.info("Seeded the example wiki page")
+    except IntegrityError:
+        db.rollback()
+        logger.debug("Example wiki page already seeded (race condition), skipping")
 
 
 def migrate_requests_rename(db: Session) -> None:

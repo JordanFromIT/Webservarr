@@ -64,6 +64,9 @@ Anything else, use <a href="/tickets" class="text-primary hover:underline font-s
 </p>
 </div>
 
+<!-- Contextual wiki pointer. Hidden unless an admin has chosen a page. -->
+<div id="wikiHookIssues" class="hidden mb-5"></div>
+
 <!-- Stat Summary Cards -->
 <div class="grid grid-cols-3 gap-3 mb-6">
 <div class="glass-card rounded-xl p-4 text-center">
@@ -230,6 +233,7 @@ Submit Issue
 <script src="/static/js/header.js?v=2"></script>
 <script src="/static/js/sidebar.js?v=21"></script>
 <script src="/static/js/notifications.js?v=3"></script>
+<script src="/static/js/wiki-hook.js?v=1"></script>
 <script>
 // State
 var _searchDebounceTimer = null;
@@ -259,6 +263,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (!user) return;
     showAdminNav(user.is_admin);
     loadSystemStatus();
+    initWikiHook('wikiHookIssues', 'issues', 'Might this help first?');
 
     // Wire up search input with debounce
     var searchInput = document.getElementById('searchInput');

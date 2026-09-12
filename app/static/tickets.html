@@ -62,6 +62,7 @@
 <span class="material-symbols-outlined text-[14px] align-text-bottom mr-1">info</span>
 If this is about one specific movie or show, <a href="/issues" class="text-primary hover:underline font-semibold">Issues</a> gets it to the right place faster.
 </p>
+<div id="wikiHookPlayback" class="hidden mb-3"></div>
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Description</label>
 <textarea id="createDescription" rows="4" placeholder="Give us the details — what you tried, what happened, and which device you were on."
@@ -135,6 +136,10 @@ For a problem with a particular movie or show, use <a href="/issues" class="text
 </p>
 </div>
 
+<!-- Contextual wiki pointer. Renders only when an admin has chosen a page in
+     Settings > Wiki; otherwise it stays hidden and takes no space. -->
+<div id="wikiHookTickets" class="hidden mb-5"></div>
+
 <!-- New Ticket Button + Filter Tabs -->
 <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
 <button onclick="openCreateModal()" class="px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all flex items-center gap-2 shrink-0">
@@ -198,6 +203,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 <script src="/static/js/header.js?v=2"></script>
 <script src="/static/js/sidebar.js?v=21"></script>
 <script src="/static/js/notifications.js?v=3"></script>
+<script src="/static/js/wiki-hook.js?v=1"></script>
 <script>
 // WebServarr — Tickets Page
 (function() {
@@ -742,10 +748,17 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
     var cat = document.getElementById('createCategory');
     var hint = document.getElementById('playbackRedirectHint');
     if (!cat || !hint) return;
+    var wikiBox = document.getElementById('wikiHookPlayback');
     function sync() {
       var overlaps = cat.value === 'playback_issue';
       hint.classList.toggle('hidden', !overlaps);
       hint.classList.toggle('block', overlaps);
+      // The wiki pointer follows the same rule, and stays hidden entirely when
+      // no admin has chosen a page for it.
+      if (wikiBox) {
+        if (overlaps) initWikiHook('wikiHookPlayback', 'playback', 'It may already be answered here:');
+        else wikiBox.classList.add('hidden');
+      }
     }
     cat.addEventListener('change', sync);
     sync();
@@ -784,6 +797,8 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
         if (!menuBtn.contains(e.target) && !menuDrop.contains(e.target)) menuDrop.classList.add('hidden');
       });
     }
+
+    initWikiHook('wikiHookTickets', 'tickets', 'Before you contact support:');
 
     // Load data
     loadTickets();

@@ -21,7 +21,7 @@ from app.limiter import limiter
 from app.database import init_db, SessionLocal
 from app.auth import session_manager
 from app.seed import seed_secret_key
-from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy
+from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki
 from app.services.notification_poller import start_poller, stop_poller
 from app.services.shelf_warmer import start_warmer, stop_warmer
 
@@ -243,6 +243,7 @@ app.include_router(integrations.router, prefix="/api/integrations", tags=["Integ
 app.include_router(branding.router, prefix="/api", tags=["Branding"])
 app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(tickets.router, prefix="/api", tags=["Tickets"])
+app.include_router(wiki.router, prefix="/api/wiki", tags=["Wiki"])
 # No /api prefix: this router owns /kavita/* and /signin-oidc at the app root.
 # /signin-oidc must be at root because Kavita sets its OIDC correlation cookies
 # with path=/signin-oidc, and the browser only sends them to that exact path.
@@ -480,6 +481,35 @@ async def news_page(
     if not await _require_session(session_id):
         return RedirectResponse(url="/login", status_code=302)
     return _serve_page("/app/app/static/news.html", "News page", request)
+
+
+# Wiki
+@app.get("/wiki", response_class=HTMLResponse, tags=["Pages"])
+async def wiki_page(
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve the wiki index."""
+    if not await _require_session(session_id):
+        return RedirectResponse(url="/login", status_code=302)
+    return _serve_page("/app/app/static/wiki.html", "Wiki page", request)
+
+
+@app.get("/wiki/{slug}", response_class=HTMLResponse, tags=["Pages"])
+async def wiki_article_page(
+    slug: str,
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve one wiki page.
+
+    Same file as the index: the client reads location.pathname and renders the
+    matching view, so a pasted deep link cold-loads onto that page instead of
+    flashing the index first.
+    """
+    if not await _require_session(session_id):
+        return RedirectResponse(url="/login", status_code=302)
+    return _serve_page("/app/app/static/wiki.html", "Wiki page", request)
 
 
 # Calendar page

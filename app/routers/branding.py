@@ -3,10 +3,13 @@ Public branding API - returns theme and branding settings without authentication
 Used by frontend theme-loader to apply branding before auth check.
 """
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies import get_current_user_optional
 from app.limiter import limiter
 from app.models import Setting
 
@@ -47,6 +50,7 @@ DEFAULTS = {
     "sidebar.label_tickets": "Tickets",
     "sidebar.label_library": "eBooks",
     "sidebar.label_settings": "Settings",
+    "sidebar.label_wiki": "Wiki",
     # Sidebar sublabels. The label names the destination, the sublabel says what
     # you do there. Every item carries one: descriptions on only some entries
     # read as unfinished, and the pair only tells Issues apart from Tickets if
@@ -60,6 +64,7 @@ DEFAULTS = {
     "sidebar.sublabel_tickets": "Get help from the admin",
     "sidebar.sublabel_library": "Read books in your browser",
     "sidebar.sublabel_settings": "Manage the site",
+    "sidebar.sublabel_wiki": "Guides and how-tos",
     # Per-page "New!" flags. Admin-controlled rather than self-retiring: the
     # admin decides how long a section counts as new, and turns it off when it
     # stops being news. Off everywhere on a fresh install - nothing is new when
@@ -72,6 +77,7 @@ DEFAULTS = {
     "sidebar.new_tickets": "false",
     "sidebar.new_library": "false",
     "sidebar.new_settings": "false",
+    "sidebar.new_wiki": "false",
     # Per-page sidebar visibility. Separate keys from the features.* flags so no
     # setting is written from two places in the UI - a Customization save and a
     # System save would otherwise race and clobber each other. Both must be true
@@ -83,6 +89,7 @@ DEFAULTS = {
     "sidebar.enabled_calendar": "true",
     "sidebar.enabled_tickets": "true",
     "sidebar.enabled_library": "true",
+    "sidebar.enabled_wiki": "true",
     # Settings is deliberately absent: hiding it locks the admin out of the only
     # page that could turn it back on.
     # Configurable icons
@@ -94,6 +101,11 @@ DEFAULTS = {
     "icon.nav_tickets": "confirmation_number",
     "icon.nav_library": "menu_book",
     "icon.nav_settings": "settings",
+    "icon.nav_wiki": "library_books",
+    # Contextual pointers into the wiki; each holds a page slug or is empty.
+    "wiki.hook_tickets": "",
+    "wiki.hook_issues": "",
+    "wiki.hook_playback": "",
     "icon.sidebar_logo": "settings_input_component",
     "icon.section_services": "health_metrics",
     "icon.section_news": "newspaper",
@@ -122,9 +134,51 @@ def _int_setting(raw: str, fallback: int, low: int, high: int) -> int:
     return max(low, min(high, value))
 
 
+def _resolve_wiki_hooks(db: Session, get, is_signed_in: bool) -> dict:
+    """Turn the three hook settings into {slug, title} pairs the frontend can
+    render directly.
+
+    Resolved here rather than client-side because /api/branding already fires on
+    every page load -- a second round trip per hook would buy nothing.
+
+    Gated on a session because this endpoint is public: the wiki is deliberately
+    readable only when signed in, so returning page titles to an anonymous caller
+    would leak content the wiki itself refuses to serve. Logged-out callers get
+    nulls, which the login page has no use for anyway.
+
+    A hook pointing at a deleted or unpublished page also resolves to None, so
+    the card simply does not render instead of producing a dead link.
+    """
+    hooks = {"tickets": None, "issues": None, "playback": None}
+    if not is_signed_in:
+        return hooks
+
+    from app.models import WikiPage
+
+    for name, key in (
+        ("tickets", "wiki.hook_tickets"),
+        ("issues", "wiki.hook_issues"),
+        ("playback", "wiki.hook_playback"),
+    ):
+        slug = (get(key) or "").strip()
+        if not slug:
+            continue
+        page = db.query(WikiPage).filter(
+            WikiPage.slug == slug,
+            WikiPage.published.is_(True),
+        ).first()
+        if page:
+            hooks[name] = {"slug": page.slug, "title": page.title}
+    return hooks
+
+
 @router.get("/branding")
 @limiter.limit("60/minute")
-async def get_branding(request: Request, db: Session = Depends(get_db)):
+async def get_branding(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(get_current_user_optional),
+):
     """
     Public endpoint - returns branding and theme settings.
     No authentication required. Frontend loads this on every page.
@@ -195,6 +249,7 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
                 and bool(get("integration.kavita.url"))
             ),
         },
+        "wiki_hooks": _resolve_wiki_hooks(db, get, current_user is not None),
         "sidebar_labels": {
             "home": get("sidebar.label_home"),
             "requests": get("sidebar.label_requests"),
@@ -204,6 +259,7 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "tickets": get("sidebar.label_tickets"),
             "library": get("sidebar.label_library"),
             "settings": get("sidebar.label_settings"),
+            "wiki": get("sidebar.label_wiki"),
         },
         "sidebar_sublabels": {
             "home": get("sidebar.sublabel_home"),
@@ -214,6 +270,7 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "tickets": get("sidebar.sublabel_tickets"),
             "library": get("sidebar.sublabel_library"),
             "settings": get("sidebar.sublabel_settings"),
+            "wiki": get("sidebar.sublabel_wiki"),
         },
         "sidebar_enabled": {
             "home": get("sidebar.enabled_home") != "false",
@@ -223,6 +280,7 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "calendar": get("sidebar.enabled_calendar") != "false",
             "tickets": get("sidebar.enabled_tickets") != "false",
             "library": get("sidebar.enabled_library") != "false",
+            "wiki": get("sidebar.enabled_wiki") != "false",
             # Always true; there is no key for it. See DEFAULTS.
             "settings": True,
         },
@@ -234,6 +292,7 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "calendar": get("sidebar.new_calendar") == "true",
             "tickets": get("sidebar.new_tickets") == "true",
             "library": get("sidebar.new_library") == "true",
+            "wiki": get("sidebar.new_wiki") == "true",
             "settings": get("sidebar.new_settings") == "true",
         },
         "icons": {
@@ -244,6 +303,7 @@ async def get_branding(request: Request, db: Session = Depends(get_db)):
             "nav_calendar": get("icon.nav_calendar"),
             "nav_tickets": get("icon.nav_tickets"),
             "nav_library": get("icon.nav_library"),
+            "nav_wiki": get("icon.nav_wiki"),
             "nav_settings": get("icon.nav_settings"),
             "sidebar_logo": get("icon.sidebar_logo"),
             "section_services": get("icon.section_services"),

@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Wiki</title>
+<link rel="icon" href="/static/webservarr.svg"/>
+<script src="/static/js/theme-loader.js"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+<script>tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "primary": "rgb(var(--color-primary) / <alpha-value>)",
+        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
+        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
+        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
+        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
+        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
+      },
+      fontFamily: {
+        "display": ["var(--font-display)", "sans-serif"]
+      },
+    },
+  },
+}</script>
+<style>
+  /* Rendered wiki body. Markdown produces bare tags, so the typographic scale
+     lives here rather than as utility classes on elements we never author. */
+  .wiki-body { line-height: 1.7; }
+  .wiki-body h2 { font-size: 1.375rem; font-weight: 700; margin: 2rem 0 .75rem;
+                  color: rgb(var(--color-text)); scroll-margin-top: 5rem; }
+  .wiki-body h3 { font-size: 1.125rem; font-weight: 700; margin: 1.5rem 0 .5rem;
+                  color: rgb(var(--color-text)); scroll-margin-top: 5rem; }
+  .wiki-body p  { margin: 0 0 1rem; }
+  .wiki-body ul, .wiki-body ol { margin: 0 0 1rem 1.25rem; }
+  .wiki-body ul { list-style: disc; }
+  .wiki-body ol { list-style: decimal; }
+  .wiki-body li { margin: .35rem 0; }
+  .wiki-body a  { color: rgb(var(--color-primary)); text-decoration: underline;
+                  text-underline-offset: 2px; }
+  .wiki-body code { font-family: ui-monospace, monospace; font-size: .875em;
+                    background: rgb(var(--color-accent) / .15);
+                    padding: .1em .35em; border-radius: .25rem; }
+  .wiki-body pre { background: rgb(var(--color-accent) / .12);
+                   border: 1px solid rgb(var(--color-accent) / .3);
+                   border-radius: .5rem; padding: 1rem; overflow-x: auto;
+                   margin: 0 0 1rem; }
+  .wiki-body pre code { background: none; padding: 0; }
+  .wiki-body blockquote { border-left: 3px solid rgb(var(--color-primary) / .5);
+                          padding-left: 1rem; margin: 0 0 1rem;
+                          color: rgb(var(--color-accent)); }
+  .wiki-body img { max-width: 100%; height: auto; border-radius: .5rem;
+                   margin: .5rem 0; }
+  .wiki-body hr { border-color: rgb(var(--color-accent) / .3); margin: 1.5rem 0; }
+  /* Wide tables scroll inside their own container rather than the page. */
+  .wiki-body table { width: 100%; border-collapse: collapse; margin: 0 0 1rem;
+                     display: block; overflow-x: auto; }
+  .wiki-body th, .wiki-body td { border: 1px solid rgb(var(--color-accent) / .3);
+                                 padding: .5rem .75rem; text-align: left; }
+  .wiki-body th { background: rgb(var(--color-accent) / .12); font-weight: 700; }
+  .wiki-body mark, .wiki-hit { background: rgb(var(--color-primary) / .35);
+                               color: rgb(var(--color-text)); border-radius: .2rem;
+                               padding: 0 .15em; }
+  .wiki-skel { background: rgb(var(--color-accent) / .15); border-radius: .5rem;
+               animation: wikiPulse 1.4s ease-in-out infinite; }
+  @keyframes wikiPulse { 0%,100% { opacity: .5 } 50% { opacity: .9 } }
+</style>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+
+<div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
+
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-y-auto">
+<div id="header-root" class="hidden lg:block lg:h-16"></div>
+
+<div class="p-4 lg:p-8 max-w-5xl w-full mx-auto">
+  <div id="wikiRoot">
+    <!-- Skeleton reserves the final layout so nothing shifts when data lands. -->
+    <div class="wiki-skel h-8 w-48 mb-3"></div>
+    <div class="wiki-skel h-4 w-72 mb-8"></div>
+    <div class="wiki-skel h-12 w-full mb-8"></div>
+    <div class="grid gap-4 sm:grid-cols-2">
+      <div class="wiki-skel h-28"></div>
+      <div class="wiki-skel h-28"></div>
+      <div class="wiki-skel h-28"></div>
+      <div class="wiki-skel h-28"></div>
+    </div>
+  </div>
+</div>
+
+<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
+  <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
+</div>
+
+</main>
+
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/sidebar.js?v=22"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+<script src="/static/js/wiki-editor.js?v=1"></script>
+<script>
+// WebServarr — Wiki
+//
+// One page serving three views (index, page, search). Moving between them swaps
+// only #wikiRoot and pushes history, so the sidebar and header never rebuild —
+// the nav has to feel stationary, which a full page load cannot do.
+var WikiView = (function () {
+  'use strict';
+
+  var root = document.getElementById('wikiRoot');
+  var _user = null;
+  var _cats = null;   // cached category list; invalidated on every refresh()
+
+  // ---------- helpers ----------
+
+  function isAdmin() { return !!(_user && _user.is_admin); }
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined && text !== null) n.textContent = text;
+    return n;
+  }
+
+  function icon(name, cls) {
+    var s = el('span', 'material-symbols-outlined ' + (cls || ''));
+    s.textContent = name;
+    return s;
+  }
+
+  function dateLabel(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  async function api(path) {
+    var res = await fetch(path);
+    if (res.status === 401) { window.location.href = '/login'; throw new Error('unauthenticated'); }
+    if (!res.ok) { var e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
+    return res.json();
+  }
+
+  function clear() { while (root.firstChild) root.removeChild(root.firstChild); }
+
+  function skeleton(kind) {
+    clear();
+    var wrap = el('div');
+    if (kind === 'page') {
+      wrap.appendChild(el('div', 'wiki-skel h-8 w-2/3 mb-3'));
+      wrap.appendChild(el('div', 'wiki-skel h-4 w-40 mb-8'));
+      for (var i = 0; i < 6; i++) {
+        wrap.appendChild(el('div', 'wiki-skel h-4 w-full mb-3'));
+      }
+    } else {
+      wrap.appendChild(el('div', 'wiki-skel h-8 w-48 mb-3'));
+      wrap.appendChild(el('div', 'wiki-skel h-12 w-full mb-8'));
+      var grid = el('div', 'grid gap-4 sm:grid-cols-2');
+      for (var j = 0; j < 4; j++) grid.appendChild(el('div', 'wiki-skel h-28'));
+      wrap.appendChild(grid);
+    }
+    root.appendChild(wrap);
+  }
+
+  // ---------- shared chrome ----------
+
+  function pageHeader(titleText, subtitleText, backHref, backText) {
+    var head = el('div', 'mb-6');
+    var back = el('a', 'inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors mb-3');
+    back.href = backHref || '/';
+    back.appendChild(icon('chevron_left', 'text-sm'));
+    back.appendChild(document.createTextNode(backText || 'Back to home'));
+    head.appendChild(back);
+
+    var row = el('div', 'flex items-center gap-3');
+    row.appendChild(icon('library_books', 'text-steel-blue text-3xl'));
+    var col = el('div', 'min-w-0');
+    col.appendChild(el('h1', 'text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight', titleText));
+    if (subtitleText) col.appendChild(el('p', 'text-sm text-steel-blue mt-0.5', subtitleText));
+    row.appendChild(col);
+    head.appendChild(row);
+    return head;
+  }
+
+  function searchBox(initial) {
+    var form = el('form', 'relative mb-8');
+    var input = el('input',
+      'w-full pl-11 pr-4 py-3 rounded-lg bg-baltic-blue/20 border border-steel-blue/30 ' +
+      'text-frosted-blue placeholder:text-steel-blue focus:border-primary focus:ring-0 transition-colors');
+    input.type = 'search';
+    input.name = 'q';
+    input.placeholder = 'Search the wiki…';
+    input.value = initial || '';
+    input.setAttribute('aria-label', 'Search the wiki');
+    var mag = icon('search', 'text-steel-blue absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none');
+    form.appendChild(mag);
+    form.appendChild(input);
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var term = input.value.trim();
+      navigate(term ? '/wiki?q=' + encodeURIComponent(term) : '/wiki');
+    });
+    return form;
+  }
+
+  function adminBar(onNew) {
+    if (!isAdmin()) return null;
+    var bar = el('div', 'flex justify-end mb-4');
+    var btn = el('button',
+      'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 text-primary ' +
+      'border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all');
+    btn.type = 'button';
+    btn.appendChild(icon('add', 'text-base'));
+    btn.appendChild(document.createTextNode('New page'));
+    btn.addEventListener('click', onNew);
+    bar.appendChild(btn);
+    return bar;
+  }
+
+  function emptyState(iconName, title, detail) {
+    var box = el('div', 'text-center text-steel-blue py-12');
+    box.appendChild(icon(iconName, 'text-4xl mb-2 block opacity-50'));
+    box.appendChild(el('p', 'text-frosted-blue font-bold', title));
+    if (detail) box.appendChild(el('p', 'text-sm mt-1', detail));
+    return box;
+  }
+
+  // ---------- index ----------
+
+  function categoryCard(cat) {
+    var a = el('a',
+      'group flex flex-col gap-2 p-5 rounded-xl bg-baltic-blue/20 border border-steel-blue/30 ' +
+      'hover:border-primary/50 hover:bg-baltic-blue/30 transition-all');
+    a.href = '/wiki?category=' + encodeURIComponent(cat.slug);
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      renderCategory(cat.slug);
+      history.pushState({}, '', a.getAttribute('href'));
+    });
+
+    var top = el('div', 'flex items-center gap-3');
+    top.appendChild(icon(cat.icon || 'folder', 'text-steel-blue group-hover:text-primary transition-colors'));
+    top.appendChild(el('h2', 'font-bold text-frosted-blue', cat.name));
+    a.appendChild(top);
+
+    if (cat.description) a.appendChild(el('p', 'text-sm text-steel-blue', cat.description));
+
+    var count = cat.page_count === 1 ? '1 page' : cat.page_count + ' pages';
+    if (cat.draft_count) count += ' · ' + cat.draft_count + ' draft' + (cat.draft_count === 1 ? '' : 's');
+    a.appendChild(el('p', 'text-xs text-steel-blue mt-auto pt-1', count));
+    return a;
+  }
+
+  function pageRow(page, showCategory) {
+    var a = el('a',
+      'flex items-start gap-3 p-4 rounded-lg bg-baltic-blue/15 border border-steel-blue/25 ' +
+      'hover:border-primary/50 hover:bg-baltic-blue/25 transition-all');
+    a.href = '/wiki/' + encodeURIComponent(page.slug);
+    a.appendChild(icon('description', 'text-steel-blue shrink-0'));
+
+    var col = el('div', 'min-w-0 flex-1');
+    var titleRow = el('div', 'flex items-center gap-2 flex-wrap');
+    titleRow.appendChild(el('span', 'font-bold text-frosted-blue', page.title));
+    if (!page.published) {
+      titleRow.appendChild(el('span',
+        'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-steel-blue',
+        'Draft'));
+    }
+    col.appendChild(titleRow);
+    if (page.summary) col.appendChild(el('p', 'text-sm text-steel-blue mt-0.5', page.summary));
+    if (showCategory && page.category_name) {
+      col.appendChild(el('p', 'text-xs text-steel-blue mt-1', page.category_name));
+    }
+    a.appendChild(col);
+    return a;
+  }
+
+  async function renderIndex() {
+    skeleton('index');
+    var results;
+    try {
+      results = await Promise.all([
+        api('/api/wiki/categories'),
+        api('/api/wiki/pages?include_drafts=' + (isAdmin() ? 'true' : 'false') + '&limit=200')
+      ]);
+    } catch (e) {
+      if (e.message === 'unauthenticated') return;
+      clear();
+      root.appendChild(pageHeader('Wiki', null, '/', 'Back to home'));
+      root.appendChild(emptyState('cloud_off', "The wiki didn't load",
+        'Reload the page. If it keeps happening, the server may be restarting.'));
+      return;
+    }
+
+    _cats = results[0];
+    var pages = results[1];
+
+    clear();
+    root.appendChild(pageHeader('Wiki', 'Guides and how-tos for the whole setup.', '/', 'Back to home'));
+    root.appendChild(searchBox(''));
+
+    var bar = adminBar(function () {
+      if (window.WikiEditor) WikiEditor.open(null);
+    });
+    if (bar) root.appendChild(bar);
+
+    if (!_cats.length && !pages.length) {
+      root.appendChild(emptyState('menu_book', 'The wiki is empty',
+        isAdmin() ? 'Use New page above to write the first guide.'
+                  : 'Nothing has been written here yet.'));
+      return;
+    }
+
+    if (_cats.length) {
+      var grid = el('div', 'grid gap-4 sm:grid-cols-2 mb-8');
+      _cats.forEach(function (c) { grid.appendChild(categoryCard(c)); });
+      root.appendChild(grid);
+    }
+
+    var loose = pages.filter(function (p) { return !p.category_slug; });
+    if (loose.length) {
+      root.appendChild(el('h2', 'text-sm font-bold uppercase tracking-wider text-steel-blue mb-3',
+        _cats.length ? 'Uncategorised' : 'Pages'));
+      var list = el('div', 'grid gap-2 mb-8');
+      loose.forEach(function (p) { list.appendChild(pageRow(p, false)); });
+      root.appendChild(list);
+    }
+
+    var recent = pages.slice().sort(function (a, b) {
+      return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+    }).slice(0, 5);
+    if (recent.length && _cats.length) {
+      root.appendChild(el('h2', 'text-sm font-bold uppercase tracking-wider text-steel-blue mb-3',
+        'Recently updated'));
+      var rlist = el('div', 'grid gap-2');
+      recent.forEach(function (p) { rlist.appendChild(pageRow(p, true)); });
+      root.appendChild(rlist);
+    }
+  }
+
+  // ---------- category ----------
+
+  async function renderCategory(slug) {
+    skeleton('index');
+    var pages, cats;
+    try {
+      cats = _cats || await api('/api/wiki/categories');
+      _cats = cats;
+      pages = await api('/api/wiki/pages?category=' + encodeURIComponent(slug) +
+                        '&include_drafts=' + (isAdmin() ? 'true' : 'false') + '&limit=200');
+    } catch (e) {
+      if (e.message === 'unauthenticated') return;
+      clear();
+      root.appendChild(pageHeader('Wiki', null, '/wiki', 'Back to the wiki'));
+      root.appendChild(emptyState('folder_off', 'That category doesn’t exist',
+        'It may have been renamed or removed.'));
+      return;
+    }
+
+    var cat = cats.filter(function (c) { return c.slug === slug; })[0];
+    clear();
+    root.appendChild(pageHeader(cat ? cat.name : 'Category',
+      cat && cat.description ? cat.description : null, '/wiki', 'Back to the wiki'));
+    root.appendChild(searchBox(''));
+
+    if (!pages.length) {
+      root.appendChild(emptyState('description', 'No pages here yet',
+        isAdmin() ? 'Create one from the wiki index.' : null));
+      return;
+    }
+    var list = el('div', 'grid gap-2');
+    pages.forEach(function (p) { list.appendChild(pageRow(p, false)); });
+    root.appendChild(list);
+  }
+
+  // ---------- search ----------
+
+  function snippetNode(item) {
+    // Built from text nodes and a <mark>, never innerHTML: the snippet is raw
+    // page source and must never be interpreted as markup.
+    var p = el('p', 'text-sm text-steel-blue mt-1');
+    var text = item.snippet || '';
+    var off = item.match_offset || 0;
+    var len = item.match_length || 0;
+    if (!len || off < 0 || off + len > text.length) {
+      p.textContent = text;
+      return p;
+    }
+    p.appendChild(document.createTextNode(text.slice(0, off)));
+    var hit = el('span', 'wiki-hit', text.slice(off, off + len));
+    p.appendChild(hit);
+    p.appendChild(document.createTextNode(text.slice(off + len)));
+    return p;
+  }
+
+  async function renderSearch(term) {
+    skeleton('index');
+    var results;
+    try {
+      results = await api('/api/wiki/pages?q=' + encodeURIComponent(term) +
+                          '&include_drafts=' + (isAdmin() ? 'true' : 'false') + '&limit=100');
+    } catch (e) {
+      if (e.message === 'unauthenticated') return;
+      results = [];
+    }
+
+    clear();
+    root.appendChild(pageHeader('Search', results.length
+      ? results.length + (results.length === 1 ? ' result' : ' results') + ' for “' + term + '”'
+      : null, '/wiki', 'Back to the wiki'));
+    root.appendChild(searchBox(term));
+
+    if (!results.length) {
+      root.appendChild(emptyState('search_off', 'Nothing matched “' + term + '”',
+        'Try a single word, or browse the categories below.'));
+      if (_cats && _cats.length) {
+        var grid = el('div', 'grid gap-4 sm:grid-cols-2 mt-6');
+        _cats.forEach(function (c) { grid.appendChild(categoryCard(c)); });
+        root.appendChild(grid);
+      } else {
+        api('/api/wiki/categories').then(function (cats) {
+          _cats = cats;
+          if (!cats.length) return;
+          var g = el('div', 'grid gap-4 sm:grid-cols-2 mt-6');
+          cats.forEach(function (c) { g.appendChild(categoryCard(c)); });
+          root.appendChild(g);
+        }).catch(function () {});
+      }
+      return;
+    }
+
+    var list = el('div', 'grid gap-2');
+    results.forEach(function (item) {
+      var a = el('a',
+        'block p-4 rounded-lg bg-baltic-blue/15 border border-steel-blue/25 ' +
+        'hover:border-primary/50 hover:bg-baltic-blue/25 transition-all');
+      a.href = '/wiki/' + encodeURIComponent(item.slug);
+
+      var row = el('div', 'flex items-center gap-2 flex-wrap');
+      row.appendChild(el('span', 'font-bold text-frosted-blue', item.title));
+      if (item.category_name) {
+        row.appendChild(el('span', 'text-xs text-steel-blue', item.category_name));
+      }
+      if (item.matched_in === 'body') {
+        row.appendChild(el('span',
+          'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-steel-blue',
+          'in body'));
+      }
+      if (!item.published) {
+        row.appendChild(el('span',
+          'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-steel-blue',
+          'Draft'));
+      }
+      a.appendChild(row);
+      a.appendChild(snippetNode(item));
+      list.appendChild(a);
+    });
+    root.appendChild(list);
+  }
+
+  // ---------- single page ----------
+
+  function buildToc(bodyEl) {
+    var heads = bodyEl.querySelectorAll('h2, h3');
+    if (heads.length < 3) return null;   // a one- or two-item TOC is noise
+    var items = [];
+    Array.prototype.forEach.call(heads, function (h, i) {
+      var id = 'h-' + i + '-' + (h.textContent || '').toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+      h.id = id;
+      items.push({ id: id, text: h.textContent, level: h.tagName === 'H3' ? 3 : 2 });
+    });
+    return items;
+  }
+
+  function tocNode(items) {
+    var nav = el('nav', 'text-sm');
+    nav.appendChild(el('p', 'text-xs font-bold uppercase tracking-wider text-steel-blue mb-2', 'On this page'));
+    var ul = el('ul', 'space-y-1.5 border-l border-steel-blue/30 pl-3');
+    items.forEach(function (it) {
+      var li = el('li', it.level === 3 ? 'pl-3' : '');
+      var a = el('a', 'text-steel-blue hover:text-primary transition-colors block', it.text);
+      a.href = '#' + it.id;
+      li.appendChild(a);
+      ul.appendChild(li);
+    });
+    nav.appendChild(ul);
+    return nav;
+  }
+
+  async function renderPage(slug) {
+    skeleton('page');
+    var page;
+    try {
+      page = await api('/api/wiki/pages/' + encodeURIComponent(slug));
+    } catch (e) {
+      if (e.message === 'unauthenticated') return;
+      clear();
+      root.appendChild(pageHeader('Wiki', null, '/wiki', 'Back to the wiki'));
+      root.appendChild(emptyState('find_in_page', 'That page doesn’t exist',
+        'It may have been renamed or removed. Try searching for it.'));
+      root.appendChild(searchBox(''));
+      api('/api/wiki/categories').then(function (cats) {
+        _cats = cats;
+        if (!cats.length) return;
+        var g = el('div', 'grid gap-4 sm:grid-cols-2');
+        cats.forEach(function (c) { g.appendChild(categoryCard(c)); });
+        root.appendChild(g);
+      }).catch(function () {});
+      return;
+    }
+
+    clear();
+
+    var backHref = page.category_slug ? '/wiki?category=' + encodeURIComponent(page.category_slug) : '/wiki';
+    var backText = page.category_name ? 'Back to ' + page.category_name : 'Back to the wiki';
+
+    var head = el('div', 'mb-6');
+    var back = el('a', 'inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors mb-3');
+    back.href = backHref;
+    back.appendChild(icon('chevron_left', 'text-sm'));
+    back.appendChild(document.createTextNode(backText));
+    head.appendChild(back);
+
+    var titleRow = el('div', 'flex items-start justify-between gap-4 flex-wrap');
+    var titleCol = el('div', 'min-w-0');
+    var h1Row = el('div', 'flex items-center gap-2 flex-wrap');
+    h1Row.appendChild(el('h1', 'text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight', page.title));
+    if (!page.published) {
+      h1Row.appendChild(el('span',
+        'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-steel-blue',
+        'Draft'));
+    }
+    titleCol.appendChild(h1Row);
+    var meta = 'Last updated ' + dateLabel(page.updated_at);
+    titleCol.appendChild(el('p', 'text-sm text-steel-blue mt-1', meta));
+    titleRow.appendChild(titleCol);
+
+    if (isAdmin()) {
+      var editBtn = el('button',
+        'shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 text-primary ' +
+        'border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all');
+      editBtn.type = 'button';
+      editBtn.appendChild(icon('edit', 'text-base'));
+      editBtn.appendChild(document.createTextNode('Edit this page'));
+      editBtn.addEventListener('click', function () {
+        if (window.WikiEditor) WikiEditor.open(page.slug);
+      });
+      titleRow.appendChild(editBtn);
+    }
+    head.appendChild(titleRow);
+    root.appendChild(head);
+
+    // The shipped example page says so, to admins only — a member has no way to
+    // act on it and no reason to distrust the content.
+    if (page.is_example && isAdmin()) {
+      var banner = el('div',
+        'flex items-start gap-3 p-4 rounded-lg bg-baltic-blue/25 border border-steel-blue/40 mb-6');
+      banner.appendChild(icon('info', 'text-steel-blue shrink-0'));
+      banner.appendChild(el('p', 'text-sm text-steel-blue',
+        'This is an example page shipped with WebServarr. Edit it or delete it.'));
+      root.appendChild(banner);
+    }
+
+    var layout = el('div', 'lg:flex lg:gap-10 lg:items-start');
+    var bodyWrap = el('div', 'min-w-0 flex-1');
+    var body = el('article', 'wiki-body text-frosted-blue');
+    body.innerHTML = page.content_html || '';   // server-sanitized on write
+    bodyWrap.appendChild(body);
+
+    var toc = buildToc(body);
+    if (toc) {
+      var aside = el('aside', 'hidden lg:block lg:w-56 lg:shrink-0 lg:sticky lg:top-8');
+      aside.appendChild(tocNode(toc));
+      layout.appendChild(bodyWrap);
+      layout.appendChild(aside);
+
+      var details = el('details', 'lg:hidden mb-6 rounded-lg bg-baltic-blue/20 border border-steel-blue/30 p-4');
+      var summary = el('summary', 'text-sm font-bold text-frosted-blue cursor-pointer', 'On this page');
+      details.appendChild(summary);
+      var inner = tocNode(toc);
+      inner.className = 'text-sm mt-3';
+      details.appendChild(inner);
+      root.appendChild(details);
+    } else {
+      layout.appendChild(bodyWrap);
+    }
+    root.appendChild(layout);
+
+    if (page.siblings && page.siblings.length) {
+      var more = el('div', 'mt-10 pt-6 border-t border-steel-blue/25');
+      more.appendChild(el('h2', 'text-sm font-bold uppercase tracking-wider text-steel-blue mb-3',
+        'More in ' + (page.category_name || 'this category')));
+      var list = el('div', 'grid gap-2');
+      page.siblings.forEach(function (s) {
+        var a = el('a',
+          'flex items-center gap-3 p-3 rounded-lg bg-baltic-blue/15 border border-steel-blue/25 ' +
+          'hover:border-primary/50 transition-all');
+        a.href = '/wiki/' + encodeURIComponent(s.slug);
+        a.appendChild(icon('description', 'text-steel-blue shrink-0'));
+        a.appendChild(el('span', 'text-frosted-blue', s.title));
+        list.appendChild(a);
+      });
+      more.appendChild(list);
+      root.appendChild(more);
+    }
+  }
+
+  // ---------- routing ----------
+
+  function parse() {
+    var path = location.pathname.replace(/\/+$/, '');
+    var params = new URLSearchParams(location.search);
+    var q = (params.get('q') || '').trim();
+    var cat = (params.get('category') || '').trim();
+    if (path === '/wiki' || path === '') {
+      if (q) return { view: 'search', q: q };
+      if (cat) return { view: 'category', slug: cat };
+      return { view: 'index' };
+    }
+    return { view: 'page', slug: decodeURIComponent(path.replace(/^\/wiki\//, '')) };
+  }
+
+  function render() {
+    var s = parse();
+    window.scrollTo(0, 0);
+    if (s.view === 'index') return renderIndex();
+    if (s.view === 'search') return renderSearch(s.q);
+    if (s.view === 'category') return renderCategory(s.slug);
+    return renderPage(s.slug);
+  }
+
+  function navigate(url, push) {
+    if (push !== false) history.pushState({}, '', url);
+    render();
+  }
+
+  // Delegated so it also catches links inside page bodies rendered later —
+  // this is what makes a cross-link swap the pane instead of reloading the shell.
+  document.addEventListener('click', function (e) {
+    if (!e.target || !e.target.closest) return;
+    var a = e.target.closest('a[href^="/wiki"]');
+    if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+    if (a.target === '_blank') return;
+    if (a.dataset && a.dataset.noRoute === 'true') return;
+    e.preventDefault();
+    navigate(a.getAttribute('href'));
+  });
+
+  window.addEventListener('popstate', function () { render(); });
+
+  return {
+    render: render,
+    navigate: navigate,
+    refresh: function () { _cats = null; return render(); },
+    user: function () { return _user; },
+    isAdmin: isAdmin,
+    setUser: function (u) { _user = u; }
+  };
+})();
+
+(function () {
+  'use strict';
+
+  initSidebar('wiki');
+
+  (function () {
+    var hint = document.getElementById('scrollDownHint');
+    if (!hint) return;
+    function update() {
+      var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
+      hint.style.opacity = atBottom ? '0' : '1';
+    }
+    window.addEventListener('scroll', update);
+    update();
+  })();
+
+  // The shared page-shell handshake every other page performs: without it the
+  // nav stays at opacity-0, Settings stays hidden and the bell is dead.
+  checkAuth().then(function (user) {
+    if (!user) return;
+    WikiView.setUser(user);
+
+    var uEl = document.getElementById('headerUsername');
+    var rEl = document.getElementById('headerRole');
+    if (uEl) uEl.textContent = user.display_name || user.username;
+    if (rEl) rEl.textContent = user.is_admin ? 'Admin' : 'Member';
+    showAdminNav(user.is_admin);
+
+    var menuBtn = document.getElementById('userMenuBtn');
+    var menuDrop = document.getElementById('userMenuDropdown');
+    if (menuBtn && menuDrop) {
+      menuBtn.addEventListener('click', function () { menuDrop.classList.toggle('hidden'); });
+      document.addEventListener('click', function (e) {
+        if (!menuBtn.contains(e.target) && !menuDrop.contains(e.target)) menuDrop.classList.add('hidden');
+      });
+    }
+
+    loadSystemStatus();
+    if (typeof initNotifications === 'function') initNotifications();
+
+    // Render only after the session is known, so admin-only controls never
+    // flash in for a member or flash out for an admin.
+    WikiView.render();
+  });
+})();
+</script>
+</body>
+</html>
