@@ -403,6 +403,31 @@ body[data-page="settings"]       [data-nav-id="settings"]       > .material-symb
   color: inherit;
 }
 
+/* ---- Skeleton loading blocks ----
+ *
+ * One shared shimmer treatment for every page's loading state, promoted from
+ * wiki's original `skeleton()` (this file used to be the only page without
+ * one). Sized per-use to the exact final layout via utility classes on the
+ * element -- the class here only supplies the color and motion, never a
+ * width/height, so nothing here can itself cause layout shift.
+ *
+ * `.wiki-skel` is included in the selector list so wiki.html's existing
+ * markup and JS (which both still emit the `wiki-skel` class name) pick up
+ * the shared treatment with no behavior change on that page; wiki.html's own
+ * `<style>` block no longer defines it locally.
+ */
+.ws-skel, .wiki-skel {
+  border-radius: 0.5rem;
+  background: linear-gradient(100deg,
+    rgb(var(--color-accent) / 0.08) 40%,
+    rgb(var(--color-accent) / 0.18) 50%,
+    rgb(var(--color-accent) / 0.08) 60%);
+  background-size: 200% 100%;
+  animation: ws-skel-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes ws-skel-shimmer { to { background-position-x: -200%; } }
+@media (prefers-reduced-motion: reduce) { .ws-skel, .wiki-skel { animation: none; } }
+
 /* Cross-document view transitions: the shell holds still, content crossfades. */
 @view-transition { navigation: auto; }
 #appSidebar { view-transition-name: ws-sidebar; }

@@ -48,9 +48,8 @@
   .wiki-body mark, .wiki-hit { background: rgb(var(--color-primary) / .35);
                                color: rgb(var(--color-text)); border-radius: .2rem;
                                padding: 0 .15em; }
-  .wiki-skel { background: rgb(var(--color-accent) / .15); border-radius: .5rem;
-               animation: wikiPulse 1.4s ease-in-out infinite; }
-  @keyframes wikiPulse { 0%,100% { opacity: .5 } 50% { opacity: .9 } }
+  /* .wiki-skel itself now lives in theme.css as an alias of .ws-skel --
+     the shared shimmer treatment every page uses. */
 </style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden" data-page="wiki">
