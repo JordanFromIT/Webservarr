@@ -149,9 +149,12 @@
   // ---- Stale-while-revalidate page data ----
   //
   // A revisit paints the last known data at once instead of a skeleton, then
-  // fetches and re-renders only if the answer changed.
-  function swr(key, fetcher, render, maxAge) {
-    if (maxAge === undefined) maxAge = 15 * 60 * 1000;
+  // fetches and re-renders only if the answer changed. render(data, fromCache)
+  // may therefore run twice. opts.onError(err) runs only when the fetch failed
+  // AND nothing cached was shown - stale content beats an error block.
+  function swr(key, fetcher, render, opts) {
+    opts = opts || {};
+    var maxAge = opts.maxAge === undefined ? 15 * 60 * 1000 : opts.maxAge;
     var cached = cacheGet('swr:' + key);
     var cachedJSON = null;
     if (cached && (Date.now() - cached.t) < maxAge) {
@@ -165,6 +168,20 @@
       }
       cacheSet('swr:' + key, { t: Date.now(), d: fresh });
       return fresh;
+    }, function (err) {
+      if (cachedJSON === null && opts.onError) {
+        try { opts.onError(err); } catch (e) { if (window.console) console.error(e); }
+      }
+      return cachedJSON === null ? null : cached.d;
+    });
+  }
+
+  /* fetch() that rejects on a non-2xx status and parses JSON - the shape every
+     loader wants from swr's fetcher. */
+  function getJSON(url) {
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
     });
   }
 
@@ -311,6 +328,7 @@
     setHTML: setHTML,
     arrive: arrive,
     swr: swr,
+    getJSON: getJSON,
     serviceStatus: serviceStatus,
     clearCache: clearCache
   };

@@ -42,10 +42,54 @@ Today
 </div>
 
 <!-- Day-of-week headers -->
-<div id="dayHeaders" class="hidden lg:grid grid-cols-7 gap-px shrink-0"></div>
+<div id="dayHeaders" class="hidden lg:grid grid-cols-7 gap-px shrink-0">
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Sun</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Mon</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Tue</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Wed</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Thu</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Fri</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Sat</div>
+</div>
 
 <!-- Calendar grid — fills remaining height -->
-<div id="calendarGrid" class="grid grid-cols-7 gap-px flex-1 min-h-0 lg:overflow-hidden"></div>
+<div id="calendarGrid" class="grid grid-cols-7 gap-px flex-1 min-h-0 lg:overflow-hidden" data-arrive="month" style="grid-template-rows: repeat(5, 1fr)">
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+</div>
 
 </div>
 
@@ -131,7 +175,9 @@ function goToToday() {
 // ---- Day-of-Week Headers ----
 
 function buildDayHeaders() {
+    // Shipped in the markup so the row is there at first paint; nothing to do.
     var container = document.getElementById('dayHeaders');
+    if (container.children.length) return;
     var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     days.forEach(function(day) {
         var el = document.createElement('div');
@@ -149,20 +195,21 @@ function renderMonth() {
         'July', 'August', 'September', 'October', 'November', 'December'];
     document.getElementById('monthLabel').textContent = monthNames[_currentMonth] + ' ' + _currentYear;
 
-    // Show loading state in grid
+    // A skeleton month while the data comes in - the same grid the real month
+    // uses, so nothing moves when it lands. On the first paint the markup
+    // already carries one; only a month change needs it rebuilt.
     var grid = document.getElementById('calendarGrid');
-    clearChildren(grid);
-    var loadingCell = document.createElement('div');
-    loadingCell.className = 'col-span-7 text-center text-steel-blue py-12';
-    var spinner = document.createElement('span');
-    spinner.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin';
-    spinner.textContent = 'progress_activity';
-    var loadingText = document.createElement('p');
-    loadingText.className = 'text-sm';
-    loadingText.textContent = 'Loading calendar...';
-    loadingCell.appendChild(spinner);
-    loadingCell.appendChild(loadingText);
-    grid.appendChild(loadingCell);
+    if (!grid.querySelector('.skel')) {
+        clearChildren(grid);
+        grid.className = 'grid grid-cols-7 gap-px flex-1 min-h-0 lg:overflow-hidden';
+        grid.style.gridTemplateRows = 'repeat(5, 1fr)';
+        for (var i = 0; i < 35; i++) {
+            var cell = document.createElement('div');
+            cell.className = 'skel rounded-lg';
+            cell.setAttribute('aria-hidden', 'true');
+            grid.appendChild(cell);
+        }
+    }
 
     fetchAndRender();
 }
@@ -187,10 +234,10 @@ async function fetchAndRender() {
     var days = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
     var startStr = formatDateISO(startDate);
 
-    try {
-        var resp = await fetch('/api/integrations/upcoming-releases?start=' + startStr + '&days=' + days);
-        if (!resp.ok) throw new Error('API error');
-        var releases = await resp.json();
+    var url = '/api/integrations/upcoming-releases?start=' + startStr + '&days=' + days;
+    return WS.swr('calendar:' + cacheKey, function () { return WS.getJSON(url); }, function (releases) {
+        // A month change may have happened while this answer was in flight.
+        if (cacheKey !== _currentYear + '-' + padZero(_currentMonth + 1)) return;
 
         // Group by date
         var grouped = {};
@@ -202,15 +249,17 @@ async function fetchAndRender() {
         });
 
         _releaseCache[cacheKey] = grouped;
-        buildGrid(startDate, endDate, grouped);
+        WS.arrive('month', function () {
+            buildGrid(startDate, endDate, grouped);
 
-        // If detail panel is open, refresh it too
-        if (_selectedDate && grouped[_selectedDate]) {
-            showDetailPanel(_selectedDate, grouped[_selectedDate]);
-        } else if (_selectedDate) {
-            showDetailPanel(_selectedDate, []);
-        }
-    } catch (error) {
+            // If detail panel is open, refresh it too
+            if (_selectedDate && grouped[_selectedDate]) {
+                showDetailPanel(_selectedDate, grouped[_selectedDate]);
+            } else if (_selectedDate) {
+                showDetailPanel(_selectedDate, []);
+            }
+        });
+    }, { onError: function (error) {
         console.error('Calendar fetch error:', error);
         var grid = document.getElementById('calendarGrid');
         clearChildren(grid);
@@ -225,7 +274,7 @@ async function fetchAndRender() {
         errCell.appendChild(errIcon);
         errCell.appendChild(errText);
         grid.appendChild(errCell);
-    }
+    } });
 }
 
 function buildGrid(startDate, endDate, grouped) {

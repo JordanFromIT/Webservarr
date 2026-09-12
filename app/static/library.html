@@ -87,9 +87,17 @@
     </div>
 
     <!-- States -->
-    <div id="loadingState" class="py-16 text-center text-steel-blue">
-      <span class="material-symbols-outlined animate-spin text-3xl">progress_activity</span>
-      <p class="mt-2 text-sm">Loading your library…</p>
+    <div id="loadingState" aria-busy="true">
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-8 gap-4" aria-hidden="true">
+        <div class="skel skel-poster"></div>
+        <div class="skel skel-poster"></div>
+        <div class="skel skel-poster"></div>
+        <div class="skel skel-poster"></div>
+        <div class="skel skel-poster"></div>
+        <div class="skel skel-poster"></div>
+        <div class="skel skel-poster"></div>
+        <div class="skel skel-poster"></div>
+      </div>
     </div>
 
     <div id="unavailableState" class="hidden py-16 text-center">

@@ -18,10 +18,8 @@
 <!-- Seerr Iframe -->
 <div class="flex-1 overflow-hidden">
 <div id="iframeContainer" class="w-full h-full">
-<div id="iframePlaceholder" class="flex flex-col items-center justify-center h-full text-center text-steel-blue p-8">
-<span class="material-symbols-outlined text-6xl mb-4 opacity-50">download</span>
-<p class="text-lg mb-2">Loading Seerr...</p>
-<p class="text-sm">If Seerr is not configured, set the URL in Settings > Integrations.</p>
+<div id="iframePlaceholder" class="h-full p-4 lg:p-8">
+<div class="skel w-full h-full rounded-2xl" aria-hidden="true"></div>
 </div>
 </div>
 </div>
@@ -44,17 +42,19 @@ document.addEventListener('DOMContentLoaded', async function() {
         } catch (e) { /* SSO optional — iframe will show Seerr login if it fails */ }
 
         // Load Seerr URL from settings
+        const container = document.getElementById('iframeContainer');
+        var url = '';
         try {
             const resp = await fetch('/api/integrations/seerr-url');
-            if (resp.ok) {
-                const data = await resp.json();
-                if (data.url) {
-                    const container = document.getElementById('iframeContainer');
-                    container.innerHTML = '<iframe src="' + data.url + '" class="w-full h-full border-0" allow="fullscreen"></iframe>';
-                }
-            }
-        } catch (e) {
-            // Seerr not configured — keep placeholder
+            if (resp.ok) url = ((await resp.json()) || {}).url || '';
+        } catch (e) { /* not configured */ }
+        if (url) {
+            container.innerHTML = '<iframe src="' + url + '" class="w-full h-full border-0" allow="fullscreen"></iframe>';
+        } else {
+            container.innerHTML = '<div class="flex flex-col items-center justify-center h-full text-center text-steel-blue p-8">' +
+                '<span class="material-symbols-outlined text-6xl mb-4 opacity-50">download</span>' +
+                '<p class="text-lg mb-2">The embedded requests page is not set up yet</p>' +
+                '<p class="text-sm">Set the Seerr URL in Settings > Integrations.</p></div>';
         }
     });
 });

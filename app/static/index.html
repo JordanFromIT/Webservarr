@@ -20,14 +20,14 @@
 <!-- Service Health + News Side by Side -->
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 <!-- Service Health -->
-<section>
+<section data-arrive="services">
 <div class="flex items-center gap-3 mb-4">
 <span id="iconSectionServices" class="material-symbols-outlined text-steel-blue">health_metrics</span>
 <h3 class="text-xl font-bold text-frosted-blue">Service Health</h3>
 <span id="serviceLastChecked" class="text-[10px] text-steel-blue ml-auto"></span>
 </div>
 <!-- Netdata Gauges -->
-<div id="netdataGauges" class="hidden bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 mb-4">
+<div id="netdataGauges" class="bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 mb-4">
 <div class="flex justify-between items-center">
 <!-- CPU Gauge -->
 <div class="flex flex-col items-center flex-1">
@@ -86,15 +86,13 @@
 </div>
 <!-- Service Tiles -->
 <div id="servicesContainer" class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr))">
-<!-- Services will be loaded here dynamically -->
-<div class="text-center text-steel-blue py-8 col-span-full">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span>
-<p>Loading services...</p>
-</div>
+<div class="skel skel-tile" aria-hidden="true"></div>
+<div class="skel skel-tile" aria-hidden="true"></div>
+<div class="skel skel-tile" aria-hidden="true"></div>
 </div>
 </section>
 <!-- News & Updates -->
-<section>
+<section data-arrive="news">
 <div class="flex items-center gap-3 mb-4">
 <span id="iconSectionNews" class="material-symbols-outlined text-steel-blue">newspaper</span>
 <h3 class="text-xl font-bold text-frosted-blue">News &amp; Updates</h3>
@@ -103,16 +101,13 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </a>
 </div>
 <div id="newsContainer" class="grid gap-3">
-<!-- News posts will be loaded here dynamically -->
-<div class="text-center text-steel-blue py-8">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>
-<p>Loading news...</p>
-</div>
+<div class="skel skel-card" aria-hidden="true"></div>
+<div class="skel skel-card" aria-hidden="true"></div>
 </div>
 </section>
 </div>
 <!-- Now Playing Section -->
-<section>
+<section data-arrive="streams">
 <div class="flex items-center justify-between mb-6">
 <div class="flex items-center gap-3">
 <span id="iconSectionStreams" class="material-symbols-outlined text-steel-blue">play_circle</span>
@@ -128,15 +123,11 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </div>
 </div>
 <div id="streamsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-<!-- Stream cards will be loaded here dynamically -->
-<div class="text-center text-steel-blue py-8 col-span-3">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
-<p>Loading streams...</p>
-</div>
+<div class="skel rounded-xl h-64" aria-hidden="true"></div>
 </div>
 </section>
 <!-- Upcoming Releases -->
-<section id="upcomingReleasesSection">
+<section id="upcomingReleasesSection" data-arrive="releases">
 <div class="flex items-center justify-between mb-6">
 <div class="flex items-center gap-3">
 <span id="iconSectionReleases" class="material-symbols-outlined text-steel-blue">calendar_month</span>
@@ -148,14 +139,11 @@ View Calendar
 </a>
 </div>
 <div id="releasesContainer">
-<div class="text-center text-steel-blue py-8">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">calendar_month</span>
-<p>Loading releases...</p>
-</div>
+<div class="skel rounded-lg h-40" aria-hidden="true"></div>
 </div>
 </section>
 <!-- Recent Requests -->
-<section>
+<section data-arrive="requests">
 <div class="flex items-center justify-between mb-6">
 <div class="flex items-center gap-3">
 <span id="iconSectionRequests" class="material-symbols-outlined text-steel-blue">shopping_cart</span>
@@ -175,12 +163,9 @@ View Requests
 </tr>
 </thead>
 <tbody id="requestsBody" class="divide-y divide-steel-blue/10">
-<tr>
-<td colspan="2" class="px-6 py-8 text-center text-steel-blue">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
-<p>Loading requests...</p>
-</td>
-</tr>
+<tr><td colspan="2" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-2/3" aria-hidden="true"></div></td></tr>
+<tr><td colspan="2" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-1/2" aria-hidden="true"></div></td></tr>
+<tr><td colspan="2" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-3/5" aria-hidden="true"></div></td></tr>
 </tbody>
 </table>
 </div>
@@ -352,51 +337,51 @@ document.addEventListener('click', function (e) {
 });
 
 async function loadNews() {
-    try {
-        var cfg = newsSettings();
-        // Ask for one extra post: if the server has more than fits, the
-        // "View all" link is worth showing. The extra is never rendered.
-        var url = '/api/news/?limit=' + (cfg.count + 1);
-        if (cfg.maxAgeDays > 0) url += '&max_age_days=' + cfg.maxAgeDays;
+    var cfg = newsSettings();
+    // Ask for one extra post: if the server has more than fits, the
+    // "View all" link is worth showing. The extra is never rendered.
+    var url = '/api/news/?limit=' + (cfg.count + 1);
+    if (cfg.maxAgeDays > 0) url += '&max_age_days=' + cfg.maxAgeDays;
 
-        const response = await fetch(url);
-        const posts = await response.json();
+    return WS.swr('news:' + url, function () { return WS.getJSON(url); }, renderNews, {
+        onError: function (error) {
+            console.error('Error loading news:', error);
+            WS.arrive('news', function () {
+                WS.setHTML(document.getElementById('newsContainer'), `
+                    <div class="text-center text-red-400 py-8">
+                        <span class="material-symbols-outlined text-4xl mb-2 block">error</span>
+                        <p>Error loading news</p>
+                    </div>
+                `);
+            });
+        }
+    });
+}
 
-        const newsContainer = document.getElementById('newsContainer');
-        const viewAll = document.getElementById('newsViewAll');
+function renderNews(posts) {
+    var cfg = newsSettings();
+    const newsContainer = document.getElementById('newsContainer');
+    const viewAll = document.getElementById('newsViewAll');
 
+    WS.arrive('news', function () {
         if (!Array.isArray(posts) || posts.length === 0) {
-            newsContainer.innerHTML = `
+            WS.setHTML(newsContainer, `
                 <div class="text-center text-steel-blue py-8">
                     <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>
                     <p>No news posts yet.</p>
                 </div>
-            `;
-            // Older posts may still exist beyond the age window, so the archive
-            // link stays available even when the homepage feed is empty.
-            if (viewAll) {
-                viewAll.classList.remove('hidden');
-                viewAll.classList.add('flex');
-            }
-            return;
+            `);
+        } else {
+            var shown = posts.slice(0, cfg.count);
+            WS.setHTML(newsContainer, shown.map(function (post) { return renderNewsCard(post, false); }).join(''));
         }
-
-        var shown = posts.slice(0, cfg.count);
-        newsContainer.innerHTML = shown.map(function (post) { return renderNewsCard(post, false); }).join('');
+        // Older posts may still exist beyond the age window, so the archive
+        // link stays available even when the homepage feed is empty.
         if (viewAll) {
             viewAll.classList.remove('hidden');
             viewAll.classList.add('flex');
         }
-
-    } catch (error) {
-        console.error('Error loading news:', error);
-        document.getElementById('newsContainer').innerHTML = `
-            <div class="text-center text-red-400 py-8">
-                <span class="material-symbols-outlined text-4xl mb-2 block">error</span>
-                <p>Error loading news</p>
-            </div>
-        `;
-    }
+    });
 }
 
 // Load request count for sidebar badge
@@ -427,28 +412,43 @@ var _streamsPerPage = 6;
 // Load active streams from Plex integration
 let _lastStreams = null; // Cache to prevent flicker on transient API failures
 async function loadActiveStreams() {
+    return WS.swr('streams', function () { return WS.getJSON('/api/integrations/active-streams'); }, renderActiveStreams, {
+        maxAge: 60 * 1000,
+        onError: function (error) {
+            console.error('Error loading active streams:', error);
+            // On error, keep showing previous data if available
+            if (_lastStreams && _lastStreams.length > 0) return;
+            WS.arrive('streams', function () {
+                document.getElementById('streamChevrons').classList.add('hidden');
+                WS.setHTML(document.getElementById('streamsContainer'), `
+                    <div class="text-center text-steel-blue py-8 col-span-3">
+                        <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
+                        <p>Plex not configured</p>
+                    </div>
+                `);
+            });
+        }
+    });
+}
+
+function renderActiveStreams(streams) {
     const container = document.getElementById('streamsContainer');
-    try {
-        const response = await fetch('/api/integrations/active-streams');
-        if (!response.ok) {
-            throw new Error('API error');
-        }
-        const streams = await response.json();
 
-        // If API returns empty but we had data before, keep showing previous data
-        // (prevents streams disappearing/reappearing due to transient Plex API issues)
-        if ((!Array.isArray(streams) || streams.length === 0) && _lastStreams && _lastStreams.length > 0) {
-            return; // Keep showing previous streams
-        }
-        _lastStreams = streams;
+    // If API returns empty but we had data before, keep showing previous data
+    // (prevents streams disappearing/reappearing due to transient Plex API issues)
+    if ((!Array.isArray(streams) || streams.length === 0) && _lastStreams && _lastStreams.length > 0) {
+        return; // Keep showing previous streams
+    }
+    _lastStreams = streams;
 
+    WS.arrive('streams', function () {
         if (!Array.isArray(streams) || streams.length === 0) {
-            container.innerHTML = `
+            WS.setHTML(container, `
                 <div class="text-center text-steel-blue py-8 col-span-3">
                     <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
                     <p>No active streams</p>
                 </div>
-            `;
+            `);
             return;
         }
 
@@ -526,9 +526,7 @@ async function loadActiveStreams() {
         }).join('');
 
         // Only update DOM if content actually changed (prevents flicker)
-        if (container.innerHTML !== newHtml) {
-            container.innerHTML = newHtml;
-        }
+        WS.setHTML(container, newHtml);
 
         // Show/hide pagination chevrons based on stream count
         const chevrons = document.getElementById('streamChevrons');
@@ -537,19 +535,7 @@ async function loadActiveStreams() {
         } else {
             chevrons.classList.add('hidden');
         }
-
-    } catch (error) {
-        console.error('Error loading active streams:', error);
-        // On error, keep showing previous data if available
-        if (_lastStreams && _lastStreams.length > 0) return;
-        document.getElementById('streamChevrons').classList.add('hidden');
-        container.innerHTML = `
-            <div class="text-center text-steel-blue py-8 col-span-3">
-                <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
-                <p>Plex not configured</p>
-            </div>
-        `;
-    }
+    });
 }
 
 // Paginate streams
@@ -564,27 +550,40 @@ function scrollStreams(direction) {
 
 // Load recent requests from Seerr integration
 async function loadRecentRequests() {
-    const tbody = document.getElementById('requestsBody');
-    try {
-        const response = await fetch('/api/integrations/recent-requests');
-        if (!response.ok) {
-            throw new Error('API error');
+    return WS.swr('recent-requests', function () { return WS.getJSON('/api/integrations/recent-requests'); }, renderRecentRequests, {
+        onError: function (error) {
+            console.error('Error loading recent requests:', error);
+            WS.arrive('requests', function () {
+                WS.setHTML(document.getElementById('requestsBody'), `
+                    <tr>
+                        <td colspan="2" class="px-6 py-8 text-center text-steel-blue">
+                            <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
+                            <p>Seerr not configured</p>
+                        </td>
+                    </tr>
+                `);
+            });
         }
-        const requests = await response.json();
+    });
+}
 
+function renderRecentRequests(requests) {
+    const tbody = document.getElementById('requestsBody');
+
+    WS.arrive('requests', function () {
         if (!Array.isArray(requests) || requests.length === 0) {
-            tbody.innerHTML = `
+            WS.setHTML(tbody, `
                 <tr>
                     <td colspan="2" class="px-6 py-8 text-center text-steel-blue">
                         <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
                         <p>No recent requests</p>
                     </td>
                 </tr>
-            `;
+            `);
             return;
         }
 
-        tbody.innerHTML = requests.map(req => {
+        WS.setHTML(tbody, requests.map(req => {
             const title = escapeHtml(req.media_title || 'Unknown');
             // Deliberately no requester name here. Recent Requests is a
             // server-wide view - it shows everyone's requests - so attributing
@@ -654,19 +653,8 @@ async function loadRecentRequests() {
                     </td>
                 </tr>
             `;
-        }).join('');
-
-    } catch (error) {
-        console.error('Error loading recent requests:', error);
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="4" class="px-6 py-8 text-center text-steel-blue">
-                    <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
-                    <p>Seerr not configured</p>
-                </td>
-            </tr>
-        `;
-    }
+        }).join(''));
+    });
 }
 
 // Homelab icon mapping — service name substring → selfh.st icon slug
@@ -698,93 +686,109 @@ function getServiceIconUrl(name) {
 
 // Load services from Uptime Kuma (only enabled monitors)
 async function loadServices() {
+    // One request shared with the header pill (WS.serviceStatus), cached for
+    // the next visit. It never rejects: an unreachable monitor reads as none.
+    return WS.swr('services', WS.serviceStatus, renderServices);
+}
+
+function renderServices(data) {
     const servicesContainer = document.getElementById('servicesContainer');
-    let services = [];
+    const services = (Array.isArray(data) ? data : []).map(svc => ({
+        display_name: svc.name || 'Unknown',
+        status: svc.status || 'unknown',
+        icon: svc.icon || 'dns',
+        last_check: svc.last_check
+    }));
 
-    try {
-        // Shared with the header pill: one request serves both.
-        const data = await WS.serviceStatus();
-        services = (Array.isArray(data) ? data : []).map(svc => ({
-            display_name: svc.name || 'Unknown',
-            status: svc.status || 'unknown',
-            icon: svc.icon || 'dns',
-            last_check: svc.last_check
-        }));
-    } catch (error) {
-        console.error('Error loading services:', error);
-        servicesContainer.innerHTML = '<div class="text-center text-red-400 py-8 col-span-full"><span class="material-symbols-outlined text-4xl mb-2 block">error</span><p>Error loading services</p></div>';
-        return;
-    }
-
-    if (services.length === 0) {
-        servicesContainer.innerHTML = '<div class="text-center text-steel-blue py-8 col-span-full"><span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span><p>No services configured yet.</p></div>';
-        return;
-    }
-
-    // Update "Last checked" timer in section header
-    var latestCheck = null;
-    services.forEach(function(svc) {
-        if (svc.last_check) {
-            var d = new Date(svc.last_check + 'Z');
-            if (!latestCheck || d > latestCheck) latestCheck = d;
+    WS.arrive('services', function () {
+        if (services.length === 0) {
+            WS.setHTML(servicesContainer, '<div class="text-center text-steel-blue py-8 col-span-full"><span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span><p>No services configured yet.</p></div>');
+            return;
         }
+
+        // Update "Last checked" timer in section header
+        var latestCheck = null;
+        services.forEach(function(svc) {
+            if (svc.last_check) {
+                var d = new Date(svc.last_check + 'Z');
+                if (!latestCheck || d > latestCheck) latestCheck = d;
+            }
+        });
+        var timerEl = document.getElementById('serviceLastChecked');
+        if (timerEl && latestCheck) {
+            timerEl.textContent = 'Checked ' + getTimeAgo(latestCheck);
+            timerEl.dataset.lastCheck = latestCheck.toISOString();
+        }
+
+        WS.setHTML(servicesContainer, services.map(function(service) {
+            var barBg, statusLabel;
+
+            switch(service.status) {
+                case 'up':
+                    barBg = 'bg-green-500';
+                    statusLabel = 'Online';
+                    break;
+                case 'degraded':
+                    barBg = 'bg-yellow-500';
+                    statusLabel = 'Degraded';
+                    break;
+                case 'down':
+                    barBg = 'bg-red-500';
+                    statusLabel = 'Offline';
+                    break;
+                case 'maintenance':
+                    barBg = 'bg-steel-blue';
+                    statusLabel = 'Maintenance';
+                    break;
+                default:
+                    barBg = 'bg-steel-blue';
+                    statusLabel = 'Unknown';
+            }
+
+            var iconUrl = getServiceIconUrl(service.display_name);
+            var iconHtml = iconUrl
+                ? '<img src="' + iconUrl + '" alt="" class="service-icon w-8 h-8 object-contain">'
+                : '<span class="material-symbols-outlined text-3xl text-steel-blue">' + escapeHtml(service.icon) + '</span>';
+
+            return '<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col hover:border-primary/40 transition-all">' +
+                '<div class="flex-1 p-3 flex flex-col items-center justify-center text-center space-y-2 min-h-[80px]">' +
+                    iconHtml +
+                    '<span class="text-[11px] font-medium leading-tight line-clamp-2 text-frosted-blue">' + escapeHtml(service.display_name) + '</span>' +
+                '</div>' +
+                '<div class="' + barBg + ' py-1 flex justify-center">' +
+                    '<span class="text-[10px] font-bold text-bright uppercase tracking-wider">' + statusLabel + '</span>' +
+                '</div>' +
+            '</div>';
+        }).join(''));
     });
-    var timerEl = document.getElementById('serviceLastChecked');
-    if (timerEl && latestCheck) {
-        timerEl.textContent = 'Checked ' + getTimeAgo(latestCheck);
-        timerEl.dataset.lastCheck = latestCheck.toISOString();
-    }
-
-    servicesContainer.innerHTML = services.map(function(service) {
-        var barBg, statusLabel;
-
-        switch(service.status) {
-            case 'up':
-                barBg = 'bg-green-500';
-                statusLabel = 'Online';
-                break;
-            case 'degraded':
-                barBg = 'bg-yellow-500';
-                statusLabel = 'Degraded';
-                break;
-            case 'down':
-                barBg = 'bg-red-500';
-                statusLabel = 'Offline';
-                break;
-            case 'maintenance':
-                barBg = 'bg-steel-blue';
-                statusLabel = 'Maintenance';
-                break;
-            default:
-                barBg = 'bg-steel-blue';
-                statusLabel = 'Unknown';
-        }
-
-        var iconUrl = getServiceIconUrl(service.display_name);
-        var iconHtml = iconUrl
-            ? '<img src="' + iconUrl + '" alt="" class="service-icon w-8 h-8 object-contain">'
-            : '<span class="material-symbols-outlined text-3xl text-steel-blue">' + escapeHtml(service.icon) + '</span>';
-
-        return '<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col hover:border-primary/40 transition-all">' +
-            '<div class="flex-1 p-3 flex flex-col items-center justify-center text-center space-y-2 min-h-[80px]">' +
-                iconHtml +
-                '<span class="text-[11px] font-medium leading-tight line-clamp-2 text-frosted-blue">' + escapeHtml(service.display_name) + '</span>' +
-            '</div>' +
-            '<div class="' + barBg + ' py-1 flex justify-center">' +
-                '<span class="text-[10px] font-bold text-bright uppercase tracking-wider">' + statusLabel + '</span>' +
-            '</div>' +
-        '</div>';
-    }).join('');
 }
 
 // Load upcoming releases from Sonarr/Radarr
 async function loadUpcomingReleases() {
-    var container = document.getElementById('releasesContainer');
-    try {
-        var response = await fetch('/api/integrations/upcoming-releases?days=7');
-        if (!response.ok) throw new Error('API error');
-        var releases = await response.json();
+    return WS.swr('releases:7', function () { return WS.getJSON('/api/integrations/upcoming-releases?days=7'); }, renderUpcomingReleases, {
+        onError: function () {
+            console.log('Upcoming releases not available');
+            WS.arrive('releases', function () {
+                var container = document.getElementById('releasesContainer');
+                while (container.firstChild) container.removeChild(container.firstChild);
+                var errDiv = document.createElement('div');
+                errDiv.className = 'text-center text-steel-blue py-8';
+                var errIcon = document.createElement('span');
+                errIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
+                errIcon.textContent = 'calendar_month';
+                var errText = document.createElement('p');
+                errText.textContent = 'Sonarr/Radarr not configured';
+                errDiv.appendChild(errIcon);
+                errDiv.appendChild(errText);
+                container.appendChild(errDiv);
+            });
+        }
+    });
+}
 
+function renderUpcomingReleases(releases) {
+    var container = document.getElementById('releasesContainer');
+    WS.arrive('releases', function () {
         // Clear container
         while (container.firstChild) container.removeChild(container.firstChild);
 
@@ -967,21 +971,7 @@ async function loadUpcomingReleases() {
             }
             container.appendChild(grid);
         }
-
-    } catch (error) {
-        console.log('Upcoming releases not available');
-        while (container.firstChild) container.removeChild(container.firstChild);
-        var errDiv = document.createElement('div');
-        errDiv.className = 'text-center text-steel-blue py-8';
-        var errIcon = document.createElement('span');
-        errIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
-        errIcon.textContent = 'calendar_month';
-        var errText = document.createElement('p');
-        errText.textContent = 'Sonarr/Radarr not configured';
-        errDiv.appendChild(errIcon);
-        errDiv.appendChild(errText);
-        container.appendChild(errDiv);
-    }
+    });
 }
 
 // Format Date to YYYY-MM-DD
@@ -994,19 +984,12 @@ function _fmtDate(d) {
 
 // Load system stats from Netdata integration
 async function loadSystemStats() {
-    var gaugesEl = document.getElementById('netdataGauges');
     try {
         var response = await fetch('/api/integrations/system-stats');
         if (!response.ok) throw new Error('API error');
         var stats = await response.json();
 
-        if (!stats.configured || stats.error) {
-            gaugesEl.classList.add('hidden');
-            return;
-        }
-
-        // Show gauges
-        gaugesEl.classList.remove('hidden');
+        if (!stats.configured || stats.error) return;
 
         // Update CPU gauge
         if (stats.cpu_percent !== null) {
@@ -1062,7 +1045,6 @@ async function loadSystemStats() {
 
     } catch (error) {
         console.log('System stats not available');
-        gaugesEl.classList.add('hidden');
     }
 }
 

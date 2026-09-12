@@ -273,6 +273,11 @@ body {
  */
 #systemStatus[data-state="unknown"] { visibility: hidden; }
 
+/* The dashboard's gauge block is static markup so it reserves its space from
+   the first paint; the server marks <html data-netdata> when Netdata is
+   configured, and without that mark the block is simply not there. */
+html:not([data-netdata]) #netdataGauges { display: none; }
+
 /* ---- Cross-document view transitions ----
  *
  * Every nav click is still a full-document navigation, but the sidebar, the

@@ -49,17 +49,17 @@ Anything else, use <a href="/tickets" class="text-primary hover:underline font-s
 <div id="wikiHookIssues" class="hidden mb-5"></div>
 
 <!-- Stat Summary Cards -->
-<div class="grid grid-cols-3 gap-3 mb-6">
+<div class="grid grid-cols-3 gap-3 mb-6" data-arrive="counts">
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-frosted-blue" id="statTotal">--</p>
+<p class="text-2xl font-bold text-frosted-blue" id="statTotal"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Total</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-amber-400" id="statOpen">--</p>
+<p class="text-2xl font-bold text-amber-400" id="statOpen"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Open</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-green-500" id="statClosed">--</p>
+<p class="text-2xl font-bold text-green-500" id="statClosed"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Resolved</p>
 </div>
 </div>
@@ -161,11 +161,10 @@ Submit Issue
 </div>
 
 <!-- Issues List -->
-<div id="issuesList" class="space-y-2">
-<div class="text-center text-steel-blue py-8">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">report_problem</span>
-<p>Loading issues...</p>
-</div>
+<div id="issuesList" class="space-y-2" data-arrive="list">
+<div class="skel skel-row" aria-hidden="true"></div>
+<div class="skel skel-row" aria-hidden="true"></div>
+<div class="skel skel-row" aria-hidden="true"></div>
 </div>
 </div>
 
@@ -443,37 +442,40 @@ async function submitIssue() {
 // ---- Issue Counts ----
 
 async function loadIssueCounts() {
-    try {
-        var resp = await fetch('/api/integrations/issue-counts');
-        if (!resp.ok) throw new Error('API error');
-        var counts = await resp.json();
-
-        document.getElementById('statTotal').textContent = counts.total || 0;
-        document.getElementById('statOpen').textContent = counts.open || 0;
-        document.getElementById('statClosed').textContent = counts.closed || 0;
-        document.getElementById('issuesTotalCount').textContent = '(' + (counts.total || 0) + ')';
-    } catch (e) {
-        console.log('Issue counts not available');
-    }
+    return WS.swr('issues:counts', function () { return WS.getJSON('/api/integrations/issue-counts'); }, function (counts) {
+        WS.arrive('counts', function () {
+            document.getElementById('statTotal').textContent = counts.total || 0;
+            document.getElementById('statOpen').textContent = counts.open || 0;
+            document.getElementById('statClosed').textContent = counts.closed || 0;
+            document.getElementById('issuesTotalCount').textContent = '(' + (counts.total || 0) + ')';
+        });
+    }, {
+        onError: function () {
+            console.log('Issue counts not available');
+            WS.arrive('counts', function () {
+                ['statTotal', 'statOpen', 'statClosed'].forEach(function (id) { document.getElementById(id).textContent = '\u2013'; });
+            });
+        }
+    });
 }
 
 // ---- Issues List ----
 
 async function loadIssues() {
-    try {
-        var resp = await fetch('/api/integrations/issues?take=50');
-        if (!resp.ok) throw new Error('API error');
-        var data = await resp.json();
-
+    return WS.swr('issues:list', function () { return WS.getJSON('/api/integrations/issues?take=50'); }, function (data) {
         _allIssues = data.results || [];
-        renderIssues();
-    } catch (error) {
-        console.error('Error loading issues:', error);
-        document.getElementById('issuesList').innerHTML =
-            '<div class="text-center text-steel-blue py-8">' +
-            '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">report_problem</span>' +
-            '<p>Could not load issues</p></div>';
-    }
+        WS.arrive('list', renderIssues);
+    }, {
+        onError: function (error) {
+            console.error('Error loading issues:', error);
+            WS.arrive('list', function () {
+                WS.setHTML(document.getElementById('issuesList'),
+                    '<div class="text-center text-steel-blue py-8">' +
+                    '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">report_problem</span>' +
+                    '<p>Could not load issues</p></div>');
+            });
+        }
+    });
 }
 
 function renderIssues() {
@@ -496,15 +498,15 @@ function renderIssues() {
     if (filtered.length === 0) {
         var msg = 'No issues found';
         if (_currentStatusFilter !== 'all' || _currentTypeFilter !== 'all') msg = 'No matching issues';
-        list.innerHTML = '<div class="text-center text-steel-blue py-8">' +
+        WS.setHTML(list, '<div class="text-center text-steel-blue py-8">' +
             '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">check_circle</span>' +
-            '<p>' + msg + '</p></div>';
+            '<p>' + msg + '</p></div>');
         return;
     }
 
-    list.innerHTML = filtered.map(function(issue) {
+    WS.setHTML(list, filtered.map(function(issue) {
         return buildIssueCard(issue);
-    }).join('');
+    }).join(''));
 }
 
 function buildIssueCard(issue) {

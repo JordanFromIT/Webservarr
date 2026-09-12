@@ -36,11 +36,10 @@
   </div>
 
   <!-- Post list -->
-  <div id="newsArchive" class="grid gap-3">
-    <div class="text-center text-steel-blue py-12">
-      <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>
-      <p>Loading news…</p>
-    </div>
+  <div id="newsArchive" class="grid gap-3" data-arrive="posts">
+    <div class="skel skel-card" aria-hidden="true"></div>
+    <div class="skel skel-card" aria-hidden="true"></div>
+    <div class="skel skel-card" aria-hidden="true"></div>
   </div>
 
   <!-- Pagination -->
@@ -163,35 +162,55 @@
     _loading = true;
     moreText.textContent = 'Loading…';
 
-    try {
-      // Fetch one past the page size: if it comes back, there is another page.
-      // Cheaper than a separate count query and never goes stale against it.
-      var res = await fetch('/api/news/?limit=' + (PAGE_SIZE + 1) + '&offset=' + _offset);
-      if (!res.ok) throw new Error('Request failed (' + res.status + ')');
-      var posts = await res.json();
-      if (!Array.isArray(posts)) throw new Error('Unexpected response');
+    var offset = _offset;
+    // Fetch one past the page size: if it comes back, there is another page.
+    // Cheaper than a separate count query and never goes stale against it.
+    var url = '/api/news/?limit=' + (PAGE_SIZE + 1) + '&offset=' + offset;
 
+    function fetcher() {
+      return WS.getJSON(url).then(function (posts) {
+        if (!Array.isArray(posts)) throw new Error('Unexpected response');
+        return posts;
+      });
+    }
+
+    function render(posts) {
       var hasMore = posts.length > PAGE_SIZE;
       var page = posts.slice(0, PAGE_SIZE);
 
-      if (_offset === 0) {
-        listEl.innerHTML = page.length ? page.map(renderCard).join('') : emptyState();
+      if (offset === 0) {
+        WS.arrive('posts', function () {
+          WS.setHTML(listEl, page.length ? page.map(renderCard).join('') : emptyState());
+        });
+        _offset = page.length;
       } else {
         listEl.insertAdjacentHTML('beforeend', page.map(renderCard).join(''));
+        _offset = offset + page.length;
       }
 
-      _offset += page.length;
       moreBtn.classList.toggle('hidden', !hasMore);
       moreBtn.classList.toggle('flex', hasMore);
       moreText.textContent = 'Load older posts';
+    }
+
+    try {
+      if (offset === 0) {
+        // The first page paints from the last visit at once, then refreshes.
+        var fresh = await WS.swr('news:archive', fetcher, render);
+        if (fresh === null) throw new Error('Request failed');
+      } else {
+        render(await fetcher());
+      }
     } catch (err) {
       console.error('Error loading news archive:', err);
-      if (_offset === 0) {
-        listEl.innerHTML = '<div class="text-center text-steel-blue py-12">' +
-          '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">cloud_off</span>' +
-          '<p>Could not load news right now.</p>' +
-          '<p class="text-xs opacity-60 mt-1">Try refreshing the page.</p>' +
-        '</div>';
+      if (offset === 0) {
+        WS.arrive('posts', function () {
+          WS.setHTML(listEl, '<div class="text-center text-steel-blue py-12">' +
+            '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">cloud_off</span>' +
+            '<p>Could not load news right now.</p>' +
+            '<p class="text-xs opacity-60 mt-1">Try refreshing the page.</p>' +
+          '</div>');
+        });
       }
       moreText.textContent = 'Try again';
     } finally {

@@ -88,21 +88,21 @@ Send to support
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
 <!-- Stat Cards -->
-<div class="grid grid-cols-4 gap-3 mb-6">
+<div class="grid grid-cols-4 gap-3 mb-6" data-arrive="counts">
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-frosted-blue" id="statTotal">--</p>
+<p class="text-2xl font-bold text-frosted-blue" id="statTotal"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Total</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-amber-400" id="statOpen">--</p>
+<p class="text-2xl font-bold text-amber-400" id="statOpen"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Open</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-blue-400" id="statInProgress">--</p>
+<p class="text-2xl font-bold text-blue-400" id="statInProgress"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">In Progress</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-green-500" id="statResolved">--</p>
+<p class="text-2xl font-bold text-green-500" id="statResolved"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Resolved</p>
 </div>
 </div>
@@ -146,11 +146,10 @@ For a problem with a particular movie or show, use <a href="/issues" class="text
 </div>
 
 <!-- Ticket List -->
-<div id="ticketList" class="space-y-2">
-<div class="text-center text-steel-blue py-12">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin">progress_activity</span>
-<p>Loading tickets...</p>
-</div>
+<div id="ticketList" class="space-y-2" data-arrive="list">
+<div class="skel skel-row" aria-hidden="true"></div>
+<div class="skel skel-row" aria-hidden="true"></div>
+<div class="skel skel-row" aria-hidden="true"></div>
 </div>
 
 <!-- Pagination -->
@@ -307,29 +306,35 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
     params.set('limit', _pageSize);
     params.set('offset', _currentPage * _pageSize);
 
-    var url = _isAdmin ? '/api/admin/tickets' : '/api/tickets';
+    var url = (_isAdmin ? '/api/admin/tickets' : '/api/tickets') + '?' + params.toString();
 
-    fetch(url + '?' + params.toString())
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        _tickets = data.tickets || [];
-        _total = data.total || 0;
+    return WS.swr('tickets:' + url, function () { return WS.getJSON(url); }, function (data) {
+      _tickets = data.tickets || [];
+      _total = data.total || 0;
+      WS.arrive('list', function () {
         renderTicketList();
         updatePagination();
-      })
-      .catch(function() { showToast('Failed to load tickets', 'error'); });
+      });
+    }, {
+      onError: function () { showToast('Failed to load tickets', 'error'); }
+    });
   }
 
   function loadCounts() {
-    fetch('/api/tickets/counts')
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
+    return WS.swr('tickets:counts', function () { return WS.getJSON('/api/tickets/counts'); }, function (data) {
+      WS.arrive('counts', function () {
         document.getElementById('statTotal').textContent = data.total || 0;
         document.getElementById('statOpen').textContent = data.open || 0;
         document.getElementById('statInProgress').textContent = data.in_progress || 0;
         document.getElementById('statResolved').textContent = data.resolved || 0;
-      })
-      .catch(function() {});
+      });
+    }, {
+      onError: function () {
+        WS.arrive('counts', function () {
+          ['statTotal', 'statOpen', 'statInProgress', 'statResolved'].forEach(function (id) { document.getElementById(id).textContent = '\u2013'; });
+        });
+      }
+    });
   }
 
   // ---- Render ticket list ----
