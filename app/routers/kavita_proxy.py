@@ -7,8 +7,8 @@ it directly. Every request is proxied through here: same-origin for the browser,
 plain HTTP server-side over the tunnel.
 
 This is the same proxy pattern already used for Plex, Seerr, Netdata, Sonarr,
-Radarr and Uptime Kuma. The browser only ever loads https://hmserver.tv, so
-there is no mixed-content problem.
+Radarr and Uptime Kuma. The browser only ever loads the site's own HTTPS
+origin, so there is no mixed-content problem.
 
 Kavita owns all per-user reading state (progress, bookmarks, highlights,
 shelves). WebServarr stores none of it — it forwards the caller's Kavita JWT,
@@ -119,7 +119,7 @@ def origin_headers(host: str) -> Dict[str, str]:
 
     Kavita derives its OIDC redirect_uri from the Host header, so it must see
     the public WebServarr host rather than its own LAN address — otherwise it
-    would ask Authentik to redirect to http://10.10.0.3:5000/signin-oidc, which
+    would ask Authentik to redirect to http://<kavita-host>:5000/signin-oidc, which
     is neither registered nor reachable from a browser.
     """
     return {
@@ -137,7 +137,7 @@ def rewrite_book_html(html: str, base: str) -> str:
     Kavita embeds absolute references to itself inside book HTML, for images and
     embedded fonts:
 
-        //10.10.0.3:5000/api/book/18/book-resources?apiKey=<user key>&file=...
+        //<kavita-host>:5000/api/book/18/book-resources?apiKey=<user key>&file=...
 
     Two problems. The host is LAN-only, so the browser cannot fetch it at all —
     every image and font in every book would fail. And the URL carries the
@@ -150,7 +150,7 @@ def rewrite_book_html(html: str, base: str) -> str:
     if not host:
         return html
 
-    # //10.10.0.3:5000/api/...  and  http(s)://10.10.0.3:5000/api/...
+    # //<kavita-host>:5000/api/...  and  http(s)://<kavita-host>:5000/api/...
     html = re.sub(
         r"(?:https?:)?//" + re.escape(host) + r"/api/",
         "/kavita/api/",

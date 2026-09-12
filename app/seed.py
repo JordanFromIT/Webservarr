@@ -72,12 +72,12 @@ DEFAULT_SETTINGS = {
     "integration.authentik.client_secret": ("", "Authentik OAuth2 client secret"),
     "integration.authentik.app_slug": ("", "Authentik application slug (for logout URL)"),
     # Kavita ebook backend (proxied; never exposed to the browser directly)
-    "integration.kavita.url": ("", "Kavita base URL (e.g., http://10.10.0.3:5000)"),
+    "integration.kavita.url": ("", "Kavita base URL (e.g., http://192.168.1.100:5000)"),
     "features.show_books": ("true", "Show Library page in sidebar (also requires Kavita configured)"),
     "sidebar.label_library": ("eBooks", "Sidebar label for the eBooks/Library page"),
     "icon.nav_library": ("menu_book", "Sidebar icon for Library page"),
     # Chaptarr book acquisition (used by the Requests page)
-    "integration.chaptarr.url": ("", "Chaptarr base URL (e.g., http://10.10.0.3:8789)"),
+    "integration.chaptarr.url": ("", "Chaptarr base URL (e.g., http://192.168.1.100:8789)"),
     "integration.chaptarr.api_key": ("", "Chaptarr API key"),
     "integration.chaptarr.root_folder": ("", "Chaptarr root folder path for requested books"),
     "integration.chaptarr.quality_profile_id": ("1", "Chaptarr quality profile id for requested books"),
