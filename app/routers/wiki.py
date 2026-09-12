@@ -126,6 +126,39 @@ def _page_brief(page: WikiPage, cat: Optional[WikiCategory]) -> dict:
     }
 
 
+_MD_FENCE = re.compile(r"```.*?```", re.S)
+_MD_IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_HEADING = re.compile(r"^\s{0,3}#{1,6}\s*", re.M)
+_MD_QUOTE = re.compile(r"^\s{0,3}>\s?", re.M)
+_MD_BULLET = re.compile(r"^\s{0,3}(?:[-*+]|\d+\.)\s+", re.M)
+_MD_EMPHASIS = re.compile(r"(\*{1,3}|_{1,3})(?=\S)(.+?)(?<=\S)\1", re.S)
+_MD_CODE = re.compile(r"`([^`]*)`")
+_MD_RULE = re.compile(r"^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$", re.M)
+_WS = re.compile(r"\s+")
+
+
+def _plain_text(markdown_source: str) -> str:
+    """Flatten markdown source to readable prose for search snippets.
+
+    Search runs against the raw source so a match is never missed, but the
+    snippet shown to a reader must not be full of asterisks and hashes -- the
+    audience here is not technical, and "## Writing a page **bold**" reads as
+    broken rather than as formatting.
+    """
+    text = markdown_source or ""
+    text = _MD_FENCE.sub(" ", text)
+    text = _MD_IMAGE.sub(r"\1", text)
+    text = _MD_LINK.sub(r"\1", text)
+    text = _MD_RULE.sub(" ", text)
+    text = _MD_HEADING.sub("", text)
+    text = _MD_QUOTE.sub("", text)
+    text = _MD_BULLET.sub("", text)
+    text = _MD_CODE.sub(r"\1", text)
+    text = _MD_EMPHASIS.sub(r"\2", text)
+    return _WS.sub(" ", text).strip()
+
+
 def _snippet(content: str, term: str) -> dict:
     """A plain-text window around the first case-insensitive hit, plus the offset
     and length of the match within that window.
@@ -134,9 +167,12 @@ def _snippet(content: str, term: str) -> dict:
     JSON field that the client will render, and the client can highlight a range
     without parsing anything.
     """
-    body = content or ""
+    body = _plain_text(content)
     idx = body.lower().find((term or "").lower())
     if idx < 0:
+        # The term matched the raw source but not the flattened text (it was
+        # inside a link target or a code fence). Show the opening lines rather
+        # than nothing, with no highlight.
         return {
             "snippet": body[: SNIPPET_RADIUS * 2].strip(),
             "match_offset": 0,
