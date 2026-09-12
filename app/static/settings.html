@@ -1565,7 +1565,7 @@
     </main>
 
     <script src="/static/js/auth.js?v=1"></script>
-    <script src="/static/js/header.js?v=2"></script>
+    <script src="/static/js/header.js?v=3"></script>
     <script src="/static/js/sidebar.js?v=21"></script>
     <script src="/static/js/notifications.js?v=3"></script>
     <script>
@@ -1586,7 +1586,6 @@
             const user = await checkAuth({ requireAdmin: true });
             if (!user) return;
             showAdminNav(user.is_admin);
-            loadSystemStatus();
 
             // Show admin account section for simple auth users
             if (user.auth_method === 'simple') {

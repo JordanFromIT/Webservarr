@@ -31,16 +31,19 @@
 // Hydrated from the sessionStorage cache (see shell-cache.js) so a warm tab
 // never sits on the neutral placeholder while the request is in flight --
 // the static shell ships #systemStatus with a blank (&nbsp;) label
-// precisely so this is the only thing that ever fills it in. Exposed as the
-// global loadSystemStatus() because every shell page's own inline script
-// already calls that by name, both on first load and on its own 30s
-// refresh interval -- this just changes what runs underneath that call.
+// precisely so this is the only thing that ever fills it in.
+//
+// Fully self-contained: this used to be a global loadSystemStatus() that
+// every shell page's own inline script called both on load and from its
+// own 30s setInterval, which meant every page had to know this existed and
+// call it at the right time relative to header.js's own script tag having
+// already run. header.js now owns its own refresh cadence instead, so no
+// page needs to call anything -- still exposed as window.loadSystemStatus
+// for manual/debug use (e.g. forcing a repaint from the console), but
+// nothing in this codebase calls it by that name anymore.
 (function () {
   var pill = document.getElementById('systemStatus');
-  if (!pill) {
-    window.loadSystemStatus = function () {};
-    return;
-  }
+  if (!pill) return;
   var textEl = pill.querySelector('span:last-child');
 
   function paint(services) {
@@ -71,13 +74,13 @@
     pill.dataset.state = state; // drives dot/text/background color, theme.css
   }
 
-  window.loadSystemStatus = function () {
+  function refresh() {
     return wsCache.swr('ws.status', '/api/integrations/service-status', 30000, paint)
       .catch(function () { /* keep whatever was last painted; never show "Loading" */ });
-  };
+  }
 
-  // Hydrate immediately -- don't wait for the page's own script to call
-  // loadSystemStatus(), which runs only after checkAuth()'s network round
-  // trip resolves.
-  window.loadSystemStatus();
+  window.loadSystemStatus = refresh;
+
+  refresh(); // hydrate immediately -- no page script has to trigger this
+  setInterval(refresh, 30000); // matches the cadence every page used to drive itself
 })();

@@ -195,7 +195,7 @@ View Requests
 </main>
 
 <script src="/static/js/auth.js?v=1"></script>
-<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/header.js?v=3"></script>
 <script src="/static/js/sidebar.js?v=21"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
@@ -233,8 +233,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (!user) return;
     showAdminNav(user.is_admin);
 
-    // Load all dynamic sections
-    loadSystemStatus();
+    // Load all dynamic sections (the status pill hydrates and refreshes
+    // itself -- header.js owns that entirely now)
     loadNews();
     loadServices();
     loadActiveStreams();
@@ -245,7 +245,6 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Auto-refresh dynamic sections every 30 seconds
     setInterval(function() {
-        loadSystemStatus();
         loadServices();
         loadActiveStreams();
         loadRecentRequests();

@@ -82,7 +82,7 @@
 </main>
 
 <script src="/static/js/auth.js?v=1"></script>
-<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/header.js?v=3"></script>
 <script src="/static/js/sidebar.js?v=22"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script src="/static/js/wiki-editor.js?v=1"></script>
@@ -683,7 +683,6 @@ var WikiView = (function () {
       });
     }
 
-    loadSystemStatus();
     if (typeof initNotifications === 'function') initNotifications();
 
     // Render only after the session is known, so admin-only controls never

@@ -28,14 +28,13 @@
 </main>
 
 <script src="/static/js/auth.js?v=1"></script>
-<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/header.js?v=3"></script>
 <script src="/static/js/sidebar.js?v=21"></script>
 <script>
 document.addEventListener('DOMContentLoaded', async function() {
     const user = await checkAuth();
     if (!user) return;
     showAdminNav(user.is_admin);
-    loadSystemStatus();
 
     // Authenticate with Seerr SSO before loading iframe
     try {

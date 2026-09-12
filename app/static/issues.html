@@ -211,7 +211,7 @@ Submit Issue
 </style>
 
 <script src="/static/js/auth.js?v=1"></script>
-<script src="/static/js/header.js?v=2"></script>
+<script src="/static/js/header.js?v=3"></script>
 <script src="/static/js/sidebar.js?v=21"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script src="/static/js/wiki-hook.js?v=1"></script>
@@ -242,7 +242,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     var user = await checkAuth();
     if (!user) return;
     showAdminNav(user.is_admin);
-    loadSystemStatus();
     initWikiHook('wikiHookIssues', 'issues', 'Might this help first?');
 
     // Wire up search input with debounce
