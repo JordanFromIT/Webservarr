@@ -53,12 +53,12 @@
 </style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<!-- ws:sidebar -->
 
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-y-auto">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
+<!-- ws:header -->
 
 <div class="p-4 lg:p-8 max-w-5xl w-full mx-auto">
   <div id="wikiRoot">
@@ -75,15 +75,10 @@
   </div>
 </div>
 
-<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
-  <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
-</div>
-
 </main>
 
 <script src="/static/js/auth.js"></script>
-<script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=22"></script>
+<script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script src="/static/js/wiki-editor.js?v=1"></script>
 <script>
@@ -651,42 +646,9 @@ var WikiView = (function () {
 (function () {
   'use strict';
 
-  initSidebar('wiki');
-
-  (function () {
-    var hint = document.getElementById('scrollDownHint');
-    if (!hint) return;
-    function update() {
-      var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
-      hint.style.opacity = atBottom ? '0' : '1';
-    }
-    window.addEventListener('scroll', update);
-    update();
-  })();
-
-  // The shared page-shell handshake every other page performs: without it the
-  // nav stays at opacity-0, Settings stays hidden and the bell is dead.
   checkAuth().then(function (user) {
     if (!user) return;
     WikiView.setUser(user);
-
-    var uEl = document.getElementById('headerUsername');
-    var rEl = document.getElementById('headerRole');
-    if (uEl) uEl.textContent = user.display_name || user.username;
-    if (rEl) rEl.textContent = user.is_admin ? 'Admin' : 'Member';
-    showAdminNav(user.is_admin);
-
-    var menuBtn = document.getElementById('userMenuBtn');
-    var menuDrop = document.getElementById('userMenuDropdown');
-    if (menuBtn && menuDrop) {
-      menuBtn.addEventListener('click', function () { menuDrop.classList.toggle('hidden'); });
-      document.addEventListener('click', function (e) {
-        if (!menuBtn.contains(e.target) && !menuDrop.contains(e.target)) menuDrop.classList.add('hidden');
-      });
-    }
-
-    loadSystemStatus();
-    if (typeof initNotifications === 'function') initNotifications();
 
     // Render only after the session is known, so admin-only controls never
     // flash in for a member or flash out for an admin.

@@ -11,12 +11,12 @@
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<!-- ws:sidebar -->
 <!-- Toast notification container -->
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 <!-- Main Content Area -->
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
+<!-- ws:header -->
 <!-- Scrollable Content -->
 <div class="flex-1 flex flex-col min-h-0 lg:overflow-hidden relative">
 
@@ -60,44 +60,24 @@ Today
 
 </div>
 
-<!-- Scroll down indicator (mobile only) -->
-<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
-    <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
-</div>
-
 </main>
 
 <script src="/static/js/auth.js"></script>
-<script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=21"></script>
+<script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
 // ---- State ----
 var _currentYear = new Date().getFullYear();
 var _currentMonth = new Date().getMonth(); // 0-indexed
 var _releaseCache = {}; // key: "YYYY-MM" → array of releases
-var _refreshInterval = null;
+var _stopRefresh = null;
 var _selectedDate = null; // "YYYY-MM-DD" or null
 
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', async function() {
-    initSidebar('calendar');
-    initNotifications();
-
-    // Scroll-down hint — fade out at bottom
-    (function() {
-        var hint = document.getElementById('scrollDownHint');
-        if (!hint) return;
-        window.addEventListener('scroll', function() {
-            var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
-            hint.style.opacity = atBottom ? '0' : '1';
-        });
-    })();
 
     var user = await checkAuth();
     if (!user) return;
-    showAdminNav(user.is_admin);
-    loadSystemStatus();
 
     // Wire up nav buttons
     document.getElementById('prevMonthBtn').addEventListener('click', function() {
@@ -120,7 +100,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     renderMonth();
 
     // Auto-refresh every 60 seconds
-    _refreshInterval = setInterval(function() {
+    _stopRefresh = WS.poll(function() {
         fetchAndRender();
     }, 60000);
 });

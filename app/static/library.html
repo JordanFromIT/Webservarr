@@ -27,10 +27,10 @@
 </style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<!-- ws:sidebar -->
 
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
+<!-- ws:header -->
 
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8">
 
@@ -130,8 +130,7 @@
 </main>
 
 <script src="/static/js/auth.js"></script>
-<script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=21"></script>
+<script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script src="/static/js/tour.js?v=5"></script>
 <script>
@@ -1010,31 +1009,10 @@
     wireBookDetail();
   }
 
-
   document.addEventListener('DOMContentLoaded', function () {
-    // header.js self-initialises on load; calling it again renders a second header.
-    if (typeof initSidebar === 'function') initSidebar('library');
-    setTimeout(applyBrandingIcons, 300);
+    applyBrandingIcons();
 
-    // The sidebar nav renders at opacity-0 and is only faded in by
-    // showAdminNav(), which every page calls after checkAuth(). Without this the
-    // nav is present in the DOM but never painted.
-    checkAuth().then(function (user) {
-      var uEl = document.getElementById('headerUsername');
-      var rEl = document.getElementById('headerRole');
-      if (uEl) uEl.textContent = user.display_name || user.username;
-      if (rEl) rEl.textContent = user.is_admin ? 'Admin' : 'Member';
-      showAdminNav(user.is_admin);
-
-      var menuBtn = document.getElementById('userMenuBtn');
-      var menuDrop = document.getElementById('userMenuDropdown');
-      if (menuBtn && menuDrop) {
-        menuBtn.addEventListener('click', function () { menuDrop.classList.toggle('hidden'); });
-        document.addEventListener('click', function (e) {
-          if (!menuBtn.contains(e.target) && !menuDrop.contains(e.target)) menuDrop.classList.add('hidden');
-        });
-      }
-    }).catch(function () {
+    checkAuth().catch(function () {
       /* checkAuth redirects to /login itself when unauthenticated. */
     });
 

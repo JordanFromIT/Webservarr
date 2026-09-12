@@ -72,8 +72,12 @@ class ShellRendering(unittest.TestCase):
         self.assertRegex(render(name="news"), r'<a[^>]*href="/"[^>]*aria-current="page"')
 
     def test_admin_only_items_emitted_only_for_admins(self):
-        self.assertIn('href="/settings"', render(user=ADMIN))
-        self.assertNotIn('href="/settings"', render(user=MEMBER))
+        def nav(out):
+            return re.search(r'<nav id="desktopNav".*?</nav>', out, re.S).group(0)
+        self.assertIn('href="/settings"', nav(render(user=ADMIN)))
+        self.assertNotIn('href="/settings"', nav(render(user=MEMBER)))
+        # The account-menu entry stays in the markup but hidden for members.
+        self.assertRegex(render(user=MEMBER), r'<a href="/settings" class="[^"]*hidden">')
         self.assertIn("data-admin", html_tag(render(user=ADMIN)))
         self.assertNotIn("data-admin", html_tag(render(user=MEMBER)))
         # Version label and the account-settings menu entry hide for members.

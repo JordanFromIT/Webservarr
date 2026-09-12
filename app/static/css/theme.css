@@ -264,3 +264,83 @@ body {
 .animate-pulse-once {
   animation: pulse-once 0.3s ease-out;
 }
+
+/* ---- Page shell ----
+ *
+ * The status pill starts in the "unknown" state: it keeps its box (so the
+ * header never reflows) but paints nothing. shell.js paints the last known
+ * state from sessionStorage and revalidates in the background.
+ */
+#systemStatus[data-state="unknown"] { visibility: hidden; }
+
+/* ---- Cross-document view transitions ----
+ *
+ * Every nav click is still a full-document navigation, but the sidebar, the
+ * header and the mobile bar carry the same view-transition-name in both
+ * documents and are byte-identical, so the browser keeps them where they are
+ * and only the content crossfades. Firefox ignores this and simply gets the
+ * static shell.
+ */
+@view-transition { navigation: auto; }
+#desktopSidebar { view-transition-name: ws-sidebar; }
+#appHeader      { view-transition-name: ws-header; }
+#mobileTopBar   { view-transition-name: ws-topbar; }
+main            { view-transition-name: ws-content; }
+
+::view-transition-old(ws-sidebar), ::view-transition-new(ws-sidebar),
+::view-transition-old(ws-header),  ::view-transition-new(ws-header),
+::view-transition-old(ws-topbar),  ::view-transition-new(ws-topbar),
+::view-transition-old(root),       ::view-transition-new(root) {
+  animation: none;
+}
+::view-transition-old(ws-content) { animation: ws-vt-out 120ms ease-out both; }
+::view-transition-new(ws-content) { animation: ws-vt-in 180ms ease-out both; }
+@keyframes ws-vt-out { to { opacity: 0; } }
+@keyframes ws-vt-in { from { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  @view-transition { navigation: none; }
+}
+
+/* ---- Skeletons ----
+ *
+ * The shape of what is coming, in the theme's own text colour, at the size
+ * of the real thing, so nothing moves when the content lands.
+ */
+.skel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  background: rgb(var(--color-text) / 0.06);
+}
+.skel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(var(--color-text) / 0.06), transparent);
+  transform: translateX(-100%);
+  animation: ws-shimmer 1.4s ease-in-out infinite;
+}
+.skel-line   { height: 0.85em; border-radius: 6px; }
+.skel-num    { display: inline-block; width: 2.2ch; height: 1em; vertical-align: -0.1em; border-radius: 6px; }
+.skel-tile   { height: 92px; border-radius: 12px; }
+.skel-card   { height: 116px; border-radius: 12px; }
+.skel-row    { height: 56px; border-radius: 10px; }
+.skel-poster { aspect-ratio: 2 / 3; border-radius: 12px; }
+@keyframes ws-shimmer { to { transform: translateX(100%); } }
+
+/* ---- Arrival ----
+ *
+ * A section plays one 12px fade-up when its content lands (shell.js adds
+ * .ws-in in document order, 60ms apart). Polls never replay it.
+ */
+[data-arrive].ws-in { animation: ws-fade-up 220ms ease-out both; }
+@keyframes ws-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skel::after { animation: none; }
+  [data-arrive].ws-in { animation: none; }
+}

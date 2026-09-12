@@ -11,10 +11,10 @@
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<!-- ws:sidebar -->
 <!-- Main Content Area -->
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
+<!-- ws:header -->
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8">
 <!-- Service Health + News Side by Side -->
@@ -187,32 +187,14 @@ View Requests
 </section>
 </div>
 
-<!-- Scroll down indicator (mobile only) -->
-<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
-    <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
-</div>
-
 </main>
 
 <script src="/static/js/auth.js"></script>
-<script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=21"></script>
+<script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
 // WebServarr - Main Page
 document.addEventListener('DOMContentLoaded', async function() {
-    initSidebar('home');
-    initNotifications();
-
-    // Scroll-down hint — fade out after scrolling
-    (function() {
-        var hint = document.getElementById('scrollDownHint');
-        if (!hint) return;
-        window.addEventListener('scroll', function() {
-            var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
-            hint.style.opacity = atBottom ? '0' : '1';
-        });
-    })();
 
     // Apply configurable section icons from branding
     var icons = (window.WEBSERVARR_THEME || {}).icons || {};
@@ -232,10 +214,8 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     const user = await checkAuth();
     if (!user) return;
-    showAdminNav(user.is_admin);
 
     // Load all dynamic sections
-    loadSystemStatus();
     loadNews();
     loadServices();
     loadActiveStreams();
@@ -244,9 +224,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     loadSystemStats();
     loadUpcomingReleases();
 
-    // Auto-refresh dynamic sections every 30 seconds
-    setInterval(function() {
-        loadSystemStatus();
+    // Auto-refresh dynamic sections every 30 seconds (paused in background tabs)
+    WS.poll(function() {
         loadServices();
         loadActiveStreams();
         loadRecentRequests();
@@ -255,10 +234,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     }, 30000);
 
     // Real-time Netdata gauges — poll every 1 second
-    setInterval(loadSystemStats, 1000);
+    WS.poll(loadSystemStats, 1000);
 
     // Live-update "Last checked" timer every second
-    setInterval(function() {
+    WS.poll(function() {
         var el = document.getElementById('serviceLastChecked');
         if (el && el.dataset.lastCheck) {
             el.textContent = 'Checked ' + getTimeAgo(new Date(el.dataset.lastCheck));
@@ -419,7 +398,6 @@ async function loadNews() {
         `;
     }
 }
-
 
 // Load request count for sidebar badge
 async function loadRequestCount() {
@@ -592,7 +570,6 @@ async function loadRecentRequests() {
         }
         const requests = await response.json();
 
-
         if (!Array.isArray(requests) || requests.length === 0) {
             tbody.innerHTML = `
                 <tr>
@@ -723,16 +700,14 @@ async function loadServices() {
     let services = [];
 
     try {
-        const response = await fetch('/api/integrations/service-status');
-        if (response.ok) {
-            const data = await response.json();
-            services = (Array.isArray(data) ? data : []).map(svc => ({
-                display_name: svc.name || 'Unknown',
-                status: svc.status || 'unknown',
-                icon: svc.icon || 'dns',
-                last_check: svc.last_check
-            }));
-        }
+        // Shared with the header pill: one request serves both.
+        const data = await WS.serviceStatus();
+        services = (Array.isArray(data) ? data : []).map(svc => ({
+            display_name: svc.name || 'Unknown',
+            status: svc.status || 'unknown',
+            icon: svc.icon || 'dns',
+            last_check: svc.last_check
+        }));
     } catch (error) {
         console.error('Error loading services:', error);
         servicesContainer.innerHTML = '<div class="text-center text-red-400 py-8 col-span-full"><span class="material-symbols-outlined text-4xl mb-2 block">error</span><p>Error loading services</p></div>';
