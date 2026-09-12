@@ -172,38 +172,29 @@ def _resolve_wiki_hooks(db: Session, get, is_signed_in: bool) -> dict:
     return hooks
 
 
-@router.get("/branding")
-@limiter.limit("60/minute")
-async def get_branding(
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: Optional[dict] = Depends(get_current_user_optional),
-):
-    """
-    Public endpoint - returns branding and theme settings.
-    No authentication required. Frontend loads this on every page.
-    """
-    # Fetch all branding/theme settings in one query
-    keys = list(DEFAULTS.keys())
-    rows = db.query(Setting).filter(Setting.key.in_(keys)).all()
-    db_values = {row.key: row.value for row in rows}
+AUTH_KEYS = [
+    "integration.plex.url",
+    "integration.plex.token",
+    "integration.authentik.url",
+    "integration.authentik.client_id",
+]
 
-    # Also fetch VAPID public key for push subscriptions
-    vapid_row = db.query(Setting).filter(Setting.key == "notifications.vapid_public_key").first()
+EMPTY_WIKI_HOOKS = {"tickets": None, "issues": None, "playback": None}
 
-    # Fetch auth-related settings for auth_methods
-    auth_keys = [
-        "integration.plex.url",
-        "integration.plex.token",
-        "integration.authentik.url",
-        "integration.authentik.client_id",
-    ]
-    auth_rows = db.query(Setting).filter(Setting.key.in_(auth_keys)).all()
-    auth_values = {row.key: row.value for row in auth_rows}
+
+def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[str], wiki_hooks: dict) -> dict:
+    """
+    Assemble the branding payload from raw setting values.
+
+    Pure: no database access. Shared by GET /api/branding and by the page
+    renderer (app/pages.py), which inlines the same payload into every page so
+    the client never has to fetch it. Keeping one builder means the two cannot
+    drift.
+    """
 
     # Merge DB values over defaults
     def get(key: str) -> str:
-        return db_values.get(key, DEFAULTS[key])
+        return values.get(key, DEFAULTS[key])
 
     # Check which auth methods are available
     plex_url = auth_values.get("integration.plex.url")
@@ -249,7 +240,7 @@ async def get_branding(
                 and bool(get("integration.kavita.url"))
             ),
         },
-        "wiki_hooks": _resolve_wiki_hooks(db, get, current_user is not None),
+        "wiki_hooks": wiki_hooks,
         "sidebar_labels": {
             "home": get("sidebar.label_home"),
             "requests": get("sidebar.label_requests"),
@@ -317,5 +308,41 @@ async def get_branding(
             "homepage_max_age_days": _int_setting(get("news.homepage_max_age_days"), 30, 0, 3650),
         },
         "auth_methods": auth_methods,
-        "vapid_public_key": vapid_row.value if vapid_row else None,
+        "vapid_public_key": vapid_public_key,
     }
+
+
+def load_branding(db: Session, signed_in: bool) -> dict:
+    """Read every branding-related setting and build the payload."""
+    # Fetch all branding/theme settings in one query
+    rows = db.query(Setting).filter(Setting.key.in_(list(DEFAULTS.keys()))).all()
+    values = {row.key: row.value for row in rows}
+
+    # Also fetch VAPID public key for push subscriptions
+    vapid_row = db.query(Setting).filter(Setting.key == "notifications.vapid_public_key").first()
+
+    # Fetch auth-related settings for auth_methods
+    auth_rows = db.query(Setting).filter(Setting.key.in_(AUTH_KEYS)).all()
+    auth_values = {row.key: row.value for row in auth_rows}
+
+    def get(key: str) -> str:
+        return values.get(key, DEFAULTS[key])
+
+    hooks = _resolve_wiki_hooks(db, get, signed_in)
+    return build_branding(values, auth_values, vapid_row.value if vapid_row else None, hooks)
+
+
+@router.get("/branding")
+@limiter.limit("60/minute")
+async def get_branding(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[dict] = Depends(get_current_user_optional),
+):
+    """
+    Public endpoint - returns branding and theme settings.
+    No authentication required. Pages receive the same payload inlined at
+    serve time (app/pages.py); this endpoint remains for the settings
+    preview and as the fallback for pages served some other way.
+    """
+    return load_branding(db, current_user is not None)

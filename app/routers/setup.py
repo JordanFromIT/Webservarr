@@ -98,19 +98,12 @@ class SetupRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/setup", response_class=HTMLResponse, tags=["Setup"])
-async def setup_page():
+async def setup_page(request: Request):
     """Serve the setup wizard page (or redirect if already completed)."""
     if is_setup_completed():
         return RedirectResponse(url="/login", status_code=302)
-
-    try:
-        with open("/app/app/static/setup.html", "r") as f:
-            return HTMLResponse(content=f.read())
-    except FileNotFoundError:
-        return JSONResponse(
-            status_code=404,
-            content={"detail": "Setup page not found. Static files missing."},
-        )
+    from app.pages import render_page
+    return render_page("setup", request, None)
 
 
 @router.post("/api/setup/complete", tags=["Setup"])

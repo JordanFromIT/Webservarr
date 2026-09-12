@@ -9,9 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
-import html
 import logging
-import re
 
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -21,6 +19,7 @@ from app.limiter import limiter
 from app.database import init_db, SessionLocal
 from app.auth import session_manager
 from app.seed import seed_secret_key
+from app.pages import render_page
 from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status
 from app.services.notification_poller import start_poller, stop_poller
 from app.services.shelf_warmer import start_warmer, stop_warmer
@@ -277,181 +276,12 @@ async def health_check():
 
 
 # --- Page auth helper ---
-async def _require_session(session_id: Optional[str]) -> bool:
-    """Check if the session cookie maps to a valid session."""
+async def _require_session(session_id: Optional[str]) -> Optional[dict]:
+    """The session dict behind the cookie, or None. Page routes use it both to
+    gate access and to render the shell for that user (see app/pages.py)."""
     if not session_id:
-        return False
-    return bool(await session_manager.get_session(session_id))
-
-
-# Link-preview (Open Graph) support.
-#
-# Messaging apps, Discord, Slack and search crawlers read the HTML they are
-# served and never execute JavaScript, so theme-loader can never reach them --
-# whatever is baked into the static file is what the world sees. The pages ship
-# with a hardcoded "WebServarr" title, which is why a shared link previews under
-# the software's name instead of the operator's. These tags are therefore
-# stamped in server-side, from the same branding settings the UI already uses.
-
-_TITLE_RE = re.compile(r"<title>.*?</title>", re.IGNORECASE | re.DOTALL)
-
-# Existing titles read "WebServarr - Control Center". Keep the descriptive half,
-# swap the brand half, so every page stays self-describing in a browser tab.
-_TITLE_SUFFIX_RE = re.compile(r"^\s*\S.*?\s+-\s+(?P<suffix>.+?)\s*$", re.DOTALL)
-
-
-def _branding_for_preview() -> dict:
-    """
-    Read the three branding settings the link preview needs.
-
-    Deliberately its own short-lived session rather than a request dependency:
-    every page route needs this, and threading a DB session through the static
-    file handlers would buy nothing. Any failure falls back to the packaged
-    defaults -- a database hiccup must not stop a page from being served.
-    """
-    from app.routers.branding import DEFAULTS
-
-    values = {
-        "app_name": DEFAULTS["branding.app_name"],
-        "tagline": DEFAULTS["branding.tagline"],
-        "logo_url": DEFAULTS["branding.logo_url"],
-    }
-    db = None
-    try:
-        from app.models import Setting
-
-        db = SessionLocal()
-        keys = ["branding.app_name", "branding.tagline", "branding.logo_url"]
-        for row in db.query(Setting).filter(Setting.key.in_(keys)).all():
-            if row.value:
-                values[row.key.split(".", 1)[1]] = row.value
-    except Exception:  # pragma: no cover - defensive
-        logger.warning("Could not read branding for link preview; using defaults", exc_info=True)
-    finally:
-        if db is not None:
-            db.close()
-    return values
-
-
-def _base_url(request: Optional[Request]) -> str:
-    """Absolute scheme://host for this request, honouring the Cloudflare proxy."""
-    if request is None:
-        return ""
-    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
-    if not proto:
-        proto = request.url.scheme or "https"
-    host = (
-        request.headers.get("x-forwarded-host", "").split(",")[0].strip()
-        or request.headers.get("host", "").strip()
-        or request.url.netloc
-    )
-    if not host:
-        return ""
-    return f"{proto}://{host}"
-
-
-def _preview_meta(request: Optional[Request]) -> tuple[str, str]:
-    """
-    Build (page_title, meta_tags_html) for the link preview.
-
-    The image is omitted when the logo is an SVG: no major messaging client
-    renders SVG in a link card, and advertising one produces a preview with a
-    broken thumbnail rather than the clean text-only card you get without it.
-    Uploaded logos are always PNG/JPEG/WebP, so uploading one turns the image on.
-    """
-    brand = _branding_for_preview()
-    app_name = brand["app_name"].strip() or "WebServarr"
-    tagline = brand["tagline"].strip()
-    base = _base_url(request)
-
-    image_url = ""
-    logo = brand["logo_url"].strip()
-    if logo and not logo.lower().endswith(".svg"):
-        image_url = logo if logo.startswith(("http://", "https://")) else f"{base}{logo}"
-
-    page_url = f"{base}{request.url.path}" if base and request is not None else ""
-
-    e = lambda v: html.escape(v, quote=True)
-    tags = [
-        f'<meta property="og:site_name" content="{e(app_name)}">',
-        f'<meta property="og:title" content="{e(app_name)}">',
-        '<meta property="og:type" content="website">',
-        f'<meta name="twitter:title" content="{e(app_name)}">',
-    ]
-    if tagline:
-        tags.insert(0, f'<meta name="description" content="{e(tagline)}">')
-        tags.append(f'<meta property="og:description" content="{e(tagline)}">')
-        tags.append(f'<meta name="twitter:description" content="{e(tagline)}">')
-    if page_url:
-        tags.append(f'<meta property="og:url" content="{e(page_url)}">')
-    if image_url:
-        tags.append(f'<meta property="og:image" content="{e(image_url)}">')
-        tags.append(f'<meta name="twitter:image" content="{e(image_url)}">')
-        tags.append('<meta name="twitter:card" content="summary_large_image">')
-    else:
-        tags.append('<meta name="twitter:card" content="summary">')
-
-    return app_name, "\n".join(tags)
-
-
-# Cache-busting for local scripts and stylesheets.
-#
-# Every page carries hand-written "?v=NN" markers on its own script and link
-# tags, which means adding a nav entry to the shared sidebar requires bumping
-# that number in all eleven pages by hand. Two separate sessions have now added
-# a nav item, missed a page, and shipped a sidebar that browsers never
-# re-fetched -- the file on the server was correct and the nav was still stale
-# in everyone's browser.
-#
-# The marker is therefore rewritten at serve time to the running app version.
-# The number in the HTML no longer matters, every release invalidates the cache
-# exactly once, and nobody has to remember. Only local /static/ assets are
-# touched, and only an existing ?v= marker is replaced, so nothing gains a
-# query string that did not already have one.
-_ASSET_VERSION_RE = re.compile(r'(?P<attr>(?:src|href)="/static/[^"?]+\?v=)[^"]*"')
-
-
-def _stamp_asset_versions(content: str) -> str:
-    version = (settings.app_version or "dev").strip() or "dev"
-    return _ASSET_VERSION_RE.sub(lambda m: f'{m.group("attr")}{version}"', content)
-
-
-def _inject_preview_meta(content: str, request: Optional[Request]) -> str:
-    """Rewrite <title> and append the preview meta tags immediately after it."""
-    app_name, tags = _preview_meta(request)
-
-    def _rewrite(match: "re.Match") -> str:
-        inner = match.group(0)[len("<title>"):-len("</title>")]
-        suffix_match = _TITLE_SUFFIX_RE.match(inner)
-        title = f"{app_name} - {suffix_match.group('suffix')}" if suffix_match else app_name
-        return f"<title>{html.escape(title)}</title>\n{tags}"
-
-    content, count = _TITLE_RE.subn(_rewrite, content, count=1)
-    if count == 0:
-        # No <title> to anchor to; fall back to the top of <head>.
-        content = content.replace("<head>", f"<head>\n<title>{html.escape(app_name)}</title>\n{tags}", 1)
-    return content
-
-
-def _serve_page(filepath: str, label: str = "Page", request: Optional[Request] = None):
-    """Read an HTML file, stamp in the link-preview tags, and return it, or 404."""
-    try:
-        with open(filepath, "r") as f:
-            content = f.read()
-    except FileNotFoundError:
-        return JSONResponse(
-            status_code=404,
-            content={"detail": f"{label} not found. Static files missing."}
-        )
-    try:
-        content = _inject_preview_meta(content, request)
-    except Exception:  # pragma: no cover - a preview must never break a page
-        logger.warning("Link-preview injection failed for %s", label, exc_info=True)
-    try:
-        content = _stamp_asset_versions(content)
-    except Exception:  # pragma: no cover - a stale asset beats a broken page
-        logger.warning("Asset version stamping failed for %s", label, exc_info=True)
-    return HTMLResponse(content=content)
+        return None
+    return await session_manager.get_session(session_id)
 
 
 # Root endpoint - serve main dashboard
@@ -461,16 +291,17 @@ async def root(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the main dashboard page."""
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/index.html", "Dashboard", request)
+    return render_page("index", request, user)
 
 
 # Login page
 @app.get("/login", response_class=HTMLResponse, tags=["Pages"])
 async def login_page(request: Request):
     """Serve the login page."""
-    return _serve_page("/app/app/static/login.html", "Login page", request)
+    return render_page("login", request, None)
 
 
 # Requests page (native Seerr UI)
@@ -480,9 +311,10 @@ async def requests_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the native requests page."""
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/requests.html", "Requests page", request)
+    return render_page("requests", request, user)
 
 
 # Requests embed page (Seerr iframe wrapper)
@@ -492,9 +324,10 @@ async def requests_embed_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the requests embed page (Seerr iframe)."""
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/requests-embed.html", "Requests embed page", request)
+    return render_page("requests-embed", request, user)
 
 
 # Legacy redirect: /requests2 → /requests (301)
@@ -511,9 +344,10 @@ async def issues_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the issues page."""
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/issues.html", "Issues page", request)
+    return render_page("issues", request, user)
 
 
 # News archive page
@@ -523,9 +357,10 @@ async def news_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the full news archive. The homepage only carries recent posts."""
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/news.html", "News page", request)
+    return render_page("news", request, user)
 
 
 # Wiki
@@ -535,9 +370,10 @@ async def wiki_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the wiki index."""
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/wiki.html", "Wiki page", request)
+    return render_page("wiki", request, user)
 
 
 @app.get("/wiki/{slug}", response_class=HTMLResponse, tags=["Pages"])
@@ -552,9 +388,10 @@ async def wiki_article_page(
     matching view, so a pasted deep link cold-loads onto that page instead of
     flashing the index first.
     """
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/wiki.html", "Wiki page", request)
+    return render_page("wiki", request, user)
 
 
 # Calendar page
@@ -564,9 +401,10 @@ async def calendar_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the combined Radarr/Sonarr calendar page."""
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/calendar.html", "Calendar page", request)
+    return render_page("calendar", request, user)
 
 
 @app.get("/tickets", response_class=HTMLResponse, tags=["Pages"])
@@ -575,9 +413,10 @@ async def tickets_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the support tickets page."""
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/tickets.html", "Tickets page", request)
+    return render_page("tickets", request, user)
 
 
 # Ebook library page
@@ -587,9 +426,10 @@ async def library_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the ebook library browse page."""
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/library.html", "Library page", request)
+    return render_page("library", request, user)
 
 
 # Ebook reader page
@@ -599,9 +439,10 @@ async def reader_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the ebook reader."""
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/reader.html", "Reader page", request)
+    return render_page("reader", request, user)
 
 
 # Settings page (admin)
@@ -611,9 +452,12 @@ async def settings_page(
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """Serve the settings page."""
-    if not await _require_session(session_id):
+    user = await _require_session(session_id)
+    if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return _serve_page("/app/app/static/settings.html", "Settings page", request)
+    if user.get("is_admin") != "true":
+        return RedirectResponse(url="/", status_code=302)
+    return render_page("settings", request, user)
 
 
 # Mount static files (CSS, JS, images, etc.)
