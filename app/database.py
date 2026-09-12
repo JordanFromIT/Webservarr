@@ -50,7 +50,7 @@ def init_db():
     # Seed defaults
     from app.seed import (
         seed_default_settings, seed_vapid_keys,
-        seed_default_news, migrate_requests_rename,
+        seed_default_news, migrate_requests_rename, seed_wiki_example,
         migrate_setup_completed, migrate_overseerr_to_seerr,
         migrate_nav_sublabels_v2, migrate_home_sublabel_v3,
     )
@@ -66,5 +66,6 @@ def init_db():
         migrate_setup_completed(db)
         seed_vapid_keys(db)
         seed_default_news(db)
+        seed_wiki_example(db)
     finally:
         db.close()
