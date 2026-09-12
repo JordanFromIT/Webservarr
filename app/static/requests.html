@@ -619,6 +619,12 @@ var RS = (function () {
     DOWNLOADING:       { key: 'downloading', label: 'Downloading', cls: 'rs-chip-go' },
     DOWNLOAD_STALLED:  { key: 'retrying',    label: 'Retrying',    cls: 'rs-chip-go' },
     TV_PARTIAL:        { key: 'partial',     label: 'Partly here', cls: 'rs-chip-go' },
+    // A show is never simply "downloading" -- it is some number of episodes in
+    // and some number short, and saying "Downloading" for a series sitting at
+    // 27 of 59 reads as nearly-here when it is not. Shows get their own chip
+    // and the counts carry the truth. See statusOf().
+    _TV_FETCHING:      { key: 'gettingeps',  label: 'Getting episodes', cls: 'rs-chip-go' },
+    _QUEUED:           { key: 'queued',      label: 'Queued',      cls: 'rs-chip-wait' },
     NO_RELEASE_FOUND:  { key: 'searching',   label: 'Searching',   cls: 'rs-chip-wait' },
     NOT_MONITORED:     { key: 'paused',      label: 'Paused',      cls: 'rs-chip-wait' },
     NOT_RELEASED_YET:  { key: 'unreleased',  label: 'Not out yet', cls: 'rs-chip-wait' },
@@ -644,9 +650,47 @@ var RS = (function () {
   // than one without and a hardcoded height would cut the fifth row in half.
   var MAX_ROWS = 5;
 
-  function reasonText(c) { return REASONS[c] || 'Being looked at'; }
   function statusOf(r) {
+    // A show being fetched is not "downloading" in any sense a viewer means it.
+    // Sonarr has episodes queued, but the series can be less than half here and
+    // stay that way for months. Give it its own word and let the counts speak.
+    if (r.media_type === 'tv' && (r.reason_code === 'DOWNLOADING' || r.reason_code === 'DOWNLOAD_STALLED')) {
+      return STATUS._TV_FETCHING;
+    }
+    // A film Radarr has grabbed but not started is queued, not downloading.
+    // Reporting 0% as "Downloading" is the same overstatement in miniature.
+    if (r.media_type === 'movie' && r.reason_code === 'DOWNLOADING' && !r.percent) {
+      return STATUS._QUEUED;
+    }
     return STATUS[r.reason_code] || { key: 'checking', label: 'Checking', cls: 'rs-chip-wait' };
+  }
+
+  // The "Why" sentence. For a show this is where the episode counts go, because
+  // "27 of 59 episodes here" answers the question far better than any verb can.
+  function reasonText(r) {
+    var have = r.episodes_have, total = r.episodes_total;
+    var hasCounts = typeof have === 'number' && typeof total === 'number' && total > 0;
+
+    if (r.media_type === 'tv' && hasCounts) {
+      var short = total - have;
+      if (r.reason_code === 'DOWNLOADING' || r.reason_code === 'DOWNLOAD_STALLED') {
+        var q = r.episodes_queued || 0;
+        return have + ' of ' + total + ' episodes here' +
+               (q ? ', ' + q + ' being fetched' : '') +
+               (r.reason_code === 'DOWNLOAD_STALLED' ? ' (some copies failed, retrying)' : '');
+      }
+      if (r.reason_code === 'TV_PARTIAL') {
+        return have + ' of ' + total + ' episodes here, ' + short + ' still being looked for';
+      }
+      if (r.reason_code === 'NO_RELEASE_FOUND' && have === 0) {
+        return 'No episodes found online yet — still checking';
+      }
+    }
+    if (r.media_type === 'movie' && r.reason_code === 'DOWNLOADING') {
+      return r.percent ? 'Downloading, ' + Math.round(r.percent) + '% done'
+                       : 'Found a copy — waiting for the download to start';
+    }
+    return REASONS[r.reason_code] || 'Being looked at';
   }
 
   function daysWaiting(iso) {
@@ -679,7 +723,7 @@ var RS = (function () {
     switch (key) {
       case 'title':  return r.title || ('Request #' + r.request_id);
       case 'status': return statusOf(r).label;
-      case 'why':    return reasonText(r.reason_code);
+      case 'why':    return reasonText(r);
       case 'waited': return daysWaiting(r.requested_at);
       case 'type':   return r.media_type === 'tv' ? 'Show' : 'Movie';
       default:       return '';
@@ -1811,8 +1855,9 @@ function moveSearchBar(position) {
 
     // 2. Work out how far to scroll. The bar's destination is deliberately NOT
     //    precomputed - see the frame loop.
-    var plan = scrollPlanFor(searchScrollAnchor(target));
-    var scrollDelta = plan.to - plan.from;
+    var anchor = searchScrollAnchor(target);
+    var plan = scrollPlanFor(anchor);
+    var scrollFrom = plan.from;
 
     // 3. Drive the scroll and the bar from one clock, with one easing curve.
     //
@@ -1836,7 +1881,18 @@ function moveSearchBar(position) {
         var progress = Math.min(1, (now - started) / DURATION);
         var eased = easeInOutCubic(progress);
 
-        applyScroll(plan, progress < 1 ? plan.from + scrollDelta * eased : plan.to);
+        // The scroll DESTINATION is re-read every frame for the same reason the
+        // bar's is, one block down: the page reflows underneath the animation.
+        // It used to be computed once and eased toward, which was correct only
+        // as long as nothing above the dock changed height mid-flight. The
+        // request-status grid does exactly that -- it loads asynchronously and
+        // then caps itself to five rows -- so a target measured before it
+        // settled left the page scrolled short of where the bar landed.
+        //
+        // Only the destination is live; the starting point stays fixed, or the
+        // easing would be measured from a position that is itself moving.
+        var live = scrollPlanFor(anchor);
+        applyScroll(live, progress < 1 ? scrollFrom + (live.to - scrollFrom) * eased : live.to);
 
         // The destination is re-read every frame, after the scroll for that
         // frame has been applied, rather than computed once up front.

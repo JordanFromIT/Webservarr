@@ -219,6 +219,7 @@ def classify(requests, movies, movie_queue, series, series_queue, plex_tmdb_ids)
         media_status = req.get("media_status")
         request_status = req.get("request_status")
         tmdb_id = req.get("tmdb_id")
+        progress = {}
 
         # Fulfilled as far as Seerr is concerned: nothing to explain.
         if media_status == _MEDIA_AVAILABLE:
@@ -242,6 +243,8 @@ def classify(requests, movies, movie_queue, series, series_queue, plex_tmdb_ids)
             movie = movies.get(int(tmdb_id)) if tmdb_id else None
             queue_entry = movie_queue.get(movie["id"]) if movie else None
             reason = _classify_movie(req, movie, queue_entry)
+            if queue_entry:
+                progress["percent"] = queue_entry.get("percent")
         elif req.get("media_type") == "tv":
             tvdb_id = req.get("tvdb_id")
             found = by_tvdb.get(int(tvdb_id)) if tvdb_id else None
@@ -249,6 +252,15 @@ def classify(requests, movies, movie_queue, series, series_queue, plex_tmdb_ids)
                 found = by_tmdb.get(int(tmdb_id))
             queue_entry = series_queue.get(found["id"]) if found else None
             reason = _classify_tv(req, found, queue_entry)
+            # Episode counts are the honest answer for a show. "Downloading" on
+            # a series with 27 of 59 episodes reads as "nearly here" when it is
+            # not; the numbers say what is actually true and the page shows them
+            # instead of a verb.
+            if found:
+                progress["episodes_have"] = found.get("episode_file_count") or 0
+                progress["episodes_total"] = found.get("episode_count") or 0
+            if queue_entry:
+                progress["episodes_queued"] = queue_entry.get("queued") or 0
         else:
             reason = "UNKNOWN"
 
@@ -274,6 +286,7 @@ def classify(requests, movies, movie_queue, series, series_queue, plex_tmdb_ids)
             "reason_code": reason,
             "state_code": state,
             "group": STATE_TO_GROUP.get(state, "needs_look"),
+            **progress,
         })
 
     return rows
