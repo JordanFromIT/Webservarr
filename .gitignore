@@ -65,3 +65,9 @@ app/static/uploads/
 
 # Moat task system
 .moat/
+
+# Local dev-only data
+.devdata/
+
+# Superpowers planning/task workspace (not part of the shipped app)
+.superpowers/
