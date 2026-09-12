@@ -37,10 +37,17 @@ DEFAULT_SETTINGS = {
     "sidebar.label_home": ("Home", "Sidebar label for Home page"),
     "sidebar.label_requests": ("Requests", "Sidebar label for Requests page"),
     "sidebar.label_requests_embed": ("Requests (Embed)", "Sidebar label for Requests (Embed) page"),
-    "sidebar.label_issues": ("Report a Problem", "Sidebar label for the media-issue page"),
-    "sidebar.label_tickets": ("Contact Support", "Sidebar label for the support ticket page"),
-    "sidebar.sublabel_issues": ("Issue with a movie or show", "Sidebar sublabel for the media-issue page"),
-    "sidebar.sublabel_tickets": ("Everything else", "Sidebar sublabel for the support ticket page"),
+    "sidebar.label_issues": ("Issues", "Sidebar label for the media-issue page"),
+    "sidebar.label_tickets": ("Tickets", "Sidebar label for the support ticket page"),
+    # Every nav item gets a sublabel; see branding.DEFAULTS for why.
+    "sidebar.sublabel_home": ("See what's playing", "Sidebar sublabel for Home"),
+    "sidebar.sublabel_requests": ("Request a movie or show", "Sidebar sublabel for Requests"),
+    "sidebar.sublabel_requests_embed": ("Request through Seerr", "Sidebar sublabel for Requests (Embed)"),
+    "sidebar.sublabel_issues": ("Report a problem with media", "Sidebar sublabel for Issues"),
+    "sidebar.sublabel_calendar": ("See upcoming releases", "Sidebar sublabel for Calendar"),
+    "sidebar.sublabel_tickets": ("Get help from the admin", "Sidebar sublabel for Tickets"),
+    "sidebar.sublabel_library": ("Read books in your browser", "Sidebar sublabel for eBooks"),
+    "sidebar.sublabel_settings": ("Manage the site", "Sidebar sublabel for Settings"),
     "sidebar.label_calendar": ("Calendar", "Sidebar label for Calendar page"),
     "sidebar.label_settings": ("Settings", "Sidebar label for Settings page"),
     # Configurable icons (Material Symbols icon names)
@@ -48,7 +55,7 @@ DEFAULT_SETTINGS = {
     "icon.nav_requests": ("movie", "Sidebar icon for Requests page"),
     "icon.nav_requests_embed": ("download", "Sidebar icon for Requests (Embed) page"),
     "icon.nav_issues": ("report_problem", "Sidebar icon for the media-issue page"),
-    "icon.nav_tickets": ("support_agent", "Sidebar icon for the support ticket page"),
+    "icon.nav_tickets": ("confirmation_number", "Sidebar icon for the support ticket page"),
     "icon.nav_calendar": ("calendar_month", "Sidebar icon for Calendar page"),
     "icon.nav_settings": ("settings", "Sidebar icon for Settings page"),
     "icon.sidebar_logo": ("settings_input_component", "Icon shown in sidebar logo area"),
@@ -354,34 +361,38 @@ def migrate_requests_rename(db: Session) -> None:
     logger.info("Completed one-time requests rename migration")
 
 
-def migrate_help_nav_rename(db: Session) -> None:
+def migrate_nav_sublabels_v2(db: Session) -> None:
     """
-    One-time migration: adopt the clearer "Report a Problem" / "Contact Support"
-    nav names on installs that already have rows for the old ones.
+    One-time migration: undo the v1.7.0 nav rename and reword the two sublabels.
 
-    Necessary because seed_default_settings only *inserts* missing keys -- it
-    never touches an existing row, by design, so an admin's customisations
-    survive upgrades. That same rule means any install where Customization has
-    ever been saved keeps the stored "Issues" and "Tickets" forever and never
-    sees the rename.
+    v1.7.0 replaced the "Issues"/"Tickets" labels with "Report a Problem" and
+    "Contact Support" to make the pair self-explanatory. It worked, but only for
+    those two entries -- the other six nav items kept bare one-word labels, so
+    the list read as half-finished and the two long labels looked out of place.
 
-    The upgrade is therefore conditional on the stored value still being the old
-    shipped default. A label the admin actually chose is left exactly as it is --
-    this migration exists to move installs off a default, not to overwrite
-    anyone's wording. Sublabels are inserted only when absent for the same reason.
+    The clearer split turned out to belong in the sublabel, not the label: every
+    item now keeps a short noun as its name and gains a verb phrase underneath,
+    written in one voice across the whole nav. So the labels go back.
 
-    Guarded by migration.help_nav_rename_v1.
+    Conditional on the stored value still being exactly what v1.7.0 shipped. A
+    label the admin has since chosen is left alone -- this reverts a default, it
+    does not overwrite anyone's wording. The six sublabels that have no row yet
+    are handled by seed_default_settings, which inserts them with the new text.
+
+    Guarded by migration.nav_sublabels_v2.
     """
     from sqlalchemy.exc import IntegrityError
 
-    if db.query(Setting).filter(Setting.key == "migration.help_nav_rename_v1").first():
+    if db.query(Setting).filter(Setting.key == "migration.nav_sublabels_v2").first():
         return
 
-    # (key, value to replace, replacement). Anything else stays untouched.
+    # (key, the exact value v1.7.0 shipped, what it becomes)
     upgrades = [
-        ("sidebar.label_issues", "Issues", "Report a Problem"),
-        ("sidebar.label_tickets", "Tickets", "Contact Support"),
-        ("icon.nav_tickets", "confirmation_number", "support_agent"),
+        ("sidebar.label_issues", "Report a Problem", "Issues"),
+        ("sidebar.label_tickets", "Contact Support", "Tickets"),
+        ("icon.nav_tickets", "support_agent", "confirmation_number"),
+        ("sidebar.sublabel_issues", "Issue with a movie or show", "Report a problem with media"),
+        ("sidebar.sublabel_tickets", "Everything else", "Get help from the admin"),
     ]
     changed = []
     for key, old_value, new_value in upgrades:
@@ -390,34 +401,23 @@ def migrate_help_nav_rename(db: Session) -> None:
             row.value = new_value
             changed.append(key)
 
-    # Sublabels are new keys, so they only need inserting where absent. An admin
-    # who has since blanked one keeps it blank.
-    sublabels = [
-        ("sidebar.sublabel_issues", "Issue with a movie or show", "Sidebar sublabel for the media-issue page"),
-        ("sidebar.sublabel_tickets", "Everything else", "Sidebar sublabel for the support ticket page"),
-    ]
-    for key, value, description in sublabels:
-        if not db.query(Setting).filter(Setting.key == key).first():
-            db.add(Setting(key=key, value=value, description=description))
-            changed.append(key)
-
     db.add(Setting(
-        key="migration.help_nav_rename_v1",
+        key="migration.nav_sublabels_v2",
         value="done",
-        description="One-time Issues/Tickets -> Report a Problem/Contact Support nav rename",
+        description="One-time revert of the v1.7.0 nav label rename, plus sublabel rewording",
     ))
 
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        logger.debug("migration.help_nav_rename_v1 marker already exists (race), skipping")
+        logger.debug("migration.nav_sublabels_v2 marker already exists (race), skipping")
         return
 
     if changed:
-        logger.info("Completed help nav rename migration (updated: %s)", ", ".join(changed))
+        logger.info("Completed nav sublabel migration (updated: %s)", ", ".join(changed))
     else:
-        logger.info("Help nav rename migration: nothing to change (labels are customised)")
+        logger.info("Nav sublabel migration: nothing to change (labels are customised)")
 
 
 def migrate_overseerr_to_seerr(db: Session) -> None:

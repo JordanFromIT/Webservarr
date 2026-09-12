@@ -42,24 +42,24 @@ DEFAULTS = {
     "sidebar.label_home": "Home",
     "sidebar.label_requests": "Requests",
     "sidebar.label_requests_embed": "Requests (Embed)",
-    # "Issues" and "Tickets" both read as jargon to a non-technical viewer, and
-    # neither says which one to pick. The labels now name the thing being
-    # reported; the sublabels below draw the line between them.
-    "sidebar.label_issues": "Report a Problem",
+    "sidebar.label_issues": "Issues",
     "sidebar.label_calendar": "Calendar",
-    "sidebar.label_tickets": "Contact Support",
+    "sidebar.label_tickets": "Tickets",
     "sidebar.label_library": "eBooks",
     "sidebar.label_settings": "Settings",
-    # Sidebar sublabels. Only the two help destinations carry one by default --
-    # they are the pair users confuse. Blank hides the line entirely.
-    "sidebar.sublabel_home": "",
-    "sidebar.sublabel_requests": "",
-    "sidebar.sublabel_requests_embed": "",
-    "sidebar.sublabel_issues": "Issue with a movie or show",
-    "sidebar.sublabel_calendar": "",
-    "sidebar.sublabel_tickets": "Everything else",
-    "sidebar.sublabel_library": "",
-    "sidebar.sublabel_settings": "",
+    # Sidebar sublabels. The label names the destination, the sublabel says what
+    # you do there. Every item carries one: descriptions on only some entries
+    # read as unfinished, and the pair only tells Issues apart from Tickets if
+    # the whole list speaks in one voice. All are verb phrases for that reason.
+    # Blank still hides the line, so an admin can opt any item out.
+    "sidebar.sublabel_home": "See what's playing",
+    "sidebar.sublabel_requests": "Request a movie or show",
+    "sidebar.sublabel_requests_embed": "Request through Seerr",
+    "sidebar.sublabel_issues": "Report a problem with media",
+    "sidebar.sublabel_calendar": "See upcoming releases",
+    "sidebar.sublabel_tickets": "Get help from the admin",
+    "sidebar.sublabel_library": "Read books in your browser",
+    "sidebar.sublabel_settings": "Manage the site",
     # Per-page "New!" flags. Admin-controlled rather than self-retiring: the
     # admin decides how long a section counts as new, and turns it off when it
     # stops being news. Off everywhere on a fresh install - nothing is new when
@@ -91,7 +91,7 @@ DEFAULTS = {
     "icon.nav_requests_embed": "download",
     "icon.nav_issues": "report_problem",
     "icon.nav_calendar": "calendar_month",
-    "icon.nav_tickets": "support_agent",
+    "icon.nav_tickets": "confirmation_number",
     "icon.nav_library": "menu_book",
     "icon.nav_settings": "settings",
     "icon.sidebar_logo": "settings_input_component",

@@ -10,17 +10,18 @@
  */
 
 var NAV_ITEMS = [
-  { id: 'home',     label: 'Home',        icon: 'home',                   href: '/' },
-  { id: 'requests', label: 'Requests',    icon: 'movie',                 href: '/requests' },
-  { id: 'requests-embed', label: 'Requests (Embed)', icon: 'download',  href: '/requests-embed', badgeId: 'requestsBadge', feature: 'show_requests' },
-  // "Issues" and "Tickets" both read as jargon, and neither tells a user which
-  // one their problem belongs in. The labels name the thing being reported and
-  // the sublabels draw the line between them. Both are settings-overridable.
-  { id: 'issues',    label: 'Report a Problem', icon: 'report_problem',   href: '/issues', sublabel: 'Issue with a movie or show' },
-  { id: 'calendar',  label: 'Calendar',    icon: 'calendar_month',        href: '/calendar' },
-  { id: 'tickets',  label: 'Contact Support', icon: 'support_agent',   href: '/tickets', feature: 'show_tickets', sublabel: 'Everything else' },
-  { id: 'library',  label: 'eBooks',     icon: 'menu_book',             href: '/library', feature: 'show_books' },
-  { id: 'settings', label: 'Settings',    icon: 'settings',              href: '/settings', adminOnly: true },
+  // Label is the destination's name; sublabel says what you do there. Every
+  // item carries one -- descriptions on only some items read as unfinished,
+  // and the pair only disambiguates Issues from Tickets if the whole list is
+  // written in the same voice. All sublabels are verb phrases for that reason.
+  { id: 'home',     label: 'Home',        icon: 'home',                 href: '/',                sublabel: "See what's playing" },
+  { id: 'requests', label: 'Requests',    icon: 'movie',                href: '/requests',        sublabel: 'Request a movie or show' },
+  { id: 'requests-embed', label: 'Requests (Embed)', icon: 'download',  href: '/requests-embed',  sublabel: 'Request through Seerr', badgeId: 'requestsBadge', feature: 'show_requests' },
+  { id: 'issues',   label: 'Issues',      icon: 'report_problem',       href: '/issues',          sublabel: 'Report a problem with media' },
+  { id: 'calendar', label: 'Calendar',    icon: 'calendar_month',       href: '/calendar',        sublabel: 'See upcoming releases' },
+  { id: 'tickets',  label: 'Tickets',     icon: 'confirmation_number',  href: '/tickets',         sublabel: 'Get help from the admin', feature: 'show_tickets' },
+  { id: 'library',  label: 'eBooks',      icon: 'menu_book',            href: '/library',         sublabel: 'Read books in your browser', feature: 'show_books' },
+  { id: 'settings', label: 'Settings',    icon: 'settings',             href: '/settings',        sublabel: 'Manage the site', adminOnly: true },
 ];
 
 /**
@@ -101,11 +102,11 @@ function _buildSidebarHTML(currentPage) {
       : '<span>' + escapeHtml(item.label) + newFlag + '</span>';
 
     if (isActive) {
-      return '<a class="relative flex items-center gap-3 px-4 py-3 rounded-lg bg-primary text-background-dark font-bold transition-all shadow-baltic-blue/20" href="' + item.href + '"' + adminAttr + '>' +
+      return '<a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary text-background-dark font-bold transition-all shadow-baltic-blue/20 py-2.5" href="' + item.href + '"' + adminAttr + '>' +
         '<span class="material-symbols-outlined fill-1 shrink-0">' + escapeHtml(item.icon) + '</span>' +
         labelBlock + badge + '</a>';
     }
-    return '<a class="relative flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="' + item.href + '"' + adminAttr + '>' +
+    return '<a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue transition-all group" href="' + item.href + '"' + adminAttr + '>' +
       '<span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">' + escapeHtml(item.icon) + '</span>' +
       labelBlock + badge + '</a>';
   }).join('\n');
@@ -124,7 +125,7 @@ function _buildSidebarHTML(currentPage) {
         logoHtml +
         '<h1 class="text-frosted-blue font-bold text-lg leading-none text-center">' + escapeHtml(appName) + '</h1>' +
       '</div>' +
-      '<nav class="flex-1 px-4 py-6 space-y-2 opacity-0 transition-opacity duration-200" id="desktopNav">' + navLinks + '</nav>' +
+      '<nav class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1 opacity-0 transition-opacity duration-200" id="desktopNav">' + navLinks + '</nav>' +
       '<div class="p-4 border-t border-steel-blue/20">' +
         '<p id="appVersion" class="text-steel-blue text-[10px] text-center" data-admin-only="true" style="display:none"></p>' +
       '</div>' +
@@ -176,7 +177,7 @@ function _buildSidebarHTML(currentPage) {
             '<h1 class="text-frosted-blue font-bold text-lg leading-none text-center">' + escapeHtml(appName) + '</h1>' +
           '</div>' +
         '</div>' +
-        '<nav class="flex-1 px-4 py-4 space-y-2 opacity-0 transition-opacity duration-200" id="drawerNav">' + navLinks + '</nav>' +
+        '<nav class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1 opacity-0 transition-opacity duration-200" id="drawerNav">' + navLinks + '</nav>' +
         '<div class="p-4 border-t border-steel-blue/20">' +
           '<button data-logout class="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-steel-blue hover:text-bright transition-colors">' +
             '<span class="material-symbols-outlined text-sm">logout</span> Sign Out' +

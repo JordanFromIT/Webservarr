@@ -235,7 +235,28 @@
     });
   })();
 
-  checkAuth().then(function () {
+  // The shared page-shell handshake every other page performs. Without it the
+  // nav stays at opacity-0 (showAdminNav is what fades it in), Settings stays
+  // hidden, the status badge reads "Loading..." forever and the bell is dead --
+  // which is what made this page look unlike the rest of the site.
+  checkAuth().then(function (user) {
+    var uEl = document.getElementById('headerUsername');
+    var rEl = document.getElementById('headerRole');
+    if (uEl) uEl.textContent = user.display_name || user.username;
+    if (rEl) rEl.textContent = user.is_admin ? 'Admin' : 'Member';
+    showAdminNav(user.is_admin);
+
+    var menuBtn = document.getElementById('userMenuBtn');
+    var menuDrop = document.getElementById('userMenuDropdown');
+    if (menuBtn && menuDrop) {
+      menuBtn.addEventListener('click', function () { menuDrop.classList.toggle('hidden'); });
+      document.addEventListener('click', function (e) {
+        if (!menuBtn.contains(e.target) && !menuDrop.contains(e.target)) menuDrop.classList.add('hidden');
+      });
+    }
+
+    loadSystemStatus();
+    initNotifications();
     loadPage();
   });
 })();

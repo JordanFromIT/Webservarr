@@ -52,7 +52,7 @@ def init_db():
         seed_default_settings, seed_vapid_keys,
         seed_default_news, migrate_requests_rename,
         migrate_setup_completed, migrate_overseerr_to_seerr,
-        migrate_help_nav_rename,
+        migrate_nav_sublabels_v2,
     )
     db = SessionLocal()
     try:
@@ -61,7 +61,7 @@ def init_db():
         seed_default_settings(db)
         # After seeding, so a fresh install has rows to inspect and an existing
         # one is upgraded in the same pass.
-        migrate_help_nav_rename(db)
+        migrate_nav_sublabels_v2(db)
         migrate_setup_completed(db)
         seed_vapid_keys(db)
         seed_default_news(db)
