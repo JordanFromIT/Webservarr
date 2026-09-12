@@ -191,6 +191,9 @@
                     <button id="tabNews" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue shrink-0">
                         News
                     </button>
+                    <button id="tabWiki" class="px-6 py-3 font-semibold border-b-2 border-transparent text-steel-blue hover:text-frosted-blue shrink-0">
+                        Wiki
+                    </button>
                 </nav>
             </div>
             <div id="tabScrollHintLeft" class="absolute left-2 top-1/2 -translate-y-1/2 flex items-center pointer-events-none lg:hidden" style="opacity:0;transition:opacity 0.2s">
@@ -1507,6 +1510,72 @@
 
         </div>
 
+        <!-- Wiki Section -->
+        <!-- Deliberately thin: categories and contextual links only. Wiki pages
+             are written on /wiki itself, where they are read. -->
+        <div id="wikiSection" class="hidden">
+
+            <div class="mb-6 bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-5">
+                <h3 class="text-sm font-bold text-frosted-blue mb-1">Wiki pages</h3>
+                <p class="text-xs text-steel-blue">
+                    Pages are written and edited on the
+                    <a href="/wiki" class="text-primary hover:underline">wiki itself</a> &mdash; open a page and use
+                    <strong class="text-frosted-blue">Edit this page</strong>, or
+                    <strong class="text-frosted-blue">New page</strong> on the wiki index.
+                    This tab holds the grouping and the pointers.
+                </p>
+            </div>
+
+            <!-- Categories -->
+            <div class="mb-6 bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-5">
+                <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
+                    <div>
+                        <h3 class="text-sm font-bold text-frosted-blue mb-1">Categories</h3>
+                        <p class="text-xs text-steel-blue">One level of grouping. Deleting a category never deletes its pages.</p>
+                    </div>
+                    <button id="wikiCatNewBtn" type="button"
+                        class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 text-primary border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all">
+                        <span class="material-symbols-outlined text-base">add</span>Add category
+                    </button>
+                </div>
+                <div id="wikiCatList" class="grid gap-2">
+                    <div class="text-center text-steel-blue py-6 text-sm">Loading categories&hellip;</div>
+                </div>
+                <div id="statusWikiCats" class="flex items-center gap-2 mt-3 text-sm"></div>
+            </div>
+
+            <!-- Contextual links -->
+            <div class="mb-6 bg-cornflower-ocean/10 border border-steel-blue/20 rounded-xl p-5">
+                <h3 class="text-sm font-bold text-frosted-blue mb-1">Contextual links</h3>
+                <p class="text-xs text-steel-blue mb-4">
+                    Point people at a guide before they file something. An unset link, or one whose page is
+                    deleted or unpublished, simply shows nothing.
+                </p>
+                <div class="grid gap-4 sm:grid-cols-3">
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5">Contact Support page</label>
+                        <select id="wikiHookTickets" class="w-full px-3 py-2 rounded-lg bg-background-dark border border-steel-blue/40 text-frosted-blue focus:border-primary focus:ring-0"></select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5">Report a Problem page</label>
+                        <select id="wikiHookIssues" class="w-full px-3 py-2 rounded-lg bg-background-dark border border-steel-blue/40 text-frosted-blue focus:border-primary focus:ring-0"></select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5">Playback Issue category</label>
+                        <select id="wikiHookPlayback" class="w-full px-3 py-2 rounded-lg bg-background-dark border border-steel-blue/40 text-frosted-blue focus:border-primary focus:ring-0"></select>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3 mt-4">
+                    <button id="wikiHooksSaveBtn" type="button"
+                        class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-background-dark text-sm font-bold hover:opacity-90 transition-all">
+                        <span class="material-symbols-outlined text-base">save</span>Save links
+                    </button>
+                    <div id="statusWikiHooks" class="flex items-center gap-2 text-sm"></div>
+                </div>
+            </div>
+
+        </div>
+
     </div><!-- end scrollable wrapper -->
     <!-- Scroll-down hint (mobile only) -->
     <div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
@@ -1585,11 +1654,12 @@
         document.getElementById('tabSystem').addEventListener('click', () => switchTab('system'));
         document.getElementById('tabTheme').addEventListener('click', () => switchTab('theme'));
         document.getElementById('tabNews').addEventListener('click', () => switchTab('news'));
+        document.getElementById('tabWiki').addEventListener('click', () => { switchTab('wiki'); loadWikiTab(); });
 
-        const tabIds = ['tabIntegrations', 'tabSystem', 'tabTheme', 'tabNews'];
-        const sectionIds = ['integrationsSection', 'systemSection', 'themeSection', 'newsSection'];
-        const tabMap = { integrations: 'tabIntegrations', system: 'tabSystem', theme: 'tabTheme', news: 'tabNews' };
-        const sectionMap = { integrations: 'integrationsSection', system: 'systemSection', theme: 'themeSection', news: 'newsSection' };
+        const tabIds = ['tabIntegrations', 'tabSystem', 'tabTheme', 'tabNews', 'tabWiki'];
+        const sectionIds = ['integrationsSection', 'systemSection', 'themeSection', 'newsSection', 'wikiSection'];
+        const tabMap = { integrations: 'tabIntegrations', system: 'tabSystem', theme: 'tabTheme', news: 'tabNews', wiki: 'tabWiki' };
+        const sectionMap = { integrations: 'integrationsSection', system: 'systemSection', theme: 'themeSection', news: 'newsSection', wiki: 'wikiSection' };
 
         function switchTab(tab) {
             // Hide all sections
@@ -3498,6 +3568,7 @@
         loadThemeSettings();
         loadPosts();
     </script>
+    <script src="/static/js/wiki-settings.js?v=1"></script>
 
 </body>
 </html>
