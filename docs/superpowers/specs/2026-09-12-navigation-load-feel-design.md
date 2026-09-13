@@ -294,6 +294,28 @@ Only the nav links qualify — never `/auth/*` (logout is a GET), `/reader`, `/k
 API URLs. A prerendered page loads its data (so activation is instant) but starts no
 timers and performs no side-effect requests until activated (`WS.whenActive`).
 
+### 6.4a Hover prefetch through the service worker (added after first review)
+
+Speculation rules are ignored by some browsers (Brave among them), and without
+prefetching a cross-document click cannot beat the document's time-to-first-byte
+through the tunnel (130–580 ms measured). `shell.js` therefore asks the existing
+service worker to fetch the target page on `mouseenter`/`focus`/`touchstart` of a nav
+link; `sw.js` stores it in the Cache API (`ws-pages-v1`) and answers the navigation that
+follows from that copy. Entries are single-use and expire after 30 s, a redirect (session
+gone) is never stored, the cache is cleared on sign-out, and an API 401 on a page served
+this way sends the visitor to the login page. Measured: document from cache in 6 ms,
+first contentful paint at 108 ms after the click.
+
+Static assets now carry `Cache-Control: public, max-age=31536000, immutable` when they
+have a `?v=` marker (the marker is a content hash), `no-cache` for `sw.js`, one day for
+uploads, five minutes otherwise. Before this every navigation re-validated each script
+and stylesheet through the tunnel, and the stylesheets block rendering.
+
+The arrival gate is 300 ms (not 1.2 s): ordering is worth a short wait, not a long one.
+Content already in place before the first frame plays no entrance animation. The
+stationary shell parts hide their *old* snapshot during the view transition; drawing
+both snapshots with the browser's additive blending brightened the translucent sidebar.
+
 ### 6.5 Per-page loading states (one language)
 
 Skeletons that match the final layout replace every "Loading…" text and spinner:
