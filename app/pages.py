@@ -474,9 +474,21 @@ _stamp_cache: dict = {}
 
 
 def _read_static_bytes(static_path: str):
-    """(bytes, mtime) for a /static/... path, or None if it does not exist."""
-    fs_path = os.path.join(STATIC_DIR, static_path[len("/static/"):])
+    """(bytes, mtime) for a /static/... path confined under STATIC_DIR, or None.
+
+    The path is taken from page markup, which includes operator-set values such
+    as logo_url. It is resolved and confined here so a crafted "../" traversal
+    (e.g. "/static/../../../dev/zero?v=1") cannot point the hasher at a file
+    outside the static tree or at an endless device (L14). Only regular files
+    inside STATIC_DIR are read."""
+    rel = static_path[len("/static/"):]
+    static_root = os.path.realpath(STATIC_DIR)
+    fs_path = os.path.realpath(os.path.join(static_root, rel))
+    if fs_path != static_root and not fs_path.startswith(static_root + os.sep):
+        return None
     try:
+        if not os.path.isfile(fs_path):
+            return None
         st = os.stat(fs_path)
         with open(fs_path, "rb") as f:
             return f.read(), st.st_mtime

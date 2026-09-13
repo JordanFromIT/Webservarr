@@ -14,10 +14,16 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from passlib.hash import bcrypt
 from pydantic import BaseModel, field_validator
+from sqlalchemy.exc import IntegrityError
 
 from app.database import SessionLocal
 from app.limiter import limiter
 from app.models import Setting, User
+from app.utils import is_safe_integration_url
+
+# Settings key under which the shared first-run setup token is persisted so all
+# worker processes validate against ONE value (L11).
+SETUP_TOKEN_KEY = "system.setup_token"
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +40,47 @@ _setup_token: str = ""
 
 
 def get_or_create_setup_token() -> str:
-    """Return the first-run setup token (lazily generated). Empty once setup done."""
+    """Return the shared first-run setup token, generating + persisting it on the
+    first call. Empty once setup is done.
+
+    The token is stored in the settings table (SETUP_TOKEN_KEY) so every worker
+    process validates against the SAME value. A module global alone gave each of
+    the 2 workers its own token, 403-ing ~half of submissions (L11). The key
+    contains "token", so the admin settings API masks it; it is never served to
+    a client and is deleted when setup completes. The module global still acts as
+    a per-process cache.
+    """
     global _setup_token
     if is_setup_completed():
         return ""
-    if not _setup_token:
-        _setup_token = secrets.token_urlsafe(24)
-    return _setup_token
+    if _setup_token:
+        return _setup_token
+
+    db = SessionLocal()
+    try:
+        row = db.query(Setting).filter(Setting.key == SETUP_TOKEN_KEY).first()
+        if row and row.value:
+            _setup_token = row.value
+            return _setup_token
+
+        token = secrets.token_urlsafe(24)
+        db.add(Setting(
+            key=SETUP_TOKEN_KEY,
+            value=token,
+            description="One-time first-run setup token (never served to clients)",
+        ))
+        try:
+            db.commit()
+            _setup_token = token
+        except IntegrityError:
+            # Another worker created it first — re-read the winning value.
+            db.rollback()
+            row = db.query(Setting).filter(Setting.key == SETUP_TOKEN_KEY).first()
+            if row and row.value:
+                _setup_token = row.value
+        return _setup_token
+    finally:
+        db.close()
 
 
 def is_setup_completed() -> bool:
@@ -132,6 +172,15 @@ async def complete_setup(request: Request, body: SetupRequest):
             content={"detail": "Passwords do not match."},
         )
 
+    # Validate the optional Plex URL through the same anti-SSRF guard /settings
+    # uses, so the setup wizard can't seed a loopback/link-local/metadata URL
+    # that the poller would later fetch (L16).
+    if body.plex_url.strip() and not is_safe_integration_url(body.plex_url.strip()):
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Plex URL must be http/https and not a loopback, link-local, or metadata address."},
+        )
+
     # Determine secret key
     secret_key = body.secret_key.strip() or secrets.token_hex(32)
 
@@ -190,6 +239,11 @@ async def complete_setup(request: Request, body: SetupRequest):
             description="Initial setup wizard has been completed",
         ))
 
+        # The one-time setup token has served its purpose — remove it (L11).
+        token_row = db.query(Setting).filter(Setting.key == SETUP_TOKEN_KEY).first()
+        if token_row:
+            db.delete(token_row)
+
         db.commit()
 
         # Update in-process secret key so sessions work immediately
@@ -197,8 +251,9 @@ async def complete_setup(request: Request, body: SetupRequest):
         app_settings.app_secret_key = secret_key
 
         # Set module cache
-        global _setup_done
+        global _setup_done, _setup_token
         _setup_done = True
+        _setup_token = ""
 
         logger.info("Setup completed — admin user '%s' created", body.username)
 
@@ -208,10 +263,11 @@ async def complete_setup(request: Request, body: SetupRequest):
         )
     except Exception as e:
         db.rollback()
-        logger.error("Setup failed: %s", e)
+        # Log the detail server-side; return a generic message to the client (L15).
+        logger.exception("Setup failed: %s", e)
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Setup failed: {e}"},
+            content={"detail": "Setup failed. Check the server logs for details."},
         )
     finally:
         db.close()

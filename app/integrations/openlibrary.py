@@ -31,6 +31,13 @@ logger = logging.getLogger(__name__)
 SEARCH_URL = "https://openlibrary.org/search.json"
 COVER_URL = "https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
 
+# The cover proxy serves upstream bytes from the app origin. Redirects are not
+# followed (a compromised 302 could point at an internal address), only real
+# raster images are served (never SVG/HTML, which would be stored XSS), and the
+# body is capped (M10).
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_COVER_BYTES = 10 * 1024 * 1024
+
 # Short: covers are a nicety and must never hold up a search.
 LOOKUP_TIMEOUT = 3.0
 IMAGE_TIMEOUT = 10.0
@@ -305,18 +312,38 @@ async def fetch_cover(cover_id: int) -> Optional[Tuple[bytes, str]]:
         return _image_cache[cover_id]
 
     try:
-        async with httpx.AsyncClient(timeout=IMAGE_TIMEOUT, follow_redirects=True) as client:
-            resp = await client.get(COVER_URL.format(cover_id=cover_id))
+        # follow_redirects=False: a redirect from the cover CDN must not be
+        # followed to an arbitrary (possibly internal) host (M10).
+        async with httpx.AsyncClient(timeout=IMAGE_TIMEOUT, follow_redirects=False) as client:
+            async with client.stream("GET", COVER_URL.format(cover_id=cover_id)) as resp:
+                if resp.status_code != 200:
+                    return None
+                content_type = (resp.headers.get("content-type", "") or "").split(";")[0].strip().lower()
+                if content_type not in ALLOWED_IMAGE_TYPES:
+                    logger.warning(
+                        "Open Library cover %s served unexpected content-type %r",
+                        cover_id, content_type,
+                    )
+                    return None
+                chunks = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > MAX_COVER_BYTES:
+                        logger.warning("Open Library cover %s exceeded byte cap", cover_id)
+                        return None
+                    chunks.append(chunk)
+                content = b"".join(chunks)
     except httpx.RequestError as exc:
         logger.warning("Open Library cover fetch failed for %s: %s", cover_id, exc)
         return None
 
     # Open Library answers with a tiny 1x1 placeholder for unknown ids rather
     # than a 404, so treat a suspiciously small body as "no cover".
-    if resp.status_code != 200 or len(resp.content) < 1000:
+    if len(content) < 1000:
         return None
 
-    result = (resp.content, resp.headers.get("content-type", "image/jpeg"))
+    result = (content, content_type)
     _image_cache[cover_id] = result
     _trim(_image_cache)
     return result

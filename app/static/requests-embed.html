@@ -49,7 +49,14 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (resp.ok) url = ((await resp.json()) || {}).url || '';
         } catch (e) { /* not configured */ }
         if (url) {
-            container.innerHTML = '<iframe src="' + url + '" class="w-full h-full border-0" allow="fullscreen"></iframe>';
+            // Build the iframe via DOM APIs and assign .src as a property, so a
+            // stray " in the URL can't break out and inject extra attributes.
+            container.innerHTML = '';
+            var iframe = document.createElement('iframe');
+            iframe.src = url;
+            iframe.className = 'w-full h-full border-0';
+            iframe.setAttribute('allow', 'fullscreen');
+            container.appendChild(iframe);
         } else {
             container.innerHTML = '<div class="flex flex-col items-center justify-center h-full text-center text-steel-blue p-8">' +
                 '<span class="material-symbols-outlined text-6xl mb-4 opacity-50">download</span>' +

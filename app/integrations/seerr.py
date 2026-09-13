@@ -124,9 +124,19 @@ async def get_recent_requests(limit: int = 10) -> list:
             data = resp.json()
             results = data.get("results", [])
 
-            # Fetch media details (title, poster) concurrently for each request
+            # Fetch media details (title, poster) concurrently for each request,
+            # but capped so a large page cannot fan out one Seerr call per row
+            # with unbounded concurrency over the tunnel (L4).
             async def _placeholder():
                 return {"title": "Unknown", "poster_path": ""}
+
+            semaphore = asyncio.Semaphore(8)
+
+            async def _detail(tmdb_id, media_type):
+                async with semaphore:
+                    return await _fetch_media_details(
+                        client, config["url"], config["api_key"], tmdb_id, media_type
+                    )
 
             detail_tasks = []
             for req in results:
@@ -134,9 +144,7 @@ async def get_recent_requests(limit: int = 10) -> list:
                 tmdb_id = media.get("tmdbId", 0)
                 media_type = req.get("type", "movie")
                 if tmdb_id:
-                    detail_tasks.append(
-                        _fetch_media_details(client, config["url"], config["api_key"], tmdb_id, media_type)
-                    )
+                    detail_tasks.append(_detail(tmdb_id, media_type))
                 else:
                     detail_tasks.append(_placeholder())
 
@@ -424,21 +432,33 @@ async def create_request_as_user(plex_token: str, media_type: str, media_id: int
 
 # --- Issues ---
 
-async def get_issues(take: int = 20, skip: int = 0, sort: str = "added") -> dict:
+async def get_issues(take: int = 20, skip: int = 0, sort: str = "added",
+                     connect_sid: str | None = None) -> dict:
     """
     Fetch issues from Seerr with media details.
     Returns dict with results list and pageInfo.
+
+    When ``connect_sid`` is given, the issue LIST is fetched through that user's
+    own Seerr session (cookie auth), so Seerr applies its per-user visibility
+    filter instead of returning every user's issues (L1). The admin API key is
+    never used for the list in that case; it is still used for the media-detail
+    lookups, which are un-scoped TMDB metadata (title/poster).
     """
     config = _get_config()
     if not config["url"] or not config["api_key"]:
         return {"results": [], "pageInfo": {"pages": 0, "results": 0}}
+
+    list_headers = (
+        {"Cookie": f"connect.sid={connect_sid}"} if connect_sid
+        else {"X-Api-Key": config["api_key"]}
+    )
 
     try:
         async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
             resp = await client.get(
                 f"{config['url']}/api/v1/issue",
                 params={"take": take, "skip": skip, "sort": sort},
-                headers={"X-Api-Key": config["api_key"]},
+                headers=list_headers,
             )
             if resp.status_code != 200:
                 logger.warning("Seerr issues returned HTTP %d", resp.status_code)
@@ -448,9 +468,17 @@ async def get_issues(take: int = 20, skip: int = 0, sort: str = "added") -> dict
             raw_results = data.get("results", [])
             page_info = data.get("pageInfo", {})
 
-            # Fetch media details concurrently
+            # Fetch media details concurrently, capped (L4).
             async def _placeholder():
                 return {"title": "Unknown", "poster_path": ""}
+
+            semaphore = asyncio.Semaphore(8)
+
+            async def _detail(tmdb_id, media_type):
+                async with semaphore:
+                    return await _fetch_media_details(
+                        client, config["url"], config["api_key"], tmdb_id, media_type
+                    )
 
             detail_tasks = []
             for issue in raw_results:
@@ -458,9 +486,7 @@ async def get_issues(take: int = 20, skip: int = 0, sort: str = "added") -> dict
                 tmdb_id = media.get("tmdbId", 0)
                 media_type = media.get("mediaType", "movie")
                 if tmdb_id:
-                    detail_tasks.append(
-                        _fetch_media_details(client, config["url"], config["api_key"], tmdb_id, media_type)
-                    )
+                    detail_tasks.append(_detail(tmdb_id, media_type))
                 else:
                     detail_tasks.append(_placeholder())
 
@@ -539,17 +565,27 @@ async def get_issue_counts() -> dict:
         return {"total": 0, "open": 0, "closed": 0, "video": 0, "audio": 0, "subtitles": 0, "other": 0}
 
 
-async def get_issue_detail(issue_id: int) -> dict:
-    """Fetch a single issue with comments from Seerr."""
+async def get_issue_detail(issue_id: int, connect_sid: str | None = None) -> dict:
+    """Fetch a single issue with comments from Seerr.
+
+    With ``connect_sid`` the issue is fetched through the caller's own Seerr
+    session, so Seerr enforces ownership: an id the user may not see comes back
+    non-200 and this returns {} (the caller then 404s), closing the IDOR (L1).
+    """
     config = _get_config()
     if not config["url"] or not config["api_key"]:
         return {}
+
+    issue_headers = (
+        {"Cookie": f"connect.sid={connect_sid}"} if connect_sid
+        else {"X-Api-Key": config["api_key"]}
+    )
 
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
             resp = await client.get(
                 f"{config['url']}/api/v1/issue/{issue_id}",
-                headers={"X-Api-Key": config["api_key"]},
+                headers=issue_headers,
             )
             if resp.status_code != 200:
                 return {}

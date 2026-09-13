@@ -1367,6 +1367,15 @@ function renderSearchPage() {
     grid.appendChild(fragment);
 
     wirePosterFallbacks(grid);
+
+    // Bind request buttons (data-request-type / data-request-id set in
+    // buildSearchCard). The grid is cleared and rebuilt on every render, so
+    // these listeners don't accumulate.
+    grid.querySelectorAll('button[data-request-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            requestMedia(btn.getAttribute('data-request-type'), btn.getAttribute('data-request-id'), false, btn);
+        });
+    });
 }
 
 function buildSearchCard(item) {
@@ -1410,7 +1419,11 @@ function buildSearchCard(item) {
         // ids coerce back to int server-side.
         // border-transparent so the button matches the status block's height
         // exactly - otherwise the card jumps 2px depending on its state.
-        stdHtml = '<button onclick="requestMedia(\'' + mediaType + '\', \'' + escapeHtml(String(mediaId)) + '\', false, this)" class="w-full py-2 px-1 rounded-lg border border-transparent bg-primary hover:bg-primary/80 text-bright text-[11px] font-bold transition-all">Request <span class="' + mediaTypeNounColor(mediaType) + '">' + typeBadge + '</span></button>';
+        // Type and id ride in data-* attributes and the handler is bound in
+        // renderSearchPage, so a provider id like "gr:3634639" can never break
+        // out of a JS string in an inline onclick (HTML-escaping doesn't stop
+        // JS-context breakout). Behaviour is identical to the old onclick.
+        stdHtml = '<button data-request-type="' + escapeHtml(mediaType) + '" data-request-id="' + escapeHtml(String(mediaId)) + '" class="w-full py-2 px-1 rounded-lg border border-transparent bg-primary hover:bg-primary/80 text-bright text-[11px] font-bold transition-all">Request <span class="' + mediaTypeNounColor(mediaType) + '">' + typeBadge + '</span></button>';
     } else {
         // Same rectangle as the button, so the card keeps its shape. The type
         // is carried here too, since there is no button to state it.

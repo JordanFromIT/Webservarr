@@ -285,9 +285,10 @@ async function performSearch(query) {
             return;
         }
 
-        list.innerHTML = results.map(function(item) {
-            return buildSearchResultItem(item);
-        }).join('');
+        list.innerHTML = '';
+        results.forEach(function(item) {
+            list.appendChild(buildSearchResultItem(item));
+        });
 
     } catch (error) {
         console.error('Search error:', error);
@@ -298,39 +299,73 @@ async function performSearch(query) {
 }
 
 function buildSearchResultItem(item) {
-    var title = escapeHtml(item.title || 'Unknown');
-    var year = item.year ? escapeHtml(String(item.year)) : '';
-    var mediaType = item.media_type === 'tv' ? 'TV Show' : 'Movie';
-    var typeBadgeColor = item.media_type === 'tv' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400';
-    var posterUrl = item.poster_url || '';
-    var mediaInfoId = item.media_info_id;
-
-    var posterHtml = posterUrl
-        ? '<img src="' + escapeHtml(posterUrl) + '" alt="' + title + '" class="w-10 h-[60px] rounded object-cover shrink-0" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"/>' +
-          '<div class="w-10 h-[60px] rounded bg-frosted-blue/5 items-center justify-center shrink-0" style="display:none"><span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span></div>'
-        : '<div class="w-10 h-[60px] rounded bg-frosted-blue/5 flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span></div>';
-
-    // Encode data as JSON string in data attribute
-    var dataStr = escapeHtml(JSON.stringify({
+    // The object handed to selectMedia — same shape the old inline onclick built.
+    // Captured in the click closure instead of being serialised into an attribute,
+    // so titles containing quotes/apostrophes/angle brackets can't break out.
+    var mediaObj = {
         id: item.id,
         media_type: item.media_type,
         title: item.title || 'Unknown',
         year: item.year || '',
-        poster_url: posterUrl,
-        media_info_id: mediaInfoId,
-    }));
+        poster_url: item.poster_url || '',
+        media_info_id: item.media_info_id,
+    };
+    var title = mediaObj.title;
+    var year = mediaObj.year ? String(mediaObj.year) : '';
+    var mediaTypeLabel = item.media_type === 'tv' ? 'TV Show' : 'Movie';
+    var typeBadgeColor = item.media_type === 'tv' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400';
+    var posterUrl = mediaObj.poster_url;
 
-    return '<div class="flex items-center gap-3 p-2 rounded-lg hover:bg-frosted-blue/5 cursor-pointer transition-all border border-transparent hover:border-steel-blue/20" ' +
-        'onclick=\'selectMedia(' + JSON.stringify({id: item.id, media_type: item.media_type, title: item.title || "Unknown", year: item.year || "", poster_url: posterUrl, media_info_id: mediaInfoId}) + ')\'>' +
-        posterHtml +
-        '<div class="flex-1 min-w-0">' +
-            '<p class="text-frosted-blue text-sm font-medium truncate">' + title + '</p>' +
-            '<div class="flex items-center gap-2 mt-0.5">' +
-                (year ? '<span class="text-steel-blue text-[11px]">' + year + '</span>' : '') +
-                '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + mediaType + '</span>' +
-            '</div>' +
-        '</div>' +
-    '</div>';
+    var row = document.createElement('div');
+    row.className = 'flex items-center gap-3 p-2 rounded-lg hover:bg-frosted-blue/5 cursor-pointer transition-all border border-transparent hover:border-steel-blue/20';
+    row.addEventListener('click', function () { selectMedia(mediaObj); });
+
+    if (posterUrl) {
+        var img = document.createElement('img');
+        img.src = posterUrl;
+        img.alt = title;
+        img.className = 'w-10 h-[60px] rounded object-cover shrink-0';
+        var fallback = document.createElement('div');
+        fallback.className = 'w-10 h-[60px] rounded bg-frosted-blue/5 items-center justify-center shrink-0';
+        fallback.style.display = 'none';
+        fallback.innerHTML = '<span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span>';
+        img.addEventListener('error', function () {
+            img.style.display = 'none';
+            fallback.style.display = 'flex';
+        });
+        row.appendChild(img);
+        row.appendChild(fallback);
+    } else {
+        var placeholder = document.createElement('div');
+        placeholder.className = 'w-10 h-[60px] rounded bg-frosted-blue/5 flex items-center justify-center shrink-0';
+        placeholder.innerHTML = '<span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span>';
+        row.appendChild(placeholder);
+    }
+
+    var info = document.createElement('div');
+    info.className = 'flex-1 min-w-0';
+
+    var titleP = document.createElement('p');
+    titleP.className = 'text-frosted-blue text-sm font-medium truncate';
+    titleP.textContent = title;
+    info.appendChild(titleP);
+
+    var metaRow = document.createElement('div');
+    metaRow.className = 'flex items-center gap-2 mt-0.5';
+    if (year) {
+        var yearSpan = document.createElement('span');
+        yearSpan.className = 'text-steel-blue text-[11px]';
+        yearSpan.textContent = year;
+        metaRow.appendChild(yearSpan);
+    }
+    var typeSpan = document.createElement('span');
+    typeSpan.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor;
+    typeSpan.textContent = mediaTypeLabel;
+    metaRow.appendChild(typeSpan);
+    info.appendChild(metaRow);
+
+    row.appendChild(info);
+    return row;
 }
 
 function clearSearch() {

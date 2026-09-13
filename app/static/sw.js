@@ -12,9 +12,20 @@
 var PAGE_CACHE = 'ws-pages-v1';
 var PAGE_TTL_MS = 30 * 1000;
 var pending = {};
+// key -> ms the worker itself cached that page. Lives only in worker memory, so
+// page scripts (incl. an XSS) can't forge it. The fetch handler serves a cached
+// page ONLY when its key is in here, which stops an attacker who can write the
+// Cache API from planting a page the worker will replay.
+var prefetched = new Map();
 
 self.addEventListener('install', function () { self.skipWaiting(); });
-self.addEventListener('activate', function (event) { event.waitUntil(self.clients.claim()); });
+self.addEventListener('activate', function (event) {
+  // Drop any prefetch cache from the previous worker: a poisoned entry can't
+  // survive a service-worker update.
+  event.waitUntil(
+    caches.delete(PAGE_CACHE).then(function () { return self.clients.claim(); })
+  );
+});
 
 function prefetchPage(key) {
   if (pending[key]) return pending[key];
@@ -23,11 +34,14 @@ function prefetchPage(key) {
       var type = res.headers.get('content-type') || '';
       // A redirect means the session is gone (login page); never cache that.
       if (!res.ok || res.redirected || type.indexOf('text/html') === -1) return null;
+      var cachedAt = Date.now();
       var headers = new Headers(res.headers);
-      headers.set('X-WS-Cached-At', String(Date.now()));
+      headers.set('X-WS-Cached-At', String(cachedAt));
       return res.arrayBuffer().then(function (body) {
         return caches.open(PAGE_CACHE).then(function (cache) {
-          return cache.put(key, new Response(body, { status: 200, headers: headers }));
+          return cache.put(key, new Response(body, { status: 200, headers: headers })).then(function () {
+            prefetched.set(key, cachedAt);   // mark it as worker-prefetched
+          });
         });
       });
     })
@@ -45,6 +59,7 @@ self.addEventListener('message', function (event) {
       prefetchPage(u.pathname + u.search);
     }
   } else if (data.type === 'clear-pages') {
+    prefetched.clear();
     event.waitUntil(caches.delete(PAGE_CACHE));
   }
 });
@@ -59,11 +74,19 @@ self.addEventListener('fetch', function (event) {
   event.respondWith((async function () {
     var cache = await caches.open(PAGE_CACHE);
     if (pending[key]) await pending[key];       // the click beat the prefetch: wait for it
-    var hit = await cache.match(key);
-    if (hit) {
-      await cache.delete(key);                  // single use
-      var at = Number(hit.headers.get('X-WS-Cached-At') || 0);
-      if (Date.now() - at < PAGE_TTL_MS) return hit;
+    // Only replay a page THIS worker prefetched (key present in the in-memory
+    // Map), so a Cache API write from a page script can't be served back.
+    var prefetchedAt = prefetched.get(key);
+    if (prefetchedAt !== undefined) {
+      prefetched.delete(key);                   // single use
+      var hit = await cache.match(key);
+      if (hit) {
+        await cache.delete(key);                // single use
+        var at = Number(hit.headers.get('X-WS-Cached-At') || 0);
+        // Ignore a future timestamp (poisoned), and gate freshness on the
+        // trusted in-worker time so a tampered entry can't extend its own life.
+        if (at <= Date.now() && Date.now() - prefetchedAt < PAGE_TTL_MS) return hit;
+      }
     }
     return fetch(req);
   })());
@@ -109,8 +132,17 @@ self.addEventListener('notificationclick', function(event) {
     ? event.notification.data.url
     : '/';
 
-  // Resolve relative URLs against the service worker origin
-  var targetUrl = new URL(url, self.location.origin).href;
+  // Resolve relative URLs against the service worker origin, and only ever
+  // open/navigate to a same-origin URL. Anything cross-origin (or unparseable)
+  // in the push payload falls back to the app root.
+  var rootUrl = new URL('/', self.location.origin).href;
+  var targetUrl;
+  try {
+    var parsed = new URL(url, self.location.origin);
+    targetUrl = parsed.origin === self.location.origin ? parsed.href : rootUrl;
+  } catch (e) {
+    targetUrl = rootUrl;
+  }
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {

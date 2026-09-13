@@ -13,6 +13,12 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT = 10.0
 
+# The thumbnail proxy serves whatever Plex returns straight from the app origin,
+# so it must be a real raster image and never SVG/HTML (which would be stored
+# XSS) and never unbounded in size (M10).
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_THUMBNAIL_BYTES = 10 * 1024 * 1024
+
 
 def _get_config() -> dict:
     """Read Plex config from settings table (short-lived session)."""
@@ -39,7 +45,7 @@ async def _get_best_media_quality(
     try:
         resp = await client.get(
             f"{config['url']}/library/metadata/{rating_key}",
-            params={"X-Plex-Token": config["token"]},
+            headers={"X-Plex-Token": config["token"]},
         )
         if resp.status_code != 200:
             return "SD", 0
@@ -84,7 +90,7 @@ async def get_active_streams() -> list:
         async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
             resp = await client.get(
                 f"{config['url']}/status/sessions",
-                params={"X-Plex-Token": config["token"]},
+                headers={"X-Plex-Token": config["token"]},
             )
             if resp.status_code != 200:
                 logger.warning("Plex sessions returned HTTP %d", resp.status_code)
@@ -255,7 +261,8 @@ async def get_thumbnail(path: str) -> tuple:
 
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, verify=False) as client:
-            resp = await client.get(
+            async with client.stream(
+                "GET",
                 f"{config['url']}/photo/:/transcode",
                 params={
                     "width": 300,
@@ -263,12 +270,26 @@ async def get_thumbnail(path: str) -> tuple:
                     "minSize": 1,
                     "upscale": 1,
                     "url": path,
-                    "X-Plex-Token": config["token"],
                 },
-            )
-            if resp.status_code == 200:
-                content_type = resp.headers.get("content-type", "image/jpeg")
-                return resp.content, content_type
+                headers={"X-Plex-Token": config["token"]},
+            ) as resp:
+                if resp.status_code != 200:
+                    return None, None
+                # Serve only a real raster image, never SVG/HTML (stored-XSS
+                # risk on our origin), and cap the bytes read (M10).
+                content_type = (resp.headers.get("content-type", "") or "").split(";")[0].strip().lower()
+                if content_type not in ALLOWED_IMAGE_TYPES:
+                    logger.warning("Plex thumbnail served unexpected content-type %r", content_type)
+                    return None, None
+                chunks = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > MAX_THUMBNAIL_BYTES:
+                        logger.warning("Plex thumbnail exceeded %d byte cap", MAX_THUMBNAIL_BYTES)
+                        return None, None
+                    chunks.append(chunk)
+                return b"".join(chunks), content_type
     except Exception as e:
         logger.warning("Failed to fetch Plex thumbnail: %s", str(e))
 

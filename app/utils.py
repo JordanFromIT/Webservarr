@@ -40,6 +40,29 @@ def _is_dangerous_ip(ip) -> bool:
     )
 
 
+# Carrier-grade NAT (RFC 6598) and the equivalent shared IPv6 space. These are
+# NOT flagged by is_private on every Python version, yet they route to the same
+# LAN/Tailscale hosts an SSRF wants to reach — so they are rejected explicitly
+# in addition to the is_global check below.
+_CGNAT_NETS = (
+    ipaddress.ip_network("100.64.0.0/10"),
+)
+
+
+def _is_public_routable(ip) -> bool:
+    """True only for a globally-routable public address.
+
+    is_global is the authoritative test (it already excludes private, loopback,
+    link-local, CGNAT and reserved space), but the explicit CGNAT and
+    _is_dangerous_ip checks make the intent obvious and stay correct across
+    Python versions that have historically disagreed on 100.64.0.0/10."""
+    if _is_dangerous_ip(ip):
+        return False
+    if ip.version == 4 and any(ip in net for net in _CGNAT_NETS):
+        return False
+    return bool(ip.is_global)
+
+
 def is_safe_integration_url(url: str) -> bool:
     """Validate an admin-configured integration / test-connection URL.
 
@@ -63,8 +86,11 @@ def is_safe_push_endpoint(url: str) -> bool:
     """Validate a user-supplied Web Push endpoint URL (anti-SSRF).
 
     Must be a public https URL. Any private/RFC-1918, loopback, link-local,
-    multicast or reserved address — or an unresolvable host — is rejected, since
-    legitimate browser push services are always public HTTPS hosts."""
+    multicast, reserved or CGNAT (100.64.0.0/10) address — anything not globally
+    routable — or an unresolvable host, is rejected, since legitimate browser
+    push services are always public HTTPS hosts. Every resolved address must
+    pass, so a host that resolves to a mix of public and internal IPs is
+    rejected outright (a DNS-rebind defence)."""
     parsed = urlparse((url or "").strip())
     if parsed.scheme.lower() != "https":
         return False
@@ -75,7 +101,7 @@ def is_safe_push_endpoint(url: str) -> bool:
     if not ips:
         return False
     for ip in ips:
-        if ip.is_private or _is_dangerous_ip(ip):
+        if not _is_public_routable(ip):
             return False
     return True
 

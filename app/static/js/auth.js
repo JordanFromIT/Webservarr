@@ -55,11 +55,13 @@ function wireLogout() {
 
 /**
  * Escape HTML to prevent XSS when inserting user-provided text.
+ * Escapes & < > " ' so the result is safe in both text and quoted-attribute
+ * contexts (a textContent/innerHTML round-trip leaves " and ' unescaped).
  */
 function escapeHtml(text) {
-  var div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  return String(text).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
 }
 
 /**

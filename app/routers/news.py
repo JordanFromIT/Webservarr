@@ -36,10 +36,15 @@ class NewsPostUpdate(BaseModel):
 
 
 class NewsPostResponse(BaseModel):
-    """Schema for news post response."""
+    """Schema for news post response.
+
+    ``content`` is the editor's own copy of the post markup and is returned to
+    admins only (see ``_serialize_news_post``); public/anonymous callers get
+    the sanitized ``content_html`` and never the ``content`` field.
+    """
     id: int
     title: str
-    content: str  # Raw HTML from editor
+    content: Optional[str] = None  # Sanitized editor HTML; returned to admins only
     content_html: str  # Sanitized HTML
     author_name: str
     created_at: datetime
@@ -52,7 +57,33 @@ class NewsPostResponse(BaseModel):
         from_attributes = True
 
 
-@router.get("/", response_model=List[NewsPostResponse])
+def _serialize_news_post(post: NewsPost, include_content: bool) -> dict:
+    """Build the response body for a news post.
+
+    ``content`` (the editor's copy of the post markup) is included only when
+    ``include_content`` is set -- i.e. for an admin who may reopen the post in
+    the editor. Public/anonymous callers get ``content_html`` only, so a post
+    can never serve editor-supplied markup to a non-admin viewer. Paired with
+    ``response_model_exclude_unset=True`` on the read routes, omitting the key
+    here drops it from the JSON entirely rather than emitting ``null``.
+    """
+    data = {
+        "id": post.id,
+        "title": post.title,
+        "content_html": post.content_html,
+        "author_name": post.author_name,
+        "created_at": post.created_at,
+        "updated_at": post.updated_at,
+        "published": post.published,
+        "published_at": post.published_at,
+        "pinned": post.pinned,
+    }
+    if include_content:
+        data["content"] = post.content
+    return data
+
+
+@router.get("/", response_model=List[NewsPostResponse], response_model_exclude_unset=True)
 async def get_news_posts(
     published_only: bool = True,
     limit: int = Query(10, ge=1, le=100),
@@ -73,10 +104,11 @@ async def get_news_posts(
     a pin is the admin saying "this stays up", and an age cutoff must not
     silently override that.
     """
-    if not published_only:
-        is_admin = bool(current_user) and str(current_user.get("is_admin", "false")).lower() == "true"
-        if not is_admin:
-            published_only = True
+    is_admin = bool(current_user) and str(current_user.get("is_admin", "false")).lower() == "true"
+
+    # Drafts are admin-only; force the published filter for everyone else.
+    if not published_only and not is_admin:
+        published_only = True
 
     query = db.query(NewsPost)
 
@@ -96,10 +128,10 @@ async def get_news_posts(
     )
 
     posts = query.offset(offset).limit(limit).all()
-    return posts
+    return [_serialize_news_post(post, include_content=is_admin) for post in posts]
 
 
-@router.get("/{post_id}", response_model=NewsPostResponse)
+@router.get("/{post_id}", response_model=NewsPostResponse, response_model_exclude_unset=True)
 async def get_news_post(
     post_id: int,
     db: Session = Depends(get_db),
@@ -112,6 +144,8 @@ async def get_news_post(
     editor could not reopen its own unpublished work, which reads to the
     author as the draft having been thrown away.
     """
+    is_admin = bool(current_user) and str(current_user.get("is_admin", "false")).lower() == "true"
+
     post = db.query(NewsPost).filter(NewsPost.id == post_id).first()
 
     if not post:
@@ -120,15 +154,13 @@ async def get_news_post(
             detail="News post not found"
         )
 
-    if not post.published:
-        is_admin = bool(current_user) and str(current_user.get("is_admin", "false")).lower() == "true"
-        if not is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="News post not found"
-            )
+    if not post.published and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="News post not found"
+        )
 
-    return post
+    return _serialize_news_post(post, include_content=is_admin)
 
 
 @router.post("/", response_model=NewsPostResponse, status_code=status.HTTP_201_CREATED)
@@ -142,13 +174,16 @@ async def create_news_post(
     Create a new news post.
     Requires admin authentication.
     """
-    # Sanitize HTML from rich text editor
+    # Sanitize the editor HTML once and store it for BOTH fields: content_html
+    # is what gets rendered, and content (the copy the editor reopens) must not
+    # be allowed to carry active markup either, so it can never become a stored
+    # XSS sink if it is ever served or loaded raw.
     content_html = sanitize_html(post_data.content)
 
     # Create post
     new_post = NewsPost(
         title=post_data.title,
-        content=post_data.content,
+        content=content_html,
         content_html=content_html,
         author_id=current_user.get("user_id", ""),
         author_name=current_user.get("name", "Unknown"),
@@ -189,8 +224,10 @@ async def update_news_post(
         post.title = post_data.title
 
     if post_data.content is not None:
-        post.content = post_data.content
-        post.content_html = sanitize_html(post_data.content)
+        # Store the sanitized markup for both fields (see create_news_post).
+        sanitized = sanitize_html(post_data.content)
+        post.content = sanitized
+        post.content_html = sanitized
 
     if post_data.published is not None:
         # If publishing for first time, set published_at
