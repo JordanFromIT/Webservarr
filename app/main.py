@@ -235,6 +235,30 @@ async def add_security_headers(request: Request, call_next):
 
 
 @app.middleware("http")
+async def static_cache_headers(request: Request, call_next):
+    """Cache policy for /static/.
+
+    Versioned assets carry a ?v= marker that app/pages.py rewrites to the
+    file's content hash, so their URL changes whenever they do: cache them
+    for a year. Without this every navigation re-validated each script and
+    stylesheet (a round trip apiece, and the stylesheets block rendering).
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if request.method == "GET" and path.startswith("/static/") and response.status_code in (200, 304):
+        if path == "/static/sw.js":
+            response.headers["Cache-Control"] = "no-cache"
+        elif "v" in request.query_params:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif path.startswith("/static/uploads/"):
+            # Uploads are stored under content-hashed names.
+            response.headers["Cache-Control"] = "public, max-age=86400"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=300"
+    return response
+
+
+@app.middleware("http")
 async def setup_redirect_middleware(request: Request, call_next):
     """Redirect all traffic to /setup if initial setup not completed."""
     path = request.url.path

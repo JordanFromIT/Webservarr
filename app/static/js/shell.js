@@ -186,9 +186,50 @@
      loader wants from swr's fetcher. */
   function getJSON(url) {
     return fetch(url).then(function (r) {
+      // A page can be served from the prefetch cache after the session has
+      // ended; the first API answer says so.
+      if (r.status === 401) { window.location.href = '/login'; throw new Error('HTTP 401'); }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     });
+  }
+
+  // ---- Hover prefetch ----
+  //
+  // Speculation rules do the same thing natively, but not every browser
+  // honours them. The service worker (sw.js) fetches the target document while
+  // the pointer is still over the link and hands it to the navigation that
+  // follows, so the click lands on a document already in hand.
+  var PAGE_CACHE = 'ws-pages-v1';
+  var prefetchedAt = {};
+
+  function prefetch(href) {
+    var sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+    if (!sw) return;
+    var now = Date.now();
+    if (prefetchedAt[href] && now - prefetchedAt[href] < 20000) return;
+    prefetchedAt[href] = now;
+    sw.postMessage({ type: 'prefetch', url: href });
+  }
+
+  function wirePrefetch() {
+    if (!('serviceWorker' in navigator)) return;
+    document.querySelectorAll('#desktopNav a, #drawerNav a').forEach(function (a) {
+      var href = a.getAttribute('href');
+      if (!href || href === location.pathname) return;
+      var go = function () { prefetch(href); };
+      a.addEventListener('mouseenter', go);
+      a.addEventListener('focus', go);
+      a.addEventListener('touchstart', go, { passive: true });
+    });
+  }
+
+  function clearPageCache() {
+    try { if (window.caches) caches.delete(PAGE_CACHE); } catch (e) { /* ignore */ }
+    try {
+      var sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+      if (sw) sw.postMessage({ type: 'clear-pages' });
+    } catch (e) { /* ignore */ }
   }
 
   // ---- Status pill ----
@@ -297,6 +338,7 @@
     document.querySelectorAll('#logoutBtn, [data-logout]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         clearCache();
+        clearPageCache();
         window.location.href = '/auth/logout';
       });
     });
@@ -344,6 +386,7 @@
     arriveInit();
     wireChrome();
     wireScrollHint();
+    wirePrefetch();
 
     var cached = cacheGet('status');
     if (cached && cached.state) paintStatus(cached.state);
