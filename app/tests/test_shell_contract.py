@@ -5,6 +5,7 @@ The shell is server-rendered from two partials; every app page carries the
 two markers and nothing of the old JS-built shell. These guards catch the
 regression class where one page is edited and drifts from the rest.
 """
+import os
 import re
 import unittest
 from pathlib import Path
@@ -14,8 +15,10 @@ SHELL_PAGES = ["index", "requests", "requests-embed", "issues", "calendar", "tic
                "library", "news", "wiki", "settings"]
 BARE_PAGES = ["login", "setup", "reader"]
 
-# The repo is a template; the operator's own branding lives in the database.
-FORBIDDEN_STRINGS = ["hmserver", "HMServer", "HMS Dashboard"]
+# The repo is a template; an operator's own branding lives in the database,
+# never in these files. Operators can add their own names to the guard without
+# committing them: WEBSERVARR_FORBIDDEN_STRINGS="My Server,myserver.example".
+FORBIDDEN_STRINGS = [s for s in os.environ.get("WEBSERVARR_FORBIDDEN_STRINGS", "").split(",") if s.strip()]
 
 
 def read(name: str) -> str:
@@ -78,6 +81,11 @@ class ShellContract(unittest.TestCase):
             t = p.read_text(encoding="utf-8")
             for bad in FORBIDDEN_STRINGS:
                 self.assertNotIn(bad, t, p.name)
+        # Generic guard: every shipped page carries the template's own name.
+        for p in STATIC.glob("*.html"):
+            m = re.search(r"<title>(.*?)</title>", p.read_text(encoding="utf-8"), re.S)
+            self.assertIsNotNone(m, p.name)
+            self.assertTrue(m.group(1).strip().startswith("WebServarr - "), f"{p.name}: {m.group(1)!r}")
 
     def test_polls_go_through_ws_poll(self):
         for n in SHELL_PAGES:
