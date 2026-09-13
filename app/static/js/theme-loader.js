@@ -1,13 +1,19 @@
 /**
  * WebServarr — Theme Loader
- * Loads branding/theme from /api/branding and applies CSS custom properties.
- * Include in <head> before Tailwind to prevent FOUC.
+ *
+ * Runs in <head>, before the body parses. The server stamps the branding
+ * payload into every page as a JSON block (#ws-data, see app/pages.py), so the
+ * theme is applied synchronously from the document itself: no fetch, no cache,
+ * no flash of the default colours or name on any navigation.
+ *
+ * Sets window.WS_DATA (the whole block) and window.WEBSERVARR_THEME (the
+ * branding part, the name every page script already reads).
+ *
+ * A page served some other way has no block; it falls back to one fetch of
+ * /api/branding.
  */
 (function () {
   'use strict';
-
-  const CACHE_KEY = 'webservarr_branding';
-  const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
 
   /**
    * Convert hex color to space-separated RGB triplet for Tailwind opacity support.
@@ -29,7 +35,9 @@
     var root = document.documentElement;
     var c = data.colors || {};
 
-    // Color CSS custom properties (RGB triplets for Tailwind alpha support)
+    // Color CSS custom properties (RGB triplets for Tailwind alpha support).
+    // The server already inlined these (#ws-theme); setting them again is
+    // harmless and keeps the fallback path identical.
     if (c.primary) root.style.setProperty('--color-primary', hexToRgb(c.primary));
     if (c.secondary) root.style.setProperty('--color-secondary', hexToRgb(c.secondary));
     if (c.accent) root.style.setProperty('--color-accent', hexToRgb(c.accent));
@@ -38,8 +46,7 @@
     if (c.background) root.style.setProperty('--color-background', hexToRgb(c.background));
 
     // Media type accents. Consumed by the .text-media-* / .badge-media-*
-    // classes in theme.css rather than by Tailwind, so they work on every page
-    // without each page's tailwind.config having to know about them.
+    // classes in theme.css rather than by Tailwind, so they work on every page.
     if (c.media_movie) root.style.setProperty('--color-media-movie', hexToRgb(c.media_movie));
     if (c.media_tv) root.style.setProperty('--color-media-tv', hexToRgb(c.media_tv));
     if (c.media_book) root.style.setProperty('--color-media-book', hexToRgb(c.media_book));
@@ -57,9 +64,7 @@
     if (c.media_book) root.style.setProperty('--hex-media-book', c.media_book);
 
     // Favicon follows the configured logo, so a rebranded install is branded
-    // in the browser tab too. The pages ship a static icon link as well, since
-    // this only runs once /api/branding answers - without it the browser asks
-    // for /favicon.ico and takes a 404 on every page load.
+    // in the browser tab too. The pages ship a static icon link as well.
     if (data.logo_url) {
       var icon = document.querySelector('link[rel="icon"]');
       if (!icon) {
@@ -70,13 +75,12 @@
       icon.href = data.logo_url;
     }
 
-    // Font
+    // Font. The server emits the stylesheet link statically (#ws-font); only
+    // the fallback path has to inject one.
     if (data.font) {
       root.style.setProperty('--font-display', data.font + ', sans-serif');
-
-      // Inject Google Fonts link if not already present
       var fontId = 'webservarr-google-font';
-      if (!document.getElementById(fontId)) {
+      if (!document.getElementById('ws-font') && !document.getElementById(fontId)) {
         var link = document.createElement('link');
         link.id = fontId;
         link.rel = 'stylesheet';
@@ -90,7 +94,7 @@
     root.classList.add('dark');
     root.classList.remove('light');
 
-    // Custom CSS injection
+    // Custom CSS injection (textContent, never markup)
     if (data.custom_css) {
       var styleId = 'webservarr-custom-css';
       var el = document.getElementById(styleId);
@@ -114,47 +118,25 @@
     }
   }
 
-  /**
-   * Try to load cached branding from localStorage (instant, no FOUC).
-   */
-  function loadCached() {
-    try {
-      var raw = localStorage.getItem(CACHE_KEY);
-      if (!raw) return null;
-      var cached = JSON.parse(raw);
-      if (Date.now() - cached._ts > CACHE_MAX_AGE) return null;
-      return cached;
-    } catch (e) {
-      return null;
-    }
+  function readInline() {
+    var el = document.getElementById('ws-data');
+    if (!el) return null;
+    try { return JSON.parse(el.textContent); } catch (e) { return null; }
   }
 
-  /**
-   * Fetch fresh branding from API and cache it.
-   */
-  function fetchAndApply() {
-    fetch('/api/branding')
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        data._ts = Date.now();
-        try { localStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch (e) {}
-        applyTheme(data);
-      })
-      .catch(function () {
-        // Network error — keep whatever we have (cached or defaults)
-      });
-  }
-
-  // 1. Apply cached theme immediately (prevents FOUC)
-  var cached = loadCached();
-  if (cached) {
-    applyTheme(cached);
-  }
-
-  // 2. Always fetch fresh in background
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', fetchAndApply);
+  var inline = readInline();
+  if (inline) {
+    window.WS_DATA = inline;
+    applyTheme(inline.branding || {});
   } else {
-    fetchAndApply();
+    window.WS_DATA = null;
+    var run = function () {
+      fetch('/api/branding')
+        .then(function (r) { return r.json(); })
+        .then(applyTheme)
+        .catch(function () { /* keep the defaults */ });
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+    else run();
   }
 })();

@@ -5,38 +5,19 @@
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>WebServarr - News</title>
 <link rel="icon" href="/static/webservarr.svg"/>
-<script src="/static/js/theme-loader.js"></script>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script src="/static/js/theme-loader.js?v=1"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
+<link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
-<script>tailwind.config = {
-  darkMode: "class",
-  theme: {
-    extend: {
-      colors: {
-        "primary": "rgb(var(--color-primary) / <alpha-value>)",
-        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
-        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
-        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
-        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
-        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
-        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
-      },
-      fontFamily: {
-        "display": ["var(--font-display)", "sans-serif"]
-      },
-    },
-  },
-}</script>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<!-- ws:sidebar -->
 
 <!-- Toast notification container -->
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-y-auto">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
+<!-- ws:header -->
 
 <div class="p-4 lg:p-8 max-w-4xl w-full mx-auto">
 
@@ -55,11 +36,10 @@
   </div>
 
   <!-- Post list -->
-  <div id="newsArchive" class="grid gap-3">
-    <div class="text-center text-steel-blue py-12">
-      <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>
-      <p>Loading news…</p>
-    </div>
+  <div id="newsArchive" class="grid gap-3" data-arrive="posts">
+    <div class="skel skel-card" aria-hidden="true"></div>
+    <div class="skel skel-card" aria-hidden="true"></div>
+    <div class="skel skel-card" aria-hidden="true"></div>
   </div>
 
   <!-- Pagination -->
@@ -73,16 +53,11 @@
 
 </div>
 
-<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
-  <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
-</div>
-
 </main>
 
 <!-- Scripts -->
-<script src="/static/js/auth.js"></script>
-<script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=21"></script>
+<script src="/static/js/auth.js?v=1"></script>
+<script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
 // WebServarr — News Archive
@@ -187,35 +162,55 @@
     _loading = true;
     moreText.textContent = 'Loading…';
 
-    try {
-      // Fetch one past the page size: if it comes back, there is another page.
-      // Cheaper than a separate count query and never goes stale against it.
-      var res = await fetch('/api/news/?limit=' + (PAGE_SIZE + 1) + '&offset=' + _offset);
-      if (!res.ok) throw new Error('Request failed (' + res.status + ')');
-      var posts = await res.json();
-      if (!Array.isArray(posts)) throw new Error('Unexpected response');
+    var offset = _offset;
+    // Fetch one past the page size: if it comes back, there is another page.
+    // Cheaper than a separate count query and never goes stale against it.
+    var url = '/api/news/?limit=' + (PAGE_SIZE + 1) + '&offset=' + offset;
 
+    function fetcher() {
+      return WS.getJSON(url).then(function (posts) {
+        if (!Array.isArray(posts)) throw new Error('Unexpected response');
+        return posts;
+      });
+    }
+
+    function render(posts) {
       var hasMore = posts.length > PAGE_SIZE;
       var page = posts.slice(0, PAGE_SIZE);
 
-      if (_offset === 0) {
-        listEl.innerHTML = page.length ? page.map(renderCard).join('') : emptyState();
+      if (offset === 0) {
+        WS.arrive('posts', function () {
+          WS.setHTML(listEl, page.length ? page.map(renderCard).join('') : emptyState());
+        });
+        _offset = page.length;
       } else {
         listEl.insertAdjacentHTML('beforeend', page.map(renderCard).join(''));
+        _offset = offset + page.length;
       }
 
-      _offset += page.length;
       moreBtn.classList.toggle('hidden', !hasMore);
       moreBtn.classList.toggle('flex', hasMore);
       moreText.textContent = 'Load older posts';
+    }
+
+    try {
+      if (offset === 0) {
+        // The first page paints from the last visit at once, then refreshes.
+        var fresh = await WS.swr('news:archive', fetcher, render);
+        if (fresh === null) throw new Error('Request failed');
+      } else {
+        render(await fetcher());
+      }
     } catch (err) {
       console.error('Error loading news archive:', err);
-      if (_offset === 0) {
-        listEl.innerHTML = '<div class="text-center text-steel-blue py-12">' +
-          '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">cloud_off</span>' +
-          '<p>Could not load news right now.</p>' +
-          '<p class="text-xs opacity-60 mt-1">Try refreshing the page.</p>' +
-        '</div>';
+      if (offset === 0) {
+        WS.arrive('posts', function () {
+          WS.setHTML(listEl, '<div class="text-center text-steel-blue py-12">' +
+            '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">cloud_off</span>' +
+            '<p>Could not load news right now.</p>' +
+            '<p class="text-xs opacity-60 mt-1">Try refreshing the page.</p>' +
+          '</div>');
+        });
       }
       moreText.textContent = 'Try again';
     } finally {
@@ -226,39 +221,8 @@
   moreBtn.addEventListener('click', loadPage);
 
   // ---- Init ----
-  initSidebar('home');
 
-  (function () {
-    var hint = document.getElementById('scrollDownHint');
-    if (!hint) return;
-    window.addEventListener('scroll', function () {
-      var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
-      hint.style.opacity = atBottom ? '0' : '1';
-    });
-  })();
-
-  // The shared page-shell handshake every other page performs. Without it the
-  // nav stays at opacity-0 (showAdminNav is what fades it in), Settings stays
-  // hidden, the status badge reads "Loading..." forever and the bell is dead --
-  // which is what made this page look unlike the rest of the site.
-  checkAuth().then(function (user) {
-    var uEl = document.getElementById('headerUsername');
-    var rEl = document.getElementById('headerRole');
-    if (uEl) uEl.textContent = user.display_name || user.username;
-    if (rEl) rEl.textContent = user.is_admin ? 'Admin' : 'Member';
-    showAdminNav(user.is_admin);
-
-    var menuBtn = document.getElementById('userMenuBtn');
-    var menuDrop = document.getElementById('userMenuDropdown');
-    if (menuBtn && menuDrop) {
-      menuBtn.addEventListener('click', function () { menuDrop.classList.toggle('hidden'); });
-      document.addEventListener('click', function (e) {
-        if (!menuBtn.contains(e.target) && !menuDrop.contains(e.target)) menuDrop.classList.add('hidden');
-      });
-    }
-
-    loadSystemStatus();
-    initNotifications();
+  checkAuth().then(function () {
     loadPage();
   });
 })();

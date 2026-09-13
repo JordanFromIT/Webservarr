@@ -48,17 +48,9 @@ function renderWikiHook(containerId, hookName, lead) {
 }
 
 /**
- * The branding payload may not have landed when a page boots, so try now and
- * retry briefly rather than silently rendering nothing on a slow connection.
+ * The branding payload is stamped into the page by the server, so it is
+ * available before this runs; render straight away.
  */
 function initWikiHook(containerId, hookName, lead) {
-  var tries = 0;
-  (function attempt() {
-    if (window.WEBSERVARR_THEME) {
-      renderWikiHook(containerId, hookName, lead);
-      return;
-    }
-    if (++tries > 20) return;   // ~4s, then give up quietly
-    setTimeout(attempt, 200);
-  })();
+  renderWikiHook(containerId, hookName, lead);
 }

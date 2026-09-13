@@ -5,32 +5,13 @@
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>WebServarr - Issues</title>
 <link rel="icon" href="/static/webservarr.svg"/>
-<script src="/static/js/theme-loader.js"></script>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script src="/static/js/theme-loader.js?v=1"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
+<link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
-<script>tailwind.config = {
-  darkMode: "class",
-  theme: {
-    extend: {
-      colors: {
-        "primary": "rgb(var(--color-primary) / <alpha-value>)",
-        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
-        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
-        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
-        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
-        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
-        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
-      },
-      fontFamily: {
-        "display": ["var(--font-display)", "sans-serif"]
-      },
-    },
-  },
-}</script>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<!-- ws:sidebar -->
 <!-- Toast notification container -->
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 <!-- Issue Detail Modal -->
@@ -50,7 +31,7 @@
 </div>
 <!-- Main Content Area -->
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
+<!-- ws:header -->
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
@@ -68,17 +49,17 @@ Anything else, use <a href="/tickets" class="text-primary hover:underline font-s
 <div id="wikiHookIssues" class="hidden mb-5"></div>
 
 <!-- Stat Summary Cards -->
-<div class="grid grid-cols-3 gap-3 mb-6">
+<div class="grid grid-cols-3 gap-3 mb-6" data-arrive="counts">
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-frosted-blue" id="statTotal">--</p>
+<p class="text-2xl font-bold text-frosted-blue" id="statTotal"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Total</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-amber-400" id="statOpen">--</p>
+<p class="text-2xl font-bold text-amber-400" id="statOpen"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Open</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-green-500" id="statClosed">--</p>
+<p class="text-2xl font-bold text-green-500" id="statClosed"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Resolved</p>
 </div>
 </div>
@@ -180,20 +161,14 @@ Submit Issue
 </div>
 
 <!-- Issues List -->
-<div id="issuesList" class="space-y-2">
-<div class="text-center text-steel-blue py-8">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">report_problem</span>
-<p>Loading issues...</p>
-</div>
-</div>
-</div>
-
+<div id="issuesList" class="space-y-2" data-arrive="list">
+<div class="skel skel-row" aria-hidden="true"></div>
+<div class="skel skel-row" aria-hidden="true"></div>
+<div class="skel skel-row" aria-hidden="true"></div>
 </div>
 </div>
 
-<!-- Scroll down indicator (mobile only) -->
-<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
-    <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
+</div>
 </div>
 
 </main>
@@ -229,9 +204,8 @@ Submit Issue
 }
 </style>
 
-<script src="/static/js/auth.js"></script>
-<script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=21"></script>
+<script src="/static/js/auth.js?v=1"></script>
+<script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script src="/static/js/wiki-hook.js?v=1"></script>
 <script>
@@ -243,26 +217,12 @@ var _currentStatusFilter = 'all';
 var _currentTypeFilter = 'all';
 var _selectedMedia = null;
 var _selectedIssueType = null;
-var _refreshInterval = null;
+var _stopRefresh = null;
 
 document.addEventListener('DOMContentLoaded', async function() {
-    initSidebar('issues');
-    initNotifications();
-
-    // Scroll-down hint — fade out at bottom
-    (function() {
-        var hint = document.getElementById('scrollDownHint');
-        if (!hint) return;
-        window.addEventListener('scroll', function() {
-            var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
-            hint.style.opacity = atBottom ? '0' : '1';
-        });
-    })();
 
     var user = await checkAuth();
     if (!user) return;
-    showAdminNav(user.is_admin);
-    loadSystemStatus();
     initWikiHook('wikiHookIssues', 'issues', 'Might this help first?');
 
     // Wire up search input with debounce
@@ -284,7 +244,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     loadIssues();
 
     // Auto-refresh every 30 seconds
-    _refreshInterval = setInterval(function() {
+    _stopRefresh = WS.poll(function() {
         loadIssueCounts();
         loadIssues();
     }, 30000);
@@ -482,37 +442,40 @@ async function submitIssue() {
 // ---- Issue Counts ----
 
 async function loadIssueCounts() {
-    try {
-        var resp = await fetch('/api/integrations/issue-counts');
-        if (!resp.ok) throw new Error('API error');
-        var counts = await resp.json();
-
-        document.getElementById('statTotal').textContent = counts.total || 0;
-        document.getElementById('statOpen').textContent = counts.open || 0;
-        document.getElementById('statClosed').textContent = counts.closed || 0;
-        document.getElementById('issuesTotalCount').textContent = '(' + (counts.total || 0) + ')';
-    } catch (e) {
-        console.log('Issue counts not available');
-    }
+    return WS.swr('issues:counts', function () { return WS.getJSON('/api/integrations/issue-counts'); }, function (counts) {
+        WS.arrive('counts', function () {
+            document.getElementById('statTotal').textContent = counts.total || 0;
+            document.getElementById('statOpen').textContent = counts.open || 0;
+            document.getElementById('statClosed').textContent = counts.closed || 0;
+            document.getElementById('issuesTotalCount').textContent = '(' + (counts.total || 0) + ')';
+        });
+    }, {
+        onError: function () {
+            console.log('Issue counts not available');
+            WS.arrive('counts', function () {
+                ['statTotal', 'statOpen', 'statClosed'].forEach(function (id) { document.getElementById(id).textContent = '\u2013'; });
+            });
+        }
+    });
 }
 
 // ---- Issues List ----
 
 async function loadIssues() {
-    try {
-        var resp = await fetch('/api/integrations/issues?take=50');
-        if (!resp.ok) throw new Error('API error');
-        var data = await resp.json();
-
+    return WS.swr('issues:list', function () { return WS.getJSON('/api/integrations/issues?take=50'); }, function (data) {
         _allIssues = data.results || [];
-        renderIssues();
-    } catch (error) {
-        console.error('Error loading issues:', error);
-        document.getElementById('issuesList').innerHTML =
-            '<div class="text-center text-steel-blue py-8">' +
-            '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">report_problem</span>' +
-            '<p>Could not load issues</p></div>';
-    }
+        WS.arrive('list', renderIssues);
+    }, {
+        onError: function (error) {
+            console.error('Error loading issues:', error);
+            WS.arrive('list', function () {
+                WS.setHTML(document.getElementById('issuesList'),
+                    '<div class="text-center text-steel-blue py-8">' +
+                    '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">report_problem</span>' +
+                    '<p>Could not load issues</p></div>');
+            });
+        }
+    });
 }
 
 function renderIssues() {
@@ -535,15 +498,15 @@ function renderIssues() {
     if (filtered.length === 0) {
         var msg = 'No issues found';
         if (_currentStatusFilter !== 'all' || _currentTypeFilter !== 'all') msg = 'No matching issues';
-        list.innerHTML = '<div class="text-center text-steel-blue py-8">' +
+        WS.setHTML(list, '<div class="text-center text-steel-blue py-8">' +
             '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">check_circle</span>' +
-            '<p>' + msg + '</p></div>';
+            '<p>' + msg + '</p></div>');
         return;
     }
 
-    list.innerHTML = filtered.map(function(issue) {
+    WS.setHTML(list, filtered.map(function(issue) {
         return buildIssueCard(issue);
-    }).join('');
+    }).join(''));
 }
 
 function buildIssueCard(issue) {

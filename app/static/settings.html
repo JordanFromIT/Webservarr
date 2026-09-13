@@ -5,29 +5,10 @@
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>WebServarr - Settings</title>
 <link rel="icon" href="/static/webservarr.svg"/>
-    <script src="/static/js/theme-loader.js"></script>
-    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <script src="/static/js/theme-loader.js?v=1"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
+    <link href="/static/css/app.css?v=1" rel="stylesheet"/>
     <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
-    <script>tailwind.config = {
-      darkMode: "class",
-      theme: {
-        extend: {
-          colors: {
-            "primary": "rgb(var(--color-primary) / <alpha-value>)",
-            "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
-            "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
-            "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
-            "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
-            "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
-            "background-dark": "rgb(var(--color-background) / <alpha-value>)",
-          },
-          fontFamily: {
-            "display": ["var(--font-display)", "sans-serif"]
-          },
-        },
-      },
-    }</script>
     <style>
         .hide-scrollbar { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -169,10 +150,10 @@
     </style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-    <div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+    <!-- ws:sidebar -->
     <!-- Main Content -->
     <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
-    <div id="header-root" class="hidden lg:block lg:h-16"></div>
+    <!-- ws:header -->
     <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
         <!-- Tabs -->
@@ -384,10 +365,9 @@
                                 </div>
                                 <p class="text-xs text-steel-blue/70 mb-3">Toggle which monitors appear on the homepage.</p>
                                 <div id="monitorsList" class="space-y-2">
-                                    <div class="text-center text-steel-blue py-6">
-                                        <span class="material-symbols-outlined text-3xl mb-2 block opacity-50">dns</span>
-                                        <p class="text-xs">Loading monitors...</p>
-                                    </div>
+                                    <div class="skel skel-row" aria-hidden="true"></div>
+                                    <div class="skel skel-row" aria-hidden="true"></div>
+                                    <div class="skel skel-row" aria-hidden="true"></div>
                                 </div>
                             </div>
                         </div>
@@ -1502,10 +1482,9 @@
 
             <!-- Posts List -->
             <div id="postsList" class="space-y-4">
-                <div class="text-center text-steel-blue py-12">
-                    <span class="material-symbols-outlined text-6xl mb-4 block opacity-50">article</span>
-                    <p>Loading news posts...</p>
-                </div>
+                <div class="skel skel-card" aria-hidden="true"></div>
+                <div class="skel skel-card" aria-hidden="true"></div>
+                <div class="skel skel-card" aria-hidden="true"></div>
             </div>
 
         </div>
@@ -1539,7 +1518,8 @@
                     </button>
                 </div>
                 <div id="wikiCatList" class="grid gap-2">
-                    <div class="text-center text-steel-blue py-6 text-sm">Loading categories&hellip;</div>
+                    <div class="skel skel-row" aria-hidden="true"></div>
+                    <div class="skel skel-row" aria-hidden="true"></div>
                 </div>
                 <div id="statusWikiCats" class="flex items-center gap-2 mt-3 text-sm"></div>
             </div>
@@ -1577,36 +1557,17 @@
         </div>
 
     </div><!-- end scrollable wrapper -->
-    <!-- Scroll-down hint (mobile only) -->
-    <div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
-        <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
-    </div>
     </main>
 
-    <script src="/static/js/auth.js"></script>
-    <script src="/static/js/header.js?v=2"></script>
-    <script src="/static/js/sidebar.js?v=21"></script>
+    <script src="/static/js/auth.js?v=1"></script>
+    <script src="/static/js/shell.js?v=1"></script>
     <script src="/static/js/notifications.js?v=3"></script>
     <script>
-        // Initialize sidebar and auth
+        // Auth gate (the shell itself is server-rendered)
         (async function() {
-            initSidebar('settings');
-            initNotifications();
-
-            // Scroll-down hint — fade when at bottom
-            (function() {
-                var hint = document.getElementById('scrollDownHint');
-                if (!hint) return;
-                window.addEventListener('scroll', function() {
-                    var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
-                    hint.style.opacity = atBottom ? '0' : '1';
-                });
-            })();
 
             const user = await checkAuth({ requireAdmin: true });
             if (!user) return;
-            showAdminNav(user.is_admin);
-            loadSystemStatus();
 
             // Show admin account section for simple auth users
             if (user.auth_method === 'simple') {
@@ -1615,18 +1576,6 @@
                 var usernameField = document.getElementById('adminNewUsername');
                 if (usernameField) usernameField.placeholder = user.username || 'Leave blank to keep current';
             }
-
-            // Populate desktop header
-            var headerUsername = document.getElementById('headerUsername');
-            var headerRole = document.getElementById('headerRole');
-            if (headerUsername) headerUsername.textContent = user.display_name || user.username;
-            if (headerRole) headerRole.textContent = user.is_admin ? 'Admin' : 'User';
-
-            // Populate mobile user info
-            var mobileUsername = document.getElementById('mobileUsername');
-            var mobileRole = document.getElementById('mobileRole');
-            if (mobileUsername) mobileUsername.textContent = user.display_name || user.username;
-            if (mobileRole) mobileRole.textContent = user.is_admin ? 'Admin' : 'User';
         })();
 
         // Tab scroll hint — hide when scrolled to end
@@ -2480,7 +2429,6 @@
 
                 if (resp.ok) {
                     showStatus(statusDiv, true, 'Authentication settings saved');
-                    localStorage.removeItem('webservarr_branding');
                 } else {
                     var err = await resp.json();
                     showStatus(statusDiv, false, err.detail || 'Failed to save');
@@ -2503,7 +2451,6 @@
             { picker: 'themeColorTextSecondary', hex: 'themeColorTextSecondaryHex', cssVar: '--color-text-secondary', key: 'theme.color_text_secondary' },
             { picker: 'themeColorBackground', hex: 'themeColorBackgroundHex', cssVar: '--color-background', key: 'theme.color_background' },
         ];
-
 
         /* Sidebar "New!" flags: DOM id -> settings key -> branding field.
            One table so load, save and reset cannot drift apart. */
@@ -2944,7 +2891,6 @@
 
                 if (resp.ok) {
                     showStatus(statusDiv, true, 'Theme saved — reload other pages to see changes');
-                    localStorage.removeItem('webservarr_branding');
                 } else {
                     var err = await resp.json();
                     showStatus(statusDiv, false, err.detail || 'Failed to save');

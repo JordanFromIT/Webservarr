@@ -5,37 +5,18 @@
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>WebServarr - Calendar</title>
 <link rel="icon" href="/static/webservarr.svg"/>
-<script src="/static/js/theme-loader.js"></script>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script src="/static/js/theme-loader.js?v=1"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
+<link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
-<script>tailwind.config = {
-  darkMode: "class",
-  theme: {
-    extend: {
-      colors: {
-        "primary": "rgb(var(--color-primary) / <alpha-value>)",
-        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
-        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
-        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
-        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
-        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
-        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
-      },
-      fontFamily: {
-        "display": ["var(--font-display)", "sans-serif"]
-      },
-    },
-  },
-}</script>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<!-- ws:sidebar -->
 <!-- Toast notification container -->
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 <!-- Main Content Area -->
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
+<!-- ws:header -->
 <!-- Scrollable Content -->
 <div class="flex-1 flex flex-col min-h-0 lg:overflow-hidden relative">
 
@@ -61,10 +42,54 @@ Today
 </div>
 
 <!-- Day-of-week headers -->
-<div id="dayHeaders" class="hidden lg:grid grid-cols-7 gap-px shrink-0"></div>
+<div id="dayHeaders" class="hidden lg:grid grid-cols-7 gap-px shrink-0">
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Sun</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Mon</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Tue</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Wed</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Thu</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Fri</div>
+<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Sat</div>
+</div>
 
 <!-- Calendar grid — fills remaining height -->
-<div id="calendarGrid" class="grid grid-cols-7 gap-px flex-1 min-h-0 lg:overflow-hidden"></div>
+<div id="calendarGrid" class="grid grid-cols-7 gap-px flex-1 min-h-0 lg:overflow-hidden" data-arrive="month" style="grid-template-rows: repeat(5, 1fr)">
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+<div class="skel rounded-lg" aria-hidden="true"></div>
+</div>
 
 </div>
 
@@ -79,44 +104,24 @@ Today
 
 </div>
 
-<!-- Scroll down indicator (mobile only) -->
-<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
-    <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
-</div>
-
 </main>
 
-<script src="/static/js/auth.js"></script>
-<script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=21"></script>
+<script src="/static/js/auth.js?v=1"></script>
+<script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
 // ---- State ----
 var _currentYear = new Date().getFullYear();
 var _currentMonth = new Date().getMonth(); // 0-indexed
 var _releaseCache = {}; // key: "YYYY-MM" → array of releases
-var _refreshInterval = null;
+var _stopRefresh = null;
 var _selectedDate = null; // "YYYY-MM-DD" or null
 
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', async function() {
-    initSidebar('calendar');
-    initNotifications();
-
-    // Scroll-down hint — fade out at bottom
-    (function() {
-        var hint = document.getElementById('scrollDownHint');
-        if (!hint) return;
-        window.addEventListener('scroll', function() {
-            var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
-            hint.style.opacity = atBottom ? '0' : '1';
-        });
-    })();
 
     var user = await checkAuth();
     if (!user) return;
-    showAdminNav(user.is_admin);
-    loadSystemStatus();
 
     // Wire up nav buttons
     document.getElementById('prevMonthBtn').addEventListener('click', function() {
@@ -139,7 +144,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     renderMonth();
 
     // Auto-refresh every 60 seconds
-    _refreshInterval = setInterval(function() {
+    _stopRefresh = WS.poll(function() {
         fetchAndRender();
     }, 60000);
 });
@@ -170,7 +175,9 @@ function goToToday() {
 // ---- Day-of-Week Headers ----
 
 function buildDayHeaders() {
+    // Shipped in the markup so the row is there at first paint; nothing to do.
     var container = document.getElementById('dayHeaders');
+    if (container.children.length) return;
     var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     days.forEach(function(day) {
         var el = document.createElement('div');
@@ -188,20 +195,21 @@ function renderMonth() {
         'July', 'August', 'September', 'October', 'November', 'December'];
     document.getElementById('monthLabel').textContent = monthNames[_currentMonth] + ' ' + _currentYear;
 
-    // Show loading state in grid
+    // A skeleton month while the data comes in - the same grid the real month
+    // uses, so nothing moves when it lands. On the first paint the markup
+    // already carries one; only a month change needs it rebuilt.
     var grid = document.getElementById('calendarGrid');
-    clearChildren(grid);
-    var loadingCell = document.createElement('div');
-    loadingCell.className = 'col-span-7 text-center text-steel-blue py-12';
-    var spinner = document.createElement('span');
-    spinner.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin';
-    spinner.textContent = 'progress_activity';
-    var loadingText = document.createElement('p');
-    loadingText.className = 'text-sm';
-    loadingText.textContent = 'Loading calendar...';
-    loadingCell.appendChild(spinner);
-    loadingCell.appendChild(loadingText);
-    grid.appendChild(loadingCell);
+    if (!grid.querySelector('.skel')) {
+        clearChildren(grid);
+        grid.className = 'grid grid-cols-7 gap-px flex-1 min-h-0 lg:overflow-hidden';
+        grid.style.gridTemplateRows = 'repeat(5, 1fr)';
+        for (var i = 0; i < 35; i++) {
+            var cell = document.createElement('div');
+            cell.className = 'skel rounded-lg';
+            cell.setAttribute('aria-hidden', 'true');
+            grid.appendChild(cell);
+        }
+    }
 
     fetchAndRender();
 }
@@ -226,10 +234,10 @@ async function fetchAndRender() {
     var days = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
     var startStr = formatDateISO(startDate);
 
-    try {
-        var resp = await fetch('/api/integrations/upcoming-releases?start=' + startStr + '&days=' + days);
-        if (!resp.ok) throw new Error('API error');
-        var releases = await resp.json();
+    var url = '/api/integrations/upcoming-releases?start=' + startStr + '&days=' + days;
+    return WS.swr('calendar:' + cacheKey, function () { return WS.getJSON(url); }, function (releases) {
+        // A month change may have happened while this answer was in flight.
+        if (cacheKey !== _currentYear + '-' + padZero(_currentMonth + 1)) return;
 
         // Group by date
         var grouped = {};
@@ -241,15 +249,17 @@ async function fetchAndRender() {
         });
 
         _releaseCache[cacheKey] = grouped;
-        buildGrid(startDate, endDate, grouped);
+        WS.arrive('month', function () {
+            buildGrid(startDate, endDate, grouped);
 
-        // If detail panel is open, refresh it too
-        if (_selectedDate && grouped[_selectedDate]) {
-            showDetailPanel(_selectedDate, grouped[_selectedDate]);
-        } else if (_selectedDate) {
-            showDetailPanel(_selectedDate, []);
-        }
-    } catch (error) {
+            // If detail panel is open, refresh it too
+            if (_selectedDate && grouped[_selectedDate]) {
+                showDetailPanel(_selectedDate, grouped[_selectedDate]);
+            } else if (_selectedDate) {
+                showDetailPanel(_selectedDate, []);
+            }
+        });
+    }, { onError: function (error) {
         console.error('Calendar fetch error:', error);
         var grid = document.getElementById('calendarGrid');
         clearChildren(grid);
@@ -264,7 +274,7 @@ async function fetchAndRender() {
         errCell.appendChild(errIcon);
         errCell.appendChild(errText);
         grid.appendChild(errCell);
-    }
+    } });
 }
 
 function buildGrid(startDate, endDate, grouped) {

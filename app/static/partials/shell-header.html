@@ -1,0 +1,43 @@
+<!--
+  Desktop header: status pill, notification bell, user menu.
+
+  Server-rendered (app/pages.py) with the user already filled in. The pill
+  starts in the "unknown" state, which reserves its width but paints nothing -
+  it never says "Loading". shell.js paints the last known state from
+  sessionStorage at once and revalidates in the background.
+
+  notifications.js finds the bell by title="Notifications" inside a <header>
+  whose class list contains lg:flex - keep both.
+-->
+<header id="appHeader" class="h-16 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-black/40 backdrop-blur-md relative z-50">
+  <div class="flex items-center gap-6">
+    <div id="systemStatus" data-state="unknown" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-steel-blue/10 border border-steel-blue/30">
+      <span data-status-dot class="flex size-2 rounded-full bg-steel-blue"></span>
+      <span data-status-text class="text-steel-blue text-xs font-bold uppercase tracking-widest">&nbsp;</span>
+    </div>
+  </div>
+  <div class="flex items-center gap-4">
+    <button class="relative p-2 text-steel-blue hover:text-frosted-blue transition-colors group" title="Notifications" aria-label="Notifications">
+      <span class="material-symbols-outlined">notifications</span>
+    </button>
+    <div class="relative">
+      <button id="userMenuBtn" class="flex items-center gap-3 pl-4 cursor-pointer hover:opacity-80 transition-opacity" aria-label="Account menu">
+        <div class="text-right">
+          <p id="headerUsername" class="text-sm font-bold text-frosted-blue leading-none">{{user_name}}</p>
+          <p id="headerRole" class="text-[10px] text-frosted-blue/60 mt-1">{{user_role}}</p>
+        </div>
+        <div id="headerAvatar" class="size-9 rounded-full bg-gradient-to-br from-baltic-blue to-cornflower-ocean border border-steel-blue/40" style="{{avatar_style}}"></div>
+      </button>
+      <div id="userMenuDropdown" class="hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
+        <a href="/settings" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors {{admin_block}}">
+          <span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>
+          Account Settings
+        </a>
+        <button data-logout class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors text-left">
+          <span class="material-symbols-outlined text-steel-blue text-sm">logout</span>
+          Sign Out
+        </button>
+      </div>
+    </div>
+  </div>
+</header>

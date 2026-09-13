@@ -11,3 +11,9 @@ docs/
 LICENSE
 nginx.conf
 .github/
+node_modules/
+package.json
+package-lock.json
+tailwind.config.js
+scripts/
+app/tests/

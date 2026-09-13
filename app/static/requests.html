@@ -5,37 +5,18 @@
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>WebServarr - Media Requests</title>
 <link rel="icon" href="/static/webservarr.svg"/>
-<script src="/static/js/theme-loader.js"></script>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script src="/static/js/theme-loader.js?v=1"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
+<link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
-<script>tailwind.config = {
-  darkMode: "class",
-  theme: {
-    extend: {
-      colors: {
-        "primary": "rgb(var(--color-primary) / <alpha-value>)",
-        "baltic-blue": "rgb(var(--color-primary) / <alpha-value>)",
-        "cornflower-ocean": "rgb(var(--color-secondary) / <alpha-value>)",
-        "steel-blue": "rgb(var(--color-accent) / <alpha-value>)",
-        "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
-        "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
-        "background-dark": "rgb(var(--color-background) / <alpha-value>)",
-      },
-      fontFamily: {
-        "display": ["var(--font-display)", "sans-serif"]
-      },
-    },
-  },
-}</script>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
-<div id="sidebar-root" class="lg:w-64 lg:shrink-0"></div>
+<!-- ws:sidebar -->
 <!-- Toast notification container -->
 <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 <!-- Main Content Area -->
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
-<div id="header-root" class="hidden lg:block lg:h-16"></div>
+<!-- ws:header -->
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
@@ -87,28 +68,28 @@
     <section class="flex-1 min-w-0">
       <p class="text-sm text-steel-blue font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Library</p>
       <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statSize">--</span>
+        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statSize"><span class="skel skel-num" style="width:5ch" aria-hidden="true"></span></span>
         <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">On Disk</span>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statMovies">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statMovies"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Movies</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statShows">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statShows"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">TV Shows</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statEpisodes">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statEpisodes"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Episodes</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statEbooks">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statEbooks"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">eBooks</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statAudiobooks">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statAudiobooks"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Audiobooks</p>
         </div>
       </div>
@@ -117,23 +98,23 @@
     <section class="flex-1 min-w-0">
       <p class="text-sm text-steel-blue font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Queue</p>
       <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statWait">--</span>
+        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statWait"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
         <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Typical Wait</span>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statInProgress">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statInProgress"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">In Progress</p>
         </div>
         <!-- Kept apart from In Progress: a film awaiting its cinema release is
              not a stuck request, and counting it as one makes the queue look
              broken. -->
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statUnreleased">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statUnreleased"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Not Yet Released</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statAdded">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statAdded"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Added This Month</p>
         </div>
       </div>
@@ -145,16 +126,16 @@
     <section class="flex-1 min-w-0">
       <p class="text-sm text-steel-blue font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Quality</p>
       <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statHdPct">--</span>
+        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statHdPct"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
         <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">HD or Better</span>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kMovies">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kMovies"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">4K Movies</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kEpisodes">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kEpisodes"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">4K Episodes</p>
         </div>
       </div>
@@ -163,7 +144,7 @@
     <section class="flex-1 min-w-0">
       <p class="text-sm text-steel-blue font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Completeness</p>
       <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statFulfilled">--</span>
+        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statFulfilled"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
         <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Requests Fulfilled</span>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
@@ -171,11 +152,11 @@
              when every one of its seasons does - so both are given rather than
              one standing in for the other. -->
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statComplete">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statComplete"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Complete Shows</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statSeasons">--</p>
+          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statSeasons"><span class="skel skel-num" aria-hidden="true"></span></p>
           <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Complete Seasons</p>
         </div>
       </div>
@@ -292,10 +273,9 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
 <!-- Requests Grid -->
 <div id="requestsGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-<div class="text-center text-steel-blue py-8 col-span-full">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
-<p>Loading requests...</p>
-</div>
+<div class="skel rounded-xl h-24" aria-hidden="true"></div>
+<div class="skel rounded-xl h-24" aria-hidden="true"></div>
+<div class="skel rounded-xl h-24" aria-hidden="true"></div>
 </div>
 <!-- Requests pagination -->
 <div id="requestsPagination" class="flex items-center justify-center gap-3 mt-6 hidden">
@@ -312,11 +292,6 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
 </div>
 </div>
-<!-- Scroll-down hint (mobile only) -->
-<div id="scrollDownHint" class="fixed bottom-6 left-1/2 -translate-x-1/2 pointer-events-none lg:hidden transition-opacity duration-300">
-    <span class="material-symbols-outlined text-secondary text-4xl animate-bounce">arrow_downward</span>
-</div>
-
 <!-- Media Detail Modal -->
 <div id="mediaModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4">
   <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeMediaModal()"></div>
@@ -533,9 +508,8 @@ body.rs-resizing { cursor: col-resize; user-select: none; }
 }
 </style>
 
-<script src="/static/js/auth.js"></script>
-<script src="/static/js/header.js?v=2"></script>
-<script src="/static/js/sidebar.js?v=21"></script>
+<script src="/static/js/auth.js?v=1"></script>
+<script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script>
 // Discover row definitions.
@@ -566,7 +540,7 @@ var _searchDisplayPage = 1;
 var _allRequests = [];
 var _currentFilter = 'all';
 var _requestsDisplayPage = 1;
-var _refreshInterval = null;
+var _stopRefresh = null;
 var CARDS_PER_PAGE = 9;
 
 // ---------------------------------------------------------------------------
@@ -971,18 +945,6 @@ var RS = (function () {
 })();
 
 document.addEventListener('DOMContentLoaded', async function() {
-    initSidebar('requests');
-    initNotifications();
-
-    // Scroll-down hint — fade when at bottom
-    (function() {
-        var hint = document.getElementById('scrollDownHint');
-        if (!hint) return;
-        window.addEventListener('scroll', function() {
-            var atBottom = (window.innerHeight + window.scrollY) >= document.body.scrollHeight - 20;
-            hint.style.opacity = atBottom ? '0' : '1';
-        });
-    })();
 
     // Close media modal on Escape key
     document.addEventListener('keydown', function(e) {
@@ -991,8 +953,6 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     var user = await checkAuth();
     if (!user) return;
-    showAdminNav(user.is_admin);
-    loadSystemStatus();
 
     // Not awaited: the status grid is five integration calls behind a cache and
     // must never hold up the search UI that most visits are here for.
@@ -1029,7 +989,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     loadExistingRequests();
 
     // Auto-refresh every 30 seconds
-    _refreshInterval = setInterval(function() {
+    _stopRefresh = WS.poll(function() {
         loadRequestCounts();
         loadExistingRequests();
     }, 30000);
