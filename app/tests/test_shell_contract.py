@@ -51,7 +51,7 @@ class ShellContract(unittest.TestCase):
         for p in sorted(STATIC.glob("*.html")):
             h = p.read_text(encoding="utf-8")
             self.assertIn('href="/static/css/app.css?v=', h, p.name)
-            self.assertIn('src="/static/js/theme-loader.js"', h, p.name)
+            self.assertIn('src="/static/js/theme-loader.js?v=', h, p.name)
 
     def test_partials_keep_the_notification_and_menu_contracts(self):
         strip = lambda text: re.sub(r"<!--.*?-->", "", text, flags=re.S)   # comments describe the contract too
