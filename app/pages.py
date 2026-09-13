@@ -324,9 +324,11 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
 
     logo = _safe_url(branding.get("logo_url"))
     if logo:
+        # A fixed box: an unsized image would push the whole nav down the
+        # moment it arrived on a cold load (the one layout shift the shell had).
         logo_html = (
             f'<img src="{html.escape(logo, quote=True)}" alt="Logo" '
-            'class="w-full h-auto rounded-lg object-contain mb-3">'
+            'class="w-full h-24 rounded-lg object-contain mb-3">'
         )
     else:
         logo_icon = html.escape(icons.get("sidebar_logo") or "settings_input_component")
