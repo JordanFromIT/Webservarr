@@ -292,14 +292,21 @@ html:not([data-netdata]) #netdataGauges { display: none; }
 #mobileTopBar   { view-transition-name: ws-topbar; }
 main            { view-transition-name: ws-content; }
 
-::view-transition-old(ws-sidebar), ::view-transition-new(ws-sidebar),
-::view-transition-old(ws-header),  ::view-transition-new(ws-header),
-::view-transition-old(ws-topbar),  ::view-transition-new(ws-topbar),
-::view-transition-old(root),       ::view-transition-new(root) {
-  animation: none;
+/* The stationary parts must not be drawn twice: the browser blends the old
+   and new snapshots additively (plus-lighter), so a translucent sidebar shown
+   in both would flash brighter for the length of the transition. Drop the
+   old snapshot and let the new one sit still. */
+::view-transition-old(ws-sidebar), ::view-transition-old(ws-header),
+::view-transition-old(ws-topbar),  ::view-transition-old(root) {
+  display: none;
 }
-::view-transition-old(ws-content) { animation: ws-vt-out 120ms ease-out both; }
-::view-transition-new(ws-content) { animation: ws-vt-in 180ms ease-out both; }
+::view-transition-new(ws-sidebar), ::view-transition-new(ws-header),
+::view-transition-new(ws-topbar),  ::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(ws-content) { animation: ws-vt-out 90ms ease-out both; }
+::view-transition-new(ws-content) { animation: ws-vt-in 140ms ease-out both; }
 @keyframes ws-vt-out { to { opacity: 0; } }
 @keyframes ws-vt-in { from { opacity: 0; } }
 
@@ -339,7 +346,7 @@ main            { view-transition-name: ws-content; }
  * A section plays one 12px fade-up when its content lands (shell.js adds
  * .ws-in in document order, 60ms apart). Polls never replay it.
  */
-[data-arrive].ws-in { animation: ws-fade-up 220ms ease-out both; }
+[data-arrive].ws-in { animation: ws-fade-up 160ms ease-out both; }
 @keyframes ws-fade-up {
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: none; }

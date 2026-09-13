@@ -105,13 +105,19 @@
   // once every section above it has arrived (or once the gate lifts, so one
   // slow integration cannot hold the page). Later calls for a key that has
   // already arrived run at once with no animation - polls use the same path.
-  var arr = { order: [], done: {}, queue: {}, gate: false, last: 0 };
+  var arr = { order: [], done: {}, queue: {}, gate: false, last: 0, painted: false };
 
   function arriveInit() {
     arr.order = Array.prototype.map.call(document.querySelectorAll('[data-arrive]'), function (el) {
       return el.getAttribute('data-arrive');
     });
-    setTimeout(function () { arr.gate = true; arriveFlush(); }, 1200);
+    // Ordering is only worth a short wait. Answers that land within this
+    // window reveal top-down; anything slower reveals as it comes, so one
+    // slow integration never holds the page.
+    setTimeout(function () { arr.gate = true; arriveFlush(); }, 300);
+    // Content that is in place before the first frame (a revisit painting
+    // from cache) must not fade in - it was never absent.
+    requestAnimationFrame(function () { requestAnimationFrame(function () { arr.painted = true; }); });
   }
 
   function arrive(key, write) {
@@ -136,7 +142,7 @@
       arr.done[k] = true;
       try { write(); } catch (e) { if (window.console) console.error(e); }
       var el = document.querySelector('[data-arrive="' + k + '"]');
-      if (el) {
+      if (el && arr.painted) {
         var now = performance.now();
         var delay = Math.max(0, arr.last + 60 - now);   // 60 ms stagger between sections
         arr.last = now + delay;
