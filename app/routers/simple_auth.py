@@ -19,6 +19,11 @@ from app.models import User, Setting
 # Secure cookies whenever served over HTTPS (see settings.cookie_secure).
 _COOKIE_SECURE = settings.cookie_secure
 
+# Fixed bcrypt hash used to run a verify even when the username doesn't exist, so
+# login timing is constant and can't be used to enumerate valid usernames (L9).
+# Computed once at import; the password value is irrelevant (never matched).
+_DUMMY_PASSWORD_HASH = bcrypt.hash("webservarr-timing-equalizer")
+
 router = APIRouter()
 
 
@@ -55,7 +60,15 @@ async def simple_login(
         User.is_active == True,
     ).first()
 
-    if not user or not bcrypt.verify(login_data.password, user.password_hash):
+    if user:
+        password_valid = bcrypt.verify(login_data.password, user.password_hash)
+    else:
+        # Unknown user: still run a bcrypt verify against the dummy hash so the
+        # timing matches the known-user path (L9). Result is discarded.
+        bcrypt.verify(login_data.password, _DUMMY_PASSWORD_HASH)
+        password_valid = False
+
+    if not password_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",

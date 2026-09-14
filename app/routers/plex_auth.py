@@ -3,7 +3,11 @@ Direct Plex OAuth routes — PIN-based authentication without Authentik.
 Same flow used by Seerr, Tautulli, and other *arr apps.
 """
 
+import hashlib
+import hmac
+import json
 import logging
+import secrets
 import uuid
 from urllib.parse import urlencode
 
@@ -20,12 +24,27 @@ from app.database import get_db
 from app.integrations import seerr
 from app.limiter import limiter
 from app.models import Setting
-from app.routers.auth import _is_plex_server_owner
+from app.routers.auth import (
+    _is_plex_server_owner,
+    _plex_auth_enabled,
+    _user_has_server_access,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 PLEX_TIMEOUT = 5.0
+
+# Cookie that binds a Plex PIN to the browser that started the login (M3). Its
+# value is a random nonce; Redis stores only sha256(nonce) alongside the PIN, so
+# a stolen Redis value can't forge the cookie and a stolen cookie without the
+# PIN id is useless.
+PLEX_PIN_COOKIE = "webservarr_plex_pin"
+
+
+def _hash_pin_nonce(nonce: str) -> str:
+    """SHA-256 hex of a PIN-binding nonce (what we store in Redis)."""
+    return hashlib.sha256(nonce.encode("utf-8")).hexdigest()
 
 
 # --- Helpers ---
@@ -81,11 +100,19 @@ class PlexCallbackRequest(BaseModel):
 
 @router.post("/plex-start")
 @limiter.limit("5/minute")
-async def plex_start(request: Request, db: Session = Depends(get_db)):
+async def plex_start(request: Request, response: Response, db: Session = Depends(get_db)):
     """
     Initiate Plex PIN-based auth flow.
     Creates a PIN on plex.tv and returns the auth URL for the client to open.
     """
+    # Enforce the auth toggle server-side (H1a): don't even issue a PIN when
+    # direct-Plex login is disabled.
+    if not _plex_auth_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Plex authentication is disabled",
+        )
+
     # Verify Plex integration is configured
     plex_url = db.query(Setting).filter(Setting.key == "integration.plex.url").first()
     plex_token = db.query(Setting).filter(Setting.key == "integration.plex.token").first()
@@ -135,9 +162,24 @@ async def plex_start(request: Request, db: Session = Depends(get_db)):
             detail="Invalid PIN response from Plex",
         )
 
-    # Store PIN in Redis with 5-minute TTL
+    # Bind the PIN to this browser (M3): generate a nonce, store only its hash in
+    # Redis alongside the PIN, and hand the browser the nonce in an HttpOnly
+    # cookie. The callback requires the matching cookie before proceeding, so a
+    # third party who guesses/brackets the pin_id can't complete someone else's
+    # login.
+    pin_nonce = secrets.token_urlsafe(32)
     redis = await session_manager.get_redis()
-    await redis.setex(f"plex_pin:{pin_id}", 300, "1")
+    await redis.setex(f"plex_pin:{pin_id}", 300, _hash_pin_nonce(pin_nonce))
+
+    response.set_cookie(
+        key=PLEX_PIN_COOKIE,
+        value=pin_nonce,
+        max_age=300,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path="/",
+    )
 
     # Build callback URL from the incoming request so no APP_DOMAIN config is needed.
     # Honour X-Forwarded-Proto behind reverse proxy / Cloudflare Tunnel.
@@ -170,10 +212,35 @@ async def plex_callback(
     """
     pin_id = body.pin_id
 
-    # Verify the PIN was issued by us (anti-replay)
+    # Enforce the auth toggle server-side (H1a).
+    if not _plex_auth_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Plex authentication is disabled",
+        )
+
     redis = await session_manager.get_redis()
     pin_key = f"plex_pin:{pin_id}"
-    if not await redis.exists(pin_key):
+    stored_hash = await redis.get(pin_key)
+    stored_hash_str = (
+        stored_hash.decode() if isinstance(stored_hash, (bytes, bytearray)) else (stored_hash or "")
+    )
+
+    # Browser-binding + anti-replay (M3): require the cookie set at /plex-start
+    # and verify it hashes to the value stored with THIS pin. A request without
+    # the matching cookie — an attacker polling another browser's pin_id, or a
+    # probe for issued ids — gets ONE identical generic error regardless of
+    # whether the pin is unknown, expired, or simply not theirs, so the endpoint
+    # is not an oracle for issued pin ids. The legitimate browser (which holds
+    # the cookie) is the only caller that can reach the states below, including
+    # the "not yet authorized" polling response the login page relies on.
+    cookie_nonce = request.cookies.get(PLEX_PIN_COOKIE) or ""
+    binding_ok = bool(
+        stored_hash_str
+        and cookie_nonce
+        and hmac.compare_digest(_hash_pin_nonce(cookie_nonce), stored_hash_str)
+    )
+    if not binding_ok:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unknown or expired PIN. Please start a new login.",
@@ -251,8 +318,33 @@ async def plex_callback(
     email = user_info.get("email", "")
     avatar_url = user_info.get("thumb", "")
 
-    # Determine admin status
-    is_admin = await _is_plex_server_owner(email, db)
+    # Require Plex server MEMBERSHIP before creating a session (H1b). This allows
+    # the owner AND all shared/home users, and rejects only accounts with no
+    # access to the configured server. Fails closed on error.
+    if not await _user_has_server_access(auth_token, db):
+        logger.warning("Plex login denied: %s has no access to the configured Plex server", email)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account does not have access to this Plex server.",
+        )
+
+    # Determine admin status by immutable Plex account id (H2). The owner passes
+    # purely on the id match. The secondary system.admin_email allowlist only
+    # ever fires here if plex.tv explicitly reports the account's email as
+    # confirmed; if it does not, email_verified stays False and a non-owner can
+    # never become admin via the Plex-direct path (closes H2(b) for template
+    # installs whose admin_email may be registerable at plex.tv).
+    email_verified = bool(
+        user_info.get("confirmed")
+        or user_info.get("confirmedAt")
+        or user_info.get("emailVerified")
+    )
+    is_admin = await _is_plex_server_owner(
+        db,
+        user_plex_id=plex_user_id,
+        email=email,
+        email_verified=email_verified,
+    )
 
     # Create session
     session_data = {
@@ -282,6 +374,8 @@ async def plex_callback(
         secure=_cookie_secure,
         samesite="lax",
     )
+    # PIN binding is consumed — clear its cookie.
+    response.delete_cookie(key=PLEX_PIN_COOKIE, path="/")
 
     # Try Seerr SSO (non-blocking — failure doesn't affect login)
     try:
@@ -313,6 +407,16 @@ async def plex_callback_page(request: Request):
     If opened as redirect (no opener): redirects to login page.
     """
     app_origin = f"{request.url.scheme}://{request.url.netloc}"
+    # The origin comes from the (attacker-controllable) Host header and is
+    # interpolated into inline JS. JSON-encode it for the JS string context, then
+    # neutralise the sequences that could otherwise break out of the <script>
+    # element (e.g. a Host containing "</script>"). L13.
+    app_origin_js = (
+        json.dumps(app_origin)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -321,7 +425,7 @@ async def plex_callback_page(request: Request):
 <p>Completing authentication...</p>
 <script>
 if (window.opener) {{
-    window.opener.postMessage({{type: 'plex-auth-complete'}}, '{app_origin}');
+    window.opener.postMessage({{type: 'plex-auth-complete'}}, {app_origin_js});
     window.close();
 }} else {{
     window.location.href = '/login?plex_auth=complete';

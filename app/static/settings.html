@@ -3252,6 +3252,34 @@
             }
         });
 
+        // Load saved HTML into the rich-text editor without letting any active
+        // markup run. Belt-and-suspenders behind the server-side sanitiser:
+        // assigning post.content straight to innerHTML would fire an <img
+        // onerror> in a legacy/unsanitised post the moment an admin opened it.
+        // We parse in an inert document (no browsing context, so nothing loads
+        // or executes there), drop executable/loading elements and inline
+        // handlers, then move the cleaned nodes in. Legitimate editor markup
+        // (headings, lists, links, images, code, hr, strike) is preserved, so
+        // the save round-trip is unchanged for real posts.
+        function setEditorHtml(el, html) {
+            el.innerHTML = '';
+            var doc = new DOMParser().parseFromString(String(html == null ? '' : html), 'text/html');
+            doc.querySelectorAll('script, style, iframe, object, embed, link, meta, base').forEach(function (n) { n.remove(); });
+            doc.querySelectorAll('*').forEach(function (n) {
+                Array.prototype.slice.call(n.attributes).forEach(function (attr) {
+                    var name = attr.name.toLowerCase();
+                    if (name.indexOf('on') === 0) {
+                        n.removeAttribute(attr.name);
+                    } else if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\s*javascript:/i.test(attr.value || '')) {
+                        n.removeAttribute(attr.name);
+                    }
+                });
+            });
+            while (doc.body.firstChild) {
+                el.appendChild(doc.body.firstChild);
+            }
+        }
+
         function clearEditor() {
             editor.innerHTML = '';
             isPreviewMode = false;
@@ -3459,7 +3487,7 @@
                 document.getElementById('newsFormTitle').textContent = 'Edit News Post';
                 document.getElementById('postId').value = id;
                 document.getElementById('postTitle').value = post.title;
-                editor.innerHTML = post.content;
+                setEditorHtml(editor, post.content);
                 document.getElementById('postPinned').checked = post.pinned;
                 setPostStatus(post.published ? 'published' : 'draft');
                 pendingPublish = post.published;

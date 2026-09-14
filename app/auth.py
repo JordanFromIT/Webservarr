@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 import httpx
 import logging
 import secrets
+import time
 from app.config import settings
 import redis.asyncio as aioredis
 
@@ -36,12 +37,16 @@ class OIDCClient:
         self.token_url = f"{base_url}/application/o/token/"
         self.userinfo_url = f"{base_url}/application/o/userinfo/"
 
-    async def get_authorization_url(self, state: str) -> str:
+    async def get_authorization_url(
+        self, state: str, code_challenge: str = "", nonce: str = ""
+    ) -> str:
         """
         Generate authorization URL for OIDC login flow.
 
         Args:
             state: CSRF protection state parameter
+            code_challenge: PKCE S256 code challenge (base64url, no padding)
+            nonce: OIDC nonce to bind the id_token to this browser's flow
 
         Returns:
             Authorization URL to redirect user to
@@ -52,19 +57,29 @@ class OIDCClient:
             scope="openid profile email plex"
         )
 
+        extra: Dict[str, Any] = {}
+        if code_challenge:
+            # PKCE (S256): the matching code_verifier is sent at token exchange.
+            extra["code_challenge"] = code_challenge
+            extra["code_challenge_method"] = "S256"
+        if nonce:
+            extra["nonce"] = nonce
+
         uri, _ = client.create_authorization_url(
             self.authorize_url,
-            state=state
+            state=state,
+            **extra,
         )
 
         return uri
 
-    async def exchange_code_for_token(self, code: str) -> Dict[str, Any]:
+    async def exchange_code_for_token(self, code: str, code_verifier: str = "") -> Dict[str, Any]:
         """
         Exchange authorization code for access token.
 
         Args:
             code: Authorization code from callback
+            code_verifier: PKCE code_verifier matching the challenge sent at /login
 
         Returns:
             Token response with access_token, id_token, etc.
@@ -75,17 +90,25 @@ class OIDCClient:
             redirect_uri=self.redirect_uri
         )
 
+        kwargs: Dict[str, Any] = {}
+        if code_verifier:
+            kwargs["code_verifier"] = code_verifier
+
         try:
             token = await client.fetch_token(
                 self.token_url,
                 code=code,
-                grant_type="authorization_code"
+                grant_type="authorization_code",
+                **kwargs,
             )
             return token
         except Exception as e:
+            # Log the detail server-side; return a generic message to the client
+            # so upstream error text is never disclosed (L15).
+            logger.error("OIDC token exchange failed: %s", str(e))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Failed to exchange code for token: {str(e)}"
+                detail="Authentication failed"
             )
 
     async def get_userinfo(self, access_token: str) -> Dict[str, Any]:
@@ -107,9 +130,11 @@ class OIDCClient:
                 response.raise_for_status()
                 return response.json()
             except Exception as e:
+                # Log server-side; return a generic message to the client (L15).
+                logger.error("OIDC userinfo fetch failed: %s", str(e))
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=f"Failed to fetch user info: {str(e)}"
+                    detail="Authentication failed"
                 )
 
 
@@ -119,7 +144,20 @@ class SessionManager:
     def __init__(self):
         self.redis_url = settings.redis_url
         self.max_age = settings.session_max_age
+        # Hard ceiling on session age, independent of the rolling `max_age` TTL
+        # that get_session refreshes on every access. A session older than this
+        # is rejected even if it has been used continuously (L10).
+        self.absolute_max_age = 30 * 24 * 60 * 60  # 30 days
         self._redis: Optional[aioredis.Redis] = None
+
+    @staticmethod
+    def _user_sessions_key(auth_method: str, user_id: str) -> str:
+        """Redis set key indexing all live session ids for a given identity.
+
+        Keyed on (auth_method, user_id) so identities in different auth realms
+        that share a numeric/string id never collide.
+        """
+        return f"user_sessions:{auth_method}:{user_id}"
 
     async def get_redis(self) -> aioredis.Redis:
         """Get or create Redis connection."""
@@ -160,10 +198,25 @@ class SessionManager:
             "id_token": str(user_data.get("id_token", "")),
             "plex_token": str(user_data.get("plex_token", "")),
             "avatar_url": str(user_data.get("avatar_url", "")),
+            # Creation time for the absolute-lifetime ceiling enforced in
+            # get_session. Extra field only — older sessions without it are
+            # grandfathered (see get_session).
+            "created_at": str(int(time.time())),
         }
 
         await redis.hset(session_key, mapping=mapping)
         await redis.expire(session_key, self.max_age)
+
+        # Index the session under its identity so credential changes can revoke
+        # a user's other sessions (L10). The set self-expires at the absolute
+        # ceiling; stale ids left behind are harmless (deleting a missing key is
+        # a no-op).
+        user_id = mapping["user_id"]
+        auth_method = mapping["auth_method"]
+        if user_id:
+            index_key = self._user_sessions_key(auth_method, user_id)
+            await redis.sadd(index_key, session_id)
+            await redis.expire(index_key, self.absolute_max_age)
 
     async def update_session(self, session_id: str, fields: Dict[str, Any]) -> None:
         """
@@ -204,11 +257,25 @@ class SessionManager:
         if not session_data:
             return None
 
-        # Refresh expiration on access
+        # Convert bytes to strings
+        decoded = {k.decode(): v.decode() for k, v in session_data.items()}
+
+        # Enforce the absolute lifetime ceiling (L10). Sessions created before
+        # this field existed lack created_at and are grandfathered (no ceiling);
+        # they drain out via the rolling TTL / restart-driven Redis flush.
+        created_at = decoded.get("created_at")
+        if created_at:
+            try:
+                if int(time.time()) - int(created_at) > self.absolute_max_age:
+                    await redis.delete(session_key)
+                    return None
+            except ValueError:
+                pass  # malformed created_at — treat as grandfathered
+
+        # Refresh the rolling expiration on access
         await redis.expire(session_key, self.max_age)
 
-        # Convert bytes to strings
-        return {k.decode(): v.decode() for k, v in session_data.items()}
+        return decoded
 
     async def delete_session(self, session_id: str) -> None:
         """
@@ -220,6 +287,54 @@ class SessionManager:
         redis = await self.get_redis()
         session_key = f"session:{session_id}"
         await redis.delete(session_key)
+
+    async def delete_user_sessions(
+        self,
+        auth_method: str,
+        user_id: str,
+        exclude_session_id: Optional[str] = None,
+    ) -> int:
+        """Revoke every session for an identity, optionally sparing one.
+
+        Used after a credential change so old sessions can't outlive the
+        password that authorised them (L10). Returns the number deleted.
+        """
+        if not user_id:
+            return 0
+        redis = await self.get_redis()
+        index_key = self._user_sessions_key(auth_method, str(user_id))
+        members = await redis.smembers(index_key)
+        deleted = 0
+        for member in members:
+            sid = member.decode() if isinstance(member, (bytes, bytearray)) else str(member)
+            if exclude_session_id and sid == exclude_session_id:
+                continue
+            await redis.delete(f"session:{sid}")
+            await redis.srem(index_key, sid)
+            deleted += 1
+        return deleted
+
+    async def store_oidc_flow(self, flow_id: str, data: Dict[str, str], ttl: int = 300) -> None:
+        """Persist per-login OIDC flow data (state, PKCE verifier, nonce).
+
+        Keyed by a random flow id that is handed to the browser in a
+        short-lived cookie, so the callback can prove the flow was started by
+        *this* browser (M4).
+        """
+        redis = await self.get_redis()
+        flow_key = f"oidc_flow:{flow_id}"
+        await redis.hset(flow_key, mapping={k: str(v) for k, v in data.items()})
+        await redis.expire(flow_key, ttl)
+
+    async def consume_oidc_flow(self, flow_id: str) -> Optional[Dict[str, str]]:
+        """Fetch and delete a stored OIDC flow (single use). None if absent."""
+        redis = await self.get_redis()
+        flow_key = f"oidc_flow:{flow_id}"
+        data = await redis.hgetall(flow_key)
+        if not data:
+            return None
+        await redis.delete(flow_key)
+        return {k.decode(): v.decode() for k, v in data.items()}
 
     async def store_state(self, state: str) -> None:
         """

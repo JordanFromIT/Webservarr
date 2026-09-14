@@ -20,6 +20,7 @@ import re
 from typing import Dict, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse
 
+import bleach
 import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -87,6 +88,184 @@ _PASSTHROUGH_RESPONSE_HEADERS = {
     "x-pagination",
 }
 
+# The only Kavita API resources the reader and library actually call. The
+# catch-all proxy is authenticated, but without an allowlist it is still a relay
+# into every Kavita endpoint (including the anonymous api/account/login, which
+# would expose an otherwise LAN-only service to password guessing). Matched on
+# the resource segment after "api/", case-insensitively (L6).
+_KAVITA_ALLOWED_RESOURCES = {
+    "book",
+    "download",
+    "image",
+    "metadata",
+    "person",
+    "reader",
+    "search",
+    "series",
+    "want-to-read",
+}
+
+# Prefix of Kavita's own ASP.NET Core OIDC/session cookies. The handshake routes
+# forward and relay ONLY these — never the browser's WebServarr session cookie,
+# and never arbitrary cookies Kavita might try to set on our origin (M8).
+_ASPNET_COOKIE_PREFIX = ".AspNetCore."
+
+
+def _filter_aspnet_cookie_header(cookie_header: str) -> str:
+    """Keep only Kavita's own .AspNetCore.* cookies from a browser Cookie header.
+
+    The browser's Cookie header for this origin also carries the WebServarr
+    session id; forwarding the whole header to Kavita would hand it a live
+    session credential (M8). Only the handshake's own correlation/nonce cookies
+    are relevant to Kavita, so only those are passed through."""
+    if not cookie_header:
+        return ""
+    keep = []
+    for part in cookie_header.split(";"):
+        p = part.strip()
+        if not p:
+            continue
+        name = p.split("=", 1)[0].strip()
+        if name.startswith(_ASPNET_COOKIE_PREFIX):
+            keep.append(p)
+    return "; ".join(keep)
+
+
+def _force_signin_path(set_cookie: str) -> str:
+    """Rewrite a Set-Cookie so its Path is pinned to /signin-oidc.
+
+    Kavita's handshake cookies belong only on the callback path. Pinning the
+    path stops a cookie from being scoped to the whole app origin, where it
+    could shadow or fixate a cookie the app itself relies on (M8)."""
+    parts = [
+        seg for seg in set_cookie.split(";")
+        if seg.strip().split("=", 1)[0].strip().lower() != "path"
+    ]
+    parts.append(" Path=/signin-oidc")
+    return ";".join(parts)
+
+
+def _origin(url: str) -> tuple:
+    """(scheme, host, effective-port) for same-origin comparison."""
+    p = urlparse(url or "")
+    scheme = (p.scheme or "").lower()
+    port = p.port or (443 if scheme == "https" else 80 if scheme == "http" else None)
+    return scheme, (p.hostname or "").lower(), port
+
+
+def _location_allowed(location: str, kavita_base: str) -> bool:
+    """A handshake redirect may only point at Authentik or Kavita itself.
+
+    Kavita's /oidc/login answers with a redirect to the Authentik authorize
+    endpoint. Relaying that Location unchecked makes this route an open redirect
+    (M8); confining it to the configured Authentik origin (or Kavita's own)
+    closes that without affecting the real flow."""
+    target = _origin(location)
+    authentik = (settings.authentik_url or "").strip()
+    for allowed in (authentik, kavita_base):
+        if allowed and _origin(allowed) == target:
+            return True
+    return False
+
+
+def _kavita_path_allowed(path: str) -> bool:
+    """True only for an api/<allowed-resource>/... path the reader legitimately
+    uses. Rejects an embedded query/fragment in the captured path segment and
+    anything outside the reader's resource allowlist (L6)."""
+    if "?" in path or "#" in path:
+        return False
+    segments = path.split("/")
+    if len(segments) < 2 or segments[0].lower() != "api":
+        return False
+    return segments[1].lower() in _KAVITA_ALLOWED_RESOURCES
+
+
+# --- Book HTML sanitisation (H5) -------------------------------------------
+#
+# Kavita restyles book pages and rewrites their URLs but does NOT strip active
+# content, and the reader inserts the returned HTML with innerHTML on the app's
+# own origin. A poisoned EPUB (a book request auto-grabbed from an indexer, a
+# shared folder, an uploader) could therefore run script as any signed-in user,
+# admin included. Everything the browser receives is run through bleach here
+# first, with a book-appropriate allowlist. Deliberately NOT shared with
+# content.py: book HTML needs a far more permissive structural allowlist than
+# user-authored markdown, and coupling the two would widen one to fit the other.
+_BOOK_ALLOWED_TAGS = [
+    "p", "div", "span", "br", "hr",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li", "dl", "dt", "dd",
+    "blockquote", "pre", "code", "kbd", "samp", "var",
+    "em", "strong", "b", "i", "u", "s", "del", "ins", "mark", "small",
+    "sub", "sup", "abbr", "cite", "q", "time", "wbr",
+    "a", "img", "figure", "figcaption",
+    "section", "article", "aside", "header", "footer", "nav", "main", "address",
+    "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption",
+    "col", "colgroup", "ruby", "rt", "rp", "bdi", "bdo",
+]
+
+# Attributes safe everywhere.
+_BOOK_GLOBAL_ATTRS = {"class", "id", "title", "lang", "dir"}
+# Extra attributes allowed on specific tags.
+_BOOK_TAG_ATTRS = {
+    "a": {"href", "name"},
+    "img": {"src", "alt", "width", "height"},
+    "td": {"colspan", "rowspan", "headers"},
+    "th": {"colspan", "rowspan", "headers", "scope"},
+    "col": {"span"},
+    "colgroup": {"span"},
+    "ol": {"start", "type", "reversed"},
+    "bdo": {"dir"},
+}
+
+_BOOK_URI_SCHEME_RE = re.compile(r"^([a-z][a-z0-9+.\-]*):", re.IGNORECASE)
+
+# bleach strips the <script>/<style> TAGS but keeps their text, which would show
+# as raw CSS/JS in the book. Drop those element bodies first (cosmetic; bleach
+# remains the security gate for anything this misses).
+_SCRIPT_STYLE_BLOCK_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+
+
+def _allow_book_attr(tag: str, name: str, value: str) -> bool:
+    """Per-attribute filter for book HTML.
+
+    Drops every on* handler, allows a tight per-tag set, and constrains href/src
+    to relative URLs and http(s); data: is permitted only as a genuine image
+    payload on <img src>. javascript:/vbscript: are refused (bleach's own
+    protocol filter is a second line of defence on top of this)."""
+    if name.startswith("on"):
+        return False
+    if name in _BOOK_GLOBAL_ATTRS:
+        return True
+    if name not in _BOOK_TAG_ATTRS.get(tag, set()):
+        return False
+    if name in ("href", "src"):
+        v = (value or "").strip().lower().replace("\t", "").replace("\n", "").replace("\r", "")
+        m = _BOOK_URI_SCHEME_RE.match(v)
+        if m:
+            scheme = m.group(1)
+            if scheme in ("http", "https"):
+                return True
+            if scheme == "data":
+                return name == "src" and tag == "img" and v.startswith("data:image/")
+            return False
+        # No scheme => relative URL (e.g. /kavita/api/... after rewriting).
+    return True
+
+
+def sanitize_book_html(html: str) -> str:
+    """Strip script/style/svg/math/iframe/object/embed, all handlers and unsafe
+    URLs from rendered book HTML, keeping structural and formatting markup so the
+    page still reads correctly. This is the XSS gate; run it last (H5)."""
+    html = _SCRIPT_STYLE_BLOCK_RE.sub("", html)
+    return bleach.clean(
+        html,
+        tags=_BOOK_ALLOWED_TAGS,
+        attributes=_allow_book_attr,
+        protocols=["http", "https", "data"],
+        strip=True,
+        strip_comments=True,
+    )
+
 
 def get_kavita_url() -> Optional[str]:
     """Read the configured Kavita base URL from settings (short-lived session)."""
@@ -99,9 +278,16 @@ def get_kavita_url() -> Optional[str]:
 
 
 def build_forward_headers(request: Request, token: Optional[str]) -> Dict[str, str]:
-    """Copy the inbound headers minus hop-by-hop ones, attaching the user's JWT."""
+    """Copy the inbound headers minus hop-by-hop ones, attaching the user's JWT.
+
+    Client-supplied x-forwarded-* and cf-* headers are dropped (L6): the browser
+    must never be able to dictate the forwarded-for chain or spoof Cloudflare
+    metadata to Kavita."""
     headers = {
-        k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP
+        k: v for k, v in request.headers.items()
+        if k.lower() not in _HOP_BY_HOP
+        and not k.lower().startswith("x-forwarded-")
+        and not k.lower().startswith("cf-")
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -229,15 +415,27 @@ async def kavita_connect(
         # with its own generic error page regardless of what origin sends.
         raise HTTPException(status_code=503, detail="Kavita did not start the login flow")
 
+    # Relaying the upstream Location unchecked would be an open redirect (M8):
+    # confine it to the Authentik authorize endpoint (or Kavita itself).
+    if not _location_allowed(location, base):
+        logger.warning("Kavita /oidc/login redirected to an unexpected origin")
+        raise HTTPException(status_code=503, detail="Kavita login redirected somewhere unexpected")
+
     location = force_query_response_mode(location)
     response = RedirectResponse(location, status_code=302)
 
     # Kavita sets its OIDC nonce and correlation cookies here, scoped to
     # path=/signin-oidc. They must reach the browser or the callback fails with
-    # "message.State is null or empty".
+    # "message.State is null or empty". Relay ONLY those .AspNetCore.* cookies,
+    # each pinned to Path=/signin-oidc, so nothing else can be set on the app
+    # origin (M8).
     for key, value in upstream.headers.multi_items():
-        if key.lower() == "set-cookie":
-            response.headers.append("set-cookie", value)
+        if key.lower() != "set-cookie":
+            continue
+        cookie_name = value.split("=", 1)[0].strip()
+        if not cookie_name.startswith(_ASPNET_COOKIE_PREFIX):
+            continue
+        response.headers.append("set-cookie", _force_signin_path(value))
 
     return response
 
@@ -267,7 +465,11 @@ async def signin_oidc(
 
     host = request.headers.get("host", "")
     headers = origin_headers(host)
-    headers["Cookie"] = request.headers.get("cookie", "")
+    # Forward ONLY Kavita's own .AspNetCore.* handshake cookies — never the
+    # browser's WebServarr session cookie (M8).
+    aspnet_cookies = _filter_aspnet_cookie_header(request.headers.get("cookie", ""))
+    if aspnet_cookies:
+        headers["Cookie"] = aspnet_cookies
     content_type = request.headers.get("content-type")
     if content_type:
         headers["Content-Type"] = content_type
@@ -367,6 +569,12 @@ async def kavita_proxy(
     if not base:
         raise HTTPException(status_code=503, detail="Kavita is not configured")
 
+    # Only the reader/library's own resources may be reached (L6). Everything
+    # else — anonymous login, admin, plugin auth — is refused so this
+    # authenticated proxy cannot be turned into a general relay into the LAN.
+    if not _kavita_path_allowed(path):
+        raise HTTPException(status_code=404, detail="Not found")
+
     token = current_user.get("kavita_token") or None
     headers = build_forward_headers(request, token)
     body = await request.body()
@@ -423,7 +631,14 @@ async def kavita_proxy(
             await upstream.aclose()
             await client.aclose()
         body = rewrite_book_html(raw.decode("utf-8", errors="replace"), base)
+        # Sanitise LAST, so the bytes the browser receives are the gated ones
+        # (H5): the reader inserts this HTML with innerHTML on the app origin.
+        body = sanitize_book_html(body)
         response_headers.pop("content-length", None)
+        # Defence in depth: if this content is ever loaded as a document rather
+        # than fetched and inserted, sandbox it. allow-same-origin keeps the
+        # parent able to read the DOM for annotations without allowing scripts.
+        response_headers["Content-Security-Policy"] = "sandbox allow-same-origin"
         return Response(
             content=body,
             status_code=upstream.status_code,

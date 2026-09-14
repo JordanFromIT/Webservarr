@@ -10,8 +10,9 @@ bleach untouched while "javascript:" hrefs are stripped, which is what makes
 cross-linking and inline images work without a custom protocol list.
 """
 
-import bleach
 import markdown
+from bleach.html5lib_shim import Filter
+from bleach.sanitizer import Cleaner
 
 ALLOWED_TAGS = [
     'p', 'br', 'b', 'strong', 'i', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -29,17 +30,44 @@ ALLOWED_ATTRIBUTES = {
 }
 
 
+class _LinkRelFilter(Filter):
+    """Force rel="noopener noreferrer" on any <a> that carries ``target``.
+
+    ``target`` is allowed on links (a wiki/news author may legitimately open a
+    reference in a new tab), but a link opened with target="_blank" hands the
+    opened page a live ``window.opener`` handle back to this one -- reverse
+    tabnabbing. Any existing rel tokens are preserved; ``noopener`` and
+    ``noreferrer`` are appended only if missing. Links without ``target`` are
+    left exactly as bleach produced them.
+    """
+
+    def __iter__(self):
+        for token in Filter.__iter__(self):
+            if token.get("type") in ("StartTag", "EmptyTag") and token.get("name") == "a":
+                attrs = token.get("data") or {}
+                if any(name == "target" for (_ns, name) in attrs.keys()):
+                    rels = (attrs.get((None, "rel"), "") or "").split()
+                    for required in ("noopener", "noreferrer"):
+                        if required not in rels:
+                            rels.append(required)
+                    attrs[(None, "rel")] = " ".join(rels)
+                    token["data"] = attrs
+            yield token
+
+
 def sanitize_html(html: str) -> str:
     """
     Sanitize HTML to prevent XSS attacks.
-    Allows safe tags only.
+    Allows safe tags only, and forces rel="noopener noreferrer" on any link
+    that opens a new browsing context (target=...).
     """
-    return bleach.clean(
-        html,
+    cleaner = Cleaner(
         tags=ALLOWED_TAGS,
         attributes=ALLOWED_ATTRIBUTES,
         strip=True,
+        filters=[_LinkRelFilter],
     )
+    return cleaner.clean(html)
 
 
 def render_markdown(content: str) -> str:

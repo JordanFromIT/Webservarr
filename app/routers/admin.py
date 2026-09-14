@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, UploadFile, File, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -17,6 +17,8 @@ from datetime import datetime, timedelta
 
 from passlib.hash import bcrypt
 
+from app.auth import session_manager
+from app.config import settings
 from app.database import get_db
 from app.limiter import limiter
 from app.models import Setting, Notification, PushSubscription, User
@@ -122,6 +124,7 @@ async def update_account(
     data: AccountUpdateRequest,
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db),
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """
     Update admin username and/or password.
@@ -164,6 +167,26 @@ async def update_account(
         return {"success": True, "message": "No changes requested", "updated": []}
 
     db.commit()
+
+    # Revoke this user's OTHER sessions after a password change so a changed
+    # password invalidates any session that predates it (L10). The current
+    # session is spared so the admin isn't logged out of the tab they're using.
+    if "password" in changes:
+        try:
+            revoked = await session_manager.delete_user_sessions(
+                current_user.get("auth_method", "simple"),
+                str(user.id),
+                exclude_session_id=session_id,
+            )
+            if revoked:
+                logger.info(
+                    "Revoked %d other session(s) after password change for user id=%s",
+                    revoked,
+                    user.id,
+                )
+        except Exception as e:
+            logger.error("Failed to revoke sessions after password change: %s", str(e))
+
     return {"success": True, "message": "Account updated successfully", "updated": changes}
 
 

@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
+import json
 import logging
 
 from slowapi.errors import RateLimitExceeded
@@ -34,6 +35,14 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# httpx/httpcore log every request at INFO as "HTTP Request: GET <full URL>".
+# Several integration clients still carry secrets in the query string (Plex
+# token, Kavita apiKey, NYT api-key), so at INFO those secrets land in the
+# container logs. Raise these loggers to WARNING so request URLs stop being
+# logged, without silencing the app's own INFO logging (M7).
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
@@ -135,7 +144,6 @@ app = FastAPI(
 
 # Rate limiting via slowapi (backed by Redis)
 app.state.limiter = limiter
-app.add_middleware(SlowAPIMiddleware)
 
 
 async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
@@ -146,21 +154,102 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONR
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
-# Reject oversized request bodies early (memory-exhaustion DoS). Uploads are
-# capped at 2 MB in their handlers; 16 MB leaves headroom for multipart envelopes.
+# Reject oversized request bodies before anything materialises them
+# (memory/disk-exhaustion DoS). Uploads are capped at 2 MB in their handlers;
+# 16 MB leaves headroom for multipart envelopes.
 MAX_REQUEST_BYTES = 16 * 1024 * 1024
 
 
-@app.middleware("http")
-async def limit_request_body(request: Request, call_next):
-    content_length = request.headers.get("content-length")
-    if content_length:
+class _BodyTooLarge(Exception):
+    """Raised from the wrapped receive() once a streaming body exceeds the cap."""
+
+
+class BodySizeLimitMiddleware:
+    """Pure-ASGI guard that bounds the request body by actually counting bytes.
+
+    A declared Content-Length over the cap is rejected up front, but a
+    Transfer-Encoding: chunked body carries no Content-Length — and FastAPI
+    buffers the whole body (JSON in memory, multipart spooled to a temp file)
+    before auth or rate limiting runs. So the bytes are also counted as they
+    stream through receive(), and the request is refused with 413 the moment the
+    cap is exceeded, before the body is fully materialised (M9).
+
+    Registered as the innermost middleware, so a 413 it produces still travels
+    back out through the rate-limit, CORS and security-header layers, and so the
+    over-limit exception has no BaseHTTPMiddleware to cross on its way here.
+    """
+
+    def __init__(self, app, max_bytes: int):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Fast path: refuse a declared oversized Content-Length without reading
+        # a single body byte.
+        for name, value in scope.get("headers") or []:
+            if name == b"content-length":
+                try:
+                    if int(value) > self.max_bytes:
+                        await self._respond(send, 413, "Request body too large")
+                        return
+                except ValueError:
+                    await self._respond(send, 400, "Invalid Content-Length")
+                    return
+                break
+
+        total = 0
+
+        async def limited_receive():
+            nonlocal total
+            message = await receive()
+            if message["type"] == "http.request":
+                total += len(message.get("body", b"") or b"")
+                if total > self.max_bytes:
+                    raise _BodyTooLarge()
+            return message
+
+        response_started = False
+
+        async def send_wrapper(message):
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
         try:
-            if int(content_length) > MAX_REQUEST_BYTES:
-                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
-        except ValueError:
-            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
-    return await call_next(request)
+            await self.app(scope, limited_receive, send_wrapper)
+        except _BodyTooLarge:
+            if response_started:
+                # The app began responding before over-reading the body; too
+                # late to send a clean 413. Swallow so the worker survives.
+                logger.warning(
+                    "Request body exceeded %d bytes after the response had started",
+                    self.max_bytes,
+                )
+                return
+            await self._respond(send, 413, "Request body too large")
+
+    @staticmethod
+    async def _respond(send, status: int, detail: str) -> None:
+        body = json.dumps({"detail": detail}).encode()
+        await send({
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
+
+
+# Innermost middleware (registered first): see the class docstring.
+app.add_middleware(BodySizeLimitMiddleware, max_bytes=MAX_REQUEST_BYTES)
+app.add_middleware(SlowAPIMiddleware)
 
 # CORS middleware - built from config
 _cors_origins = [settings.app_url]
@@ -229,7 +318,11 @@ async def add_security_headers(request: Request, call_next):
     if frame_sources:
         csp_directives.append(f"frame-src {' '.join(frame_sources)}")
     csp_directives.append(f"connect-src {' '.join(connect_sources)}")
-    response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
+    # Do not clobber a CSP a route set for itself. Some responses (sanitised
+    # Kavita book content, the image proxies) ship a stricter `sandbox` policy;
+    # only apply the site-wide default when the route did not set its own.
+    if "content-security-policy" not in response.headers:
+        response.headers["Content-Security-Policy"] = "; ".join(csp_directives)
 
     return response
 

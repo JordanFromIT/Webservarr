@@ -5,10 +5,11 @@ Integration API routes - Plex, Uptime Kuma, Seerr, Netdata endpoints.
 import asyncio
 import json
 import logging
+import re
 import time
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -72,23 +73,38 @@ async def get_active_streams(
     return streams
 
 
+# A thumbnail 'path' is forwarded verbatim as Plex's transcode 'url' param, so
+# an attacker who can pass anything Plex-internal can make Plex issue arbitrary
+# local GETs (e.g. /library/sections/all/refresh?force=1) as the owner. Only a
+# genuine thumbnail/art metadata path with no query string is accepted (L5).
+_PLEX_THUMB_PATH = re.compile(r"^/library/metadata/\d+/(thumb|art|composite|banner)/\d+$")
+
+# Image proxy responses are sandboxed as defence in depth (M10): if a served
+# body is ever loaded as a document rather than an <img>, it cannot run script.
+_IMAGE_SANDBOX_CSP = "sandbox"
+
+
 @router.get("/plex/thumb")
 async def plex_thumbnail(
     path: str,
     current_user: dict = Depends(get_current_user),
 ):
     """Proxy a Plex thumbnail image to avoid mixed-content issues."""
-    # Anti-SSRF: 'path' is forwarded verbatim as Plex's transcode 'url' param, so
-    # it must be a Plex-internal RELATIVE path (e.g. /library/metadata/123/thumb/..)
-    # and never a full/protocol-relative URL — otherwise any authenticated user
-    # could make Plex fetch arbitrary LAN/metadata URLs and return the body.
-    _parsed = urlparse(path)
-    if not path.startswith("/") or path.startswith("//") or _parsed.scheme or _parsed.netloc:
+    if not _PLEX_THUMB_PATH.match(path):
         raise HTTPException(status_code=400, detail="Invalid thumbnail path")
+    # plex.get_thumbnail enforces the image content-type allowlist and a byte
+    # cap, returning (None, None) on anything else (M10).
     content, content_type = await plex.get_thumbnail(path)
     if content is None:
         raise HTTPException(status_code=404, detail="Thumbnail not found")
-    return Response(content=content, media_type=content_type, headers={"Cache-Control": "public, max-age=3600"})
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Content-Security-Policy": _IMAGE_SANDBOX_CSP,
+        },
+    )
 
 
 @router.get("/backgrounds")
@@ -184,7 +200,7 @@ async def get_status_summary(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/recent-requests")
 async def get_recent_requests(
-    limit: int = 10,
+    limit: int = Query(10, ge=1, le=50),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -529,6 +545,8 @@ async def book_cover(
     contact Open Library — only the VPS does. Takes an integer id, so it cannot
     be pointed at an arbitrary URL.
     """
+    # fetch_cover does not follow redirects, enforces the image content-type
+    # allowlist and caps the bytes read, returning None on anything else (M10).
     result = await openlibrary.fetch_cover(coverId)
     if result is None:
         raise HTTPException(status_code=404, detail="Cover not found")
@@ -536,7 +554,10 @@ async def book_cover(
     return Response(
         content=content,
         media_type=content_type,
-        headers={"Cache-Control": "private, max-age=604800"},
+        headers={
+            "Cache-Control": "private, max-age=604800",
+            "Content-Security-Policy": _IMAGE_SANDBOX_CSP,
+        },
     )
 
 
@@ -547,6 +568,47 @@ class BookRequestCreate(BaseModel):
     # request lands in. Anything else is treated as an ebook rather than
     # rejected, so an older client keeps working.
     format: str = "ebook"
+
+
+# A book request starts a real download on the operator's Chaptarr key, so it
+# gets a per-user daily ceiling on top of the 10/min IP limit (L3). Keyed by the
+# caller's stable id with a rolling 24h TTL.
+_BOOK_REQUESTS_PER_DAY = 20
+
+
+def _user_key(current_user: dict) -> str:
+    """A stable per-user identifier for logging and counters."""
+    return (
+        current_user.get("user_id")
+        or current_user.get("email")
+        or current_user.get("username")
+        or "unknown"
+    )
+
+
+async def _enforce_daily_book_cap(current_user: dict) -> None:
+    """Raise 429 once a user has requested too many books in 24h.
+
+    Fails open on any Redis error: the daily cap is defence in depth on top of
+    the per-IP rate limit, and a cache hiccup must not block a legitimate
+    request."""
+    uid = _user_key(current_user)
+    try:
+        redis = await session_manager.get_redis()
+        key = f"webservarr:bookreq:{uid}"
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, 86400)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Book request cap check unavailable (allowing): %s", exc)
+        return
+    if count > _BOOK_REQUESTS_PER_DAY:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily book request limit ({_BOOK_REQUESTS_PER_DAY}) reached. Please try again tomorrow.",
+        )
 
 
 @router.post("/chaptarr-request")
@@ -560,6 +622,18 @@ async def create_chaptarr_request(
     if not body.bookId.strip():
         raise HTTPException(status_code=400, detail="bookId is required")
     fmt = "audiobook" if body.format == "audiobook" else "ebook"
+
+    await _enforce_daily_book_cap(current_user)
+    # Attribute the request: it spends the operator's Chaptarr key and starts a
+    # download, so who asked for what is worth having in the logs (L3).
+    logger.info(
+        "Book request by %s (user=%s): bookId=%s format=%s",
+        current_user.get("username") or current_user.get("display_name") or "?",
+        _user_key(current_user),
+        body.bookId.strip(),
+        fmt,
+    )
+
     result = await chaptarr.request_book(body.bookId.strip(), fmt=fmt)
     if not result["ok"]:
         # 502 gets its body replaced by Cloudflare's own generic error page,
@@ -579,6 +653,22 @@ async def _get_plex_token(session_id: str) -> str | None:
     return session_data.get("plex_token") or None
 
 
+async def _require_seerr_session(session_id: str) -> str:
+    """A Seerr connect.sid for the caller's own Plex account, or a 400.
+
+    Reads flow through the caller's Seerr session so Seerr applies its per-user
+    visibility filter, rather than the admin API key which returns everyone's
+    data (L1). No Plex token means no per-user identity, so refuse — the same
+    stance the issue-create path already takes."""
+    plex_token = await _get_plex_token(session_id)
+    if not plex_token:
+        raise HTTPException(status_code=400, detail="No Plex token in session. Please sign in with Plex.")
+    connect_sid = await seerr.authenticate_with_plex_token(plex_token)
+    if not connect_sid:
+        raise HTTPException(status_code=400, detail="Could not authenticate with Seerr. Try logging out and back in.")
+    return connect_sid
+
+
 class RequestCreate(BaseModel):
     mediaType: str
     mediaId: int
@@ -595,16 +685,18 @@ async def create_seerr_request(
     if body.mediaType not in ("movie", "tv"):
         raise HTTPException(status_code=400, detail="mediaType must be 'movie' or 'tv'")
 
+    # Without a Plex token there is no per-user Seerr identity, and the old
+    # fallback to the admin API key made the request auto-approved, 4K-eligible
+    # and quota-free — an anonymous privilege escalation. Refuse instead, exactly
+    # as /issues does (M5).
     plex_token = await _get_plex_token(session_id)
-    if plex_token:
-        result = await seerr.create_request_as_user(
-            plex_token=plex_token,
-            media_type=body.mediaType, media_id=body.mediaId, is4k=body.is4k,
-        )
-    else:
-        result = await seerr.create_request(
-            media_type=body.mediaType, media_id=body.mediaId, is4k=body.is4k,
-        )
+    if not plex_token:
+        raise HTTPException(status_code=400, detail="No Plex token in session. Please sign in with Plex to request media.")
+
+    result = await seerr.create_request_as_user(
+        plex_token=plex_token,
+        media_type=body.mediaType, media_id=body.mediaId, is4k=body.is4k,
+    )
 
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "Request failed"))
@@ -625,13 +717,15 @@ class IssueCommentCreate(BaseModel):
 
 @router.get("/issues")
 async def get_issues(
-    take: int = 20,
-    skip: int = 0,
+    take: int = Query(20, ge=1, le=50),
+    skip: int = Query(0, ge=0),
     sort: str = "added",
     current_user: dict = Depends(get_current_user),
+    session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
-    """Get Seerr issues with media details. Requires authentication."""
-    return await seerr.get_issues(take=take, skip=skip, sort=sort)
+    """Get the caller's own Seerr issues with media details. Requires auth."""
+    connect_sid = await _require_seerr_session(session_id)
+    return await seerr.get_issues(take=take, skip=skip, sort=sort, connect_sid=connect_sid)
 
 
 @router.get("/issue-counts")
@@ -646,9 +740,11 @@ async def get_issue_counts(
 async def get_issue_detail(
     issue_id: int,
     current_user: dict = Depends(get_current_user),
+    session_id: str = Cookie(None, alias=settings.session_cookie_name),
 ):
-    """Get single issue with comments."""
-    issue = await seerr.get_issue_detail(issue_id)
+    """Get a single issue with comments, scoped to the caller's Seerr account."""
+    connect_sid = await _require_seerr_session(session_id)
+    issue = await seerr.get_issue_detail(issue_id, connect_sid=connect_sid)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
     return issue
@@ -748,7 +844,7 @@ async def seerr_discover_upcoming_series(
 
 @router.get("/upcoming-releases")
 async def get_upcoming_releases(
-    days: int = 14,
+    days: int = Query(14, ge=1, le=90),
     start: str = "",
     current_user: dict = Depends(get_current_user),
 ):
