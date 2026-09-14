@@ -96,6 +96,27 @@ def _decode_jwt_payload(token: str) -> dict:
 # this router (httpx directly) — it does not import app/integrations/plex.py.
 # ---------------------------------------------------------------------------
 
+def _plex_client_headers(db: Session) -> dict:
+    """Client-identity headers required by plex.tv API endpoints.
+
+    plex.tv's /api/v2/resources (and some other endpoints) return HTTP 400
+    without an X-Plex-Client-Identifier header, so every plex.tv call here must
+    carry it — mirroring plex_auth._plex_headers. Reuses the app's persistent
+    client id (system.plex_client_id, set on first PIN login); falls back to a
+    constant so the header is never empty even before that setting exists. The
+    caller merges in its own X-Plex-Token.
+    """
+    row = db.query(Setting).filter(Setting.key == "system.plex_client_id").first()
+    client_id = (row.value if row and row.value else "") or "WebServarr"
+    return {
+        "Accept": "application/json",
+        "X-Plex-Product": "WebServarr",
+        "X-Plex-Version": "1.0",
+        "X-Plex-Platform": "Web",
+        "X-Plex-Client-Identifier": client_id,
+    }
+
+
 async def _fetch_owner_account(db: Session) -> dict | None:
     """Fetch the plex.tv account (id, email, ...) that owns the configured
     server, using the stored owner token. TLS verified. None if unavailable."""
@@ -107,10 +128,7 @@ async def _fetch_owner_account(db: Session) -> dict | None:
         async with httpx.AsyncClient(timeout=PLEX_TIMEOUT) as client:
             resp = await client.get(
                 "https://plex.tv/api/v2/user",
-                headers={
-                    "X-Plex-Token": token_setting.value,
-                    "Accept": "application/json",
-                },
+                headers={**_plex_client_headers(db), "X-Plex-Token": token_setting.value},
             )
             if resp.status_code != 200:
                 logger.warning("Failed to fetch Plex owner account: HTTP %d", resp.status_code)
@@ -121,10 +139,13 @@ async def _fetch_owner_account(db: Session) -> dict | None:
         return None
 
 
-async def _fetch_server_identifiers_for_token(plex_token: str, owned_only: bool = False) -> set:
+async def _fetch_server_identifiers_for_token(
+    plex_token: str, base_headers: dict, owned_only: bool = False
+) -> set:
     """Return the set of Plex server machineIdentifiers (clientIdentifier) that a
-    given token can see on plex.tv. TLS verified. Raises on transport error so
-    callers can fail closed."""
+    given token can see on plex.tv. `base_headers` must carry the Plex client
+    identity (see _plex_client_headers) or plex.tv answers 400. TLS verified.
+    Raises on transport error so callers can fail closed."""
     ids: set = set()
     if not plex_token:
         return ids
@@ -133,7 +154,7 @@ async def _fetch_server_identifiers_for_token(plex_token: str, owned_only: bool 
         resp = await client.get(
             "https://plex.tv/api/v2/resources",
             params={"includeHttps": 1},
-            headers={"X-Plex-Token": plex_token, "Accept": "application/json"},
+            headers={**base_headers, "X-Plex-Token": plex_token},
         )
         if resp.status_code != 200:
             raise RuntimeError(f"plex.tv resources returned HTTP {resp.status_code}")
@@ -187,7 +208,9 @@ async def _fetch_configured_server_identifiers(db: Session) -> set:
 
     if not ids and owner_token:
         try:
-            ids |= await _fetch_server_identifiers_for_token(owner_token, owned_only=True)
+            ids |= await _fetch_server_identifiers_for_token(
+                owner_token, _plex_client_headers(db), owned_only=True
+            )
         except Exception as e:
             logger.error("Plex owner resources lookup failed: %s", str(e))
 
@@ -211,7 +234,7 @@ async def _user_has_server_access(plex_token: str, db: Session) -> bool:
         return False
 
     try:
-        user_ids = await _fetch_server_identifiers_for_token(plex_token)
+        user_ids = await _fetch_server_identifiers_for_token(plex_token, _plex_client_headers(db))
     except Exception as e:
         logger.error("Plex membership check: failed to fetch user's servers — denying: %s", str(e))
         return False
