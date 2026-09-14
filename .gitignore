@@ -68,3 +68,12 @@ app/static/uploads/
 
 # Tailwind CLI (development only; the built CSS is committed)
 node_modules/
+
+# Internal working drafts (specific files only — sibling plans/specs and
+# mockups in these dirs are intentionally tracked, so ignore by path not dir).
+docs/mockups/preview-full.jpeg
+docs/superpowers/plans/2026-03-10-embed-redis.md
+docs/superpowers/plans/2026-09-12-wiki.md
+docs/superpowers/specs/2026-03-10-embed-redis-design.md
+docs/superpowers/specs/2026-07-01-ui-redesign-transmission-design.md
+docs/superpowers/specs/2026-09-12-wiki-design.md
