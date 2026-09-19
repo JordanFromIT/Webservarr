@@ -485,9 +485,15 @@ async def request_book(foreign_id: str, fmt: str = "ebook") -> Dict[str, Any]:
         "addOptions": {"monitor": "none", "searchForMissingBooks": False},
     })
 
+    # The requested format has to be stated outright. Chaptarr decides which
+    # edition to monitor and grab from `mediaType` in the payload, not from
+    # the root folder, and every search result arrives carrying
+    # "audiobook" (see the module docstring) - so copying the book through
+    # unchanged silently turned every ebook request into an audiobook one.
     payload = dict(book)
     payload.update({
         "monitored": True,
+        "mediaType": fmt,
         "rootFolderPath": root_folder,
         "author": author,
         "addOptions": {"searchForNewBook": True},
