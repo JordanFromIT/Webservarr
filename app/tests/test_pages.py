@@ -105,6 +105,16 @@ class ShellRendering(unittest.TestCase):
         # Empty sublabel means "no second line" for that item.
         self.assertRegex(out, r'href="/issues"[^\n]*<span>Problems<span class="nav-new-badge">New!</span></span>')
 
+    def test_new_flag_sits_outside_the_truncating_label(self):
+        # truncate is overflow:hidden and the flag paints taller than its line,
+        # so a flag inside the truncating span gets its top and bottom clipped.
+        b = branding(**{"sidebar.label_issues": "Problems", "sidebar.sublabel_issues": "Tell us",
+                        "sidebar.new_issues": "true"})
+        out = render(b=b)
+        self.assertRegex(out, r'href="/issues"[^\n]*<span class="truncate">Problems</span>'
+                              r'<span class="nav-new-badge">New!</span>')
+        self.assertNotRegex(out, r'<span class="truncate">[^<]*<span class="nav-new-badge">')
+
     def test_user_strings_are_escaped_and_bad_avatar_dropped(self):
         out = render(user=MEMBER)
         self.assertIn("Sam &lt;b&gt;", out)

@@ -224,9 +224,15 @@ _LINK = (
 # keeps one scannable column of names with the clarification as secondary
 # text. On the active pill it rides the inherited colour at reduced opacity
 # rather than introducing a second one.
+#
+# The New! flag is a sibling of the truncating label, never inside it:
+# truncate is overflow:hidden, and the flag deliberately paints taller than
+# the line it sits on (see .nav-new-badge in theme.css), so inside the label
+# its top and bottom were clipped off. As a sibling it also stays visible when
+# a long label truncates.
 _LABEL_WITH_SUB = (
     '<span class="flex flex-col min-w-0 leading-tight">'
-    '<span class="truncate">{label}{flag}</span>'
+    '<span class="flex items-baseline min-w-0"><span class="truncate">{label}</span>{flag}</span>'
     '<span class="text-[10px] font-normal truncate mt-0.5 {subcls}">{sub}</span>'
     '</span>'
 )
