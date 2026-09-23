@@ -12,6 +12,7 @@ from app.database import get_db
 from app.dependencies import get_current_user_optional
 from app.limiter import limiter
 from app.models import Setting
+from app.utils import same_origin_path
 
 router = APIRouter()
 
@@ -182,6 +183,23 @@ AUTH_KEYS = [
 EMPTY_WIKI_HOOKS = {"tickets": None, "issues": None, "playback": None}
 
 
+def safe_logo_url(value) -> str:
+    """The logo URL as it may reach any browser, or "".
+
+    logo_url goes into /api/branding and every page's #ws-data block, and
+    from there into the favicon on every page and the public login logo. An
+    http(s) URL or a same-origin path passes; anything else (a
+    "/\\evil.example/x.ico" that browsers resolve to another host, a
+    javascript: URL, ...) becomes "", the same as no logo: the shell shows
+    its sidebar icon (as pages._safe_url already did), and the favicon and
+    login logo are left alone.
+    """
+    v = (value or "").strip() if isinstance(value, str) else ""
+    if v.startswith(("https://", "http://")):
+        return v
+    return same_origin_path(v)
+
+
 def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[str], wiki_hooks: dict) -> dict:
     """
     Assemble the branding payload from raw setting values.
@@ -211,7 +229,7 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
     return {
         "app_name": get("branding.app_name"),
         "tagline": get("branding.tagline"),
-        "logo_url": get("branding.logo_url"),
+        "logo_url": safe_logo_url(get("branding.logo_url")),
         "colors": {
             "primary": get("theme.color_primary"),
             "secondary": get("theme.color_secondary"),
