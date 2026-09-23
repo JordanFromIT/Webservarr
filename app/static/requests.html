@@ -1200,7 +1200,9 @@ function buildDiscoverCard(item) {
 
 function scrollDiscoverRow(rowId, direction) {
   var row = document.getElementById(rowId);
-  if (row) row.scrollBy({ left: direction * 400, behavior: 'smooth' });
+  if (!row) return;
+  WS.dragScroll.stop(row);   // a mouse-drag glide still coasting would fight this
+  row.scrollBy({ left: direction * 400, behavior: 'smooth' });
 }
 
 /**

@@ -17,6 +17,7 @@
  *   WS.arrive(key, write)         reveal sections top-down, in document order
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
  *   WS.dragScroll(el)             mouse drag-to-scroll for a sideways row
+ *   WS.dragScroll.stop(el)        end that row's momentum glide (before scrolling it)
  *   WS.mediaType(type)            { label, icon, accent } for movie/tv/book/audiobook
  *   WS.requestStatus(status)      { label, tone } for a Seerr-style request status
  *
@@ -539,7 +540,20 @@
 
     // The wheel (or trackpad) takes over from a glide immediately.
     el.addEventListener('wheel', stopGlide, { passive: true });
+
+    // For controls outside the row that scroll it (the chevron buttons are
+    // siblings, so the row never sees their press): see dragScroll.stop.
+    el._wsStopGlide = stopGlide;
   }
+
+  // Stop a row's glide before scrolling it some other way. Without this a
+  // chevron's smooth scrollBy and the glide's per-frame scrollLeft writes
+  // fight over the row. Also restores the row's own scroll-behavior first, so
+  // a smooth scrollBy is smooth again. A no-op for a row that is not gliding
+  // or was never wired.
+  dragScroll.stop = function (el) {
+    if (el && el._wsStopGlide) el._wsStopGlide();
+  };
 
   // ---- Shared vocabulary ----
   //
