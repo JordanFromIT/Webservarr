@@ -25,6 +25,49 @@ def read(name: str) -> str:
     return (STATIC / f"{name}.html").read_text(encoding="utf-8")
 
 
+def js_code_only(src: str) -> str:
+    """JavaScript source with comments removed and string contents blanked.
+
+    A small scanner rather than a regex, so a // or /* inside a string (a URL,
+    say) is not taken for a comment. Blanking the strings means a name that
+    appears only inside quotes cannot satisfy a check either. Assumes no regex
+    literals, which shell.js does not use.
+    """
+    out, i, n = [], 0, len(src)
+    while i < n:
+        c, nxt = src[i], src[i + 1] if i + 1 < n else ""
+        if c == "/" and nxt == "/":
+            j = src.find("\n", i)
+            i = n if j == -1 else j
+        elif c == "/" and nxt == "*":
+            j = src.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+            out.append(" ")
+        elif c in "'\"`":
+            j = i + 1
+            while j < n and src[j] != c:
+                j += 2 if src[j] == "\\" else 1
+            out.append(c + " " * (j - i - 1) + c)
+            i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def matching_brace(code: str, open_at: int) -> int:
+    """Index of the } that closes the { at open_at (in comment-free code)."""
+    depth = 0
+    for i in range(open_at, len(code)):
+        if code[i] == "{":
+            depth += 1
+        elif code[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+    raise AssertionError("unbalanced braces")
+
+
 class ShellContract(unittest.TestCase):
     def test_shell_pages_carry_both_markers_and_no_js_shell(self):
         for n in SHELL_PAGES:
@@ -92,13 +135,30 @@ class ShellContract(unittest.TestCase):
             self.assertNotRegex(read(n), r"\bsetInterval\(", f"{n}: use WS.poll so timers wait for activation")
 
     def test_shell_js_defines_the_public_api(self):
-        js = (STATIC / "js" / "shell.js").read_text(encoding="utf-8")
+        code = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
+        # Only the exports object counts: a name mentioned anywhere else in the
+        # file (a comment, a string, a local variable) is not an export.
+        m = re.search(r"\bwindow\.WS\s*=\s*\{", code)
+        self.assertIsNotNone(m, "window.WS = { ... } not found")
+        block = code[m.end():matching_brace(code, m.end() - 1)]
         for name in ("ready", "whenActive", "poll", "setHTML", "arrive", "swr", "serviceStatus", "clearCache",
                      "dragScroll", "mediaType", "requestStatus"):
-            self.assertRegex(js, rf"\b{name}: {name}\b", name)
+            self.assertRegex(block, rf"\b{name}\s*:\s*{name}\b", name)
         # Pages call this to stop a row's momentum glide before scrolling it.
-        self.assertIn("dragScroll.stop = function", js)
+        self.assertIsNotNone(re.search(r"\bdragScroll\.stop\s*=\s*function\b", code),
+                             "dragScroll.stop = function ... not defined (outside comments/strings)")
 
+    def test_js_code_only_ignores_comments_and_strings(self):
+        # Guards the helper the API test relies on.
+        src = ("var a = 1; // b: b\n/* c: c */ var u = 'http://x/*y*/'; "
+               "window.WS = { d: d, /* e: e */ f: f };")
+        code = js_code_only(src)
+        self.assertNotIn("b: b", code)
+        self.assertNotIn("c: c", code)
+        self.assertNotIn("e: e", code)
+        self.assertNotIn("http", code)
+        self.assertIn("d: d", code)
+        self.assertIn("f: f", code)
 
 if __name__ == "__main__":
     unittest.main()
