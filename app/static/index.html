@@ -167,10 +167,14 @@ View Requests
 <th class="w-36 lg:w-40 px-4 lg:px-6 py-3">Status</th>
 </tr>
 </thead>
+<!-- Skeleton rows are built like the real rows in renderRecentRequests (same
+     padding, 32px thumbnail, one text line, and below sm the type pill, made
+     from the real pill's markup with its content hidden) so each row is the
+     height of the row that replaces it: 60px wide, 72px on a phone. -->
 <tbody id="requestsBody" class="divide-y divide-steel-blue/10">
-<tr><td colspan="3" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-2/3" aria-hidden="true"></div></td></tr>
-<tr><td colspan="3" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-1/2" aria-hidden="true"></div></td></tr>
-<tr><td colspan="3" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-3/5" aria-hidden="true"></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-4 lg:px-6 py-3.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/3 align-middle"></span></p><div class="sm:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-4 lg:px-6 py-3.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="sm:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
+<tr aria-hidden="true"><td colspan="3" class="px-4 lg:px-6 py-3.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/5 align-middle"></span></p><div class="sm:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
 </tbody>
 </table>
 </div>
@@ -630,6 +634,8 @@ function renderRecentRequests(requests) {
             const typePill = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none whitespace-nowrap badge-${type.accent}">` +
                 `<span class="material-symbols-outlined text-[13px] leading-none" aria-hidden="true">${type.icon}</span>${type.label}</span>`;
 
+            // The skeleton rows in #requestsBody copy this row's geometry so
+            // nothing moves when data lands. Change one, change both.
             return `
                 <tr>
                     <td class="px-4 lg:px-6 py-3.5">
