@@ -225,7 +225,8 @@ class DefaultIconTests(unittest.TestCase):
     def test_no_colour_logo_as_badge(self):
         with open(os.path.join(self.STATIC, "sw.js"), encoding="utf-8") as f:
             sw = f.read()
-        self.assertNotIn("badge:", sw)
+        # An options key, not the comment that explains its absence.
+        self.assertNotRegex(sw, r"(?m)^\s*badge\s*:")
 
     def test_default_icon_is_a_real_png(self):
         with open(os.path.join(self.STATIC, "webservarr-192.png"), "rb") as f:
