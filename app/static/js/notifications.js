@@ -590,8 +590,28 @@
     });
   }
 
+  // The page-load re-sync and a click on the toggle can both save the same
+  // subscription at once; they share one request instead of racing.
+  var _postInFlight = null;   // { endpoint, promise }
+
   function postSubscription(subscription) {
     var subJSON = subscription.toJSON();
+    if (_postInFlight && _postInFlight.endpoint === subJSON.endpoint) {
+      return _postInFlight.promise;
+    }
+    var entry = { endpoint: subJSON.endpoint, promise: null };
+    entry.promise = sendSubscription(subJSON).then(function(v) {
+      if (_postInFlight === entry) _postInFlight = null;
+      return v;
+    }, function(err) {
+      if (_postInFlight === entry) _postInFlight = null;
+      throw err;
+    });
+    _postInFlight = entry;
+    return entry.promise;
+  }
+
+  function sendSubscription(subJSON) {
     return fetch('/api/notifications/push-subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
