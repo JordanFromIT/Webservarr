@@ -31,6 +31,9 @@ class SameOriginPathTests(unittest.TestCase):
         self.assertEqual(same_origin_path("/a\x00b"), "")
         self.assertEqual(same_origin_path("/a\x7fb"), "")
 
+    def test_lone_surrogate_is_refused(self):
+        self.assertEqual(same_origin_path("/static/\ud800.png"), "")
+
     def test_protocol_relative_is_refused(self):
         self.assertEqual(same_origin_path("//evil.example/x.png"), "")
 

@@ -42,7 +42,11 @@ def same_origin_path(value) -> str:
         return ""
     if any(c == "\\" or ord(c) < 0x20 or ord(c) == 0x7F for c in v):
         return ""
-    parts = urlsplit(v)
+    try:
+        v.encode("utf-8")  # a lone surrogate can be neither stored nor served
+        parts = urlsplit(v)
+    except ValueError:  # UnicodeEncodeError is a ValueError
+        return ""
     if parts.scheme or parts.netloc:
         return ""
     # The fragment is kept: it never reaches the server and cannot change the
@@ -70,10 +74,11 @@ def safe_http_url(value) -> str:
     if not v or any(c == "\\" or ord(c) < 0x20 or ord(c) == 0x7F for c in v):
         return ""
     try:
+        v.encode("utf-8")  # a lone surrogate can be neither stored nor served
         parts = urlsplit(v)
         host = parts.hostname
         parts.port  # raises ValueError for a malformed or out-of-range port
-    except ValueError:
+    except ValueError:  # UnicodeEncodeError is a ValueError
         return ""
     if parts.scheme.lower() not in ("http", "https") or not host:
         return ""

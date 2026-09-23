@@ -49,6 +49,11 @@ class LogoUrlTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 self.assertEqual(_payload(bad)["logo_url"], "")
 
+    def test_lone_surrogates_become_no_logo(self):
+        for bad in ("https://example.com/\ud800.png", "/static/\udfff.png"):
+            with self.subTest(bad=ascii(bad)):
+                self.assertEqual(_payload(bad)["logo_url"], "")
+
     def test_scheme_is_case_insensitive(self):
         self.assertEqual(_payload("HTTPS://cdn.example.com/l.png")["logo_url"], "HTTPS://cdn.example.com/l.png")
         self.assertEqual(_payload("Http://cdn.example.com/l.png")["logo_url"], "Http://cdn.example.com/l.png")
@@ -126,6 +131,21 @@ class LogoWriteValidationTests(unittest.TestCase):
                 self.assertIn("logo URL", r.json()["detail"])
                 self.assertIsNone(self._stored("branding.logo_url"))
 
+    def test_lone_surrogates_are_refused_not_500(self):
+        for key, value in (("branding.logo_url", "https://example.com/\ud800.png"),
+                           ("branding.logo_url", "/static/\ud800.png"),
+                           ("branding.app_name", "Name \ud800")):
+            with self.subTest(key=key, value=ascii(value)):
+                r = self.client.put("/api/admin/settings", json={"key": key, "value": value})
+                self.assertEqual(r.status_code, 400, r.text)
+                self.assertIsNone(self._stored(key))
+        r = self.client.put("/api/admin/settings/bulk", json={"settings": [
+            {"key": "branding.tagline", "value": "fine"},
+            {"key": "branding.logo_url", "value": "https://example.com/\ud800.png"},
+        ]})
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertIsNone(self._stored("branding.tagline"))
+
     def test_good_logo_urls_are_saved(self):
         for good in ("/static/uploads/logo-1.png", "HTTPS://cdn.example.com/l.png", ""):
             with self.subTest(good=good):
@@ -153,6 +173,7 @@ class BulkSaveIsAtomicTests(LogoWriteValidationTests):
     test_bad_logo_urls_are_refused = None
     test_good_logo_urls_are_saved = None
     test_bulk_save_with_a_bad_logo_writes_nothing = None
+    test_lone_surrogates_are_refused_not_500 = None
 
     def test_a_commit_failure_saves_nothing(self):
         from sqlalchemy.orm import Session as SASession
@@ -216,6 +237,18 @@ class RenderNeverFallsBackToRawTests(unittest.TestCase):
                 self.assertNotIn("<!-- ws:header -->", body)
                 self.assertIn('id="desktopSidebar"', body)
                 self.assertIn('id="ws-data"', body)
+
+    def test_a_lone_surrogate_in_branding_still_returns_the_page(self):
+        user = {"username": "root", "is_admin": "true", "auth_method": "simple"}
+        b = build_branding({"branding.app_name": "Home \ud800 Server",
+                            "branding.tagline": "\udfff"}, {}, None, dict(EMPTY_WIKI_HOOKS))
+        with mock.patch.object(pages, "STATIC_DIR", self.STATIC), \
+             mock.patch.object(pages, "load_context", return_value=(b, {"netdata": False})):
+            resp = pages.render_page("index", None, user)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.body.decode("utf-8")
+        self.assertIn('id="desktopSidebar"', body)
+        self.assertNotIn("<!-- ws:sidebar -->", body)
 
     def test_preview_meta_survives_an_unparseable_logo(self):
         name, meta = pages._preview_meta({"logo_url": "http://[::1"}, "https://example.test", "/")

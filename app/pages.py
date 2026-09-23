@@ -600,7 +600,14 @@ def render_page(name: str, request: Optional[Request], user: Optional[dict]):
             path=(request.url.path if request is not None else "/"),
             flags=flags,
         )
+        # Encoded here, inside the guard: HTMLResponse would otherwise raise
+        # outside it on a lone surrogate in some setting and 500 the page.
+        try:
+            body = out.encode("utf-8")
+        except UnicodeEncodeError:
+            # Keep the rendered shell; the unencodable character becomes "?".
+            body = out.encode("utf-8", "replace")
     except Exception:  # pragma: no cover - a rendering bug must never take a page down
         logger.warning("Page rendering failed for %s; serving the raw file", name, exc_info=True)
-        out = page_html
-    return HTMLResponse(content=out)
+        body = page_html.encode("utf-8", "replace")
+    return HTMLResponse(content=body)

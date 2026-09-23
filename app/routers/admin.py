@@ -63,6 +63,15 @@ _INTEGRATION_URL_KEY = re.compile(r"^integration\.[^.]+\.url$")
 def _check_setting_write(key: str, value: str):
     """Reject writes of integration URLs that point at SSRF-dangerous targets,
     and logo URLs that the public branding payload would refuse to serve."""
+    try:
+        (value or "").encode("utf-8")
+    except UnicodeEncodeError:
+        # A lone UTF-16 surrogate: SQLite cannot store it (the bind would
+        # raise and 500), so say so plainly instead.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Refusing to save {key}: it contains characters that can't be stored.",
+        )
     if value and _INTEGRATION_URL_KEY.match(key) and not is_safe_integration_url(value):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
