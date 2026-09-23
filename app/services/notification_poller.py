@@ -296,6 +296,52 @@ def _parse_monitor_snapshot(raw) -> tuple:
     return status, (since if sep else None)
 
 
+def push_username_key(username: str) -> str:
+    """Settings key mapping a username to the email it subscribed to push with.
+
+    Tickets record only the creator's username, and the only other place that
+    ties a username to an email is a live Redis session, which a restart
+    wipes. The push-subscribe route writes this row (like the per-user
+    notify.<hash>.<category> preference rows) so a subscriber can still be
+    reached about their ticket while signed out.
+    """
+    digest = hashlib.sha256((username or "").lower().encode()).hexdigest()[:16]
+    return f"push.user.{digest}.email"
+
+
+async def _ticket_creator_email(r: aioredis.Redis, db: Session, username: str) -> Optional[str]:
+    """The ticket creator's email, if they can be reached: live session or push.
+
+    Resolved from a live session carrying that username, else from the
+    username->email row the push-subscribe route records; either way the
+    email must be one _collect_recipient_emails would target.
+    """
+    if not username:
+        return None
+    email = None
+    cursor = 0
+    while email is None:
+        cursor, keys = await r.scan(cursor, match="session:*", count=100)
+        for key in keys:
+            data = await r.hgetall(key)
+            uname = data.get(b"username", b"")
+            uname = uname.decode() if isinstance(uname, bytes) else uname
+            if uname == username:
+                found = data.get(b"email", b"")
+                found = found.decode() if isinstance(found, bytes) else found
+                if found:
+                    email = found.lower()
+                    break
+        if cursor == 0:
+            break
+    if email is None:
+        row = db.query(Setting).filter(Setting.key == push_username_key(username)).first()
+        email = row.value.lower() if row and row.value else None
+    if email and email in await _collect_recipient_emails(r, db):
+        return email
+    return None
+
+
 def _monitor_ref(monitor_id, status_label: str, since: str) -> str:
     """Dedup reference for one monitor transition.
 
@@ -746,25 +792,7 @@ async def _poll_tickets(r: aioredis.Redis) -> None:
                 prev_count = 0
                 prev_status = "open"
 
-            # Find the creator's email by scanning Redis sessions for their username
-            creator_username = ticket.creator_username
-            creator_email = None
-            cursor = 0
-            while True:
-                cursor, keys = await r.scan(cursor, match="session:*", count=100)
-                for key in keys:
-                    data = await r.hgetall(key)
-                    uname = data.get(b"username", b"")
-                    uname_str = uname.decode() if isinstance(uname, bytes) else uname
-                    if uname_str == creator_username:
-                        email_bytes = data.get(b"email", b"")
-                        email_str = email_bytes.decode() if isinstance(email_bytes, bytes) else email_bytes
-                        if email_str:
-                            creator_email = email_str.lower()
-                            break
-                if creator_email or cursor == 0:
-                    break
-
+            creator_email = await _ticket_creator_email(r, db, ticket.creator_username)
             if not creator_email:
                 continue
 

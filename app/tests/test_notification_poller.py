@@ -17,7 +17,7 @@ import unittest
 from unittest import mock
 
 try:
-    from app.models import NewsPost, Notification, PushSubscription
+    from app.models import NewsPost, Notification, PushSubscription, Setting, Ticket, TicketComment
     from app.services import notification_poller as poller
     from app.tests.test_push import make_session_factory
     HAVE_APP = True
@@ -289,6 +289,90 @@ class NewsBaselineTests(unittest.TestCase):
         self.r.store["poller:news:last_check"] = b"2026-01-01T11:00:00"
         self._poll()
         self.assertEqual(self._count(), 1)
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class TicketAlertTests(unittest.TestCase):
+    """A ticket reply reaches its creator while signed out if they have push."""
+
+    def setUp(self):
+        self.Session = make_session_factory()
+        self.r = FakeRedis()
+        self.pushed = []
+        db = self.Session()
+        try:
+            t = Ticket(title="Buffering", description="d", category="other", status="open",
+                       creator_username="bob", creator_name="Bob")
+            db.add(t)
+            db.commit()
+            self.ticket_id = t.id
+        finally:
+            db.close()
+        self.r.store[f"poller:ticket:{self.ticket_id}"] = b"0:open"   # baseline
+
+    def _reply(self):
+        db = self.Session()
+        try:
+            db.add(TicketComment(ticket_id=self.ticket_id, author_username="admin",
+                                 author_name="Admin", is_admin=True, message="Fixed"))
+            db.commit()
+        finally:
+            db.close()
+
+    def _subscribe_bob(self):
+        db = self.Session()
+        try:
+            db.add(PushSubscription(user_email="bob@example.com",
+                                    endpoint="https://push.example.com/b", p256dh="p", auth="a"))
+            db.add(Setting(key=poller.push_username_key("bob"), value="bob@example.com"))
+            db.commit()
+        finally:
+            db.close()
+
+    def _poll(self):
+        async def fake_push(emails, title, body, category, url="/"):
+            self.pushed.append((sorted(emails), title))
+            return 1
+
+        with mock.patch.object(poller, "SessionLocal", self.Session), \
+             mock.patch.object(poller, "send_push_to_users", fake_push):
+            run(poller._poll_tickets(self.r))
+
+    def _rows(self):
+        db = self.Session()
+        try:
+            return [(n.user_email, n.title) for n in db.query(Notification).all()]
+        finally:
+            db.close()
+
+    def test_signed_out_push_subscriber_gets_the_reply(self):
+        self._subscribe_bob()   # no session:* key for bob
+        self._reply()
+        self._poll()
+        self.assertEqual(self._rows(), [("bob@example.com", "New response on your ticket")])
+        self.assertEqual(self.pushed, [(["bob@example.com"], "New response on your ticket")])
+
+    def test_live_session_still_works(self):
+        self.r.hashes["session:x"] = {"username": "bob", "email": "Bob@Example.com"}
+        self._reply()
+        self._poll()
+        self.assertEqual(self._rows(), [("bob@example.com", "New response on your ticket")])
+
+    def test_unreachable_creator_gets_nothing(self):
+        self._reply()
+        self._poll()
+        self.assertEqual(self._rows(), [])
+
+    def test_stale_mapping_without_a_subscription_is_ignored(self):
+        db = self.Session()
+        try:
+            db.add(Setting(key=poller.push_username_key("bob"), value="bob@example.com"))
+            db.commit()
+        finally:
+            db.close()
+        self._reply()
+        self._poll()
+        self.assertEqual(self._rows(), [])
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

@@ -85,6 +85,18 @@ class PushRouteTests(unittest.TestCase):
         self.user = {"email": "bob@example.com", "is_admin": "false"}
         self.assertFalse(self._status(ENDPOINT_A))
 
+    def test_subscribing_records_the_username_for_ticket_alerts(self):
+        from app.models import Setting
+        from app.services.notification_poller import push_username_key
+        self.user = {"email": "Alice@Example.com", "username": "alice", "is_admin": "false"}
+        self._subscribe(ENDPOINT_A)
+        db = self.Session()
+        try:
+            row = db.query(Setting).filter(Setting.key == push_username_key("alice")).one()
+            self.assertEqual(row.value, "alice@example.com")
+        finally:
+            db.close()
+
     def test_resubscribing_is_idempotent(self):
         self._subscribe(ENDPOINT_A)
         self._subscribe(ENDPOINT_A)
