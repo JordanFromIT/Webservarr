@@ -16,12 +16,17 @@
     /* Frosted glass, the same treatment as the search bar on the requests
        page (secondary tint at 25%, a heavy blur, a faint accent border), so
        the rotating artwork reads through the card. The extra background layer
-       underneath the tint dims the blurred art a little: without it a bright
-       poster turns the card pale and the light text on it washes out. */
+       underneath the tint dims the blurred art: without it a bright poster
+       turns the card pale and the light text on it washes out. 0.45 was set
+       against the worst case, a pure white backdrop, together with the text
+       opacities inside the card (labels /90, field icons /70, placeholders
+       /60, the divider caption /80): labels 5.6:1, icons 3.9:1, placeholders
+       3.1:1. Lower either and the simple sign-in form stops being readable
+       over bright art. */
     .login-glass-card {
       background:
         linear-gradient(rgb(var(--color-secondary) / 0.25), rgb(var(--color-secondary) / 0.25)),
-        rgb(var(--color-background) / 0.35);
+        rgb(var(--color-background) / 0.45);
       -webkit-backdrop-filter: blur(24px);
       backdrop-filter: blur(24px);
       border: 1px solid rgb(var(--color-accent) / 0.2);
@@ -92,19 +97,19 @@
 <!-- Login Form -->
 <form id="loginForm" class="w-full space-y-5">
 <div class="flex flex-col gap-1.5">
-<label class="text-frosted-blue/80 text-sm font-medium px-1">Username</label>
+<label class="text-frosted-blue/90 text-sm font-medium px-1">Username</label>
 <div class="relative group">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/40 group-focus-within:text-primary text-[20px]">person</span>
-<input id="username" name="username" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/30 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="admin" type="text" required/>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 group-focus-within:text-primary text-[20px]">person</span>
+<input id="username" name="username" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/60 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="admin" type="text" required/>
 </div>
 </div>
 <div class="flex flex-col gap-1.5">
 <div class="flex justify-between items-center px-1">
-<label class="text-frosted-blue/80 text-sm font-medium">Password</label>
+<label class="text-frosted-blue/90 text-sm font-medium">Password</label>
 </div>
 <div class="relative group">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/40 group-focus-within:text-primary text-[20px]">lock</span>
-<input id="password" name="password" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/30 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="••••••••" type="password" required/>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 group-focus-within:text-primary text-[20px]">lock</span>
+<input id="password" name="password" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/60 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="••••••••" type="password" required/>
 </div>
 </div>
 <button type="submit" class="w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98]">
@@ -113,7 +118,7 @@
 <!-- Divider -->
 <div id="ssoDivider" class="flex items-center gap-4 py-2">
 <div class="h-[1px] flex-1 bg-frosted-blue/10"></div>
-<span class="text-frosted-blue/30 text-[10px] font-bold uppercase tracking-widest">Or continue with</span>
+<span class="text-frosted-blue/80 text-[10px] font-bold uppercase tracking-widest">Or continue with</span>
 <div class="h-[1px] flex-1 bg-frosted-blue/10"></div>
 </div>
 <!-- Plex SSO Button -->
