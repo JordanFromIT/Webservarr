@@ -12,11 +12,12 @@ Notification poller: who gets service alerts, and when.
 """
 import asyncio
 import fnmatch
+from datetime import datetime
 import unittest
 from unittest import mock
 
 try:
-    from app.models import Notification, PushSubscription
+    from app.models import NewsPost, Notification, PushSubscription
     from app.services import notification_poller as poller
     from app.tests.test_push import make_session_factory
     HAVE_APP = True
@@ -98,7 +99,7 @@ class MonitorAlertTests(unittest.TestCase):
         finally:
             db.close()
 
-    def _poll(self, status, since, first_run=False):
+    def _poll(self, status, since):
         monitors = [{"id": 7, "name": "Media", "status": status, "status_since": since,
                      "last_check": since}]
 
@@ -110,7 +111,7 @@ class MonitorAlertTests(unittest.TestCase):
              mock.patch.object(poller, "send_push_to_users", fake_push), \
              mock.patch("app.integrations.uptime_kuma.get_monitors",
                         mock.AsyncMock(return_value=monitors)):
-            run(poller._poll_monitors(self.r, first_run))
+            run(poller._poll_monitors(self.r))
 
     def _rows(self, email):
         db = self.Session()
@@ -123,7 +124,7 @@ class MonitorAlertTests(unittest.TestCase):
 
     def test_push_subscriber_without_session_gets_the_alert(self):
         self._subscribe("owner@example.com")  # no session:* key anywhere
-        self._poll("up", "2026-01-01 10:00:00", first_run=True)
+        self._poll("up", "2026-01-01 10:00:00")
         self._poll("down", "2026-01-01 11:00:00")
 
         self.assertEqual([t for t, _ in self._rows("owner@example.com")], ["Media is down"])
@@ -132,14 +133,14 @@ class MonitorAlertTests(unittest.TestCase):
     def test_session_users_and_subscribers_are_merged(self):
         self._subscribe("owner@example.com")
         self.r.hashes["session:abc"] = {"email": "Friend@Example.com"}
-        self._poll("up", "t0", first_run=True)
+        self._poll("up", "t0")
         self._poll("down", "t1")
 
         self.assertEqual(self.pushed[0][0], ["friend@example.com", "owner@example.com"])
 
     def test_a_later_outage_alerts_again(self):
         self._subscribe("owner@example.com")
-        self._poll("up", "2026-01-01 10:00:00", first_run=True)
+        self._poll("up", "2026-01-01 10:00:00")
         self._poll("down", "2026-01-01 11:00:00")
         self._poll("up", "2026-01-01 11:05:00")
         self._poll("down", "2026-01-02 09:00:00")
@@ -149,7 +150,7 @@ class MonitorAlertTests(unittest.TestCase):
 
     def test_one_transition_never_alerts_twice(self):
         self._subscribe("owner@example.com")
-        self._poll("up", "2026-01-01 10:00:00", first_run=True)
+        self._poll("up", "2026-01-01 10:00:00")
         self._poll("down", "2026-01-01 11:00:00")
         # The same transition seen again (e.g. a second poller that read the
         # old snapshot): the dedup reference matches, nothing new is sent.
@@ -161,7 +162,7 @@ class MonitorAlertTests(unittest.TestCase):
 
     def test_unchanged_status_polled_again_does_not_alert(self):
         self._subscribe("owner@example.com")
-        self._poll("up", "2026-01-01 10:00:00", first_run=True)
+        self._poll("up", "2026-01-01 10:00:00")
         self._poll("down", "2026-01-01 11:00:00")
         self._poll("down", "2026-01-01 11:00:00")
 
@@ -170,7 +171,7 @@ class MonitorAlertTests(unittest.TestCase):
 
     def test_long_outage_with_a_sliding_window_alerts_once(self):
         self._subscribe("owner@example.com")
-        self._poll("up", "2026-01-01 10:00:00", first_run=True)
+        self._poll("up", "2026-01-01 10:00:00")
         # The run start is outside the status page's window: no status_since.
         self._poll("down", None)
         marker = self.r.store["poller:monitor:7"]
@@ -182,7 +183,7 @@ class MonitorAlertTests(unittest.TestCase):
 
     def test_marker_is_kept_while_the_status_holds(self):
         self._subscribe("owner@example.com")
-        self._poll("up", "t0", first_run=True)
+        self._poll("up", "t0")
         self._poll("down", "t1")
         # Later polls report a different (slid) run start; the stored marker
         # from the first observation stands.
@@ -196,11 +197,63 @@ class MonitorAlertTests(unittest.TestCase):
         self._poll("down", "t1")
         self.assertEqual([t for t, _ in self._rows("owner@example.com")], ["Media is down"])
 
-    def test_first_run_seeds_silently(self):
+    def test_empty_redis_seeds_silently(self):
+        # A full restart empties Redis: the first pass records, never alerts.
         self._subscribe("owner@example.com")
-        self._poll("down", "t0", first_run=True)
+        self._poll("down", "t0")
         self.assertEqual(self._rows("owner@example.com"), [])
         self.assertEqual(self.pushed, [])
+
+    def test_new_leader_alerts_against_an_existing_baseline(self):
+        # uvicorn restarted (or the lease moved) but Redis kept the baseline
+        # the previous leader wrote: the first change seen must alert.
+        self._subscribe("owner@example.com")
+        self.r.store["poller:monitor:7"] = b"up|t0"
+        self._poll("down", "t1")
+        self.assertEqual([t for t, _ in self._rows("owner@example.com")], ["Media is down"])
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class NewsBaselineTests(unittest.TestCase):
+    """News gates on the stored last-check time, not on a per-process flag."""
+
+    def setUp(self):
+        self.Session = make_session_factory()
+        self.r = FakeRedis()
+        db = self.Session()
+        try:
+            db.add(PushSubscription(user_email="owner@example.com",
+                                    endpoint="https://push.example.com/x", p256dh="p", auth="a"))
+            db.add(NewsPost(title="Maintenance tonight", content="x", content_html="x",
+                            author_id="1", author_name="admin", published=True,
+                            published_at=datetime(2026, 1, 1, 12, 0)))
+            db.commit()
+        finally:
+            db.close()
+
+    def _poll(self):
+        async def fake_push(*a, **kw):
+            return 1
+
+        with mock.patch.object(poller, "SessionLocal", self.Session), \
+             mock.patch.object(poller, "send_push_to_users", fake_push):
+            run(poller._poll_news(self.r))
+
+    def _count(self):
+        db = self.Session()
+        try:
+            return db.query(Notification).filter(Notification.category == "news").count()
+        finally:
+            db.close()
+
+    def test_empty_redis_seeds_silently(self):
+        self._poll()
+        self.assertEqual(self._count(), 0)
+
+    def test_new_leader_announces_posts_since_the_stored_check(self):
+        self.r.store["poller:news:last_check"] = b"2026-01-01T11:00:00"
+        self._poll()
+        self.assertEqual(self._count(), 1)
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

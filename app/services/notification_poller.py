@@ -295,7 +295,7 @@ def _get_seerr_config() -> dict:
 # Poll: Seerr requests
 # ---------------------------------------------------------------------------
 
-async def _poll_seerr_requests(r: aioredis.Redis, first_run: bool) -> None:
+async def _poll_seerr_requests(r: aioredis.Redis) -> None:
     config = _get_seerr_config()
     if not config["url"] or not config["api_key"]:
         return
@@ -329,8 +329,8 @@ async def _poll_seerr_requests(r: aioredis.Redis, first_run: bool) -> None:
                 # Always update snapshot
                 await r.set(redis_key, status_label)
 
-                if first_run or prev_status is None:
-                    continue  # seed silently
+                if prev_status is None:
+                    continue  # no baseline yet: seed silently
 
                 if status_label == "available" and prev_status != "available":
                     # Fetch media title
@@ -388,7 +388,7 @@ async def _poll_seerr_requests(r: aioredis.Redis, first_run: bool) -> None:
 # Poll: Seerr issues
 # ---------------------------------------------------------------------------
 
-async def _poll_seerr_issues(r: aioredis.Redis, first_run: bool) -> None:
+async def _poll_seerr_issues(r: aioredis.Redis) -> None:
     config = _get_seerr_config()
     if not config["url"] or not config["api_key"]:
         return
@@ -433,8 +433,8 @@ async def _poll_seerr_issues(r: aioredis.Redis, first_run: bool) -> None:
                 snapshot_val = f"{comment_count}:{status_label}"
                 await r.set(redis_key, snapshot_val)
 
-                if first_run or prev is None:
-                    continue
+                if prev is None:
+                    continue  # no baseline yet: seed silently
 
                 prev_str = prev.decode()
                 try:
@@ -526,7 +526,7 @@ async def _poll_seerr_issues(r: aioredis.Redis, first_run: bool) -> None:
 # Poll: Uptime Kuma monitors
 # ---------------------------------------------------------------------------
 
-async def _poll_monitors(r: aioredis.Redis, first_run: bool) -> None:
+async def _poll_monitors(r: aioredis.Redis) -> None:
     try:
         from app.integrations.uptime_kuma import get_monitors
     except ImportError:
@@ -563,8 +563,8 @@ async def _poll_monitors(r: aioredis.Redis, first_run: bool) -> None:
         replaced = await r.set(redis_key, f"{status_label}|{since}", get=True)
         prev_status, _ = _parse_monitor_snapshot(replaced)
 
-        if first_run or prev_status is None:
-            continue
+        if prev_status is None:
+            continue  # no baseline yet: seed silently
         if status_label == prev_status:
             continue  # another poller recorded this transition first
 
@@ -601,7 +601,7 @@ async def _poll_monitors(r: aioredis.Redis, first_run: bool) -> None:
 # Poll: News posts
 # ---------------------------------------------------------------------------
 
-async def _poll_news(r: aioredis.Redis, first_run: bool) -> None:
+async def _poll_news(r: aioredis.Redis) -> None:
     LAST_CHECK_KEY = "poller:news:last_check"
 
     prev_check_raw = await r.get(LAST_CHECK_KEY)
@@ -616,8 +616,8 @@ async def _poll_news(r: aioredis.Redis, first_run: bool) -> None:
     now = datetime.now(timezone.utc)
     await r.set(LAST_CHECK_KEY, now.isoformat())
 
-    if first_run or last_check is None:
-        return  # seed silently — don't flood on first run
+    if last_check is None:
+        return  # no baseline yet: seed silently — don't flood
 
     db = SessionLocal()
     try:
@@ -667,7 +667,7 @@ async def _poll_news(r: aioredis.Redis, first_run: bool) -> None:
 # Poll: Support tickets
 # ---------------------------------------------------------------------------
 
-async def _poll_tickets(r: aioredis.Redis, first_run: bool) -> None:
+async def _poll_tickets(r: aioredis.Redis) -> None:
     """Detect admin comments and status changes on support tickets."""
     db = SessionLocal()
     try:
@@ -698,8 +698,8 @@ async def _poll_tickets(r: aioredis.Redis, first_run: bool) -> None:
             snapshot_val = f"{comment_count}:{current_status}"
             await r.set(redis_key, snapshot_val)
 
-            if first_run or prev is None:
-                continue  # seed silently
+            if prev is None:
+                continue  # no baseline yet: seed silently
 
             prev_str = prev.decode()
             try:
@@ -820,11 +820,12 @@ async def start_poller() -> None:
 async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
     """The polling loop proper; polls only while this worker holds the lease."""
 
-    # Track first-run per poller type
-    first_run_seerr = True
-    first_run_monitors = True
-    first_run_news = True
-    first_run_tickets = True
+    # Whether to stay silent is decided per item by whether Redis already
+    # holds a baseline for it, never by a flag in this process: Redis outlives
+    # a uvicorn restart (supervisord restarts it alone) and a lease handover,
+    # and a fresh leader must alert on the first change it sees against the
+    # baseline its predecessor left. A full restart empties Redis, so that
+    # still seeds silently.
 
     # Track when each poller last ran (epoch seconds)
     last_seerr = 0.0
@@ -867,38 +868,34 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
             if lease.held and now - last_seerr >= interval_seerr:
                 last_seerr = now
                 try:
-                    await _poll_seerr_requests(r, first_run_seerr)
-                    await _poll_seerr_issues(r, first_run_seerr)
+                    await _poll_seerr_requests(r)
+                    await _poll_seerr_issues(r)
                 except Exception as exc:
                     logger.warning("Poller: seerr cycle error: %s", exc)
-                first_run_seerr = False
 
             # --- Monitors ---
             if lease.held and now - last_monitors >= interval_monitors:
                 last_monitors = now
                 try:
-                    await _poll_monitors(r, first_run_monitors)
+                    await _poll_monitors(r)
                 except Exception as exc:
                     logger.warning("Poller: monitors cycle error: %s", exc)
-                first_run_monitors = False
 
             # --- News ---
             if lease.held and now - last_news >= interval_news:
                 last_news = now
                 try:
-                    await _poll_news(r, first_run_news)
+                    await _poll_news(r)
                 except Exception as exc:
                     logger.warning("Poller: news cycle error: %s", exc)
-                first_run_news = False
 
             # --- Tickets ---
             if lease.held and now - last_tickets >= interval_tickets:
                 last_tickets = now
                 try:
-                    await _poll_tickets(r, first_run_tickets)
+                    await _poll_tickets(r)
                 except Exception as exc:
                     logger.warning("Poller: tickets cycle error: %s", exc)
-                first_run_tickets = False
 
         except Exception as exc:
             logger.error("Poller: unexpected error in main loop: %s", exc)
