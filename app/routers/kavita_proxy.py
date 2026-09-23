@@ -161,7 +161,7 @@ def _location_allowed(location: str, kavita_base: str) -> bool:
     (M8); confining it to the configured Authentik origin (or Kavita's own)
     closes that without affecting the real flow."""
     target = _origin(location)
-    authentik = (settings.authentik_url or "").strip()
+    authentik = get_authentik_url()
     for allowed in (authentik, kavita_base):
         if allowed and _origin(allowed) == target:
             return True
@@ -267,14 +267,29 @@ def sanitize_book_html(html: str) -> str:
     )
 
 
-def get_kavita_url() -> Optional[str]:
-    """Read the configured Kavita base URL from settings (short-lived session)."""
+def _read_setting(key: str) -> str:
+    """Read one settings row's value (short-lived session); "" when unset."""
     db = SessionLocal()
     try:
-        row = db.query(Setting).filter(Setting.key == "integration.kavita.url").first()
-        return row.value.rstrip("/") if row and row.value else None
+        row = db.query(Setting).filter(Setting.key == key).first()
+        return (row.value or "").strip() if row else ""
     finally:
         db.close()
+
+
+def get_kavita_url() -> Optional[str]:
+    """Read the configured Kavita base URL from settings."""
+    return _read_setting("integration.kavita.url").rstrip("/") or None
+
+
+def get_authentik_url() -> str:
+    """The Authentik base URL, resolved the way get_oidc_client resolves it.
+
+    Installs configure Authentik in Settings -> Integrations (the settings
+    table); the AUTHENTIK_URL environment variable is only a legacy fallback.
+    Reading the env var alone left the handshake allow-list empty on every
+    DB-configured install, so the real authorize redirect was refused."""
+    return _read_setting("integration.authentik.url") or (settings.authentik_url or "").strip()
 
 
 def build_forward_headers(request: Request, token: Optional[str]) -> Dict[str, str]:
