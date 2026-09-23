@@ -94,8 +94,9 @@ self.addEventListener('fetch', function (event) {
 
 // The server sends the operator's logo when it is a same-origin path; anything
 // else falls back to the bundled logo so the notification never shows a
-// broken image.
-var DEFAULT_ICON = '/static/webservarr.svg';
+// broken image. A PNG, because Chromium does not rasterise SVG notification
+// icons. Keep in step with DEFAULT_PUSH_ICON in app/services/push.py.
+var DEFAULT_ICON = '/static/webservarr-192.png';
 
 function sameOriginPath(value) {
   try {

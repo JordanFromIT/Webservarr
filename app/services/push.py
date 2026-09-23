@@ -27,8 +27,10 @@ PUSH_TOTAL_BUDGET = 30.0
 PUSH_CONCURRENCY = 10
 
 # Shown on the notification when the operator's logo is not a same-origin path
-# (a service worker can only reliably load icons from its own origin).
-DEFAULT_PUSH_ICON = "/static/webservarr.svg"
+# (a service worker can only reliably load icons from its own origin). A PNG,
+# because Chromium does not rasterise SVG notification icons. Keep in step with
+# DEFAULT_ICON in app/static/sw.js.
+DEFAULT_PUSH_ICON = "/static/webservarr-192.png"
 
 
 def load_vapid_key(private_key: str):

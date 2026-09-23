@@ -13,6 +13,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import unittest
 from unittest import mock
 
@@ -191,6 +192,25 @@ class SeededKeySignsPushes(unittest.TestCase):
         self.assertEqual(push._push_icon("https://cdn.example.com/x.png"), push.DEFAULT_PUSH_ICON)
         self.assertEqual(push._push_icon("//evil.example.com/x.png"), push.DEFAULT_PUSH_ICON)
         self.assertEqual(push._push_icon(""), push.DEFAULT_PUSH_ICON)
+
+
+class DefaultIconTests(unittest.TestCase):
+    """The fallback notification icon exists, is a PNG, and both sides agree."""
+
+    STATIC = os.path.join(os.path.dirname(__file__), "..", "static")
+
+    def test_service_worker_and_server_use_the_same_default(self):
+        with open(os.path.join(self.STATIC, "sw.js"), encoding="utf-8") as f:
+            sw = f.read()
+        m = re.search(r"var DEFAULT_ICON = '([^']+)'", sw)
+        self.assertIsNotNone(m)
+        if HAVE_APP:
+            self.assertEqual(m.group(1), push.DEFAULT_PUSH_ICON)
+        self.assertTrue(m.group(1).endswith(".png"))
+
+    def test_default_icon_is_a_real_png(self):
+        with open(os.path.join(self.STATIC, "webservarr-192.png"), "rb") as f:
+            self.assertEqual(f.read(8), b"\x89PNG\r\n\x1a\n")
 
 
 if __name__ == "__main__":
