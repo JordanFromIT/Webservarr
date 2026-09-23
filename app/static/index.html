@@ -563,8 +563,10 @@ async function loadRecentRequests() {
         onError: function (error) {
             console.error('Error loading recent requests:', error);
             WS.arrive('requests', function () {
+                // Same height as the three skeleton rows it replaces (see
+                // renderRecentRequests), so the card does not shrink.
                 WS.setHTML(document.getElementById('requestsBody'), `
-                    <tr>
+                    <tr class="h-[218px] sm:h-[182px]">
                         <td colspan="3" class="px-6 py-8 text-center text-steel-blue">
                             <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
                             <p>Seerr not configured</p>
@@ -592,8 +594,12 @@ function renderRecentRequests(requests) {
 
     WS.arrive('requests', function () {
         if (!Array.isArray(requests) || requests.length === 0) {
+            // The empty (and error) state fills the space the three skeleton
+            // rows held - 3 x 72px + dividers on a phone, 3 x 60px + dividers
+            // from sm up - so the card does not shrink when it lands. A row
+            // height in a table is a minimum; the message centres in it.
             WS.setHTML(tbody, `
-                <tr>
+                <tr class="h-[218px] sm:h-[182px]">
                     <td colspan="3" class="px-6 py-8 text-center text-steel-blue">
                         <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
                         <p>No recent requests</p>
