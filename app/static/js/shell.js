@@ -444,18 +444,28 @@
       glideFrame = requestAnimationFrame(step);
     }
 
+    // Ends the gesture however it ended. withGlide is true only for a real
+    // release over the row (pointerup): that release is followed by a click
+    // to swallow and may coast. Every other ending - a cancel, lost capture
+    // (window blur, alt-tab), a release we never heard about - just stops and
+    // puts the row back, so no state can outlive the gesture: a stuck
+    // `dragging` would leave the grabbing cursor and the scroll overrides on,
+    // and swallow the next ordinary click on a card.
     function endDrag(e, withGlide) {
-      if (!press) return;
       press = null;
       if (!dragging) return;
       dragging = false;
       el.classList.remove('ws-dragging');
-      try { el.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
-      // The button came up over whatever card the drag ended on; the click
-      // that follows must not open it. Cleared on the next task in case no
-      // click arrives (released outside the row).
-      swallowClick = true;
-      setTimeout(function () { swallowClick = false; }, 0);
+      try {
+        if (e && el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      } catch (err) { /* already released */ }
+      if (withGlide) {
+        // The button came up over whatever card the drag ended on; the click
+        // that follows must not open it. Cleared on the next task in case no
+        // click arrives (released outside the row).
+        swallowClick = true;
+        setTimeout(function () { swallowClick = false; }, 0);
+      }
       // A pause before letting go means the user stopped the row themselves.
       if (withGlide && !reducedMotion() && performance.now() - lastT < 80 &&
           Math.abs(velocity) > GLIDE_MIN) {
@@ -471,6 +481,7 @@
 
     el.addEventListener('pointerdown', function (e) {
       if (e.pointerType !== 'mouse') return;
+      endDrag(e, false);                            // finish any gesture left open
       stopGlide();                                  // a press catches a gliding row
       if (e.button !== 0 || !scrollable()) return;
       press = { id: e.pointerId, x: e.clientX, left: el.scrollLeft };
@@ -483,7 +494,7 @@
       if (!press || e.pointerId !== press.id) return;
       // The button was released somewhere we never heard about (outside the
       // row, before a drag began and captured the pointer).
-      if (!(e.buttons & 1)) { press = null; return; }
+      if (!(e.buttons & 1)) { endDrag(e, false); return; }
       var dx = e.clientX - press.x;
       if (!dragging) {
         if (Math.abs(dx) < DRAG_THRESHOLD) return;
@@ -510,6 +521,10 @@
 
     el.addEventListener('pointerup', function (e) { endDrag(e, true); });
     el.addEventListener('pointercancel', function (e) { endDrag(e, false); });
+    // Capture can be taken away without a pointerup ever reaching the row. On a
+    // normal release this fires after pointerup has already finished the drag,
+    // and does nothing.
+    el.addEventListener('lostpointercapture', function (e) { endDrag(e, false); });
 
     // Capture phase on the row runs before any card's own click handler.
     el.addEventListener('click', function (e) {
