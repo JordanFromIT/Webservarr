@@ -222,6 +222,11 @@ class DefaultIconTests(unittest.TestCase):
         self.assertIn("payload.icon = rasterIcon(data.icon)", sw)
         self.assertIn(r"/\.svg$/i.test(file) ? DEFAULT_ICON", sw)
 
+    def test_no_colour_logo_as_badge(self):
+        with open(os.path.join(self.STATIC, "sw.js"), encoding="utf-8") as f:
+            sw = f.read()
+        self.assertNotIn("badge:", sw)
+
     def test_default_icon_is_a_real_png(self):
         with open(os.path.join(self.STATIC, "webservarr-192.png"), "rb") as f:
             self.assertEqual(f.read(8), b"\x89PNG\r\n\x1a\n")

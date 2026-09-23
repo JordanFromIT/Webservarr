@@ -136,7 +136,8 @@ self.addEventListener('push', function(event) {
   var options = {
     body: payload.body,
     icon: payload.icon,
-    badge: payload.icon,
+    // No badge: Android draws it as a monochrome alpha mask, which turns a
+    // full-colour logo into a flat blob. The platform default is cleaner.
     tag: payload.category,
     data: {
       url: payload.url,
