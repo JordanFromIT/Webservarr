@@ -192,6 +192,8 @@ class SeededKeySignsPushes(unittest.TestCase):
         self.assertEqual(push._push_icon("https://cdn.example.com/x.png"), push.DEFAULT_PUSH_ICON)
         self.assertEqual(push._push_icon("//evil.example.com/x.png"), push.DEFAULT_PUSH_ICON)
         self.assertEqual(push._push_icon(""), push.DEFAULT_PUSH_ICON)
+        self.assertEqual(push._push_icon("/\\evil.example/x.png"), push.DEFAULT_PUSH_ICON)
+        self.assertEqual(push._push_icon("/\t/evil.example/x.png"), push.DEFAULT_PUSH_ICON)
 
 
 class DefaultIconTests(unittest.TestCase):

@@ -2,7 +2,32 @@
 
 import ipaddress
 import socket
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
+
+
+# --- Same-origin paths ---
+
+def same_origin_path(value) -> str:
+    """Return ``value`` as a same-origin absolute path (path + query), or "".
+
+    ``startswith("/") and not startswith("//")`` is not enough: browsers
+    parse URLs by the WHATWG rules, which treat a backslash as a slash and
+    drop tabs and newlines anywhere, so "/\\evil.example" and "/<TAB>/evil.example"
+    both resolve to another origin. Any backslash or
+    control character is refused outright, and the result must carry no
+    scheme or host.
+    """
+    if not isinstance(value, str):
+        return ""
+    v = value.strip()
+    if not v.startswith("/") or v.startswith("//"):
+        return ""
+    if any(c == "\\" or ord(c) < 0x20 or ord(c) == 0x7F for c in v):
+        return ""
+    parts = urlsplit(v)
+    if parts.scheme or parts.netloc:
+        return ""
+    return parts.path + (f"?{parts.query}" if parts.query else "")
 
 
 # --- SSRF guards for server-side outbound requests ---

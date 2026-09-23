@@ -13,7 +13,7 @@ from typing import Dict, List
 
 from app.database import SessionLocal
 from app.models import PushSubscription, Setting
-from app.utils import is_safe_push_endpoint
+from app.utils import is_safe_push_endpoint, same_origin_path
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +55,7 @@ def load_vapid_key(private_key: str):
 
 def _push_icon(logo_url: str) -> str:
     """The operator's logo when it is a same-origin path, else the bundled one."""
-    v = (logo_url or "").strip()
-    if v.startswith("/") and not v.startswith("//"):
-        return v
-    return DEFAULT_PUSH_ICON
+    return same_origin_path(logo_url) or DEFAULT_PUSH_ICON
 
 
 async def send_push_to_users(

@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.config import settings
 from app.database import SessionLocal
+from app.utils import same_origin_path
 
 logger = logging.getLogger(__name__)
 
@@ -141,9 +142,7 @@ def _safe_url(value) -> str:
     v = (value or "").strip()
     if v.startswith(("https://", "http://")):
         return v
-    if v.startswith("/") and not v.startswith("//"):
-        return v
-    return ""
+    return same_origin_path(v)
 
 
 def theme_style(branding: dict) -> str:
