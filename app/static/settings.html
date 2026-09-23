@@ -891,6 +891,7 @@
                                         </button>
                                         <span id="logoUploadStatus" class="text-xs"></span>
                                     </div>
+                                    <p id="logoNotLoaded" class="hidden text-xs text-frosted-blue/80">Couldn't load the saved logo, so saving the theme will leave it unchanged. Reload the page to edit it.</p>
                                     <p class="text-xs text-steel-blue/70">Shown in the sidebar. Accepts URL, uploaded file (max 2MB), or server path. Leave empty for default icon.</p>
                                 </div>
                             </div>
@@ -2563,13 +2564,48 @@
             }
         }
 
+        // Whether the logo field holds the STORED setting (or a value the
+        // admin chose). While false, Save theme leaves branding.logo_url out,
+        // so a failed read can never save a blank over the real logo.
+        var _themeLogoLoaded = false;
+
+        function _setThemeLogo(url) {
+            _themeLogoLoaded = true;
+            document.getElementById('logoNotLoaded').classList.add('hidden');
+            document.getElementById('themeLogoUrl').value = url;
+            _updateLogoPreview(url);
+        }
+
+        // Fill the logo field from the stored setting, not /api/branding:
+        // the public value is blanked when it won't be served, and saving
+        // that blank back would erase the setting. No row (404) means the
+        // default, which the public value already is.
+        async function _loadStoredLogo(logoRequest, publicValue) {
+            var resp = await logoRequest;
+            if (resp && resp.ok) {
+                var setting = await resp.json().catch(function() { return null; });
+                if (setting && typeof setting.value === 'string') {
+                    _setThemeLogo(setting.value);
+                    return;
+                }
+            } else if (resp && resp.status === 404) {
+                _setThemeLogo(publicValue);
+                return;
+            }
+            console.warn('Could not load the stored logo URL; Save theme will leave it unchanged.');
+            document.getElementById('themeLogoUrl').value = publicValue;
+            _updateLogoPreview(publicValue);
+            document.getElementById('logoNotLoaded').classList.remove('hidden');
+        }
+
         document.getElementById('themeLogoUrl').addEventListener('input', function() {
+            _themeLogoLoaded = true;   // the admin is setting it themselves
+            document.getElementById('logoNotLoaded').classList.add('hidden');
             _updateLogoPreview(this.value.trim());
         });
 
         document.getElementById('btnClearLogo').addEventListener('click', function() {
-            document.getElementById('themeLogoUrl').value = '';
-            _updateLogoPreview('');
+            _setThemeLogo('');
         });
 
         document.getElementById('logoFileInput').addEventListener('change', async function() {
@@ -2589,8 +2625,7 @@
                 });
                 if (resp.ok) {
                     var data = await resp.json();
-                    document.getElementById('themeLogoUrl').value = data.url;
-                    _updateLogoPreview(data.url);
+                    _setThemeLogo(data.url);
                     statusEl.textContent = 'Uploaded!';
                     statusEl.className = 'text-xs text-green-400';
                 } else {
@@ -2703,6 +2738,8 @@
 
         // Load current theme values from branding API
         async function loadThemeSettings() {
+            // Started now, awaited later: a slow answer must not hold up the tab.
+            const logoRequest = fetch('/api/admin/settings/branding.logo_url').catch(function() { return null; });
             try {
                 const resp = await fetch('/api/branding');
                 if (!resp.ok) return;
@@ -2710,19 +2747,7 @@
 
                 document.getElementById('themeAppName').value = data.app_name || '';
                 document.getElementById('themeTagline').value = data.tagline || '';
-                // The logo field shows the STORED value, not the public one:
-                // /api/branding blanks a logo URL it won't serve, and saving
-                // that blank back would erase the setting on an unrelated save.
-                var logoUrl = data.logo_url || '';
-                try {
-                    const logoResp = await fetch('/api/admin/settings/branding.logo_url');
-                    if (logoResp.ok) {
-                        const logoSetting = await logoResp.json();
-                        if (typeof logoSetting.value === 'string') logoUrl = logoSetting.value;
-                    }
-                } catch (e) { /* keep the public value */ }
-                document.getElementById('themeLogoUrl').value = logoUrl;
-                _updateLogoPreview(logoUrl);
+                _loadStoredLogo(logoRequest, data.logo_url || '');   // not awaited
                 const colors = data.colors || {};
                 const colorMap = {
                     primary: colors.primary || '#125793',
@@ -2823,8 +2848,13 @@
             var settings = [
                 { key: 'branding.app_name', value: document.getElementById('themeAppName').value, description: 'App name' },
                 { key: 'branding.tagline', value: document.getElementById('themeTagline').value, description: 'App tagline' },
-                { key: 'branding.logo_url', value: document.getElementById('themeLogoUrl').value, description: 'Logo URL' },
             ];
+            // Only when the field holds the stored (or admin-chosen) value; see _themeLogoLoaded.
+            if (_themeLogoLoaded) {
+                settings.push({ key: 'branding.logo_url', value: document.getElementById('themeLogoUrl').value, description: 'Logo URL' });
+            } else {
+                console.warn('Save theme: leaving branding.logo_url unchanged (the stored value was not loaded).');
+            }
 
             themeColorFields.forEach(function(field) {
                 settings.push({
@@ -2921,7 +2951,7 @@
 
             document.getElementById('themeAppName').value = THEME_DEFAULTS['branding.app_name'];
             document.getElementById('themeTagline').value = THEME_DEFAULTS['branding.tagline'];
-            document.getElementById('themeLogoUrl').value = THEME_DEFAULTS['branding.logo_url'];
+            _setThemeLogo(THEME_DEFAULTS['branding.logo_url']);
             _updateLogoPreview('');
 
             themeColorFields.forEach(function(field) {
