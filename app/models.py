@@ -173,6 +173,10 @@ class Ticket(Base):
     is_public = Column(Boolean, default=False, nullable=False)
     creator_username = Column(String(100), nullable=False, index=True)
     creator_name = Column(String(100), nullable=False)
+    # The creator's session email, lower-cased: the identity ticket alerts are
+    # sent to. Usernames come from separate namespaces (local, Plex, OIDC) and
+    # can collide. Null on tickets created before the column existed.
+    creator_email = Column(String(255), nullable=True)
     image_path = Column(String(300), nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

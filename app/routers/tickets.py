@@ -317,6 +317,7 @@ async def create_ticket(
         is_public=False,
         creator_username=current_user.get("username", ""),
         creator_name=current_user.get("name", current_user.get("username", "Unknown")),
+        creator_email=(current_user.get("email") or "").lower() or None,
         image_path=image_path,
     )
 

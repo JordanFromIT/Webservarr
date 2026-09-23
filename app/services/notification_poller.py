@@ -296,31 +296,25 @@ def _parse_monitor_snapshot(raw) -> tuple:
     return status, (since if sep else None)
 
 
-def push_username_key(username: str) -> str:
-    """Settings key mapping a username to the email it subscribed to push with.
+async def _ticket_creator_email(r: aioredis.Redis, db: Session, ticket) -> Optional[str]:
+    """Where a ticket alert goes, or None if the creator can't be reached.
 
-    Tickets record only the creator's username, and the only other place that
-    ties a username to an email is a live Redis session, which a restart
-    wipes. The push-subscribe route writes this row (like the per-user
-    notify.<hash>.<category> preference rows) so a subscriber can still be
-    reached about their ticket while signed out.
+    Tickets record the creator's email (creator_email): it is the target, as
+    long as _collect_recipient_emails would reach it (live session or push
+    subscription). Tickets from before that column keep the old behaviour, a
+    live session whose username matches, and nothing else: usernames from
+    different sign-in methods (local, Plex, OIDC) can collide, so a username
+    is never mapped to an email any other way.
     """
-    digest = hashlib.sha256((username or "").lower().encode()).hexdigest()[:16]
-    return f"push.user.{digest}.email"
+    if ticket.creator_email:
+        email = ticket.creator_email.lower()
+        return email if email in await _collect_recipient_emails(r, db) else None
 
-
-async def _ticket_creator_email(r: aioredis.Redis, db: Session, username: str) -> Optional[str]:
-    """The ticket creator's email, if they can be reached: live session or push.
-
-    Resolved from a live session carrying that username, else from the
-    username->email row the push-subscribe route records; either way the
-    email must be one _collect_recipient_emails would target.
-    """
+    username = ticket.creator_username
     if not username:
         return None
-    email = None
     cursor = 0
-    while email is None:
+    while True:
         cursor, keys = await r.scan(cursor, match="session:*", count=100)
         for key in keys:
             data = await r.hgetall(key)
@@ -330,16 +324,9 @@ async def _ticket_creator_email(r: aioredis.Redis, db: Session, username: str) -
                 found = data.get(b"email", b"")
                 found = found.decode() if isinstance(found, bytes) else found
                 if found:
-                    email = found.lower()
-                    break
+                    return found.lower()
         if cursor == 0:
-            break
-    if email is None:
-        row = db.query(Setting).filter(Setting.key == push_username_key(username)).first()
-        email = row.value.lower() if row and row.value else None
-    if email and email in await _collect_recipient_emails(r, db):
-        return email
-    return None
+            return None
 
 
 def _monitor_ref(monitor_id, status_label: str, since: str) -> str:
@@ -792,7 +779,7 @@ async def _poll_tickets(r: aioredis.Redis) -> None:
                 prev_count = 0
                 prev_status = "open"
 
-            creator_email = await _ticket_creator_email(r, db, ticket.creator_username)
+            creator_email = await _ticket_creator_email(r, db, ticket)
             if not creator_email:
                 continue
 

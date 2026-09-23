@@ -293,38 +293,42 @@ class NewsBaselineTests(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class TicketAlertTests(unittest.TestCase):
-    """A ticket reply reaches its creator while signed out if they have push."""
+    """Ticket alerts go to the creator's recorded email, never by username.
+
+    Usernames come from separate namespaces (local accounts, Plex handles,
+    OIDC preferred_username), so a Plex user named like the local admin must
+    never receive the admin's ticket replies.
+    """
 
     def setUp(self):
         self.Session = make_session_factory()
         self.r = FakeRedis()
         self.pushed = []
+
+    def _ticket(self, creator_email):
         db = self.Session()
         try:
             t = Ticket(title="Buffering", description="d", category="other", status="open",
-                       creator_username="bob", creator_name="Bob")
+                       creator_username="bob", creator_name="Bob", creator_email=creator_email)
             db.add(t)
             db.commit()
-            self.ticket_id = t.id
+            tid = t.id
         finally:
             db.close()
-        self.r.store[f"poller:ticket:{self.ticket_id}"] = b"0:open"   # baseline
-
-    def _reply(self):
+        self.r.store[f"poller:ticket:{tid}"] = b"0:open"   # baseline
         db = self.Session()
         try:
-            db.add(TicketComment(ticket_id=self.ticket_id, author_username="admin",
+            db.add(TicketComment(ticket_id=tid, author_username="admin",
                                  author_name="Admin", is_admin=True, message="Fixed"))
             db.commit()
         finally:
             db.close()
 
-    def _subscribe_bob(self):
+    def _subscribe(self, email):
         db = self.Session()
         try:
-            db.add(PushSubscription(user_email="bob@example.com",
-                                    endpoint="https://push.example.com/b", p256dh="p", auth="a"))
-            db.add(Setting(key=poller.push_username_key("bob"), value="bob@example.com"))
+            db.add(PushSubscription(user_email=email, endpoint=f"https://push.example.com/{email}",
+                                    p256dh="p", auth="a"))
             db.commit()
         finally:
             db.close()
@@ -345,32 +349,39 @@ class TicketAlertTests(unittest.TestCase):
         finally:
             db.close()
 
-    def test_signed_out_push_subscriber_gets_the_reply(self):
-        self._subscribe_bob()   # no session:* key for bob
-        self._reply()
+    def test_creator_is_reached_by_email_with_no_session(self):
+        self._subscribe("bob@plex.example")
+        self._ticket("bob@plex.example")
         self._poll()
-        self.assertEqual(self._rows(), [("bob@example.com", "New response on your ticket")])
-        self.assertEqual(self.pushed, [(["bob@example.com"], "New response on your ticket")])
+        self.assertEqual(self._rows(), [("bob@plex.example", "New response on your ticket")])
+        self.assertEqual(self.pushed, [(["bob@plex.example"], "New response on your ticket")])
 
-    def test_live_session_still_works(self):
-        self.r.hashes["session:x"] = {"username": "bob", "email": "Bob@Example.com"}
-        self._reply()
+    def test_same_username_on_another_sign_in_method_gets_nothing(self):
+        # The creator is Plex "bob"; a local account also called "bob" is
+        # signed in and subscribed. Only the creator may be alerted.
+        self._subscribe("bob@plex.example")
+        self._subscribe("bob@local.example")
+        self.r.hashes["session:local"] = {"username": "bob", "email": "bob@local.example"}
+        self._ticket("bob@plex.example")
         self._poll()
-        self.assertEqual(self._rows(), [("bob@example.com", "New response on your ticket")])
+        self.assertEqual(self._rows(), [("bob@plex.example", "New response on your ticket")])
 
-    def test_unreachable_creator_gets_nothing(self):
-        self._reply()
+    def test_unreachable_creator_is_not_replaced_by_a_username_match(self):
+        self._subscribe("bob@local.example")
+        self.r.hashes["session:local"] = {"username": "bob", "email": "bob@local.example"}
+        self._ticket("bob@plex.example")     # creator: no session, no push
         self._poll()
         self.assertEqual(self._rows(), [])
 
-    def test_stale_mapping_without_a_subscription_is_ignored(self):
-        db = self.Session()
-        try:
-            db.add(Setting(key=poller.push_username_key("bob"), value="bob@example.com"))
-            db.commit()
-        finally:
-            db.close()
-        self._reply()
+    def test_legacy_ticket_uses_a_live_session_only(self):
+        self.r.hashes["session:x"] = {"username": "bob", "email": "Bob@Example.com"}
+        self._ticket(None)
+        self._poll()
+        self.assertEqual(self._rows(), [("bob@example.com", "New response on your ticket")])
+
+    def test_legacy_ticket_without_session_gets_nothing(self):
+        self._subscribe("bob@example.com")
+        self._ticket(None)
         self._poll()
         self.assertEqual(self._rows(), [])
 

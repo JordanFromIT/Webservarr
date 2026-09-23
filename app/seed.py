@@ -148,6 +148,48 @@ def migrate_setup_completed(db: Session) -> None:
             db.rollback()
 
 
+def migrate_ticket_creator_email(db: Session) -> None:
+    """One-time migration: add tickets.creator_email to existing databases.
+
+    create_all() only creates missing tables, never missing columns, so an
+    install created before the column existed needs it added. Guarded by
+    PRAGMA table_info and idempotent; two workers starting together may both
+    try, and the loser's "duplicate column" error is ignored.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    columns = {row[1] for row in db.execute(text("PRAGMA table_info(tickets)"))}
+    if not columns or "creator_email" in columns:
+        return  # no table yet (create_all makes it with the column) or done
+    try:
+        db.execute(text("ALTER TABLE tickets ADD COLUMN creator_email VARCHAR(255)"))
+        db.commit()
+        logger.info("Added tickets.creator_email")
+    except OperationalError as exc:
+        db.rollback()
+        if "duplicate column" not in str(exc).lower():
+            raise
+
+
+def migrate_drop_push_username_rows(db: Session) -> None:
+    """One-time migration: delete push.user.<hash>.email settings rows.
+
+    A dev build mapped usernames to emails there for ticket alerts. Usernames
+    from different sign-in methods can collide, so that mapping could send
+    one person's ticket alerts to another; tickets now store the creator's
+    email instead. Idempotent.
+    """
+    removed = (
+        db.query(Setting)
+        .filter(Setting.key.like("push.user.%.email"))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    if removed:
+        logger.info("Removed %d push.user.*.email setting row(s)", removed)
+
+
 def seed_default_settings(db: Session) -> None:
     """Insert default branding/theme settings if they don't exist.
     Uses per-key commits to handle race conditions with multiple workers."""

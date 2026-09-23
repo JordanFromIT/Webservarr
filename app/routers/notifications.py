@@ -13,7 +13,6 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.limiter import limiter
 from app.models import Notification, PushSubscription, Setting
-from app.services.notification_poller import push_username_key
 from app.utils import is_safe_push_endpoint
 
 logger = logging.getLogger(__name__)
@@ -297,18 +296,6 @@ async def push_subscribe(
             p256dh=body.keys.p256dh,
             auth=body.keys.auth,
         ))
-
-    # Remember which email this username subscribed with: tickets store only
-    # the creator's username, and ticket alerts must reach a subscriber who
-    # is signed out (see notification_poller.push_username_key).
-    username = current_user.get("username") or ""
-    if username:
-        key = push_username_key(username)
-        row = db.query(Setting).filter(Setting.key == key).first()
-        if row:
-            row.value = email
-        else:
-            db.add(Setting(key=key, value=email, description="Push: email for a username (ticket alerts)"))
 
     db.commit()
     return {"success": True}
