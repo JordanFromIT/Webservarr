@@ -9,7 +9,9 @@ builder for both) only lets http(s) or a same-origin path through; anything
 else becomes "" (no logo), which the shell already turns into its icon.
 """
 import json
+import os
 import unittest
+from unittest import mock
 
 try:
     from app import pages
@@ -40,6 +42,12 @@ class LogoUrlTests(unittest.TestCase):
         self.assertEqual(_payload("/static/uploads/logo-1.png")["logo_url"], "/static/uploads/logo-1.png")
         self.assertEqual(_payload("https://cdn.example.com/l.png")["logo_url"], "https://cdn.example.com/l.png")
         self.assertEqual(_payload("")["logo_url"], "")
+
+    def test_malformed_absolute_urls_become_no_logo(self):
+        for bad in ("http://[::1", "https://[", "http://", "https://:80/x",
+                    "https://cdn.example.com:99999/x", "https://good.example\\@evil.example/x"):
+            with self.subTest(bad=bad):
+                self.assertEqual(_payload(bad)["logo_url"], "")
 
     def test_scheme_is_case_insensitive(self):
         self.assertEqual(_payload("HTTPS://cdn.example.com/l.png")["logo_url"], "HTTPS://cdn.example.com/l.png")
@@ -109,7 +117,8 @@ class LogoWriteValidationTests(unittest.TestCase):
 
     def test_bad_logo_urls_are_refused(self):
         for bad in ("//cdn.example.com/x.png", "static/x.png", "/\\evil.example/x.png",
-                    "javascript:alert(1)"):
+                    "javascript:alert(1)", "http://[::1", "https://[", "http://",
+                    "https://:80/x"):
             with self.subTest(bad=bad):
                 r = self.client.put("/api/admin/settings",
                                     json={"key": "branding.logo_url", "value": bad})
@@ -133,6 +142,39 @@ class LogoWriteValidationTests(unittest.TestCase):
         self.assertEqual(r.status_code, 400, r.text)
         self.assertIsNone(self._stored("branding.app_name"))
         self.assertIsNone(self._stored("branding.logo_url"))
+
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class RenderNeverFallsBackToRawTests(unittest.TestCase):
+    """No stored logo value may make render_page serve the raw file.
+
+    render_page catches any rendering error and serves the unrendered page
+    (no sidebar, header, theme or #ws-data) - site-wide, for as long as the
+    bad value is stored. "http://[::1" once did exactly that.
+    """
+
+    STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
+
+    def test_index_renders_for_any_stored_logo(self):
+        user = {"username": "root", "is_admin": "true", "auth_method": "simple"}
+        for stored in ("http://[::1", "https://[", "http://", "https://:80/x",
+                       "/\\evil.example/x.png", "/icons.svg#logo", "javascript:x", ""):
+            with self.subTest(stored=stored):
+                ctx = (_payload(stored), {"netdata": False})
+                with mock.patch.object(pages, "STATIC_DIR", self.STATIC), \
+                     mock.patch.object(pages, "load_context", return_value=ctx), \
+                     self.assertNoLogs(pages.logger, level="WARNING"):
+                    resp = pages.render_page("index", None, user)
+                body = resp.body.decode()
+                self.assertNotIn("<!-- ws:sidebar -->", body)
+                self.assertNotIn("<!-- ws:header -->", body)
+                self.assertIn('id="desktopSidebar"', body)
+                self.assertIn('id="ws-data"', body)
+
+    def test_preview_meta_survives_an_unparseable_logo(self):
+        name, meta = pages._preview_meta({"logo_url": "http://[::1"}, "https://example.test", "/")
+        self.assertNotIn("og:image", meta)
 
 
 if __name__ == "__main__":

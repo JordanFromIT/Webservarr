@@ -54,6 +54,32 @@ def same_origin_path(value) -> str:
     )
 
 
+def safe_http_url(value) -> str:
+    """Return ``value`` if it is a well-formed absolute http(s) URL, else "".
+
+    A prefix check is not enough: "http://[::1" passes one but makes
+    urlsplit() raise, and anything that later parses the stored value (the
+    link-preview builder does) would fail. The URL must parse, have an http
+    or https scheme (any case) and a hostname, and a valid port if any.
+    Backslashes and control characters are refused, because browsers and
+    Python disagree on where the host ends around them.
+    """
+    if not isinstance(value, str):
+        return ""
+    v = value.strip()
+    if not v or any(c == "\\" or ord(c) < 0x20 or ord(c) == 0x7F for c in v):
+        return ""
+    try:
+        parts = urlsplit(v)
+        host = parts.hostname
+        parts.port  # raises ValueError for a malformed or out-of-range port
+    except ValueError:
+        return ""
+    if parts.scheme.lower() not in ("http", "https") or not host:
+        return ""
+    return v
+
+
 # --- SSRF guards for server-side outbound requests ---
 
 def _resolve_ips(host: str):

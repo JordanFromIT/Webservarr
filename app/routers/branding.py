@@ -12,7 +12,7 @@ from app.database import get_db
 from app.dependencies import get_current_user_optional
 from app.limiter import limiter
 from app.models import Setting
-from app.utils import same_origin_path
+from app.utils import safe_http_url, same_origin_path
 
 router = APIRouter()
 
@@ -196,7 +196,7 @@ def safe_logo_url(value) -> str:
     """
     v = (value or "").strip() if isinstance(value, str) else ""
     if v.lower().startswith(("https://", "http://")):  # schemes are case-insensitive
-        return v
+        return safe_http_url(v)
     return same_origin_path(v)
 
 

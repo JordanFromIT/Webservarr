@@ -32,7 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.config import settings
 from app.database import SessionLocal
-from app.utils import same_origin_path
+from app.utils import safe_http_url, same_origin_path
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +141,7 @@ def _safe_url(value) -> str:
     """Only http(s) or a same-origin absolute path may reach an attribute."""
     v = (value or "").strip()
     if v.lower().startswith(("https://", "http://")):  # schemes are case-insensitive
-        return v
+        return safe_http_url(v)
     return same_origin_path(v)
 
 
@@ -412,8 +412,13 @@ def _preview_meta(branding: dict, base_url: str, path: str) -> tuple:
 
     image_url = ""
     logo = (branding.get("logo_url") or "").strip()
-    # The file part decides: logo URLs may carry a ?query or #fragment.
-    if logo and not urllib.parse.urlsplit(logo).path.lower().endswith(".svg"):
+    # The file part decides: logo URLs may carry a ?query or #fragment. A
+    # value that does not parse gets no image rather than breaking the page.
+    try:
+        logo_path = urllib.parse.urlsplit(logo).path if logo else ""
+    except ValueError:
+        logo = logo_path = ""
+    if logo and not logo_path.lower().endswith(".svg"):
         absolute = logo.lower().startswith(("http://", "https://"))
         image_url = logo if absolute else f"{base_url}{logo}"
 
