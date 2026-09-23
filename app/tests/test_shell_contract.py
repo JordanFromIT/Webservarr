@@ -55,6 +55,10 @@ def js_code_only(src: str) -> str:
         if k < 0:
             return True
         c = out[k]
+        # A postfix x++ / x-- completes an operand, so a / after it is
+        # division, even though a lone + or - would expect an operand.
+        if c in "+-" and k > 0 and out[k - 1] == c:
+            return False
         if c in operand_after:
             return True
         if c.isalnum() or c in "_$":
@@ -273,6 +277,16 @@ class ShellContract(unittest.TestCase):
         self.assertIn("var r = a / b;", code)
         self.assertIn("var k = 2;", code)
         self.assertNotIn("'z'", code)
+
+    def test_js_code_only_postfix_then_division(self):
+        # After x++ or x-- the / is division. Read as a regex, it would run
+        # past the line end and swallow the next line's first word as flags.
+        for op in ("++", "--"):
+            src = ("var frames = 0;\nfunction tick(dt) { frames" + op + " / dt; }\n"
+                   "window.WS = { ready: ready, poll: poll };")
+            code = js_code_only(src)
+            self.assertIn("frames" + op + " / dt;", code, op)
+            self.assertIn("window.WS = { ready: ready, poll: poll };", code, op)
 
 if __name__ == "__main__":
     unittest.main()
