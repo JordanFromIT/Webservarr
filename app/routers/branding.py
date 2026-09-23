@@ -195,7 +195,7 @@ def safe_logo_url(value) -> str:
     login logo are left alone.
     """
     v = (value or "").strip() if isinstance(value, str) else ""
-    if v.startswith(("https://", "http://")):
+    if v.lower().startswith(("https://", "http://")):  # schemes are case-insensitive
         return v
     return same_origin_path(v)
 

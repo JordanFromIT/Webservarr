@@ -140,7 +140,7 @@ def _safe_font(value) -> str:
 def _safe_url(value) -> str:
     """Only http(s) or a same-origin absolute path may reach an attribute."""
     v = (value or "").strip()
-    if v.startswith(("https://", "http://")):
+    if v.lower().startswith(("https://", "http://")):  # schemes are case-insensitive
         return v
     return same_origin_path(v)
 

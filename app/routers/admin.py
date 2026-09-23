@@ -23,6 +23,7 @@ from app.database import get_db
 from app.limiter import limiter
 from app.models import Setting, Notification, PushSubscription, User
 from app.dependencies import require_admin
+from app.routers.branding import safe_logo_url
 from app.services.push import dispatch_push, send_push_to_users
 from app.utils import identity_email, validate_image_magic, is_safe_integration_url
 
@@ -60,11 +61,20 @@ _INTEGRATION_URL_KEY = re.compile(r"^integration\.[^.]+\.url$")
 
 
 def _check_setting_write(key: str, value: str):
-    """Reject writes of integration URLs that point at SSRF-dangerous targets."""
+    """Reject writes of integration URLs that point at SSRF-dangerous targets,
+    and logo URLs that the public branding payload would refuse to serve."""
     if value and _INTEGRATION_URL_KEY.match(key) and not is_safe_integration_url(value):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Refusing to save {key}: URL must be http/https and not a loopback, link-local, or metadata address",
+        )
+    # build_branding blanks any logo URL safe_logo_url rejects. Storing one
+    # anyway would show no logo, and the settings form would later save the
+    # blank back over it, so refuse it here with a reason instead.
+    if key == "branding.logo_url" and (value or "").strip() and not safe_logo_url(value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The logo URL must be a full http:// or https:// address, or a path on this site starting with /.",
         )
 
 
@@ -335,6 +345,12 @@ async def bulk_update_settings(
     Create or update multiple settings at once.
     Requires admin authentication.
     """
+    # Validate everything first, so one refused value saves nothing rather
+    # than leaving the settings before it written and the rest not.
+    for item in payload.settings:
+        if item.value != MASK_SENTINEL:
+            _check_setting_write(item.key, item.value)
+
     updated = []
     for item in payload.settings:
         setting = db.query(Setting).filter(Setting.key == item.key).first()
