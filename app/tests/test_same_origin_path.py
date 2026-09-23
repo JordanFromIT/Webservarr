@@ -16,6 +16,10 @@ class SameOriginPathTests(unittest.TestCase):
         self.assertEqual(same_origin_path("/static/uploads/logo.png"), "/static/uploads/logo.png")
         self.assertEqual(same_origin_path("  /a/b.png?v=2  "), "/a/b.png?v=2")
 
+    def test_fragment_is_kept(self):
+        self.assertEqual(same_origin_path("/icons.svg#logo"), "/icons.svg#logo")
+        self.assertEqual(same_origin_path("/a.png?v=2#x"), "/a.png?v=2#x")
+
     def test_backslash_is_refused(self):
         self.assertEqual(same_origin_path("/\\evil.example"), "")
         self.assertEqual(same_origin_path("/static\\..\\x"), "")

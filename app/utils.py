@@ -8,7 +8,7 @@ from urllib.parse import urlparse, urlsplit
 # --- Same-origin paths ---
 
 def same_origin_path(value) -> str:
-    """Return ``value`` as a same-origin absolute path (path + query), or "".
+    """Return ``value`` as a same-origin absolute path (path, query, fragment), or "".
 
     ``startswith("/") and not startswith("//")`` is not enough: browsers
     parse URLs by the WHATWG rules, which treat a backslash as a slash and
@@ -27,7 +27,13 @@ def same_origin_path(value) -> str:
     parts = urlsplit(v)
     if parts.scheme or parts.netloc:
         return ""
-    return parts.path + (f"?{parts.query}" if parts.query else "")
+    # The fragment is kept: it never reaches the server and cannot change the
+    # origin (an SVG sprite reference like "/icons.svg#logo" needs it).
+    return (
+        parts.path
+        + (f"?{parts.query}" if parts.query else "")
+        + (f"#{parts.fragment}" if parts.fragment else "")
+    )
 
 
 # --- SSRF guards for server-side outbound requests ---
