@@ -92,8 +92,22 @@ self.addEventListener('fetch', function (event) {
   })());
 });
 
+// The server sends the operator's logo when it is a same-origin path; anything
+// else falls back to the bundled logo so the notification never shows a
+// broken image.
+var DEFAULT_ICON = '/static/webservarr.svg';
+
+function sameOriginPath(value) {
+  try {
+    var u = new URL(value, self.location.origin);
+    return u.origin === self.location.origin ? u.pathname + u.search : '';
+  } catch (e) {
+    return '';
+  }
+}
+
 self.addEventListener('push', function(event) {
-  var payload = { title: 'WebServarr', body: 'You have a new notification.', category: 'general', url: '/' };
+  var payload = { title: 'WebServarr', body: 'You have a new notification.', category: 'general', url: '/', icon: DEFAULT_ICON };
 
   if (event.data) {
     try {
@@ -102,6 +116,7 @@ self.addEventListener('push', function(event) {
       if (data.body) payload.body = data.body;
       if (data.category) payload.category = data.category;
       if (data.url) payload.url = data.url;
+      if (data.icon) payload.icon = sameOriginPath(data.icon) || DEFAULT_ICON;
     } catch (e) {
       // If JSON parsing fails, use the text as body
       payload.body = event.data.text() || payload.body;
@@ -110,8 +125,8 @@ self.addEventListener('push', function(event) {
 
   var options = {
     body: payload.body,
-    icon: '/static/uploads/logo.png',
-    badge: '/static/uploads/logo.png',
+    icon: payload.icon,
+    badge: payload.icon,
     tag: payload.category,
     data: {
       url: payload.url,
