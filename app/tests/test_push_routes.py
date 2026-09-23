@@ -116,6 +116,15 @@ class PushRouteTests(unittest.TestCase):
         self.assertEqual(r.json()["removed"], 1)
         self.assertEqual(self._rows(), [("alice@example.com", ENDPOINT_B)])
 
+    def test_cannot_remove_another_users_subscription(self):
+        self._subscribe(ENDPOINT_A)                      # alice's device
+        self.user = {"email": "mallory@example.com", "is_admin": "false"}
+        r = self.client.delete("/api/notifications/push-subscribe",
+                               params={"endpoint": ENDPOINT_A})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["removed"], 0)
+        self.assertEqual(self._rows(), [("alice@example.com", ENDPOINT_A)])
+
     def test_unsubscribing_without_endpoint_removes_all(self):
         self._subscribe(ENDPOINT_A)
         self._subscribe(ENDPOINT_B)
