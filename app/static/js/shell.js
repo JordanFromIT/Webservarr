@@ -17,6 +17,8 @@
  *   WS.arrive(key, write)         reveal sections top-down, in document order
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
  *   WS.dragScroll(el)             mouse drag-to-scroll for a sideways row
+ *   WS.mediaType(type)            { label, icon, accent } for movie/tv/book/audiobook
+ *   WS.requestStatus(status)      { label, tone } for a Seerr-style request status
  *
  * Usage:
  *   <script src="/static/js/auth.js"></script>
@@ -524,6 +526,43 @@
     el.addEventListener('wheel', stopGlide, { passive: true });
   }
 
+  // ---- Shared vocabulary ----
+  //
+  // The words for what a thing is and where its request stands, in one place
+  // so the home page and the requests page can never describe the same item
+  // two different ways.
+  //
+  // accent names a theme class family (text-media-*, badge-media-* in
+  // theme.css), never a colour. There are three media hues, not four: an
+  // audiobook is a book, so it shares the book colour and is told apart by its
+  // label and icon.
+  var MEDIA_TYPES = {
+    movie:     { label: 'Movie',     icon: 'movie',      accent: 'media-movie' },
+    tv:        { label: 'TV Show',   icon: 'tv',         accent: 'media-tv' },
+    book:      { label: 'eBook',     icon: 'menu_book',  accent: 'media-book' },
+    audiobook: { label: 'Audiobook', icon: 'headphones', accent: 'media-book' }
+  };
+  function mediaType(type) { return MEDIA_TYPES[type] || MEDIA_TYPES.movie; }
+
+  // Seerr's request/media states (as app/integrations/seerr.py names them) in
+  // plain words. Deliberately not "Downloading" for processing: Seerr only
+  // knows the request was handed to Sonarr or Radarr, not that a download is
+  // under way. tone is a coarse grouping each page styles with its own theme
+  // classes: ready, go (moving), wait (not started), dead (will not happen).
+  var REQUEST_STATUSES = {
+    available:           { label: 'Available',        tone: 'ready' },
+    completed:           { label: 'Available',        tone: 'ready' },
+    partially_available: { label: 'Partly Available', tone: 'go' },
+    processing:          { label: 'Requested',        tone: 'go' },
+    downloading:         { label: 'Requested',        tone: 'go' },
+    approved:            { label: 'Approved',         tone: 'go' },
+    pending:             { label: 'Requested',        tone: 'wait' },
+    declined:            { label: 'Declined',         tone: 'dead' }
+  };
+  function requestStatus(status) {
+    return REQUEST_STATUSES[String(status || '').toLowerCase()] || { label: 'Requested', tone: 'wait' };
+  }
+
   // ---- Public API ----
 
   window.WS = {
@@ -539,7 +578,9 @@
     getJSON: getJSON,
     serviceStatus: serviceStatus,
     clearCache: clearCache,
-    dragScroll: dragScroll
+    dragScroll: dragScroll,
+    mediaType: mediaType,
+    requestStatus: requestStatus
   };
 
   ready(function () {

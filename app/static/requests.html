@@ -1112,10 +1112,7 @@ function renderDiscoverRowError(rowId) {
  * are short enough that it stays legible over cover art.
  */
 function mediaTypeLabel(mediaType) {
-  if (mediaType === 'tv') return 'TV Show';
-  if (mediaType === 'book') return 'eBook';
-  if (mediaType === 'audiobook') return 'Audiobook';
-  return 'Movie';
+  return WS.mediaType(mediaType).label;   // shared with the home page (shell.js)
 }
 
 /**
@@ -1127,9 +1124,7 @@ function mediaTypeLabel(mediaType) {
  * theme.css - see the note there.
  */
 function mediaTypeAccent(mediaType) {
-  if (mediaType === 'tv') return 'media-tv';
-  if (mediaType === 'book' || mediaType === 'audiobook') return 'media-book';
-  return 'media-movie';
+  return WS.mediaType(mediaType).accent;
 }
 
 function mediaTypeBadgeColor(mediaType) {
@@ -1151,10 +1146,7 @@ function mediaTypeNounColor(mediaType) {
 
 /** Placeholder glyph when a title has no artwork. */
 function mediaTypeIcon(mediaType) {
-  if (mediaType === 'tv') return 'tv';
-  if (mediaType === 'book') return 'menu_book';
-  if (mediaType === 'audiobook') return 'headphones';
-  return 'movie';
+  return WS.mediaType(mediaType).icon;
 }
 
 function buildDiscoverCard(item) {
@@ -1933,11 +1925,13 @@ function moveSearchBar(position) {
     _searchMoveRaf = requestAnimationFrame(frame);
 }
 
+// Labels come from the shared vocabulary in shell.js (WS.requestStatus), so the
+// home page's Recent Requests says the same words for the same state.
 function getStatusPresentation(status, mediaType, item) {
     switch (status) {
         case 'available':
         case 'completed':
-            return {bg: 'bg-green-500/15', text: 'text-green-400', border: 'border-green-500/30', label: 'Available'};
+            return {bg: 'bg-green-500/15', text: 'text-green-400', border: 'border-green-500/30', label: WS.requestStatus(status).label};
 
         case 'partially_available':
             // A count beats any adjective: "48 of 62 Episodes" tells someone
@@ -1947,7 +1941,7 @@ function getStatusPresentation(status, mediaType, item) {
                 bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30',
                 label: (item && item.episodes_total)
                     ? item.episodes_available + ' of ' + item.episodes_total + ' Episodes'
-                    : 'Partly Available',
+                    : WS.requestStatus(status).label,
                 selfDescribing: !!(item && item.episodes_total)
             };
 
@@ -1958,16 +1952,16 @@ function getStatusPresentation(status, mediaType, item) {
             // indexers, waiting on an upgrade, or stalled with no release
             // found at all. Claiming a download is in progress sets an
             // expectation nothing here can actually verify.
-            return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: 'Requested'};
+            return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: WS.requestStatus(status).label};
 
         case 'approved':
-            return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: 'Approved'};
+            return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: WS.requestStatus(status).label};
 
         case 'pending':
-            return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: 'Requested'};
+            return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: WS.requestStatus(status).label};
 
         case 'declined':
-            return {bg: 'bg-red-500/15', text: 'text-red-400', border: 'border-red-500/30', label: 'Declined'};
+            return {bg: 'bg-red-500/15', text: 'text-red-400', border: 'border-red-500/30', label: WS.requestStatus(status).label};
 
         default:
             return {

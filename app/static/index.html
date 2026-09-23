@@ -155,17 +155,22 @@ View Requests
 </a>
 </div>
 <div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-xl overflow-hidden">
-<table class="w-full text-left text-sm">
+<!-- table-fixed so the title column takes what is left and truncates: with
+     auto layout a long title sets the table's min-content width and the table
+     overflows the card on a phone. Below sm the Type column folds into a pill
+     under the title (see renderRecentRequests). -->
+<table class="w-full table-fixed text-left text-sm">
 <thead class="bg-frosted-blue/5 text-steel-blue uppercase text-[10px] font-bold">
 <tr>
 <th class="px-4 lg:px-6 py-3">Content</th>
-<th class="px-4 lg:px-6 py-3">Status</th>
+<th class="hidden sm:table-cell w-36 px-4 lg:px-6 py-3">Type</th>
+<th class="w-36 lg:w-40 px-4 lg:px-6 py-3">Status</th>
 </tr>
 </thead>
 <tbody id="requestsBody" class="divide-y divide-steel-blue/10">
-<tr><td colspan="2" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-2/3" aria-hidden="true"></div></td></tr>
-<tr><td colspan="2" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-1/2" aria-hidden="true"></div></td></tr>
-<tr><td colspan="2" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-3/5" aria-hidden="true"></div></td></tr>
+<tr><td colspan="3" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-2/3" aria-hidden="true"></div></td></tr>
+<tr><td colspan="3" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-1/2" aria-hidden="true"></div></td></tr>
+<tr><td colspan="3" class="px-4 lg:px-6 py-4"><div class="skel skel-line w-3/5" aria-hidden="true"></div></td></tr>
 </tbody>
 </table>
 </div>
@@ -556,7 +561,7 @@ async function loadRecentRequests() {
             WS.arrive('requests', function () {
                 WS.setHTML(document.getElementById('requestsBody'), `
                     <tr>
-                        <td colspan="2" class="px-6 py-8 text-center text-steel-blue">
+                        <td colspan="3" class="px-6 py-8 text-center text-steel-blue">
                             <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
                             <p>Seerr not configured</p>
                         </td>
@@ -567,6 +572,17 @@ async function loadRecentRequests() {
     });
 }
 
+// Status chip per tone (WS.requestStatus). Theme classes only, and the same
+// grouping the Request Status page uses: finished reads brightest, things in
+// motion in the text colour, not-yet-started in the accent, and a request that
+// will not happen dimmed rather than alarming.
+const REQUEST_TONE_CLASSES = {
+    ready: 'bg-primary/30 text-bright',
+    go:    'bg-frosted-blue/15 text-frosted-blue',
+    wait:  'bg-steel-blue/20 text-steel-blue',
+    dead:  'bg-steel-blue/10 text-steel-blue/75'
+};
+
 function renderRecentRequests(requests) {
     const tbody = document.getElementById('requestsBody');
 
@@ -574,7 +590,7 @@ function renderRecentRequests(requests) {
         if (!Array.isArray(requests) || requests.length === 0) {
             WS.setHTML(tbody, `
                 <tr>
-                    <td colspan="2" class="px-6 py-8 text-center text-steel-blue">
+                    <td colspan="3" class="px-6 py-8 text-center text-steel-blue">
                         <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
                         <p>No recent requests</p>
                     </td>
@@ -590,38 +606,12 @@ function renderRecentRequests(requests) {
             // them would tell every user what every other user asked for. The
             // API does not return a requester field at all; this comment marks
             // that as intentional rather than an oversight to be "fixed".
-            const status = (req.status || 'pending').toLowerCase();
             const posterUrl = req.poster_url || '';
 
-            let badgeBg, badgeText, statusLabel;
-            switch (status) {
-                case 'pending':
-                    badgeBg = 'bg-steel-blue/20';
-                    badgeText = 'text-steel-blue';
-                    statusLabel = 'Pending';
-                    break;
-                case 'approved':
-                case 'downloading':
-                    badgeBg = 'bg-blue-500/10';
-                    badgeText = 'text-blue-500';
-                    statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
-                    break;
-                case 'available':
-                case 'completed':
-                    badgeBg = 'bg-green-500/10';
-                    badgeText = 'text-green-500';
-                    statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
-                    break;
-                case 'declined':
-                    badgeBg = 'bg-red-500/10';
-                    badgeText = 'text-red-500';
-                    statusLabel = 'Declined';
-                    break;
-                default:
-                    badgeBg = 'bg-steel-blue/20';
-                    badgeText = 'text-steel-blue';
-                    statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
-            }
+            // Friendly words for Seerr's raw states (PARTIALLY_AVAILABLE and
+            // friends), from the vocabulary the requests page uses too.
+            const status = WS.requestStatus(req.status || 'pending');
+            const statusCls = REQUEST_TONE_CLASSES[status.tone] || REQUEST_TONE_CLASSES.wait;
 
             const posterStyle = posterUrl
                 ? `background-image: url('${posterUrl}'); background-size: cover; background-position: center;`
@@ -630,26 +620,30 @@ function renderRecentRequests(requests) {
             // Books and audiobooks come from Chaptarr, which has no artwork to
             // give, so the thumbnail slot would otherwise be an empty grey
             // square. A glyph at least says what kind of thing it is.
-            const mediaType = req.media_type || 'movie';
-            const typeGlyph = mediaType === 'audiobook' ? 'headphones'
-                            : mediaType === 'book' ? 'menu_book'
-                            : mediaType === 'tv' ? 'tv' : 'movie';
+            const type = WS.mediaType(req.media_type || 'movie');
             const thumbInner = posterUrl
                 ? ''
-                : `<span class="material-symbols-outlined text-steel-blue/50 text-base leading-none">${typeGlyph}</span>`;
+                : `<span class="material-symbols-outlined text-steel-blue/50 text-base leading-none">${type.icon}</span>`;
 
-            const seerrId = req.id || '';
+            // eBook and Audiobook share the book colour (there are three media
+            // hues, not four); the label and icon tell them apart.
+            const typePill = `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none whitespace-nowrap badge-${type.accent}">` +
+                `<span class="material-symbols-outlined text-[13px] leading-none" aria-hidden="true">${type.icon}</span>${type.label}</span>`;
 
             return `
                 <tr>
-                    <td class="px-4 lg:px-6 py-4">
-                        <div class="flex items-center gap-3">
+                    <td class="px-4 lg:px-6 py-3.5">
+                        <div class="flex items-center gap-3 min-w-0">
                             <div class="size-8 rounded bg-black/40 shrink-0 flex items-center justify-center" style="${posterStyle}">${thumbInner}</div>
-                            <span class="font-medium text-frosted-blue truncate">${title}</span>
+                            <div class="min-w-0 flex-1">
+                                <p class="font-medium text-frosted-blue truncate">${title}</p>
+                                <div class="sm:hidden mt-1">${typePill}</div>
+                            </div>
                         </div>
                     </td>
-                    <td class="px-4 lg:px-6 py-4">
-                        <span class="px-2 py-0.5 rounded ${badgeBg} ${badgeText} text-[10px] font-bold uppercase">${statusLabel}</span>
+                    <td class="hidden sm:table-cell px-4 lg:px-6 py-3.5">${typePill}</td>
+                    <td class="px-4 lg:px-6 py-3.5">
+                        <span class="inline-block px-2 py-0.5 rounded ${statusCls} text-[10px] font-bold uppercase leading-tight">${status.label}</span>
                     </td>
                 </tr>
             `;
