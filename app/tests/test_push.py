@@ -248,10 +248,14 @@ class DefaultIconTests(unittest.TestCase):
             self.assertEqual(m.group(1), push.DEFAULT_PUSH_ICON)
         self.assertTrue(m.group(1).endswith(".png"))
 
-    def test_service_worker_falls_back_from_svg(self):
+    def test_service_worker_source_has_svg_fallback(self):
+        """A source check: sw.js routes the icon through rasterIcon, which
+        drops the query and fragment before testing for .svg. The behaviour
+        itself is tested on the server twin, push._push_icon."""
         with open(os.path.join(self.STATIC, "sw.js"), encoding="utf-8") as f:
             sw = f.read()
         self.assertIn("payload.icon = rasterIcon(data.icon)", sw)
+        self.assertIn("var file = path.split('#')[0].split('?')[0];", sw)
         self.assertIn(r"/\.svg$/i.test(file) ? DEFAULT_ICON", sw)
 
     def test_no_colour_logo_as_badge(self):
