@@ -202,6 +202,38 @@ class SeededKeySignsPushes(unittest.TestCase):
         self.assertEqual(push._push_icon("/\t/evil.example/x.png"), push.DEFAULT_PUSH_ICON)
 
 
+BADGE_RE = re.compile(r"""['"]?badge['"]?\s*[:=]""", re.I)
+
+
+def strip_js_comments(src: str) -> str:
+    """JavaScript with // and /* */ comments removed, strings kept intact.
+
+    A small scanner, so a // inside a string (a URL) is not taken for a
+    comment. Enough for sw.js, which has no quote or comment characters
+    inside its regex literals.
+    """
+    out = []
+    i, n = 0, len(src)
+    while i < n:
+        c = src[i]
+        if c in "'\"`":
+            j = i + 1
+            while j < n and src[j] != c:
+                j += 2 if src[j] == "\\" else 1
+            out.append(src[i:j + 1])
+            i = j + 1
+        elif src.startswith("//", i):
+            j = src.find("\n", i)
+            i = n if j == -1 else j
+        elif src.startswith("/*", i):
+            j = src.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 class DefaultIconTests(unittest.TestCase):
     """The fallback notification icon exists, is a PNG, and both sides agree."""
 
@@ -224,9 +256,21 @@ class DefaultIconTests(unittest.TestCase):
 
     def test_no_colour_logo_as_badge(self):
         with open(os.path.join(self.STATIC, "sw.js"), encoding="utf-8") as f:
-            sw = f.read()
-        # An options key, not the comment that explains its absence.
-        self.assertNotRegex(sw, r"(?m)^\s*badge\s*:")
+            code = strip_js_comments(f.read())
+        # The comment explaining the absence is gone; any badge key or
+        # assignment in the code itself fails.
+        self.assertNotRegex(code, BADGE_RE)
+
+    def test_badge_check_catches_every_spelling(self):
+        for variant in ("var o = { 'badge': x };", 'var o = {"badge": x};',
+                        "options.badge = x;", "var o = { icon: x, badge: y };",
+                        "var o = { Badge: y };"):
+            with self.subTest(variant=variant):
+                self.assertRegex(strip_js_comments(variant), BADGE_RE)
+        for innocent in ("// no badge: the platform default\nvar a = 1;",
+                         "/* badge: omitted */ var a = 1;"):
+            with self.subTest(innocent=innocent):
+                self.assertNotRegex(strip_js_comments(innocent), BADGE_RE)
 
     def test_default_icon_is_a_real_png(self):
         with open(os.path.join(self.STATIC, "webservarr-192.png"), "rb") as f:
