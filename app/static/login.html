@@ -30,9 +30,20 @@
        and an element with a view-transition-name is a backdrop root: nothing
        inside it can blur what is painted behind it. The artwork is behind
        <main>, so the card's blur saw nothing and the art came through sharp.
-       This page has no shell to hold still across a navigation, so it gives
-       the name up (it crossfades as a whole page instead). */
+       So <main> gives the name up here.
+
+       The card takes a name of its own instead. Left unnamed, it would fall
+       into the root snapshot, which theme.css hides at once, and leaving the
+       page would jump-cut. It is deliberately NOT ws-content: a shared name
+       makes the browser morph one box into the other, so the next page's
+       content would zoom out from the card's 440px box. A name of its own
+       only exists on this page, so the card simply fades, on the same
+       timings as ws-content. An element's own backdrop-filter still reads
+       through to what is behind it, so naming the card keeps the blur. */
     body > main { view-transition-name: none; }
+    .login-glass-card { view-transition-name: ws-login-card; }
+    ::view-transition-old(ws-login-card) { animation: ws-vt-out 90ms ease-out both; }
+    ::view-transition-new(ws-login-card) { animation: ws-vt-in 140ms ease-out both; }
     /* No backdrop blur means the artwork shows through sharp, which is busy
        behind text. Fall back to a mostly opaque card instead. */
     @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
