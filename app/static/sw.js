@@ -107,6 +107,15 @@ function sameOriginPath(value) {
   }
 }
 
+// Chromium does not rasterise SVG notification icons (the shipped default
+// logo is one), so an .svg path falls back to the bundled PNG as well.
+function rasterIcon(value) {
+  var path = sameOriginPath(value);
+  if (!path) return DEFAULT_ICON;
+  var file = path.split('#')[0].split('?')[0];
+  return /\.svg$/i.test(file) ? DEFAULT_ICON : path;
+}
+
 self.addEventListener('push', function(event) {
   var payload = { title: 'WebServarr', body: 'You have a new notification.', category: 'general', url: '/', icon: DEFAULT_ICON };
 
@@ -117,7 +126,7 @@ self.addEventListener('push', function(event) {
       if (data.body) payload.body = data.body;
       if (data.category) payload.category = data.category;
       if (data.url) payload.url = data.url;
-      if (data.icon) payload.icon = sameOriginPath(data.icon) || DEFAULT_ICON;
+      if (data.icon) payload.icon = rasterIcon(data.icon);
     } catch (e) {
       // If JSON parsing fails, use the text as body
       payload.body = event.data.text() || payload.body;

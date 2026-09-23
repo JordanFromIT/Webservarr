@@ -10,6 +10,7 @@ import json
 import logging
 import time
 from typing import Dict, List
+from urllib.parse import urlsplit
 
 from app.database import SessionLocal
 from app.models import PushSubscription, Setting
@@ -54,8 +55,15 @@ def load_vapid_key(private_key: str):
 
 
 def _push_icon(logo_url: str) -> str:
-    """The operator's logo when it is a same-origin path, else the bundled one."""
-    return same_origin_path(logo_url) or DEFAULT_PUSH_ICON
+    """The operator's logo when it is a same-origin raster image, else the bundled PNG.
+
+    The shipped default logo_url is an SVG, and Chromium does not rasterise
+    SVG notification icons, so any .svg path falls back to the PNG too.
+    """
+    path = same_origin_path(logo_url)
+    if not path or urlsplit(path).path.lower().endswith(".svg"):
+        return DEFAULT_PUSH_ICON
+    return path
 
 
 async def send_push_to_users(

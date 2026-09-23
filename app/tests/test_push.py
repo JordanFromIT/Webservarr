@@ -187,6 +187,12 @@ class SeededKeySignsPushes(unittest.TestCase):
         self.assertEqual(result, {"attempted": 0, "succeeded": 0})
         self.assertEqual(posts, [])
 
+    def test_svg_logo_falls_back_to_the_png(self):
+        self.assertEqual(push._push_icon("/static/webservarr.svg"), push.DEFAULT_PUSH_ICON)
+        self.assertEqual(push._push_icon("/x/LOGO.SVG?v=2"), push.DEFAULT_PUSH_ICON)
+        self.assertEqual(push._push_icon("/x/logo.svg#mark"), push.DEFAULT_PUSH_ICON)
+        self.assertEqual(push._push_icon("/static/uploads/logo-1.png?v=2"), "/static/uploads/logo-1.png?v=2")
+
     def test_push_icon_stays_same_origin(self):
         self.assertEqual(push._push_icon("/uploads/logo.png"), "/uploads/logo.png")
         self.assertEqual(push._push_icon("https://cdn.example.com/x.png"), push.DEFAULT_PUSH_ICON)
@@ -209,6 +215,12 @@ class DefaultIconTests(unittest.TestCase):
         if HAVE_APP:
             self.assertEqual(m.group(1), push.DEFAULT_PUSH_ICON)
         self.assertTrue(m.group(1).endswith(".png"))
+
+    def test_service_worker_falls_back_from_svg(self):
+        with open(os.path.join(self.STATIC, "sw.js"), encoding="utf-8") as f:
+            sw = f.read()
+        self.assertIn("payload.icon = rasterIcon(data.icon)", sw)
+        self.assertIn(r"/\.svg$/i.test(file) ? DEFAULT_ICON", sw)
 
     def test_default_icon_is_a_real_png(self):
         with open(os.path.join(self.STATIC, "webservarr-192.png"), "rb") as f:
