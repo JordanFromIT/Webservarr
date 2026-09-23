@@ -375,6 +375,11 @@
       _modal.style.display = '';
       _modalOpen = true;
       loadPreferences();
+      var existingToggle = document.getElementById('pushToggle');
+      if (existingToggle) {
+        showPushMessage('');
+        checkPushState(existingToggle);
+      }
       return;
     }
 
@@ -466,6 +471,7 @@
       pushToggle.addEventListener('change', function() {
         var enabled = this.checked;
         applyToggleStyle(this, enabled);
+        showPushMessage('');
         if (enabled) {
           enablePush(this);
         } else {
@@ -475,6 +481,14 @@
 
       pushRow.appendChild(pushToggle);
       divider.appendChild(pushRow);
+
+      // Plain-language reason when push could not be turned on or off.
+      _pushMsg = createEl('p', 'text-sm text-frosted-blue/80 leading-relaxed mt-1');
+      _pushMsg.setAttribute('role', 'status');
+      _pushMsg.setAttribute('aria-live', 'polite');
+      _pushMsg.style.display = 'none';
+      divider.appendChild(_pushMsg);
+
       body.appendChild(divider);
     }
 
@@ -531,74 +545,211 @@
   }
 
   // ---- Push Subscription ----
+  //
+  // Pushes only arrive when the browser holds a subscription AND the server
+  // has stored it, so the toggle shows "on" only when both are true. A browser
+  // subscription the server never received (a failed save, a wiped database)
+  // is re-sent once per browser session so existing users repair themselves.
+
+  var SW_READY_TIMEOUT_MS = 8000;
+  var PUSH_SYNC_KEY = 'ws-push-synced';
+  var _pushMsg = null;
+
+  var PUSH_MESSAGES = {
+    unconfigured: "Push notifications aren't set up on this server yet.",
+    blocked: "Notifications are blocked for this site. Allow them in your browser's site settings, then try again.",
+    dismissed: "Notifications weren't allowed. Turn this on again and choose Allow when your browser asks.",
+    timeout: "Your browser didn't finish getting ready. Reload the page and try again.",
+    failed: "We couldn't turn on notifications for this device. Please try again in a moment.",
+    offFailed: "We couldn't turn off notifications for this device. Please try again in a moment."
+  };
+
+  function showPushMessage(text) {
+    if (!_pushMsg) return;
+    _pushMsg.textContent = text || '';
+    _pushMsg.style.display = text ? '' : 'none';
+  }
+
+  function setPushToggle(toggleEl, on) {
+    toggleEl.checked = on;
+    applyToggleStyle(toggleEl, on);
+  }
+
+  /** serviceWorker.ready never rejects; if the worker never activates it just
+   *  never resolves, so give up after a while with a reason the UI can show. */
+  function swReady() {
+    return new Promise(function(resolve, reject) {
+      var timer = setTimeout(function() { reject(new Error('sw-timeout')); }, SW_READY_TIMEOUT_MS);
+      navigator.serviceWorker.ready.then(function(reg) {
+        clearTimeout(timer);
+        resolve(reg);
+      }, function(err) {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
+  function postSubscription(subscription) {
+    var subJSON = subscription.toJSON();
+    return fetch('/api/notifications/push-subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint: subJSON.endpoint,
+        keys: {
+          p256dh: subJSON.keys.p256dh,
+          auth: subJSON.keys.auth
+        }
+      })
+    }).then(function(resp) {
+      if (!resp.ok) throw new Error('subscribe-failed');
+    });
+  }
+
+  function serverHasSubscription(subscription) {
+    return fetch('/api/notifications/push-subscribe/status?endpoint=' +
+                 encodeURIComponent(subscription.endpoint))
+      .then(function(r) { return r.ok ? r.json() : { subscribed: false }; })
+      .then(function(data) { return !!data.subscribed; });
+  }
+
+  /** False when the subscription was made with a different server key (the
+   *  keys were regenerated): pushes to it can never be delivered. */
+  function subscriptionKeyMatches(subscription, vapidKey) {
+    var key = subscription.options && subscription.options.applicationServerKey;
+    if (!key || !vapidKey) return true;   // can't tell; keep it
+    var have = new Uint8Array(key);
+    var want = urlBase64ToUint8Array(vapidKey);
+    if (have.length !== want.length) return false;
+    for (var i = 0; i < have.length; i++) {
+      if (have[i] !== want[i]) return false;
+    }
+    return true;
+  }
+
+  /** The browser's subscription for this server key, creating one if needed. */
+  function currentSubscription(reg, vapidKey) {
+    return reg.pushManager.getSubscription().then(function(existing) {
+      if (existing && subscriptionKeyMatches(existing, vapidKey)) return existing;
+      var stale = existing ? existing.unsubscribe() : Promise.resolve();
+      return stale.then(function() {
+        return reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidKey)
+        });
+      });
+    });
+  }
+
+  function markPushSynced() {
+    try { sessionStorage.setItem(PUSH_SYNC_KEY, '1'); } catch (e) {}
+  }
+
+  function pushSyncedThisSession() {
+    try { return !!sessionStorage.getItem(PUSH_SYNC_KEY); } catch (e) { return false; }
+  }
+
+  /** Re-send an existing browser subscription the server may have lost. */
+  function syncPushSubscription() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted' || pushSyncedThisSession()) return;
+    var vapidKey = (window.WEBSERVARR_THEME || {}).vapid_public_key;
+    if (!vapidKey) return;
+
+    swReady().then(function(reg) {
+      return reg.pushManager.getSubscription().then(function(sub) {
+        if (!sub) return;   // push is off on this device: nothing to repair
+        return currentSubscription(reg, vapidKey).then(postSubscription);
+      });
+    }).then(markPushSynced, function(err) {
+      markPushSynced();     // once per session, even when it failed
+      console.warn('Push subscription re-sync failed:', err);
+    });
+  }
 
   function checkPushState(toggleEl) {
     if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.ready.then(function(reg) {
-      reg.pushManager.getSubscription().then(function(sub) {
-        var enabled = !!sub;
-        toggleEl.checked = enabled;
-        applyToggleStyle(toggleEl, enabled);
-      });
-    }).catch(function() {});
+    swReady().then(function(reg) {
+      return reg.pushManager.getSubscription();
+    }).then(function(sub) {
+      return sub ? serverHasSubscription(sub) : false;
+    }).then(function(on) {
+      setPushToggle(toggleEl, on);
+    }).catch(function() {
+      setPushToggle(toggleEl, false);
+    });
   }
 
   function enablePush(toggleEl) {
     var theme = window.WEBSERVARR_THEME || {};
     var vapidKey = theme.vapid_public_key;
     if (!vapidKey) {
-      console.warn('VAPID public key not available. Push notifications cannot be enabled.');
-      toggleEl.checked = false;
-      applyToggleStyle(toggleEl, false);
+      setPushToggle(toggleEl, false);
+      showPushMessage(PUSH_MESSAGES.unconfigured);
       return;
     }
 
-    Notification.requestPermission().then(function(permission) {
-      if (permission !== 'granted') {
-        toggleEl.checked = false;
-        applyToggleStyle(toggleEl, false);
-        return;
-      }
+    toggleEl.disabled = true;
+    var created = null;   // the browser subscription, if we got that far
 
-      navigator.serviceWorker.ready.then(function(reg) {
-        return reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidKey)
-        });
-      }).then(function(subscription) {
-        var subJSON = subscription.toJSON();
-        return fetch('/api/notifications/push-subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            endpoint: subJSON.endpoint,
-            keys: {
-              p256dh: subJSON.keys.p256dh,
-              auth: subJSON.keys.auth
-            }
-          })
-        });
-      }).then(function(resp) {
-        if (!resp.ok) throw new Error('Subscribe failed');
-      }).catch(function(err) {
-        console.error('Push subscription error:', err);
-        toggleEl.checked = false;
-        applyToggleStyle(toggleEl, false);
-      });
+    Promise.resolve(Notification.requestPermission()).then(function(permission) {
+      if (permission !== 'granted') {
+        var err = new Error('permission');
+        err.permission = permission;
+        throw err;
+      }
+      return swReady();
+    }).then(function(reg) {
+      return currentSubscription(reg, vapidKey);
+    }).then(function(subscription) {
+      created = subscription;
+      return postSubscription(subscription);
+    }).then(function() {
+      markPushSynced();
+      setPushToggle(toggleEl, true);
+    }).catch(function(err) {
+      console.error('Push subscription error:', err);
+      setPushToggle(toggleEl, false);
+      // Never leave a browser subscription the server doesn't know about:
+      // the toggle would read "on" next time while nothing can arrive.
+      if (created) created.unsubscribe().catch(function() {});
+      var msg = PUSH_MESSAGES.failed;
+      if (err && err.permission) {
+        msg = err.permission === 'denied' ? PUSH_MESSAGES.blocked : PUSH_MESSAGES.dismissed;
+      } else if (err && err.message === 'sw-timeout') {
+        msg = PUSH_MESSAGES.timeout;
+      }
+      showPushMessage(msg);
+    }).then(function() {
+      toggleEl.disabled = false;
     });
   }
 
   function disablePush(toggleEl) {
-    navigator.serviceWorker.ready.then(function(reg) {
+    toggleEl.disabled = true;
+    swReady().then(function(reg) {
       return reg.pushManager.getSubscription();
     }).then(function(subscription) {
-      if (subscription) {
-        return subscription.unsubscribe();
-      }
+      if (!subscription) return;
+      var endpoint = subscription.endpoint;
+      // Browser first: once it has unsubscribed nothing can arrive here, and
+      // a server row left behind is removed on the next send (HTTP 410). The
+      // other order could leave a browser subscription the next page's
+      // re-sync would quietly turn back on.
+      return subscription.unsubscribe().then(function(ok) {
+        if (ok === false) throw new Error('unsubscribe-failed');
+        return fetch('/api/notifications/push-subscribe?endpoint=' + encodeURIComponent(endpoint),
+                     { method: 'DELETE' }).catch(function() {});
+      });
     }).then(function() {
-      return fetch('/api/notifications/push-subscribe', { method: 'DELETE' });
+      setPushToggle(toggleEl, false);
     }).catch(function(err) {
       console.error('Push unsubscribe error:', err);
+      showPushMessage(PUSH_MESSAGES.offFailed);
+      checkPushState(toggleEl);
+    }).then(function() {
+      toggleEl.disabled = false;
     });
   }
 
@@ -639,8 +790,9 @@
       return;
     }
 
-    // Register service worker
+    // Register service worker, then repair a push subscription the server lost
     registerServiceWorker();
+    syncPushSubscription();
 
     // Fetch initial count
     fetchUnreadCount().then(function(count) {
