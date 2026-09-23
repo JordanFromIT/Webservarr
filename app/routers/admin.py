@@ -370,12 +370,26 @@ async def bulk_update_settings(
     return updated
 
 
+# Service -> the settings key holding its credential, so a masked value coming
+# back from the browser (the real secret is never sent to the client) can be
+# resolved to the actual stored value instead of testing with an empty string.
+_SERVICE_CRED_KEY = {
+    "plex": "integration.plex.token",
+    "seerr": "integration.seerr.api_key",
+    "netdata": "integration.netdata.api_key",
+    "sonarr": "integration.sonarr.api_key",
+    "radarr": "integration.radarr.api_key",
+    "chaptarr": "integration.chaptarr.api_key",
+}
+
+
 @router.post("/test-connection")
 @limiter.limit("30/minute")
 async def test_connection(
     request: Request,
     payload: TestConnectionRequest,
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db)
 ):
     """
     Test an external API connection.
@@ -389,6 +403,14 @@ async def test_connection(
     service = payload.service
     url = payload.url.rstrip("/")
     credentials = payload.credentials or ""
+
+    # The browser only ever holds the mask placeholder for an already-saved
+    # credential (GET /settings never returns the real value) - resolve it to
+    # the actual stored secret rather than testing with an empty string.
+    if credentials == MASK_SENTINEL:
+        cred_key = _SERVICE_CRED_KEY.get(service)
+        stored = db.query(Setting).filter(Setting.key == cred_key).first() if cred_key else None
+        credentials = stored.value if stored else ""
 
     # Anti-SSRF: block loopback/link-local/metadata targets. LAN is allowed since
     # integrations legitimately live on the LAN.

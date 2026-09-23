@@ -2187,7 +2187,10 @@
                     body: JSON.stringify({
                         service: service,
                         url: urlVal,
-                        credentials: credVal && credVal !== '***masked***' ? credVal : ''
+                        // The masked placeholder is sent through as-is - the server
+                        // resolves it to the real stored credential (it never sends
+                        // that value to the browser in the first place).
+                        credentials: credVal || ''
                     })
                 });
 
