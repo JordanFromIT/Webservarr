@@ -628,16 +628,22 @@
     return true;
   }
 
-  /** The browser's subscription for this server key, creating one if needed. */
+  /** The browser's subscription for this server key, creating one if needed.
+   *  Resolves to { subscription, created }: created is true only when this
+   *  call made it, so a failure path never throws away one that was working. */
   function currentSubscription(reg, vapidKey) {
     return reg.pushManager.getSubscription().then(function(existing) {
-      if (existing && subscriptionKeyMatches(existing, vapidKey)) return existing;
+      if (existing && subscriptionKeyMatches(existing, vapidKey)) {
+        return { subscription: existing, created: false };
+      }
       var stale = existing ? existing.unsubscribe() : Promise.resolve();
       return stale.then(function() {
         return reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(vapidKey)
         });
+      }).then(function(subscription) {
+        return { subscription: subscription, created: true };
       });
     });
   }
@@ -660,7 +666,9 @@
     swReady().then(function(reg) {
       return reg.pushManager.getSubscription().then(function(sub) {
         if (!sub) return;   // push is off on this device: nothing to repair
-        return currentSubscription(reg, vapidKey).then(postSubscription);
+        return currentSubscription(reg, vapidKey).then(function(result) {
+          return postSubscription(result.subscription);
+        });
       });
     }).then(markPushSynced, function(err) {
       markPushSynced();     // once per session, even when it failed
@@ -691,7 +699,7 @@
     }
 
     toggleEl.disabled = true;
-    var created = null;   // the browser subscription, if we got that far
+    var created = null;   // a browser subscription THIS attempt made, if any
 
     Promise.resolve(Notification.requestPermission()).then(function(permission) {
       if (permission !== 'granted') {
@@ -702,17 +710,19 @@
       return swReady();
     }).then(function(reg) {
       return currentSubscription(reg, vapidKey);
-    }).then(function(subscription) {
-      created = subscription;
-      return postSubscription(subscription);
+    }).then(function(result) {
+      if (result.created) created = result.subscription;
+      return postSubscription(result.subscription);
     }).then(function() {
       markPushSynced();
       setPushToggle(toggleEl, true);
     }).catch(function(err) {
       console.error('Push subscription error:', err);
       setPushToggle(toggleEl, false);
-      // Never leave a browser subscription the server doesn't know about:
-      // the toggle would read "on" next time while nothing can arrive.
+      // Undo a subscription this attempt made, so the toggle can't read "on"
+      // next time while nothing can arrive. One that already existed is kept:
+      // a transient save failure must not destroy it, and the next page's
+      // re-sync can only repair a subscription the browser still holds.
       if (created) created.unsubscribe().catch(function() {});
       var msg = PUSH_MESSAGES.failed;
       if (err && err.permission) {
