@@ -23,7 +23,7 @@ from app.database import get_db
 from app.limiter import limiter
 from app.models import Setting, Notification, PushSubscription, User
 from app.dependencies import require_admin
-from app.services.push import send_push_to_users
+from app.services.push import dispatch_push, send_push_to_users
 from app.utils import validate_image_magic, is_safe_integration_url
 
 logger = logging.getLogger(__name__)
@@ -598,6 +598,31 @@ async def send_notification(
     await send_push_to_users(list(all_emails), payload.title, payload.body, "news", "/")
 
     return {"success": True, "sent_to": len(all_emails)}
+
+
+@router.post("/notifications/test-push")
+@limiter.limit("5/minute")
+async def send_test_push(
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    """
+    Send one test push to the calling admin's own devices, and nobody else's.
+    Reports how many of the admin's stored subscriptions were tried and how
+    many the push services accepted. Creates no notification rows.
+    """
+    email = (current_user.get("email") or "").lower()
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No email in session")
+
+    result = await dispatch_push(
+        [email],
+        "Test notification",
+        "Push notifications are working on this device.",
+        "test",
+        "/",
+    )
+    return {"success": result["succeeded"] > 0, **result}
 
 
 # --- Container Management ---

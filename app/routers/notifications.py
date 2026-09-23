@@ -162,7 +162,9 @@ async def mark_all_read(
     return {"success": True, "updated": updated}
 
 
-@router.delete("/notifications/{notification_id}")
+# ":int" so this never swallows DELETE /notifications/push-subscribe below
+# (declared later, it used to 422 as a non-integer notification id).
+@router.delete("/notifications/{notification_id:int}")
 @limiter.limit("30/minute")
 async def delete_notification(
     request: Request,
@@ -269,6 +271,14 @@ async def push_subscribe(
             detail="Invalid push subscription endpoint",
         )
 
+    # A push endpoint is one browser profile. If another account subscribed it
+    # earlier (a shared computer), that account's notifications must stop
+    # arriving here now that someone else is signed in on it.
+    db.query(PushSubscription).filter(
+        PushSubscription.endpoint == body.endpoint,
+        PushSubscription.user_email != email,
+    ).delete(synchronize_session=False)
+
     # Upsert by user_email + endpoint
     existing = (
         db.query(PushSubscription)
@@ -291,22 +301,49 @@ async def push_subscribe(
     return {"success": True}
 
 
+@router.get("/notifications/push-subscribe/status")
+@limiter.limit("60/minute")
+async def push_subscription_status(
+    request: Request,
+    endpoint: str = Query(..., max_length=2048),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Whether the server holds this browser's subscription for the current user.
+
+    The browser keeping a subscription is not enough for pushes to arrive: the
+    server must have stored it too. The settings toggle shows "on" only when
+    both are true.
+    """
+    email = _get_user_email(current_user)
+    if not email:
+        return {"subscribed": False}
+
+    found = (
+        db.query(PushSubscription.id)
+        .filter(PushSubscription.user_email == email, PushSubscription.endpoint == endpoint)
+        .first()
+    )
+    return {"subscribed": found is not None}
+
+
 @router.delete("/notifications/push-subscribe")
 @limiter.limit("30/minute")
 async def push_unsubscribe(
     request: Request,
+    endpoint: Optional[str] = Query(None, max_length=2048),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Remove all push subscriptions for the current user."""
+    """Remove the current user's push subscription for one browser (``endpoint``),
+    or all of them when no endpoint is given."""
     email = _get_user_email(current_user)
     if not email:
         return {"success": True, "removed": 0}
 
-    removed = (
-        db.query(PushSubscription)
-        .filter(PushSubscription.user_email == email)
-        .delete()
-    )
+    query = db.query(PushSubscription).filter(PushSubscription.user_email == email)
+    if endpoint:
+        query = query.filter(PushSubscription.endpoint == endpoint)
+    removed = query.delete(synchronize_session=False)
     db.commit()
     return {"success": True, "removed": removed}
