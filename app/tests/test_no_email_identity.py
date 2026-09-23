@@ -136,6 +136,48 @@ class NoSharedIdentityTests(unittest.TestCase):
                 self.assertEqual(r.json(), {"notifications": [], "total": 0})
                 self.assertEqual(self.client.get("/api/notifications/unread-count").json(), {"count": 0})
 
+    def test_no_email_account_cannot_touch_rows_filed_under_no_identity(self):
+        db = self.Session()
+        try:
+            n = Notification(user_email="", category="news", title="orphan")
+            db.add(n)
+            db.commit()
+            nid = n.id
+        finally:
+            db.close()
+        self.user = {"email": "", "username": "kid-b", "is_admin": "false"}
+        self.assertEqual(self.client.put(f"/api/notifications/{nid}/read").status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/notifications/{nid}").status_code, 404)
+        db = self.Session()
+        try:
+            row = db.query(Notification).filter(Notification.id == nid).one()
+            self.assertFalse(row.read)
+        finally:
+            db.close()
+
+    def test_broadcast_skips_no_identity_rows(self):
+        db = self.Session()
+        try:
+            db.add(PushSubscription(user_email="bob@example.com", endpoint="https://push.example.com/bob",
+                                    p256dh="p", auth="a"))
+            db.add(Notification(user_email="", category="news", title="orphan"))
+            db.commit()
+        finally:
+            db.close()
+        self.user = {"email": "admin@example.com", "username": "admin", "is_admin": "true"}
+        sent = mock.AsyncMock(return_value=0)
+        with mock.patch("app.routers.admin.send_push_to_users", sent):
+            r = self.client.post("/api/admin/notifications/send", json={"title": "Hi", "body": "All"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["sent_to"], 1)
+        self.assertEqual(sent.await_args.args[0], ["bob@example.com"])
+        db = self.Session()
+        try:
+            titles = sorted((n.user_email, n.title) for n in db.query(Notification).filter(Notification.title == "Hi"))
+            self.assertEqual(titles, [("bob@example.com", "Hi")])
+        finally:
+            db.close()
+
     def test_push_subscribe_without_email_is_refused(self):
         r = self.client.post("/api/notifications/push-subscribe", json={
             "endpoint": "https://push.example.com/b", "keys": {"p256dh": "p", "auth": "a"}})

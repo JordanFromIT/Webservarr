@@ -133,7 +133,9 @@ async def mark_read(
     email = _get_user_email(current_user)
     notif = db.query(Notification).filter(Notification.id == notification_id).first()
 
-    if not notif or notif.user_email != email:
+    # An empty identity owns nothing: without the first check a no-email
+    # account would match any row whose email is also "".
+    if not email or not notif or notif.user_email != email:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
 
     notif.read = True
@@ -176,7 +178,9 @@ async def delete_notification(
     email = _get_user_email(current_user)
     notif = db.query(Notification).filter(Notification.id == notification_id).first()
 
-    if not notif or notif.user_email != email:
+    # An empty identity owns nothing: without the first check a no-email
+    # account would match any row whose email is also "".
+    if not email or not notif or notif.user_email != email:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
 
     db.delete(notif)

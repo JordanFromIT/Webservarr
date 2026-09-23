@@ -582,20 +582,20 @@ async def send_notification(
     """
     # Collect all known user emails
     cutoff = datetime.utcnow() - timedelta(days=30)
+    # identity_email drops rows filed under no identity ("" or the old
+    # shared "none"), so a broadcast never creates rows for one.
     push_emails = {
-        row[0].lower()
+        identity_email(row[0])
         for row in db.query(PushSubscription.user_email).distinct().all()
-        if row[0]
     }
     notif_emails = {
-        row[0].lower()
+        identity_email(row[0])
         for row in db.query(Notification.user_email)
         .filter(Notification.created_at >= cutoff)
         .distinct()
         .all()
-        if row[0]
     }
-    all_emails = push_emails | notif_emails
+    all_emails = (push_emails | notif_emails) - {""}
 
     if not all_emails:
         return {"success": True, "sent_to": 0, "message": "No users to notify"}
