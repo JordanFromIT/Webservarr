@@ -557,22 +557,40 @@ function scrollStreams(direction) {
     loadActiveStreams();
 }
 
+// The empty and error states take exactly the space of the three skeleton
+// rows they replace, so the card neither shrinks nor grows when they land.
+//
+// By composition rather than a fixed height: the message sits in the same grid
+// cell as an invisible stack of three row shapes built from the real row's
+// markup (padding, 32px thumbnail, title line, the phone-only type pill, 1px
+// dividers). The rows mix rem with the pill's px text, so no single length
+// matches them at every browser font size; the same markup does. `label` is
+// always a fixed string from this file, never data.
+function requestsStateRow(label) {
+    const shape = (divider) =>
+        `<div class="flex items-center gap-3 px-4 lg:px-6 py-3.5${divider ? ' border-t border-transparent' : ''}">` +
+            '<div class="size-8 shrink-0"></div>' +
+            '<div class="min-w-0 flex-1"><p class="truncate">&nbsp;</p>' +
+                '<div class="sm:hidden mt-1"><span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-semibold leading-none">' +
+                    '<span class="material-symbols-outlined text-[13px] leading-none">movie</span><span>Movie</span></span></div>' +
+            '</div>' +
+        '</div>';
+    return '<tr><td colspan="3" class="p-0"><div class="grid">' +
+            '<div class="col-start-1 row-start-1 invisible" aria-hidden="true">' + shape(false) + shape(true) + shape(true) + '</div>' +
+            '<div class="col-start-1 row-start-1 flex flex-col items-center justify-center px-6 text-center text-steel-blue">' +
+                '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>' +
+                '<p>' + label + '</p>' +
+            '</div>' +
+        '</div></td></tr>';
+}
+
 // Load recent requests from Seerr integration
 async function loadRecentRequests() {
     return WS.swr('recent-requests', function () { return WS.getJSON('/api/integrations/recent-requests'); }, renderRecentRequests, {
         onError: function (error) {
             console.error('Error loading recent requests:', error);
             WS.arrive('requests', function () {
-                // Same height as the three skeleton rows it replaces (see
-                // renderRecentRequests), so the card does not shrink.
-                WS.setHTML(document.getElementById('requestsBody'), `
-                    <tr class="h-[218px] sm:h-[182px]">
-                        <td colspan="3" class="px-6 py-8 text-center text-steel-blue">
-                            <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
-                            <p>Seerr not configured</p>
-                        </td>
-                    </tr>
-                `);
+                WS.setHTML(document.getElementById('requestsBody'), requestsStateRow('Seerr not configured'));
             });
         }
     });
@@ -594,18 +612,7 @@ function renderRecentRequests(requests) {
 
     WS.arrive('requests', function () {
         if (!Array.isArray(requests) || requests.length === 0) {
-            // The empty (and error) state fills the space the three skeleton
-            // rows held - 3 x 72px + dividers on a phone, 3 x 60px + dividers
-            // from sm up - so the card does not shrink when it lands. A row
-            // height in a table is a minimum; the message centres in it.
-            WS.setHTML(tbody, `
-                <tr class="h-[218px] sm:h-[182px]">
-                    <td colspan="3" class="px-6 py-8 text-center text-steel-blue">
-                        <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">shopping_cart</span>
-                        <p>No recent requests</p>
-                    </td>
-                </tr>
-            `);
+            WS.setHTML(tbody, requestsStateRow('No recent requests'));
             return;
         }
 
