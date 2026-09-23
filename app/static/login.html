@@ -26,6 +26,13 @@
       backdrop-filter: blur(24px);
       border: 1px solid rgb(var(--color-accent) / 0.2);
     }
+    /* theme.css names <main> ws-content for the cross-page view transition,
+       and an element with a view-transition-name is a backdrop root: nothing
+       inside it can blur what is painted behind it. The artwork is behind
+       <main>, so the card's blur saw nothing and the art came through sharp.
+       This page has no shell to hold still across a navigation, so it gives
+       the name up (it crossfades as a whole page instead). */
+    body > main { view-transition-name: none; }
     /* No backdrop blur means the artwork shows through sharp, which is busy
        behind text. Fall back to a mostly opaque card instead. */
     @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
