@@ -2169,7 +2169,7 @@
         async function testConnection(service) {
             const fields = integrationFields[service];
             const urlVal = document.getElementById(fields.urlInput).value;
-            const credVal = document.getElementById(fields.credInput).value;
+            const credVal = fields.credInput ? document.getElementById(fields.credInput).value : '';
             const statusDiv = document.getElementById(fields.statusDiv);
 
             if (!urlVal) {
