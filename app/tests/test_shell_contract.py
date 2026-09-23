@@ -93,8 +93,11 @@ class ShellContract(unittest.TestCase):
 
     def test_shell_js_defines_the_public_api(self):
         js = (STATIC / "js" / "shell.js").read_text(encoding="utf-8")
-        for name in ("ready", "whenActive", "poll", "setHTML", "arrive", "swr", "serviceStatus", "clearCache"):
+        for name in ("ready", "whenActive", "poll", "setHTML", "arrive", "swr", "serviceStatus", "clearCache",
+                     "dragScroll", "mediaType", "requestStatus"):
             self.assertRegex(js, rf"\b{name}: {name}\b", name)
+        # Pages call this to stop a row's momentum glide before scrolling it.
+        self.assertIn("dragScroll.stop = function", js)
 
 
 if __name__ == "__main__":
