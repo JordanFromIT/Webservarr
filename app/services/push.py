@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import List
+from typing import Dict, List
 
 from app.database import SessionLocal
 from app.models import PushSubscription, Setting
@@ -25,6 +25,38 @@ logger = logging.getLogger(__name__)
 PUSH_SEND_TIMEOUT = 10
 PUSH_TOTAL_BUDGET = 30.0
 PUSH_CONCURRENCY = 10
+
+# Shown on the notification when the operator's logo is not a same-origin path
+# (a service worker can only reliably load icons from its own origin).
+DEFAULT_PUSH_ICON = "/static/webservarr.svg"
+
+
+def load_vapid_key(private_key: str):
+    """Turn the stored VAPID private key into a py_vapid ``Vapid`` object.
+
+    seed.py stores the key as a PKCS8 PEM block. pywebpush only accepts a
+    ``Vapid`` instance, a path to a PEM *file*, or a bare base64 DER/raw string:
+    handed the PEM text itself it strips the newlines, base64-decodes the
+    header line along with the body and fails ASN.1 parsing, so every push was
+    rejected before it left the server. The PEM is therefore parsed here, once
+    per dispatch, and the object is what reaches ``webpush()``. A bare
+    base64 key (another tool's format an operator may have pasted in) still
+    goes through ``from_string``.
+    """
+    from py_vapid import Vapid
+
+    key = (private_key or "").strip()
+    if key.startswith("-----BEGIN"):
+        return Vapid.from_pem(key.encode())
+    return Vapid.from_string(private_key=key)
+
+
+def _push_icon(logo_url: str) -> str:
+    """The operator's logo when it is a same-origin path, else the bundled one."""
+    v = (logo_url or "").strip()
+    if v.startswith("/") and not v.startswith("//"):
+        return v
+    return DEFAULT_PUSH_ICON
 
 
 async def send_push_to_users(
@@ -46,6 +78,23 @@ async def send_push_to_users(
     Returns:
         Number of successfully delivered pushes.
     """
+    result = await dispatch_push(emails, title, body, category, url)
+    return result["succeeded"]
+
+
+async def dispatch_push(
+    emails: List[str],
+    title: str,
+    body: str,
+    category: str,
+    url: str = "/",
+) -> Dict[str, int]:
+    """Like send_push_to_users, but report how many devices were tried.
+
+    Returns ``{"attempted": n, "succeeded": m}``, where attempted counts the
+    stored subscriptions matched for ``emails``.
+    """
+    result = {"attempted": 0, "succeeded": 0}
     # Read VAPID keys and subscriptions with a short-lived session
     db = SessionLocal()
     try:
@@ -54,9 +103,18 @@ async def send_push_to_users(
 
         if not pub_row or not priv_row:
             logger.debug("VAPID keys not configured — skipping push dispatch")
-            return 0
+            return result
 
-        vapid_private_key = priv_row.value
+        try:
+            vapid_key = load_vapid_key(priv_row.value)
+        except Exception as exc:
+            # One clear error instead of a warning per device: with an
+            # unreadable key no push can be signed at all.
+            logger.error("VAPID private key could not be loaded; push disabled: %s", exc)
+            return result
+
+        logo_row = db.query(Setting).filter(Setting.key == "branding.logo_url").first()
+        icon = _push_icon(logo_row.value if logo_row else "")
 
         # Build VAPID claims from admin email in Settings (no hardcoded domain)
         admin_email_setting = db.query(Setting).filter(Setting.key == "system.admin_email").first()
@@ -66,7 +124,7 @@ async def send_push_to_users(
         # Normalise emails for matching
         normalised = [e.lower() for e in emails if e]
         if not normalised:
-            return 0
+            return result
 
         subscriptions = (
             db.query(PushSubscription)
@@ -76,7 +134,7 @@ async def send_push_to_users(
 
         if not subscriptions:
             logger.debug("No push subscriptions found for %d email(s)", len(normalised))
-            return 0
+            return result
 
         # Snapshot subscription data so we can close the session before sending
         sub_data = [
@@ -96,7 +154,7 @@ async def send_push_to_users(
         from pywebpush import webpush, WebPushException
     except ImportError:
         logger.warning("pywebpush not installed — cannot send push notifications")
-        return 0
+        return result
 
     try:
         import requests
@@ -126,6 +184,7 @@ async def send_push_to_users(
         "body": body,
         "category": category,
         "url": url,
+        "icon": icon,
     })
 
     success_count = 0
@@ -155,12 +214,17 @@ async def send_push_to_users(
             # The webpush call is synchronous (requests under the hood); running
             # it in a worker thread with a hard timeout keeps one dead endpoint
             # from blocking the event loop (H6).
+            #
+            # webpush() writes the endpoint's origin into the claims as "aud"
+            # and keeps it if already set, so each send gets its own copy: a
+            # shared dict would sign every device with the first one's push
+            # service as audience, and the others would reject it.
             await asyncio.to_thread(
                 webpush,
                 subscription_info=subscription_info,
                 data=payload,
-                vapid_private_key=vapid_private_key,
-                vapid_claims=vapid_claims,
+                vapid_private_key=vapid_key,
+                vapid_claims=dict(vapid_claims),
                 timeout=PUSH_SEND_TIMEOUT,
                 requests_session=_no_redirect_session(),
             )
@@ -227,4 +291,6 @@ async def send_push_to_users(
         len(sub_data),
         category,
     )
-    return success_count
+    result["attempted"] = len(sub_data)
+    result["succeeded"] = success_count
+    return result
