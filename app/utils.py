@@ -5,6 +5,24 @@ import socket
 from urllib.parse import urlparse, urlsplit
 
 
+# --- Account identity ---
+
+def identity_email(value) -> str:
+    """The email that identifies an account for notifications and push, or "".
+
+    Stripped and lower-cased. Plex Home managed users and OIDC identities
+    without an email claim have none; an older session stored that as the
+    literal string "None", which made every such account share one identity
+    (the same notifications, push subscriptions and preferences). "" and
+    "none" therefore both mean "no identity": that account gets no
+    notifications and no push.
+    """
+    if not isinstance(value, str):
+        return ""
+    v = value.strip().lower()
+    return "" if v in ("", "none") else v
+
+
 # --- Same-origin paths ---
 
 def same_origin_path(value) -> str:

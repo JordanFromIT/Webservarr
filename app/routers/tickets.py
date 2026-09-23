@@ -21,7 +21,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.limiter import limiter
 from app.models import Setting, Ticket, TicketComment
-from app.utils import validate_image_magic
+from app.utils import identity_email, validate_image_magic
 
 logger = logging.getLogger(__name__)
 
@@ -317,7 +317,7 @@ async def create_ticket(
         is_public=False,
         creator_username=current_user.get("username", ""),
         creator_name=current_user.get("name", current_user.get("username", "Unknown")),
-        creator_email=(current_user.get("email") or "").lower() or None,
+        creator_email=identity_email(current_user.get("email")) or None,
         image_path=image_path,
     )
 

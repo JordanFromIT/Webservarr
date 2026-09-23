@@ -54,6 +54,7 @@ def init_db():
         migrate_setup_completed, migrate_overseerr_to_seerr,
         migrate_nav_sublabels_v2, migrate_home_sublabel_v3, migrate_wiki_sublabel_v4,
         migrate_ticket_creator_email, migrate_drop_push_username_rows,
+        migrate_no_email_identity,
     )
     db = SessionLocal()
     try:
@@ -69,6 +70,7 @@ def init_db():
         migrate_wiki_sublabel_v4(db)
         migrate_setup_completed(db)
         migrate_drop_push_username_rows(db)
+        migrate_no_email_identity(db)
         seed_vapid_keys(db)
         seed_default_news(db)
         seed_wiki_example(db)

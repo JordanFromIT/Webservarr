@@ -34,6 +34,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import Notification, NewsPost, PushSubscription, Setting, Ticket, TicketComment
 from app.services.push import send_push_to_users
+from app.utils import identity_email
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +231,9 @@ async def _create_notification_once(
     claim is released, so a later poll can retry, and the caller moves on to
     the next recipient with nothing of theirs lost.
     """
-    email = user_email.lower()
+    email = identity_email(user_email)
+    if not email:
+        return None  # no identity to address it to
     if _dedup_exists(db, email, category, reference_id):
         return None
     if not _user_wants_category(db, email, category):
@@ -274,8 +277,9 @@ async def _collect_session_emails(r: aioredis.Redis) -> Set[str]:
             data = await r.hgetall(key)
             email_bytes = data.get(b"email", b"")
             email_str = email_bytes.decode() if isinstance(email_bytes, bytes) else email_bytes
-            if email_str:
-                emails.add(email_str.lower())
+            email = identity_email(email_str)
+            if email:  # accounts without an email are never targeted
+                emails.add(email)
         if cursor == 0:
             break
     return emails
@@ -284,9 +288,10 @@ async def _collect_session_emails(r: aioredis.Redis) -> Set[str]:
 def _collect_push_emails(db: Session) -> Set[str]:
     """Emails of every user with at least one stored push subscription."""
     return {
-        row.user_email.lower()
-        for row in db.query(PushSubscription.user_email).distinct().all()
-        if row.user_email
+        email
+        for email in (identity_email(row.user_email)
+                      for row in db.query(PushSubscription.user_email).distinct().all())
+        if email
     }
 
 
@@ -324,7 +329,9 @@ async def _ticket_creator_email(r: aioredis.Redis, db: Session, ticket) -> Optio
     is never mapped to an email any other way.
     """
     if ticket.creator_email:
-        email = ticket.creator_email.lower()
+        email = identity_email(ticket.creator_email)
+        if not email:
+            return None
         return email if email in await _collect_recipient_emails(r, db) else None
 
     username = ticket.creator_username
@@ -339,9 +346,9 @@ async def _ticket_creator_email(r: aioredis.Redis, db: Session, ticket) -> Optio
             uname = uname.decode() if isinstance(uname, bytes) else uname
             if uname == username:
                 found = data.get(b"email", b"")
-                found = found.decode() if isinstance(found, bytes) else found
+                found = identity_email(found.decode() if isinstance(found, bytes) else found)
                 if found:
-                    return found.lower()
+                    return found
         if cursor == 0:
             return None
 

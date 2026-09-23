@@ -13,7 +13,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.limiter import limiter
 from app.models import Notification, PushSubscription, Setting
-from app.utils import is_safe_push_endpoint
+from app.utils import identity_email, is_safe_push_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,8 @@ def _email_hash(email: str) -> str:
 
 
 def _get_user_email(current_user: dict) -> str:
-    """Extract and lowercase the user email from the session dict."""
-    return (current_user.get("email") or "").lower()
+    """The session's identity email (see utils.identity_email), or ""."""
+    return identity_email(current_user.get("email"))
 
 
 # --- Notification list & management ---
@@ -193,6 +193,8 @@ async def delete_all_notifications(
 ):
     """Delete all notifications for the current user."""
     email = _get_user_email(current_user)
+    if not email:
+        return {"success": True, "deleted": 0}
     deleted = db.query(Notification).filter(Notification.user_email == email).delete()
     db.commit()
     return {"success": True, "deleted": deleted}
@@ -261,7 +263,12 @@ async def push_subscribe(
     """Register or update a browser push subscription for the current user."""
     email = _get_user_email(current_user)
     if not email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No email in session")
+        # Accounts without an email (e.g. Plex managed users) have no identity
+        # to address notifications to, so they cannot subscribe.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Push notifications need an account email.",
+        )
 
     # Anti-SSRF: the server POSTs to this endpoint on every notification dispatch.
     # Only allow public HTTPS browser-push services — never LAN/loopback/metadata.

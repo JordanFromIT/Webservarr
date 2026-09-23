@@ -190,6 +190,27 @@ def migrate_drop_push_username_rows(db: Session) -> None:
         logger.info("Removed %d push.user.*.email setting row(s)", removed)
 
 
+def migrate_no_email_identity(db: Session) -> None:
+    """One-time migration: drop data filed under the fake "none" identity.
+
+    Sessions used to store a missing email as the string "None", so every
+    account without an email (Plex managed users, OIDC identities with no
+    email claim) shared one identity: notifications, push subscriptions,
+    preferences and ticket creator_email. Those rows cannot be attributed to
+    anyone, so they are removed (a ticket just loses its creator_email).
+    Idempotent.
+    """
+    from sqlalchemy import text
+    from app.routers.notifications import _email_hash
+
+    db.execute(text("DELETE FROM push_subscriptions WHERE lower(trim(user_email)) IN ('none', '')"))
+    db.execute(text("DELETE FROM notifications WHERE lower(trim(user_email)) IN ('none', '')"))
+    db.execute(text("UPDATE tickets SET creator_email = NULL WHERE lower(trim(creator_email)) IN ('none', '')"))
+    prefix = f"notify.{_email_hash('none')}."
+    db.query(Setting).filter(Setting.key.like(prefix + "%")).delete(synchronize_session=False)
+    db.commit()
+
+
 def seed_default_settings(db: Session) -> None:
     """Insert default branding/theme settings if they don't exist.
     Uses per-key commits to handle race conditions with multiple workers."""

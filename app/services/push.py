@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from app.database import SessionLocal
 from app.models import PushSubscription, Setting
-from app.utils import is_safe_push_endpoint, same_origin_path
+from app.utils import identity_email, is_safe_push_endpoint, same_origin_path
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ async def dispatch_push(
         vapid_claims = {"sub": f"mailto:{admin_email}"}
 
         # Normalise emails for matching
-        normalised = [e.lower() for e in emails if e]
+        normalised = [e for e in (identity_email(x) for x in emails) if e]
         if not normalised:
             return result
 

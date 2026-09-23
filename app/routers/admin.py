@@ -24,7 +24,7 @@ from app.limiter import limiter
 from app.models import Setting, Notification, PushSubscription, User
 from app.dependencies import require_admin
 from app.services.push import dispatch_push, send_push_to_users
-from app.utils import validate_image_magic, is_safe_integration_url
+from app.utils import identity_email, validate_image_magic, is_safe_integration_url
 
 logger = logging.getLogger(__name__)
 
@@ -611,9 +611,12 @@ async def send_test_push(
     Reports how many of the admin's stored subscriptions were tried and how
     many the push services accepted. Creates no notification rows.
     """
-    email = (current_user.get("email") or "").lower()
+    email = identity_email(current_user.get("email"))
     if not email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No email in session")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Push notifications need an account email.",
+        )
 
     result = await dispatch_push(
         [email],

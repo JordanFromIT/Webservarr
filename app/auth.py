@@ -187,17 +187,28 @@ class SessionManager:
         redis = await self.get_redis()
         session_key = f"session:{session_id}"
 
+        def field(*keys: str, default: str = "") -> str:
+            # First key holding a real value. dict.get's default only applies
+            # to a MISSING key, so an explicit None (a Plex managed user's
+            # email, an OIDC identity with no email claim) used to be stored
+            # as the string "None" and every such account shared it.
+            for key in keys:
+                value = user_data.get(key)
+                if value is not None and value != "":
+                    return str(value)
+            return default
+
         # Normalize field names: support both OIDC and simple auth formats
         mapping = {
-            "user_id": str(user_data.get("user_id", user_data.get("sub", ""))),
-            "email": str(user_data.get("email", "")),
-            "name": str(user_data.get("name", user_data.get("display_name", ""))),
-            "username": str(user_data.get("username", user_data.get("preferred_username", ""))),
-            "is_admin": str(user_data.get("is_admin", "false")),
-            "auth_method": str(user_data.get("auth_method", "simple")),
-            "id_token": str(user_data.get("id_token", "")),
-            "plex_token": str(user_data.get("plex_token", "")),
-            "avatar_url": str(user_data.get("avatar_url", "")),
+            "user_id": field("user_id", "sub"),
+            "email": field("email"),
+            "name": field("name", "display_name"),
+            "username": field("username", "preferred_username"),
+            "is_admin": field("is_admin", default="false"),
+            "auth_method": field("auth_method", default="simple"),
+            "id_token": field("id_token"),
+            "plex_token": field("plex_token"),
+            "avatar_url": field("avatar_url"),
             # Creation time for the absolute-lifetime ceiling enforced in
             # get_session. Extra field only — older sessions without it are
             # grandfathered (see get_session).
@@ -236,7 +247,10 @@ class SessionManager:
         if not await redis.exists(session_key):
             return
 
-        await redis.hset(session_key, mapping={k: str(v) for k, v in fields.items()})
+        await redis.hset(
+            session_key,
+            mapping={k: "" if v is None else str(v) for k, v in fields.items()},
+        )
         await redis.expire(session_key, self.max_age)
 
     async def get_session(self, session_id: str) -> Optional[Dict[str, str]]:

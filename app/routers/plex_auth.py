@@ -312,7 +312,7 @@ async def plex_callback(
             detail="Failed to fetch Plex user info",
         )
 
-    plex_user_id = str(user_info.get("id", ""))
+    plex_user_id = str(user_info.get("id") or "")
     username = user_info.get("username", "")
     display_name = user_info.get("title", username)
     email = user_info.get("email", "")
