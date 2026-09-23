@@ -30,28 +30,113 @@ def js_code_only(src: str) -> str:
 
     A small scanner rather than a regex, so a // or /* inside a string (a URL,
     say) is not taken for a comment. Blanking the strings means a name that
-    appears only inside quotes cannot satisfy a check either. Assumes no regex
-    literals, which shell.js does not use.
+    appears only inside quotes cannot satisfy a check either.
+
+    Handles the cases a naive scanner gets wrong:
+    - template literals: the text is blanked, but ${ ... } expressions stay
+      code, tracked by brace depth, so a nested `...` inside one cannot close
+      the outer literal early;
+    - regex literals: a / where an operand is expected (after an operator,
+      an opening bracket, a comma or semicolon, or a keyword such as return)
+      starts a regex, whose body - including any quotes, as in /[&<>"']/g -
+      is blanked like a string. A / after a name, number or closing bracket
+      is division.
     """
-    out, i, n = [], 0, len(src)
-    while i < n:
-        c, nxt = src[i], src[i + 1] if i + 1 < n else ""
-        if c == "/" and nxt == "/":
-            j = src.find("\n", i)
-            i = n if j == -1 else j
-        elif c == "/" and nxt == "*":
-            j = src.find("*/", i + 2)
-            i = n if j == -1 else j + 2
-            out.append(" ")
-        elif c in "'\"`":
-            j = i + 1
-            while j < n and src[j] != c:
-                j += 2 if src[j] == "\\" else 1
-            out.append(c + " " * (j - i - 1) + c)
-            i = j + 1
-        else:
-            out.append(c)
-            i += 1
+    out = []                       # one character per entry
+    n = len(src)
+    operand_after = set("(,=:[!&|?{};~+-*%<>^")
+    operand_keywords = {"return", "typeof", "case", "do", "else", "in", "of", "new", "delete",
+                        "void", "throw", "instanceof", "yield", "await"}
+
+    def regex_allowed() -> bool:
+        k = len(out) - 1
+        while k >= 0 and out[k].isspace():
+            k -= 1
+        if k < 0:
+            return True
+        c = out[k]
+        if c in operand_after:
+            return True
+        if c.isalnum() or c in "_$":
+            j = k
+            while j >= 0 and (out[j].isalnum() or out[j] in "_$"):
+                j -= 1
+            return "".join(out[j + 1:k + 1]) in operand_keywords
+        return False
+
+    def template(i: int) -> int:
+        out.append("`")
+        i += 1
+        while i < n:
+            c = src[i]
+            if c == "\\":
+                out.extend("  ")
+                i += 2
+            elif c == "`":
+                out.append("`")
+                return i + 1
+            elif c == "$" and i + 1 < n and src[i + 1] == "{":
+                out.extend("${")
+                i = code(i + 2, in_template_expr=True)
+                if i < n:                          # the } that closes ${
+                    out.append("}")
+                    i += 1
+            else:
+                out.append("\n" if c == "\n" else " ")
+                i += 1
+        return i
+
+    def code(i: int, in_template_expr: bool = False) -> int:
+        depth = 0
+        while i < n:
+            c, nxt = src[i], src[i + 1] if i + 1 < n else ""
+            if c == "/" and nxt == "/":
+                j = src.find("\n", i)
+                i = n if j == -1 else j
+            elif c == "/" and nxt == "*":
+                j = src.find("*/", i + 2)
+                i = n if j == -1 else j + 2
+                out.append(" ")
+            elif c in "'\"":
+                j = i + 1
+                while j < n and src[j] != c and src[j] != "\n":
+                    j += 2 if src[j] == "\\" else 1
+                out.extend(c + " " * (j - i - 1) + c)
+                i = j + 1
+            elif c == "`":
+                i = template(i)
+            elif c == "/" and regex_allowed():
+                j, in_class = i + 1, False
+                while j < n and src[j] != "\n":
+                    ch = src[j]
+                    if ch == "\\":
+                        j += 2
+                        continue
+                    if ch == "[":
+                        in_class = True
+                    elif ch == "]":
+                        in_class = False
+                    elif ch == "/" and not in_class:
+                        break
+                    j += 1
+                j += 1
+                while j < n and src[j].isalpha():  # flags
+                    j += 1
+                out.extend("/" + " " * (j - i - 1))
+                i = j
+            else:
+                if in_template_expr:
+                    if c == "{":
+                        depth += 1
+                    elif c == "}":
+                        if depth == 0:
+                            return i               # template() consumes it
+                        depth -= 1
+                out.append(c)
+                i += 1
+        return i
+
+    code(0)
     return "".join(out)
 
 
@@ -159,6 +244,35 @@ class ShellContract(unittest.TestCase):
         self.assertNotIn("http", code)
         self.assertIn("d: d", code)
         self.assertIn("f: f", code)
+
+    def test_js_code_only_tracks_template_expressions(self):
+        # A nested template inside ${ } must not close the outer literal early
+        # and leak its text into "code" (a false pass for the API test).
+        src = "window.WS = { d: d, debugLabel: `x ${ `dragScroll: dragScroll` } y` };"
+        code = js_code_only(src)
+        self.assertNotIn("dragScroll: dragScroll", code)
+        self.assertIn("d: d", code)
+        self.assertIn("};", code)
+        # Expression code inside ${ } is still code; the literal text is not.
+        code = js_code_only("var s = `text ${ obj.keep } more`; var z = 1;")
+        self.assertIn("obj.keep", code)
+        self.assertNotIn("text", code)
+        self.assertIn("var z = 1;", code)
+
+    def test_js_code_only_blanks_regex_literals(self):
+        # A regex holding a quote (the escape helper's shape) must not open a
+        # fake string that swallows the rest of the file (a false failure).
+        src = "var esc = s.replace(/[&<>\"']/g, f);\nwindow.WS = { e: e };"
+        code = js_code_only(src)
+        self.assertIn("window.WS = {", code)
+        self.assertIn("e: e", code)
+        self.assertNotIn("&<>", code)
+        # After return, too; and a / after a name is division, not a regex.
+        code = js_code_only("function t(){ return /'/.test(x); } var r = a / b; var q = 'z'; var k = 2;")
+        self.assertIn(".test(x)", code)
+        self.assertIn("var r = a / b;", code)
+        self.assertIn("var k = 2;", code)
+        self.assertNotIn("'z'", code)
 
 if __name__ == "__main__":
     unittest.main()
