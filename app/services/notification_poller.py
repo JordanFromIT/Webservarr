@@ -156,6 +156,35 @@ async def _collect_session_emails(r: aioredis.Redis) -> Set[str]:
     return emails
 
 
+def _collect_push_emails(db: Session) -> Set[str]:
+    """Emails of every user with at least one stored push subscription."""
+    return {
+        row.user_email.lower()
+        for row in db.query(PushSubscription.user_email).distinct().all()
+        if row.user_email
+    }
+
+
+async def _collect_recipient_emails(r: aioredis.Redis, db: Session) -> Set[str]:
+    """Everyone a broadcast should reach: live sessions plus push subscribers.
+
+    Sessions alone are not enough: Redis is emptied on every restart, so right
+    after a deploy nobody has a session and a user who is not on the site
+    (the whole point of push) would never be targeted.
+    """
+    return await _collect_session_emails(r) | _collect_push_emails(db)
+
+
+def _monitor_ref(monitor_id, status_label: str, since: str) -> str:
+    """Dedup reference for one monitor transition.
+
+    Includes when the monitor entered the status, so the next outage of the
+    same monitor is a new notification while re-detecting the same transition
+    still hits the dedup check. Fits Notification.reference_id (100 chars).
+    """
+    return f"monitor:{monitor_id}:{status_label}:{since}"[:100]
+
+
 # ---------------------------------------------------------------------------
 # Seerr config helper
 # ---------------------------------------------------------------------------
@@ -442,17 +471,19 @@ async def _poll_monitors(r: aioredis.Redis, first_run: bool) -> None:
         if status_label == prev_status:
             continue
 
-        # Notify all active session users
-        emails = await _collect_session_emails(r)
-        if not emails:
-            continue
-
-        ref_id = f"monitor:{monitor_id}:{status_label}"
+        since = mon.get("status_since") or mon.get("last_check") or ""
+        if not since:
+            since = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        ref_id = _monitor_ref(monitor_id, status_label, since)
         title = f"{name} is {status_label}"
         body = f"Service status changed from {prev_status} to {status_label}"
 
         db = SessionLocal()
         try:
+            emails = await _collect_recipient_emails(r, db)
+            if not emails:
+                continue
+
             notified_emails = []
             for email in emails:
                 notif = _create_notification(db, email, "service", title, body, ref_id)
@@ -510,14 +541,7 @@ async def _poll_news(r: aioredis.Redis, first_run: bool) -> None:
             return
 
         # Collect all known emails (sessions + push subscriptions)
-        r_conn = await _get_redis()
-        session_emails = await _collect_session_emails(r_conn)
-        sub_emails = set(
-            row.user_email.lower()
-            for row in db.query(PushSubscription.user_email).distinct().all()
-            if row.user_email
-        )
-        all_emails = session_emails | sub_emails
+        all_emails = await _collect_recipient_emails(r, db)
 
         if not all_emails:
             return
