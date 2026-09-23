@@ -697,8 +697,8 @@
   }
 
   function checkPushState(toggleEl) {
-    if (!('serviceWorker' in navigator)) return;
-    swReady().then(function(reg) {
+    if (!('serviceWorker' in navigator)) return Promise.resolve();
+    return swReady().then(function(reg) {
       return reg.pushManager.getSubscription();
     }).then(function(sub) {
       return sub ? serverHasSubscription(sub) : false;
@@ -777,7 +777,7 @@
     }).catch(function(err) {
       console.error('Push unsubscribe error:', err);
       showPushMessage(PUSH_MESSAGES.offFailed);
-      checkPushState(toggleEl);
+      return checkPushState(toggleEl);   // re-enable only once it is corrected
     }).then(function() {
       toggleEl.disabled = false;
     });
