@@ -243,9 +243,13 @@ class RenderNeverFallsBackToRawTests(unittest.TestCase):
         b = build_branding({"branding.app_name": "Home \ud800 Server",
                             "branding.tagline": "\udfff"}, {}, None, dict(EMPTY_WIKI_HOOKS))
         with mock.patch.object(pages, "STATIC_DIR", self.STATIC), \
-             mock.patch.object(pages, "load_context", return_value=(b, {"netdata": False})):
+             mock.patch.object(pages, "load_context", return_value=(b, {"netdata": False})), \
+             self.assertLogs(pages.logger, "WARNING") as logs:
             resp = pages.render_page("index", None, user)
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("Page index contained characters that can't be encoded", logs.output[0])
+        self.assertNotIn("Home", logs.output[0])   # never the offending value
         body = resp.body.decode("utf-8")
         self.assertIn('id="desktopSidebar"', body)
         self.assertNotIn("<!-- ws:sidebar -->", body)

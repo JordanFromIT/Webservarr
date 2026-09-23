@@ -606,6 +606,8 @@ def render_page(name: str, request: Optional[Request], user: Optional[dict]):
             body = out.encode("utf-8")
         except UnicodeEncodeError:
             # Keep the rendered shell; the unencodable character becomes "?".
+            # Log the page, never the offending value.
+            logger.warning("Page %s contained characters that can't be encoded; replaced them", name)
             body = out.encode("utf-8", "replace")
     except Exception:  # pragma: no cover - a rendering bug must never take a page down
         logger.warning("Page rendering failed for %s; serving the raw file", name, exc_info=True)
