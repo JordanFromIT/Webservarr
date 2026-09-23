@@ -1025,6 +1025,9 @@ function buildDiscoverSection() {
     var el = document.getElementById(row.id);
     wireDiscoverArrows(el);
     updateDiscoverArrows(el);
+    // Mouse drag-to-scroll. The row element outlives every render (only its
+    // contents are replaced), so wiring it once here covers the fetched cards.
+    WS.dragScroll(el);
   });
 
   // Widening the window can make a row fit entirely, which retires both arrows.

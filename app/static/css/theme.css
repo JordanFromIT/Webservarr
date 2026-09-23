@@ -168,6 +168,23 @@ body {
   .nav-new-badge { animation: none; }
 }
 
+/* ---- Drag to scroll (WS.dragScroll in shell.js) ----
+ *
+ * A row that can travel sideways offers a grab hand to a mouse; while it is
+ * being dragged the hand closes and nothing inside can be text-selected. The
+ * cursor covers the cards too - they still open on a plain click, and a grab
+ * hand over the posters is what says the whole row can be pulled.
+ * ws-drag-ready is only ever set for a mouse, so touch devices never see it.
+ */
+.ws-drag-ready,
+.ws-drag-ready * { cursor: grab; }
+.ws-dragging,
+.ws-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* ---- Guided tour (coach marks) ----
  *
  * A "fog of war" over the page with a hole cut around whatever is being

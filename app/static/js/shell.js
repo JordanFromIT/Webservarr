@@ -16,6 +16,7 @@
  *   WS.setHTML(el, html)          innerHTML only when the string changed
  *   WS.arrive(key, write)         reveal sections top-down, in document order
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
+ *   WS.dragScroll(el)             mouse drag-to-scroll for a sideways row
  *
  * Usage:
  *   <script src="/static/js/auth.js"></script>
@@ -364,6 +365,165 @@
     update();
   }
 
+  // ---- Drag to scroll (mouse only) ----
+  //
+  // A sideways poster row scrolls under a finger on a phone; on a desktop the
+  // same row should follow a mouse drag. Touch and pen are left entirely to
+  // the browser: every handler below returns early unless pointerType is
+  // 'mouse', so native touch scrolling and its momentum are untouched.
+  //
+  // Attach it to the scrolling element itself, once. Content can be replaced
+  // inside it freely (the listeners live on the row, not the cards), and a
+  // second call on the same element is a no-op, so re-renders never stack
+  // handlers.
+  var DRAG_THRESHOLD = 5;          // px before a press becomes a drag
+  var GLIDE_DECAY = 0.92;          // velocity kept per 16 ms frame
+  var GLIDE_MIN = 0.02;            // px/ms below which the glide stops
+  var GLIDE_MAX = 3;               // px/ms cap, so a wild flick stays sane
+
+  function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  function dragScroll(el) {
+    if (!el || el._wsDragScroll) return;
+    el._wsDragScroll = true;
+
+    var press = null;        // { id, x, left } while the button is held
+    var dragging = false;
+    var swallowClick = false;
+    var velocity = 0, lastX = 0, lastT = 0;
+    var glideFrame = 0;
+    var saved = null;        // inline scroll-behavior / scroll-snap-type to restore
+
+    function scrollable() { return el.scrollWidth - el.clientWidth > 1; }
+
+    // scroll-behavior:smooth would turn every scrollLeft write into its own
+    // little animation (the row lags the cursor), and scroll-snap would pull
+    // the row back toward a snap point mid-drag. Both are switched off for the
+    // drag and the glide, then put back exactly as they were.
+    function hold() {
+      if (saved) return;
+      saved = { behavior: el.style.scrollBehavior, snap: el.style.scrollSnapType };
+      el.style.scrollBehavior = 'auto';
+      el.style.scrollSnapType = 'none';
+    }
+    function release() {
+      if (!saved) return;
+      el.style.scrollBehavior = saved.behavior;
+      el.style.scrollSnapType = saved.snap;
+      saved = null;
+    }
+
+    function stopGlide() {
+      if (!glideFrame) return;
+      cancelAnimationFrame(glideFrame);
+      glideFrame = 0;
+      release();
+    }
+
+    function glide() {
+      var pos = el.scrollLeft;
+      var max = el.scrollWidth - el.clientWidth;
+      var prev = performance.now();
+      function step(now) {
+        var dt = Math.min(now - prev, 32);
+        prev = now;
+        pos = Math.max(0, Math.min(max, pos + velocity * dt));
+        el.scrollLeft = pos;
+        velocity *= Math.pow(GLIDE_DECAY, dt / 16);
+        if (Math.abs(velocity) < GLIDE_MIN || pos <= 0 || pos >= max) {
+          glideFrame = 0;
+          release();
+          return;
+        }
+        glideFrame = requestAnimationFrame(step);
+      }
+      glideFrame = requestAnimationFrame(step);
+    }
+
+    function endDrag(e, withGlide) {
+      if (!press) return;
+      press = null;
+      if (!dragging) return;
+      dragging = false;
+      el.classList.remove('ws-dragging');
+      try { el.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
+      // The button came up over whatever card the drag ended on; the click
+      // that follows must not open it. Cleared on the next task in case no
+      // click arrives (released outside the row).
+      swallowClick = true;
+      setTimeout(function () { swallowClick = false; }, 0);
+      // A pause before letting go means the user stopped the row themselves.
+      if (withGlide && !reducedMotion() && performance.now() - lastT < 80 &&
+          Math.abs(velocity) > GLIDE_MIN) {
+        glide();
+      } else {
+        release();
+      }
+    }
+
+    el.addEventListener('pointerenter', function (e) {
+      if (e.pointerType === 'mouse') el.classList.toggle('ws-drag-ready', scrollable());
+    });
+
+    el.addEventListener('pointerdown', function (e) {
+      if (e.pointerType !== 'mouse') return;
+      stopGlide();                                  // a press catches a gliding row
+      if (e.button !== 0 || !scrollable()) return;
+      press = { id: e.pointerId, x: e.clientX, left: el.scrollLeft };
+      velocity = 0;
+      lastX = e.clientX;
+      lastT = performance.now();
+    });
+
+    el.addEventListener('pointermove', function (e) {
+      if (!press || e.pointerId !== press.id) return;
+      // The button was released somewhere we never heard about (outside the
+      // row, before a drag began and captured the pointer).
+      if (!(e.buttons & 1)) { press = null; return; }
+      var dx = e.clientX - press.x;
+      if (!dragging) {
+        if (Math.abs(dx) < DRAG_THRESHOLD) return;
+        dragging = true;
+        hold();
+        el.classList.add('ws-dragging');
+        // Capture only once it is a drag: capturing on press would retarget
+        // the click of an ordinary press to the row and the card would never
+        // see it.
+        try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        var sel = window.getSelection && window.getSelection();
+        if (sel && sel.removeAllRanges) sel.removeAllRanges();
+      }
+      el.scrollLeft = press.left - dx;
+      var now = performance.now();
+      var dt = now - lastT;
+      if (dt > 0) {
+        var v = (lastX - e.clientX) / dt;
+        velocity = Math.max(-GLIDE_MAX, Math.min(GLIDE_MAX, 0.8 * v + 0.2 * velocity));
+      }
+      lastX = e.clientX;
+      lastT = now;
+    });
+
+    el.addEventListener('pointerup', function (e) { endDrag(e, true); });
+    el.addEventListener('pointercancel', function (e) { endDrag(e, false); });
+
+    // Capture phase on the row runs before any card's own click handler.
+    el.addEventListener('click', function (e) {
+      if (!swallowClick) return;
+      swallowClick = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+
+    // No ghost image of a poster (or a link) following the cursor.
+    el.addEventListener('dragstart', function (e) { e.preventDefault(); });
+
+    // The wheel (or trackpad) takes over from a glide immediately.
+    el.addEventListener('wheel', stopGlide, { passive: true });
+  }
+
   // ---- Public API ----
 
   window.WS = {
@@ -378,7 +538,8 @@
     swr: swr,
     getJSON: getJSON,
     serviceStatus: serviceStatus,
-    clearCache: clearCache
+    clearCache: clearCache,
+    dragScroll: dragScroll
   };
 
   ready(function () {
