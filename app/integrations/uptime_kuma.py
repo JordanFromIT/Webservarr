@@ -87,13 +87,18 @@ async def get_monitors() -> list:
                 response_time = latest.get("ping", 0)
 
                 # When the monitor entered its current status: the first beat
-                # of the trailing run with that status. The notification poller
-                # uses it to tell one outage from the next.
-                status_since = latest.get("time", "")
+                # of the trailing run with that status. The status page only
+                # returns the last few dozen beats, so when the run fills the
+                # whole window its start is not visible and status_since is
+                # None (the oldest beat would slide on every poll). The
+                # notification poller then falls back to its detection time.
+                status_since = None
+                run_start = None
                 for beat in reversed(heartbeats):
                     if STATUS_MAP.get(beat.get("status", 0), "down") != status:
+                        status_since = run_start
                         break
-                    status_since = beat.get("time", status_since)
+                    run_start = beat.get("time") or run_start
 
                 # Get uptime percentage
                 uptime_key_24h = f"{monitor_id}_24"

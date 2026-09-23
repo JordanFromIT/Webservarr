@@ -250,6 +250,19 @@ async def _collect_recipient_emails(r: aioredis.Redis, db: Session) -> Set[str]:
     return await _collect_session_emails(r) | _collect_push_emails(db)
 
 
+def _parse_monitor_snapshot(raw) -> tuple:
+    """Split a ``poller:monitor:<id>`` value into (status, since).
+
+    Stored as ``<status>|<since>``; a plain ``<status>`` written by an older
+    version reads as (status, None). No value reads as (None, None).
+    """
+    if raw is None:
+        return None, None
+    text = raw.decode() if isinstance(raw, bytes) else str(raw)
+    status, sep, since = text.partition("|")
+    return status, (since if sep else None)
+
+
 def _monitor_ref(monitor_id, status_label: str, since: str) -> str:
     """Dedup reference for one monitor transition.
 
@@ -535,20 +548,26 @@ async def _poll_monitors(r: aioredis.Redis, first_run: bool) -> None:
         status_label = mon.get("status", "unknown")
 
         redis_key = f"poller:monitor:{monitor_id}"
-        prev = await r.get(redis_key)
-        prev_status = prev.decode() if prev else None
+        prev_status, _ = _parse_monitor_snapshot(await r.get(redis_key))
+        if status_label == prev_status:
+            continue  # unchanged: keep the transition marker already stored
 
-        await r.set(redis_key, status_label)
+        # A new status. Its transition marker is fixed once, here, and stored
+        # with the snapshot: the start of the run when the status page still
+        # shows it, else the time we noticed. Recomputing it from the sliding
+        # heartbeat window on later polls would give the same outage a new
+        # dedup reference each time.
+        since = mon.get("status_since") or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        # SET ... GET returns the value this write replaced, atomically, so if
+        # two pollers ever see the change at once only one finds the old status.
+        replaced = await r.set(redis_key, f"{status_label}|{since}", get=True)
+        prev_status, _ = _parse_monitor_snapshot(replaced)
 
         if first_run or prev_status is None:
             continue
-
         if status_label == prev_status:
-            continue
+            continue  # another poller recorded this transition first
 
-        since = mon.get("status_since") or mon.get("last_check") or ""
-        if not since:
-            since = datetime.now(timezone.utc).isoformat(timespec="seconds")
         ref_id = _monitor_ref(monitor_id, status_label, since)
         title = f"{name} is {status_label}"
         body = f"Service status changed from {prev_status} to {status_label}"

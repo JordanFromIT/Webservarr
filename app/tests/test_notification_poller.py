@@ -6,6 +6,9 @@ Notification poller: who gets service alerts, and when.
   nobody has one).
 * The dedup reference identifies one monitor *transition*: the same monitor
   going down again later alerts again, one transition never alerts twice.
+  Its marker is fixed when the change is first seen and stored with the
+  snapshot, because the status page only returns the last few dozen beats:
+  for a long outage the visible "start" slides with every poll.
 """
 import asyncio
 import fnmatch
@@ -41,15 +44,16 @@ class FakeRedis:
     async def get(self, key):
         return self.store[key] if self._live(key) else None
 
-    async def set(self, key, value, nx=False, ex=None):
-        if nx and self._live(key):
+    async def set(self, key, value, nx=False, ex=None, get=False):
+        old = self.store[key] if self._live(key) else None
+        if nx and old is not None:
             return None
         self.store[key] = value.encode() if isinstance(value, str) else value
         if ex is not None:
             self.expiry[key] = self.now + ex
         else:
             self.expiry.pop(key, None)
-        return True
+        return old if get else True
 
     async def eval(self, script, numkeys, key, owner, *args):
         mine = self._live(key) and self.store[key] == owner.encode()
@@ -155,6 +159,43 @@ class MonitorAlertTests(unittest.TestCase):
         self.assertEqual(len(self._rows("owner@example.com")), 1)
         self.assertEqual(len(self.pushed), 1)
 
+    def test_unchanged_status_polled_again_does_not_alert(self):
+        self._subscribe("owner@example.com")
+        self._poll("up", "2026-01-01 10:00:00", first_run=True)
+        self._poll("down", "2026-01-01 11:00:00")
+        self._poll("down", "2026-01-01 11:00:00")
+
+        self.assertEqual(len(self._rows("owner@example.com")), 1)
+        self.assertEqual(len(self.pushed), 1)
+
+    def test_long_outage_with_a_sliding_window_alerts_once(self):
+        self._subscribe("owner@example.com")
+        self._poll("up", "2026-01-01 10:00:00", first_run=True)
+        # The run start is outside the status page's window: no status_since.
+        self._poll("down", None)
+        marker = self.r.store["poller:monitor:7"]
+        self._poll("down", None)
+        self._poll("down", None)
+
+        self.assertEqual(len(self._rows("owner@example.com")), 1)
+        self.assertEqual(self.r.store["poller:monitor:7"], marker)
+
+    def test_marker_is_kept_while_the_status_holds(self):
+        self._subscribe("owner@example.com")
+        self._poll("up", "t0", first_run=True)
+        self._poll("down", "t1")
+        # Later polls report a different (slid) run start; the stored marker
+        # from the first observation stands.
+        self._poll("down", "t2")
+        self.assertEqual(self.r.store["poller:monitor:7"], b"down|t1")
+        self.assertEqual(len(self._rows("owner@example.com")), 1)
+
+    def test_snapshot_from_an_older_version_is_understood(self):
+        self._subscribe("owner@example.com")
+        self.r.store["poller:monitor:7"] = b"up"   # pre-marker format
+        self._poll("down", "t1")
+        self.assertEqual([t for t, _ in self._rows("owner@example.com")], ["Media is down"])
+
     def test_first_run_seeds_silently(self):
         self._subscribe("owner@example.com")
         self._poll("down", "t0", first_run=True)
@@ -208,6 +249,12 @@ class StatusSinceTests(unittest.TestCase):
         self.assertEqual(mon["status"], "down")
         self.assertEqual(mon["status_since"], "t2")
         self.assertEqual(mon["last_check"], "t4")
+
+    def test_status_since_is_none_when_the_run_fills_the_window(self):
+        beats = [{"status": 0, "time": f"t{i}"} for i in range(50)]
+        mon = self._monitors(beats)[0]
+        self.assertEqual(mon["status"], "down")
+        self.assertIsNone(mon["status_since"])
 
 
 if __name__ == "__main__":
