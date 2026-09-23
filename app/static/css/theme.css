@@ -89,15 +89,26 @@ body {
   display: inline-block;
   margin-left: 0.4rem;
   vertical-align: baseline;
-  transform: rotate(-8deg);
 
-  font-size: 1.15rem;
+  /* Laid out once, at the LARGEST size the throb reaches, and never resized.
+     The negative block margins pull the badge's margin box inside the label's
+     own line box, so the flag adds no height to the nav item: a tall italic
+     word beside a 14px label would otherwise make its row taller than its
+     neighbours. */
+  font-size: 1.3rem;
+  margin-block: -0.4em;
   font-weight: 900;
   font-style: italic;
   text-transform: uppercase;
   letter-spacing: 0.02em;
   line-height: 1;
   white-space: nowrap;
+
+  /* Grows from its left edge so it swells away from the word it belongs to.
+     The resting scale (0.885 of 1.3rem, about 1.15rem) is what reduced motion
+     shows. */
+  transform-origin: 0 60%;
+  transform: rotate(-8deg) scale(0.885);
 
   background-image:
     /* the travelling highlight */
@@ -129,11 +140,12 @@ body {
     drop-shadow(0 0 9px rgb(var(--color-new-flag) / 0.6));
 
   /* Two animations: the shine sweeps, the type throbs.
-     The throb animates font-size, NOT transform: scale(). Scaling stretches an
-     already-rasterised bitmap and is what made this look smudged; changing the
-     size re-renders the glyphs at each frame, so it stays sharp. The flag sits
-     at the END of the label, so growing extends rightward and never nudges the
-     word it belongs to. */
+     The throb animates transform ONLY. An earlier version animated font-size,
+     which re-laid-out the line on every frame and nudged every nav item below
+     the flag up and down with the pulse. Transforms never touch layout. The
+     glyphs stay sharp because the peak of the throb is scale(1): the browser
+     rasterises an animated transform at its largest keyframe scale, so every
+     other frame is a downscale of a full-resolution raster, never a blow-up. */
   animation:
     nav-new-shine 3.2s ease-in-out infinite,
     nav-new-throb 1.7s ease-in-out infinite;
@@ -147,8 +159,9 @@ body {
 }
 
 @keyframes nav-new-throb {
-  0%, 100% { font-size: 1.05rem; }
-  50%      { font-size: 1.3rem; }
+  /* 1.05rem -> 1.3rem, expressed as a scale of the 1.3rem layout size. */
+  0%, 100% { transform: rotate(-8deg) scale(0.808); }
+  50%      { transform: rotate(-8deg) scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
