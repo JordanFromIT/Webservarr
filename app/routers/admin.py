@@ -96,7 +96,7 @@ class MonitorPreferences(BaseModel):
 
 class TestConnectionRequest(BaseModel):
     """Schema for testing an external API connection."""
-    service: Literal["plex", "uptime_kuma", "seerr", "netdata", "sonarr", "radarr"]
+    service: Literal["plex", "uptime_kuma", "seerr", "netdata", "sonarr", "radarr", "kavita", "chaptarr"]
     url: str
     credentials: Optional[str] = None
 
