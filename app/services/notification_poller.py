@@ -206,6 +206,39 @@ class LeaderLease:
             logger.debug("Poller: lease release failed: %s", exc)
 
 
+# How long a "this notification was created" claim is kept in Redis. It only
+# has to outlive a window in which two pollers could race on the same item;
+# the Notification table stays the long-term dedup record.
+DEDUP_CLAIM_TTL = 30 * 24 * 3600
+
+
+async def _create_notification_once(
+    r: aioredis.Redis,
+    db: Session,
+    user_email: str,
+    category: str,
+    title: str,
+    body: str,
+    reference_id: str,
+) -> Optional[Notification]:
+    """_create_notification, made atomic across workers.
+
+    The table check is an unlocked SELECT and Notification has no unique
+    constraint, so two pollers processing the same item at once (a lease
+    handover in the middle of a slow pass) would both insert and push. A
+    Redis SET NX on the dedup triple lets exactly one of them proceed.
+    """
+    email = user_email.lower()
+    if _dedup_exists(db, email, category, reference_id):
+        return None
+    if not _user_wants_category(db, email, category):
+        return None
+    digest = hashlib.sha256(f"{email}|{category}|{reference_id}".encode()).hexdigest()[:32]
+    if not await r.set(f"poller:notified:{digest}", "1", nx=True, ex=DEDUP_CLAIM_TTL):
+        return None
+    return _create_notification(db, email, category, title, body, reference_id)
+
+
 async def _get_redis() -> aioredis.Redis:
     """Lazy-init a module-level Redis connection."""
     global _redis
@@ -360,7 +393,8 @@ async def _poll_seerr_requests(r: aioredis.Redis) -> None:
                     # Use short-lived session for DB write
                     db = SessionLocal()
                     try:
-                        notif = _create_notification(
+                        notif = await _create_notification_once(
+                            r,
                             db,
                             requester_email,
                             "request",
@@ -473,7 +507,8 @@ async def _poll_seerr_issues(r: aioredis.Redis) -> None:
                     ref_id = f"issue:{issue_id}:resolved"
                     db = SessionLocal()
                     try:
-                        notif = _create_notification(
+                        notif = await _create_notification_once(
+                            r,
                             db,
                             creator_email,
                             "issue",
@@ -498,7 +533,8 @@ async def _poll_seerr_issues(r: aioredis.Redis) -> None:
                     ref_id = f"issue:{issue_id}:comment:{comment_count}"
                     db = SessionLocal()
                     try:
-                        notif = _create_notification(
+                        notif = await _create_notification_once(
+                            r,
                             db,
                             creator_email,
                             "issue",
@@ -580,7 +616,7 @@ async def _poll_monitors(r: aioredis.Redis) -> None:
 
             notified_emails = []
             for email in emails:
-                notif = _create_notification(db, email, "service", title, body, ref_id)
+                notif = await _create_notification_once(r, db, email, "service", title, body, ref_id)
                 if notif:
                     notified_emails.append(email)
 
@@ -644,7 +680,8 @@ async def _poll_news(r: aioredis.Redis) -> None:
             ref_id = f"news:{post.id}"
             notified_emails = []
             for email in all_emails:
-                notif = _create_notification(
+                notif = await _create_notification_once(
+                    r,
                     db, email, "news", "New announcement", post.title, ref_id
                 )
                 if notif:
@@ -739,7 +776,8 @@ async def _poll_tickets(r: aioredis.Redis) -> None:
                 newest_comment = comments[-1] if comments else None
                 if newest_comment and newest_comment.is_admin:
                     ref_id = f"ticket:{ticket_id}:comment:{comment_count}"
-                    notif = _create_notification(
+                    notif = await _create_notification_once(
+                        r,
                         db,
                         creator_email,
                         "ticket",
@@ -760,7 +798,8 @@ async def _poll_tickets(r: aioredis.Redis) -> None:
             # Check for status change
             if current_status != prev_status:
                 ref_id = f"ticket:{ticket_id}:status:{current_status}"
-                notif = _create_notification(
+                notif = await _create_notification_once(
+                    r,
                     db,
                     creator_email,
                     "ticket",

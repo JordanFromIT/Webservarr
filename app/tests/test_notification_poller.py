@@ -214,6 +214,41 @@ class MonitorAlertTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class AtomicDedupTests(unittest.TestCase):
+    """Two pollers on the same item at once create one notification."""
+
+    def test_concurrent_creators_insert_once(self):
+        Session = make_session_factory()
+        r = FakeRedis()
+        db1, db2 = Session(), Session()
+        try:
+            args = ("owner@example.com", "service", "Media is down", "b", "monitor:7:down:t1")
+            # Both table checks run before either commits, as in a race.
+            first = run(poller._create_notification_once(r, db1, *args))
+            second = run(poller._create_notification_once(r, db2, *args))
+            db1.commit()
+            db2.commit()
+            self.assertIsNotNone(first)
+            self.assertIsNone(second)
+            self.assertEqual(db1.query(Notification).count(), 1)
+        finally:
+            db1.close()
+            db2.close()
+
+    def test_other_users_and_references_are_independent(self):
+        Session = make_session_factory()
+        r = FakeRedis()
+        db = Session()
+        try:
+            a = run(poller._create_notification_once(r, db, "a@example.com", "service", "t", "b", "ref1"))
+            b = run(poller._create_notification_once(r, db, "b@example.com", "service", "t", "b", "ref1"))
+            c = run(poller._create_notification_once(r, db, "a@example.com", "service", "t", "b", "ref2"))
+            self.assertTrue(a and b and c)
+        finally:
+            db.close()
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class NewsBaselineTests(unittest.TestCase):
     """News gates on the stored last-check time, not on a per-process flag."""
 
