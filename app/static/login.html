@@ -13,29 +13,32 @@
     .cinematic-overlay {
       background: radial-gradient(circle, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.9) 100%);
     }
-    /* Frosted glass, exactly the treatment of the search bar on the requests
-       page (#searchInput: bg-cornflower-ocean/25 backdrop-blur-xl
-       border-steel-blue/20), so the rotating artwork reads through the card.
-       Keep the two in step: the owner asked for this card to match that bar,
-       and a darker underlay here was judged too solid. */
+    /* Frosted glass with the search bar's colours (#searchInput on the
+       requests page: bg-cornflower-ocean/25, border-steel-blue/20) so the
+       rotating artwork reads through the card. The blur is deliberately
+       lighter than the bar's backdrop-blur-xl: the owner wanted the card more
+       see-through, so shapes in the art stay recognisable behind it. No dark
+       underlay: that was judged too solid. */
     .login-glass-card {
       background: rgb(var(--color-secondary) / 0.25);
-      -webkit-backdrop-filter: blur(24px);
-      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(8px);
+      backdrop-filter: blur(8px);
       border: 1px solid rgb(var(--color-accent) / 0.2);
     }
-    /* Small text on the glass. The card stays as translucent as the search
-       bar, so over bright artwork it is readability, not the card, that has
-       to give: labels and the divider caption use the full text colour, the
+    /* Small text on the glass. The card stays this translucent, so over
+       bright or busy artwork it is readability, not the card, that has to
+       give: labels and the divider caption use the full text colour, the
        field icons and placeholders sit only as far below it as they need to
        still read as hints, and all of it carries a soft shadow in the theme's
-       background colour to lift it off whatever is behind. */
+       background colour to lift it off whatever shows through. The wider
+       second shadow is sized for the light 8px blur, which lets larger shapes
+       in the art through. */
     .login-glass-card label,
     #ssoDivider span,
     #loginForm .material-symbols-outlined,
     #loginForm input::placeholder {
-      text-shadow: 0 1px 2px rgb(var(--color-background) / 0.8),
-                   0 0 8px rgb(var(--color-background) / 0.45);
+      text-shadow: 0 1px 2px rgb(var(--color-background) / 0.85),
+                   0 0 10px rgb(var(--color-background) / 0.6);
     }
     /* theme.css names <main> ws-content for the cross-page view transition,
        and an element with a view-transition-name is a backdrop root: nothing
