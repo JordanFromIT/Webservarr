@@ -23,7 +23,9 @@ try:
     from app.main import app
     from app.models import Notification, PushSubscription, Setting, Ticket
     from app.routers.notifications import _email_hash
-    from app.seed import migrate_no_email_identity
+    import requests
+
+    from app.seed import migrate_no_email_identity, seed_vapid_keys
     from app.services import notification_poller as poller
     from app.services import push
     from app.tests.test_notification_poller import FakeRedis
@@ -102,6 +104,9 @@ class NoSharedIdentityTests(unittest.TestCase):
         self.Session = make_session_factory()
         db = self.Session()
         try:
+            # Real VAPID keys, so push dispatch gets past its missing-keys
+            # guard and actually reaches the recipient normalisation.
+            seed_vapid_keys(db)
             # Legacy rows filed under the shared "none" identity.
             db.add(Notification(user_email="none", category="ticket", title="Admin replied: A's ticket"))
             db.add(PushSubscription(user_email="none", endpoint="https://push.example.com/a",
@@ -205,10 +210,22 @@ class NoSharedIdentityTests(unittest.TestCase):
         finally:
             db.close()
 
+    def _dispatch_to_no_identity(self):
+        with mock.patch.object(push, "SessionLocal", self.Session), \
+             mock.patch.object(push, "is_safe_push_endpoint", return_value=True), \
+             mock.patch.object(requests.Session, "post", side_effect=AssertionError("pushed")):
+            return run(push.dispatch_push(["None", "none", ""], "t", "b", "news"))
+
     def test_no_push_is_sent_to_the_shared_subscription(self):
-        with mock.patch.object(push, "SessionLocal", self.Session):
-            result = run(push.dispatch_push(["None", "none", ""], "t", "b", "news"))
-        self.assertEqual(result, {"attempted": 0, "succeeded": 0})
+        self.assertEqual(self._dispatch_to_no_identity(), {"attempted": 0, "succeeded": 0})
+
+    def test_that_check_would_catch_the_old_normalisation(self):
+        # With identity_email swapped for the old plain lower-casing, the
+        # shared "none" subscription is found and a send is attempted: the
+        # test above is not passing merely because dispatch bailed out early.
+        with mock.patch.object(push, "identity_email", lambda e: (e or "").lower()):
+            result = self._dispatch_to_no_identity()
+        self.assertEqual(result["attempted"], 1)
 
     def test_ticket_from_a_no_email_account_stores_null(self):
         self.user = {"email": None, "username": "kid-b", "name": "Kid", "is_admin": "false"}
