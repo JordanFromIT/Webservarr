@@ -2568,6 +2568,10 @@
         // admin chose). While false, Save theme leaves branding.logo_url out,
         // so a failed read can never save a blank over the real logo.
         var _themeLogoLoaded = false;
+        // Set by every admin action on the field (typing or pasting, upload,
+        // Clear, Reset). The stored-logo read resolves late; once the admin
+        // has touched the field it must not overwrite their choice.
+        var _themeLogoTouched = false;
 
         function _setThemeLogo(url) {
             _themeLogoLoaded = true;
@@ -2576,14 +2580,21 @@
             _updateLogoPreview(url);
         }
 
+        function _adminSetThemeLogo(url) {
+            _themeLogoTouched = true;
+            _setThemeLogo(url);
+        }
+
         // Fill the logo field from the stored setting, not /api/branding:
         // the public value is blanked when it won't be served, and saving
         // that blank back would erase the setting. No row (404) means the
         // default, which the public value already is.
         async function _loadStoredLogo(logoRequest, publicValue) {
             var resp = await logoRequest;
+            if (_themeLogoTouched) return;   // the admin's value wins
             if (resp && resp.ok) {
                 var setting = await resp.json().catch(function() { return null; });
+                if (_themeLogoTouched) return;
                 if (setting && typeof setting.value === 'string') {
                     _setThemeLogo(setting.value);
                     return;
@@ -2599,13 +2610,14 @@
         }
 
         document.getElementById('themeLogoUrl').addEventListener('input', function() {
-            _themeLogoLoaded = true;   // the admin is setting it themselves
+            _themeLogoTouched = true;  // the admin is setting it themselves
+            _themeLogoLoaded = true;
             document.getElementById('logoNotLoaded').classList.add('hidden');
             _updateLogoPreview(this.value.trim());
         });
 
         document.getElementById('btnClearLogo').addEventListener('click', function() {
-            _setThemeLogo('');
+            _adminSetThemeLogo('');
         });
 
         document.getElementById('logoFileInput').addEventListener('change', async function() {
@@ -2625,7 +2637,7 @@
                 });
                 if (resp.ok) {
                     var data = await resp.json();
-                    _setThemeLogo(data.url);
+                    _adminSetThemeLogo(data.url);
                     statusEl.textContent = 'Uploaded!';
                     statusEl.className = 'text-xs text-green-400';
                 } else {
@@ -2951,7 +2963,7 @@
 
             document.getElementById('themeAppName').value = THEME_DEFAULTS['branding.app_name'];
             document.getElementById('themeTagline').value = THEME_DEFAULTS['branding.tagline'];
-            _setThemeLogo(THEME_DEFAULTS['branding.logo_url']);
+            _adminSetThemeLogo(THEME_DEFAULTS['branding.logo_url']);
             _updateLogoPreview('');
 
             themeColorFields.forEach(function(field) {
