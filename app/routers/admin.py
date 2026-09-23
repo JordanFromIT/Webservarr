@@ -351,39 +351,49 @@ async def bulk_update_settings(
         if item.value != MASK_SENTINEL:
             _check_setting_write(item.key, item.value)
 
-    updated = []
-    for item in payload.settings:
-        setting = db.query(Setting).filter(Setting.key == item.key).first()
-        # Mask sentinel means "unchanged" — keep the existing value, never
-        # overwrite a real secret with the placeholder.
-        if item.value == MASK_SENTINEL:
+    # All rows are written in one transaction: a failure part-way (SQLite
+    # "database is locked" with two workers) saves nothing, never a prefix.
+    touched = {}  # key -> Setting, so a key repeated in the batch is one row
+    order = []
+    try:
+        for item in payload.settings:
+            setting = touched.get(item.key) or db.query(Setting).filter(Setting.key == item.key).first()
+            # Mask sentinel means "unchanged" — keep the existing value, never
+            # overwrite a real secret with the placeholder.
+            if item.value == MASK_SENTINEL:
+                if setting:
+                    order.append(setting)
+                continue
             if setting:
-                updated.append({
-                    "key": setting.key,
-                    "value": _mask_setting_value(setting.key, setting.value),
-                    "description": setting.description,
-                })
-            continue
-        _check_setting_write(item.key, item.value)
-        if setting:
-            setting.value = item.value
-            if item.description is not None:
-                setting.description = item.description
-        else:
-            setting = Setting(
-                key=item.key,
-                value=item.value,
-                description=item.description
-            )
-            db.add(setting)
+                setting.value = item.value
+                if item.description is not None:
+                    setting.description = item.description
+            else:
+                setting = Setting(
+                    key=item.key,
+                    value=item.value,
+                    description=item.description
+                )
+                db.add(setting)
+            touched[item.key] = setting
+            order.append(setting)
         db.commit()
-        db.refresh(setting)
-        updated.append({
+    except Exception:
+        db.rollback()
+        logger.warning("Bulk settings save failed; nothing was saved", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Couldn't save the settings right now. Nothing was changed; please try again.",
+        )
+
+    return [
+        {
             "key": setting.key,
             "value": _mask_setting_value(setting.key, setting.value),
             "description": setting.description,
-        })
-    return updated
+        }
+        for setting in order
+    ]
 
 
 # Service -> the settings key holding its credential, so a masked value coming

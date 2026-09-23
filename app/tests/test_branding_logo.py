@@ -145,6 +145,51 @@ class LogoWriteValidationTests(unittest.TestCase):
 
 
 
+@unittest.skipUnless(HAVE_CLIENT, "app import needs the container's dependencies")
+class BulkSaveIsAtomicTests(LogoWriteValidationTests):
+    """PUT /api/admin/settings/bulk writes every item or none."""
+
+    # Reuses the parent's setUp/tearDown; its own tests are not re-run here.
+    test_bad_logo_urls_are_refused = None
+    test_good_logo_urls_are_saved = None
+    test_bulk_save_with_a_bad_logo_writes_nothing = None
+
+    def test_a_commit_failure_saves_nothing(self):
+        from sqlalchemy.orm import Session as SASession
+        from app.models import Setting as SettingRow
+        real_commit = SASession.commit
+
+        def locked(session):
+            # Fails only once the second item is part of the transaction, so a
+            # commit-per-item loop would already have saved the first.
+            pending = list(session.new) + list(session.dirty)
+            if any(isinstance(o, SettingRow) and o.key == "branding.tagline" for o in pending):
+                raise RuntimeError("database is locked")
+            return real_commit(session)
+
+        with mock.patch.object(SASession, "commit", autospec=True, side_effect=locked):
+            r = self.client.put("/api/admin/settings/bulk", json={"settings": [
+                {"key": "branding.app_name", "value": "Changed"},
+                {"key": "branding.tagline", "value": "Also changed"},
+            ]})
+        self.assertEqual(r.status_code, 503, r.text)
+        self.assertIn("Nothing was changed", r.json()["detail"])
+        self.assertIsNone(self._stored("branding.app_name"))
+        self.assertIsNone(self._stored("branding.tagline"))
+
+    def test_saves_all_items_including_a_repeated_key(self):
+        r = self.client.put("/api/admin/settings/bulk", json={"settings": [
+            {"key": "branding.app_name", "value": "First"},
+            {"key": "branding.tagline", "value": "T"},
+            {"key": "branding.app_name", "value": "Second"},
+        ]})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self._stored("branding.app_name"), "Second")
+        self.assertEqual(self._stored("branding.tagline"), "T")
+        self.assertEqual([i["key"] for i in r.json()],
+                         ["branding.app_name", "branding.tagline", "branding.app_name"])
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class RenderNeverFallsBackToRawTests(unittest.TestCase):
     """No stored logo value may make render_page serve the raw file.
