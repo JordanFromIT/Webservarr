@@ -46,9 +46,9 @@
        <main>, so the card's blur saw nothing and the art came through sharp.
        So <main> gives the name up here.
 
-       The card fades across navigations under a name of its own,
-       ws-login-card; those rules live in theme.css, not here (see there for
-       why). */
+       The card fades across navigations under a name of its own, keyed on
+       the login-only .ws-login-card class; those rules live in theme.css, not
+       here (see there for why). */
     body > main { view-transition-name: none; }
     /* No backdrop blur means the artwork shows through sharp, which is busy
        behind text. Fall back to a mostly opaque card instead. */
@@ -89,7 +89,7 @@
 <!-- Main Content Container -->
 <main class="relative z-20 flex-1 flex flex-col items-center justify-center px-4">
 <!-- Login Card -->
-<div class="w-full max-w-[440px] login-glass-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
+<div class="w-full max-w-[440px] login-glass-card ws-login-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
 <!-- Logo Section -->
 <div class="mb-8 flex flex-col items-center">
 <img id="loginLogo" alt="Logo" class="h-48 w-auto object-contain border-none mb-2 hidden"/>

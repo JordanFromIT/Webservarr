@@ -352,8 +352,13 @@ main            { view-transition-name: ws-content; }
    These rules must live here, in the stylesheet every page loads: in a
    cross-document transition the ::view-transition-* pseudo-elements belong to
    the NEW document and are styled by its stylesheets, so a rule that exists
-   only on the login page never applies when leaving it. */
-.login-glass-card { view-transition-name: ws-login-card; }
+   only on the login page never applies when leaving it.
+
+   Keyed on .ws-login-card, which only the login page's card carries, not on
+   .login-glass-card: setup.html's card shares that styling class and sends
+   the browser to /login when it finishes, and two cards with one name would
+   morph setup's 500px card into login's 440px one. */
+.ws-login-card { view-transition-name: ws-login-card; }
 ::view-transition-old(ws-login-card) { animation: ws-vt-out 90ms ease-out both; }
 ::view-transition-new(ws-login-card) { animation: ws-vt-in 140ms ease-out both; }
 @keyframes ws-vt-out { to { opacity: 0; } }
