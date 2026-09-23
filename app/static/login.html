@@ -13,32 +13,35 @@
     .cinematic-overlay {
       background: radial-gradient(circle, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.9) 100%);
     }
-    /* Frosted glass with the search bar's colours (#searchInput on the
-       requests page: bg-cornflower-ocean/25, border-steel-blue/20) so the
-       rotating artwork reads through the card. The blur is deliberately
-       lighter than the bar's backdrop-blur-xl: the owner wanted the card more
-       see-through, so shapes in the art stay recognisable behind it. No dark
-       underlay: that was judged too solid. */
+    /* Light glass over the rotating artwork. The hues are the search bar's
+       (#searchInput on the requests page: the secondary tint and the
+       steel-blue/20 border), but both the tint and the blur are much lighter
+       than the bar's: the owner asked for the card to be clearly see-through,
+       so the art behind it stays recognisable rather than frosted away. No
+       dark underlay: that was judged too solid. */
     .login-glass-card {
-      background: rgb(var(--color-secondary) / 0.25);
-      -webkit-backdrop-filter: blur(8px);
-      backdrop-filter: blur(8px);
+      background: rgb(var(--color-secondary) / 0.10);
+      -webkit-backdrop-filter: blur(4px);
+      backdrop-filter: blur(4px);
       border: 1px solid rgb(var(--color-accent) / 0.2);
     }
-    /* Small text on the glass. The card stays this translucent, so over
-       bright or busy artwork it is readability, not the card, that has to
-       give: labels and the divider caption use the full text colour, the
-       field icons and placeholders sit only as far below it as they need to
-       still read as hints, and all of it carries a soft shadow in the theme's
-       background colour to lift it off whatever shows through. The wider
-       second shadow is sized for the light 8px blur, which lets larger shapes
-       in the art through. */
+    /* Small text on the glass. The card is this translucent on purpose, so
+       over bright or busy artwork it is the text that has to carry itself:
+       labels and the divider caption use the full text colour, the field
+       icons and placeholders sit only as far below it as they need to still
+       read as hints, and all of it is outlined in the theme's background
+       colour. Four layers: a 1px halo and a 1px drop that give every glyph a
+       dark edge whatever sits behind it (a 4px blur lets real detail
+       through), then a tight and a wide glow that quiet the art around the
+       words. */
     .login-glass-card label,
     #ssoDivider span,
     #loginForm .material-symbols-outlined,
     #loginForm input::placeholder {
-      text-shadow: 0 1px 2px rgb(var(--color-background) / 0.85),
-                   0 0 10px rgb(var(--color-background) / 0.6);
+      text-shadow: 0 0 1px rgb(var(--color-background) / 0.9),
+                   0 1px 2px rgb(var(--color-background) / 0.9),
+                   0 0 5px rgb(var(--color-background) / 0.75),
+                   0 0 12px rgb(var(--color-background) / 0.5);
     }
     /* theme.css names <main> ws-content for the cross-page view transition,
        and an element with a view-transition-name is a backdrop root: nothing
