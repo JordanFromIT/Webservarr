@@ -181,6 +181,17 @@ class ShellRendering(unittest.TestCase):
         self.assertIn('property="og:site_name" content="My Server"', out)
         self.assertIn('property="og:url" content="https://example.test/"', out)
 
+    def test_link_preview_image_ignores_svg_with_query_or_fragment(self):
+        for svg in ("/icons.svg#logo", "/x/LOGO.SVG?v=2"):
+            with self.subTest(logo=svg):
+                out = render(b=branding(**{"branding.logo_url": svg}))
+                self.assertNotIn('property="og:image"', out)
+                self.assertIn('name="twitter:card" content="summary"', out)
+        out = render(b=branding(**{"branding.logo_url": "/static/uploads/logo.png?v=2"}))
+        self.assertIn('property="og:image" content="https://example.test/static/uploads/logo.png?v=2"', out)
+        out = render(b=branding(**{"branding.logo_url": "HTTPS://cdn.example.com/l.png"}))
+        self.assertIn('property="og:image" content="HTTPS://cdn.example.com/l.png"', out)
+
     def test_html_attributes(self):
         self.assertIn('data-page="index"', html_tag(render()))
         self.assertIn("data-netdata", html_tag(render(flags={"netdata": True})))

@@ -412,8 +412,10 @@ def _preview_meta(branding: dict, base_url: str, path: str) -> tuple:
 
     image_url = ""
     logo = (branding.get("logo_url") or "").strip()
-    if logo and not logo.lower().endswith(".svg"):
-        image_url = logo if logo.startswith(("http://", "https://")) else f"{base_url}{logo}"
+    # The file part decides: logo URLs may carry a ?query or #fragment.
+    if logo and not urllib.parse.urlsplit(logo).path.lower().endswith(".svg"):
+        absolute = logo.lower().startswith(("http://", "https://"))
+        image_url = logo if absolute else f"{base_url}{logo}"
 
     page_url = f"{base_url}{path}" if base_url and path else ""
 
