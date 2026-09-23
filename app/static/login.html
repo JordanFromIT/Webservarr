@@ -13,20 +13,13 @@
     .cinematic-overlay {
       background: radial-gradient(circle, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.9) 100%);
     }
-    /* Frosted glass, the same treatment as the search bar on the requests
-       page (secondary tint at 25%, a heavy blur, a faint accent border), so
-       the rotating artwork reads through the card. The extra background layer
-       underneath the tint dims the blurred art: without it a bright poster
-       turns the card pale and the light text on it washes out. 0.45 was set
-       against the worst case, a pure white backdrop, together with the text
-       opacities inside the card (labels /90, field icons /70, placeholders
-       /60, the divider caption /80): labels 5.6:1, icons 3.9:1, placeholders
-       3.1:1. Lower either and the simple sign-in form stops being readable
-       over bright art. */
+    /* Frosted glass, exactly the treatment of the search bar on the requests
+       page (#searchInput: bg-cornflower-ocean/25 backdrop-blur-xl
+       border-steel-blue/20), so the rotating artwork reads through the card.
+       Keep the two in step: the owner asked for this card to match that bar,
+       and a darker underlay here was judged too solid. */
     .login-glass-card {
-      background:
-        linear-gradient(rgb(var(--color-secondary) / 0.25), rgb(var(--color-secondary) / 0.25)),
-        rgb(var(--color-background) / 0.45);
+      background: rgb(var(--color-secondary) / 0.25);
       -webkit-backdrop-filter: blur(24px);
       backdrop-filter: blur(24px);
       border: 1px solid rgb(var(--color-accent) / 0.2);
