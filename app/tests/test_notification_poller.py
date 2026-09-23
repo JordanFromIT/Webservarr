@@ -19,6 +19,8 @@ from unittest import mock
 try:
     from app.models import NewsPost, Notification, PushSubscription, Setting, Ticket, TicketComment
     from app.services import notification_poller as poller
+    from sqlalchemy.orm import Session as SASession
+
     from app.tests.test_push import make_session_factory
     HAVE_APP = True
 except Exception:  # pragma: no cover - the laptop has no FastAPI
@@ -55,6 +57,15 @@ class FakeRedis:
         else:
             self.expiry.pop(key, None)
         return old if get else True
+
+    async def delete(self, *keys):
+        n = 0
+        for key in keys:
+            if self._live(key):
+                n += 1
+            self.store.pop(key, None)
+            self.expiry.pop(key, None)
+        return n
 
     async def eval(self, script, numkeys, key, owner, *args):
         mine = self._live(key) and self.store[key] == owner.encode()
@@ -246,6 +257,81 @@ class AtomicDedupTests(unittest.TestCase):
             self.assertTrue(a and b and c)
         finally:
             db.close()
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class FailedSaveTests(unittest.TestCase):
+    """A notification that fails to save is not lost, and costs nobody else theirs."""
+
+    def _failing_commit_for(self, bad_email, times=1):
+        """Patch Session.commit to fail while a row for bad_email is pending."""
+        real_commit = SASession.commit
+        state = {"left": times}
+
+        def commit(session):
+            pending = [o for o in session.new if isinstance(o, Notification)]
+            if state["left"] and any(o.user_email == bad_email for o in pending):
+                state["left"] -= 1
+                raise RuntimeError("disk I/O error")
+            return real_commit(session)
+
+        return mock.patch.object(SASession, "commit", autospec=True, side_effect=commit)
+
+    def test_failed_commit_releases_the_claim_and_a_retry_saves_it(self):
+        Session = make_session_factory()
+        r = FakeRedis()
+        args = ("owner@example.com", "service", "Media is down", "b", "monitor:7:down:t1")
+        db = Session()
+        try:
+            with self._failing_commit_for("owner@example.com"):
+                with self.assertLogs(poller.logger, level="WARNING"):
+                    self.assertIsNone(run(poller._create_notification_once(r, db, *args)))
+            self.assertEqual([k for k in r.store if k.startswith("poller:notified:")], [])
+            self.assertIsNotNone(run(poller._create_notification_once(r, db, *args)))
+            self.assertEqual(db.query(Notification).count(), 1)
+        finally:
+            db.close()
+
+    def test_claim_is_short_lived(self):
+        self.assertLessEqual(poller.DEDUP_CLAIM_TTL, 15 * 60)
+
+    def test_one_recipient_failing_does_not_drop_the_others(self):
+        Session = make_session_factory()
+        r = FakeRedis()
+        db = Session()
+        try:
+            for email in ("a@example.com", "b@example.com", "c@example.com"):
+                db.add(PushSubscription(user_email=email, endpoint=f"https://push.example.com/{email}",
+                                        p256dh="p", auth="a"))
+            db.commit()
+        finally:
+            db.close()
+        pushed = []
+
+        async def fake_push(emails, *a, **kw):
+            pushed.append(sorted(emails))
+            return len(emails)
+
+        def poll(status, since):
+            monitors = [{"id": 7, "name": "Media", "status": status, "status_since": since}]
+            with mock.patch.object(poller, "SessionLocal", Session), \
+                 mock.patch.object(poller, "send_push_to_users", fake_push), \
+                 mock.patch("app.integrations.uptime_kuma.get_monitors",
+                            mock.AsyncMock(return_value=monitors)):
+                run(poller._poll_monitors(r))
+
+        poll("up", "t0")
+        with self._failing_commit_for("b@example.com"):
+            with self.assertLogs(poller.logger, level="WARNING"):
+                poll("down", "t1")
+
+        db = Session()
+        try:
+            got = sorted(n.user_email for n in db.query(Notification).all())
+        finally:
+            db.close()
+        self.assertEqual(got, ["a@example.com", "c@example.com"])
+        self.assertEqual(pushed, [["a@example.com", "c@example.com"]])
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

@@ -206,10 +206,10 @@ class LeaderLease:
             logger.debug("Poller: lease release failed: %s", exc)
 
 
-# How long a "this notification was created" claim is kept in Redis. It only
-# has to outlive a window in which two pollers could race on the same item;
-# the Notification table stays the long-term dedup record.
-DEDUP_CLAIM_TTL = 30 * 24 * 3600
+# The Redis claim only has to cover the window in which two pollers could be
+# on the same item at once (a lease handover mid-pass); the committed
+# Notification row is the long-term dedup record.
+DEDUP_CLAIM_TTL = 10 * 60
 
 
 async def _create_notification_once(
@@ -221,12 +221,14 @@ async def _create_notification_once(
     body: str,
     reference_id: str,
 ) -> Optional[Notification]:
-    """_create_notification, made atomic across workers.
+    """Create and commit one notification, at most once across workers.
 
     The table check is an unlocked SELECT and Notification has no unique
-    constraint, so two pollers processing the same item at once (a lease
-    handover in the middle of a slow pass) would both insert and push. A
-    Redis SET NX on the dedup triple lets exactly one of them proceed.
+    constraint, so two pollers processing the same item at once would both
+    insert and push. A short Redis SET NX claim on the dedup triple lets one
+    proceed. The row is committed here, per recipient: if that fails the
+    claim is released, so a later poll can retry, and the caller moves on to
+    the next recipient with nothing of theirs lost.
     """
     email = user_email.lower()
     if _dedup_exists(db, email, category, reference_id):
@@ -234,9 +236,24 @@ async def _create_notification_once(
     if not _user_wants_category(db, email, category):
         return None
     digest = hashlib.sha256(f"{email}|{category}|{reference_id}".encode()).hexdigest()[:32]
-    if not await r.set(f"poller:notified:{digest}", "1", nx=True, ex=DEDUP_CLAIM_TTL):
+    claim = f"poller:notified:{digest}"
+    if not await r.set(claim, "1", nx=True, ex=DEDUP_CLAIM_TTL):
         return None
-    return _create_notification(db, email, category, title, body, reference_id)
+    try:
+        notif = _create_notification(db, email, category, title, body, reference_id)
+        if notif is None:
+            await r.delete(claim)
+            return None
+        db.commit()
+        return notif
+    except Exception as exc:
+        db.rollback()
+        try:
+            await r.delete(claim)
+        except Exception:
+            pass  # it lapses on its own within DEDUP_CLAIM_TTL
+        logger.warning("Poller: could not save %s notification for %s: %s", category, email, exc)
+        return None
 
 
 async def _get_redis() -> aioredis.Redis:
@@ -436,7 +453,6 @@ async def _poll_seerr_requests(r: aioredis.Redis) -> None:
                             ref_id,
                         )
                         if notif:
-                            db.commit()
                             await send_push_to_users(
                                 [requester_email],
                                 notif.title,
@@ -550,7 +566,6 @@ async def _poll_seerr_issues(r: aioredis.Redis) -> None:
                             ref_id,
                         )
                         if notif:
-                            db.commit()
                             await send_push_to_users(
                                 [creator_email],
                                 notif.title,
@@ -576,7 +591,6 @@ async def _poll_seerr_issues(r: aioredis.Redis) -> None:
                             ref_id,
                         )
                         if notif:
-                            db.commit()
                             await send_push_to_users(
                                 [creator_email],
                                 notif.title,
@@ -654,7 +668,6 @@ async def _poll_monitors(r: aioredis.Redis) -> None:
                     notified_emails.append(email)
 
             if notified_emails:
-                db.commit()
                 await send_push_to_users(
                     notified_emails,
                     title,
@@ -721,7 +734,6 @@ async def _poll_news(r: aioredis.Redis) -> None:
                     notified_emails.append(email)
 
             if notified_emails:
-                db.commit()
                 await send_push_to_users(
                     notified_emails,
                     "New announcement",
@@ -801,7 +813,6 @@ async def _poll_tickets(r: aioredis.Redis) -> None:
                         ref_id,
                     )
                     if notif:
-                        db.commit()
                         await send_push_to_users(
                             [creator_email],
                             notif.title,
@@ -823,7 +834,6 @@ async def _poll_tickets(r: aioredis.Redis) -> None:
                     ref_id,
                 )
                 if notif:
-                    db.commit()
                     await send_push_to_users(
                         [creator_email],
                         notif.title,
