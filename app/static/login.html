@@ -24,6 +24,19 @@
       backdrop-filter: blur(24px);
       border: 1px solid rgb(var(--color-accent) / 0.2);
     }
+    /* Small text on the glass. The card stays as translucent as the search
+       bar, so over bright artwork it is readability, not the card, that has
+       to give: labels and the divider caption use the full text colour, the
+       field icons and placeholders sit only as far below it as they need to
+       still read as hints, and all of it carries a soft shadow in the theme's
+       background colour to lift it off whatever is behind. */
+    .login-glass-card label,
+    #ssoDivider span,
+    #loginForm .material-symbols-outlined,
+    #loginForm input::placeholder {
+      text-shadow: 0 1px 2px rgb(var(--color-background) / 0.8),
+                   0 0 8px rgb(var(--color-background) / 0.45);
+    }
     /* theme.css names <main> ws-content for the cross-page view transition,
        and an element with a view-transition-name is a backdrop root: nothing
        inside it can blur what is painted behind it. The artwork is behind
@@ -82,19 +95,19 @@
 <!-- Login Form -->
 <form id="loginForm" class="w-full space-y-5">
 <div class="flex flex-col gap-1.5">
-<label class="text-frosted-blue/90 text-sm font-medium px-1">Username</label>
+<label class="text-frosted-blue text-sm font-medium px-1">Username</label>
 <div class="relative group">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 group-focus-within:text-primary text-[20px]">person</span>
-<input id="username" name="username" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/60 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="admin" type="text" required/>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-primary text-[20px]">person</span>
+<input id="username" name="username" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="admin" type="text" required/>
 </div>
 </div>
 <div class="flex flex-col gap-1.5">
 <div class="flex justify-between items-center px-1">
-<label class="text-frosted-blue/90 text-sm font-medium">Password</label>
+<label class="text-frosted-blue text-sm font-medium">Password</label>
 </div>
 <div class="relative group">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 group-focus-within:text-primary text-[20px]">lock</span>
-<input id="password" name="password" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/60 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="••••••••" type="password" required/>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-primary text-[20px]">lock</span>
+<input id="password" name="password" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="••••••••" type="password" required/>
 </div>
 </div>
 <button type="submit" class="w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98]">
@@ -103,7 +116,7 @@
 <!-- Divider -->
 <div id="ssoDivider" class="flex items-center gap-4 py-2">
 <div class="h-[1px] flex-1 bg-frosted-blue/10"></div>
-<span class="text-frosted-blue/80 text-[10px] font-bold uppercase tracking-widest">Or continue with</span>
+<span class="text-frosted-blue text-[10px] font-bold uppercase tracking-widest">Or continue with</span>
 <div class="h-[1px] flex-1 bg-frosted-blue/10"></div>
 </div>
 <!-- Plex SSO Button -->
