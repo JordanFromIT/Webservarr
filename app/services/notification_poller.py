@@ -10,11 +10,19 @@ send_push_to_users().
 Architecture:
     start_poller()  -- launched as asyncio.create_task in main.py lifespan
     stop_poller()   -- sets a flag; the loop exits on the next tick
+
+Every uvicorn worker runs the lifespan, so every worker starts a poller. Only
+the one holding the Redis leader lease (LeaderLease) actually polls; the
+others wait and take over when the lease lapses. Without it each worker
+detected the same change and every user got duplicate notifications.
 """
 
 import asyncio
 import hashlib
 import logging
+import os
+import socket
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, Set
 
@@ -35,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 _stop_event: Optional[asyncio.Event] = None
 _redis: Optional[aioredis.Redis] = None
+_lease: Optional["LeaderLease"] = None
 
 # Seerr media-status codes (used on media objects)
 MEDIA_STATUS_MAP = {
@@ -61,6 +70,26 @@ DEFAULT_NEWS_INTERVAL = 60
 
 # Internal tick — how often we check whether a poll is due
 TICK_SECONDS = 5
+
+# Leader lease: the holder renews it every tick. The TTL covers a couple of
+# missed renewals, and bounds how long polling stops if the leader dies.
+LEADER_KEY = "poller:leader"
+LEASE_TTL = TICK_SECONDS * 3
+
+# Renew / release only while the lease is still ours, atomically, so a worker
+# whose lease already lapsed can never extend or delete the new holder's.
+_RENEW_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('expire', KEYS[1], ARGV[2])
+end
+return 0
+"""
+_RELEASE_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('del', KEYS[1])
+end
+return 0
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +158,52 @@ def _create_notification(
     )
     db.add(notif)
     return notif
+
+
+class LeaderLease:
+    """A Redis lease that lets exactly one worker run the poller.
+
+    ``refresh()`` takes the lease if it is free (SET NX EX) or renews it if
+    this worker already holds it, and records the outcome in ``held``.
+    """
+
+    def __init__(self, r, key: str = LEADER_KEY, ttl: int = LEASE_TTL, owner: Optional[str] = None):
+        self._r = r
+        self.key = key
+        self.ttl = ttl
+        self.owner = owner or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+        self.held = False
+
+    async def refresh(self) -> bool:
+        was_held = self.held
+        try:
+            if await self._r.set(self.key, self.owner, nx=True, ex=self.ttl):
+                self.held = True
+            else:
+                renewed = await self._r.eval(_RENEW_SCRIPT, 1, self.key, self.owner, self.ttl)
+                self.held = bool(renewed)
+        except Exception as exc:
+            # Unknown state: stand down. If we were leader the lease will
+            # lapse and whoever can reach Redis takes over.
+            logger.warning("Poller: leader lease check failed: %s", exc)
+            self.held = False
+        if self.held != was_held:
+            logger.info(
+                "Poller: %s the leader lease (%s)",
+                "acquired" if self.held else "lost",
+                self.owner,
+            )
+        return self.held
+
+    async def release(self) -> None:
+        """Give the lease up now so another worker need not wait out the TTL."""
+        if not self.held:
+            return
+        self.held = False
+        try:
+            await self._r.eval(_RELEASE_SCRIPT, 1, self.key, self.owner)
+        except Exception as exc:
+            logger.debug("Poller: lease release failed: %s", exc)
 
 
 async def _get_redis() -> aioredis.Redis:
@@ -693,12 +768,38 @@ async def _poll_tickets(r: aioredis.Redis, first_run: bool) -> None:
 
 async def start_poller() -> None:
     """Main poller loop — runs until stop_poller() is called."""
-    global _stop_event
+    global _stop_event, _lease
     _stop_event = asyncio.Event()
 
     logger.info("Notification poller starting...")
 
     r = await _get_redis()
+
+    # The lease is renewed by its own task, not between polls: one Seerr pass
+    # can take longer than the TTL, and the lease must not lapse mid-cycle.
+    lease = LeaderLease(r)
+    _lease = lease
+    await lease.refresh()
+
+    async def _keep_lease() -> None:
+        while not _stop_event.is_set():
+            try:
+                await asyncio.wait_for(_stop_event.wait(), timeout=TICK_SECONDS)
+                break
+            except asyncio.TimeoutError:
+                pass
+            await lease.refresh()
+
+    lease_task = asyncio.create_task(_keep_lease())
+    try:
+        await _poll_forever(r, lease)
+    finally:
+        lease_task.cancel()
+        await lease.release()
+
+
+async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
+    """The polling loop proper; polls only while this worker holds the lease."""
 
     # Track first-run per poller type
     first_run_seerr = True
@@ -718,6 +819,9 @@ async def start_poller() -> None:
             break  # stop_event was set
         except asyncio.TimeoutError:
             pass  # tick expired, check if any poll is due
+
+        if not lease.held:
+            continue  # another worker is polling
 
         now = asyncio.get_event_loop().time()
 
@@ -741,7 +845,7 @@ async def start_poller() -> None:
 
         try:
             # --- Seerr ---
-            if now - last_seerr >= interval_seerr:
+            if lease.held and now - last_seerr >= interval_seerr:
                 last_seerr = now
                 try:
                     await _poll_seerr_requests(r, first_run_seerr)
@@ -751,7 +855,7 @@ async def start_poller() -> None:
                 first_run_seerr = False
 
             # --- Monitors ---
-            if now - last_monitors >= interval_monitors:
+            if lease.held and now - last_monitors >= interval_monitors:
                 last_monitors = now
                 try:
                     await _poll_monitors(r, first_run_monitors)
@@ -760,7 +864,7 @@ async def start_poller() -> None:
                 first_run_monitors = False
 
             # --- News ---
-            if now - last_news >= interval_news:
+            if lease.held and now - last_news >= interval_news:
                 last_news = now
                 try:
                     await _poll_news(r, first_run_news)
@@ -769,7 +873,7 @@ async def start_poller() -> None:
                 first_run_news = False
 
             # --- Tickets ---
-            if now - last_tickets >= interval_tickets:
+            if lease.held and now - last_tickets >= interval_tickets:
                 last_tickets = now
                 try:
                     await _poll_tickets(r, first_run_tickets)
@@ -785,9 +889,12 @@ async def start_poller() -> None:
 
 async def stop_poller() -> None:
     """Signal the poller loop to stop."""
-    global _stop_event, _redis
+    global _stop_event, _redis, _lease
     if _stop_event:
         _stop_event.set()
+    if _lease:
+        await _lease.release()
+        _lease = None
     if _redis:
         await _redis.close()
         _redis = None
