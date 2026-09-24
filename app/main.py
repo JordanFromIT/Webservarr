@@ -428,30 +428,30 @@ async def login_page(request: Request):
     return render_page("login", request, None)
 
 
-# Requests page (native Seerr UI)
+def _requests_page(branding: dict) -> str:
+    """The Requests page shows the built-in UI or the Seerr embed (Settings > Pages)."""
+    return "requests-embed" if branding.get("requests_source") == "seerr_embed" else "requests"
+
+
+# Requests page (native Seerr UI, or the Seerr iframe when that is the source)
 @app.get("/requests", response_class=HTMLResponse, tags=["Pages"])
 async def requests_page(
     request: Request,
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
-    """Serve the native requests page."""
+    """Serve the requests page from the operator's chosen source."""
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("requests", request, user)
+    return render_page("requests", request, user, gate="requests", pick=_requests_page)
 
 
-# Requests embed page (Seerr iframe wrapper)
-@app.get("/requests-embed", response_class=HTMLResponse, tags=["Pages"])
-async def requests_embed_page(
-    request: Request,
-    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
-):
-    """Serve the requests embed page (Seerr iframe)."""
-    user = await _require_session(session_id)
-    if not user:
-        return RedirectResponse(url="/login", status_code=302)
-    return render_page("requests-embed", request, user)
+# Legacy redirect: /requests-embed → /requests (301)
+@app.get("/requests-embed", include_in_schema=False)
+async def requests_embed_redirect(request: Request):
+    """The Seerr embed is now what /requests shows when it is the chosen source."""
+    query = request.url.query
+    return RedirectResponse(url="/requests" + ("?" + query if query else ""), status_code=301)
 
 
 # Legacy redirect: /requests2 → /requests (301)
@@ -471,7 +471,7 @@ async def issues_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("issues", request, user)
+    return render_page("issues", request, user, gate="issues")
 
 
 # News archive page
@@ -497,7 +497,7 @@ async def wiki_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("wiki", request, user)
+    return render_page("wiki", request, user, gate="wiki")
 
 
 @app.get("/wiki/{slug}", response_class=HTMLResponse, tags=["Pages"])
@@ -515,7 +515,7 @@ async def wiki_article_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("wiki", request, user)
+    return render_page("wiki", request, user, gate="wiki")
 
 
 # Calendar page
@@ -528,7 +528,7 @@ async def calendar_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("calendar", request, user)
+    return render_page("calendar", request, user, gate="calendar")
 
 
 @app.get("/tickets", response_class=HTMLResponse, tags=["Pages"])
@@ -540,12 +540,12 @@ async def tickets_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("tickets", request, user)
+    return render_page("tickets", request, user, gate="tickets")
 
 
-# Ebook library page
-@app.get("/library", response_class=HTMLResponse, tags=["Pages"])
-async def library_page(
+# eBooks page (the Kavita library browser)
+@app.get("/ebooks", response_class=HTMLResponse, tags=["Pages"])
+async def ebooks_page(
     request: Request,
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
@@ -553,7 +553,15 @@ async def library_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("library", request, user)
+    return render_page("library", request, user, gate="library")
+
+
+# Legacy redirect: /library → /ebooks (301)
+@app.get("/library", include_in_schema=False)
+async def library_redirect(request: Request):
+    """eBooks moved from /library to /ebooks; old links and bookmarks keep working."""
+    query = request.url.query
+    return RedirectResponse(url="/ebooks" + ("?" + query if query else ""), status_code=301)
 
 
 # Ebook reader page
@@ -566,7 +574,7 @@ async def reader_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("reader", request, user)
+    return render_page("reader", request, user, gate="library")
 
 
 # Settings page (admin)

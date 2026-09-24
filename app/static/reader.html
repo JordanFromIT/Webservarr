@@ -164,7 +164,7 @@
 
 <!-- Top bar -->
 <header class="fixed top-0 inset-x-0 z-30 h-14 bg-background-dark/95 backdrop-blur border-b border-steel-blue/25 flex items-center gap-2 px-3">
-  <a href="/library" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="Back to library" aria-label="Back to library">
+  <a href="/ebooks" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="Back to eBooks" aria-label="Back to eBooks">
     <span class="material-symbols-outlined text-frosted-blue align-middle">arrow_back</span>
   </a>
   <button id="tocBtn" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="Table of contents" aria-label="Table of contents">
@@ -228,7 +228,7 @@
     <span class="material-symbols-outlined text-4xl text-steel-blue/60">error</span>
     <p id="errorTitle" class="mt-3 font-semibold text-frosted-blue">Couldn't open this book</p>
     <p id="errorDetail" class="mt-1 text-sm text-steel-blue max-w-md mx-auto"></p>
-    <a href="/library" class="inline-block mt-4 px-4 py-2 rounded-xl bg-baltic-blue/30 border border-steel-blue/30 text-sm text-frosted-blue">Back to library</a>
+    <a href="/ebooks" class="inline-block mt-4 px-4 py-2 rounded-xl bg-baltic-blue/30 border border-steel-blue/30 text-sm text-frosted-blue">Back to eBooks</a>
   </div>
   <!-- Kavita's HTML goes in here VERBATIM (annotation xPaths are relative to it) -->
   <div id="bookContent" class="book-content hidden"></div>
@@ -682,7 +682,7 @@
       before: openSettings
     },
     {
-      target: 'header a[href="/library"]',
+      target: 'header a[href="/ebooks"]',
       icon: 'arrow_back',
       title: 'When you are done',
       body: 'The arrow at the top left goes back to the library. Nothing needs saving first, and the book reappears under Your Bookshelf.',

@@ -25,10 +25,10 @@ import logging
 import os
 import re
 import urllib.parse
-from typing import Optional
+from typing import Callable, Optional
 
 from fastapi import Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.config import settings
 from app.database import SessionLocal
@@ -53,7 +53,7 @@ STATIC_DIR = "/app/app/static"
 
 _NAV_HREF = {
     "home": "/", "requests": "/requests", "issues": "/issues", "calendar": "/calendar",
-    "tickets": "/tickets", "library": "/library", "wiki": "/wiki", "settings": "/settings",
+    "tickets": "/tickets", "library": "/ebooks", "wiki": "/wiki", "settings": "/settings",
 }
 _NAV_EXTRA = {
     # The pending-requests count rides on the one Requests item.
@@ -274,6 +274,24 @@ def visible_nav_items(branding: dict, is_admin: bool) -> list:
         it["new"] = bool(new_flags.get(item["id"]))
         out.append(it)
     return out
+
+
+def page_is_off(page_id: str, branding: dict) -> bool:
+    """True when the operator switched this page off (Settings > Pages).
+    Home and Settings cannot be switched off."""
+    if page_id in ("home", "settings"):
+        return False
+    return (branding.get("sidebar_enabled") or {}).get(page_id) is False
+
+
+# Shown to admins on a page that is switched off. Server-rendered under the
+# header, so it is part of the first paint and moves nothing.
+PAGE_OFF_BANNER = (
+    '<div id="pageOffBanner" role="status" class="mx-4 lg:mx-8 mt-4 flex items-center gap-3 '
+    'rounded-xl border border-frosted-blue/10 bg-primary/15 px-4 py-3 text-sm font-semibold text-frosted-blue">'
+    '<span class="material-symbols-outlined text-base" aria-hidden="true">visibility_off</span>'
+    'This page is turned off. Only admins can see it.</div>'
+)
 
 
 def render_nav_links(branding: dict, is_admin: bool, active_id: Optional[str]) -> str:
@@ -541,7 +559,10 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
     if SIDEBAR_MARKER in out or HEADER_MARKER in out:
         values = shell_values(branding, user, version, name)
         out = out.replace(SIDEBAR_MARKER, fill(_partial("shell-sidebar.html"), values), 1)
-        out = out.replace(HEADER_MARKER, fill(_partial("shell-header.html"), values), 1)
+        header = fill(_partial("shell-header.html"), values)
+        if flags.get("page_off"):
+            header += PAGE_OFF_BANNER
+        out = out.replace(HEADER_MARKER, header, 1)
 
     attrs = f' data-page="{html.escape(name, quote=True)}"'
     if user and user.get("is_admin"):
@@ -579,8 +600,22 @@ def load_context(signed_in: bool) -> tuple:
     return branding, flags
 
 
-def render_page(name: str, request: Optional[Request], user: Optional[dict]):
-    """Read app/static/<name>.html, render it for this user, and return it, or 404."""
+def render_page(name: str, request: Optional[Request], user: Optional[dict],
+                gate: Optional[str] = None, pick: Optional[Callable[[dict], str]] = None):
+    """Read app/static/<name>.html, render it for this user, and return it, or 404.
+
+    gate: the nav page id this route belongs to. When the operator switched it
+    off, members are sent home (302) and admins get the page with a banner.
+    pick: chooses the file from the branding payload (used by /requests, which
+    shows the Seerr embed when that is the chosen source)."""
+    branding, flags = load_context(user is not None)
+    if gate and page_is_off(gate, branding):
+        if not (user and user.get("is_admin") == "true"):
+            return RedirectResponse(url="/", status_code=302)
+        flags = dict(flags, page_off=True)
+    if pick is not None:
+        name = pick(branding)
+
     filepath = os.path.join(STATIC_DIR, name + ".html")
     try:
         with open(filepath, "r", encoding="utf-8") as f:
@@ -591,7 +626,6 @@ def render_page(name: str, request: Optional[Request], user: Optional[dict]):
             content={"detail": f"{name} page not found. Static files missing."},
         )
 
-    branding, flags = load_context(user is not None)
     try:
         out = render_html(
             page_html,
