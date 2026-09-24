@@ -583,3 +583,127 @@ def migrate_overseerr_to_seerr(db: Session) -> None:
         logger.info("Completed Overseerr -> Seerr migration: renamed %d setting keys", renamed)
     else:
         logger.info("Completed Overseerr -> Seerr migration: no old keys found")
+
+
+def _setting_row(db: Session, key: str):
+    return db.query(Setting).filter(Setting.key == key).first()
+
+
+def _finish_migration(db: Session, marker: str, description: str) -> bool:
+    """Add the marker and commit. False when another worker got there first."""
+    from sqlalchemy.exc import IntegrityError
+
+    db.add(Setting(key=marker, value="done", description=description))
+    try:
+        db.commit()
+        return True
+    except IntegrityError:
+        db.rollback()
+        logger.debug("%s marker already exists (race), skipping", marker)
+        return False
+
+
+def _merge_page_switch(db: Session, marker: str, flag_key: str, switch_key: str, what: str) -> None:
+    """Fold an old feature flag into the page's one switch: switch := switch AND flag.
+
+    Only a flag explicitly stored as "false" changes anything, and then only a
+    switch that is still on (or has no row yet). After this the flag is not read."""
+    from app.settings_registry import REGISTRY
+
+    if _setting_row(db, marker):
+        return
+    flag = _setting_row(db, flag_key)
+    switch = _setting_row(db, switch_key)
+    changed = False
+    if flag is not None and (flag.value or "").strip().lower() == "false":
+        if switch is None:
+            db.add(Setting(key=switch_key, value="false", description=REGISTRY[switch_key].description))
+            changed = True
+        elif (switch.value or "").strip().lower() != "false":
+            switch.value = "false"
+            changed = True
+    if _finish_migration(db, marker, f"One-time merge of {flag_key} into {switch_key}"):
+        logger.info("%s page switch migration: %s", what, "turned the page off" if changed else "nothing to change")
+
+
+def migrate_tickets_page_switch_v1(db: Session) -> None:
+    """
+    One-time migration: Tickets gets one on/off switch.
+
+    Before v1.11 the Tickets page needed two things on: its sidebar switch
+    (sidebar.enabled_tickets) and a separate feature flag (features.show_tickets)
+    that also gated the ticket API. The Settings redesign keeps one switch per
+    page, so the page stays off after upgrade exactly when either was off.
+
+    Guarded by migration.tickets_page_switch_v1.
+    """
+    _merge_page_switch(db, "migration.tickets_page_switch_v1", "features.show_tickets",
+                       "sidebar.enabled_tickets", "Tickets")
+
+
+def migrate_ebooks_page_switch_v1(db: Session) -> None:
+    """
+    One-time migration: eBooks gets one on/off switch.
+
+    Same shape as the Tickets merge: features.show_books folds into
+    sidebar.enabled_library. The "Kavita must be configured" rule is not a
+    switch and is unaffected.
+
+    Guarded by migration.ebooks_page_switch_v1.
+    """
+    _merge_page_switch(db, "migration.ebooks_page_switch_v1", "features.show_books",
+                       "sidebar.enabled_library", "eBooks")
+
+
+def migrate_requests_source_v1(db: Session) -> None:
+    """
+    One-time migration: the two requests pages become one page with a source.
+
+    Before v1.11 there were two nav items: the built-in Requests page and a
+    Seerr iframe page ("Requests (Embed)") that only appeared when
+    features.show_requests was true and its own switch was on. Now there is one
+    Requests page and requests.source says which of the two it shows.
+
+      native  = sidebar.enabled_requests != "false"
+      embed   = features.show_requests == "true" and sidebar.enabled_requests_embed != "false"
+
+      native on,  embed off -> source native, Requests on
+      native on,  embed on  -> source native, Requests on (native is the current page)
+      native off, embed on  -> source seerr_embed, Requests switched on
+      native off, embed off -> source native, Requests stays off
+
+    Runs after seeding, so requests.source normally already holds its default
+    "native"; only that value (or a missing row) is changed. The Requests row
+    keeps the native row's label, icon and sublabel - nothing is copied from
+    the embed keys.
+
+    Guarded by migration.requests_source_v1.
+    """
+    from app.settings_registry import REGISTRY
+
+    marker = "migration.requests_source_v1"
+    if _setting_row(db, marker):
+        return
+
+    def val(key: str, default: str) -> str:
+        row = _setting_row(db, key)
+        return (row.value or "").strip().lower() if row is not None else default
+
+    native = val("sidebar.enabled_requests", "true") != "false"
+    embed = (val("features.show_requests", "false") == "true"
+             and val("sidebar.enabled_requests_embed", "true") != "false")
+    target = "seerr_embed" if (not native and embed) else "native"
+
+    source = _setting_row(db, "requests.source")
+    if source is None:
+        db.add(Setting(key="requests.source", value=target, description=REGISTRY["requests.source"].description))
+    elif (source.value or "").strip() == "native" and target == "seerr_embed":
+        source.value = "seerr_embed"
+
+    if not native and embed:
+        switch = _setting_row(db, "sidebar.enabled_requests")
+        if switch is not None:
+            switch.value = "true"
+
+    if _finish_migration(db, marker, "One-time merge of the two requests pages into one with a source"):
+        logger.info("Requests source migration: source=%s", target)
