@@ -21,6 +21,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.limiter import limiter
 from app.models import Setting, Ticket, TicketComment
+from app.settings_registry import switch_is_off
 from app.utils import identity_email, validate_image_magic
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ def _check_feature_enabled(db: Session, current_user: dict) -> None:
     if current_user.get("is_admin") == "true":
         return
     setting = db.query(Setting).filter(Setting.key == "sidebar.enabled_tickets").first()
-    if setting and (setting.value or "").strip().lower() == "false":
+    if setting and switch_is_off(setting.value):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The ticket system is turned off",
@@ -195,6 +196,7 @@ async def get_ticket_image(
     db: Session = Depends(get_db),
 ):
     """Serve a ticket image with authentication."""
+    _check_feature_enabled(db, current_user)
     if not filename or "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
 

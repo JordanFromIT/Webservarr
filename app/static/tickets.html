@@ -300,18 +300,54 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
   // ---- Load tickets ----
 
   /* WS.getJSON for the ticket API. A member gets 403 once Tickets is switched
-     off (the tab was open, or the page came from the prefetch cache): send them
-     home as the server-side page gate would, instead of an error toast and a
-     403 every 30 s. The promise never settles, so nothing renders on the way out. */
+     off (the tab was open, or the page came from the prefetch cache). Instead
+     of an error toast and a 403 every 30 s, ticketsTurnedOff() takes over. The
+     promise never settles, so nothing renders from the failed call. */
   function ticketsJSON(url) {
     return WS.getJSON(url).catch(function (err) {
       if (!_isAdmin && err && err.message === 'HTTP 403') {
-        if (_stopRefresh) _stopRefresh();
-        window.location.replace('/');
+        ticketsTurnedOff();
         return new Promise(function () {});
       }
       throw err;
     });
+  }
+
+  var _ticketsOff = false;
+  var OFF_NOTICE = 'Messages have been turned off, so this can\u2019t be sent right now.';
+
+  /* Stop polling, then go home as the server-side page gate would - unless the
+     member is part-way through writing something. Their text is never thrown
+     away: the notice goes in that surface, and they leave when they close it. */
+  function ticketsTurnedOff() {
+    _ticketsOff = true;
+    if (_stopRefresh) { _stopRefresh(); _stopRefresh = null; }
+    var sendBtn = draftSendButton();
+    if (sendBtn) { showOffNotice(sendBtn); return; }
+    window.location.replace('/');
+  }
+
+  // The send button of an open compose surface holding typed text, or null.
+  function draftSendButton() {
+    if (!document.getElementById('createModal').classList.contains('hidden') &&
+        (document.getElementById('createTitle').value.trim() ||
+         document.getElementById('createDescription').value.trim())) {
+      return document.getElementById('createSubmitBtn');
+    }
+    var comment = document.getElementById('commentInput');
+    if (comment && !document.getElementById('detailModal').classList.contains('hidden') && comment.value.trim()) {
+      return document.getElementById('commentSendBtn');
+    }
+    return null;
+  }
+
+  function showOffNotice(sendBtn) {
+    var prev = sendBtn.previousElementSibling;
+    if (prev && prev.hasAttribute('data-off-notice')) return;
+    var notice = createEl('p', 'text-xs text-steel-blue bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3', OFF_NOTICE);
+    notice.setAttribute('data-off-notice', '');
+    notice.setAttribute('role', 'status');
+    sendBtn.parentNode.insertBefore(notice, sendBtn);
   }
 
   function loadTickets() {
@@ -431,6 +467,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
   window.closeCreateModal = function() {
     document.getElementById('createModal').classList.add('hidden');
+    if (_ticketsOff) window.location.replace('/');
   };
 
   window.submitNewTicket = function() {
@@ -482,14 +519,14 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
     loadingDiv.appendChild(createEl('p', '', 'Loading...'));
     content.appendChild(loadingDiv);
 
-    fetch('/api/tickets/' + ticketId)
-      .then(function(r) { return r.json(); })
+    ticketsJSON('/api/tickets/' + ticketId)
       .then(function(data) { renderDetailContent(data, data.comments || []); })
       .catch(function(err) { console.error('Detail modal error:', err); showToast('Failed to load ticket', 'error'); closeDetailModal(); });
   };
 
   window.closeDetailModal = function() {
     document.getElementById('detailModal').classList.add('hidden');
+    if (_ticketsOff) window.location.replace('/');
   };
 
   function renderDetailContent(ticket, comments) {
@@ -671,6 +708,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
     if (ticket.is_own || _isAdmin) {
       var formDiv = createEl('div', 'border-t border-steel-blue/20 pt-4');
       var textarea = document.createElement('textarea');
+      textarea.id = 'commentInput';
       textarea.placeholder = 'Write a comment...';
       textarea.rows = 3;
       textarea.className = 'w-full px-3 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-2';
@@ -681,6 +719,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
       fileInput.className = 'w-full text-sm text-steel-blue file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-primary/20 file:text-primary hover:file:bg-primary/30 transition-all mb-2';
 
       var sendBtn = createEl('button', 'w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all', 'Add Comment');
+      sendBtn.id = 'commentSendBtn';
       sendBtn.addEventListener('click', function() {
         var msg = textarea.value.trim();
         if (!msg) { showToast('Comment cannot be empty', 'error'); return; }

@@ -312,6 +312,16 @@ def seed_defaults() -> Dict[str, Tuple[str, str]]:
     return {x.key: (x.default, x.description) for x in _DEFS if x.seed and not x.deprecated}
 
 
+def switch_is_off(value: Optional[str]) -> bool:
+    """True when a stored on/off switch (sidebar.enabled_<page>) means off.
+
+    The one reader for page switches: the page gate (via build_branding) and
+    each page's API gate use it, so an out-of-band value such as " False "
+    cannot turn a page off in one place and leave it on in the other. Anything
+    but "false" (after strip, any case), a missing row included, means on."""
+    return (value or "").strip().lower() == "false"
+
+
 def public_defaults() -> Dict[str, str]:
     return {x.key: x.default for x in _DEFS if x.public and not x.deprecated}
 

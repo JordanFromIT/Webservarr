@@ -13,7 +13,7 @@ from app.dependencies import get_current_user_optional
 from app.limiter import limiter
 from app.models import Setting
 from app.settings_registry import (
-    HOME_SECTION_IDS, REGISTRY, SIDEBAR_PAGE_IDS, normalize_page_order, public_defaults,
+    HOME_SECTION_IDS, REGISTRY, SIDEBAR_PAGE_IDS, normalize_page_order, public_defaults, switch_is_off,
 )
 from app.utils import safe_http_url, same_origin_path
 
@@ -180,7 +180,7 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         # Home and Settings are always on: Home is where everyone lands, and
         # hiding Settings would lock the admin out of the page that turns it back on.
         "sidebar_enabled": {
-            p: True if p in ("home", "settings") else get("sidebar.enabled_" + p) != "false" for p in pages
+            p: True if p in ("home", "settings") else not switch_is_off(get("sidebar.enabled_" + p)) for p in pages
         },
         "sidebar_new": {p: get("sidebar.new_" + p) == "true" for p in pages},
         "icons": icons,

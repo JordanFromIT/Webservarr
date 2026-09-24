@@ -31,6 +31,7 @@ from app.database import SessionLocal
 from app.dependencies import get_current_user
 from app.limiter import limiter
 from app.models import Setting
+from app.settings_registry import switch_is_off
 
 logger = logging.getLogger(__name__)
 
@@ -300,7 +301,7 @@ def kavita_url_for(user: Dict[str, str]) -> Optional[str]:
     if user.get("is_admin") == "true":
         return get_kavita_url()
     values = _read_settings("integration.kavita.url", "sidebar.enabled_library")
-    if values["sidebar.enabled_library"].lower() == "false":
+    if switch_is_off(values["sidebar.enabled_library"]):
         raise HTTPException(status_code=403, detail="eBooks is turned off")
     return values["integration.kavita.url"].rstrip("/") or None
 
@@ -494,10 +495,18 @@ async def signin_oidc(
     Deliberately does not use get_current_user: an expired session should send
     the visitor to the login page, not return a bare 401 to a form POST.
     """
-    if not session_id or not await session_manager.get_session(session_id):
+    session = await session_manager.get_session(session_id) if session_id else None
+    if not session:
         return RedirectResponse("/login", status_code=302)
 
-    base = get_kavita_url()
+    try:
+        base = kavita_url_for(session)
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        # eBooks was switched off mid-handshake: store no Kavita token and send
+        # a member home, which is where the page gate would send them anyway.
+        return RedirectResponse("/", status_code=302)
     if not base:
         raise HTTPException(status_code=503, detail="Kavita is not configured")
 
