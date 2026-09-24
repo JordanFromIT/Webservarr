@@ -500,16 +500,58 @@ class ShellRendering(unittest.TestCase):
         self.assertIn(">My Server</h1>", out)
         self.assertNotRegex(out.split("<body>")[1], r'<h1 class="[^"]*\bhidden\b')
 
-    def test_login_hides_the_name_only_when_it_is_empty(self):
-        # R54(c): an empty name hides #loginAppName; the reveal that keeps the
-        # simple-auth form from flashing stays exactly as it was.
-        page = re.sub(r"\s+", " ", static_text("login.html"))
-        self.assertIn("var siteName = typeof theme.app_name === 'string' ? theme.app_name.trim() : null;", page)
-        self.assertIn("} else if (siteName === '') {", page)
-        self.assertRegex(page, r"var nameEl = document\.getElementById\('loginAppName'\); "
-                               r"if \(nameEl\) nameEl\.classList\.add\('hidden'\);")
-        self.assertIn("#loginForm { visibility: hidden; }", page)
-        self.assertIn("#loginForm.auth-ready { visibility: visible; }", page)
+    def test_login_name_is_in_the_first_html(self):
+        # R56: the name (or its absence) is served, not patched in by a script
+        # after the first paint could already have shown the static default.
+        page = static_text("login.html")
+        named = branding(**{"branding.app_name": "My Server"})
+        missing = {k: v for k, v in branding().items() if k != "app_name"}
+        for label, b, text, hidden in (("empty", branding(**{"branding.app_name": ""}), "", True),
+                                       ("spaces", branding(**{"branding.app_name": "   "}), "", True),
+                                       ("markup", branding(**{"branding.app_name": "<b>x</b>"}),
+                                        "&lt;b&gt;x&lt;/b&gt;", False),
+                                       ("custom", named, "My Server", False),
+                                       ("missing", missing, "WebServarr", False)):
+            with self.subTest(label):
+                out = render(user=None, name="login", b=b, page=page)
+                found = re.findall(r'<h1 id="loginAppName" class="([^"]*)">([^<]*)</h1>', out)
+                self.assertEqual(len(found), 1, found)
+                cls, got = found[0]
+                self.assertEqual(got, text)
+                self.assertEqual("hidden" in cls.split(), hidden, cls)
+                self.assertIn("text-frosted-blue", cls.split())
+                self.assertNotIn("<b>x</b>", out.split("<body")[1])
+
+    def test_login_script_leaves_the_name_alone_and_keeps_the_reveal(self):
+        page = static_text("login.html")
+        scripts = "\n".join(re.findall(r"<script[^>]*>(.*?)</script>", page, re.S))
+        self.assertNotIn("loginAppName", scripts)
+        flat = re.sub(r"\s+", " ", page)
+        self.assertIn("#loginForm { visibility: hidden; }", flat)
+        self.assertIn("#loginForm.auth-ready { visibility: visible; }", flat)
+        self.assertIn("if (f) f.classList.add('auth-ready');", flat)                  # failsafe
+        self.assertIn("if (revealForm) revealForm.classList.add('auth-ready');", flat)
+
+    def test_phone_bar_shows_the_logo_when_there_is_no_name(self):
+        def bar(out):
+            return re.search(r'<div id="mobileTopBar".*?<div class="relative', out, re.S).group(0)
+        logo = "/static/uploads/logo.png"
+        out = bar(render(b=branding(**{"branding.app_name": "", "branding.logo_url": logo})))
+        self.assertRegex(out, r'<a href="/" aria-label="Home" class="[^"]*"><img src="/static/uploads/logo\.png" '
+                              r'alt="" class="[^"]*\bh-8\b[^"]*\bw-24\b[^"]*\bobject-contain\b[^"]*"></a>')
+        # No logo, or one that isn't safe to serve: the logo icon, same as the sidebar.
+        for value in ("", "javascript:alert(1)"):
+            with self.subTest(logo=value):
+                out = bar(render(b=branding(**{"branding.app_name": "", "branding.logo_url": value,
+                                                "icon.sidebar_logo": "dns"})))
+                self.assertNotIn("javascript:", out)
+                self.assertNotIn("<img", out)
+                self.assertRegex(out, r'<a href="/" aria-label="Home" class="[^"]*">.*>dns</span>', )
+        # A named site keeps its name there and gets no second logo.
+        out = bar(render(b=branding(**{"branding.app_name": "My Server", "branding.logo_url": logo})))
+        self.assertIn(">My Server</span>", out)
+        self.assertNotIn('aria-label="Home"', out)
+        self.assertNotIn("<img", out)
 
     def test_theme_loader_leaves_a_blank_names_title_alone(self):
         # The server's title for a blank (or all-space) name is just the page
