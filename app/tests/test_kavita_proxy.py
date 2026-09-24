@@ -79,5 +79,74 @@ class GetAuthentikUrl(unittest.TestCase):
             self.assertEqual(kavita_proxy.get_authentik_url(), "https://auth.example.com")
 
 
+class _FakeResponse:
+    def __init__(self, payload):
+        self.status_code = 200
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class _FakeKavita:
+    """Stands in for httpx.AsyncClient: the callback, the account, the JWT."""
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def request(self, *args, **kwargs):
+        return _FakeResponse({})
+
+    async def get(self, *args, **kwargs):
+        return _FakeResponse({"apiKey": "key"})
+
+    async def post(self, *args, **kwargs):
+        return _FakeResponse({"token": "jwt"})
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class HandshakeLandsOnEbooks(unittest.TestCase):
+    """The Kavita sign-in finishes on the eBooks page itself (/ebooks), not on
+    the old /library address, which would cost a second redirect."""
+
+    def setUp(self):
+        from fastapi.testclient import TestClient
+        from app.config import settings
+        from app.main import app
+        from app.tests import helpers
+        self.helpers = helpers
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        helpers.set_rate_limits(False)
+        self.client = TestClient(app)
+        self.client.cookies.set(settings.session_cookie_name, "test-session")
+
+    def tearDown(self):
+        self.setup_patch.stop()
+        self.helpers.set_rate_limits(True)
+
+    def finish(self, kavita_cookies):
+        sm = kavita_proxy.session_manager
+        with mock.patch.object(sm, "get_session", mock.AsyncMock(return_value={"username": "sam"})), \
+             mock.patch.object(sm, "update_session", mock.AsyncMock()), \
+             mock.patch.object(kavita_proxy, "get_kavita_url", return_value=KAVITA), \
+             mock.patch.object(kavita_proxy, "collect_cookies", return_value=kavita_cookies), \
+             mock.patch.object(kavita_proxy.httpx, "AsyncClient", _FakeKavita):
+            return self.client.post("/signin-oidc", data={"code": "c"}, follow_redirects=False)
+
+    def test_success_lands_on_ebooks(self):
+        r = self.finish(".AspNetCore.Cookies=abc")
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/ebooks"))
+
+    def test_failure_lands_on_ebooks_with_the_error_flag(self):
+        r = self.finish("")
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/ebooks?kavita=error"))
+
+
 if __name__ == "__main__":
     unittest.main()
