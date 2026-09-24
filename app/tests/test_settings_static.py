@@ -278,7 +278,9 @@ class GeneralTab(unittest.TestCase):
     def test_import_preview_lists_the_warnings(self):
         # Unchanged values today's rules would refuse are shown as "kept as-is",
         # next to the changes, not dropped from the preview.
-        self.assertRegex(general_function("startImport"), r"\.warnings\b")
+        start = general_function("startImport")
+        self.assertRegex(start, r"\bwarnings\s*=\s*plainObject\(\s*\w+\.warnings\s*\)")
+        self.assertRegex(start, r"previewBody\(\s*changes\s*,\s*ignored\s*,\s*warnings\s*\)")
         self.assertRegex(general_function("previewBody"), r"Object\.keys\(\s*warnings\s*\)\s*\.forEach\(")
 
     def test_a_failed_import_lists_every_error(self):
