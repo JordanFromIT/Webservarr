@@ -21,7 +21,7 @@ from app.database import init_db, SessionLocal
 from app.auth import session_manager
 from app.seed import seed_secret_key
 from app.pages import render_page
-from app.routers import news, status, admin, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status
+from app.routers import news, status, admin, admin_settings, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status
 from app.services.notification_poller import start_poller, stop_poller
 from app.services.shelf_warmer import start_warmer, stop_warmer
 from app.services.request_status_warmer import (
@@ -377,6 +377,8 @@ app.include_router(oidc_auth.router, prefix="/auth", tags=["OIDC Authentication"
 app.include_router(plex_auth.router, prefix="/auth", tags=["Plex Authentication"])
 app.include_router(news.router, prefix="/api/news", tags=["News"])
 app.include_router(status.router, prefix="/api/status", tags=["Status"])
+# Before admin.router: its fixed /settings/... paths must win over /settings/{key}.
+app.include_router(admin_settings.router, prefix="/api/admin", tags=["Admin settings"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(integrations.router, prefix="/api/integrations", tags=["Integrations"])
 app.include_router(branding.router, prefix="/api", tags=["Branding"])

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, UploadFi
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Literal, Optional, List
+from typing import Literal, Optional
 import httpx
 
 from datetime import datetime, timedelta
@@ -23,8 +23,11 @@ from app.database import get_db
 from app.limiter import limiter
 from app.models import Setting, Notification, PushSubscription, User
 from app.dependencies import require_admin
-from app.routers.branding import safe_logo_url
+from app.routers.admin_settings import (
+    apply_writes, mask_any, plan_writes, validation_error,
+)
 from app.services.push import dispatch_push, send_push_to_users
+from app.settings_registry import MASK as MASK_SENTINEL, is_user_data, mask
 from app.utils import identity_email, validate_image_magic, is_safe_integration_url
 
 logger = logging.getLogger(__name__)
@@ -34,77 +37,12 @@ CONTAINER_NAME = os.environ.get("CONTAINER_NAME", "webservarr")
 router = APIRouter()
 
 
-# --- Sensitive-setting masking ---
-# Any setting whose key contains one of these terms holds a secret that must
-# never be returned to a client in plaintext (Plex token, *arr API keys, the
-# Authentik client_secret, the VAPID private key, the app secret_key, etc.).
-MASK_SENTINEL = "***masked***"
-_SENSITIVE_KEY_TERMS = ("api_key", "token", "secret", "password", "private_key")
-
-
-def _is_sensitive_key(key: str) -> bool:
-    """True if a setting key holds a secret that must be masked in API responses."""
-    k = key.lower()
-    return any(term in k for term in _SENSITIVE_KEY_TERMS)
-
-
-def _mask_setting_value(key: str, value):
-    """Replace a sensitive setting value with the mask sentinel before returning it."""
-    if value and _is_sensitive_key(key):
-        return MASK_SENTINEL
-    return value
-
-
-# Keys of the form integration.<service>.url hold a URL the server will fetch
-# (directly or via the background poller) — validate them against SSRF on write.
-_INTEGRATION_URL_KEY = re.compile(r"^integration\.[^.]+\.url$")
-
-
-def _check_setting_write(key: str, value: str):
-    """Reject writes of integration URLs that point at SSRF-dangerous targets,
-    and logo URLs that the public branding payload would refuse to serve."""
-    try:
-        (value or "").encode("utf-8")
-    except UnicodeEncodeError:
-        # A lone UTF-16 surrogate: SQLite cannot store it (the bind would
-        # raise and 500), so say so plainly instead.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Refusing to save {key}: it contains characters that can't be stored.",
-        )
-    if value and _INTEGRATION_URL_KEY.match(key) and not is_safe_integration_url(value):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Refusing to save {key}: URL must be http/https and not a loopback, link-local, or metadata address",
-        )
-    # build_branding blanks any logo URL safe_logo_url rejects. Storing one
-    # anyway would show no logo, and the settings form would later save the
-    # blank back over it, so refuse it here with a reason instead.
-    if key == "branding.logo_url" and (value or "").strip() and not safe_logo_url(value):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The logo URL must be a full http:// or https:// address, or a path on this site starting with /.",
-        )
-
-
 # Pydantic schemas
 class SettingCreate(BaseModel):
     """Schema for creating/updating a setting."""
     key: str
     value: str
     description: Optional[str] = None
-
-
-class SettingItem(BaseModel):
-    """Schema for a single setting in a bulk update."""
-    key: str
-    value: str
-    description: Optional[str] = None
-
-
-class BulkSettingsUpdate(BaseModel):
-    """Schema for bulk updating settings."""
-    settings: List[SettingItem]
 
 
 class MonitorPreferences(BaseModel):
@@ -256,7 +194,8 @@ async def get_setting(
     Get a setting by key.
     Requires admin authentication.
     """
-    setting = db.query(Setting).filter(Setting.key == key).first()
+    # Per-user rows (notification preferences) are not settings.
+    setting = None if is_user_data(key) else db.query(Setting).filter(Setting.key == key).first()
 
     if not setting:
         raise HTTPException(
@@ -268,7 +207,7 @@ async def get_setting(
     # the masking applied by the list endpoint.
     return {
         "key": setting.key,
-        "value": _mask_setting_value(setting.key, setting.value),
+        "value": mask_any(setting.key, setting.value),
         "description": setting.description,
     }
 
@@ -282,127 +221,20 @@ async def update_setting(
     db: Session = Depends(get_db)
 ):
     """
-    Create or update a setting.
+    Create or update one setting, with the same registry validation and
+    lockout guard as the bulk save (422 with per-key errors; nothing written).
     Requires admin authentication.
     """
-    setting = db.query(Setting).filter(Setting.key == setting_data.key).first()
-
-    # The UI sends back the mask sentinel for unchanged secrets — never persist
-    # the placeholder, just keep the existing value.
-    if setting_data.value == MASK_SENTINEL:
-        if not setting:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No existing value to preserve for this setting",
-            )
-    else:
-        _check_setting_write(setting_data.key, setting_data.value)
-        if setting:
-            # Update existing
-            setting.value = setting_data.value
-            if setting_data.description:
-                setting.description = setting_data.description
-        else:
-            # Create new
-            setting = Setting(
-                key=setting_data.key,
-                value=setting_data.value,
-                description=setting_data.description
-            )
-            db.add(setting)
-
-    db.commit()
-    db.refresh(setting)
-
+    writes, errors = plan_writes(db, [(setting_data.key, setting_data.value)])
+    if errors:
+        return validation_error(errors)
+    apply_writes(db, writes)
+    row = db.query(Setting).filter(Setting.key == setting_data.key).first()
     return {
-        "key": setting.key,
-        "value": _mask_setting_value(setting.key, setting.value),
-        "description": setting.description,
+        "key": setting_data.key,
+        "value": mask(setting_data.key, row.value if row else ""),
+        "description": row.description if row else None,
     }
-
-
-@router.get("/settings")
-async def list_settings(
-    current_user: dict = Depends(require_admin),
-    db: Session = Depends(get_db)
-):
-    """
-    List all settings.
-    Masks values for any key holding a secret (api_key, token, secret,
-    password, private_key). Requires admin authentication.
-    """
-    settings = db.query(Setting).all()
-    result = []
-    for s in settings:
-        result.append({
-            "key": s.key,
-            "value": _mask_setting_value(s.key, s.value),
-            "description": s.description
-        })
-    return result
-
-
-@router.put("/settings/bulk")
-@limiter.limit("30/minute")
-async def bulk_update_settings(
-    request: Request,
-    payload: BulkSettingsUpdate,
-    current_user: dict = Depends(require_admin),
-    db: Session = Depends(get_db)
-):
-    """
-    Create or update multiple settings at once.
-    Requires admin authentication.
-    """
-    # Validate everything first, so one refused value saves nothing rather
-    # than leaving the settings before it written and the rest not.
-    for item in payload.settings:
-        if item.value != MASK_SENTINEL:
-            _check_setting_write(item.key, item.value)
-
-    # All rows are written in one transaction: a failure part-way (SQLite
-    # "database is locked" with two workers) saves nothing, never a prefix.
-    touched = {}  # key -> Setting, so a key repeated in the batch is one row
-    order = []
-    try:
-        for item in payload.settings:
-            setting = touched.get(item.key) or db.query(Setting).filter(Setting.key == item.key).first()
-            # Mask sentinel means "unchanged" — keep the existing value, never
-            # overwrite a real secret with the placeholder.
-            if item.value == MASK_SENTINEL:
-                if setting:
-                    order.append(setting)
-                continue
-            if setting:
-                setting.value = item.value
-                if item.description is not None:
-                    setting.description = item.description
-            else:
-                setting = Setting(
-                    key=item.key,
-                    value=item.value,
-                    description=item.description
-                )
-                db.add(setting)
-            touched[item.key] = setting
-            order.append(setting)
-        db.commit()
-    except Exception:
-        db.rollback()
-        logger.warning("Bulk settings save failed; nothing was saved", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Couldn't save the settings right now. Nothing was changed; please try again.",
-        )
-
-    return [
-        {
-            "key": setting.key,
-            "value": _mask_setting_value(setting.key, setting.value),
-            "description": setting.description,
-        }
-        for setting in order
-    ]
 
 
 # Service -> the settings key holding its credential, so a masked value coming
