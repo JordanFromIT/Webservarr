@@ -410,3 +410,26 @@ main            { view-transition-name: ws-content; }
   .skel::after { animation: none; }
   [data-arrive].ws-in { animation: none; }
 }
+
+/* ---- Home sections switched off (Settings > Pages > Home) ----
+ *
+ * The server lists them on <html data-home-hide="news streams">, so a section
+ * that is off is never painted and index.html never loads it. Service Health
+ * and News share a row: with one of them off the other takes the full width,
+ * with both off the row goes away.
+ */
+html[data-home-hide~="services"] [data-arrive="services"],
+html[data-home-hide~="news"] [data-arrive="news"],
+html[data-home-hide~="streams"] [data-arrive="streams"],
+html[data-home-hide~="releases"] [data-arrive="releases"],
+html[data-home-hide~="requests"] [data-arrive="requests"] { display: none; }
+html[data-home-hide~="services"] [data-home-pair],
+html[data-home-hide~="news"] [data-home-pair] { grid-template-columns: minmax(0, 1fr); }
+html[data-home-hide~="services"][data-home-hide~="news"] [data-home-pair] { display: none; }
+/* space-y-8 spaces every child that follows one without the hidden attribute,
+ * and a row hidden by the rules above still counts: with Service Health and
+ * News both off, the first section left would open with a stray gap. While
+ * anything is off the page spaces its sections with a flex gap instead, which
+ * skips whatever is not displayed. */
+html[data-home-hide] [data-home-stack] { display: flex; flex-direction: column; row-gap: 2rem; }
+html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }

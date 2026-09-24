@@ -16,7 +16,7 @@
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
 <!-- ws:header -->
 <!-- Scrollable Content -->
-<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8">
+<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8" data-home-stack>
 <!-- Push opt-in. Everything that decides whether to offer it is known before
      first paint, so the script inside reveals it synchronously and it never
      pushes content down after load. notifications.js wires the buttons and
@@ -56,7 +56,7 @@
 </script>
 </section>
 <!-- Service Health + News Side by Side -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start" data-home-pair>
 <!-- Service Health -->
 <section data-arrive="services">
 <div class="flex items-center gap-3 mb-4">
@@ -244,37 +244,45 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
+    // Sections the admin switched off (Settings > Pages > Home) are hidden by
+    // the server (data-home-hide) and never loaded. Marking them arrived keeps
+    // the top-down reveal from waiting for a section that will never come.
+    var homeSections = (window.WEBSERVARR_THEME || {}).home_sections || {};
+    function sectionOn(id) { return homeSections[id] !== false; }
+    ['services', 'news', 'streams', 'releases', 'requests'].forEach(function (id) {
+        if (!sectionOn(id)) WS.arrive(id);
+    });
+
     const user = await checkAuth();
     if (!user) return;
 
-    // Load all dynamic sections
-    loadNews();
-    loadServices();
-    loadActiveStreams();
-    loadRecentRequests();
-    loadRequestCount();
-    loadSystemStats();
-    loadUpcomingReleases();
+    if (sectionOn('news')) loadNews();
+    if (sectionOn('services')) { loadServices(); loadSystemStats(); }
+    if (sectionOn('streams')) loadActiveStreams();
+    if (sectionOn('requests')) loadRecentRequests();
+    if (sectionOn('releases')) loadUpcomingReleases();
+    loadRequestCount();   // the sidebar badge, not a home section
 
     // Auto-refresh dynamic sections every 30 seconds (paused in background tabs)
     WS.poll(function() {
-        loadServices();
-        loadActiveStreams();
-        loadRecentRequests();
+        if (sectionOn('services')) loadServices();
+        if (sectionOn('streams')) loadActiveStreams();
+        if (sectionOn('requests')) loadRecentRequests();
+        if (sectionOn('releases')) loadUpcomingReleases();
         loadRequestCount();
-        loadUpcomingReleases();
     }, 30000);
 
-    // Real-time Netdata gauges — poll every 1 second
-    WS.poll(loadSystemStats, 1000);
-
-    // Live-update "Last checked" timer every second
-    WS.poll(function() {
-        var el = document.getElementById('serviceLastChecked');
-        if (el && el.dataset.lastCheck) {
-            el.textContent = 'Checked ' + getTimeAgo(new Date(el.dataset.lastCheck));
-        }
-    }, 1000);
+    if (sectionOn('services')) {
+        // Real-time Netdata gauges — poll every 1 second
+        WS.poll(loadSystemStats, 1000);
+        // Live-update "Last checked" timer every second
+        WS.poll(function() {
+            var el = document.getElementById('serviceLastChecked');
+            if (el && el.dataset.lastCheck) {
+                el.textContent = 'Checked ' + getTimeAgo(new Date(el.dataset.lastCheck));
+            }
+        }, 1000);
+    }
 });
 
 // Load news from API

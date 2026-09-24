@@ -567,6 +567,10 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
     attrs = f' data-page="{html.escape(name, quote=True)}"'
     if user and user.get("is_admin"):
         attrs += " data-admin"
+    if name == "index":
+        off = [sid for sid, on in (branding.get("home_sections") or {}).items() if on is False]
+        if off:
+            attrs += f' data-home-hide="{html.escape(" ".join(off), quote=True)}"'
     if flags.get("netdata"):
         attrs += " data-netdata"
     out = re.sub(r"<html\b", "<html" + attrs, out, count=1)
