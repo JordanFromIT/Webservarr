@@ -89,14 +89,76 @@ def split_top(text: str, sep: str) -> list:
     return [p.strip() for p in parts]
 
 
-def kavita_call_args(test, body: str) -> list:
-    """The argument lists of every kavita(...) call in a function body."""
-    code = js_code_only(body)
+def operand(text: str) -> str:
+    """An || operand without whitespace or redundant wrapping parentheses, so
+    (triedRecently()) and !(markTry()) compare equal to their plain spelling."""
+    op = re.sub(r"\s+", "", text)
+
+    def unwrap(x):
+        while x.startswith("(") and matching_paren(x, 0) == len(x) - 1:
+            x = x[1:-1]
+        return x
+    op = unwrap(op)
+    if op.startswith("!"):
+        op = "!" + unwrap(op[1:])
+    return op
+
+
+def raw_call_args(src: str, open_at: int) -> list:
+    """Arguments of the call whose ( is at open_at, from raw source: string
+    literals are skipped while matching brackets but kept in the result."""
+    depth, i, start, args = 0, open_at, open_at + 1, []
+    while i < len(src):
+        c = src[i]
+        if c in "'\"":
+            j = i + 1
+            while j < len(src) and src[j] != c:
+                j += 2 if src[j] == "\\" else 1
+            i = j + 1
+            continue
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                args.append(src[start:i].strip())
+                return args
+        elif c == "," and depth == 1:
+            args.append(src[start:i].strip())
+            start = i + 1
+        i += 1
+    raise AssertionError("unbalanced call")
+
+
+# Every Kavita call the reader makes, by what its address says. Foreground
+# calls put the book on screen: on a 401 they take over and reconnect.
+# Background calls must never interrupt reading. A call that matches neither
+# (or both) fails the test, so a new call has to be classified here.
+READER_FOREGROUND = {"series-detail": r"^/api/Series/series-detail\?",
+                     "book-info": r"^/api/Book//book-info$",
+                     "book-page": r"^/api/Book//book-page\?"}
+READER_BACKGROUND = {"chapters": r"^/api/Book//chapters$",
+                     "get-progress": r"^/api/Reader/get-progress\?",
+                     "progress": r"^/api/Reader/progress$",
+                     "bookmark": r"^/api/Reader/bookmark$"}
+
+
+_LITERAL = re.compile(r"'([^']*)'|\"([^\"]*)\"")
+
+
+def reader_kavita_calls(t, js: str) -> list:
+    """(kind, name, args) for every live kavita(...) call in the reader."""
     calls = []
-    for m in re.finditer(r"\bkavita\(", code):
-        close = matching_paren(code, m.end() - 1)
-        calls.append(split_top(code[m.end():close], ","))
-    test.assertTrue(calls, "no kavita() call here")
+    for m in live_matches(js, r"\bkavita\("):
+        if re.search(r"\bfunction\s+$", js[:m.start()]):
+            continue                                   # the definition itself
+        args = raw_call_args(js, m.end() - 1)
+        address = "".join(a or b for a, b in _LITERAL.findall(args[0]))
+        kinds = [(kind, name) for kind, table in (("foreground", READER_FOREGROUND),
+                                                  ("background", READER_BACKGROUND))
+                 for name, pattern in table.items() if re.search(pattern, address)]
+        t.assertEqual(len(kinds), 1, f"kavita({args[0]}) is not classified as foreground or background")
+        calls.append((kinds[0][0], kinds[0][1], args))
     return calls
 
 
@@ -123,7 +185,7 @@ def check_reconnect(t, src):
     t.assertIsNotNone(guard, "reconnect never checks the last attempt in an if (...)")
     start, close, cond = guard
     t.assertNotIn("&&", cond, "the guard must be one || chain")
-    ops = split_top(cond, "||")
+    ops = [operand(o) for o in split_top(cond, "||")]
     t.assertIn("triedRecently()", ops, "triedRecently() is not an operand of the guard")
     t.assertIn("!markTry()", ops, "the attempt is not recorded by the guard itself")
     t.assertLess(ops.index("triedRecently()"), ops.index("!markTry()"),
@@ -184,7 +246,7 @@ def check_retry(t, src):
 # The pages (library.html, reader.html)
 # ---------------------------------------------------------------------------
 
-def check_page_uses_helper(t, html, retry_id):
+def check_page_uses_helper(t, html, retry_id, retry_handler):
     """Both pages: the helper loads first, every 401 goes through it, a
     missing helper never breaks the page or redirects, and Try again is a
     real button wired through it."""
@@ -219,13 +281,13 @@ def check_page_uses_helper(t, html, retry_id):
 
     # Try again: a real button (Space and Enter work), going through the helper.
     t.assertRegex(html, rf'<button id="{retry_id}" type="button"', f"#{retry_id} is not a button")
-    t.assertTrue(live_matches(js, rf"""\bel\(\s*['"]{retry_id}['"]\s*\)\.addEventListener\(\s*['"]click['"]\s*,\s*retryConnect\s*\)"""),
-                 f"#{retry_id} is not wired to retryConnect")
+    t.assertTrue(live_matches(js, rf"""\bel\(\s*['"]{retry_id}['"]\s*\)\.addEventListener\(\s*['"]click['"]\s*,\s*{retry_handler}\s*\)"""),
+                 f"#{retry_id} is not wired to {retry_handler}")
     return js
 
 
 def check_library(t, html):
-    js = check_page_uses_helper(t, html, "connectRetry")
+    js = check_page_uses_helper(t, html, "connectRetry", "retryConnect")
     # The message lives in the markup, reserved like the other states.
     block = re.search(r'<div id="connectState"[^>]*>.*?</div>', html, re.S)
     t.assertIsNotNone(block, "no #connectState block")
@@ -262,7 +324,7 @@ READER_PANELS = ("loading", "errorState", "bookContent")
 
 
 def check_reader(t, html):
-    js = check_page_uses_helper(t, html, "errorRetry")
+    js = check_page_uses_helper(t, html, "errorRetry", "runRetry")
 
     # A background call on a 401 fails quietly: no takeover, no redirect.
     t.assertTrue(live_matches(js, r"\bfunction kavita\s*\(\s*path\s*,\s*options\s*,\s*background\s*\)"),
@@ -273,45 +335,101 @@ def check_reader(t, html):
                  "a background 401 reconnects before it is kept quiet")
     t.assertFalse(live_matches(kav, r"\bshowError\("), "kavita() takes over the page itself")
 
-    # Background calls pass background=true and never call showError; the
-    # calls that show the book (book, chapter, page) take over as before.
+    # Every call site is classified; background ones pass background=true,
+    # foreground ones (the book, its chapter, book-info, a page) must not,
+    # or the reader would sit on "Opening book..." forever.
+    seen = set()
+    for kind, name, args in reader_kavita_calls(t, js):
+        seen.add(name)
+        if kind == "background":
+            t.assertEqual(args[-1], "true", f"{name}: not called as a background call")
+        else:
+            t.assertNotEqual(args[-1], "true", f"{name}: a book load is quiet and would hang on the spinner")
+    t.assertEqual(seen, set(READER_FOREGROUND) | set(READER_BACKGROUND), "a classified call went missing")
     background = {"saveProgress": body_of(t, js, "saveProgress"),
                   "restoreProgress": body_of(t, js, "restoreProgress"),
                   "loadTOC": body_of(t, js, "loadTOC"),
                   "bookmark": listener_body(t, js, "bookmarkBtn")}
     for name, body in background.items():
-        for args in kavita_call_args(t, body):
-            t.assertEqual(args[-1], "true", f"{name}: kavita() is not called as a background call")
         t.assertFalse(live_matches(body, r"\bshowError\("), f"{name}: a background call takes over the page")
-    for name in ("resolveChapter", "goToPage"):
-        for args in kavita_call_args(t, body_of(t, js, name)):
-            t.assertNotEqual(args[-1], "true", f"{name}: a book load is quiet and would hang on the spinner")
+
+    # Never write a position we don't know. Until Kavita confirmed where the
+    # reader is (or they turned a page themselves), saveProgress - including
+    # the leave-the-page beacon - does nothing.
+    t.assertTrue(live_matches(js, r"\bvar\s+positionKnown\s*=\s*false\b"))
+    save = body_of(t, js, "saveProgress")
+    guard = first(t, save, r"\bif\s*\(\s*!\s*positionKnown\b[^)]*\)\s*return\b",
+                  "saveProgress writes without a confirmed position")
+    t.assertLess(guard, first(t, save, r"\bsendBeacon\(", "no beacon"), "the beacon goes out before the check")
+    t.assertLess(guard, first(t, save, r"\bkavita\(", "no save call"), "the save goes out before the check")
+    sets = live_matches(js, r"\bpositionKnown\s*=\s*true\b")
+    t.assertEqual(len(sets), 2, "positionKnown is confirmed somewhere unexpected")
+    restore = body_of(t, js, "restoreProgress")
+    t.assertEqual(len(live_matches(restore, r"\bpositionKnown\s*=\s*true\b")), 1,
+                  "restoreProgress does not confirm the looked-up position")
+    for m in live_matches(restore, r"\.catch\(\s*function\s*\(\s*\w*\s*\)\s*\{"):
+        handler = restore[m.end():matching_brace(restore, m.end() - 1)]
+        t.assertFalse(live_matches(handler, r"\b(?:positionKnown|lastSaved)\s*="),
+                      "a failed lookup is treated as a known position")
+    lookup = body_of(t, js, "fetchProgress")
+    t.assertTrue(live_matches(lookup, r"\bif\s*\(\s*!\s*r\.ok\s*\)\s*throw\b"),
+                 "a failed lookup (500) reads as 'no progress' and opens at page 0 as if known")
+    t.assertFalse(live_matches(lookup, r"\br\.ok\s*\?"), "a failed lookup reads as 'no progress'")
+    turn = body_of(t, js, "goToPage")
+    user_turn = live_matches(turn, r"\bif\s*\(\s*!\s*skipSave\s*\)\s*\{")
+    t.assertTrue(user_turn, "a page the reader turned to is never confirmed")
+    block = turn[user_turn[0].end():matching_brace(turn, user_turn[0].end() - 1)]
+    t.assertTrue(live_matches(block, r"\bpositionKnown\s*=\s*true\b"), "a page the reader turned to is never confirmed")
+
+    # No page turning while an error shows or before there is a book.
+    can = body_of(t, js, "canTurnPage")
+    t.assertTrue(live_matches(can, r"\bbook\.chapterId\s*!=\s*null\b"))
+    t.assertTrue(live_matches(can, r"""\bactivePanel\s*!==\s*['"]errorState['"]"""))
+    bail = first(t, turn, r"\bif\s*\(\s*!\s*canTurnPage\(\s*\)\s*\)\s*return\b", "goToPage turns pages under an error")
+    t.assertLess(bail, first(t, turn, r"\bshowPanel\(", "no panel switch"), "goToPage hides the error before the check")
+    t.assertLess(bail, first(t, turn, r"\bkavita\(", "no page load"), "goToPage loads before the check")
+    keys = live_matches(js, r"""document\.addEventListener\(\s*['"]keydown['"]\s*,\s*function\s*\(\s*\w+\s*\)\s*\{""")
+    t.assertTrue(keys)
+    keys = js[keys[0].end():matching_brace(js, keys[0].end() - 1)]
+    t.assertEqual(len(live_matches(keys, r"\bgoToPage\(")), len(live_matches(keys, r"\bif\s*\(\s*!\s*canTurnPage\(\s*\)\s*\)\s*return\b")),
+                  "a page key turns pages without the check")
 
     # The three panels are one set: exactly one shows, so a stale error never
-    # stays above a working page.
+    # stays above a working page; the edge zones (outside the panels) go with the error.
     panels = re.search(r"\bvar\s+PANELS\s*=\s*\[([^\]]*)\]", js_code_only(js))
     t.assertIsNotNone(panels, "no PANELS list")
     t.assertEqual(len(split_top(panels.group(1), ",")), 3)
     for panel_id in READER_PANELS:
         t.assertTrue(live_matches(js, rf"""\bvar\s+PANELS\s*=\s*\[[^\]]*['"]{panel_id}['"]"""), panel_id)
     show_panel = body_of(t, js, "showPanel")
+    t.assertTrue(live_matches(show_panel, r"\bactivePanel\s*=\s*which\b"))
     t.assertTrue(live_matches(show_panel, r"\bPANELS\.forEach\("))
     t.assertTrue(live_matches(show_panel, r"""\.classList\.toggle\(\s*['"]hidden['"]\s*,\s*\w+\s*!==\s*\w+\s*\)"""),
                  "showPanel does not hide every panel but the one asked for")
+    for zone in ("navPrev", "navNext"):
+        t.assertTrue(live_matches(show_panel, rf"""\bel\(\s*['"]{zone}['"]\s*\)\.hidden\s*="""),
+                     f"#{zone} stays tappable over an error")
+    t.assertRegex(html, r"\.nav-zone\[hidden\]\s*\{\s*display:\s*none;?\s*\}",
+                  ".nav-zone's display:flex would override [hidden]")
     for fn, panel_id in (("showError", "errorState"), ("renderPage", "bookContent"), ("goToPage", "loading")):
         t.assertTrue(live_matches(body_of(t, js, fn), rf"""\bshowPanel\(\s*['"]{panel_id}['"]\s*\)"""),
                      f"{fn} does not switch to {panel_id} through showPanel")
-    # Nothing else flips a panel on its own.
     t.assertFalse(live_matches(js, r"""\bel\(\s*['"](?:loading|errorState|bookContent)['"]\s*\)\.classList\b"""),
                   "a panel is toggled outside showPanel")
     t.assertFalse(live_matches(body_of(t, js, "renderPage"), r"\.classList\.(?:remove|add)\("),
                   "renderPage shows the book outside showPanel")
 
-    # Try again only for the connection problem; a plain book error keeps just "Back to eBooks".
+    # Try again: the connection problem retries the sign-in; a failed page
+    # retries that page (with its own skipSave, so it never confirms an unknown
+    # position); anything else keeps just "Back to eBooks".
     show_error = body_of(t, js, "showError")
-    t.assertTrue(live_matches(show_error, r"""\bel\(\s*['"]errorRetry['"]\s*\)\.classList\.toggle\(\s*['"]hidden['"]\s*,\s*!\s*canRetry\s*\)"""))
+    t.assertTrue(live_matches(show_error, r"\bretryAction\s*=\s*onRetry\b"))
+    t.assertTrue(live_matches(show_error, r"""\bel\(\s*['"]errorRetry['"]\s*\)\.classList\.toggle\(\s*['"]hidden['"]\s*,\s*!\s*retryAction\s*\)"""))
+    t.assertTrue(live_matches(body_of(t, js, "runRetry"), r"\bretryAction\(\s*\)"))
     t.assertTrue(live_matches(body_of(t, js, "showConnectProblem"),
-                              r"\bshowError\(\s*CONNECT_TITLE\s*,\s*CONNECT_MESSAGE\s*,\s*true\s*\)"))
+                              r"\bshowError\(\s*CONNECT_TITLE\s*,\s*CONNECT_MESSAGE\s*,\s*retryConnect\s*\)"))
+    t.assertTrue(live_matches(turn, r"""\bshowPanel\(\s*['"]loading['"]\s*\)\s*;\s*goToPage\(\s*page\s*,\s*skipSave\s*\)"""),
+                 "a failed page cannot be retried (the arrows are off under an error)")
     t.assertIn(MESSAGE, js)
     error_block = re.search(r'<div id="errorState".*?<!--', html, re.S)
     t.assertIsNotNone(error_block)
@@ -379,7 +497,30 @@ MUTATIONS = [
      "    if (!helper || typeof helper.reconnect !== 'function') {\n      showConnectProblem();\n      return;\n    }\n",
      "", check_reader),
     ("reader: Try again not wired", "reader",
-     "el('errorRetry').addEventListener('click', retryConnect);", "", check_reader),
+     "el('errorRetry').addEventListener('click', runRetry);", "", check_reader),
+    ("reader: connection problem without the sign-in retry", "reader",
+     "showError(CONNECT_TITLE, CONNECT_MESSAGE, retryConnect);", "showError(CONNECT_TITLE, CONNECT_MESSAGE);", check_reader),
+    ("reader: book-info made background", "reader",
+     "return kavita('/api/Book/' + book.chapterId + '/book-info');",
+     "return kavita('/api/Book/' + book.chapterId + '/book-info', null, true);", check_reader),
+    ("reader: a new unclassified call", "reader",
+     "  function loadTOC() {\n",
+     "  function loadTOC() {\n    kavita('/api/Reader/something-new', null, true);\n", check_reader),
+    ("reader: saveProgress without the confirmed-position check", "reader",
+     "if (!positionKnown || current.page === lastSaved) return;",
+     "if (current.page === lastSaved) return;", check_reader),
+    ("reader: a failed lookup counts as known", "reader",
+     "      .catch(function () { return 0; });   // position unknown: open at the start, never save it",
+     "      .catch(function () { positionKnown = true; lastSaved = 0; return 0; });", check_reader),
+    ("reader: a 500 lookup reads as no progress", "reader",
+     "        if (!r.ok) throw new Error('progress HTTP ' + r.status);\n", "", check_reader),
+    ("reader: goToPage without the error-panel bail", "reader",
+     "    if (!canTurnPage()) return Promise.resolve();\n", "", check_reader),
+    ("reader: a page key without the bail", "reader",
+     "      if (!canTurnPage()) return;\n      e.preventDefault();\n      goToPage(current.page + 1);",
+     "      e.preventDefault();\n      goToPage(current.page + 1);", check_reader),
+    ("reader: edge zones stay over the error", "reader",
+     "    el('navNext').hidden = !turning;\n", "", check_reader),
     ("reader: Try again is a link", "reader",
      '<button id="errorRetry" type="button"', '<a id="errorRetry" href="/kavita/connect"', check_reader),
     ("reader: progress save takes over on a 401", "reader",
@@ -393,7 +534,8 @@ MUTATIONS = [
     ("reader: a page is shown outside the panel set", "reader",
      "    showPanel('bookContent');", "    container.classList.remove('hidden');", check_reader),
     ("reader: loading flipped by hand", "reader",
-     "    showPanel('loading');", "    el('bookContent').classList.add('hidden');\n    el('loading').classList.remove('hidden');",
+     "    showPanel('loading');\n    el('loadingText')",
+     "    el('bookContent').classList.add('hidden');\n    el('loading').classList.remove('hidden');\n    el('loadingText')",
      check_reader),
 
     ("library: Try again is a link", "library",
@@ -410,6 +552,21 @@ MUTATIONS = [
      "    if (!helper || typeof helper.retry !== 'function') {\n      window.location.reload();\n      return;\n    }\n",
      "", check_library),
 ]
+
+
+class EquivalentSpellings(unittest.TestCase):
+    """The shape check is strict about order, not about spelling."""
+
+    def test_redundant_parentheses_pass(self):
+        src = helper_src()
+        original = "if (blocked || triedRecently() || !markTry()) {"
+        self.assertEqual(src.count(original), 1)
+        for spelling in ("if ((blocked) || (triedRecently()) || !(markTry())) {",
+                         "if (blocked || ( triedRecently() ) || (!markTry())) {"):
+            with self.subTest(spelling):
+                check_reconnect(self, src.replace(original, spelling))
+        with self.assertRaises(AssertionError):     # still strict about the order
+            check_reconnect(self, src.replace(original, "if ((blocked) || (!markTry()) || (triedRecently())) {"))
 
 
 class Mutations(unittest.TestCase):
