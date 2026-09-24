@@ -67,6 +67,136 @@ SECRETS = {
 }
 
 
+# Every default app/seed.py DEFAULT_SETTINGS and app/routers/branding.py DEFAULTS
+# held before they were derived from the registry (the union; the two tables
+# agreed on every shared key). Copied, not imported: deriving must change no
+# effective default.
+OLD_DEFAULT_VALUES = {
+    "branding.app_name": "WebServarr",
+    "branding.logo_url": "/static/webservarr.svg",
+    "branding.tagline": "Media Server Management",
+    "features.login_backgrounds": "true",
+    "features.show_authentik_auth": "false",
+    "features.show_books": "true",
+    "features.show_plex_auth": "false",
+    "features.show_requests": "false",
+    "features.show_simple_auth": "true",
+    "features.show_tickets": "true",
+    "icon.nav_calendar": "calendar_month",
+    "icon.nav_home": "home",
+    "icon.nav_issues": "report_problem",
+    "icon.nav_library": "menu_book",
+    "icon.nav_requests": "movie",
+    "icon.nav_requests_embed": "download",
+    "icon.nav_settings": "settings",
+    "icon.nav_tickets": "confirmation_number",
+    "icon.nav_wiki": "library_books",
+    "icon.section_news": "newspaper",
+    "icon.section_releases": "calendar_month",
+    "icon.section_requests": "shopping_cart",
+    "icon.section_services": "health_metrics",
+    "icon.section_streams": "play_circle",
+    "icon.sidebar_logo": "settings_input_component",
+    "integration.authentik.app_slug": "",
+    "integration.authentik.client_id": "",
+    "integration.authentik.client_secret": "",
+    "integration.authentik.url": "",
+    "integration.chaptarr.api_key": "",
+    "integration.chaptarr.audiobook_metadata_profile_id": "1",
+    "integration.chaptarr.audiobook_quality_profile_id": "2",
+    "integration.chaptarr.audiobook_root_folder": "",
+    "integration.chaptarr.metadata_profile_id": "2",
+    "integration.chaptarr.quality_profile_id": "1",
+    "integration.chaptarr.root_folder": "",
+    "integration.chaptarr.url": "",
+    "integration.kavita.url": "",
+    "integration.nyt.api_key": "",
+    "netdata.cpu_label": "",
+    "netdata.net_label": "",
+    "netdata.net_max": "1000",
+    "netdata.net_unit": "mbps",
+    "netdata.ram_label": "",
+    "news.homepage_count": "3",
+    "news.homepage_max_age_days": "30",
+    "notifications.poll_interval_monitors": "60",
+    "notifications.poll_interval_news": "60",
+    "notifications.poll_interval_seerr": "60",
+    "notifications.poll_interval_tickets": "60",
+    "sidebar.enabled_calendar": "true",
+    "sidebar.enabled_home": "true",
+    "sidebar.enabled_issues": "true",
+    "sidebar.enabled_library": "true",
+    "sidebar.enabled_requests": "true",
+    "sidebar.enabled_requests_embed": "true",
+    "sidebar.enabled_tickets": "true",
+    "sidebar.enabled_wiki": "true",
+    "sidebar.label_calendar": "Calendar",
+    "sidebar.label_home": "Home",
+    "sidebar.label_issues": "Issues",
+    "sidebar.label_library": "eBooks",
+    "sidebar.label_requests": "Requests",
+    "sidebar.label_requests_embed": "Requests (Embed)",
+    "sidebar.label_settings": "Settings",
+    "sidebar.label_tickets": "Tickets",
+    "sidebar.label_wiki": "Wiki",
+    "sidebar.new_calendar": "false",
+    "sidebar.new_home": "false",
+    "sidebar.new_issues": "false",
+    "sidebar.new_library": "false",
+    "sidebar.new_requests": "false",
+    "sidebar.new_requests_embed": "false",
+    "sidebar.new_settings": "false",
+    "sidebar.new_tickets": "false",
+    "sidebar.new_wiki": "false",
+    "sidebar.sublabel_calendar": "See upcoming releases",
+    "sidebar.sublabel_home": "See what's happening",
+    "sidebar.sublabel_issues": "Report a problem with media",
+    "sidebar.sublabel_library": "Read books in your browser",
+    "sidebar.sublabel_requests": "Request a movie or show",
+    "sidebar.sublabel_requests_embed": "Request through Seerr",
+    "sidebar.sublabel_settings": "Manage the site",
+    "sidebar.sublabel_tickets": "Get help from the admin",
+    "sidebar.sublabel_wiki": "Read guides and how-tos",
+    "theme.color_accent": "#4684B0",
+    "theme.color_background": "#000000",
+    "theme.color_media_book": "#FCD34D",
+    "theme.color_media_movie": "#E9D5FF",
+    "theme.color_media_tv": "#67E8F9",
+    "theme.color_primary": "#125793",
+    "theme.color_secondary": "#2C6DA1",
+    "theme.color_text": "#BEEEF4",
+    "theme.color_text_secondary": "#FFFFFF",
+    "theme.custom_css": "",
+    "theme.font": "Spline Sans",
+    "wiki.hook_issues": "",
+    "wiki.hook_playback": "",
+    "wiki.hook_tickets": "",
+}
+# The keys branding.DEFAULTS held before it was derived.
+OLD_BRANDING_KEYS = [
+    "branding.app_name", "branding.logo_url", "branding.tagline", "features.login_backgrounds",
+    "features.show_authentik_auth", "features.show_books", "features.show_plex_auth",
+    "features.show_requests", "features.show_simple_auth", "features.show_tickets", "icon.nav_calendar",
+    "icon.nav_home", "icon.nav_issues", "icon.nav_library", "icon.nav_requests", "icon.nav_requests_embed",
+    "icon.nav_settings", "icon.nav_tickets", "icon.nav_wiki", "icon.section_news", "icon.section_releases",
+    "icon.section_requests", "icon.section_services", "icon.section_streams", "icon.sidebar_logo",
+    "integration.kavita.url", "news.homepage_count", "news.homepage_max_age_days", "sidebar.enabled_calendar",
+    "sidebar.enabled_home", "sidebar.enabled_issues", "sidebar.enabled_library", "sidebar.enabled_requests",
+    "sidebar.enabled_requests_embed", "sidebar.enabled_tickets", "sidebar.enabled_wiki",
+    "sidebar.label_calendar", "sidebar.label_home", "sidebar.label_issues", "sidebar.label_library",
+    "sidebar.label_requests", "sidebar.label_requests_embed", "sidebar.label_settings",
+    "sidebar.label_tickets", "sidebar.label_wiki", "sidebar.new_calendar", "sidebar.new_home",
+    "sidebar.new_issues", "sidebar.new_library", "sidebar.new_requests", "sidebar.new_requests_embed",
+    "sidebar.new_settings", "sidebar.new_tickets", "sidebar.new_wiki", "sidebar.sublabel_calendar",
+    "sidebar.sublabel_home", "sidebar.sublabel_issues", "sidebar.sublabel_library",
+    "sidebar.sublabel_requests", "sidebar.sublabel_requests_embed", "sidebar.sublabel_settings",
+    "sidebar.sublabel_tickets", "sidebar.sublabel_wiki", "theme.color_accent", "theme.color_background",
+    "theme.color_media_book", "theme.color_media_movie", "theme.color_media_tv", "theme.color_primary",
+    "theme.color_secondary", "theme.color_text", "theme.color_text_secondary", "theme.custom_css",
+    "theme.font", "wiki.hook_issues", "wiki.hook_playback", "wiki.hook_tickets",
+]
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class Coverage(unittest.TestCase):
     def test_nothing_the_app_used_is_missing(self):
@@ -273,6 +403,104 @@ class Helpers(unittest.TestCase):
                       "allow_empty", "allow_relative", "pattern"):
             self.assertIn(field, m)
 
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class DerivedDefaults(unittest.TestCase):
+    def test_seed_defaults_come_from_the_registry(self):
+        from app import seed
+        self.assertEqual(seed.DEFAULT_SETTINGS, reg.seed_defaults())
+
+    def test_branding_defaults_come_from_the_registry(self):
+        from app.routers import branding
+        expected = dict(reg.public_defaults())
+        expected["integration.kavita.url"] = reg.REGISTRY["integration.kavita.url"].default
+        self.assertEqual(branding.DEFAULTS, expected)
+        # The builder must find every key it reads.
+        payload = branding.build_branding({}, {}, None, dict(branding.EMPTY_WIKI_HOOKS))
+        self.assertEqual(payload["app_name"], "WebServarr")
+
+    def test_no_effective_default_changed(self):
+        # Against the literal snapshot, not the registry: a registry edit that
+        # changed a shipped default would pass the two tests above.
+        from app import seed
+        from app.routers import branding
+        for key, value in OLD_DEFAULT_VALUES.items():
+            self.assertEqual(reg.REGISTRY[key].default, value, key)
+        for key in OLD_SEED_KEYS:
+            self.assertEqual(seed.DEFAULT_SETTINGS[key][0], OLD_DEFAULT_VALUES[key], key)
+        for key in OLD_BRANDING_KEYS:
+            self.assertEqual(branding.DEFAULTS[key], OLD_DEFAULT_VALUES[key], key)
+
+    def test_renderer_and_theme_css_colours_match_the_registry(self):
+        import os
+        import re as _re
+        from app import pages
+        for key, value in pages._DEFAULT_COLORS.items():
+            self.assertEqual(value, reg.REGISTRY["theme.color_" + key].default, key)
+            self.assertEqual(value, OLD_DEFAULT_VALUES["theme.color_" + key], key)
+        css_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "static", "css", "theme.css")
+        css = open(css_path, encoding="utf-8").read()
+        for key in pages._DEFAULT_COLORS:
+            var = "--hex-" + key.replace("_", "-")
+            m = _re.search(_re.escape(var) + r":\s*(#[0-9A-Fa-f]{6});", css)
+            self.assertIsNotNone(m, var)
+            self.assertEqual(m.group(1).upper(), reg.REGISTRY["theme.color_" + key].default.upper(), var)
+
+    def test_renderer_fallbacks_come_from_the_registry(self):
+        from app import pages
+        self.assertEqual(pages.DEFAULT_FONT, reg.REGISTRY["theme.font"].default)
+        self.assertEqual(pages._safe_font("not;a font"), OLD_DEFAULT_VALUES["theme.font"])
+        for item in pages.NAV_ITEMS:
+            key = item["id"].replace("-", "_")
+            self.assertEqual(item["label"], OLD_DEFAULT_VALUES["sidebar.label_" + key], key)
+            self.assertEqual(item["sublabel"], OLD_DEFAULT_VALUES["sidebar.sublabel_" + key], key)
+            self.assertEqual(item["icon"], OLD_DEFAULT_VALUES["icon.nav_" + key], key)
+        # A blank site name, logo and logo icon fall back to the registry defaults.
+        values = pages.shell_values({"app_name": "", "logo_url": "", "icons": {"sidebar_logo": ""}},
+                                    None, "", "index")
+        self.assertEqual(values["app_name"], OLD_DEFAULT_VALUES["branding.app_name"])
+        self.assertIn(">" + OLD_DEFAULT_VALUES["icon.sidebar_logo"] + "<", values["logo_html"])
+        app_name, _tags = pages._preview_meta({"app_name": "  "}, "", "/")
+        self.assertEqual(app_name, OLD_DEFAULT_VALUES["branding.app_name"])
+
+    def test_news_window_bounds_come_from_the_registry(self):
+        from app.routers import branding
+
+        def news(count, age):
+            payload = branding.build_branding(
+                {"news.homepage_count": count, "news.homepage_max_age_days": age},
+                {}, None, dict(branding.EMPTY_WIKI_HOOKS))
+            return payload["news"]["homepage_count"], payload["news"]["homepage_max_age_days"]
+
+        count, age = reg.REGISTRY["news.homepage_count"], reg.REGISTRY["news.homepage_max_age_days"]
+        self.assertEqual((count.min, count.max, age.min, age.max), (1, 20, 0, 3650))
+        self.assertEqual(news("abc", ""), (3, 30))                 # unparseable -> default
+        self.assertEqual(news("999", "99999"), (20, 3650))         # clamped to max
+        self.assertEqual(news("-5", "-5"), (1, 0))                 # clamped to min
+        self.assertEqual(news(" 7 ", "14"), (7, 14))
+
+    def test_seeding_inserts_page_order_and_home_sections(self):
+        # Spec migrations 4 and 5 are satisfied by insert-missing seeding (plan decision 3).
+        import json as _json
+        from app.tests import helpers
+        from app.seed import seed_default_settings
+        Session = helpers.make_sessionmaker()
+        db = Session()
+        try:
+            seed_default_settings(db)
+            self.assertEqual(_json.loads(helpers.get(db, "pages.order")), reg.DEFAULT_PAGE_ORDER)
+            for sid in reg.HOME_SECTION_IDS:
+                self.assertEqual(helpers.get(db, "home.section_" + sid), "true")
+            self.assertEqual(helpers.get(db, "requests.source"), "native")
+            self.assertIsNone(helpers.get(db, "system.admin_email"))          # seed=False
+            self.assertIsNone(helpers.get(db, "integration.uptime_kuma.api_key"))  # deprecated
+            helpers.put(db, "pages.order", '["home","wiki","requests","issues","calendar","tickets","library","settings"]')
+            seed_default_settings(db)   # never overwrites
+            self.assertTrue(helpers.get(db, "pages.order").startswith('["home","wiki"'))
+        finally:
+            db.close()
 
 if __name__ == "__main__":
     unittest.main()
