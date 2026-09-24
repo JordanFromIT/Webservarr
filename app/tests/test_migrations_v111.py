@@ -72,6 +72,22 @@ class PageSwitches(MigrationBase):
         self.assertEqual(helpers.get(self.db, "sidebar.enabled_tickets"), "true")
         self.assertEqual(helpers.get(self.db, "migration.tickets_page_switch_v1"), "done")
 
+    def test_only_an_explicit_false_flag_counts_as_off(self):
+        # "1" is not "false": the switch is left exactly as it was.
+        for migrate, flag_key, switch_key in (
+            (seed.migrate_tickets_page_switch_v1, "features.show_tickets", "sidebar.enabled_tickets"),
+            (seed.migrate_ebooks_page_switch_v1, "features.show_books", "sidebar.enabled_library"),
+        ):
+            self.run_case(migrate, flag_key, switch_key, "1", "true", "true")
+
+    def test_a_switch_that_is_not_false_counts_as_on(self):
+        # A flag of "false" turns off any switch not already "false", including "1".
+        for migrate, flag_key, switch_key in (
+            (seed.migrate_tickets_page_switch_v1, "features.show_tickets", "sidebar.enabled_tickets"),
+            (seed.migrate_ebooks_page_switch_v1, "features.show_books", "sidebar.enabled_library"),
+        ):
+            self.run_case(migrate, flag_key, switch_key, "false", "1", "false")
+
 
 class RequestsSource(MigrationBase):
     """Spec section 7, migration 3 - the four-row table, exactly."""
@@ -135,6 +151,51 @@ class RequestsSource(MigrationBase):
         helpers.put(self.db, "requests.source", "seerr_embed")     # chosen before the migration ran
         seed.migrate_requests_source_v1(self.db)
         self.assertEqual(helpers.get(self.db, "requests.source"), "seerr_embed")
+
+    # Values that are neither "true" nor "false" pin each operator as documented:
+    # the two switches count as on unless "false", the embed flag only when "true".
+    def test_native_switch_counts_as_on_unless_false(self):
+        self.setup_state(native_on=True, embed_on=True)
+        helpers.put(self.db, "sidebar.enabled_requests", "1")
+        seed.migrate_requests_source_v1(self.db)
+        self.assertEqual(helpers.get(self.db, "requests.source"), "native")
+        self.assertEqual(helpers.get(self.db, "sidebar.enabled_requests"), "1")
+
+    def test_embed_switch_counts_as_on_unless_false(self):
+        self.setup_state(native_on=False, embed_on=True)
+        helpers.put(self.db, "sidebar.enabled_requests_embed", "1")
+        seed.migrate_requests_source_v1(self.db)
+        self.check("seerr_embed", True)
+
+    def test_embed_flag_counts_as_on_only_when_true(self):
+        self.setup_state(native_on=False, embed_on=True)
+        helpers.put(self.db, "features.show_requests", "1")
+        seed.migrate_requests_source_v1(self.db)
+        self.check("native", False)
+
+
+class InitDbSequence(MigrationBase):
+    """All three migrations on one seeded database, in init_db's order."""
+
+    def test_the_three_migrations_run_together(self):
+        seed.seed_default_settings(self.db)
+        helpers.put(self.db, "features.show_tickets", "false")
+        helpers.put(self.db, "features.show_books", "false")
+        helpers.put(self.db, "sidebar.enabled_requests", "false")
+        helpers.put(self.db, "features.show_requests", "true")
+        helpers.put(self.db, "sidebar.enabled_requests_embed", "true")
+
+        seed.migrate_tickets_page_switch_v1(self.db)
+        seed.migrate_ebooks_page_switch_v1(self.db)
+        seed.migrate_requests_source_v1(self.db)
+
+        self.assertEqual(helpers.get(self.db, "sidebar.enabled_tickets"), "false")
+        self.assertEqual(helpers.get(self.db, "sidebar.enabled_library"), "false")
+        self.assertEqual(helpers.get(self.db, "requests.source"), "seerr_embed")
+        self.assertEqual(helpers.get(self.db, "sidebar.enabled_requests"), "true")
+        for marker in ("migration.tickets_page_switch_v1", "migration.ebooks_page_switch_v1",
+                       "migration.requests_source_v1"):
+            self.assertEqual(helpers.get(self.db, marker), "done", marker)
 
 
 if __name__ == "__main__":
