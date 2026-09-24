@@ -219,6 +219,12 @@ class ShellContract(unittest.TestCase):
         self.assertIsNotNone(m, "openDropdown(bell) not found")
         body = code[m.end():matching_brace(code, m.end() - 1)]
         self.assertRegex(body, rf"\banchorDropdown\(\s*{m.group(1)}\s*\)")
+        # ...and anchorDropdown really moves the panel into that bell's parent.
+        m = re.search(r"\bfunction anchorDropdown\(\s*(\w+)\s*\)\s*\{", code)
+        self.assertIsNotNone(m, "anchorDropdown(bell) not found")
+        body = code[m.end():matching_brace(code, m.end() - 1)]
+        self.assertRegex(body, rf"\b{m.group(1)}\.parentElement\b")
+        self.assertRegex(body, r"\.appendChild\(\s*_dropdown\s*\)")
 
     def test_notification_fetches_send_a_signed_out_user_to_login(self):
         # A session that ends while the page is open must not read as an
