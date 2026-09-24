@@ -110,6 +110,16 @@
                                    text-sm text-frosted-blue hover:bg-baltic-blue/50">Try again</button>
     </div>
 
+    <!-- The Kavita sign-in failed, or was just tried and still doesn't work
+         (see /static/js/kavita-connect.js). Shown instead of going round again. -->
+    <div id="connectState" class="hidden py-16 text-center" role="status">
+      <span class="material-symbols-outlined text-4xl text-steel-blue/60">link_off</span>
+      <p class="mt-3 text-frosted-blue font-semibold">Can't open the library</p>
+      <p class="mt-1 text-sm text-steel-blue max-w-md mx-auto">We couldn't connect you to the eBook library right now. Please try again in a few minutes.</p>
+      <a id="connectRetry" href="/kavita/connect" class="inline-block mt-4 px-4 py-2 rounded-xl bg-baltic-blue/30 border border-steel-blue/30
+                                   text-sm text-frosted-blue hover:bg-baltic-blue/50">Try again</a>
+    </div>
+
     <div id="emptyState" class="hidden py-16 text-center">
       <span class="material-symbols-outlined text-4xl text-steel-blue/60">search_off</span>
       <p class="mt-3 text-frosted-blue font-semibold">No books found</p>
@@ -141,6 +151,7 @@
 <script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script src="/static/js/tour.js?v=5"></script>
+<script src="/static/js/kavita-connect.js?v=1"></script>
 <script>
 (function () {
   'use strict';
@@ -160,15 +171,17 @@
    *
    * A 401 means this session has no Kavita token yet (or it expired). The
    * handshake is a full-page OIDC redirect chain, so it cannot be done inside
-   * fetch() - send the browser to /kavita/connect, which silently reauthenticates
-   * and redirects back here.
+   * fetch() - the browser goes to /kavita/connect, which silently reauthenticates
+   * and redirects back here. kavita-connect.js decides whether to go: when the
+   * sign-in was just tried or just failed it shows the problem instead, so a
+   * broken sign-in can never loop.
    */
   function kavita(path, options) {
     options = options || {};
     options.credentials = 'include';
     return fetch('/kavita' + path, options).then(function (res) {
       if (res.status === 401) {
-        window.location.href = '/kavita/connect';
+        window.WSKavita.reconnect(showConnectProblem);
         throw new Error('reconnecting');
       }
       return res;
@@ -191,7 +204,7 @@
   }
 
   function show(which) {
-    ['loadingState', 'unavailableState', 'emptyState', 'bookGrid', 'authorGrid'].forEach(function (id) {
+    ['loadingState', 'unavailableState', 'connectState', 'emptyState', 'bookGrid', 'authorGrid'].forEach(function (id) {
       el(id).classList.toggle('hidden', id !== which);
     });
     if (which !== 'bookGrid') el('pager').classList.add('hidden');
@@ -618,6 +631,22 @@
     show('unavailableState');
   }
 
+  /** Kavita won't let this browser in right now; say so plainly, once. */
+  function showConnectProblem() {
+    setShelvesVisible(false);
+    el('libraryCount').textContent = '';
+    show('connectState');
+  }
+
+  // Read before anything loads: a sign-in that just failed must not be retried
+  // automatically on this page load (that is the loop this guards against).
+  var connectFailed = window.WSKavita.arrivedFromFailedConnect();
+
+  el('connectRetry').addEventListener('click', function (e) {
+    e.preventDefault();
+    window.WSKavita.retry();
+  });
+
   // Apply the admin's configured icon, like other pages do.
   function applyBrandingIcons() {
     var theme = window.WEBSERVARR_THEME || {};
@@ -1027,6 +1056,10 @@
     // Paints the Books tab as selected. The load itself is done below, so this
     // must not reload; setView('books') would fetch the same page twice.
     setViewChrome('books');
+    if (connectFailed) {
+      showConnectProblem();
+      return;
+    }
     loadShelves();
     loadPage();
   });

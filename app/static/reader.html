@@ -262,6 +262,7 @@
 
 <script src="/static/js/auth.js?v=1"></script>
 <script src="/static/js/tour.js?v=5"></script>
+<script src="/static/js/kavita-connect.js?v=1"></script>
 <script>
 (function () {
   'use strict';
@@ -277,13 +278,20 @@
   function el(id) { return document.getElementById(id); }
   function qs(name) { return new URLSearchParams(location.search).get(name); }
 
-  /** Proxy call. A 401 means the Kavita session lapsed - re-run the handshake. */
+  /**
+   * Proxy call. A 401 means the Kavita session lapsed - re-run the handshake,
+   * unless kavita-connect.js says it was just tried; then say so instead of
+   * going round again.
+   */
   function kavita(path, options) {
     options = options || {};
     options.credentials = 'include';
     return fetch('/kavita' + path, options).then(function (res) {
       if (res.status === 401) {
-        window.location.href = '/kavita/connect';
+        window.WSKavita.reconnect(function () {
+          showError("Couldn't open this book",
+                    "We couldn't connect you to the eBook library right now. Please try again in a few minutes.");
+        });
         throw new Error('reconnecting');
       }
       return res;
