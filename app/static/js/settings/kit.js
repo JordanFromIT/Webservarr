@@ -44,7 +44,10 @@
     busy: 'That was a lot of saves in a row. Wait a minute, then try again.',
     forbidden: 'Only admins can change settings.',
     fix: 'Some settings need fixing',
-    invalid: 'That value isn’t allowed'
+    invalid: 'That value isn’t allowed',
+    maskText: 'That text can’t be used as a key.',
+    notSaved: 'This change wasn’t saved. Please try again.',
+    partial: 'Some changes weren’t saved. Check the marked fields.'
   };
 
   var S = { values: {}, meta: {}, mask: null, booted: false, loaded: false, loadFailed: false, current: null,
@@ -304,9 +307,29 @@
         sel.appendChild(op);
       });
       var shell = fieldShell(o, sel);
+      // A stored value that isn't one of the options (an old or hand-edited
+      // row) stays selected as itself, in a hidden option that can't be
+      // picked, so the box never shows blank and nothing is staged until the
+      // admin chooses.
+      var stray = null;
+      function paint(v) {
+        var known = (o.options || []).some(function (opt) { return String(opt.value) === v; });
+        if (!known) {
+          if (!stray) {
+            stray = el('option');
+            stray.disabled = true;
+            stray.hidden = true;
+            sel.insertBefore(stray, sel.firstChild);
+          }
+          stray.value = v;
+          stray.textContent = v === '' ? 'Not set' : v;
+          stray.selected = true;
+        } else {
+          sel.value = v;
+        }
+      }
       sel.addEventListener('change', function () { stage(o.key, sel.value, true); });
-      api.track(o.key, { get: function () { return sel.value; }, set: function (v) { sel.value = v; },
-                         el: sel, errorEl: shell.error });
+      api.track(o.key, { get: function () { return sel.value; }, set: paint, el: sel, errorEl: shell.error });
       return shell.root;
     };
 
@@ -450,10 +473,18 @@
       clearBtn.addEventListener('click', function () { stage(o.key, '', false); });
       undo.addEventListener('click', function () { stage(o.key, S.mask, false); });
       cancel.addEventListener('click', function () { stage(o.key, S.mask, false); });
+      var binding = { get: function () { return input.value; }, set: paint, el: input, errorEl: err };
       input.addEventListener('input', function () {
+        if (input.value === S.mask) {
+          // The placeholder itself would read as "unchanged" (or be skipped
+          // by the server), so it can't be a key. Nothing is staged.
+          stage(o.key, baseline(o.key), true);
+          showError(binding, MSG.maskText);
+          return;
+        }
         stage(o.key, input.value === '' ? baseline(o.key) : input.value, true);
       });
-      api.track(o.key, { get: function () { return input.value; }, set: paint, el: input, errorEl: err });
+      api.track(o.key, binding);
       return root;
     };
 
@@ -580,7 +611,7 @@
       return false;
     }
     if (ok) {
-      if (data && data.values && typeof data.values === 'object') { applySaved(t, sent, data.values); return true; }
+      if (data && data.values && typeof data.values === 'object') return applySaved(t, sent, data.values);
       return fail(MSG.unconfirmed);
     }
     if (status === 422 || status === 403) S.failed = false;    // an answer, not a hiccup: retrying won't help
@@ -601,10 +632,13 @@
   }
 
   function applySaved(t, sent, values) {
-    var keys = Object.keys(sent);
+    // The server answers with every key it wrote. One it skipped (a secret
+    // sent as the mask means "leave it as it is") was not saved, whatever the
+    // status says: it stays staged and marked, and nobody is told "Saved".
+    var keys = [], dropped = [];
+    Object.keys(sent).forEach(function (k) { if (!hasOwn(values, k)) dropped.push(k); else keys.push(k); });
     keys.forEach(function (k) {
-      // A secret sent back as the mask is left as it was, so it is not echoed.
-      if (hasOwn(values, k) && values[k] != null) S.values[k] = String(values[k]);
+      if (values[k] != null) S.values[k] = String(values[k]);
       // Typing that landed while the save was in flight stays staged.
       if (t.staged[k] === sent[k] || (hasOwn(t.staged, k) && sameAsBaseline(k, t.staged[k]))) {
         delete t.staged[k];
@@ -613,12 +647,20 @@
       }
       notify(t, k);
     });
-    S.failed = false;
-    t.saved.forEach(function (fn) {
-      try { fn(keys, values); } catch (e) { if (window.console) console.error(e); }
+    dropped.forEach(function (k) {
+      var b = t.bindings[k], m = metaFor(k);
+      if (b) showError(b, m && m.secret && sent[k] === S.mask ? MSG.maskText : MSG.notSaved);
     });
-    document.dispatchEvent(new CustomEvent('ws-settings:saved', { detail: { tab: t.id, keys: keys, values: values } }));
+    S.failed = false;
+    if (keys.length) {
+      t.saved.forEach(function (fn) {
+        try { fn(keys, values); } catch (e) { if (window.console) console.error(e); }
+      });
+      document.dispatchEvent(new CustomEvent('ws-settings:saved', { detail: { tab: t.id, keys: keys, values: values } }));
+    }
+    if (dropped.length) { UI.toast(MSG.partial, 'err'); return false; }
     UI.toast('Saved', 'ok');
+    return true;
   }
 
   function applyErrors(t, sent, errors) {
@@ -709,6 +751,12 @@
     var from = S.current;
     if (id === from) return mount(id).then(function () { return true; });
     if (S.asking) return Promise.resolve(false);      // the open dialog settles the URL
+    if (UI.isDialogOpen()) {
+      // Another dialog (the icon picker, say) belongs to this tab: finish or
+      // cancel it first, so its answer can't land on a tab that has gone.
+      if (how === 'history') setHash(from, 'replace');
+      return Promise.resolve(false);
+    }
     if (S.busy) {
       if (how === 'history') setHash(from, 'replace');
       return Promise.resolve(false);
@@ -721,6 +769,9 @@
       body: 'You have ' + changes(n) + ' on ' + TITLES[from] + '. Switching tabs throws ' +
         (n === 1 ? 'it' : 'them') + ' away.',
       confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', danger: true
+    }).catch(function (e) {
+      if (window.console) console.error(e);
+      return false;                     // a dialog that failed counts as Keep editing
     }).then(function (ok) {
       S.asking = false;
       if (!ok) { setHash(from, 'replace'); return false; }

@@ -93,6 +93,37 @@
   var FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), ' +
     'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
   var dialogCount = 0;
+  // Open dialogs, topmost last. A dialog can open over another (a leave
+  // guard over the icon picker), so one keydown and one focusin handler serve
+  // them all, and they act for the topmost dialog only.
+  var stack = [];
+
+  function topDialog() { return stack.length ? stack[stack.length - 1] : null; }
+
+  function focusables(box) { return Array.prototype.slice.call(box.querySelectorAll(FOCUSABLE)); }
+
+  function onKey(e) {
+    var d = topDialog();
+    if (!d) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); d.close(false); return; }
+    if (e.key !== 'Tab') return;
+    var f = focusables(d.box);
+    if (!f.length) { e.preventDefault(); return; }
+    var first = f[0], last = f[f.length - 1];
+    if (!d.box.contains(document.activeElement)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+    else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+
+  // Focus that escapes anyway (a click on the page behind, assistive tech)
+  // is brought back inside the topmost dialog. Focusing inside it fires
+  // focusin again, which then has nothing to do.
+  function onFocusIn(e) {
+    var d = topDialog();
+    if (!d || d.box.contains(e.target)) return;
+    var f = focusables(d.box);
+    if (f.length) f[0].focus();
+  }
 
   function confirm(opts) {
     opts = opts || {};
@@ -126,36 +157,37 @@
       row.appendChild(ok);
       box.appendChild(row);
       overlay.appendChild(box);
-      document.body.appendChild(overlay);
 
+      var entry = { box: box, close: close };
       var done = false;
       function close(result) {
         if (done) return;
         done = true;
-        document.removeEventListener('keydown', onKey, true);
-        document.removeEventListener('focusin', onFocusIn, true);
+        var wasTop = topDialog() === entry;
+        stack.splice(stack.indexOf(entry), 1);
+        if (!stack.length) {
+          document.removeEventListener('keydown', onKey, true);
+          document.removeEventListener('focusin', onFocusIn, true);
+        }
         if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-        if (previous && previous.focus && document.contains(previous)) previous.focus({ preventScroll: true });
+        // Only the dialog on top owns focus. Hand it back to what opened this
+        // one, unless that is gone or sits outside the dialog now on top.
+        if (wasTop) {
+          var under = topDialog();
+          var back = previous && previous.focus && document.contains(previous) &&
+            (!under || under.box.contains(previous)) ? previous : null;
+          if (!back && under) back = focusables(under.box)[0] || null;
+          if (back) back.focus({ preventScroll: true });
+        }
         resolve(result);
       }
-      function focusables() { return Array.prototype.slice.call(box.querySelectorAll(FOCUSABLE)); }
-      function onKey(e) {
-        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(false); return; }
-        if (e.key !== 'Tab') return;
-        var f = focusables();
-        if (!f.length) return;
-        var first = f[0], last = f[f.length - 1];
-        if (!box.contains(document.activeElement)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
-        else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+
+      if (!stack.length) {
+        document.addEventListener('keydown', onKey, true);
+        document.addEventListener('focusin', onFocusIn, true);
       }
-      // Focus that escapes anyway (a click on the page behind, assistive tech)
-      // is brought back inside.
-      function onFocusIn(e) {
-        if (!box.contains(e.target)) { var f = focusables(); if (f.length) f[0].focus(); }
-      }
-      document.addEventListener('keydown', onKey, true);
-      document.addEventListener('focusin', onFocusIn, true);
+      stack.push(entry);
+      document.body.appendChild(overlay);
       overlay.addEventListener('click', function (e) { if (e.target === overlay) close(false); });
       cancel.addEventListener('click', function () { close(false); });
       ok.addEventListener('click', function () { close(true); });
@@ -163,5 +195,7 @@
     });
   }
 
-  window.WSUI = { el: el, icon: icon, toast: toast, confirm: confirm, cls: cls };
+  function isDialogOpen() { return stack.length > 0; }
+
+  window.WSUI = { el: el, icon: icon, toast: toast, confirm: confirm, cls: cls, isDialogOpen: isDialogOpen };
 })();
