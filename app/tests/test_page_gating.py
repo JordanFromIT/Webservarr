@@ -199,6 +199,24 @@ class KavitaGate(unittest.TestCase):
         self.assertEqual(self.call(helpers.MEMBER, True).status_code, 503)
         self.assertEqual(self.call(helpers.MEMBER, True, "/kavita/api/Series/all").status_code, 503)
 
+    def test_read_settings_returns_every_key_in_one_query(self):
+        from app.routers import kavita_proxy
+        db = self.Session()
+        helpers.put(db, "sidebar.enabled_library", " false ")
+        helpers.put(db, "integration.kavita.url", "http://192.168.1.50:5000/")
+        db.close()
+        with mock.patch.object(kavita_proxy, "SessionLocal", self.Session):
+            values = kavita_proxy._read_settings("sidebar.enabled_library",
+                                                 "integration.kavita.url", "missing.key")
+            self.assertEqual(values, {"sidebar.enabled_library": "false",
+                                      "integration.kavita.url": "http://192.168.1.50:5000/",
+                                      "missing.key": ""})
+            self.assertEqual(kavita_proxy._read_setting("missing.key"), "")
+            with self.assertRaises(Exception) as ctx:
+                kavita_proxy.kavita_url_for(helpers.MEMBER)
+            self.assertEqual(getattr(ctx.exception, "status_code", None), 403)
+            self.assertEqual(kavita_proxy.kavita_url_for(helpers.ADMIN), "http://192.168.1.50:5000")
+
     def test_one_settings_read_per_proxied_request(self):
         # The reader sends every page, image and progress call through the
         # proxy, so the switch is read in the same query as the Kavita URL.
