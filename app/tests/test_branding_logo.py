@@ -127,8 +127,10 @@ class LogoWriteValidationTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 r = self.client.put("/api/admin/settings",
                                     json={"key": "branding.logo_url", "value": bad})
-                self.assertEqual(r.status_code, 400, r.text)
-                self.assertIn("logo URL", r.json()["detail"])
+                self.assertEqual(r.status_code, 422, r.text)
+                message = r.json()["errors"]["branding.logo_url"]
+                self.assertTrue(message)
+                self.assertEqual(r.json()["detail"], message)   # the old settings page shows detail
                 self.assertIsNone(self._stored("branding.logo_url"))
 
     def test_lone_surrogates_are_refused_not_500(self):
@@ -137,13 +139,16 @@ class LogoWriteValidationTests(unittest.TestCase):
                            ("branding.app_name", "Name \ud800")):
             with self.subTest(key=key, value=ascii(value)):
                 r = self.client.put("/api/admin/settings", json={"key": key, "value": value})
-                self.assertEqual(r.status_code, 400, r.text)
+                self.assertEqual(r.status_code, 422, r.text)
+                self.assertEqual(r.json()["errors"][key], "Contains characters that can't be stored")
+                self.assertEqual(r.json()["detail"], "Contains characters that can't be stored")
                 self.assertIsNone(self._stored(key))
         r = self.client.put("/api/admin/settings/bulk", json={"settings": [
             {"key": "branding.tagline", "value": "fine"},
             {"key": "branding.logo_url", "value": "https://example.com/\ud800.png"},
         ]})
-        self.assertEqual(r.status_code, 400, r.text)
+        self.assertEqual(r.status_code, 422, r.text)
+        self.assertEqual(list(r.json()["errors"]), ["branding.logo_url"])
         self.assertIsNone(self._stored("branding.tagline"))
 
     def test_good_logo_urls_are_saved(self):
@@ -159,7 +164,8 @@ class LogoWriteValidationTests(unittest.TestCase):
             {"key": "branding.app_name", "value": "Changed"},
             {"key": "branding.logo_url", "value": "static/x.png"},
         ]})
-        self.assertEqual(r.status_code, 400, r.text)
+        self.assertEqual(r.status_code, 422, r.text)
+        self.assertEqual(list(r.json()["errors"]), ["branding.logo_url"])
         self.assertIsNone(self._stored("branding.app_name"))
         self.assertIsNone(self._stored("branding.logo_url"))
 
@@ -198,17 +204,28 @@ class BulkSaveIsAtomicTests(LogoWriteValidationTests):
         self.assertIsNone(self._stored("branding.app_name"))
         self.assertIsNone(self._stored("branding.tagline"))
 
-    def test_saves_all_items_including_a_repeated_key(self):
+    def test_saves_all_items_and_reports_them(self):
+        r = self.client.put("/api/admin/settings/bulk", json={"settings": [
+            {"key": "branding.app_name", "value": "First"},
+            {"key": "branding.tagline", "value": "T"},
+        ]})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self._stored("branding.app_name"), "First")
+        self.assertEqual(self._stored("branding.tagline"), "T")
+        self.assertEqual(r.json(), {"saved": ["branding.app_name", "branding.tagline"],
+                                    "values": {"branding.app_name": "First", "branding.tagline": "T"}})
+
+    def test_a_repeated_key_saves_nothing(self):
         r = self.client.put("/api/admin/settings/bulk", json={"settings": [
             {"key": "branding.app_name", "value": "First"},
             {"key": "branding.tagline", "value": "T"},
             {"key": "branding.app_name", "value": "Second"},
         ]})
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(self._stored("branding.app_name"), "Second")
-        self.assertEqual(self._stored("branding.tagline"), "T")
-        self.assertEqual([i["key"] for i in r.json()],
-                         ["branding.app_name", "branding.tagline", "branding.app_name"])
+        self.assertEqual(r.status_code, 422, r.text)
+        self.assertEqual(r.json()["errors"], {"branding.app_name": "Listed more than once"})
+        self.assertEqual(r.json()["detail"], "Listed more than once")
+        self.assertIsNone(self._stored("branding.app_name"))
+        self.assertIsNone(self._stored("branding.tagline"))
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
