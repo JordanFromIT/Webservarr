@@ -119,6 +119,13 @@ class Frame(unittest.TestCase):
             self.assertIn("linear-gradient(", rule.group(1), side)
             self.assertIn("rgb(var(--color-background)", rule.group(1), side)
 
+    def test_tab_hints_start_hidden(self):
+        # Neither arrow paints before the strip is known to overflow; the
+        # first-paint script or the kit reveals it.
+        h = (STATIC / FRAME).read_text(encoding="utf-8")
+        for side in ("Left", "Right"):
+            self.assertRegex(h, rf'<div id="settingsTabHint{side}"[^>]*style="opacity:0"', side)
+
     def test_reduced_motion_stills_the_tab_hints(self):
         # The hints fade with transition-opacity; reduced motion switches that off.
         css = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
@@ -197,6 +204,41 @@ class KitApi(unittest.TestCase):
         self.assertIn("'popstate'", js)
         for hint in ("settingsTabHintLeft", "settingsTabHintRight"):
             self.assertIn(hint, js)
+
+    def test_dialogs_stack_and_only_the_top_one_listens(self):
+        # Two open dialogs (the icon picker, then the leave guard from Back)
+        # must not fight over focus: one keydown/focusin handler, and it acts
+        # for the topmost dialog only.
+        js = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
+        self.assertIn("function topDialog()", js)
+        for handler in ("onKey", "onFocusIn"):
+            m = re.search(rf"\n  function {handler}\(e\) \{{(.*?)\n  \}}", js, re.S)
+            self.assertIsNotNone(m, f"{handler} is not a module-level handler")
+            self.assertIn("topDialog()", m.group(1), handler)
+
+    def test_tab_switch_dialog_always_releases(self):
+        # A dialog that fails must not leave S.asking set and block every
+        # later tab switch: the reset sits after a catch, so it runs every time.
+        js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        self.assertRegex(js, r"S\.asking = true;[\s\S]*?\.catch\([\s\S]*?\}\)\.then\(function \(ok\) \{\s*S\.asking = false")
+
+    def test_select_keeps_an_unknown_stored_value(self):
+        # A stored value outside the options stays selected (a hidden,
+        # disabled option) instead of the box showing blank and the first
+        # click staging option 0.
+        js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        body = js[js.index("api.select = function"):js.index("api.color = function")]
+        self.assertIn(".disabled = true", body)
+        self.assertIn(".hidden = true", body)
+
+    def test_secret_refuses_the_mask_text(self):
+        # Typing the mask itself would read as "unchanged"; it is refused with
+        # an inline error, and a save the server silently skipped is never "Saved".
+        js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        body = js[js.index("api.secret = function"):js.index("return api;")]
+        self.assertIn("=== S.mask", body[body.index("input.addEventListener('input'"):])
+        self.assertIn("MSG.maskText", body)
+        self.assertRegex(js, r"function applySaved[\s\S]*?!hasOwn\(values, k\)[\s\S]*?function applyErrors")
 
     def test_modules_register_their_tab(self):
         for tab, module in MODULES.items():
