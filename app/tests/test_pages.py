@@ -101,15 +101,25 @@ class ShellRendering(unittest.TestCase):
         # The nav links fill both the desktop sidebar and the phone drawer, so
         # anything with an id inside a link would appear twice, and
         # getElementById would only ever find the first (hidden on a phone).
-        b = branding(**{"integration.kavita.url": "http://192.168.1.50:5000"})
-        for sid in ("home", "requests", "issues", "calendar", "tickets", "library", "wiki"):
-            self.assertTrue(b["sidebar_enabled"][sid], sid)
-        out = render(user=ADMIN, b=b)
-        nav = re.search(r'<nav id="drawerNav".*?</nav>', out, re.S).group(0)
-        self.assertEqual(len(re.findall(r"<a ", nav)), 8)      # every page is in the nav
-        ids = re.findall(r'\sid="([^"]+)"', out)
-        dupes = sorted({i for i in ids if ids.count(i) > 1})
-        self.assertEqual(dupes, [])
+        # Worst case: every page visible, every New! flag on, and both label
+        # layouts (with a sublabel line, and without one).
+        from app.settings_registry import SIDEBAR_PAGE_IDS
+        on = {"integration.kavita.url": "http://192.168.1.50:5000"}
+        on.update({"sidebar.new_" + pid: "true" for pid in SIDEBAR_PAGE_IDS})
+        no_sub = dict(on, **{"sidebar.sublabel_" + pid: "" for pid in SIDEBAR_PAGE_IDS})
+        for name, values in (("with sublabels", on), ("without sublabels", no_sub)):
+            with self.subTest(name):
+                b = branding(**values)
+                for pid in SIDEBAR_PAGE_IDS:
+                    self.assertTrue(b["sidebar_enabled"][pid], pid)
+                    self.assertTrue(b["sidebar_new"][pid], pid)
+                out = render(user=ADMIN, b=b)
+                nav = re.search(r'<nav id="drawerNav".*?</nav>', out, re.S).group(0)
+                self.assertEqual(len(re.findall(r"<a ", nav)), 8)      # every page is in the nav
+                self.assertEqual(nav.count('class="nav-new-badge"'), 8)
+                ids = re.findall(r'''\sid=["']([^"']+)["']''', out)
+                dupes = sorted({i for i in ids if ids.count(i) > 1})
+                self.assertEqual(dupes, [])
 
     def test_labels_icons_sublabels_and_new_flag_apply(self):
         b = branding(**{"sidebar.label_issues": "Problems", "icon.nav_issues": "bug_report",
