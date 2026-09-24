@@ -362,6 +362,12 @@
     loadDropdownItems();
     if (_dropdown) _dropdown.style.display = '';
     _dropdownOpen = true;
+    // Close the account menu (see the ws:menu-open note in shell.js).
+    document.dispatchEvent(new CustomEvent('ws:menu-open', { detail: _dropdown }));
+  }
+
+  function handleOtherMenuOpen(e) {
+    if (_dropdownOpen && e.detail !== _dropdown) closeDropdown();
   }
 
   function closeDropdown() {
@@ -840,6 +846,8 @@
 
     // Close dropdown on outside click
     document.addEventListener('click', handleOutsideClick);
+    // ...and when the account menu opens
+    document.addEventListener('ws:menu-open', handleOtherMenuOpen);
   }
 
   // Expose

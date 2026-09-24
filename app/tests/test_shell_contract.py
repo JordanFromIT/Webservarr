@@ -231,6 +231,15 @@ class ShellContract(unittest.TestCase):
             self.assertRegex(js_code_only(body), r"\.status\s*===\s*401\b", fn)
             self.assertRegex(body, r"""window\.location\.href\s*=\s*['"]/login['"]""", fn)
 
+    def test_header_menus_close_each_other(self):
+        # The bell and account buttons stop their clicks reaching document, so
+        # the menus close each other through a shared ws:menu-open event: each
+        # file must both announce an opening and listen for the other's.
+        for name in ("shell.js", "notifications.js"):
+            src = (STATIC / "js" / name).read_text(encoding="utf-8")
+            self.assertRegex(src, r"""dispatchEvent\(\s*new CustomEvent\(\s*['"]ws:menu-open['"]""", name)
+            self.assertRegex(src, r"""addEventListener\(\s*['"]ws:menu-open['"]""", name)
+
     def test_no_instance_specific_strings(self):
         files = (list(STATIC.glob("*.html")) + list((STATIC / "partials").glob("*.html"))
                  + list((STATIC / "js").glob("*.js")))

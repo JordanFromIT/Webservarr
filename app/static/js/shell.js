@@ -331,12 +331,26 @@
       overlay.addEventListener('click', function (e) { if (e.target === overlay) closeDrawer(); });
     }
 
+    // Header menus are mutually exclusive. Each menu's button stops its click
+    // from reaching document, so another menu's outside-click close never sees
+    // it; instead a menu that opens announces itself with a ws:menu-open event
+    // (detail: the menu element) and every other menu closes. notifications.js
+    // does the same for the bell dropdown.
     [['userMenuBtn', 'userMenuDropdown'], ['mobileUserMenuBtn', 'mobileUserMenuDropdown']].forEach(function (pair) {
       var btn = document.getElementById(pair[0]);
       var menu = document.getElementById(pair[1]);
       if (!btn || !menu) return;
-      btn.addEventListener('click', function (e) { e.stopPropagation(); menu.classList.toggle('hidden'); });
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        menu.classList.toggle('hidden');
+        if (!menu.classList.contains('hidden')) {
+          document.dispatchEvent(new CustomEvent('ws:menu-open', { detail: menu }));
+        }
+      });
       document.addEventListener('click', function () { menu.classList.add('hidden'); });
+      document.addEventListener('ws:menu-open', function (e) {
+        if (e.detail !== menu) menu.classList.add('hidden');
+      });
     });
 
     document.querySelectorAll('#logoutBtn, [data-logout]').forEach(function (btn) {
