@@ -168,6 +168,27 @@ class BulkSave(SettingsApiBase):
         r = self.save(("integration.uptime_kuma.api_key", "old"))
         self.assertEqual(r.status_code, 200, r.text)
 
+    def test_old_settings_page_save_with_retired_page_keys_still_works(self):
+        # Until the old Settings page is replaced (Task 8.3) its Theme save
+        # still sends the keys the redesign retired, and its Seerr save sends
+        # features.show_requests. The whole save must keep working.
+        retired = [
+            ("sidebar.label_requests_embed", "Requests (Embed)"),
+            ("sidebar.enabled_requests_embed", "true"),
+            ("sidebar.new_requests_embed", "false"),
+            ("icon.nav_requests_embed", "download"),
+            ("features.show_tickets", "true"),
+            ("features.show_requests", "false"),
+            ("features.show_books", "true"),
+            ("sidebar.sublabel_requests_embed", "Request through Seerr"),
+        ]
+        for key, _value in retired:
+            self.assertTrue(reg.REGISTRY[key].deprecated, key)
+        r = self.save(("sidebar.label_home", "Start"), *retired)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(helpers.get(self.db, "sidebar.label_home"), "Start")
+        self.assertEqual(helpers.get(self.db, "icon.nav_requests_embed"), "download")
+
     def test_monitor_pattern_key(self):
         r = self.save(("monitor.12.enabled", "false"))
         self.assertEqual(r.status_code, 200, r.text)
