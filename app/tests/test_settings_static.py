@@ -47,11 +47,9 @@ SHELL_JS = {"js/theme-loader.js", "js/auth.js", "js/shell.js", "js/notifications
 
 # Files the frame references that later tasks write. Each task deletes its own
 # entries when it adds the file (a file here that exists fails the test), and
-# Task 8.4 asserts the set is empty.
+# Task 8.4 asserts the set is empty. Task 3.2 added ui.js, kit.js and the first
+# General fields (general.js, which Task 4.3 completes).
 PENDING = {
-    "js/ui.js",                          # Task 3.2
-    "js/settings/kit.js",                # Task 3.2
-    "js/settings/general.js",            # Task 4.3
     "js/settings/appearance.js",         # Task 4.4
     "js/settings/signin.js",             # Task 4.5
     "js/settings/pages.js",              # Task 5.1
@@ -121,6 +119,15 @@ class Frame(unittest.TestCase):
             self.assertIn("linear-gradient(", rule.group(1), side)
             self.assertIn("rgb(var(--color-background)", rule.group(1), side)
 
+    def test_reduced_motion_stills_the_tab_hints(self):
+        # The hints fade with transition-opacity; reduced motion switches that off.
+        css = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        blocks = re.findall(r"@media \(prefers-reduced-motion: reduce\) \{(.*?)\n\}", css, re.S)
+        still = [b for b in blocks if ".ws-savebar" in b]
+        self.assertTrue(still, "the Settings reduced-motion block is missing")
+        for side in ("left", "right"):
+            self.assertRegex(still[0], rf"\.ws-tab-hint-{side}\b[^{{}}]*\{{[^}}]*transition:\s*none", side)
+
 
 class Hygiene(unittest.TestCase):
     def test_referenced_files_exist_or_are_pending(self):
@@ -149,8 +156,53 @@ class Hygiene(unittest.TestCase):
             # default font is not checked here; colours, tagline and icon defaults are.
             for leaked in ("#125793", "#2C6DA1", "#4684B0", "#BEEEF4", "#E9D5FF", "#67E8F9", "#FCD34D",
                            "Media Server Management", "health_metrics", "confirmation_number",
-                           "settings_input_component"):
+                           "settings_input_component", "***masked***"):
                 self.assertNotIn(leaked, text, f"{f.name} carries a default ({leaked}); read it from meta")
+
+
+class KitApi(unittest.TestCase):
+    def test_ui_js_public_api(self):
+        js = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
+        for name in ("el", "icon", "toast", "confirm", "cls"):
+            self.assertRegex(js, rf"\b{name}: {name}\b", name)
+
+    def test_kit_public_api(self):
+        js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        for name in ("boot", "registerTab", "go", "metaFor", "card"):
+            self.assertRegex(js, rf"\b{name}: {name}\b", name)
+        for method in ("text", "textarea", "toggle", "select", "color", "iconPicker", "secret", "track",
+                       "get", "set", "stageDefaults", "onChange", "onSaved", "onDiscard", "beforeSave",
+                       "fieldError", "dirtyKeys", "save"):
+            self.assertIn(f"api.{method} = function", js, method)
+        for event in ("ws-settings:saved", "ws-settings:discarded", "ws-settings:tab"):
+            self.assertIn(event, js)
+        self.assertIn("beforeunload", js)
+        self.assertIn("/api/admin/settings?view=registry", js)
+        self.assertIn("/api/admin/settings/bulk", js)
+
+    def test_mask_comes_from_the_server(self):
+        # One copy of the sentinel: the SettingsView payload. The kit re-exports
+        # it as WSSettings.MASK; the leak test keeps any literal copy out.
+        js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        self.assertIn("data.mask", js)
+        self.assertRegex(js, r"defineProperty\(WSSettings, 'MASK'")
+
+    def test_tab_state_follows_every_switch(self):
+        # The selected look is CSS on html[data-settings-tab]; the kit keeps it,
+        # aria-selected and the URL in step for clicks, keys, hash and history.
+        js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        self.assertRegex(js, r"documentElement\.setAttribute\('data-settings-tab'")
+        self.assertIn("aria-selected", js)
+        self.assertIn("'hashchange'", js)
+        self.assertIn("'popstate'", js)
+        for hint in ("settingsTabHintLeft", "settingsTabHintRight"):
+            self.assertIn(hint, js)
+
+    def test_modules_register_their_tab(self):
+        for tab, module in MODULES.items():
+            path = STATIC / "js" / "settings" / module
+            if path.exists():
+                self.assertIn(f"WSSettings.registerTab('{tab}'", path.read_text(encoding="utf-8"), module)
 
 
 class Guards(unittest.TestCase):

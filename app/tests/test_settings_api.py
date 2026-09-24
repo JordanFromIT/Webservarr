@@ -75,6 +75,13 @@ class RegistryView(SettingsApiBase):
         self.assertNotIn("integration.uptime_kuma.api_key", body["values"])
         self.assertEqual(body["meta"]["news.homepage_count"]["max"], 20)
 
+    def test_view_carries_the_mask_sentinel(self):
+        # The front end reads the saved-secret placeholder from here, never a copy of its own.
+        helpers.put(self.db, "integration.plex.token", "real-token")
+        body = self.client.get("/api/admin/settings?view=registry").json()
+        self.assertEqual(body["mask"], reg.MASK)
+        self.assertEqual(body["values"]["integration.plex.token"], body["mask"])
+
     def test_per_user_rows_never_listed(self):
         helpers.put(self.db, USER_KEY, "false")
         for url in ("/api/admin/settings?view=registry", "/api/admin/settings"):
