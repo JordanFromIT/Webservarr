@@ -8,8 +8,11 @@ its fixed paths (/settings/export, /settings/shell) win over the older
 /settings/{key} route.
 """
 
+import hashlib
+import json
 import logging
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -17,6 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import settings as app_settings
 from app.database import get_db
 from app.dependencies import require_admin
 from app.limiter import limiter
@@ -225,3 +229,125 @@ async def bulk_update_settings(
     if errors:
         return validation_error(errors)
     return {"saved": list(writes), "values": {k: mask(k, v) for k, v in writes.items()}}
+
+
+# ---- Backup: export and import ----
+
+EXPORT_FORMAT = "webservarr-settings"
+EXPORT_VERSION = 1
+MAX_IMPORT_KEYS = 2000
+IMPORT_STALE_MESSAGE = "Settings changed since the preview. Preview the import again."
+
+
+class ImportRequest(BaseModel):
+    data: Any                       # checked by plan_import, so a wrong file gets a plain-English error
+    diff_token: Optional[str] = None
+
+
+def _diff_token(changes: List[dict]) -> str:
+    canonical = json.dumps(changes, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def plan_import(db: Session, data: Any) -> Tuple[List[dict], List[str], Dict[str, str], Dict[str, str]]:
+    """(changes, ignored, warnings, errors) for an export file.
+
+    The file is diffed against the current values first, and only keys whose
+    value would change go through plan_writes (BulkSave's validation, so the
+    lockout guard runs only when a sign-in key changes). A value equal to
+    what the install holds now is not a write: if today's rules reject it
+    (stored before they existed) it is a warning, not an error, so a file
+    always imports back onto the install it came from. Secrets and retired
+    keys are ignored; per-user, internal and unknown keys are errors."""
+    if (not isinstance(data, dict) or data.get("format") != EXPORT_FORMAT
+            or not isinstance(data.get("settings"), dict)):
+        return [], [], {}, {"_file": "This isn't a WebServarr settings file"}
+    if data.get("format_version") != EXPORT_VERSION:
+        return [], [], {}, {"_file": "This settings file was made by a different version of WebServarr"}
+    if len(data["settings"]) > MAX_IMPORT_KEYS:
+        return [], [], {}, {"_file": "This file has too many settings"}
+
+    current = effective_values(db)
+    ignored: List[str] = []
+    warnings: Dict[str, str] = {}
+    errors: Dict[str, str] = {}
+    items: List[Tuple[str, str]] = []
+    for key, value in data["settings"].items():
+        d = get_def(key)
+        if d is None:                   # per-user, internal or unknown: plan_writes refuses it
+            items.append((key, value))
+            continue
+        if d.secret or d.deprecated:
+            ignored.append(key)
+            continue
+        if not isinstance(value, str):
+            errors[key] = "Must be text"
+            continue
+        if value == current.get(key, d.default):
+            message = validate_value(key, value)
+            if message:
+                warnings[key] = message
+            continue
+        items.append((key, value))
+
+    writes, write_errors = plan_writes(db, items)
+    errors.update(write_errors)
+    if errors:
+        return [], sorted(ignored), {}, errors
+    changes = [{"key": k, "old": current.get(k, get_def(k).default), "new": writes[k]} for k in sorted(writes)]
+    return changes, sorted(ignored), warnings, {}
+
+
+@router.get("/settings/export")
+@limiter.limit("10/minute")
+async def export_settings(
+    request: Request,
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """SettingsExport: every non-secret setting, and the names of the secrets left out.
+
+    effective_values holds registry keys and pattern rows only, so internal
+    rows (system.secret_key, VAPID keys, the setup token, setup/seed/migration
+    markers) and per-user rows never reach the file."""
+    values = effective_values(db)
+    now = datetime.now(timezone.utc)
+    body = {
+        "format": EXPORT_FORMAT,
+        "format_version": EXPORT_VERSION,
+        "app_version": app_settings.app_version or "dev",
+        "exported_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "settings": {k: v for k, v in values.items() if not get_def(k).secret},
+        "secrets_excluded": [d.key for d in active_defs() if d.secret and values.get(d.key)],
+    }
+    return JSONResponse(content=body, headers={
+        "Content-Disposition": f'attachment; filename="webservarr-settings-{now:%Y%m%d-%H%M%S}.json"',
+        "Cache-Control": "no-store",
+    })
+
+
+@router.post("/settings/import")
+@limiter.limit("10/minute")
+async def import_settings(
+    request: Request,
+    payload: ImportRequest,
+    dry_run: bool = True,
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """SettingsImport: preview (dry_run=true) or apply exactly the previewed diff.
+
+    Apply re-plans the file against the database as it is now and refuses
+    (409) unless that diff hashes to the token the preview returned."""
+    changes, ignored, warnings, errors = plan_import(db, payload.data)
+    if errors:
+        return validation_error(errors)
+    token = _diff_token(changes)
+    if dry_run:
+        return {"changes": changes, "ignored": ignored, "warnings": warnings, "diff_token": token}
+    if not payload.diff_token or payload.diff_token != token:
+        return JSONResponse(status_code=409, content={"detail": IMPORT_STALE_MESSAGE})
+    errors = apply_writes(db, {c["key"]: c["new"] for c in changes})
+    if errors:
+        return validation_error(errors)
+    return {"applied": [c["key"] for c in changes]}
