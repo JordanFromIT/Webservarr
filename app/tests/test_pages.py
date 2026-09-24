@@ -255,6 +255,20 @@ class ShellRendering(unittest.TestCase):
         for page, nav in PAGE_NAV.items():
             self.assertIn(nav, ids, page)
 
+    def test_home_sections_switched_off_are_listed_on_html(self):
+        b = branding(**{"home.section_news": "false", "home.section_streams": "false"})
+        self.assertIn('data-home-hide="news streams"', html_tag(render(b=b, name="index")))
+        self.assertNotIn("data-home-hide", html_tag(render(name="index")))
+        self.assertNotIn("data-home-hide", html_tag(render(b=b, name="calendar")))
+
+    def test_index_skips_sections_that_are_off(self):
+        page = open(os.path.join(pages.STATIC_DIR, "index.html"), encoding="utf-8").read()
+        self.assertIn("data-home-pair", page)
+        self.assertIn("sectionOn(", page)
+        css = open(os.path.join(pages.STATIC_DIR, "css", "theme.css"), encoding="utf-8").read()
+        for sid in ("services", "news", "streams", "releases", "requests"):
+            self.assertIn(f'html[data-home-hide~="{sid}"] [data-arrive="{sid}"]', css)
+
 
 class NavModel(unittest.TestCase):
     def nav_hrefs(self, out):
