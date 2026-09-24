@@ -6,6 +6,7 @@ single bad value rejects the whole save with per-key messages (422). The 422
 body also carries `detail` (the first message) for the old settings page,
 which reads only that.
 """
+import os
 import unittest
 from unittest import mock
 
@@ -418,6 +419,34 @@ class SignedOut(SettingsApiBase):
                 r = self.client.request(method, url, json=body)
                 self.assertEqual(r.status_code, 401, r.text)
         self.assertIsNone(helpers.get(self.db, "branding.app_name"))
+
+
+class LogoUpload(SettingsApiBase):
+    PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+
+    def test_upload_stores_the_file_but_not_the_setting(self):
+        import tempfile
+        from app.routers import admin
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(admin, "UPLOAD_DIR", tmp):
+            r = self.client.post("/api/admin/upload-logo", files={"file": ("logo.png", self.PNG, "image/png")})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertTrue(r.json()["url"].startswith("/static/uploads/logo-"))
+            self.assertEqual(len(os.listdir(tmp)), 1)
+        self.assertIsNone(helpers.get(self.db, "branding.logo_url"))
+
+    def test_upload_leaves_a_stored_logo_alone_until_save(self):
+        # The page stages the returned URL; only Save (BulkSave) writes it.
+        import tempfile
+        from app.routers import admin
+        helpers.put(self.db, "branding.logo_url", "/static/uploads/logo-current.png")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(admin, "UPLOAD_DIR", tmp):
+            r = self.client.post("/api/admin/upload-logo", files={"file": ("logo.png", self.PNG, "image/png")})
+            self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(helpers.get(self.db, "branding.logo_url"), "/static/uploads/logo-current.png")
+        r = self.save(("branding.logo_url", r.json()["url"]))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(helpers.get(self.db, "branding.logo_url").startswith("/static/uploads/logo-"))
+        self.assertNotEqual(helpers.get(self.db, "branding.logo_url"), "/static/uploads/logo-current.png")
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

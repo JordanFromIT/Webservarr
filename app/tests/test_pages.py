@@ -446,6 +446,70 @@ class ShellRendering(unittest.TestCase):
         between = page[pair:streams]
         self.assertEqual(between.count("<div") + 1, between.count("</div>"))
 
+    def test_empty_site_name_shows_logo_only_and_page_titles(self):
+        out = render(b=branding(**{"branding.app_name": ""}))
+        self.assertIn("<title>Control Center</title>", out)
+        self.assertNotIn('property="og:site_name"', out)
+        body = out.split("<body>")[1]
+        self.assertRegex(body, r'<h1 class="[^"]*\bhidden\b[^"]*"></h1>')
+        self.assertNotIn(">WebServarr<", body)
+        # The default name still renders normally.
+        self.assertIn(">WebServarr</h1>", render().split("<body>")[1])
+
+    def test_empty_site_name_leaves_no_stray_separator_anywhere(self):
+        # Every place the name reaches: the tab title (with and without a page
+        # suffix, and with no <title> at all), the preview tags, and the three
+        # shell spots (sidebar, drawer, phone top bar).
+        no_suffix = PAGE.replace("<title>WebServarr - Control Center</title>", "<title>WebServarr</title>")
+        no_title = PAGE.replace("<title>WebServarr - Control Center</title>", "")
+        for name in ("", "   "):
+            for tagline in ("Movies for the family", ""):
+                b = branding(**{"branding.app_name": name, "branding.tagline": tagline})
+                for label, page, expected in (("suffix", PAGE, "Control Center"),
+                                              ("no suffix", no_suffix, tagline),
+                                              ("no title", no_title, tagline)):
+                    with self.subTest(name=name, tagline=tagline, page=label):
+                        out = render(b=b, page=page)
+                        self.assertEqual(re.findall(r"<title>(.*?)</title>", out, re.S), [expected])
+                        head = out.split("<body>")[0]
+                        self.assertNotIn("og:site_name", head)
+                        self.assertNotRegex(head, r'<meta [^>]*content="\s*"')   # no empty preview tag
+                        for m in re.finditer(r'<meta [^>]*content="([^"]*)"', head):
+                            self.assertNotRegex(m.group(1), r"^\s*[-|]|[-|]\s*$", m.group(0))
+                        if tagline:
+                            self.assertIn(f'property="og:title" content="{tagline}"', head)
+                            self.assertIn(f'name="twitter:title" content="{tagline}"', head)
+                        else:
+                            self.assertNotIn("og:title", head)
+                            self.assertNotIn("twitter:title", head)
+                        body = out.split("<body>")[1]
+                        self.assertEqual(len(re.findall(r'<h1 class="[^"]*\bhidden\b[^"]*"></h1>', body)), 2)
+                        self.assertRegex(body, r'<span class="[^"]*\bhidden\b[^"]*"></span>')
+                        self.assertNotIn("WebServarr", body)
+
+    def test_only_a_missing_name_falls_back_to_the_default(self):
+        b = {k: v for k, v in branding().items() if k != "app_name"}
+        out = render(b=b)
+        self.assertIn("<title>WebServarr - Control Center</title>", out)
+        self.assertIn('property="og:site_name" content="WebServarr"', out)
+        self.assertIn(">WebServarr</h1>", out.split("<body>")[1])
+        self.assertEqual(pages._preview_meta({}, "", "")[0], "WebServarr")
+        # A named site keeps its name everywhere, trimmed, with nothing hidden.
+        out = render(b=branding(**{"branding.app_name": "  My Server  "}))
+        self.assertIn("<title>My Server - Control Center</title>", out)
+        self.assertIn(">My Server</h1>", out)
+        self.assertNotRegex(out.split("<body>")[1], r'<h1 class="[^"]*\bhidden\b')
+
+    def test_login_hides_the_name_only_when_it_is_empty(self):
+        # R54(c): an empty name hides #loginAppName; the reveal that keeps the
+        # simple-auth form from flashing stays exactly as it was.
+        page = re.sub(r"\s+", " ", static_text("login.html"))
+        self.assertIn("} else if (theme.app_name === '') {", page)
+        self.assertRegex(page, r"var nameEl = document\.getElementById\('loginAppName'\); "
+                               r"if \(nameEl\) nameEl\.classList\.add\('hidden'\);")
+        self.assertIn("#loginForm { visibility: hidden; }", page)
+        self.assertIn("#loginForm.auth-ready { visibility: visible; }", page)
+
 
 class NavModel(unittest.TestCase):
     def nav_hrefs(self, out):
