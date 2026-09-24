@@ -261,6 +261,56 @@ class KitApi(unittest.TestCase):
                 self.assertIn(f"WSSettings.registerTab('{tab}'", path.read_text(encoding="utf-8"), module)
 
 
+def general_function(name: str) -> str:
+    """One top-level function of general.js as live code (comments removed,
+    strings blanked): from its `function name(` to the next top-level
+    function or the tab registration."""
+    js = js_code_only((STATIC / "js" / "settings" / "general.js").read_text(encoding="utf-8"))
+    m = re.search(rf"\n  function {name}\(.*?(?=\n  function |\n  WSSettings\.registerTab)", js, re.S)
+    if m is None:
+        raise AssertionError(f"general.js has no top-level function {name}()")
+    return m.group(0)
+
+
+class GeneralTab(unittest.TestCase):
+    """The General tab's backup and logo rules that can be read from the code."""
+
+    def test_import_preview_lists_the_warnings(self):
+        # Unchanged values today's rules would refuse are shown as "kept as-is",
+        # next to the changes, not dropped from the preview.
+        self.assertRegex(general_function("startImport"), r"\.warnings\b")
+        self.assertRegex(general_function("previewBody"), r"Object\.keys\(\s*warnings\s*\)\s*\.forEach\(")
+
+    def test_a_failed_import_lists_every_error(self):
+        # A 422 carries a message per key; `detail` is only the first of them.
+        body = general_function("showProblems")
+        self.assertRegex(body, r"\.errors\b")
+        self.assertRegex(body, r"Object\.keys\([^)]*\)[\s\S]*?\.forEach\(")
+        self.assertNotRegex(body, r"\.detail\b")
+        # Both the preview and the apply send a 422 there.
+        calls = re.findall(r"status\s*===\s*422\)\s*(?:return\s+)?showProblems\(", general_function("startImport"))
+        self.assertGreaterEqual(len(calls), 2)
+
+    def test_the_import_file_is_size_capped_and_parsed_safely(self):
+        js = js_code_only((STATIC / "js" / "settings" / "general.js").read_text(encoding="utf-8"))
+        self.assertRegex(js, r"\bvar MAX_IMPORT_BYTES\s*=\s*\d")
+        body = general_function("startImport")
+        size = re.search(r"\.size\s*>\s*MAX_IMPORT_BYTES\b", body)
+        read = re.search(r"\.text\(\)", body)
+        self.assertIsNotNone(size, "no size check on the import file")
+        self.assertIsNotNone(read, "the import file is never read")
+        self.assertLess(size.start(), read.start(), "the size is checked after the file is read")
+        self.assertRegex(body, r"try\s*\{[^{}]*JSON\.parse\([^{}]*\}\s*catch\b")
+
+    def test_no_client_check_on_the_logo_address(self):
+        # R14: the server's 422 on Save is the check, shown on the field by the kit.
+        body = general_function("logoCard")
+        for probe in (r"\.test\(", r"\.exec\(", r"\.match\(", r"\bRegExp\b", r"\.startsWith\("):
+            self.assertNotRegex(body, probe)
+        src = (STATIC / "js" / "settings" / "general.js").read_text(encoding="utf-8")
+        self.assertRegex(src, r"api\.text\(\{\s*key:\s*'branding\.logo_url'")
+
+
 class Guards(unittest.TestCase):
     """The hygiene patterns catch what they are for and let the theme through."""
 
