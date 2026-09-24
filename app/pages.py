@@ -32,7 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.config import settings
 from app.database import SessionLocal
-from app.utils import safe_http_url, same_origin_path
+from app.utils import identity_email, safe_http_url, same_origin_path
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +189,11 @@ def data_block(branding: dict, user: Optional[dict], version: str, name: str) ->
 
 
 def public_user(session: Optional[dict]) -> Optional[dict]:
-    """The same shape /auth/check-session returns, from the Redis session dict."""
+    """The same shape /auth/check-session returns, from the Redis session dict.
+
+    has_email says whether the account can receive notifications and push
+    (see utils.identity_email); the address itself never goes into the page.
+    """
     if not session:
         return None
     return {
@@ -198,6 +202,7 @@ def public_user(session: Optional[dict]) -> Optional[dict]:
         "is_admin": session.get("is_admin", "false") == "true",
         "avatar_url": _safe_url(session.get("avatar_url", "")),
         "auth_method": session.get("auth_method", ""),
+        "has_email": bool(identity_email(session.get("email"))),
     }
 
 

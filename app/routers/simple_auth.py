@@ -15,6 +15,7 @@ from app.database import get_db
 from app.dependencies import get_current_user_optional
 from app.limiter import limiter
 from app.models import User, Setting
+from app.utils import identity_email
 
 # Secure cookies whenever served over HTTPS (see settings.cookie_secure).
 _COOKIE_SECURE = settings.cookie_secure
@@ -213,5 +214,7 @@ async def check_session(
             "is_admin": current_user.get("is_admin", "false") == "true",
             "avatar_url": current_user.get("avatar_url", ""),
             "auth_method": current_user.get("auth_method", ""),
+            # Whether push can reach this account; never the address itself.
+            "has_email": bool(identity_email(current_user.get("email"))),
         },
     }

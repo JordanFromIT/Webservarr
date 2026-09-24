@@ -126,6 +126,15 @@ class ShellRendering(unittest.TestCase):
         self.assertEqual(pages.public_user({"avatar_url": "//evil/x.png"})["avatar_url"], "")
         self.assertEqual(pages.public_user({"avatar_url": "https://plex.tv/u.png"})["avatar_url"], "https://plex.tv/u.png")
 
+    def test_public_user_says_whether_push_can_reach_the_account(self):
+        self.assertTrue(pages.public_user({"email": "Sam@Example.test"})["has_email"])
+        for email in ("", "  ", "None", "none", None):
+            self.assertFalse(pages.public_user({"email": email})["has_email"], repr(email))
+        self.assertFalse(pages.public_user({"username": "kid"})["has_email"])
+        # The flag only: the address itself never reaches the page.
+        user = pages.public_user({"email": "sam@example.test"})
+        self.assertNotIn("sam@example.test", json.dumps(user))
+
     def test_app_name_is_escaped_in_shell(self):
         out = render(b=branding(**{"branding.app_name": "A & B <x>"}))
         self.assertIn("A &amp; B &lt;x&gt;", out)
