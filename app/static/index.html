@@ -433,23 +433,23 @@ function renderNews(posts) {
 
 // Load request count for sidebar badge
 async function loadRequestCount() {
-    // The badge exists only when the embedded requests page is enabled.
-    const badge = document.getElementById('requestsBadge');
-    if (!badge) return;
+    // The Requests nav item carries the badge in both the desktop sidebar and
+    // the phone drawer; there is none while Requests is switched off.
+    const badges = document.querySelectorAll('[data-badge="requestsBadge"]');
+    if (!badges.length) return;
+    let pending = 0;
     try {
         const response = await fetch('/api/integrations/request-counts');
         if (!response.ok) throw new Error('API error');
         const counts = await response.json();
-        const pending = counts.pending || 0;
-        if (pending > 0) {
-            badge.textContent = pending;
-            badge.classList.remove('hidden');
-        } else {
-            badge.classList.add('hidden');
-        }
+        pending = counts.pending || 0;
     } catch (e) {
-        badge.classList.add('hidden');
+        pending = 0;
     }
+    badges.forEach(function (badge) {
+        badge.textContent = pending > 0 ? pending : '';
+        badge.classList.toggle('hidden', !(pending > 0));
+    });
 }
 
 // Stream pagination state

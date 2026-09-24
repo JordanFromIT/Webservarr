@@ -57,7 +57,7 @@ _NAV_HREF = {
 }
 _NAV_EXTRA = {
     # The pending-requests count rides on the one Requests item.
-    "requests": {"badge_id": "requestsBadge"},
+    "requests": {"badge": "requestsBadge"},
     # eBooks only exists while Kavita is configured (features.show_books).
     "library": {"feature": "show_books"},
     "settings": {"admin_only": True},
@@ -231,7 +231,9 @@ _LABEL_WITH_SUB = (
     '<span class="text-[10px] font-normal truncate mt-0.5 {subcls}">{sub}</span>'
     '</span>'
 )
-_BADGE = '<span id="{bid}" class="ml-auto bg-primary/20 text-[10px] px-1.5 py-0.5 rounded font-bold hidden"></span>'
+# A data attribute, not an id: the nav links are rendered twice (desktop
+# sidebar and phone drawer), so an id would be duplicated on every page.
+_BADGE = '<span data-badge="{bid}" class="ml-auto bg-primary/20 text-[10px] px-1.5 py-0.5 rounded font-bold hidden"></span>'
 _NEW_FLAG = '<span class="nav-new-badge">New!</span>'
 
 
@@ -288,7 +290,7 @@ def render_nav_links(branding: dict, is_admin: bool, active_id: Optional[str]) -
             )
         else:
             label = "<span>" + html.escape(it["label"]) + flag + "</span>"
-        badge = _BADGE.format(bid=html.escape(it["badge_id"])) if it.get("badge_id") else ""
+        badge = _BADGE.format(bid=html.escape(it["badge"], quote=True)) if it.get("badge") else ""
         template = _LINK_ACTIVE if active else _LINK
         parts.append(template.format(
             href=html.escape(it["href"], quote=True),
