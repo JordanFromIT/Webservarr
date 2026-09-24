@@ -78,9 +78,11 @@ class ConnectHelper(unittest.TestCase):
         self.assertTrue(live_matches(body, r"\bRETRY_WINDOW_MS\b"))
 
     def test_every_storage_access_is_guarded(self):
+        # Both scans run on the code-only text: it drops comments, so its
+        # offsets differ from the raw source, and a match in it is live code.
         code = js_code_only(self.src)
         spans = [(m.end() - 1, matching_brace(code, m.end() - 1)) for m in re.finditer(r"\btry\s*\{", code)]
-        accesses = live_matches(self.src, r"\bsessionStorage\.\w+")
+        accesses = list(re.finditer(r"\bsessionStorage\.\w+", code))
         self.assertTrue(accesses)
         for m in accesses:
             self.assertTrue(any(a < m.start() < b for a, b in spans), f"unguarded {m.group(0)} at {m.start()}")
