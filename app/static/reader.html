@@ -415,9 +415,14 @@
     el('navNext').hidden = !turning;
   }
 
-  /** Page turning needs a book and no error on screen. */
+  /**
+   * Page turning needs the current page on screen: no error, and nothing still
+   * loading. During boot the saved position is still being looked up, and a
+   * turn then would be saved over it once boot falls back to the first page.
+   * It also keeps one turn from starting on top of another.
+   */
   function canTurnPage() {
-    return book.chapterId != null && activePanel !== 'errorState';
+    return book.chapterId != null && activePanel === 'bookContent';
   }
 
   var retryAction = null;
@@ -499,8 +504,18 @@
     window.scrollTo(0, 0);
   }
 
+  /** The reader's page turns (edges, keys, contents, page jump) come through here. */
   function goToPage(page, skipSave) {
     if (!canTurnPage()) return Promise.resolve();
+    return loadPage(page, skipSave);
+  }
+
+  /**
+   * Put a page on screen. Past the page-turn check, so only goToPage, boot's
+   * first page and a failed page's Try again call it: boot runs under the
+   * spinner and Try again under the error, where the check refuses.
+   */
+  function loadPage(page, skipSave) {
     if (page < 0) page = 0;
     if (book.pages && page > book.pages - 1) page = book.pages - 1;
     current.page = page;
@@ -527,7 +542,7 @@
         // The arrows are off under an error, so Try again reloads this page
         // (with the same skipSave: a retry never confirms an unknown position).
         showError('Couldn’t load this page', String(err.message || err), function () {
-          showPanel('loading'); goToPage(page, skipSave);
+          loadPage(page, skipSave);
         });
       });
   }
@@ -734,7 +749,7 @@
       loadTOC();
       return restoreProgress();
     }).then(function (page) {
-      return goToPage(page, true);
+      return loadPage(page, true);
     }).then(function () {
       // Only once there is a rendered page to point at. Starting earlier
       // spotlights an empty loading spinner.
