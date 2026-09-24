@@ -57,7 +57,7 @@
   // null after sending an admin whose session has ended to the sign-in page.
   function failure(res, words) {
     var s = res.status, d = res.data;
-    if (s === 401) { window.location.href = '/login'; return null; }
+    if (s === 401) { WSSettings.leave('/login'); return null; }
     if (words[s]) return words[s];
     if (s === 0) return MSG.offline;
     if (s === 403) return MSG.forbidden;
@@ -198,12 +198,17 @@
       uploading = on;
       upload.setAttribute('aria-disabled', on ? 'true' : 'false');
     }
+    // Any other logo choice (or a Discard) wins over an upload still in
+    // flight: its answer is dropped when it arrives.
+    function cancelUpload() { seq += 1; busy(false); }
 
     builtIn.addEventListener('click', function () {
+      cancelUpload();
       say('');
       api.set('branding.logo_url', WSSettings.metaFor('branding.logo_url').default);
     });
-    noLogo.addEventListener('click', function () { say(''); api.set('branding.logo_url', ''); });
+    noLogo.addEventListener('click', function () { cancelUpload(); say(''); api.set('branding.logo_url', ''); });
+    input.addEventListener('input', function () { cancelUpload(); say(''); });
     upload.addEventListener('click', function () { if (!uploading) file.click(); });
     file.addEventListener('change', function () {
       var f = file.files[0];
@@ -217,7 +222,7 @@
       var fd = new FormData();
       fd.append('file', f);
       request('/api/admin/upload-logo', { method: 'POST', body: fd }).then(function (res) {
-        // A Discard since this upload started wins: its answer is dropped.
+        // Another choice or a Discard since this upload started wins.
         if (mine !== seq) return;
         busy(false);
         var url = res.status === 200 && res.data && typeof res.data.url === 'string' ? res.data.url : '';
@@ -233,7 +238,7 @@
       });
     });
     api.onSaved(function () { say(''); });
-    api.onDiscard(function () { seq += 1; busy(false); say(''); });
+    api.onDiscard(function () { cancelUpload(); say(''); });
 
     // The tab waits (briefly) for the preview, so it arrives with the rest.
     return { root: c.root, ready: Promise.race([ready, new Promise(function (r) { setTimeout(r, 300); })]) };
@@ -300,7 +305,7 @@
       list.appendChild(li);
     });
     if (keys.length > 10) list.appendChild(el('li', 'text-[13px] text-frosted-blue/45', 'and ' + (keys.length - 10) + ' more'));
-    return WSSettings.confirm({ title: 'This file can’t be imported', body: list, confirmLabel: 'OK', cancelLabel: 'Close' });
+    return WSSettings.confirm({ title: 'This file can’t be imported', body: list, confirmLabel: 'OK', alert: true });
   }
 
   function postImport(data, dry, token) {
@@ -310,9 +315,17 @@
     });
   }
 
+  // An edit on this tab since the import started would be thrown away by the
+  // reload that follows it, so the import stops instead.
+  function blockedByEdits(api) {
+    if (!api.dirtyKeys().length) return false;
+    WSSettings.toast(MSG.dirty, 'err');
+    return true;
+  }
+
   // Preview the file, show every change, then apply exactly that diff.
   // Resolves once the admin is done ('reloading' when the page is reloading).
-  function startImport(f) {
+  function startImport(f, api) {
     if (f.size > MAX_IMPORT_BYTES) { WSSettings.toast(MSG.bigFile, 'err'); return Promise.resolve(); }
     return f.text().then(function (text) {
       var data;
@@ -339,19 +352,20 @@
           var same = el('div');
           same.appendChild(el('p', null, 'This file matches your current settings.'));
           same.appendChild(previewBody([], ignored, warnings));
-          return WSSettings.confirm({ title: 'Nothing to import', body: same, confirmLabel: 'OK', cancelLabel: 'Close' });
+          return WSSettings.confirm({ title: 'Nothing to import', body: same, confirmLabel: 'OK', alert: true });
         }
+        if (blockedByEdits(api)) return;
         return WSSettings.confirm({
           title: 'Import ' + changes.length + ' change' + (changes.length === 1 ? '' : 's') + '?',
           body: previewBody(changes, ignored, warnings),
           confirmLabel: 'Import', cancelLabel: 'Cancel'
         }).then(function (ok) {
-          if (!ok) return;
+          if (!ok || blockedByEdits(api)) return;
           return postImport(data, false, d.diff_token).then(function (applied) {
             if (applied.status === 200 && applied.data && Array.isArray(applied.data.applied)) {
               var n = applied.data.applied.length;
               WSSettings.toast('Imported ' + n + ' setting' + (n === 1 ? '' : 's') + '. Reloading…', 'ok');
-              setTimeout(function () { window.location.reload(); }, 900);
+              setTimeout(function () { WSSettings.leave(); }, 900);
               return 'reloading';
             }
             if (applied.status === 422) return showProblems(applied.data);
@@ -387,7 +401,8 @@
     }).catch(function () { WSSettings.toast(MSG.offline, 'err'); });
   }
 
-  function backupCard(api) {
+  // locked: the tab's other cards, which can't be edited while an import runs.
+  function backupCard(api, locked) {
     var c = WSSettings.card('Backup',
       'Save your settings to a file, or restore them from one. Passwords, tokens and API keys are never included.');
     var row = el('div', 'flex flex-wrap gap-2');
@@ -422,6 +437,10 @@
       var dirty = api.dirtyKeys().length > 0;
       imp.disabled = dirty;
       imp.setAttribute('aria-disabled', importing ? 'true' : 'false');
+      locked.forEach(function (n) {
+        n.inert = importing;
+        if (importing) n.setAttribute('aria-busy', 'true'); else n.removeAttribute('aria-busy');
+      });
       note.textContent = dirty ? MSG.dirty
         : 'Importing shows every change first. Nothing is applied until you confirm.';
     }
@@ -449,7 +468,7 @@
       if (api.dirtyKeys().length) { WSSettings.toast(MSG.dirty, 'err'); return; }
       importing = true;
       sync();
-      startImport(f).then(function (outcome) {
+      startImport(f, api).then(function (outcome) {
         if (outcome === 'reloading') return;       // stays busy until the page reloads
         importing = false;
         sync();
@@ -465,10 +484,11 @@
 
   WSSettings.registerTab('general', {
     mount: function (panel, api) {
-      panel.appendChild(siteCard(api));
+      var site = siteCard(api);
       var logo = logoCard(api);
+      panel.appendChild(site);
       panel.appendChild(logo.root);
-      panel.appendChild(backupCard(api));
+      panel.appendChild(backupCard(api, [site, logo.root]));
       return logo.ready;
     }
   });

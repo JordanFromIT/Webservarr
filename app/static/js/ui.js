@@ -105,7 +105,7 @@
   function onKey(e) {
     var d = topDialog();
     if (!d) return;
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); d.close(false); return; }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); d.close(d.dismiss); return; }
     if (e.key !== 'Tab') return;
     var f = focusables(d.box);
     if (!f.length) { e.preventDefault(); return; }
@@ -125,6 +125,9 @@
     if (f.length) f[0].focus();
   }
 
+  // opts: {title, body: string|Node, confirmLabel, cancelLabel, danger, alert}.
+  // Resolves true for OK, false for Cancel/Escape/backdrop; with alert (a
+  // one-button notice) every way out resolves true.
   function confirm(opts) {
     opts = opts || {};
     return new Promise(function (resolve) {
@@ -133,7 +136,7 @@
         'bg-background-dark/70 backdrop-blur-sm');
       var box = el('div', 'w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border border-frosted-blue/10 ' +
         'bg-background-dark shadow-2xl p-6 ws-panel-in');
-      box.setAttribute('role', opts.danger ? 'alertdialog' : 'dialog');
+      box.setAttribute('role', opts.danger || opts.alert ? 'alertdialog' : 'dialog');
       box.setAttribute('aria-modal', 'true');
       dialogCount += 1;
       var title = el('h2', 'text-[20px] font-bold tracking-tight text-frosted-blue', opts.title || 'Are you sure?');
@@ -153,12 +156,14 @@
       cancel.type = 'button';
       var ok = el('button', opts.danger ? cls.btnDanger : cls.btnPrimary, opts.confirmLabel || 'Confirm');
       ok.type = 'button';
-      row.appendChild(cancel);
+      // alert: a notice with one button (OK); Escape and the backdrop answer the same.
+      if (!opts.alert) row.appendChild(cancel);
       row.appendChild(ok);
       box.appendChild(row);
       overlay.appendChild(box);
 
-      var entry = { box: box, close: close };
+      // What Escape and a backdrop click answer: Cancel, or OK for a one-button notice.
+      var entry = { box: box, close: close, dismiss: !!opts.alert };
       var done = false;
       function close(result) {
         if (done) return;
@@ -188,10 +193,10 @@
       }
       stack.push(entry);
       document.body.appendChild(overlay);
-      overlay.addEventListener('click', function (e) { if (e.target === overlay) close(false); });
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) close(entry.dismiss); });
       cancel.addEventListener('click', function () { close(false); });
       ok.addEventListener('click', function () { close(true); });
-      (opts.danger ? cancel : ok).focus();
+      (opts.danger && !opts.alert ? cancel : ok).focus();
     });
   }
 

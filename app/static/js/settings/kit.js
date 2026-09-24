@@ -606,8 +606,7 @@
   function settle(t, sent, status, ok, data) {
     if (status === 401) {
       // The session has ended; nothing here can be saved. Sign in again.
-      S.leaving = true;
-      window.location.href = '/login';
+      leave('/login');
       return false;
     }
     if (ok) {
@@ -918,6 +917,15 @@
   }
 
   // ---- Leave guard ----
+
+  // Leave the page on purpose (a sign-in redirect, a reload after an import):
+  // the beforeunload guard stands down, so the browser doesn't ask as well.
+  // No url reloads the page.
+  function leave(url) {
+    S.leaving = true;
+    if (url) window.location.href = url;
+    else window.location.reload();
+  }
   //
   // Links inside the app ask with the kit's dialog. Anything else that leaves
   // (reload, closing the tab, a typed address, the browser's own back to
@@ -943,9 +951,7 @@
           (n === 1 ? 'it' : 'them') + ' away.',
         confirmLabel: 'Leave page', cancelLabel: 'Keep editing', danger: true
       }).then(function (ok) {
-        if (!ok) return;
-        S.leaving = true;
-        window.location.href = url.href;
+        if (ok) leave(url.href);
       });
     });
   }
@@ -953,7 +959,7 @@
   function load() {
     S.loadFailed = false;
     return fetch('/api/admin/settings?view=registry', { credentials: 'same-origin' }).then(function (r) {
-      if (r.status === 401) { S.leaving = true; window.location.href = '/login'; throw new Error('HTTP 401'); }
+      if (r.status === 401) { leave('/login'); throw new Error('HTTP 401'); }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }).then(function (data) {
@@ -995,7 +1001,7 @@
   }
 
   var WSSettings = {
-    boot: boot, registerTab: registerTab, go: go, metaFor: metaFor, card: card,
+    boot: boot, registerTab: registerTab, go: go, metaFor: metaFor, card: card, leave: leave,
     toast: UI.toast, confirm: UI.confirm, el: el, icon: icon, cls: cls
   };
   Object.defineProperty(WSSettings, 'values', { get: function () { return S.values; } });
