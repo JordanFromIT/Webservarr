@@ -53,7 +53,7 @@ If this is about one specific movie or show, <a href="/issues" class="text-prima
 <input id="createImage" type="file" accept="image/png,image/jpeg,image/webp"
   class="w-full text-sm text-steel-blue file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-primary/20 file:text-primary hover:file:bg-primary/30 transition-all mb-4"/>
 
-<button onclick="submitNewTicket()" id="createSubmitBtn" class="w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all">
+<button onclick="submitNewTicket()" id="createSubmitBtn" class="w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed">
 Send to support
 </button>
 </div>
@@ -315,14 +315,19 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
   var _ticketsOff = false;
   var OFF_NOTICE = 'Messages have been turned off, so this can\u2019t be sent right now.';
+  // The ticket API's 403 detail while Tickets is switched off (app/routers/tickets.py).
+  var TICKETS_OFF_DETAIL = 'The ticket system is turned off';
+  // Rejection a send uses once the off-flow has taken over: no error toast.
+  var TICKETS_OFF = {};
 
   /* Stop polling, then go home as the server-side page gate would - unless the
      member is part-way through writing something. Their text is never thrown
-     away: the notice goes in that surface, and they leave when they close it. */
-  function ticketsTurnedOff() {
+     away: the notice goes in that surface, and they leave when they close it.
+     A send's own 403 passes its button; a poll finds the open draft itself. */
+  function ticketsTurnedOff(sendBtn) {
     _ticketsOff = true;
     if (_stopRefresh) { _stopRefresh(); _stopRefresh = null; }
-    var sendBtn = draftSendButton();
+    sendBtn = sendBtn || draftSendButton();
     if (sendBtn) { showOffNotice(sendBtn); return; }
     window.location.replace('/');
   }
@@ -341,13 +346,33 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
     return null;
   }
 
+  // The notice says the draft can't be sent, so the button agrees.
   function showOffNotice(sendBtn) {
+    sendBtn.disabled = true;
     var prev = sendBtn.previousElementSibling;
     if (prev && prev.hasAttribute('data-off-notice')) return;
     var notice = createEl('p', 'text-xs text-steel-blue bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3', OFF_NOTICE);
     notice.setAttribute('data-off-notice', '');
     notice.setAttribute('role', 'status');
     sendBtn.parentNode.insertBefore(notice, sendBtn);
+  }
+
+  /* POST for the New message and comment forms. Rejects with the server's
+     detail for the form's toast - except a member's "turned off" 403, which
+     takes the off-flow by that form's button and rejects with TICKETS_OFF.
+     Matching the detail keeps other 403s (a comment on someone else's ticket)
+     on the toast. */
+  function postTicketForm(url, formData, sendBtn) {
+    return fetch(url, { method: 'POST', body: formData }).then(function (r) {
+      if (r.ok) return r.json();
+      return r.json().then(function (d) {
+        if (!_isAdmin && r.status === 403 && d.detail === TICKETS_OFF_DETAIL) {
+          ticketsTurnedOff(sendBtn);
+          throw TICKETS_OFF;
+        }
+        throw new Error(d.detail || 'Failed');
+      });
+    });
   }
 
   function loadTickets() {
@@ -471,6 +496,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
   };
 
   window.submitNewTicket = function() {
+    if (_ticketsOff) return;
     var title = document.getElementById('createTitle').value.trim();
     var description = document.getElementById('createDescription').value.trim();
     var category = document.getElementById('createCategory').value;
@@ -491,19 +517,15 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
     btn.disabled = true;
     btn.textContent = 'Submitting...';
 
-    fetch('/api/tickets', { method: 'POST', body: formData })
-      .then(function(r) {
-        if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || 'Failed'); });
-        return r.json();
-      })
+    postTicketForm('/api/tickets', formData, btn)
       .then(function() {
         closeCreateModal();
         showToast('Ticket submitted!', 'success');
         loadTickets();
         loadCounts();
       })
-      .catch(function(e) { showToast(e.message, 'error'); })
-      .finally(function() { btn.disabled = false; btn.textContent = 'Submit Ticket'; });
+      .catch(function(e) { if (e !== TICKETS_OFF) showToast(e.message, 'error'); })
+      .finally(function() { btn.disabled = _ticketsOff; btn.textContent = 'Submit Ticket'; });
   };
 
   // ---- Ticket detail modal ----
@@ -718,9 +740,10 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
       fileInput.accept = 'image/png,image/jpeg,image/webp';
       fileInput.className = 'w-full text-sm text-steel-blue file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-primary/20 file:text-primary hover:file:bg-primary/30 transition-all mb-2';
 
-      var sendBtn = createEl('button', 'w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all', 'Add Comment');
+      var sendBtn = createEl('button', 'w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed', 'Add Comment');
       sendBtn.id = 'commentSendBtn';
       sendBtn.addEventListener('click', function() {
+        if (_ticketsOff) return;
         var msg = textarea.value.trim();
         if (!msg) { showToast('Comment cannot be empty', 'error'); return; }
 
@@ -733,17 +756,13 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
         sendBtn.disabled = true;
         sendBtn.textContent = 'Sending...';
 
-        fetch('/api/tickets/' + ticket.id + '/comments', { method: 'POST', body: formData })
-          .then(function(r) {
-            if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || 'Failed'); });
-            return r.json();
-          })
+        postTicketForm('/api/tickets/' + ticket.id + '/comments', formData, sendBtn)
           .then(function() {
             showToast('Comment added', 'success');
             openDetailModal(ticket.id); // Refresh detail
           })
-          .catch(function(e) { showToast(e.message, 'error'); })
-          .finally(function() { sendBtn.disabled = false; sendBtn.textContent = 'Add Comment'; });
+          .catch(function(e) { if (e !== TICKETS_OFF) showToast(e.message, 'error'); })
+          .finally(function() { sendBtn.disabled = _ticketsOff; sendBtn.textContent = 'Add Comment'; });
       });
 
       formDiv.appendChild(textarea);
