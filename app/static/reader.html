@@ -104,6 +104,8 @@
   .nav-zone:hover .chev,
   .nav-zone:focus-visible .chev { opacity: 1; background: rgb(var(--color-primary) / .45); }
   .nav-zone:disabled { cursor: default; }
+  /* Off while an error shows (showPanel): there is no page to turn. */
+  .nav-zone[hidden] { display: none; }
   .nav-zone:disabled .chev { opacity: .12; }
   .nav-zone:focus-visible { outline: 2px solid rgb(var(--color-accent)); outline-offset: -4px; }
 
@@ -280,6 +282,11 @@
   var current = { page: 0 };
   var saveTimer = null;
   var lastSaved = -1;
+  // Whether current.page is a position we may write back to Kavita. False
+  // until Kavita told us where this reader is (get-progress answered) or they
+  // turned a page themselves. Otherwise a failed lookup, which opens the book
+  // at the start, would overwrite their real place when they leave the page.
+  var positionKnown = false;
 
   function el(id) { return document.getElementById(id); }
   function qs(name) { return new URLSearchParams(location.search).get(name); }
@@ -333,7 +340,7 @@
   }
 
   function showConnectProblem() {
-    showError(CONNECT_TITLE, CONNECT_MESSAGE, true);
+    showError(CONNECT_TITLE, CONNECT_MESSAGE, retryConnect);
   }
 
   // ---- Preferences (local; reading position itself lives in Kavita) ----
@@ -394,19 +401,38 @@
 
   // One of these at a time, so a stale error never sits above a working page.
   var PANELS = ['loading', 'errorState', 'bookContent'];
+  var activePanel = 'loading';
 
   function showPanel(which) {
+    activePanel = which;
     PANELS.forEach(function (id) {
       el(id).classList.toggle('hidden', id !== which);
     });
+    // The edge zones sit outside the panels, over everything. Under an error
+    // there is no page to turn, so they go too (and every page key waits).
+    var turning = which !== 'errorState';
+    el('navPrev').hidden = !turning;
+    el('navNext').hidden = !turning;
   }
 
-  /** canRetry: the connection problem, where Try again can help. */
-  function showError(title, detail, canRetry) {
+  /** Page turning needs a book and no error on screen. */
+  function canTurnPage() {
+    return book.chapterId != null && activePanel !== 'errorState';
+  }
+
+  var retryAction = null;
+
+  /** onRetry: what Try again does here (sign in again, or reload the page); none for other errors. */
+  function showError(title, detail, onRetry) {
     el('errorTitle').textContent = title;
     el('errorDetail').textContent = detail || '';
-    el('errorRetry').classList.toggle('hidden', !canRetry);
+    retryAction = onRetry || null;
+    el('errorRetry').classList.toggle('hidden', !retryAction);
     showPanel('errorState');
+  }
+
+  function runRetry() {
+    if (retryAction) retryAction();
   }
 
   function resolveChapter(seriesId) {
@@ -474,6 +500,7 @@
   }
 
   function goToPage(page, skipSave) {
+    if (!canTurnPage()) return Promise.resolve();
     if (page < 0) page = 0;
     if (book.pages && page > book.pages - 1) page = book.pages - 1;
     current.page = page;
@@ -489,11 +516,19 @@
       })
       .then(function (html) {
         renderPage(html);
-        if (!skipSave) queueProgress();
+        if (!skipSave) {
+          // The reader chose this page: from here it is theirs to save.
+          positionKnown = true;
+          queueProgress();
+        }
       })
       .catch(function (err) {
         if (err && err.message === 'reconnecting') return;
-        showError('Couldn’t load this page', String(err.message || err));
+        // The arrows are off under an error, so Try again reloads this page
+        // (with the same skipSave: a retry never confirms an unknown position).
+        showError('Couldn’t load this page', String(err.message || err), function () {
+          showPanel('loading'); goToPage(page, skipSave);
+        });
       });
   }
 
@@ -532,7 +567,7 @@
   }
 
   function saveProgress(useBeacon) {
-    if (current.page === lastSaved) return;
+    if (!positionKnown || current.page === lastSaved) return;
     var payload = {
       libraryId: book.libraryId,
       seriesId: book.seriesId,
@@ -558,15 +593,32 @@
     }, true).catch(function () { lastSaved = -1; });
   }
 
-  function restoreProgress() {
+  /** Where Kavita has this reader. Rejects when that isn't actually known. */
+  function fetchProgress() {
     return kavita('/api/Reader/get-progress?chapterId=' + book.chapterId, null, true)
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (p) {
-        var page = (p && typeof p.pageNum === 'number') ? p.pageNum : 0;
+      .then(function (r) {
+        if (!r.ok) throw new Error('progress HTTP ' + r.status);
+        return r.text();
+      })
+      .then(function (text) {
+        // An empty or null body is Kavita's "not started": a known page 0.
+        // Anything unparsable throws, and the position stays unknown.
+        var p = text ? JSON.parse(text) : null;
+        return (p && typeof p.pageNum === 'number') ? p.pageNum : 0;
+      });
+  }
+
+  function restoreProgress() {
+    // One quiet retry before giving up: a lost lookup would otherwise leave
+    // the book at the start with saving switched off.
+    return fetchProgress()
+      .catch(function () { return fetchProgress(); })
+      .then(function (page) {
+        positionKnown = true;
         lastSaved = page;
         return page;
       })
-      .catch(function () { return 0; });
+      .catch(function () { return 0; });   // position unknown: open at the start, never save it
   }
 
   // ---- UI wiring ----
@@ -578,7 +630,7 @@
   }
 
   el('tocBtn').addEventListener('click', function () { toggleTOC(); });
-  el('errorRetry').addEventListener('click', retryConnect);
+  el('errorRetry').addEventListener('click', runRetry);
   el('settingsBtn').addEventListener('click', function () {
     el('settingsPanel').classList.toggle('hidden');
   });
@@ -618,9 +670,15 @@
 
   document.addEventListener('keydown', function (e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (e.key === 'ArrowRight' || e.key === 'j' || e.key === ' ') { e.preventDefault(); goToPage(current.page + 1); }
-    else if (e.key === 'ArrowLeft' || e.key === 'k') { e.preventDefault(); goToPage(current.page - 1); }
-    else if (e.key === 't') toggleTOC();
+    if (e.key === 'ArrowRight' || e.key === 'j' || e.key === ' ') {
+      if (!canTurnPage()) return;
+      e.preventDefault();
+      goToPage(current.page + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'k') {
+      if (!canTurnPage()) return;
+      e.preventDefault();
+      goToPage(current.page - 1);
+    } else if (e.key === 't') toggleTOC();
     else if (e.key === 'Escape') { toggleTOC(false); el('settingsPanel').classList.add('hidden'); }
   });
 
