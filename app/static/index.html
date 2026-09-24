@@ -17,6 +17,44 @@
 <!-- ws:header -->
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8">
+<!-- Push opt-in. Everything that decides whether to offer it is known before
+     first paint, so the script inside reveals it synchronously and it never
+     pushes content down after load. notifications.js wires the buttons and
+     writes the dismissal under data-dismiss-key. The section has no display
+     utility (one would override the hidden attribute), and the script stays
+     inside it: a visible sibling would give the next section a space-y gap. -->
+<section id="pushPrompt" hidden aria-labelledby="pushPromptTitle" data-dismiss-key="ws-push-prompt-dismissed" data-dismiss-days="30">
+<div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 lg:p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+<div class="flex items-start gap-4 flex-1 min-w-0">
+<span class="material-symbols-outlined text-primary bg-primary/15 rounded-full size-11 shrink-0 flex items-center justify-center" aria-hidden="true">notifications_active</span>
+<div class="min-w-0">
+<h2 id="pushPromptTitle" class="text-[17px] font-bold tracking-[-0.02em] leading-snug text-frosted-blue">Get notified when your requests are ready</h2>
+<p class="text-[15px] leading-relaxed text-frosted-blue/70 mt-1">We'll send an alert to this device when something you asked for is ready to watch or someone replies to you.</p>
+<p data-push-prompt-msg role="status" aria-live="polite" class="text-[15px] leading-relaxed text-frosted-blue mt-2 empty:hidden"></p>
+</div>
+</div>
+<div data-push-prompt-actions class="flex gap-2 shrink-0">
+<button type="button" data-push-prompt-later class="flex-1 sm:flex-none px-4 py-2 rounded-[10px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50">Not now</button>
+<button type="button" data-push-prompt-enable class="flex-1 sm:flex-none bg-primary hover:bg-primary/90 text-bright px-4 py-2 rounded-[10px] text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark disabled:opacity-50">Turn on</button>
+</div>
+</div>
+<script>
+// Offer push only to an account push can reach, on a browser that supports
+// it, that has never been asked, and that didn't say "Not now" recently.
+(function () {
+    var card = document.currentScript && document.currentScript.parentElement;
+    var user = (window.WS_DATA || {}).user || {};
+    if (!card || !user.has_email || !(window.WEBSERVARR_THEME || {}).vapid_public_key) return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+    if (Notification.permission !== 'default') return;
+    try {
+        var at = parseInt(localStorage.getItem(card.dataset.dismissKey) || '', 10);
+        if (at && Date.now() - at < Number(card.dataset.dismissDays) * 86400000) return;
+    } catch (e) {}
+    card.hidden = false;
+})();
+</script>
+</section>
 <!-- Service Health + News Side by Side -->
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 <!-- Service Health -->

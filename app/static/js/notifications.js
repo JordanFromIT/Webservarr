@@ -559,9 +559,14 @@
   // has stored it, so the toggle shows "on" only when both are true. A browser
   // subscription the server never received (a failed save, a wiped database)
   // is re-sent once per browser session so existing users repair themselves.
+  //
+  // Push is on by default: a browser that already allowed notifications but
+  // holds no subscription is subscribed quietly, unless the user turned push
+  // off on this device (PUSH_OFF_KEY, kept in localStorage across sessions).
 
   var SW_READY_TIMEOUT_MS = 8000;
   var PUSH_SYNC_KEY = 'ws-push-synced';
+  var PUSH_OFF_KEY = 'ws-push-off';
   var _pushMsg = null;
 
   var PUSH_MESSAGES = {
@@ -569,9 +574,31 @@
     blocked: "Notifications are blocked for this site. Allow them in your browser's site settings, then try again.",
     dismissed: "Notifications weren't allowed. Turn this on again and choose Allow when your browser asks.",
     timeout: "Your browser didn't finish getting ready. Reload the page and try again.",
+    noEmail: "This account doesn't have an email address, so notifications can't be sent to it.",
     failed: "We couldn't turn on notifications for this device. Please try again in a moment.",
     offFailed: "We couldn't turn off notifications for this device. Please try again in a moment."
   };
+
+  /** Which PUSH_MESSAGES entry explains a failed subscribePush(). */
+  function pushFailureKind(err) {
+    if (err && err.permission) return err.permission === 'denied' ? 'blocked' : 'dismissed';
+    if (err && err.message === 'sw-timeout') return 'timeout';
+    if (err && err.reason) return err.reason;      // 'unconfigured' | 'noEmail'
+    return 'failed';
+  }
+
+  function setPushOff(off) {
+    try {
+      if (off) localStorage.setItem(PUSH_OFF_KEY, '1');
+      else localStorage.removeItem(PUSH_OFF_KEY);
+    } catch (e) {}
+  }
+
+  /** True when the user turned push off here, or when we can't tell (no
+   *  storage): never quietly turn it back on against their choice. */
+  function pushTurnedOff() {
+    try { return localStorage.getItem(PUSH_OFF_KEY) === '1'; } catch (e) { return true; }
+  }
 
   function showPushMessage(text) {
     if (!_pushMsg) return;
@@ -632,7 +659,14 @@
         }
       })
     }).then(function(resp) {
-      if (!resp.ok) throw new Error('subscribe-failed');
+      if (resp.ok) return;
+      return resp.json().catch(function() { return {}; }).then(function(body) {
+        var err = new Error('subscribe-failed');
+        // The server refuses accounts it has no email for ("Push
+        // notifications need an account email.").
+        if (resp.status === 400 && /email/i.test((body && body.detail) || '')) err.reason = 'noEmail';
+        throw err;
+      });
     });
   }
 
@@ -685,16 +719,20 @@
     try { return !!sessionStorage.getItem(PUSH_SYNC_KEY); } catch (e) { return false; }
   }
 
-  /** Re-send an existing browser subscription the server may have lost. */
+  /** Re-send an existing browser subscription the server may have lost, or,
+   *  where notifications are already allowed but nothing is subscribed,
+   *  subscribe quietly (push is on by default). */
   function syncPushSubscription() {
     if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
     if (Notification.permission !== 'granted' || pushSyncedThisSession()) return;
     var vapidKey = (window.WEBSERVARR_THEME || {}).vapid_public_key;
     if (!vapidKey) return;
+    var user = (window.WS_DATA || {}).user || {};
+    var mayTurnOn = !!user.has_email && !pushTurnedOff();
 
     swReady().then(function(reg) {
       return reg.pushManager.getSubscription().then(function(sub) {
-        if (!sub) return;   // push is off on this device: nothing to repair
+        if (!sub && !mayTurnOn) return;   // off on this device, and staying off
         return currentSubscription(reg, vapidKey).then(function(result) {
           return postSubscription(result.subscription);
         });
@@ -718,19 +756,22 @@
     });
   }
 
-  function enablePush(toggleEl) {
-    var theme = window.WEBSERVARR_THEME || {};
-    var vapidKey = theme.vapid_public_key;
+  /**
+   * Ask for permission and subscribe this browser. Shared by the settings
+   * toggle and the Home prompt. Call it straight from a click: the browser
+   * only shows its permission prompt in response to a user gesture.
+   * Rejects with an error pushFailureKind() can explain.
+   */
+  function subscribePush() {
+    var vapidKey = (window.WEBSERVARR_THEME || {}).vapid_public_key;
     if (!vapidKey) {
-      setPushToggle(toggleEl, false);
-      showPushMessage(PUSH_MESSAGES.unconfigured);
-      return;
+      var unconfigured = new Error('unconfigured');
+      unconfigured.reason = 'unconfigured';
+      return Promise.reject(unconfigured);
     }
-
-    toggleEl.disabled = true;
     var created = null;   // a browser subscription THIS attempt made, if any
 
-    Promise.resolve(Notification.requestPermission()).then(function(permission) {
+    return Promise.resolve(Notification.requestPermission()).then(function(permission) {
       if (permission !== 'granted') {
         var err = new Error('permission');
         err.permission = permission;
@@ -744,22 +785,25 @@
       return postSubscription(result.subscription);
     }).then(function() {
       markPushSynced();
-      setPushToggle(toggleEl, true);
-    }).catch(function(err) {
-      console.error('Push subscription error:', err);
-      setPushToggle(toggleEl, false);
+      setPushOff(false);
+    }, function(err) {
       // Undo a subscription this attempt made, so the toggle can't read "on"
       // next time while nothing can arrive. One that already existed is kept:
       // a transient save failure must not destroy it, and the next page's
       // re-sync can only repair a subscription the browser still holds.
       if (created) created.unsubscribe().catch(function() {});
-      var msg = PUSH_MESSAGES.failed;
-      if (err && err.permission) {
-        msg = err.permission === 'denied' ? PUSH_MESSAGES.blocked : PUSH_MESSAGES.dismissed;
-      } else if (err && err.message === 'sw-timeout') {
-        msg = PUSH_MESSAGES.timeout;
-      }
-      showPushMessage(msg);
+      throw err;
+    });
+  }
+
+  function enablePush(toggleEl) {
+    toggleEl.disabled = true;
+    subscribePush().then(function() {
+      setPushToggle(toggleEl, true);
+    }, function(err) {
+      console.error('Push subscription error:', err);
+      setPushToggle(toggleEl, false);
+      showPushMessage(PUSH_MESSAGES[pushFailureKind(err)]);
     }).then(function() {
       toggleEl.disabled = false;
     });
@@ -782,6 +826,7 @@
                      { method: 'DELETE' }).catch(function() {});
       });
     }).then(function() {
+      setPushOff(true);   // stay off: no quiet re-subscribe on later visits
       setPushToggle(toggleEl, false);
     }).catch(function(err) {
       console.error('Push unsubscribe error:', err);
@@ -789,6 +834,75 @@
       return checkPushState(toggleEl);   // re-enable only once it is corrected
     }).then(function() {
       toggleEl.disabled = false;
+    });
+  }
+
+  // ---- Home push prompt ----
+  //
+  // index.html decides before first paint whether to show #pushPrompt (so it
+  // never moves content after load); this wires its buttons. "Not now" and a
+  // closed browser prompt are remembered for data-dismiss-days under
+  // data-dismiss-key. A denied prompt needs nothing stored: the page only
+  // offers push while the permission is still "default".
+
+  function rememberPromptDismissed(card) {
+    try { localStorage.setItem(card.dataset.dismissKey, String(Date.now())); } catch (e) {}
+  }
+
+  /** Collapse the card. It follows the user's own tap, so the content moving
+   *  up is expected; it still eases rather than snaps. */
+  function hidePushPrompt(card) {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) { card.hidden = true; return; }
+    card.style.overflow = 'hidden';
+    card.style.height = card.offsetHeight + 'px';
+    void card.offsetHeight;
+    card.style.transition = 'height 200ms ease-out, opacity 200ms ease-out, margin-bottom 200ms ease-out';
+    card.style.height = '0px';
+    card.style.opacity = '0';
+    // Cancels the next section's space-y gap, which goes with the card.
+    card.style.marginBottom = '-' + getComputedStyle(card.nextElementSibling || card).marginTop;
+    setTimeout(function() {
+      card.hidden = true;
+      card.removeAttribute('style');
+    }, 200);
+  }
+
+  function initPushPrompt() {
+    var card = document.getElementById('pushPrompt');
+    if (!card || card.hidden) return;
+    var msg = card.querySelector('[data-push-prompt-msg]');
+    var actions = card.querySelector('[data-push-prompt-actions]');
+    var enableBtn = card.querySelector('[data-push-prompt-enable]');
+    var laterBtn = card.querySelector('[data-push-prompt-later]');
+    if (!msg || !actions || !enableBtn || !laterBtn) return;
+
+    laterBtn.addEventListener('click', function() {
+      rememberPromptDismissed(card);
+      hidePushPrompt(card);
+    });
+
+    enableBtn.addEventListener('click', function() {
+      enableBtn.disabled = true;
+      laterBtn.disabled = true;
+      msg.textContent = '';
+      subscribePush().then(function() {
+        // Confirm in place; with permission granted it won't be offered again.
+        actions.style.display = 'none';   // not .hidden: its flex class wins
+        msg.textContent = "You're all set. We'll let you know on this device.";
+      }, function(err) {
+        var kind = pushFailureKind(err);
+        if (kind === 'blocked') { hidePushPrompt(card); return; }
+        if (kind === 'dismissed' || kind === 'noEmail' || kind === 'unconfigured') {
+          rememberPromptDismissed(card);
+          hidePushPrompt(card);
+          return;
+        }
+        console.error('Push subscription error:', err);
+        msg.textContent = PUSH_MESSAGES[kind];
+        enableBtn.disabled = false;
+        laterBtn.disabled = false;
+      });
     });
   }
 
@@ -832,6 +946,7 @@
     // Register service worker, then repair a push subscription the server lost
     registerServiceWorker();
     syncPushSubscription();
+    initPushPrompt();
 
     // Fetch initial count
     fetchUnreadCount().then(function(count) {

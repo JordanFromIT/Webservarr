@@ -264,6 +264,56 @@ class ShellContract(unittest.TestCase):
         self.assertEqual(len(lists), 1, "the modal's categories list")
         self.assertEqual(re.findall(r"""['"](\w+)['"]""", lists[0].group(0)), server)
 
+    def test_home_push_prompt_contract(self):
+        page = read("index")
+        m = re.search(r"<section\b([^>]*)\bid=\"pushPrompt\"([^>]*)>(.*?)</section>", page, re.S)
+        self.assertIsNotNone(m, "index.html: #pushPrompt section")
+        attrs, inner = m.group(1) + m.group(2), m.group(3)
+        # Hidden until the inline script decides, and no class on the section:
+        # a display utility would override the hidden attribute.
+        self.assertRegex(attrs, r"\bhidden\b")
+        self.assertNotIn("class=", attrs)
+        self.assertIn('data-dismiss-key="ws-push-prompt-dismissed"', attrs)
+        self.assertIn('data-dismiss-days="30"', attrs)
+        for hook in ("data-push-prompt-enable", "data-push-prompt-later", "data-push-prompt-actions"):
+            self.assertIn(hook, inner, hook)
+        self.assertRegex(inner, r'<p data-push-prompt-msg[^>]*aria-live="polite"')
+        # The decision runs inside the section (a visible sibling would add a
+        # space-y gap) and before first paint, from what the page already knows.
+        script = re.search(r"<script>(.*?)</script>", inner, re.S)
+        self.assertIsNotNone(script, "the deciding script sits inside #pushPrompt")
+        code = js_code_only(script.group(1))
+        for needle in ("has_email", "vapid_public_key", "Notification.permission", "dataset.dismissKey",
+                       "dataset.dismissDays", "card.hidden = false"):
+            self.assertIn(needle, code, needle)
+        self.assertTrue(live_matches(script.group(1), r"""Notification\.permission\s*!==\s*['"]default['"]"""))
+        # Home only.
+        for n in SHELL_PAGES:
+            if n != "index":
+                self.assertNotIn("pushPrompt", read(n), n)
+        # notifications.js wires that card and writes the dismissal to its key.
+        src = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
+        m = re.search(r"\bfunction init\(\)\s*\{", src)
+        init = src[m.end():matching_brace(src, m.end() - 1)]
+        self.assertTrue(live_matches(init, r"\binitPushPrompt\(\s*\)"), "init() wires the prompt")
+        self.assertTrue(live_matches(src, r"""getElementById\(\s*['"]pushPrompt['"]\s*\)"""))
+        self.assertTrue(live_matches(src, r"localStorage\.setItem\(\s*card\.dataset\.dismissKey\b"))
+        for hook in ("data-push-prompt-enable", "data-push-prompt-later", "data-push-prompt-msg",
+                     "data-push-prompt-actions"):
+            self.assertTrue(live_matches(src, rf"""querySelector\(\s*['"]\[{hook}\]['"]\s*\)"""), hook)
+
+    def test_push_stays_off_once_turned_off(self):
+        # Push is on by default (a browser that already allows notifications is
+        # subscribed quietly), so turning it off must stick on that device.
+        src = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
+        for fn, pattern in (("disablePush", r"\bsetPushOff\(\s*true\s*\)"),
+                            ("subscribePush", r"\bsetPushOff\(\s*false\s*\)"),
+                            ("syncPushSubscription", r"\bpushTurnedOff\(\s*\)")):
+            m = re.search(rf"\bfunction {fn}\([^)]*\)\s*\{{", src)
+            self.assertIsNotNone(m, fn)
+            body = src[m.end():matching_brace(src, m.end() - 1)]
+            self.assertTrue(live_matches(body, pattern), f"{fn}: {pattern}")
+
     def test_header_menus_close_each_other(self):
         # The bell and account buttons stop their clicks reaching document, so
         # the menus close each other through a shared ws:menu-open event: each
