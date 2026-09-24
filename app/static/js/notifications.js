@@ -163,17 +163,26 @@
 
   // ---- Fetch Helpers ----
 
+  // A 401 means the session ended while the page stayed open: go to sign-in
+  // rather than showing an empty list. Any other failure stays silent.
   function fetchUnreadCount() {
     return fetch('/api/notifications/unread-count')
-      .then(function(r) { return r.ok ? r.json() : { count: 0 }; })
+      .then(function(r) {
+        if (r.status === 401) { window.location.href = '/login'; return { count: 0 }; }
+        return r.ok ? r.json() : { count: 0 };
+      })
       .then(function(data) { return data.count || 0; })
       .catch(function() { return 0; });
   }
 
+  /** Resolves to the list, or null when the user is being sent to sign in. */
   function fetchNotifications() {
     return fetch('/api/notifications?limit=20')
-      .then(function(r) { return r.ok ? r.json() : { notifications: [] }; })
-      .then(function(data) { return data.notifications || []; })
+      .then(function(r) {
+        if (r.status === 401) { window.location.href = '/login'; return null; }
+        return r.ok ? r.json() : { notifications: [] };
+      })
+      .then(function(data) { return data ? (data.notifications || []) : null; })
       .catch(function() { return []; });
   }
 
@@ -261,6 +270,7 @@
     if (!_notifList) return;
 
     fetchNotifications().then(function(notifications) {
+      if (notifications === null) return;   // leaving for /login
       // Clear list
       while (_notifList.firstChild) _notifList.removeChild(_notifList.firstChild);
 

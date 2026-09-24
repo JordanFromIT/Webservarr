@@ -220,6 +220,17 @@ class ShellContract(unittest.TestCase):
         body = code[m.end():matching_brace(code, m.end() - 1)]
         self.assertRegex(body, rf"\banchorDropdown\(\s*{m.group(1)}\s*\)")
 
+    def test_notification_fetches_send_a_signed_out_user_to_login(self):
+        # A session that ends while the page is open must not read as an
+        # empty inbox: both reads leave for /login on a 401.
+        src = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
+        for fn in ("fetchUnreadCount", "fetchNotifications"):
+            m = re.search(rf"\bfunction {fn}\(\)\s*\{{", src)
+            self.assertIsNotNone(m, fn)
+            body = src[m.end():matching_brace(src, m.end() - 1)]
+            self.assertRegex(js_code_only(body), r"\.status\s*===\s*401\b", fn)
+            self.assertRegex(body, r"""window\.location\.href\s*=\s*['"]/login['"]""", fn)
+
     def test_no_instance_specific_strings(self):
         files = (list(STATIC.glob("*.html")) + list((STATIC / "partials").glob("*.html"))
                  + list((STATIC / "js").glob("*.js")))
