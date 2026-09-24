@@ -206,7 +206,9 @@ async def list_settings(
     meta = {d.key: meta_for(d) for d in active_defs()}
     for _rx, pd in PATTERN_DEFS:
         meta[pd.key] = meta_for(pd)
-    return {"values": values, "meta": meta}
+    # "mask" is what a saved secret reads as in `values`; the front end takes it
+    # from here rather than keeping its own copy.
+    return {"values": values, "meta": meta, "mask": MASK}
 
 
 @router.put("/settings/bulk")
