@@ -36,7 +36,7 @@
     issue: 'Issues',
     service: 'Service Status',
     news: 'Announcements',
-    ticket: 'Tickets'
+    ticket: 'Ticket replies and updates'
   };
 
   // ---- Helpers ----
@@ -420,8 +420,8 @@
     var body = createEl('div', 'px-6 py-4 space-y-4');
     body.id = 'notifPrefsBody';
 
-    // Category toggles
-    var categories = ['request', 'issue', 'service', 'news'];
+    // Category toggles: every category the server sends (NOTIFICATION_CATEGORIES)
+    var categories = ['request', 'issue', 'service', 'news', 'ticket'];
     categories.forEach(function(cat) {
       var row = createEl('div', 'flex items-center justify-between py-2');
 

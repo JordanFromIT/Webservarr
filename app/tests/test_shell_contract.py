@@ -252,6 +252,18 @@ class ShellContract(unittest.TestCase):
             self.assertTrue(live_matches(body, r"\.status\s*===\s*401\b"), fn)
             self.assertTrue(live_matches(body, r"""window\.location\.href\s*=\s*['"]/login['"]"""), fn)
 
+    def test_preferences_modal_offers_every_server_category(self):
+        # A category the server sends but the modal has no toggle for can
+        # never be turned off.
+        py = (STATIC.parent / "routers" / "notifications.py").read_text(encoding="utf-8")
+        m = re.search(r"^NOTIFICATION_CATEGORIES\s*=\s*\(([^)]*)\)", py, re.M)
+        self.assertIsNotNone(m, "NOTIFICATION_CATEGORIES not found")
+        server = re.findall(r"""['"](\w+)['"]""", m.group(1))
+        src = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
+        lists = live_matches(src, r"""var categories\s*=\s*\[[^\]]*\]""")
+        self.assertEqual(len(lists), 1, "the modal's categories list")
+        self.assertEqual(re.findall(r"""['"](\w+)['"]""", lists[0].group(0)), server)
+
     def test_header_menus_close_each_other(self):
         # The bell and account buttons stop their clicks reaching document, so
         # the menus close each other through a shared ws:menu-open event: each
