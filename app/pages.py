@@ -358,8 +358,10 @@ def _site_name(branding: dict) -> str:
 def shell_values(branding: dict, user: Optional[dict], version: str, name: str) -> dict:
     is_admin = bool(user and user.get("is_admin"))
     icons = branding.get("icons") or {}
+    site_name = _site_name(branding)
 
     logo = _safe_url(branding.get("logo_url"))
+    logo_icon = html.escape(icons.get("sidebar_logo") or _REGISTRY["icon.sidebar_logo"].default)
     if logo:
         # A fixed box: an unsized image would push the whole nav down the
         # moment it arrived on a cold load (the one layout shift the shell had).
@@ -368,13 +370,26 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
             'class="w-full h-24 rounded-lg object-contain mb-3">'
         )
     else:
-        logo_icon = html.escape(icons.get("sidebar_logo") or _REGISTRY["icon.sidebar_logo"].default)
         logo_html = (
             '<div class="size-14 bg-primary rounded-lg flex items-center justify-center '
             'shadow-lg shadow-baltic-blue/20 mb-3">'
             f'<span class="material-symbols-outlined text-background-dark font-bold text-3xl">{logo_icon}</span>'
             '</div>'
         )
+
+    # The phone top bar carries the site name; with no name it carries the
+    # logo instead, so the bar is never unbranded. A fixed box again, so the
+    # image arriving cannot move the buttons either side of it.
+    bar_logo_html = ""
+    if not site_name:
+        if logo:
+            mark = (f'<img src="{html.escape(logo, quote=True)}" alt="" '
+                    'class="h-8 w-24 object-contain">')
+        else:
+            mark = ('<span class="size-8 bg-primary rounded-md flex items-center justify-center">'
+                    f'<span class="material-symbols-outlined text-background-dark text-xl">{logo_icon}</span>'
+                    '</span>')
+        bar_logo_html = f'<a href="/" aria-label="Home" class="flex items-center justify-center max-w-[40%]">{mark}</a>'
 
     avatar = (user or {}).get("avatar_url") or ""
     avatar_style = ""
@@ -387,8 +402,9 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
 
     return {
         # May be empty (Settings > General): the sidebar then shows the logo alone.
-        "app_name": _site_name(branding),
-        "app_name_cls": "" if _site_name(branding) else "hidden",
+        "app_name": site_name,
+        "app_name_cls": "" if site_name else "hidden",
+        "bar_logo_html": bar_logo_html,
         "logo_html": logo_html,
         "nav_links": render_nav_links(branding, is_admin, PAGE_NAV.get(name)),
         "version": ("v" + version) if version else "",
@@ -574,6 +590,25 @@ def _stamp_asset_versions(content: str) -> str:
 # Renderer
 # ---------------------------------------------------------------------------
 
+# The login card's site name. The page has no shell to fill, so this one
+# element is rewritten in place: served with the operator's name, or hidden
+# when there is none, so no script has to swap the static default after the
+# first paint may already have shown it.
+_LOGIN_NAME_RE = re.compile(r'(<h1 id="loginAppName" class=")([^"]*)(">)[^<]*(</h1>)')
+
+
+def _fill_login_name(out: str, branding: dict) -> str:
+    site_name = _site_name(branding)
+
+    def _sub(m):
+        classes = [c for c in m.group(2).split() if c != "hidden"]
+        if not site_name:
+            classes.append("hidden")
+        return f"{m.group(1)}{' '.join(classes)}{m.group(3)}{html.escape(site_name)}{m.group(4)}"
+
+    return _LOGIN_NAME_RE.sub(_sub, out, count=1)
+
+
 def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dict],
                 version: str, base_url: str, path: str, flags: dict) -> str:
     """Pure: turn a static page into the document this user should receive."""
@@ -586,6 +621,9 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
         if flags.get("page_off"):
             header += PAGE_OFF_BANNER
         out = out.replace(HEADER_MARKER, header, 1)
+
+    if name == "login":
+        out = _fill_login_name(out, branding)
 
     attrs = f' data-page="{html.escape(name, quote=True)}"'
     if user and user.get("is_admin"):

@@ -327,15 +327,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         } catch (e) { /* use empty defaults */ }
     }
     var theme = window.WEBSERVARR_THEME || {};
-    var siteName = typeof theme.app_name === 'string' ? theme.app_name.trim() : null;
-    if (siteName) {
-        var el = document.getElementById('loginAppName');
-        if (el) el.textContent = siteName;
-    } else if (siteName === '') {
-        // No site name (Settings > General): the logo stands alone.
-        var nameEl = document.getElementById('loginAppName');
-        if (nameEl) nameEl.classList.add('hidden');
-    }
+    // The site name (or, with none set, its absence) is rendered by the server.
     // Show branding logo if configured
     if (theme.logo_url) {
         var logoEl = document.getElementById('loginLogo');
