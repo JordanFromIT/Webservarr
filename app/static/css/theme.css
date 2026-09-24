@@ -453,6 +453,11 @@ html:not([data-admin]) .ws-admin-only { display: none !important; }
 .ws-hide-scrollbar { scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .ws-hide-scrollbar::-webkit-scrollbar { display: none; }
 
+/* Phone tab-strip arrows: each sits on an edge fade from the page background,
+   so it never lies on top of tab text. */
+.ws-tab-hint-left { background: linear-gradient(to right, rgb(var(--color-background)) 40%, rgb(var(--color-background) / 0)); }
+.ws-tab-hint-right { background: linear-gradient(to left, rgb(var(--color-background)) 40%, rgb(var(--color-background) / 0)); }
+
 .ws-tab {
   display: inline-flex; align-items: center; gap: .5rem;
   padding: .75rem 1rem; margin-bottom: -1px;
@@ -462,7 +467,16 @@ html:not([data-admin]) .ws-admin-only { display: none !important; }
   transition: color 150ms ease-out, border-color 150ms ease-out, background-color 150ms ease-out;
 }
 .ws-tab:hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .04); }
-.ws-tab[aria-selected="true"] { color: rgb(var(--color-text)); border-bottom-color: rgb(var(--color-primary)); }
+/* The selected tab follows <html data-settings-tab>, set in <head>, so it can
+   never paint unselected. */
+html[data-settings-tab="general"] #tab-general,
+html[data-settings-tab="pages"] #tab-pages,
+html[data-settings-tab="appearance"] #tab-appearance,
+html[data-settings-tab="sign-in"] #tab-sign-in,
+html[data-settings-tab="integrations"] #tab-integrations,
+html[data-settings-tab="notifications"] #tab-notifications {
+  color: rgb(var(--color-text)); border-bottom-color: rgb(var(--color-primary));
+}
 .ws-tab:focus-visible { outline: 2px solid rgb(var(--color-primary)); outline-offset: -2px; }
 
 [data-settings-panel] { display: none; }

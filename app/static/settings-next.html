@@ -9,6 +9,17 @@
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
 <link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+<!-- Select the tab from the hash before anything in the body paints: theme.css
+     shows that tab's panel (and skeleton) and styles its tab from this
+     attribute. The kit keeps it in step afterwards. -->
+<script>
+  (function () {
+    var tabs = ['general', 'pages', 'appearance', 'sign-in', 'integrations', 'notifications'];
+    var t = (location.hash || '').slice(1);
+    if (tabs.indexOf(t) < 0) t = 'general';
+    document.documentElement.setAttribute('data-settings-tab', t);
+  })();
+</script>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <!-- ws:sidebar -->
@@ -23,7 +34,7 @@
 
     <div class="relative border-b border-frosted-blue/10 mb-8">
       <div id="settingsTabScroller" class="overflow-x-auto ws-hide-scrollbar">
-        <nav id="settingsTabs" role="tablist" aria-label="Settings sections" class="flex gap-1 whitespace-nowrap">
+        <nav id="settingsTabs" role="tablist" aria-label="Settings sections" class="flex w-max gap-1 whitespace-nowrap pr-12 lg:pr-0">
           <a role="tab" id="tab-general" href="#general" data-tab="general" aria-controls="panel-general" aria-selected="false" class="ws-tab">General</a>
           <a role="tab" id="tab-pages" href="#pages" data-tab="pages" aria-controls="panel-pages" aria-selected="false" class="ws-tab">Pages</a>
           <a role="tab" id="tab-appearance" href="#appearance" data-tab="appearance" aria-controls="panel-appearance" aria-selected="false" class="ws-tab">Appearance</a>
@@ -32,22 +43,17 @@
           <a role="tab" id="tab-notifications" href="#notifications" data-tab="notifications" aria-controls="panel-notifications" aria-selected="false" class="ws-tab">Notifications</a>
         </nav>
       </div>
-      <div id="settingsTabHintLeft" class="absolute left-0 top-1/2 -translate-y-1/2 flex items-center pointer-events-none lg:hidden transition-opacity duration-200" style="opacity:0" aria-hidden="true">
+      <div id="settingsTabHintLeft" class="ws-tab-hint-left absolute inset-y-0 left-0 w-12 flex items-center justify-start pointer-events-none lg:hidden transition-opacity duration-200" style="opacity:0" aria-hidden="true">
         <span class="material-symbols-outlined text-frosted-blue/70 text-base">arrow_back</span>
       </div>
-      <div id="settingsTabHintRight" class="absolute right-0 top-1/2 -translate-y-1/2 flex items-center pointer-events-none lg:hidden transition-opacity duration-200" aria-hidden="true">
+      <div id="settingsTabHintRight" class="ws-tab-hint-right absolute inset-y-0 right-0 w-12 flex items-center justify-end pointer-events-none lg:hidden transition-opacity duration-200" aria-hidden="true">
         <span class="material-symbols-outlined text-frosted-blue/70 text-base">arrow_forward</span>
       </div>
     </div>
-    <!-- Select the tab from the hash before the first paint, so the right panel
-         (and its skeleton) is what paints. The kit keeps this in step afterwards. -->
+    <!-- The tab chosen in <head>, for assistive tech. Its look comes from CSS. -->
     <script>
       (function () {
-        var tabs = ['general', 'pages', 'appearance', 'sign-in', 'integrations', 'notifications'];
-        var t = (location.hash || '').slice(1);
-        if (tabs.indexOf(t) < 0) t = 'general';
-        document.documentElement.setAttribute('data-settings-tab', t);
-        var a = document.getElementById('tab-' + t);
+        var a = document.getElementById('tab-' + document.documentElement.getAttribute('data-settings-tab'));
         if (a) a.setAttribute('aria-selected', 'true');
       })();
     </script>
