@@ -170,21 +170,21 @@ class BulkSave(SettingsApiBase):
 
     def test_old_settings_page_save_with_retired_page_keys_still_works(self):
         # Until the old Settings page is replaced (Task 8.3) its Theme save
-        # still sends the keys the redesign retired, and its Seerr save sends
-        # features.show_requests. The whole save must keep working.
-        retired = [
+        # still sends five of the keys the redesign retired, and its Seerr save
+        # sends features.show_requests. The whole save must keep working.
+        sent_by_old_page = [
             ("sidebar.label_requests_embed", "Requests (Embed)"),
             ("sidebar.enabled_requests_embed", "true"),
             ("sidebar.new_requests_embed", "false"),
             ("icon.nav_requests_embed", "download"),
             ("features.show_tickets", "true"),
             ("features.show_requests", "false"),
-            ("features.show_books", "true"),
-            ("sidebar.sublabel_requests_embed", "Request through Seerr"),
         ]
-        for key, _value in retired:
+        for key in ("features.show_requests", "features.show_tickets", "features.show_books",
+                    "sidebar.label_requests_embed", "sidebar.sublabel_requests_embed",
+                    "sidebar.enabled_requests_embed", "sidebar.new_requests_embed", "icon.nav_requests_embed"):
             self.assertTrue(reg.REGISTRY[key].deprecated, key)
-        r = self.save(("sidebar.label_home", "Start"), *retired)
+        r = self.save(("sidebar.label_home", "Start"), *sent_by_old_page)
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(helpers.get(self.db, "sidebar.label_home"), "Start")
         self.assertEqual(helpers.get(self.db, "icon.nav_requests_embed"), "download")

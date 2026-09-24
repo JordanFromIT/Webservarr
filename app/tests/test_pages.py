@@ -95,7 +95,21 @@ class ShellRendering(unittest.TestCase):
         self.assertIn('href="/tickets"', out)
         self.assertNotIn('href="/requests-embed"', out)
         # The pending-requests badge lives on the one Requests item.
-        self.assertRegex(render(), r'href="/requests"[^\n]*id="requestsBadge"')
+        self.assertRegex(render(), r'href="/requests"[^\n]*data-badge="requestsBadge"')
+
+    def test_shell_has_no_duplicate_ids(self):
+        # The nav links fill both the desktop sidebar and the phone drawer, so
+        # anything with an id inside a link would appear twice, and
+        # getElementById would only ever find the first (hidden on a phone).
+        b = branding(**{"integration.kavita.url": "http://192.168.1.50:5000"})
+        for sid in ("home", "requests", "issues", "calendar", "tickets", "library", "wiki"):
+            self.assertTrue(b["sidebar_enabled"][sid], sid)
+        out = render(user=ADMIN, b=b)
+        nav = re.search(r'<nav id="drawerNav".*?</nav>', out, re.S).group(0)
+        self.assertEqual(len(re.findall(r"<a ", nav)), 8)      # every page is in the nav
+        ids = re.findall(r'\sid="([^"]+)"', out)
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        self.assertEqual(dupes, [])
 
     def test_labels_icons_sublabels_and_new_flag_apply(self):
         b = branding(**{"sidebar.label_issues": "Problems", "icon.nav_issues": "bug_report",
@@ -305,7 +319,7 @@ class NavModel(unittest.TestCase):
                 requests_links = [ln for ln in links if "/requests" in ln]
                 self.assertEqual(len(requests_links), 1, requests_links)
                 self.assertIn('href="/requests"', requests_links[0])
-                self.assertIn('id="requestsBadge"', requests_links[0])
+                self.assertIn('data-badge="requestsBadge"', requests_links[0])
                 self.assertNotIn("Seerr page", nav)
 
 
