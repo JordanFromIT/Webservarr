@@ -12,112 +12,15 @@ from app.database import get_db
 from app.dependencies import get_current_user_optional
 from app.limiter import limiter
 from app.models import Setting
+from app.settings_registry import REGISTRY, public_defaults
 from app.utils import safe_http_url, same_origin_path
 
 router = APIRouter()
 
-# Default values for all branding/theme keys
-DEFAULTS = {
-    "branding.app_name": "WebServarr",
-    "branding.tagline": "Media Server Management",
-    "branding.logo_url": "/static/webservarr.svg",
-    "theme.color_primary": "#125793",
-    "theme.color_secondary": "#2C6DA1",
-    "theme.color_accent": "#4684B0",
-    "theme.color_text": "#BEEEF4",
-    "theme.color_text_secondary": "#FFFFFF",
-    "theme.color_background": "#000000",
-    "theme.color_media_movie": "#E9D5FF",
-    "theme.color_media_tv": "#67E8F9",
-    "theme.color_media_book": "#FCD34D",
-    "theme.font": "Spline Sans",
-    "theme.custom_css": "",
-    # Feature flags
-    "features.show_requests": "false",
-    "features.show_simple_auth": "true",
-    "features.show_plex_auth": "false",
-    "features.show_authentik_auth": "false",
-    "features.login_backgrounds": "true",
-    "features.show_tickets": "true",
-    "features.show_books": "true",
-    # Kavita ebook backend; show_books also requires this to be set
-    "integration.kavita.url": "",
-    # Sidebar labels
-    "sidebar.label_home": "Home",
-    "sidebar.label_requests": "Requests",
-    "sidebar.label_requests_embed": "Requests (Embed)",
-    "sidebar.label_issues": "Issues",
-    "sidebar.label_calendar": "Calendar",
-    "sidebar.label_tickets": "Tickets",
-    "sidebar.label_library": "eBooks",
-    "sidebar.label_settings": "Settings",
-    "sidebar.label_wiki": "Wiki",
-    # Sidebar sublabels. The label names the destination, the sublabel says what
-    # you do there. Every item carries one: descriptions on only some entries
-    # read as unfinished, and the pair only tells Issues apart from Tickets if
-    # the whole list speaks in one voice. All are verb phrases for that reason.
-    # Blank still hides the line, so an admin can opt any item out.
-    "sidebar.sublabel_home": "See what's happening",
-    "sidebar.sublabel_requests": "Request a movie or show",
-    "sidebar.sublabel_requests_embed": "Request through Seerr",
-    "sidebar.sublabel_issues": "Report a problem with media",
-    "sidebar.sublabel_calendar": "See upcoming releases",
-    "sidebar.sublabel_tickets": "Get help from the admin",
-    "sidebar.sublabel_library": "Read books in your browser",
-    "sidebar.sublabel_settings": "Manage the site",
-    "sidebar.sublabel_wiki": "Read guides and how-tos",
-    # Per-page "New!" flags. Admin-controlled rather than self-retiring: the
-    # admin decides how long a section counts as new, and turns it off when it
-    # stops being news. Off everywhere on a fresh install - nothing is new when
-    # the whole site is.
-    "sidebar.new_home": "false",
-    "sidebar.new_requests": "false",
-    "sidebar.new_requests_embed": "false",
-    "sidebar.new_issues": "false",
-    "sidebar.new_calendar": "false",
-    "sidebar.new_tickets": "false",
-    "sidebar.new_library": "false",
-    "sidebar.new_settings": "false",
-    "sidebar.new_wiki": "false",
-    # Per-page sidebar visibility. Separate keys from the features.* flags so no
-    # setting is written from two places in the UI - a Customization save and a
-    # System save would otherwise race and clobber each other. Both must be true
-    # for a gated page to appear.
-    "sidebar.enabled_home": "true",
-    "sidebar.enabled_requests": "true",
-    "sidebar.enabled_requests_embed": "true",
-    "sidebar.enabled_issues": "true",
-    "sidebar.enabled_calendar": "true",
-    "sidebar.enabled_tickets": "true",
-    "sidebar.enabled_library": "true",
-    "sidebar.enabled_wiki": "true",
-    # Settings is deliberately absent: hiding it locks the admin out of the only
-    # page that could turn it back on.
-    # Configurable icons
-    "icon.nav_home": "home",
-    "icon.nav_requests": "movie",
-    "icon.nav_requests_embed": "download",
-    "icon.nav_issues": "report_problem",
-    "icon.nav_calendar": "calendar_month",
-    "icon.nav_tickets": "confirmation_number",
-    "icon.nav_library": "menu_book",
-    "icon.nav_settings": "settings",
-    "icon.nav_wiki": "library_books",
-    # Contextual pointers into the wiki; each holds a page slug or is empty.
-    "wiki.hook_tickets": "",
-    "wiki.hook_issues": "",
-    "wiki.hook_playback": "",
-    "icon.sidebar_logo": "settings_input_component",
-    "icon.section_services": "health_metrics",
-    "icon.section_news": "newspaper",
-    "icon.section_streams": "play_circle",
-    "icon.section_releases": "calendar_month",
-    "icon.section_requests": "shopping_cart",
-    # Homepage news window. Old posts stop appearing on the homepage rather than
-    # accumulating down the page forever; the /news archive still holds them all.
-    "news.homepage_count": "3",
-    "news.homepage_max_age_days": "30",
-}
+# Every key the branding builder reads, with its registry default. The Kavita
+# URL is not public (it never leaves the server) but the builder needs it to
+# decide whether the eBooks page exists.
+DEFAULTS = {**public_defaults(), "integration.kavita.url": REGISTRY["integration.kavita.url"].default}
 
 
 def _int_setting(raw: str, fallback: int, low: int, high: int) -> int:
@@ -133,6 +36,12 @@ def _int_setting(raw: str, fallback: int, low: int, high: int) -> int:
     except (TypeError, ValueError):
         return fallback
     return max(low, min(high, value))
+
+
+def _registry_int(key: str, raw: str) -> int:
+    """_int_setting with the default and bounds of the key's registry entry."""
+    d = REGISTRY[key]
+    return _int_setting(raw, int(d.default), d.min, d.max)
 
 
 def _resolve_wiki_hooks(db: Session, get, is_signed_in: bool) -> dict:
@@ -237,7 +146,7 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
             "text": get("theme.color_text"),
             "text_secondary": get("theme.color_text_secondary"),
             "background": get("theme.color_background"),
-            # Media type accents - see seed.py for why these are distinct hues.
+            # Media type accents - see app/settings_registry.py for why these are distinct hues.
             "media_movie": get("theme.color_media_movie"),
             "media_tv": get("theme.color_media_tv"),
             "media_book": get("theme.color_media_book"),
@@ -290,7 +199,7 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
             "tickets": get("sidebar.enabled_tickets") != "false",
             "library": get("sidebar.enabled_library") != "false",
             "wiki": get("sidebar.enabled_wiki") != "false",
-            # Always true; there is no key for it. See DEFAULTS.
+            # Always true; there is no key for it (see app/settings_registry.py).
             "settings": True,
         },
         "sidebar_new": {
@@ -322,8 +231,8 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
             "section_requests": get("icon.section_requests"),
         },
         "news": {
-            "homepage_count": _int_setting(get("news.homepage_count"), 3, 1, 20),
-            "homepage_max_age_days": _int_setting(get("news.homepage_max_age_days"), 30, 0, 3650),
+            "homepage_count": _registry_int("news.homepage_count", get("news.homepage_count")),
+            "homepage_max_age_days": _registry_int("news.homepage_max_age_days", get("news.homepage_max_age_days")),
         },
         "auth_methods": auth_methods,
         "vapid_public_key": vapid_public_key,

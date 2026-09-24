@@ -2,10 +2,24 @@
 The settings registry: the one definition of every operator setting.
 
 Every setting an admin can change is declared here once, with its shipped
-default, its type and its validation. Seeding (app/seed.py), the branding
-payload (app/routers/branding.py), the page renderer's colour fallbacks
-(app/pages.py) and the Settings page (through GET /api/admin/settings?view=registry)
-all take their defaults from this module, so a default lives in one place.
+default, its type and its validation. These take their defaults from this
+module rather than keeping their own copy:
+
+  * seeding: app/seed.py DEFAULT_SETTINGS is seed_defaults();
+  * the branding payload: app/routers/branding.py DEFAULTS is public_defaults()
+    plus the Kavita URL, and the home page news window's fallback and bounds
+    are the news.* entries' default, min and max;
+  * the page renderer (app/pages.py): the colour, font, site name and logo
+    icon fallbacks and the nav items' labels, sublabels and icons;
+  * the settings API (app/routers/admin_settings.py), which also serves the
+    defaults to the Settings page through GET /api/admin/settings?view=registry.
+
+Still outside it: the integration clients and the notification poller keep
+their own fallback for a missing row (Chaptarr profile ids, the Netdata unit
+and gauge maximum, the Uptime Kuma slug, the poll intervals), and the static
+front end repeats some defaults (app/static/css/theme.css repeats the colours
+as :root defaults, which a test keeps equal to this module; the old Settings
+page carries its own fallbacks until it is replaced).
 
 Changing a default here does nothing on installs that already have the row:
 seeding only inserts missing keys, so an operator's choices survive upgrades.
@@ -30,8 +44,10 @@ HOME_SECTION_IDS = ("services", "news", "streams", "releases", "requests")
 TYPES = ("text", "url", "bool", "int", "color", "icon", "enum", "json")
 
 # page id -> (label, sublabel, icon). Label names the destination; the
-# sublabel says what you do there, always as a verb phrase so the list reads
-# in one voice.
+# sublabel says what you do there. Every page carries one, always a verb
+# phrase: descriptions on only some entries read as unfinished, and the pair
+# only tells Issues apart from Tickets if the whole list speaks in one voice.
+# A blank sublabel still hides the line, so an admin can opt any page out.
 PAGE_DEFAULTS: Dict[str, Tuple[str, str, str]] = {
     "home": ("Home", "See what's happening", "home"),
     "requests": ("Requests", "Request a movie or show", "movie"),
@@ -156,6 +172,8 @@ def _build() -> List[SettingDef]:
                        max_length=60))
         if pid != "settings":   # Settings has no switch: hiding it would lock the admin out
             d.append(_bool(f"sidebar.enabled_{pid}", "true", f"{label} page is on", public=True))
+        # Admin-controlled rather than self-retiring: the admin decides how long a
+        # page counts as new. Off on a fresh install, where nothing is new.
         d.append(_bool(f"sidebar.new_{pid}", "false", f"Show a New! flag on {label}", public=True))
         d.append(_icon(f"icon.nav_{pid}", icon, f"Sidebar icon for {label}", public=True))
     d += [
@@ -168,6 +186,8 @@ def _build() -> List[SettingDef]:
         d.append(_bool(f"home.section_{sid}", "true", f"Show {name} on the home page", public=True))
         d.append(_icon(f"icon.section_{sid}", icon, f"Home page icon for {name}", public=True))
     d += [
+        # Home page news window: old posts drop off the home page rather than piling
+        # up forever; the /news archive still holds them all.
         _int("news.homepage_count", "3", "News posts shown on the home page", 1, 20, public=True),
         _int("news.homepage_max_age_days", "30", "Hide home page news older than this many days (0 = never)",
              0, 3650, public=True),

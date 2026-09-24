@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.config import settings
 from app.database import SessionLocal
+from app.settings_registry import REGISTRY as _REGISTRY
 from app.utils import identity_email, safe_http_url, same_origin_path
 
 logger = logging.getLogger(__name__)
@@ -44,33 +45,34 @@ STATIC_DIR = "/app/app/static"
 # Navigation registry
 # ---------------------------------------------------------------------------
 #
-# The one list of destinations. Labels, sublabels and icons here are the
-# shipped defaults; the operator's overrides come from the branding payload
-# (Settings > Customization) and are applied in visible_nav_items().
-#
-# Label is the destination's name; sublabel says what you do there. Every
-# item carries one -- descriptions on only some items read as unfinished,
-# and the pair only disambiguates Issues from Tickets if the whole list is
-# written in the same voice. All sublabels are verb phrases for that reason.
+# The one list of destinations. Labels, sublabels and icons are the shipped
+# defaults from app/settings_registry.py; the operator's overrides come from
+# the branding payload (Settings > Customization) and are applied in
+# visible_nav_items().
+
+
+def _nav_item(item_id: str, href: str, **extra) -> dict:
+    key = item_id.replace("-", "_")
+    return {
+        "id": item_id,
+        "href": href,
+        "label": _REGISTRY["sidebar.label_" + key].default,
+        "icon": _REGISTRY["icon.nav_" + key].default,
+        "sublabel": _REGISTRY["sidebar.sublabel_" + key].default,
+        **extra,
+    }
+
+
 NAV_ITEMS = [
-    {"id": "home", "href": "/", "label": "Home", "icon": "home",
-     "sublabel": "See what's happening"},
-    {"id": "requests", "href": "/requests", "label": "Requests", "icon": "movie",
-     "sublabel": "Request a movie or show"},
-    {"id": "requests-embed", "href": "/requests-embed", "label": "Requests (Embed)", "icon": "download",
-     "sublabel": "Request through Seerr", "feature": "show_requests", "badge_id": "requestsBadge"},
-    {"id": "issues", "href": "/issues", "label": "Issues", "icon": "report_problem",
-     "sublabel": "Report a problem with media"},
-    {"id": "calendar", "href": "/calendar", "label": "Calendar", "icon": "calendar_month",
-     "sublabel": "See upcoming releases"},
-    {"id": "tickets", "href": "/tickets", "label": "Tickets", "icon": "confirmation_number",
-     "sublabel": "Get help from the admin", "feature": "show_tickets"},
-    {"id": "library", "href": "/library", "label": "eBooks", "icon": "menu_book",
-     "sublabel": "Read books in your browser", "feature": "show_books"},
-    {"id": "wiki", "href": "/wiki", "label": "Wiki", "icon": "library_books",
-     "sublabel": "Read guides and how-tos"},
-    {"id": "settings", "href": "/settings", "label": "Settings", "icon": "settings",
-     "sublabel": "Manage the site", "admin_only": True},
+    _nav_item("home", "/"),
+    _nav_item("requests", "/requests"),
+    _nav_item("requests-embed", "/requests-embed", feature="show_requests", badge_id="requestsBadge"),
+    _nav_item("issues", "/issues"),
+    _nav_item("calendar", "/calendar"),
+    _nav_item("tickets", "/tickets", feature="show_tickets"),
+    _nav_item("library", "/library", feature="show_books"),
+    _nav_item("wiki", "/wiki"),
+    _nav_item("settings", "/settings", admin_only=True),
 ]
 
 # Which nav item a page highlights. The news archive is part of Home.
@@ -93,19 +95,14 @@ PAGE_NAV = {
 
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 _FONT = re.compile(r"^[A-Za-z0-9 \-]{1,60}$")
-DEFAULT_FONT = "Spline Sans"
+DEFAULT_FONT = _REGISTRY["theme.font"].default
 
-# Must match the :root defaults in app/static/css/theme.css.
+# Fallbacks when a stored colour is not a valid hex. Taken from the registry;
+# app/static/css/theme.css repeats them as :root defaults (a test keeps the two equal).
 _DEFAULT_COLORS = {
-    "primary": "#125793",
-    "secondary": "#2C6DA1",
-    "accent": "#4684B0",
-    "text": "#BEEEF4",
-    "text_secondary": "#FFFFFF",
-    "background": "#000000",
-    "media_movie": "#E9D5FF",
-    "media_tv": "#67E8F9",
-    "media_book": "#FCD34D",
+    key: _REGISTRY["theme.color_" + key].default
+    for key in ("primary", "secondary", "accent", "text", "text_secondary", "background",
+                "media_movie", "media_tv", "media_book")
 }
 # (css variable suffix, branding colour key)
 _COLOR_VARS = [
@@ -341,7 +338,7 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
             'class="w-full h-24 rounded-lg object-contain mb-3">'
         )
     else:
-        logo_icon = html.escape(icons.get("sidebar_logo") or "settings_input_component")
+        logo_icon = html.escape(icons.get("sidebar_logo") or _REGISTRY["icon.sidebar_logo"].default)
         logo_html = (
             '<div class="size-14 bg-primary rounded-lg flex items-center justify-center '
             'shadow-lg shadow-baltic-blue/20 mb-3">'
@@ -359,7 +356,7 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
         avatar_style = f"background-image:url({css_url});background-size:cover;background-position:center"
 
     return {
-        "app_name": branding.get("app_name") or "WebServarr",
+        "app_name": branding.get("app_name") or _REGISTRY["branding.app_name"].default,
         "logo_html": logo_html,
         "nav_links": render_nav_links(branding, is_admin, PAGE_NAV.get(name)),
         "version": ("v" + version) if version else "",
@@ -412,7 +409,7 @@ def _preview_meta(branding: dict, base_url: str, path: str) -> tuple:
     renders SVG in a link card, and advertising one produces a preview with a
     broken thumbnail rather than the clean text-only card you get without it.
     """
-    app_name = (branding.get("app_name") or "").strip() or "WebServarr"
+    app_name = (branding.get("app_name") or "").strip() or _REGISTRY["branding.app_name"].default
     tagline = (branding.get("tagline") or "").strip()
 
     image_url = ""

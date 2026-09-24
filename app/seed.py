@@ -6,124 +6,14 @@ import logging
 import secrets
 from sqlalchemy.orm import Session
 from app.models import User, Setting
+from app.settings_registry import seed_defaults
 
 logger = logging.getLogger(__name__)
 
-# Default branding/theme settings (inserted only if missing)
-DEFAULT_SETTINGS = {
-    "branding.app_name": ("WebServarr", "Application display name"),
-    "branding.tagline": ("Media Server Management", "Tagline shown on login page"),
-    "branding.logo_url": ("/static/webservarr.svg", "URL to custom logo image"),
-    "theme.color_primary": ("#125793", "Primary brand color (Baltic Blue)"),
-    "theme.color_secondary": ("#2C6DA1", "Secondary brand color (Cornflower Ocean)"),
-    "theme.color_accent": ("#4684B0", "Accent color (Steel Blue)"),
-    "theme.color_text": ("#BEEEF4", "Text primary color (Frosted Blue)"),
-    "theme.color_text_secondary": ("#FFFFFF", "Text secondary color (contrast/buttons)"),
-    "theme.color_background": ("#000000", "Background color"),
-    # Media type accents. These identify what a card is - the noun in "Request
-    # eBook", the type badge - so unlike the palette above they are deliberately
-    # three distinct hues rather than shades of the brand colour. Defaults are
-    # chosen to clear 4.5:1 against the primary fill they sit on.
-    "theme.color_media_movie": ("#E9D5FF", "Accent for Movie results and badges"),
-    "theme.color_media_tv": ("#67E8F9", "Accent for TV Show results and badges"),
-    "theme.color_media_book": ("#FCD34D", "Accent for eBook results and badges"),
-    "theme.font": ("Spline Sans", "Google Font family name"),
-    "theme.custom_css": ("", "Custom CSS injected into all pages"),
-    # Feature flags
-    "features.show_requests": ("false", "Show Seerr iframe Requests (Embed) page in sidebar"),
-    "features.show_simple_auth": ("true", "Show local username/password login on login page"),
-    "features.login_backgrounds": ("true", "Show rotating TMDB backgrounds on login page"),
-    # Sidebar labels
-    "sidebar.label_home": ("Home", "Sidebar label for Home page"),
-    "sidebar.label_requests": ("Requests", "Sidebar label for Requests page"),
-    "sidebar.label_requests_embed": ("Requests (Embed)", "Sidebar label for Requests (Embed) page"),
-    "sidebar.label_issues": ("Issues", "Sidebar label for the media-issue page"),
-    "sidebar.label_tickets": ("Tickets", "Sidebar label for the support ticket page"),
-    # Every nav item gets a sublabel; see branding.DEFAULTS for why.
-    "sidebar.sublabel_home": ("See what's happening", "Sidebar sublabel for Home"),
-    "sidebar.sublabel_requests": ("Request a movie or show", "Sidebar sublabel for Requests"),
-    "sidebar.sublabel_requests_embed": ("Request through Seerr", "Sidebar sublabel for Requests (Embed)"),
-    "sidebar.sublabel_issues": ("Report a problem with media", "Sidebar sublabel for Issues"),
-    "sidebar.sublabel_calendar": ("See upcoming releases", "Sidebar sublabel for Calendar"),
-    "sidebar.sublabel_tickets": ("Get help from the admin", "Sidebar sublabel for Tickets"),
-    "sidebar.sublabel_library": ("Read books in your browser", "Sidebar sublabel for eBooks"),
-    "sidebar.sublabel_settings": ("Manage the site", "Sidebar sublabel for Settings"),
-    "sidebar.label_calendar": ("Calendar", "Sidebar label for Calendar page"),
-    "sidebar.label_settings": ("Settings", "Sidebar label for Settings page"),
-    # Wiki. library_books rather than menu_book, which eBooks already uses.
-    "sidebar.label_wiki": ("Wiki", "Sidebar label for the Wiki page"),
-    "sidebar.sublabel_wiki": ("Read guides and how-tos", "Sidebar sublabel for Wiki"),
-    "sidebar.enabled_wiki": ("true", "Show Wiki in the sidebar"),
-    "sidebar.new_wiki": ("false", "Show a New! flag on the Wiki nav item"),
-    "icon.nav_wiki": ("library_books", "Sidebar icon for Wiki page"),
-    # Contextual pointers into the wiki. Each holds a page slug, or is empty.
-    # Empty or dangling slugs render nothing rather than a broken link.
-    "wiki.hook_tickets": ("", "Wiki page slug linked above the support ticket form"),
-    "wiki.hook_issues": ("", "Wiki page slug linked above the media-issue form"),
-    "wiki.hook_playback": ("", "Wiki page slug linked on the Playback Issue category"),
-    # Configurable icons (Material Symbols icon names)
-    "icon.nav_home": ("home", "Sidebar icon for Home page"),
-    "icon.nav_requests": ("movie", "Sidebar icon for Requests page"),
-    "icon.nav_requests_embed": ("download", "Sidebar icon for Requests (Embed) page"),
-    "icon.nav_issues": ("report_problem", "Sidebar icon for the media-issue page"),
-    "icon.nav_tickets": ("confirmation_number", "Sidebar icon for the support ticket page"),
-    "icon.nav_calendar": ("calendar_month", "Sidebar icon for Calendar page"),
-    "icon.nav_settings": ("settings", "Sidebar icon for Settings page"),
-    "icon.sidebar_logo": ("settings_input_component", "Icon shown in sidebar logo area"),
-    "icon.section_services": ("health_metrics", "Homepage icon for Service Health section"),
-    "icon.section_news": ("newspaper", "Homepage icon for News & Updates section"),
-    "icon.section_streams": ("play_circle", "Homepage icon for Active Streams section"),
-    "icon.section_releases": ("calendar_month", "Homepage icon for Upcoming Releases section"),
-    # Netdata gauge labels
-    "netdata.cpu_label": ("", "Label under CPU gauge (e.g. 16C/32T)"),
-    "netdata.ram_label": ("", "Label under RAM gauge (e.g. 64 GB). Auto-detects if empty."),
-    "netdata.net_label": ("", "Label under Network gauge (e.g. 1 Gbps). Auto-detects if empty."),
-    "netdata.net_unit": ("mbps", "Network speed unit: mbps (megabits/s) or MBps (megabytes/s)"),
-    "netdata.net_max": ("1000", "Max network throughput for gauge percentage (in the selected unit)"),
-    # Notification polling intervals (seconds)
-    "notifications.poll_interval_seerr": ("60", "Seconds between Seerr notification checks"),
-    "notifications.poll_interval_monitors": ("60", "Seconds between Uptime Kuma notification checks"),
-    "notifications.poll_interval_news": ("60", "Seconds between news post notification checks"),
-    # Authentik OIDC (overrides env vars when set)
-    "integration.authentik.url": ("", "Authentik base URL (e.g., https://auth.example.com)"),
-    "integration.authentik.client_id": ("", "Authentik OAuth2 client ID"),
-    "integration.authentik.client_secret": ("", "Authentik OAuth2 client secret"),
-    "integration.authentik.app_slug": ("", "Authentik application slug (for logout URL)"),
-    # Kavita ebook backend (proxied; never exposed to the browser directly)
-    "integration.kavita.url": ("", "Kavita base URL (e.g., http://192.168.1.100:5000)"),
-    "features.show_books": ("true", "Show Library page in sidebar (also requires Kavita configured)"),
-    "sidebar.label_library": ("eBooks", "Sidebar label for the eBooks/Library page"),
-    "icon.nav_library": ("menu_book", "Sidebar icon for Library page"),
-    # Chaptarr book acquisition (used by the Requests page)
-    "integration.chaptarr.url": ("", "Chaptarr base URL (e.g., http://192.168.1.100:8789)"),
-    "integration.chaptarr.api_key": ("", "Chaptarr API key"),
-    "integration.chaptarr.root_folder": ("", "Chaptarr root folder path for requested books"),
-    "integration.chaptarr.quality_profile_id": ("1", "Chaptarr quality profile id for requested books"),
-    "integration.chaptarr.metadata_profile_id": ("2", "Chaptarr metadata profile id for requested books"),
-    # Chaptarr keeps audiobooks in their own root folder with their own
-    # profiles, so requesting one is the same call with a different trio.
-    # Defaults match a stock Chaptarr install (Audiobook quality, Audiobook
-    # Default metadata).
-    "integration.chaptarr.audiobook_root_folder": ("", "Chaptarr root folder path for requested audiobooks"),
-    "integration.chaptarr.audiobook_quality_profile_id": ("2", "Chaptarr quality profile id for requested audiobooks"),
-    "integration.chaptarr.audiobook_metadata_profile_id": ("1", "Chaptarr metadata profile id for requested audiobooks"),
-    "integration.nyt.api_key": ("", "New York Times Books API key (developer.nytimes.com) for trending shelves"),
-    # Per-page sidebar visibility (Settings > Customization). ANDed with the
-    # features.* flags above, so a gated page needs both. No key for Settings:
-    # hiding it would lock the admin out of the page that turns it back on.
-    "sidebar.enabled_home": ("true", "Show Home in the sidebar"),
-    "sidebar.enabled_requests": ("true", "Show Requests in the sidebar"),
-    "sidebar.enabled_requests_embed": ("true", "Show Requests (Embed) in the sidebar"),
-    "sidebar.enabled_issues": ("true", "Show Issues in the sidebar"),
-    "sidebar.enabled_calendar": ("true", "Show Calendar in the sidebar"),
-    "sidebar.enabled_tickets": ("true", "Show Tickets in the sidebar"),
-    "sidebar.enabled_library": ("true", "Show eBooks in the sidebar"),
-    # Ticket system
-    "features.show_tickets": ("true", "Show Tickets page in sidebar"),
-    "sidebar.label_tickets": ("Tickets", "Sidebar label for Tickets page"),
-    "icon.nav_tickets": ("confirmation_number", "Sidebar icon for Tickets page"),
-    "notifications.poll_interval_tickets": ("60", "Seconds between ticket notification checks"),
-}
+# Every operator setting and its shipped default is defined once, in
+# app/settings_registry.py. Seeding inserts missing keys only, so an
+# operator's customisations survive upgrades.
+DEFAULT_SETTINGS = seed_defaults()
 
 
 def migrate_setup_completed(db: Session) -> None:
