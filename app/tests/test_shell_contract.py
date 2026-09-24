@@ -306,13 +306,32 @@ class ShellContract(unittest.TestCase):
         # Push is on by default (a browser that already allows notifications is
         # subscribed quietly), so turning it off must stick on that device.
         src = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
-        for fn, pattern in (("disablePush", r"\bsetPushOff\(\s*true\s*\)"),
-                            ("subscribePush", r"\bsetPushOff\(\s*false\s*\)"),
-                            ("syncPushSubscription", r"\bpushTurnedOff\(\s*\)")):
+
+        def body_of(fn):
             m = re.search(rf"\bfunction {fn}\([^)]*\)\s*\{{", src)
             self.assertIsNotNone(m, fn)
-            body = src[m.end():matching_brace(src, m.end() - 1)]
-            self.assertTrue(live_matches(body, pattern), f"{fn}: {pattern}")
+            return src[m.end():matching_brace(src, m.end() - 1)]
+
+        for fn, patterns in (("disablePush", (r"\bsetPushOff\(\s*true\s*\)",
+                                              r"\b_pushDisabling\s*=\s*true\b",
+                                              r"\b_pushDisabling\s*=\s*false\b")),
+                             ("subscribePush", (r"\bsetPushOff\(\s*false\s*\)",))):
+            body = body_of(fn)
+            for pattern in patterns:
+                self.assertTrue(live_matches(body, pattern), f"{fn}: {pattern}")
+
+        # The re-sync waits for the service worker (seconds) before deciding. The
+        # off-checks must run in the callback that has the fresh subscription,
+        # after that wait; checked before it, a turn-off made meanwhile is missed.
+        sync = body_of("syncPushSubscription")
+        cb = live_matches(sync, r"\.getSubscription\(\)\s*\.then\(\s*function\s*\(\s*(\w+)\s*\)\s*\{")
+        self.assertEqual(len(cb), 1, "syncPushSubscription: getSubscription().then(function (sub) {...})")
+        callback = sync[cb[0].end():matching_brace(sync, cb[0].end() - 1)]
+        self.assertTrue(live_matches(callback, r"\bpushTurnedOff\(\s*\)"), "off flag read after the wait")
+        self.assertTrue(live_matches(callback, r"\b_pushDisabling\b"), "a turn-off in progress is respected")
+        before = sync[:cb[0].start()]
+        self.assertFalse(live_matches(before, r"\bpushTurnedOff\(\s*\)"),
+                         "the off flag is read before the wait (stale by the time it is used)")
 
     def test_header_menus_close_each_other(self):
         # The bell and account buttons stop their clicks reaching document, so

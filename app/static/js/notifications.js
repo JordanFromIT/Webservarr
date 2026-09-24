@@ -728,11 +728,13 @@
     var vapidKey = (window.WEBSERVARR_THEME || {}).vapid_public_key;
     if (!vapidKey) return;
     var user = (window.WS_DATA || {}).user || {};
-    var mayTurnOn = !!user.has_email && !pushTurnedOff();
 
     swReady().then(function(reg) {
       return reg.pushManager.getSubscription().then(function(sub) {
-        if (!sub && !mayTurnOn) return;   // off on this device, and staying off
+        // Decided here, after the wait (swReady can take seconds), from fresh
+        // state: the user may have turned push off in the meantime.
+        if (_pushDisabling) return;
+        if (!sub && (!user.has_email || pushTurnedOff())) return;   // off here, and staying off
         return currentSubscription(reg, vapidKey).then(function(result) {
           return postSubscription(result.subscription);
         });
@@ -809,8 +811,13 @@
     });
   }
 
+  // True while disablePush runs, so the page-load re-sync can't subscribe
+  // again in the gap between the browser unsubscribing and PUSH_OFF_KEY.
+  var _pushDisabling = false;
+
   function disablePush(toggleEl) {
     toggleEl.disabled = true;
+    _pushDisabling = true;
     swReady().then(function(reg) {
       return reg.pushManager.getSubscription();
     }).then(function(subscription) {
@@ -833,6 +840,7 @@
       showPushMessage(PUSH_MESSAGES.offFailed);
       return checkPushState(toggleEl);   // re-enable only once it is corrected
     }).then(function() {
+      _pushDisabling = false;
       toggleEl.disabled = false;
     });
   }
