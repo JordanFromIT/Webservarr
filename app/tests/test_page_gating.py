@@ -76,6 +76,14 @@ class OffMeansOff(PageRoutesBase):
             self.assertEqual(r.status_code, 200, path)
             self.assertNotIn(BANNER, r.text, path)
 
+    def test_switch_value_is_read_like_the_api_reads_it(self):
+        # One reader for page switches: an out-of-band " False " turns the
+        # page off here exactly as it turns the page's API off.
+        r = self.get("/tickets", MEMBER_SESSION, {"sidebar.enabled_tickets": " False "})
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/"))
+        b = build_branding({"sidebar.enabled_tickets": " False "}, {}, None, dict(EMPTY_WIKI_HOOKS))
+        self.assertIs(b["sidebar_enabled"]["tickets"], False)
+
     def test_home_and_news_are_never_gated(self):
         for path in ("/", "/news"):
             r = self.get(path, MEMBER_SESSION, {"sidebar.enabled_home": "false"})
@@ -151,6 +159,25 @@ class TicketApiGate(unittest.TestCase):
         member = helpers.api_client(self.Session, helpers.MEMBER)
         self.assertEqual(member.get("/api/tickets").status_code, 200)
 
+    def test_switch_value_is_read_loosely(self):
+        helpers.put(self.db, "sidebar.enabled_tickets", " False ")
+        member = helpers.api_client(self.Session, helpers.MEMBER)
+        self.assertEqual(member.get("/api/tickets").status_code, 403)
+
+    def test_ticket_images_follow_the_switch(self):
+        # No such file: a request that passes the gate gets 404.
+        path = "/api/uploads/tickets/0123456789abcdef.png"
+        helpers.put(self.db, "sidebar.enabled_tickets", "false")
+        member = helpers.api_client(self.Session, helpers.MEMBER)
+        self.assertEqual(member.get(path).status_code, 403)
+        helpers.reset_overrides()
+        admin = helpers.api_client(self.Session, helpers.ADMIN)
+        self.assertEqual(admin.get(path).status_code, 404)
+        helpers.reset_overrides()
+        helpers.put(self.db, "sidebar.enabled_tickets", "true")
+        member = helpers.api_client(self.Session, helpers.MEMBER)
+        self.assertEqual(member.get(path).status_code, 404)
+
     def test_old_flag_cannot_turn_tickets_back_on(self):
         # The legacy settings page writes features.show_tickets="true" on every
         # save; that must not reopen a Tickets page switched off here.
@@ -174,9 +201,11 @@ class KavitaGate(unittest.TestCase):
         helpers.reset_overrides()
         self.setup_patch.stop()
 
-    def call(self, user, library_on, path="/kavita/connect"):
+    def call(self, user, library_on, path="/kavita/connect", switch=None):
         from app.routers import kavita_proxy
-        rows = {"sidebar.enabled_library": "true" if library_on else "false",
+        if switch is None:
+            switch = "true" if library_on else "false"
+        rows = {"sidebar.enabled_library": switch,
                 "integration.kavita.url": ""}     # unconfigured: a request that passes the gate gets 503
         client = helpers.api_client(self.Session, user)
         read = mock.Mock(side_effect=lambda *keys: {k: rows.get(k, "") for k in keys})
@@ -190,6 +219,9 @@ class KavitaGate(unittest.TestCase):
         self.assertEqual(r.status_code, 403)
         self.assertEqual(r.json()["detail"], "eBooks is turned off")
         self.assertEqual(self.call(helpers.MEMBER, False, "/kavita/api/Series/all").status_code, 403)
+
+    def test_switch_value_is_read_loosely(self):
+        self.assertEqual(self.call(helpers.MEMBER, None, switch=" False ").status_code, 403)
 
     def test_admins_pass_the_gate(self):
         self.assertEqual(self.call(helpers.ADMIN, False).status_code, 503)
@@ -223,6 +255,18 @@ class KavitaGate(unittest.TestCase):
         for user in (helpers.MEMBER, helpers.ADMIN):
             self.call(user, True, "/kavita/api/Series/all")
             self.assertEqual(self.reads, 1, user["username"])
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class SwitchIsOff(unittest.TestCase):
+    """The one reader for a page switch's stored value."""
+
+    def test_values(self):
+        from app.settings_registry import switch_is_off
+        for value in ("false", "False", " FALSE ", "false\n"):
+            self.assertTrue(switch_is_off(value), repr(value))
+        for value in (None, "", "true", " True ", "0", "no", "off"):
+            self.assertFalse(switch_is_off(value), repr(value))
 
 
 if __name__ == "__main__":

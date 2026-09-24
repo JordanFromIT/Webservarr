@@ -130,11 +130,14 @@ class HandshakeLandsOnEbooks(unittest.TestCase):
         self.setup_patch.stop()
         self.helpers.set_rate_limits(True)
 
-    def finish(self, kavita_cookies):
+    def finish(self, kavita_cookies, session=None, library="true"):
         sm = kavita_proxy.session_manager
-        with mock.patch.object(sm, "get_session", mock.AsyncMock(return_value={"username": "sam"})), \
-             mock.patch.object(sm, "update_session", mock.AsyncMock()), \
-             mock.patch.object(kavita_proxy, "get_kavita_url", return_value=KAVITA), \
+        rows = {"integration.kavita.url": KAVITA, "sidebar.enabled_library": library}
+        self.update = mock.AsyncMock()
+        with mock.patch.object(sm, "get_session", mock.AsyncMock(return_value=session or {"username": "sam"})), \
+             mock.patch.object(sm, "update_session", self.update), \
+             mock.patch.object(kavita_proxy, "_read_settings",
+                               side_effect=lambda *keys: {k: rows.get(k, "") for k in keys}), \
              mock.patch.object(kavita_proxy, "collect_cookies", return_value=kavita_cookies), \
              mock.patch.object(kavita_proxy.httpx, "AsyncClient", _FakeKavita):
             return self.client.post("/signin-oidc", data={"code": "c"}, follow_redirects=False)
@@ -146,6 +149,18 @@ class HandshakeLandsOnEbooks(unittest.TestCase):
     def test_failure_lands_on_ebooks_with_the_error_flag(self):
         r = self.finish("")
         self.assertEqual((r.status_code, r.headers["location"]), (302, "/ebooks?kavita=error"))
+
+    def test_members_get_no_token_while_ebooks_is_off(self):
+        # eBooks switched off mid-handshake: go home (the page gate's answer)
+        # and store no Kavita token in the session.
+        r = self.finish(".AspNetCore.Cookies=abc", {"username": "sam", "is_admin": "false"}, " False ")
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/"))
+        self.update.assert_not_called()
+
+    def test_admins_finish_the_handshake_while_ebooks_is_off(self):
+        r = self.finish(".AspNetCore.Cookies=abc", {"username": "admin", "is_admin": "true"}, "false")
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/ebooks"))
+        self.update.assert_called_once()
 
 
 if __name__ == "__main__":
