@@ -113,11 +113,11 @@
     <!-- The Kavita sign-in failed, or was just tried and still doesn't work
          (see /static/js/kavita-connect.js). Shown instead of going round again. -->
     <div id="connectState" class="hidden py-16 text-center" role="status">
-      <span class="material-symbols-outlined text-4xl text-steel-blue/60">link_off</span>
+      <span class="material-symbols-outlined text-4xl text-steel-blue/60" aria-hidden="true">link_off</span>
       <p class="mt-3 text-frosted-blue font-semibold">Can't open the library</p>
       <p class="mt-1 text-sm text-steel-blue max-w-md mx-auto">We couldn't connect you to the eBook library right now. Please try again in a few minutes.</p>
-      <a id="connectRetry" href="/kavita/connect" class="inline-block mt-4 px-4 py-2 rounded-xl bg-baltic-blue/30 border border-steel-blue/30
-                                   text-sm text-frosted-blue hover:bg-baltic-blue/50">Try again</a>
+      <button id="connectRetry" type="button" class="mt-4 px-4 py-2 rounded-xl bg-baltic-blue/30 border border-steel-blue/30
+                                   text-sm text-frosted-blue hover:bg-baltic-blue/50">Try again</button>
     </div>
 
     <div id="emptyState" class="hidden py-16 text-center">
@@ -181,11 +181,31 @@
     options.credentials = 'include';
     return fetch('/kavita' + path, options).then(function (res) {
       if (res.status === 401) {
-        window.WSKavita.reconnect(showConnectProblem);
+        reconnectKavita();
         throw new Error('reconnecting');
       }
       return res;
     });
+  }
+
+  /** Go and sign in to Kavita, or say why not. Without the helper script, explain and stay. */
+  function reconnectKavita() {
+    var helper = window.WSKavita;
+    if (!helper || typeof helper.reconnect !== 'function') {
+      showConnectProblem();
+      return;
+    }
+    helper.reconnect(showConnectProblem);
+  }
+
+  /** The Try again button. Without the helper, a reload is the honest retry. */
+  function retryConnect() {
+    var helper = window.WSKavita;
+    if (!helper || typeof helper.retry !== 'function') {
+      window.location.reload();
+      return;
+    }
+    helper.retry();
   }
 
   function filterBody(extra) {
@@ -621,9 +641,14 @@
         return shelf.load()
           .then(function (r) { return r.ok ? r.json() : []; })
           .then(function (items) { renderShelf(shelf, items); })
-          .catch(function () { /* a shelf is a convenience; never block the library */ });
+          .catch(function (err) {
+            // Kavita said no and the page now shows why: the remaining
+            // shelves would only ask again, so stop the chain here.
+            if (err && err.message === 'reconnecting') throw err;
+            /* any other failure: a shelf is a convenience; never block the library */
+          });
       });
-    }, Promise.resolve());
+    }, Promise.resolve()).catch(function () { /* stopped on 'reconnecting'; see above */ });
   }
 
   function showUnavailable(err) {
@@ -640,12 +665,10 @@
 
   // Read before anything loads: a sign-in that just failed must not be retried
   // automatically on this page load (that is the loop this guards against).
-  var connectFailed = window.WSKavita.arrivedFromFailedConnect();
+  // Without the helper script there is nothing to read; a 401 then explains.
+  var connectFailed = !!(window.WSKavita && window.WSKavita.arrivedFromFailedConnect());
 
-  el('connectRetry').addEventListener('click', function (e) {
-    e.preventDefault();
-    window.WSKavita.retry();
-  });
+  el('connectRetry').addEventListener('click', retryConnect);
 
   // Apply the admin's configured icon, like other pages do.
   function applyBrandingIcons() {

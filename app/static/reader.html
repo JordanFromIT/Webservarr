@@ -224,11 +224,17 @@
     <span class="material-symbols-outlined animate-spin text-3xl text-steel-blue">progress_activity</span>
     <p id="loadingText" class="mt-2 text-sm text-steel-blue">Opening book…</p>
   </div>
-  <div id="errorState" class="hidden py-24 text-center px-6">
-    <span class="material-symbols-outlined text-4xl text-steel-blue/60">error</span>
+  <!-- Try again shows only for the connection problem (showConnectProblem);
+       a plain book error keeps just the way back. -->
+  <div id="errorState" class="hidden py-24 text-center px-6" role="status">
+    <span class="material-symbols-outlined text-4xl text-steel-blue/60" aria-hidden="true">error</span>
     <p id="errorTitle" class="mt-3 font-semibold text-frosted-blue">Couldn't open this book</p>
     <p id="errorDetail" class="mt-1 text-sm text-steel-blue max-w-md mx-auto"></p>
-    <a href="/ebooks" class="inline-block mt-4 px-4 py-2 rounded-xl bg-baltic-blue/30 border border-steel-blue/30 text-sm text-frosted-blue">Back to eBooks</a>
+    <div class="mt-4 flex flex-wrap items-center justify-center gap-3">
+      <button id="errorRetry" type="button" class="hidden px-4 py-2 rounded-xl bg-baltic-blue/30 border border-steel-blue/30
+                                                   text-sm text-frosted-blue hover:bg-baltic-blue/50">Try again</button>
+      <a href="/ebooks" class="inline-block px-4 py-2 rounded-xl bg-baltic-blue/30 border border-steel-blue/30 text-sm text-frosted-blue">Back to eBooks</a>
+    </div>
   </div>
   <!-- Kavita's HTML goes in here VERBATIM (annotation xPaths are relative to it) -->
   <div id="bookContent" class="book-content hidden"></div>
@@ -278,24 +284,56 @@
   function el(id) { return document.getElementById(id); }
   function qs(name) { return new URLSearchParams(location.search).get(name); }
 
+  var CONNECT_TITLE = "Couldn't open this book";
+  var CONNECT_MESSAGE = "We couldn't connect you to the eBook library right now. Please try again in a few minutes.";
+
   /**
-   * Proxy call. A 401 means the Kavita session lapsed - re-run the handshake,
-   * unless kavita-connect.js says it was just tried; then say so instead of
-   * going round again.
+   * Proxy call. A 401 means the Kavita session lapsed.
+   *
+   * For the calls that put the book on screen (the book, its chapter, a page)
+   * that re-runs the handshake - or, when kavita-connect.js says it was just
+   * tried, explains instead of going round again.
+   *
+   * A background call (progress save, bookmark, contents, saved position)
+   * passes background=true: on a 401 it just fails. It never takes over the
+   * page and never leaves it mid-book; a progress write is retried with the
+   * next one.
    */
-  function kavita(path, options) {
+  function kavita(path, options, background) {
     options = options || {};
     options.credentials = 'include';
     return fetch('/kavita' + path, options).then(function (res) {
       if (res.status === 401) {
-        window.WSKavita.reconnect(function () {
-          showError("Couldn't open this book",
-                    "We couldn't connect you to the eBook library right now. Please try again in a few minutes.");
-        });
+        if (background) throw new Error('unauthorized');
+        reconnectKavita();
         throw new Error('reconnecting');
       }
       return res;
     });
+  }
+
+  /** Go and sign in to Kavita, or say why not. Without the helper script, explain and stay. */
+  function reconnectKavita() {
+    var helper = window.WSKavita;
+    if (!helper || typeof helper.reconnect !== 'function') {
+      showConnectProblem();
+      return;
+    }
+    helper.reconnect(showConnectProblem);
+  }
+
+  /** The Try again button. Without the helper, a reload is the honest retry. */
+  function retryConnect() {
+    var helper = window.WSKavita;
+    if (!helper || typeof helper.retry !== 'function') {
+      window.location.reload();
+      return;
+    }
+    helper.retry();
+  }
+
+  function showConnectProblem() {
+    showError(CONNECT_TITLE, CONNECT_MESSAGE, true);
   }
 
   // ---- Preferences (local; reading position itself lives in Kavita) ----
@@ -354,12 +392,21 @@
 
   // ---- Loading ----
 
-  function showError(title, detail) {
-    el('loading').classList.add('hidden');
-    el('bookContent').classList.add('hidden');
+  // One of these at a time, so a stale error never sits above a working page.
+  var PANELS = ['loading', 'errorState', 'bookContent'];
+
+  function showPanel(which) {
+    PANELS.forEach(function (id) {
+      el(id).classList.toggle('hidden', id !== which);
+    });
+  }
+
+  /** canRetry: the connection problem, where Try again can help. */
+  function showError(title, detail, canRetry) {
     el('errorTitle').textContent = title;
     el('errorDetail').textContent = detail || '';
-    el('errorState').classList.remove('hidden');
+    el('errorRetry').classList.toggle('hidden', !canRetry);
+    showPanel('errorState');
   }
 
   function resolveChapter(seriesId) {
@@ -387,7 +434,7 @@
   }
 
   function loadTOC() {
-    return kavita('/api/Book/' + book.chapterId + '/chapters')
+    return kavita('/api/Book/' + book.chapterId + '/chapters', null, true)
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (nodes) {
         var list = el('tocList');
@@ -422,8 +469,7 @@
     // VERBATIM. Kavita's annotation xPaths are relative to .book-content, so
     // the element tree inside must not be altered.
     container.innerHTML = html;
-    container.classList.remove('hidden');
-    el('loading').classList.add('hidden');
+    showPanel('bookContent');
     window.scrollTo(0, 0);
   }
 
@@ -433,8 +479,7 @@
     current.page = page;
     updateChrome();
 
-    el('bookContent').classList.add('hidden');
-    el('loading').classList.remove('hidden');
+    showPanel('loading');
     el('loadingText').textContent = 'Loading page ' + (page + 1) + '…';
 
     return kavita('/api/Book/' + book.chapterId + '/book-page?page=' + page)
@@ -504,16 +549,17 @@
         new Blob([body], { type: 'application/json' }));
       return;
     }
-    // A failed progress write must never interrupt reading.
+    // A failed progress write must never interrupt reading: it is a
+    // background call, and lastSaved = -1 makes the next save try again.
     kavita('/api/Reader/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: body
-    }).catch(function () { lastSaved = -1; });
+    }, true).catch(function () { lastSaved = -1; });
   }
 
   function restoreProgress() {
-    return kavita('/api/Reader/get-progress?chapterId=' + book.chapterId)
+    return kavita('/api/Reader/get-progress?chapterId=' + book.chapterId, null, true)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (p) {
         var page = (p && typeof p.pageNum === 'number') ? p.pageNum : 0;
@@ -532,6 +578,7 @@
   }
 
   el('tocBtn').addEventListener('click', function () { toggleTOC(); });
+  el('errorRetry').addEventListener('click', retryConnect);
   el('settingsBtn').addEventListener('click', function () {
     el('settingsPanel').classList.toggle('hidden');
   });
@@ -563,10 +610,10 @@
         seriesId: book.seriesId, volumeId: book.volumeId,
         chapterId: book.chapterId, page: current.page
       })
-    }).then(function (r) {
+    }, true).then(function (r) {
       el('bookmarkIcon').textContent = r.ok ? 'bookmark_added' : 'bookmark_add';
       setTimeout(function () { el('bookmarkIcon').textContent = 'bookmark_add'; }, 1800);
-    }).catch(function () {});
+    }).catch(function () { /* a bookmark is a convenience; reading goes on */ });
   });
 
   document.addEventListener('keydown', function (e) {
