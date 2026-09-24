@@ -81,6 +81,7 @@ PAGE_NAV = {
     "library": "library",
     "wiki": "wiki",
     "settings": "settings",
+    "settings-next": "settings",
 }
 
 # ---------------------------------------------------------------------------

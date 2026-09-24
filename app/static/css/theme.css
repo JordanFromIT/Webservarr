@@ -433,3 +433,78 @@ html[data-home-hide~="services"][data-home-hide~="news"] [data-home-pair] { disp
  * skips whatever is not displayed. */
 html[data-home-hide] [data-home-stack] { display: flex; flex-direction: column; row-gap: 2rem; }
 html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
+
+/* ---- Settings ----
+ *
+ * Status tokens are for NON-TEXT marks only (lights, invalid-field borders);
+ * status text always uses theme colours. Panels are shown by the tab named on
+ * <html data-settings-tab>, which an inline script sets before first paint.
+ */
+:root {
+  --ws-status-ok: 34 197 94;
+  --ws-status-warn: 245 158 11;
+  --ws-status-err: 239 68 68;
+}
+
+/* The renderer stamps data-admin on <html> for admins, so admin-only
+   controls on shared pages never flash for members. */
+html:not([data-admin]) .ws-admin-only { display: none !important; }
+
+.ws-hide-scrollbar { scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.ws-hide-scrollbar::-webkit-scrollbar { display: none; }
+
+.ws-tab {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .75rem 1rem; margin-bottom: -1px;
+  font-size: 15px; font-weight: 600;
+  color: rgb(var(--color-text) / .7);
+  border-bottom: 2px solid transparent; border-radius: 10px 10px 0 0;
+  transition: color 150ms ease-out, border-color 150ms ease-out, background-color 150ms ease-out;
+}
+.ws-tab:hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .04); }
+.ws-tab[aria-selected="true"] { color: rgb(var(--color-text)); border-bottom-color: rgb(var(--color-primary)); }
+.ws-tab:focus-visible { outline: 2px solid rgb(var(--color-primary)); outline-offset: -2px; }
+
+[data-settings-panel] { display: none; }
+html[data-settings-tab="general"] [data-settings-panel="general"],
+html[data-settings-tab="pages"] [data-settings-panel="pages"],
+html[data-settings-tab="appearance"] [data-settings-panel="appearance"],
+html[data-settings-tab="sign-in"] [data-settings-panel="sign-in"],
+html[data-settings-tab="integrations"] [data-settings-panel="integrations"],
+html[data-settings-tab="notifications"] [data-settings-panel="notifications"] { display: block; }
+
+.ws-panel-in { animation: ws-fade-up 160ms ease-out both; }
+
+.ws-switch {
+  position: relative; flex-shrink: 0; width: 2.75rem; height: 1.5rem; border-radius: 9999px;
+  background: rgb(var(--color-text) / .15); transition: background-color 150ms ease-out;
+}
+.ws-switch::after {
+  content: ""; position: absolute; top: .1875rem; left: .1875rem; width: 1.125rem; height: 1.125rem;
+  border-radius: 9999px; background: rgb(var(--color-text-secondary)); transition: transform 150ms ease-out;
+}
+.ws-switch[aria-checked="true"] { background: rgb(var(--color-primary)); }
+.ws-switch[aria-checked="true"]::after { transform: translateX(1.25rem); }
+.ws-switch:disabled { opacity: .5; cursor: not-allowed; }
+.ws-switch:focus-visible { outline: 2px solid rgb(var(--color-primary)); outline-offset: 2px; }
+
+.ws-light { display: inline-block; flex-shrink: 0; width: .625rem; height: .625rem; border-radius: 9999px;
+            background: rgb(var(--color-text) / .25); }
+.ws-light-ok { background: rgb(var(--ws-status-ok)); }
+.ws-light-warn { background: rgb(var(--ws-status-warn)); }
+.ws-light-error { background: rgb(var(--ws-status-err)); }
+.ws-light-unconfigured { background: rgb(var(--color-text) / .25); }
+.ws-light-checking { background: rgb(var(--color-text) / .25); animation: ws-pulse 1.2s ease-in-out infinite; }
+@keyframes ws-pulse { 50% { opacity: .35; } }
+
+.ws-invalid { border-color: rgb(var(--ws-status-err)) !important; box-shadow: 0 0 0 1px rgb(var(--ws-status-err)); }
+
+.ws-savebar { transition: transform 200ms ease-out, opacity 200ms ease-out; }
+.ws-savebar.is-hidden { transform: translateY(calc(100% + 1.5rem)); opacity: 0; pointer-events: none; }
+/* The mobile scroll hint stays; it moves up while the save bar covers the bottom edge. */
+body.ws-savebar-open #scrollDownHint { bottom: 6rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-panel-in, .ws-light-checking { animation: none; }
+  .ws-savebar, .ws-tab, .ws-switch, .ws-switch::after { transition: none; }
+}

@@ -21,6 +21,7 @@ const GLOBS = [
   ["app/static", /\.html$/],
   ["app/static/partials", /\.html$/],
   ["app/static/js", /\.js$/],
+  ["app/static/js/settings", /\.js$/],
   ["app", /^pages\.py$/],
   ["app/static/css", /^tailwind\.src\.css$/],
 ];

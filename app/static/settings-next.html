@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Settings</title>
+<link rel="icon" href="/static/webservarr.svg"/>
+<script src="/static/js/theme-loader.js?v=1"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
+<link href="/static/css/app.css?v=1" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<!-- ws:sidebar -->
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<!-- ws:header -->
+<div id="settingsScroll" class="flex-1 lg:overflow-y-auto custom-scrollbar">
+  <div class="max-w-[1200px] w-full mx-auto px-4 lg:px-8 pt-6 lg:pt-8 pb-40">
+    <header class="mb-6">
+      <h1 class="text-[24px] lg:text-[32px] font-bold tracking-tight text-frosted-blue leading-tight">Settings</h1>
+      <p class="text-[15px] text-frosted-blue/70 mt-1">Set up your site, choose what people see, and connect your services.</p>
+    </header>
+
+    <div class="relative border-b border-frosted-blue/10 mb-8">
+      <div id="settingsTabScroller" class="overflow-x-auto ws-hide-scrollbar">
+        <nav id="settingsTabs" role="tablist" aria-label="Settings sections" class="flex gap-1 whitespace-nowrap">
+          <a role="tab" id="tab-general" href="#general" data-tab="general" aria-controls="panel-general" aria-selected="false" class="ws-tab">General</a>
+          <a role="tab" id="tab-pages" href="#pages" data-tab="pages" aria-controls="panel-pages" aria-selected="false" class="ws-tab">Pages</a>
+          <a role="tab" id="tab-appearance" href="#appearance" data-tab="appearance" aria-controls="panel-appearance" aria-selected="false" class="ws-tab">Appearance</a>
+          <a role="tab" id="tab-sign-in" href="#sign-in" data-tab="sign-in" aria-controls="panel-sign-in" aria-selected="false" class="ws-tab">Sign-in</a>
+          <a role="tab" id="tab-integrations" href="#integrations" data-tab="integrations" aria-controls="panel-integrations" aria-selected="false" class="ws-tab">Integrations</a>
+          <a role="tab" id="tab-notifications" href="#notifications" data-tab="notifications" aria-controls="panel-notifications" aria-selected="false" class="ws-tab">Notifications</a>
+        </nav>
+      </div>
+      <div id="settingsTabHintLeft" class="absolute left-0 top-1/2 -translate-y-1/2 flex items-center pointer-events-none lg:hidden transition-opacity duration-200" style="opacity:0" aria-hidden="true">
+        <span class="material-symbols-outlined text-frosted-blue/70 text-base">arrow_back</span>
+      </div>
+      <div id="settingsTabHintRight" class="absolute right-0 top-1/2 -translate-y-1/2 flex items-center pointer-events-none lg:hidden transition-opacity duration-200" aria-hidden="true">
+        <span class="material-symbols-outlined text-frosted-blue/70 text-base">arrow_forward</span>
+      </div>
+    </div>
+    <!-- Select the tab from the hash before the first paint, so the right panel
+         (and its skeleton) is what paints. The kit keeps this in step afterwards. -->
+    <script>
+      (function () {
+        var tabs = ['general', 'pages', 'appearance', 'sign-in', 'integrations', 'notifications'];
+        var t = (location.hash || '').slice(1);
+        if (tabs.indexOf(t) < 0) t = 'general';
+        document.documentElement.setAttribute('data-settings-tab', t);
+        var a = document.getElementById('tab-' + t);
+        if (a) a.setAttribute('aria-selected', 'true');
+      })();
+    </script>
+
+    <section id="panel-general" data-settings-panel="general" role="tabpanel" aria-labelledby="tab-general">
+      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
+      <div class="skel h-[72px] mb-5" aria-hidden="true"></div>
+      <div class="skel h-[72px] mb-5" aria-hidden="true"></div>
+      <div class="skel h-40" aria-hidden="true"></div>
+    </section>
+    <section id="panel-pages" data-settings-panel="pages" role="tabpanel" aria-labelledby="tab-pages">
+      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
+      <div class="skel skel-row mb-2" aria-hidden="true"></div>
+      <div class="skel skel-row mb-2" aria-hidden="true"></div>
+      <div class="skel skel-row mb-2" aria-hidden="true"></div>
+      <div class="skel skel-row mb-2" aria-hidden="true"></div>
+      <div class="skel skel-row" aria-hidden="true"></div>
+    </section>
+    <section id="panel-appearance" data-settings-panel="appearance" role="tabpanel" aria-labelledby="tab-appearance">
+      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
+      <div class="grid sm:grid-cols-2 gap-5 mb-8">
+        <div class="skel h-[72px]" aria-hidden="true"></div><div class="skel h-[72px]" aria-hidden="true"></div>
+        <div class="skel h-[72px]" aria-hidden="true"></div><div class="skel h-[72px]" aria-hidden="true"></div>
+      </div>
+      <div class="skel h-40" aria-hidden="true"></div>
+    </section>
+    <section id="panel-sign-in" data-settings-panel="sign-in" role="tabpanel" aria-labelledby="tab-sign-in">
+      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
+      <div class="skel skel-card mb-4" aria-hidden="true"></div>
+      <div class="skel skel-card mb-4" aria-hidden="true"></div>
+      <div class="skel skel-card" aria-hidden="true"></div>
+    </section>
+    <section id="panel-integrations" data-settings-panel="integrations" role="tabpanel" aria-labelledby="tab-integrations">
+      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
+      <div class="skel skel-row mb-2" aria-hidden="true"></div>
+      <div class="skel skel-row mb-2" aria-hidden="true"></div>
+      <div class="skel skel-row mb-2" aria-hidden="true"></div>
+      <div class="skel skel-row" aria-hidden="true"></div>
+    </section>
+    <section id="panel-notifications" data-settings-panel="notifications" role="tabpanel" aria-labelledby="tab-notifications">
+      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
+      <div class="skel skel-card mb-4" aria-hidden="true"></div>
+      <div class="skel skel-card" aria-hidden="true"></div>
+    </section>
+  </div>
+</div>
+</main>
+
+<div id="settingsSaveBar" hidden></div>
+
+<!-- Tab modules, loaded the first time their tab opens. A <template> is
+     inert, so nothing here runs; the server still stamps each src. -->
+<template id="settingsModules">
+  <script data-tab="general" src="/static/js/settings/general.js?v=1"></script>
+  <script data-tab="pages" src="/static/js/settings/pages.js?v=1"></script>
+  <script data-tab="appearance" src="/static/js/settings/appearance.js?v=1"></script>
+  <script data-tab="sign-in" src="/static/js/settings/signin.js?v=1"></script>
+  <script data-tab="integrations" src="/static/js/settings/integrations.js?v=1"></script>
+  <script data-tab="notifications" src="/static/js/settings/notifications.js?v=1"></script>
+</template>
+
+<script src="/static/js/auth.js?v=1"></script>
+<script src="/static/js/shell.js?v=1"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+<script src="/static/js/ui.js?v=1"></script>
+<script src="/static/js/settings/kit.js?v=1"></script>
+<script>
+  checkAuth({ requireAdmin: true }).then(function (user) {
+    if (user && window.WSSettings) WSSettings.boot();
+  });
+</script>
+</body>
+</html>

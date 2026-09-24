@@ -592,6 +592,20 @@ async def settings_page(
     return render_page("settings", request, user)
 
 
+# Redesigned Settings (v1.11), served alongside the old page until the switch-over.
+@app.get("/settings/next", response_class=HTMLResponse, tags=["Pages"])
+async def settings_next_page(
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    user = await _require_session(session_id)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    if user.get("is_admin") != "true":
+        return RedirectResponse(url="/", status_code=302)
+    return render_page("settings-next", request, user)
+
+
 # Mount static files (CSS, JS, images, etc.)
 # This should be last to avoid catching API routes
 app.mount("/static", StaticFiles(directory="/app/app/static"), name="static")
