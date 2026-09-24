@@ -15,6 +15,7 @@ from unittest import mock
 from app import pages
 from app.pages import NAV_ITEMS, PAGE_NAV, asset_stamp, render_html
 from app.routers.branding import build_branding
+from app.tests.test_shell_contract import js_code_only, live_matches, matching_brace
 
 def setUpModule():
     # The partials live next to the pages; resolve them relative to this file
@@ -52,6 +53,134 @@ def data_of(out):
 
 def html_tag(out):
     return out.split("<head>")[0]
+
+
+def static_text(*parts):
+    with open(os.path.join(pages.STATIC_DIR, *parts), encoding="utf-8") as f:
+        return f.read()
+
+
+# Each Home loader and the section switch that must guard every call to it.
+# None: the call is not a home section and must stay unguarded.
+HOME_LOADERS = {
+    "loadNews": "news",
+    "loadServices": "services",
+    "loadSystemStats": "services",
+    "loadActiveStreams": "streams",
+    "loadRecentRequests": "requests",
+    "loadUpcomingReleases": "releases",
+    "loadRequestCount": None,
+}
+
+
+def home_guard_problems(page: str) -> list:
+    """What is wrong with how index.html's DOMContentLoaded handler gates loads.
+
+    Works on live code only (js_code_only / live_matches), so neither a
+    comment nor a string can stand in for a guard or a call. Raw-source
+    positions are mapped into the code-only text by measuring the code-only
+    form of the source before them."""
+    raw = next((s for s in re.findall(r"<script>(.*?)</script>", page, re.S)
+                if "DOMContentLoaded" in s), None)
+    if raw is None:
+        return ["no inline script with a DOMContentLoaded handler"]
+    code = js_code_only(raw)
+
+    def at(p):
+        return len(js_code_only(raw[:p]))
+
+    def only(pattern):
+        found = live_matches(raw, pattern)
+        return found[0] if len(found) == 1 else None
+
+    problems = []
+    start = only(r"addEventListener\('DOMContentLoaded', async function\s*\(\)\s*\{")
+    if start is None:
+        return ["the DOMContentLoaded handler is not live code"]
+    h_open = at(start.end()) - 1
+    h_close = matching_brace(code, h_open)
+
+    def in_handler(c):
+        return h_open < c < h_close
+
+    # sectionOn reads the payload and treats anything but false as on; the
+    # sections that are off are marked arrived before the wait on checkAuth.
+    for pattern in (r"var homeSections = \(window\.WEBSERVARR_THEME \|\| \{\}\)\.home_sections \|\| \{\};",
+                    r"function sectionOn\(id\) \{ return homeSections\[id\] !== false; \}"):
+        if only(pattern) is None:
+            problems.append("missing live: " + pattern)
+    arrive = only(r"if \(!sectionOn\(id\)\) WS\.arrive\(id\);")
+    auth = only(r"await checkAuth\(\)")
+    if arrive is None or auth is None or not arrive.start() < auth.start():
+        problems.append("off sections are not marked arrived before checkAuth")
+
+    # Guard spans: `if (sectionOn('x')) stmt;` or `if (sectionOn('x')) { ... }`.
+    guards = []
+    for m in live_matches(raw, r"if\s*\(\s*sectionOn\(\s*'(\w+)'\s*\)\s*\)\s*"):
+        e = at(m.end())
+        end = matching_brace(code, e) if code[e] == "{" else code.index(";", e)
+        guards.append((m.group(1), e, end))
+
+    def guard_of(c):
+        inside = [g for g in guards if g[1] <= c <= g[2]]
+        return min(inside, key=lambda g: g[2] - g[1])[0] if inside else None
+
+    # WS.poll(..., interval) spans inside the handler.
+    polls = []
+    for m in live_matches(raw, r"WS\.poll\("):
+        o = at(m.end()) - 1
+        if not in_handler(o):
+            continue
+        depth = 0
+        for close in range(o, len(code)):
+            depth += {"(": 1, ")": -1}.get(code[close], 0)
+            if depth == 0:
+                break
+        interval = re.search(r",\s*(\d+)\s*\)$", code[o:close + 1])
+        polls.append((int(interval.group(1)) if interval else None, o, close))
+
+    def poll_of(c):
+        return next((p[0] for p in polls if p[1] < c < p[2]), None)
+
+    seen = set()
+    for m in live_matches(raw, r"\b(" + "|".join(HOME_LOADERS) + r")\b(?=\s*[(,])"):
+        c = at(m.start())
+        if not in_handler(c):
+            continue
+        name = m.group(1)
+        want, got = HOME_LOADERS[name], guard_of(c)
+        if got != want:
+            problems.append(f"{name} guarded by {got!r}, expected {want!r}")
+        seen.add((name, poll_of(c)))
+
+    for name in HOME_LOADERS:
+        if (name, None) not in seen:
+            problems.append(f"{name} is not in the initial load")
+    for name in ("loadServices", "loadActiveStreams", "loadRecentRequests",
+                 "loadUpcomingReleases", "loadRequestCount"):
+        if (name, 30000) not in seen:
+            problems.append(f"{name} is not in the 30 s poll")
+    if ("loadSystemStats", 1000) not in seen:
+        problems.append("loadSystemStats is not polled every second")
+
+    intervals = sorted(p[0] or 0 for p in polls)
+    if intervals != [1000, 1000, 30000]:
+        problems.append(f"unexpected polls {intervals}")
+    for interval, o, _ in polls:
+        if interval == 1000 and guard_of(o) != "services":
+            problems.append("a 1 s poll runs outside the sectionOn('services') block")
+    return problems
+
+
+def css_rules(css: str) -> dict:
+    """{selector: {property: value}} for the plain rules in a stylesheet."""
+    rules = {}
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.S)):
+        decls = dict((k.strip(), v.strip()) for k, v in
+                     (d.split(":", 1) for d in m.group(2).split(";") if ":" in d))
+        for sel in m.group(1).split(","):
+            rules.setdefault(" ".join(sel.split()), {}).update(decls)
+    return rules
 
 
 class ShellRendering(unittest.TestCase):
@@ -262,12 +391,60 @@ class ShellRendering(unittest.TestCase):
         self.assertNotIn("data-home-hide", html_tag(render(b=b, name="calendar")))
 
     def test_index_skips_sections_that_are_off(self):
-        page = open(os.path.join(pages.STATIC_DIR, "index.html"), encoding="utf-8").read()
-        self.assertIn("data-home-pair", page)
-        self.assertIn("sectionOn(", page)
-        css = open(os.path.join(pages.STATIC_DIR, "css", "theme.css"), encoding="utf-8").read()
+        self.assertEqual(home_guard_problems(static_text("index.html")), [])
+
+    def test_home_guard_check_rejects_unguarded_loads(self):
+        # Each mutation still passes a plain substring check for "sectionOn(";
+        # the live-code check must not.
+        page = static_text("index.html")
+        guard = r"if \(sectionOn\('\w+'\)\) "
+        self.assertTrue(re.search(guard, page), "the guards this test mutates are gone")
+        reverted = re.sub(guard, "", page)                  # every call unconditional
+        commented = re.sub(guard, lambda m: "/* " + m.group(0) + "*/ ", page)
+        for name, mutated in (("reverted", reverted), ("commented", commented)):
+            self.assertIn("sectionOn(", mutated)
+            problems = home_guard_problems(mutated)
+            for loader in ("loadNews", "loadServices", "loadSystemStats", "loadActiveStreams",
+                           "loadRecentRequests", "loadUpcomingReleases"):
+                self.assertTrue(any(p.startswith(loader + " guarded by None") for p in problems),
+                                (name, loader, problems))
+            self.assertIn("a 1 s poll runs outside the sectionOn('services') block", problems, name)
+        badge = page.replace("loadRequestCount();   //", "if (sectionOn('requests')) loadRequestCount();   //", 1)
+        self.assertIn("loadRequestCount guarded by 'requests', expected None", home_guard_problems(badge))
+
+    def test_home_section_css_is_scoped_to_the_hide_attribute(self):
+        rules = css_rules(static_text("css", "theme.css"))
         for sid in ("services", "news", "streams", "releases", "requests"):
-            self.assertIn(f'html[data-home-hide~="{sid}"] [data-arrive="{sid}"]', css)
+            self.assertEqual(rules.get(f'html[data-home-hide~="{sid}"] [data-arrive="{sid}"]', {}).get("display"),
+                             "none", sid)
+        for sid in ("services", "news"):
+            self.assertEqual(rules.get(f'html[data-home-hide~="{sid}"] [data-home-pair]', {})
+                             .get("grid-template-columns"), "minmax(0, 1fr)", sid)
+        self.assertEqual(rules.get('html[data-home-hide~="services"][data-home-hide~="news"] [data-home-pair]', {})
+                         .get("display"), "none")
+        stack = rules.get("html[data-home-hide] [data-home-stack]", {})
+        self.assertEqual((stack.get("display"), stack.get("flex-direction"), stack.get("row-gap")),
+                         ("flex", "column", "2rem"))
+        self.assertEqual(rules.get("html[data-home-hide] [data-home-stack] > :not([hidden])", {})
+                         .get("margin-top"), "0")
+        # Nothing touches the pair or the stack while every section is on.
+        for sel in rules:
+            if re.search(r"data-home-(pair|stack|hide)", sel):
+                self.assertTrue(sel.startswith("html[data-home-hide"), sel)
+
+    def test_index_carries_the_pair_and_stack_hooks(self):
+        page = static_text("index.html")
+        self.assertEqual(page.count("data-home-stack"), 1)
+        self.assertEqual(page.count("data-home-pair"), 1)
+        stack = re.search(r'<div class="([^"]*)" data-home-stack>', page)
+        self.assertIsNotNone(stack)
+        self.assertIn("space-y-8", stack.group(1).split())
+        pair = page.index("data-home-pair>")
+        services, news, streams = (page.index(f'data-arrive="{sid}"') for sid in ("services", "news", "streams"))
+        self.assertTrue(stack.end() < pair < services < news < streams)
+        # The pair closes before Active Streams: both sections sit inside it.
+        between = page[pair:streams]
+        self.assertEqual(between.count("<div") + 1, between.count("</div>"))
 
 
 class NavModel(unittest.TestCase):
