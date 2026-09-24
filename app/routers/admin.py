@@ -226,9 +226,9 @@ async def update_setting(
     Requires admin authentication.
     """
     writes, errors = plan_writes(db, [(setting_data.key, setting_data.value)])
+    errors = errors or apply_writes(db, writes)
     if errors:
         return validation_error(errors)
-    apply_writes(db, writes)
     row = db.query(Setting).filter(Setting.key == setting_data.key).first()
     return {
         "key": setting_data.key,

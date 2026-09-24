@@ -126,19 +126,32 @@ def plan_writes(db: Session, items: List[Tuple[str, str]]) -> Tuple[Dict[str, st
             after = effective_values(db)
             after.update(writes)
             if not usable_sign_in_methods(after):
-                flags = [k for k in touched if k.startswith("features.")]
-                errors[(flags or touched)[0]] = LOCKOUT_MESSAGE
+                errors[_lockout_key(touched)] = LOCKOUT_MESSAGE
     return ({} if errors else writes), errors
 
 
-def apply_writes(db: Session, writes: Dict[str, str]) -> None:
+def _lockout_key(touched: List[str]) -> str:
+    """The key a lockout error is reported on: the first switch, else the first sign-in key."""
+    flags = [k for k in touched if k.startswith("features.")]
+    return (flags or touched)[0]
+
+
+def apply_writes(db: Session, writes: Dict[str, str]) -> Dict[str, str]:
     """Upsert every write in one transaction, or none of them.
+
+    Returns {} once saved, or the lockout error (nothing saved) when a change
+    to sign-in keys would leave no usable method. plan_writes checks that too,
+    but on a snapshot read before either worker held a write lock: two admins
+    turning off different methods at once would each pass. So the check runs
+    again here after the flush, which takes SQLite's write lock, and sees this
+    batch plus whatever the other worker had already committed.
 
     One retry covers the other worker inserting the same new key at the same
     moment. Any failure (SQLite "database is locked" with two workers, for
     one) rolls back and becomes a 503, so a save never lands half-written."""
     if not writes:
-        return
+        return {}
+    touched = [k for k in writes if k in _SIGN_IN_KEYS]
     try:
         for attempt in (1, 2):
             existing = {r.key: r for r in db.query(Setting).filter(Setting.key.in_(list(writes))).all()}
@@ -149,8 +162,13 @@ def apply_writes(db: Session, writes: Dict[str, str]) -> None:
                     d = get_def(key)
                     db.add(Setting(key=key, value=value, description=d.description if d else None))
             try:
+                if touched:
+                    db.flush()
+                    if not usable_sign_in_methods(effective_values(db)):
+                        db.rollback()
+                        return {_lockout_key(touched): LOCKOUT_MESSAGE}
                 db.commit()
-                return
+                return {}
             except IntegrityError:
                 db.rollback()
                 if attempt == 2:
@@ -201,7 +219,7 @@ async def bulk_update_settings(
 ):
     """BulkSave: validate everything, then write everything, or nothing."""
     writes, errors = plan_writes(db, [(i.key, i.value) for i in payload.settings])
+    errors = errors or apply_writes(db, writes)
     if errors:
         return validation_error(errors)
-    apply_writes(db, writes)
     return {"saved": list(writes), "values": {k: mask(k, v) for k, v in writes.items()}}
