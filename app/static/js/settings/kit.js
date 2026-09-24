@@ -750,7 +750,12 @@
     if (TABS.indexOf(id) < 0) id = 'general';
     var from = S.current;
     if (id === from) return mount(id).then(function () { return true; });
-    if (S.asking) return Promise.resolve(false);      // the open dialog settles the URL
+    if (S.asking) {
+      // The open dialog decides; a Back pressed meanwhile is held, and the
+      // address bar goes back to the tab still shown.
+      if (how === 'history') setHash(from, 'replace');
+      return Promise.resolve(false);
+    }
     if (UI.isDialogOpen()) {
       // Another dialog (the icon picker, say) belongs to this tab: finish or
       // cancel it first, so its answer can't land on a tab that has gone.
