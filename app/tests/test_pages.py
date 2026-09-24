@@ -504,11 +504,21 @@ class ShellRendering(unittest.TestCase):
         # R54(c): an empty name hides #loginAppName; the reveal that keeps the
         # simple-auth form from flashing stays exactly as it was.
         page = re.sub(r"\s+", " ", static_text("login.html"))
-        self.assertIn("} else if (theme.app_name === '') {", page)
+        self.assertIn("var siteName = typeof theme.app_name === 'string' ? theme.app_name.trim() : null;", page)
+        self.assertIn("} else if (siteName === '') {", page)
         self.assertRegex(page, r"var nameEl = document\.getElementById\('loginAppName'\); "
                                r"if \(nameEl\) nameEl\.classList\.add\('hidden'\);")
         self.assertIn("#loginForm { visibility: hidden; }", page)
         self.assertIn("#loginForm.auth-ready { visibility: visible; }", page)
+
+    def test_theme_loader_leaves_a_blank_names_title_alone(self):
+        # The server's title for a blank (or all-space) name is just the page
+        # name; the client must not prefix it with the spaces and a " - ".
+        code = js_code_only(static_text("js", "theme-loader.js"))
+        self.assertRegex(code, r"var siteName = typeof data\.app_name === '[^']*' \? data\.app_name\.trim\(\) : '';\s*"
+                               r"if \(siteName\) \{")
+        self.assertRegex(code, r"document\.title = siteName \+ suffix;")
+        self.assertNotRegex(code, r"document\.title = data\.app_name")
 
 
 class NavModel(unittest.TestCase):
