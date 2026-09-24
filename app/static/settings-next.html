@@ -50,11 +50,21 @@
         <span class="material-symbols-outlined text-frosted-blue/70 text-base">arrow_forward</span>
       </div>
     </div>
-    <!-- The tab chosen in <head>, for assistive tech. Its look comes from CSS. -->
+    <!-- The tab chosen in <head>, for assistive tech (its look comes from CSS).
+         On a phone the strip also starts scrolled to it, with its edge hints,
+         so it never paints at the start and then jumps. The kit keeps both
+         in step afterwards. -->
     <script>
       (function () {
         var a = document.getElementById('tab-' + document.documentElement.getAttribute('data-settings-tab'));
         if (a) a.setAttribute('aria-selected', 'true');
+        var sc = document.getElementById('settingsTabScroller');
+        if (!a || !sc || sc.scrollWidth <= sc.clientWidth) return;
+        var r = a.getBoundingClientRect(), s = sc.getBoundingClientRect();
+        if (r.right > s.right - 48) sc.scrollLeft += r.right - s.right + 48;
+        var max = sc.scrollWidth - sc.clientWidth;
+        document.getElementById('settingsTabHintLeft').style.opacity = sc.scrollLeft > 4 ? '1' : '0';
+        document.getElementById('settingsTabHintRight').style.opacity = sc.scrollLeft >= max - 4 ? '0' : '1';
       })();
     </script>
 
