@@ -441,7 +441,8 @@ class DerivedDefaults(unittest.TestCase):
             self.assertEqual(value, OLD_DEFAULT_VALUES["theme.color_" + key], key)
         css_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "static", "css", "theme.css")
-        css = open(css_path, encoding="utf-8").read()
+        with open(css_path, encoding="utf-8") as f:
+            css = f.read()
         for key in pages._DEFAULT_COLORS:
             var = "--hex-" + key.replace("_", "-")
             m = _re.search(_re.escape(var) + r":\s*(#[0-9A-Fa-f]{6});", css)
