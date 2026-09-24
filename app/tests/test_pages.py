@@ -84,16 +84,18 @@ class ShellRendering(unittest.TestCase):
         self.assertIn('id="appVersion" class="text-steel-blue text-[10px] text-center ">v9.9.9', render(user=ADMIN))
         self.assertIn('id="appVersion" class="text-steel-blue text-[10px] text-center hidden">v9.9.9', render(user=MEMBER))
 
-    def test_feature_gated_and_disabled_items(self):
-        b = branding(**{"features.show_tickets": "false", "sidebar.enabled_calendar": "false"})
+    def test_page_switches_and_retired_flags(self):
+        b = branding(**{"sidebar.enabled_tickets": "false", "sidebar.enabled_calendar": "false"})
         out = render(b=b)
         self.assertNotIn('href="/tickets"', out)
         self.assertNotIn('href="/calendar"', out)
         self.assertIn('href="/issues"', out)
-        # Feature-gated items appear when their flag is on.
-        self.assertNotIn('href="/requests-embed"', render())
-        self.assertIn('href="/requests-embed"', render(b=branding(**{"features.show_requests": "true"})))
-        self.assertIn('id="requestsBadge"', render(b=branding(**{"features.show_requests": "true"})))
+        # Retired flags no longer do anything.
+        out = render(b=branding(**{"features.show_tickets": "false", "features.show_requests": "true"}))
+        self.assertIn('href="/tickets"', out)
+        self.assertNotIn('href="/requests-embed"', out)
+        # The pending-requests badge lives on the one Requests item.
+        self.assertRegex(render(), r'href="/requests"[^\n]*id="requestsBadge"')
 
     def test_labels_icons_sublabels_and_new_flag_apply(self):
         b = branding(**{"sidebar.label_issues": "Problems", "icon.nav_issues": "bug_report",
@@ -224,6 +226,87 @@ class ShellRendering(unittest.TestCase):
         ids = {i["id"] for i in NAV_ITEMS}
         for page, nav in PAGE_NAV.items():
             self.assertIn(nav, ids, page)
+
+
+class NavModel(unittest.TestCase):
+    def nav_hrefs(self, out):
+        nav = re.search(r'<nav id="desktopNav".*?</nav>', out, re.S).group(0)
+        return re.findall(r'<a[^>]*href="([^"]+)"', nav)
+
+    def test_nav_follows_pages_order(self):
+        b = branding(**{"pages.order": '["home","wiki","calendar","requests","issues","tickets","library","settings"]'})
+        self.assertEqual(self.nav_hrefs(render(b=b)),
+                         ["/", "/wiki", "/calendar", "/requests", "/issues", "/tickets", "/settings"])
+
+    def test_bad_order_is_normalised(self):
+        b = branding(**{"pages.order": '["settings","wiki","home"]'})
+        hrefs = self.nav_hrefs(render(b=b))
+        self.assertEqual(hrefs[0], "/")
+        self.assertEqual(hrefs[1], "/wiki")
+        self.assertEqual(hrefs[-1], "/settings")
+
+    def test_home_and_settings_cannot_be_switched_off(self):
+        out = render(b=branding(**{"sidebar.enabled_home": "false"}))
+        self.assertEqual(self.nav_hrefs(out)[0], "/")
+
+    def test_ebooks_needs_kavita(self):
+        self.assertNotIn('>eBooks<', render())
+        b = branding(**{"integration.kavita.url": "http://192.168.1.50:5000"})
+        self.assertIn("eBooks", render(b=b))
+        b = branding(**{"integration.kavita.url": "http://192.168.1.50:5000", "sidebar.enabled_library": "false"})
+        self.assertNotIn("eBooks", re.search(r'<nav id="desktopNav".*?</nav>', render(b=b), re.S).group(0))
+
+    def test_payload_carries_the_new_fields(self):
+        b = branding()
+        self.assertEqual(b["requests_source"], "native")
+        self.assertEqual(b["pages_order"][0], "home")
+        self.assertEqual(b["home_sections"], {"services": True, "news": True, "streams": True,
+                                              "releases": True, "requests": True})
+        self.assertNotIn("requests-embed", b["sidebar_labels"])
+        self.assertNotIn("show_tickets", b["features"])
+        self.assertNotIn("show_requests", b["features"])
+        self.assertFalse(b["features"]["show_books"])
+        b = branding(**{"requests.source": "seerr_embed", "home.section_news": "false"})
+        self.assertEqual(b["requests_source"], "seerr_embed")
+        self.assertFalse(b["home_sections"]["news"])
+        self.assertEqual(branding(**{"requests.source": "iframe"})["requests_source"], "native")
+
+    def test_nav_items_take_defaults_from_the_registry(self):
+        from app.settings_registry import PAGE_DEFAULTS, SIDEBAR_PAGE_IDS
+        self.assertEqual([i["id"] for i in NAV_ITEMS], list(SIDEBAR_PAGE_IDS))
+        for item in NAV_ITEMS:
+            self.assertEqual((item["label"], item["sublabel"], item["icon"]), PAGE_DEFAULTS[item["id"]])
+
+    def test_migrated_seerr_embed_install_shows_one_requests_item(self):
+        # An install that had the built-in Requests page off and the Seerr embed
+        # on: the v1.11 migration sets requests.source to seerr_embed and turns
+        # the Requests switch on. That state must render exactly one Requests
+        # item, at /requests, carrying the pending-requests badge.
+        from app import seed
+        from app.routers.branding import load_branding
+        from app.tests import helpers
+        db = helpers.make_sessionmaker()()
+        try:
+            helpers.put(db, "requests.source", "native")
+            helpers.put(db, "sidebar.enabled_requests", "false")
+            helpers.put(db, "features.show_requests", "true")
+            helpers.put(db, "sidebar.enabled_requests_embed", "true")
+            helpers.put(db, "sidebar.label_requests_embed", "Seerr page")
+            seed.migrate_requests_source_v1(db)
+            b = load_branding(db, True)
+        finally:
+            db.close()
+        self.assertEqual(b["requests_source"], "seerr_embed")
+        out = render(b=b)
+        for nav_id in ("desktopNav", "drawerNav"):
+            with self.subTest(nav=nav_id):
+                nav = re.search(r'<nav id="%s".*?</nav>' % nav_id, out, re.S).group(0)
+                links = [ln for ln in nav.split("\n") if "<a " in ln]
+                requests_links = [ln for ln in links if "/requests" in ln]
+                self.assertEqual(len(requests_links), 1, requests_links)
+                self.assertIn('href="/requests"', requests_links[0])
+                self.assertIn('id="requestsBadge"', requests_links[0])
+                self.assertNotIn("Seerr page", nav)
 
 
 class AssetStamping(unittest.TestCase):

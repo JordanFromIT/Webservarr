@@ -195,6 +195,13 @@ OLD_BRANDING_KEYS = [
     "theme.color_secondary", "theme.color_text", "theme.color_text_secondary", "theme.custom_css",
     "theme.font", "wiki.hook_issues", "wiki.hook_playback", "wiki.hook_tickets",
 ]
+# Folded into one switch per page and one Requests item (v1.11 Task 2.1):
+# deprecated, so neither seeded nor part of the branding defaults.
+RETIRED_BY_REDESIGN = [
+    "features.show_requests", "features.show_tickets", "features.show_books",
+    "sidebar.label_requests_embed", "sidebar.sublabel_requests_embed", "sidebar.enabled_requests_embed",
+    "sidebar.new_requests_embed", "icon.nav_requests_embed",
+]
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -427,10 +434,18 @@ class DerivedDefaults(unittest.TestCase):
         from app.routers import branding
         for key, value in OLD_DEFAULT_VALUES.items():
             self.assertEqual(reg.REGISTRY[key].default, value, key)
+        # The keys the redesign retired are no longer seeded or read by the
+        # branding builder; they stay in the registry, marked deprecated.
+        for key in RETIRED_BY_REDESIGN:
+            self.assertTrue(reg.REGISTRY[key].deprecated, key)
+            self.assertNotIn(key, seed.DEFAULT_SETTINGS, key)
+            self.assertNotIn(key, branding.DEFAULTS, key)
         for key in OLD_SEED_KEYS:
-            self.assertEqual(seed.DEFAULT_SETTINGS[key][0], OLD_DEFAULT_VALUES[key], key)
+            if key not in RETIRED_BY_REDESIGN:
+                self.assertEqual(seed.DEFAULT_SETTINGS[key][0], OLD_DEFAULT_VALUES[key], key)
         for key in OLD_BRANDING_KEYS:
-            self.assertEqual(branding.DEFAULTS[key], OLD_DEFAULT_VALUES[key], key)
+            if key not in RETIRED_BY_REDESIGN:
+                self.assertEqual(branding.DEFAULTS[key], OLD_DEFAULT_VALUES[key], key)
 
     def test_renderer_and_theme_css_colours_match_the_registry(self):
         import os
@@ -497,6 +512,9 @@ class DerivedDefaults(unittest.TestCase):
             self.assertEqual(helpers.get(db, "requests.source"), "native")
             self.assertIsNone(helpers.get(db, "system.admin_email"))          # seed=False
             self.assertIsNone(helpers.get(db, "integration.uptime_kuma.api_key"))  # deprecated
+            for retired in ("features.show_tickets", "features.show_books", "features.show_requests",
+                            "sidebar.enabled_requests_embed", "icon.nav_requests_embed"):
+                self.assertIsNone(helpers.get(db, retired), retired)
             helpers.put(db, "pages.order", '["home","wiki","requests","issues","calendar","tickets","library","settings"]')
             seed_default_settings(db)   # never overwrites
             self.assertTrue(helpers.get(db, "pages.order").startswith('["home","wiki"'))
