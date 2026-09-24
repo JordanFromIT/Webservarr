@@ -133,11 +133,16 @@
     buttons.appendChild(noLogo);
     controls.appendChild(buttons);
     var field = api.text({
-      key: 'branding.logo_url', label: 'Or use a web address', inputType: 'url', placeholder: 'https://',
+      key: 'branding.logo_url', label: 'Or use a web address', placeholder: 'https://',
       help: 'PNG, JPEG, GIF or WebP. Uploads can be up to 2 MB.'
     });
     controls.appendChild(field);
+    // A text box with a URL keyboard, not type=url: a path on this site
+    // ("/static/...") is a valid logo, and the browser would mark it invalid.
     var input = field.querySelector('input');
+    input.inputMode = 'url';
+    input.spellcheck = false;
+    input.setAttribute('autocapitalize', 'off');
     // One short line at most (errors go to a toast), so the page never moves.
     var status = el('p', 'text-[13px] text-frosted-blue/70 min-h-[1.25rem]');
     status.setAttribute('aria-live', 'polite');
