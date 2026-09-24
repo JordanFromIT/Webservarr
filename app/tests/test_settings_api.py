@@ -175,7 +175,18 @@ class BulkSave(SettingsApiBase):
 
     def test_a_commit_failure_saves_nothing_and_says_so(self):
         from sqlalchemy.orm import Session as SASession
-        with mock.patch.object(SASession, "commit", autospec=True, side_effect=RuntimeError("database is locked")):
+        from app.models import Setting
+        real_commit = SASession.commit
+
+        def locked(session):
+            # Fails only once the second item is part of the transaction, so a
+            # commit-per-item loop would already have saved the first.
+            pending = list(session.new) + list(session.dirty)
+            if any(isinstance(o, Setting) and o.key == "branding.tagline" for o in pending):
+                raise RuntimeError("database is locked")
+            return real_commit(session)
+
+        with mock.patch.object(SASession, "commit", autospec=True, side_effect=locked):
             r = self.save(("branding.app_name", "Changed"), ("branding.tagline", "Also"))
         self.assertEqual(r.status_code, 503, r.text)
         self.assertEqual(r.json()["detail"],
@@ -237,6 +248,74 @@ class LockoutGuard(SettingsApiBase):
         r = self.save(("features.show_simple_auth", "false"), ("integration.plex.token", reg.MASK))
         self.assertEqual(r.status_code, 200, r.text)
 
+    def _put_all(self, pairs):
+        for k, v in pairs:
+            helpers.put(self.db, k, v)
+
+    PLEX_READY = (("features.show_plex_auth", "true"),
+                  ("integration.plex.url", "http://192.168.1.9:32400"), ("integration.plex.token", "t"))
+    AUTHENTIK_READY = (("features.show_authentik_auth", "true"),
+                       ("integration.authentik.url", "https://auth.example.com"),
+                       ("integration.authentik.client_id", "client"))
+
+    def test_authentik_on_but_not_set_up_does_not_count(self):
+        self._put_all(self.PLEX_READY + (("features.show_simple_auth", "false"),
+                                         ("features.show_authentik_auth", "true")))
+        r = self.save(("features.show_plex_auth", "false"))
+        errors = self.assertRejected(r)
+        self.assertIn("features.show_plex_auth", errors)
+        self.assertEqual(helpers.get(self.db, "features.show_plex_auth"), "true")
+
+    def test_clearing_authentik_while_it_is_the_only_method_is_rejected(self):
+        self._put_all(self.AUTHENTIK_READY + (("features.show_simple_auth", "false"),))
+        r = self.save(("integration.authentik.url", ""))
+        errors = self.assertRejected(r)
+        self.assertIn("integration.authentik.url", errors)
+        self.assertEqual(helpers.get(self.db, "integration.authentik.url"), "https://auth.example.com")
+
+    def test_authentik_set_up_lets_plex_go(self):
+        self._put_all(self.PLEX_READY + self.AUTHENTIK_READY + (("features.show_simple_auth", "false"),))
+        r = self.save(("features.show_plex_auth", "false"))
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def _race(self, target, other_worker):
+        """Run the request with `other_worker` committed between the check and the write,
+        the way the second uvicorn worker's save would land."""
+        from app.routers import admin_settings
+        real_plan = admin_settings.plan_writes
+
+        def plan_then_race(db, items):
+            planned = real_plan(db, items)
+            self._put_all(other_worker)
+            return planned
+
+        return mock.patch(target, side_effect=plan_then_race)
+
+    def test_two_admins_turning_off_different_methods_cannot_both_win(self):
+        # Simple and Plex both usable. This admin turns simple off (fine on its
+        # own); meanwhile the other worker commits Plex off. Together: nothing.
+        self._put_all(self.PLEX_READY)
+        with self._race("app.routers.admin_settings.plan_writes", (("features.show_plex_auth", "false"),)):
+            r = self.save(("features.show_simple_auth", "false"))
+        from app.routers.admin_settings import LOCKOUT_MESSAGE
+        self.assertEqual(self.assertRejected(r), {"features.show_simple_auth": LOCKOUT_MESSAGE})
+        self.assertIsNone(helpers.get(self.db, "features.show_simple_auth"))
+        self.assertEqual(helpers.get(self.db, "features.show_plex_auth"), "false")   # the other save stands
+
+    def test_the_race_is_caught_on_the_single_put_too(self):
+        self._put_all(self.PLEX_READY)
+        with self._race("app.routers.admin.plan_writes", (("features.show_plex_auth", "false"),)):
+            r = self.client.put("/api/admin/settings", json={"key": "features.show_simple_auth", "value": "false"})
+        self.assertRejected(r)
+        self.assertIsNone(helpers.get(self.db, "features.show_simple_auth"))
+
+    def test_a_race_that_leaves_a_method_is_saved(self):
+        self._put_all(self.PLEX_READY)
+        with self._race("app.routers.admin_settings.plan_writes", (("branding.app_name", "Other"),)):
+            r = self.save(("features.show_simple_auth", "false"))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(helpers.get(self.db, "features.show_simple_auth"), "false")
+
     def test_unrelated_save_is_not_blocked_by_an_existing_bad_state(self):
         helpers.put(self.db, "features.show_simple_auth", "false")
         r = self.save(("branding.app_name", "Fine"))
@@ -285,6 +364,31 @@ class NonAdmin(SettingsApiBase):
         self.assertEqual(self.client.get("/api/admin/settings?view=registry").status_code, 403)
         self.assertEqual(self.client.get("/api/admin/settings").status_code, 403)
         self.assertEqual(self.save(("branding.app_name", "x")).status_code, 403)
+        self.assertIsNone(helpers.get(self.db, "branding.app_name"))
+
+
+class SignedOut(SettingsApiBase):
+    """No session cookie and no user override: the real auth dependency answers."""
+
+    def setUp(self):
+        super().setUp()
+        from app.dependencies import get_current_user, get_current_user_optional
+        from app.main import app
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_current_user_optional, None)
+
+    def test_every_settings_route_needs_a_session(self):
+        for method, url, body in (
+            ("GET", "/api/admin/settings", None),
+            ("GET", "/api/admin/settings?view=registry", None),
+            ("PUT", "/api/admin/settings/bulk", {"settings": [{"key": "branding.app_name", "value": "x"}]}),
+            ("GET", "/api/admin/settings/branding.app_name", None),
+            ("PUT", "/api/admin/settings", {"key": "branding.app_name", "value": "x"}),
+        ):
+            with self.subTest(method=method, url=url):
+                self.assertFalse(self.client.cookies)
+                r = self.client.request(method, url, json=body)
+                self.assertEqual(r.status_code, 401, r.text)
         self.assertIsNone(helpers.get(self.db, "branding.app_name"))
 
 
