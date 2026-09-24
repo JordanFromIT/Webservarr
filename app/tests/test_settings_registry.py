@@ -473,13 +473,16 @@ class DerivedDefaults(unittest.TestCase):
             self.assertEqual(item["label"], OLD_DEFAULT_VALUES["sidebar.label_" + key], key)
             self.assertEqual(item["sublabel"], OLD_DEFAULT_VALUES["sidebar.sublabel_" + key], key)
             self.assertEqual(item["icon"], OLD_DEFAULT_VALUES["icon.nav_" + key], key)
-        # A blank site name, logo and logo icon fall back to the registry defaults.
-        values = pages.shell_values({"app_name": "", "logo_url": "", "icons": {"sidebar_logo": ""}},
-                                    None, "", "index")
+        # A missing site name, and a blank logo and logo icon, fall back to the
+        # registry defaults. A blank site name is the operator's choice (logo
+        # only, Task 4.2) and stays blank.
+        values = pages.shell_values({"logo_url": "", "icons": {"sidebar_logo": ""}}, None, "", "index")
         self.assertEqual(values["app_name"], OLD_DEFAULT_VALUES["branding.app_name"])
         self.assertIn(">" + OLD_DEFAULT_VALUES["icon.sidebar_logo"] + "<", values["logo_html"])
-        app_name, _tags = pages._preview_meta({"app_name": "  "}, "", "/")
+        app_name, _tags = pages._preview_meta({}, "", "/")
         self.assertEqual(app_name, OLD_DEFAULT_VALUES["branding.app_name"])
+        self.assertEqual(pages.shell_values({"app_name": "", "icons": {}}, None, "", "index")["app_name"], "")
+        self.assertEqual(pages._preview_meta({"app_name": "  "}, "", "/")[0], "")
 
     def test_news_window_bounds_come_from_the_registry(self):
         from app.routers import branding
