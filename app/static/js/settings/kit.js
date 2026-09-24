@@ -477,7 +477,7 @@
     var busyCls = ' aria-disabled:opacity-50 aria-disabled:cursor-not-allowed';
     barDiscard = el('button', cls.btnGhost + busyCls, 'Discard');
     barDiscard.type = 'button';
-    barSave = el('button', cls.btnPrimary + busyCls, 'Save');
+    barSave = el('button', cls.btnPrimary + busyCls + ' min-w-[6.5rem]', 'Save');   // "Saving…" fits: the bar keeps its width
     barSave.type = 'button';
     bar.appendChild(barText);
     bar.appendChild(barDiscard);
@@ -583,6 +583,7 @@
       if (data && data.values && typeof data.values === 'object') { applySaved(t, sent, data.values); return true; }
       return fail(MSG.unconfirmed);
     }
+    if (status === 422 || status === 403) S.failed = false;    // an answer, not a hiccup: retrying won't help
     if (status === 422) {
       var errors = data && data.errors;
       if (errors && typeof errors === 'object' && !Array.isArray(errors) && Object.keys(errors).length) {
@@ -685,7 +686,8 @@
   }
 
   function setHash(id, how) {
-    if (location.hash.slice(1) === id) return;
+    var h = location.hash.slice(1);
+    if (h === id || (!h && id === 'general')) return;     // no hash already means General
     if (how === 'push') history.pushState(null, '', '#' + id);
     else history.replaceState(null, '', '#' + id);
   }
