@@ -521,4 +521,5 @@ body.ws-savebar-open #scrollDownHint { bottom: 6rem; }
 @media (prefers-reduced-motion: reduce) {
   .ws-panel-in, .ws-light-checking { animation: none; }
   .ws-savebar, .ws-tab, .ws-switch, .ws-switch::after { transition: none; }
+  .ws-tab-hint-left, .ws-tab-hint-right { transition: none; }
 }
