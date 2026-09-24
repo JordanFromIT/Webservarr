@@ -108,5 +108,104 @@ class MovedRoutes(PageRoutesBase):
         self.assertRegex(embed.text, r'<a[^>]*href="/requests"[^>]*aria-current="page"')
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class TicketApiGate(unittest.TestCase):
+    """The ticket API follows the Tickets page switch, for members only."""
+
+    def setUp(self):
+        self.Session = helpers.make_sessionmaker()
+        self.db = self.Session()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+
+    def tearDown(self):
+        helpers.reset_overrides()
+        self.setup_patch.stop()
+        self.db.close()
+
+    def test_members_get_403_while_tickets_is_off(self):
+        helpers.put(self.db, "sidebar.enabled_tickets", "false")
+        member = helpers.api_client(self.Session, helpers.MEMBER)
+        self.assertEqual(member.get("/api/tickets").status_code, 403)
+        r = member.get("/api/tickets/counts")
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.json()["detail"], "The ticket system is turned off")
+        self.assertEqual(member.post("/api/tickets", data={"title": "t", "description": "d",
+                                                           "category": "other"}).status_code, 403)
+
+    def test_admins_keep_access_while_tickets_is_off(self):
+        helpers.put(self.db, "sidebar.enabled_tickets", "false")
+        admin = helpers.api_client(self.Session, helpers.ADMIN)
+        self.assertEqual(admin.get("/api/tickets").status_code, 200)
+        self.assertEqual(admin.get("/api/tickets/counts").status_code, 200)
+        self.assertEqual(admin.get("/api/admin/tickets").status_code, 200)
+
+    def test_members_have_access_while_tickets_is_on(self):
+        helpers.put(self.db, "sidebar.enabled_tickets", "true")
+        member = helpers.api_client(self.Session, helpers.MEMBER)
+        self.assertEqual(member.get("/api/tickets").status_code, 200)
+        self.assertEqual(member.get("/api/tickets/counts").status_code, 200)
+
+    def test_old_flag_no_longer_gates(self):
+        helpers.put(self.db, "features.show_tickets", "false")
+        member = helpers.api_client(self.Session, helpers.MEMBER)
+        self.assertEqual(member.get("/api/tickets").status_code, 200)
+
+    def test_old_flag_cannot_turn_tickets_back_on(self):
+        # The legacy settings page writes features.show_tickets="true" on every
+        # save; that must not reopen a Tickets page switched off here.
+        helpers.put(self.db, "features.show_tickets", "true")
+        helpers.put(self.db, "sidebar.enabled_tickets", "false")
+        member = helpers.api_client(self.Session, helpers.MEMBER)
+        self.assertEqual(member.get("/api/tickets").status_code, 403)
+        self.assertEqual(member.get("/api/tickets/counts").status_code, 403)
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class KavitaGate(unittest.TestCase):
+    """The Kavita proxy follows the eBooks page switch, for members only."""
+
+    def setUp(self):
+        self.Session = helpers.make_sessionmaker()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+
+    def tearDown(self):
+        helpers.reset_overrides()
+        self.setup_patch.stop()
+
+    def call(self, user, library_on, path="/kavita/connect"):
+        from app.routers import kavita_proxy
+        rows = {"sidebar.enabled_library": "true" if library_on else "false",
+                "integration.kavita.url": ""}     # unconfigured: a request that passes the gate gets 503
+        client = helpers.api_client(self.Session, user)
+        read = mock.Mock(side_effect=lambda *keys: {k: rows.get(k, "") for k in keys})
+        with mock.patch.object(kavita_proxy, "_read_settings", read):
+            r = client.get(path, follow_redirects=False)
+        self.reads = read.call_count
+        return r
+
+    def test_members_are_refused_while_ebooks_is_off(self):
+        r = self.call(helpers.MEMBER, False)
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.json()["detail"], "eBooks is turned off")
+        self.assertEqual(self.call(helpers.MEMBER, False, "/kavita/api/Series/all").status_code, 403)
+
+    def test_admins_pass_the_gate(self):
+        self.assertEqual(self.call(helpers.ADMIN, False).status_code, 503)
+        self.assertEqual(self.call(helpers.ADMIN, False, "/kavita/api/Series/all").status_code, 503)
+
+    def test_members_pass_when_ebooks_is_on(self):
+        self.assertEqual(self.call(helpers.MEMBER, True).status_code, 503)
+        self.assertEqual(self.call(helpers.MEMBER, True, "/kavita/api/Series/all").status_code, 503)
+
+    def test_one_settings_read_per_proxied_request(self):
+        # The reader sends every page, image and progress call through the
+        # proxy, so the switch is read in the same query as the Kavita URL.
+        for user in (helpers.MEMBER, helpers.ADMIN):
+            self.call(user, True, "/kavita/api/Series/all")
+            self.assertEqual(self.reads, 1, user["username"])
+
+
 if __name__ == "__main__":
     unittest.main()
