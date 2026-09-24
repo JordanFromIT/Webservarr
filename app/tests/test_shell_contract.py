@@ -157,6 +157,21 @@ def matching_brace(code: str, open_at: int) -> int:
     raise AssertionError("unbalanced braces")
 
 
+def live_matches(src: str, pattern: str) -> list:
+    """Matches of pattern in raw JS source that are live code.
+
+    js_code_only blanks string contents, so a check on '/login' or 'hidden'
+    cannot run on its output directly. Instead each raw match is kept only if
+    the code-only form of the source up to it ends with the match itself
+    (string contents blanked): a match inside a comment is dropped by the
+    stripping, and one inside a string is blanked, so neither survives.
+    """
+    def blank(text: str) -> str:
+        return re.sub(r"""(['"])(.*?)\1""", lambda q: q.group(1) + " " * len(q.group(2)) + q.group(1), text)
+    return [m for m in re.finditer(pattern, src)
+            if js_code_only(src[:m.end()]).endswith(blank(m.group(0)))]
+
+
 class ShellContract(unittest.TestCase):
     def test_shell_pages_carry_both_markers_and_no_js_shell(self):
         for n in SHELL_PAGES:
@@ -234,17 +249,34 @@ class ShellContract(unittest.TestCase):
             m = re.search(rf"\bfunction {fn}\(\)\s*\{{", src)
             self.assertIsNotNone(m, fn)
             body = src[m.end():matching_brace(src, m.end() - 1)]
-            self.assertRegex(js_code_only(body), r"\.status\s*===\s*401\b", fn)
-            self.assertRegex(body, r"""window\.location\.href\s*=\s*['"]/login['"]""", fn)
+            self.assertTrue(live_matches(body, r"\.status\s*===\s*401\b"), fn)
+            self.assertTrue(live_matches(body, r"""window\.location\.href\s*=\s*['"]/login['"]"""), fn)
 
     def test_header_menus_close_each_other(self):
         # The bell and account buttons stop their clicks reaching document, so
         # the menus close each other through a shared ws:menu-open event: each
-        # file must both announce an opening and listen for the other's.
-        for name in ("shell.js", "notifications.js"):
+        # file must announce an opening, and each listener must close its menu.
+        closes = {
+            "shell.js": r"""\.classList\.add\(\s*['"]hidden['"]\s*\)""",
+            "notifications.js": r"\bcloseDropdown\(\s*\)",
+        }
+        for name, close in closes.items():
             src = (STATIC / "js" / name).read_text(encoding="utf-8")
-            self.assertRegex(src, r"""dispatchEvent\(\s*new CustomEvent\(\s*['"]ws:menu-open['"]""", name)
-            self.assertRegex(src, r"""addEventListener\(\s*['"]ws:menu-open['"]""", name)
+            self.assertTrue(live_matches(src, r"""\.dispatchEvent\(\s*new CustomEvent\(\s*['"]ws:menu-open['"]"""), name)
+            listeners = live_matches(src, r"""\.addEventListener\(\s*['"]ws:menu-open['"]\s*,\s*""")
+            self.assertTrue(listeners, f"{name}: no live ws:menu-open listener")
+            for lm in listeners:
+                rest = src[lm.end():]
+                inline = re.match(r"function\s*\w*\s*\(\s*\w*\s*\)\s*\{", rest)
+                if inline:
+                    body = rest[inline.end():matching_brace(rest, inline.end() - 1)]
+                else:
+                    ref = re.match(r"(\w+)\s*\)", rest)
+                    self.assertIsNotNone(ref, f"{name}: listener is neither inline nor a named function")
+                    defs = live_matches(src, rf"\bfunction {ref.group(1)}\s*\(\s*\w*\s*\)\s*\{{")
+                    self.assertTrue(defs, f"{name}: {ref.group(1)} not defined")
+                    body = src[defs[0].end():matching_brace(src, defs[0].end() - 1)]
+                self.assertTrue(live_matches(body, close), f"{name}: ws:menu-open listener closes nothing")
 
     def test_no_instance_specific_strings(self):
         files = (list(STATIC.glob("*.html")) + list((STATIC / "partials").glob("*.html"))
