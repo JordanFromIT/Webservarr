@@ -554,13 +554,13 @@ async def signin_oidc(
 
     if not token:
         logger.warning("Kavita handshake completed without a token (HTTP %d)", callback.status_code)
-        return RedirectResponse("/library?kavita=error", status_code=302)
+        return RedirectResponse("/ebooks?kavita=error", status_code=302)
 
     await session_manager.update_session(
         session_id,
         {"kavita_token": token, "kavita_api_key": kavita_api_key or ""},
     )
-    return RedirectResponse("/library", status_code=302)
+    return RedirectResponse("/ebooks", status_code=302)
 
 
 @router.api_route(
