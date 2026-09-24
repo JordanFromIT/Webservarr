@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.config import settings
 from app.database import SessionLocal
+from app.settings_registry import PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order
 from app.settings_registry import REGISTRY as _REGISTRY
 from app.utils import identity_email, safe_http_url, same_origin_path
 
@@ -45,42 +46,35 @@ STATIC_DIR = "/app/app/static"
 # Navigation registry
 # ---------------------------------------------------------------------------
 #
-# The one list of destinations. Labels, sublabels and icons are the shipped
-# defaults from app/settings_registry.py; the operator's overrides come from
-# the branding payload (Settings > Customization) and are applied in
-# visible_nav_items().
+# The one list of destinations. Routes are fixed (page addresses are not
+# configurable). Labels, sublabels and icons are the shipped defaults from
+# app/settings_registry.py; the operator's overrides, switches and order come
+# from the branding payload (Settings) and are applied in visible_nav_items().
 
-
-def _nav_item(item_id: str, href: str, **extra) -> dict:
-    key = item_id.replace("-", "_")
-    return {
-        "id": item_id,
-        "href": href,
-        "label": _REGISTRY["sidebar.label_" + key].default,
-        "icon": _REGISTRY["icon.nav_" + key].default,
-        "sublabel": _REGISTRY["sidebar.sublabel_" + key].default,
-        **extra,
-    }
-
-
+_NAV_HREF = {
+    "home": "/", "requests": "/requests", "issues": "/issues", "calendar": "/calendar",
+    "tickets": "/tickets", "library": "/library", "wiki": "/wiki", "settings": "/settings",
+}
+_NAV_EXTRA = {
+    # The pending-requests count rides on the one Requests item.
+    "requests": {"badge_id": "requestsBadge"},
+    # eBooks only exists while Kavita is configured (features.show_books).
+    "library": {"feature": "show_books"},
+    "settings": {"admin_only": True},
+}
 NAV_ITEMS = [
-    _nav_item("home", "/"),
-    _nav_item("requests", "/requests"),
-    _nav_item("requests-embed", "/requests-embed", feature="show_requests", badge_id="requestsBadge"),
-    _nav_item("issues", "/issues"),
-    _nav_item("calendar", "/calendar"),
-    _nav_item("tickets", "/tickets", feature="show_tickets"),
-    _nav_item("library", "/library", feature="show_books"),
-    _nav_item("wiki", "/wiki"),
-    _nav_item("settings", "/settings", admin_only=True),
+    dict({"id": pid, "href": _NAV_HREF[pid], "label": PAGE_DEFAULTS[pid][0],
+          "sublabel": PAGE_DEFAULTS[pid][1], "icon": PAGE_DEFAULTS[pid][2]}, **_NAV_EXTRA.get(pid, {}))
+    for pid in SIDEBAR_PAGE_IDS
 ]
 
-# Which nav item a page highlights. The news archive is part of Home.
+# Which nav item a page highlights. The news archive is part of Home; the
+# Seerr embed is what Requests shows when its source is "seerr_embed".
 PAGE_NAV = {
     "index": "home",
     "news": "home",
     "requests": "requests",
-    "requests-embed": "requests-embed",
+    "requests-embed": "requests",
     "issues": "issues",
     "calendar": "calendar",
     "tickets": "tickets",
@@ -242,8 +236,8 @@ _NEW_FLAG = '<span class="nav-new-badge">New!</span>'
 
 
 def visible_nav_items(branding: dict, is_admin: bool) -> list:
-    """NAV_ITEMS filtered by role, feature flags and the operator's per-item switches,
-    with label/sublabel/icon overrides applied."""
+    """NAV_ITEMS in the operator's page order, filtered by role, feature flags
+    and the operator's per-page switches, with label/sublabel/icon overrides applied."""
     features = branding.get("features") or {}
     enabled = branding.get("sidebar_enabled") or {}
     labels = branding.get("sidebar_labels") or {}
@@ -251,13 +245,18 @@ def visible_nav_items(branding: dict, is_admin: bool) -> list:
     icons = branding.get("icons") or {}
     new_flags = branding.get("sidebar_new") or {}
 
+    by_id = {item["id"]: item for item in NAV_ITEMS}
+    order = normalize_page_order(json.dumps(branding.get("pages_order") or []))
+
     out = []
-    for item in NAV_ITEMS:
+    for pid in order:
+        item = by_id[pid]
         if item.get("admin_only") and not is_admin:
             continue
-        # Settings has no switch: hiding it would lock the admin out of the
-        # only page that could turn it back on.
-        if item["id"] != "settings" and enabled.get(item["id"]) is False:
+        # Home and Settings have no working switch (see build_branding): Home is
+        # where everyone lands, and hiding Settings would lock the admin out of
+        # the only page that could turn it back on.
+        if pid not in ("home", "settings") and enabled.get(pid) is False:
             continue
         if item.get("feature") and not features.get(item["feature"]):
             continue

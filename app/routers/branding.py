@@ -12,7 +12,9 @@ from app.database import get_db
 from app.dependencies import get_current_user_optional
 from app.limiter import limiter
 from app.models import Setting
-from app.settings_registry import REGISTRY, public_defaults
+from app.settings_registry import (
+    HOME_SECTION_IDS, REGISTRY, SIDEBAR_PAGE_IDS, normalize_page_order, public_defaults,
+)
 from app.utils import safe_http_url, same_origin_path
 
 router = APIRouter()
@@ -135,6 +137,13 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         "authentik": get("features.show_authentik_auth") == "true" and bool(authentik_url and authentik_client_id),
     }
 
+    pages = SIDEBAR_PAGE_IDS
+    source = get("requests.source")
+    icons = {"nav_" + p: get("icon.nav_" + p) for p in pages}
+    icons["sidebar_logo"] = get("icon.sidebar_logo")
+    for sid in HOME_SECTION_IDS:
+        icons["section_" + sid] = get("icon.section_" + sid)
+
     return {
         "app_name": get("branding.app_name"),
         "tagline": get("branding.tagline"),
@@ -154,82 +163,27 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         "font": get("theme.font"),
         "custom_css": get("theme.custom_css"),
         "features": {
-            "show_requests": get("features.show_requests") == "true",
             "show_simple_auth": get("features.show_simple_auth") == "true",
             "show_plex_auth": get("features.show_plex_auth") != "false",
             "show_authentik_auth": get("features.show_authentik_auth") == "true",
             "login_backgrounds": get("features.login_backgrounds") == "true",
-            "show_tickets": get("features.show_tickets") == "true",
-            # Requires both the admin toggle and a configured Kavita, so the nav
-            # entry can never point at a library that does not exist.
-            "show_books": (
-                get("features.show_books") == "true"
-                and bool(get("integration.kavita.url"))
-            ),
+            # eBooks can only exist while Kavita is configured. The page's own
+            # on/off switch is sidebar_enabled["library"].
+            "show_books": bool(get("integration.kavita.url")),
         },
+        "requests_source": source if source in ("native", "seerr_embed") else "native",
+        "pages_order": normalize_page_order(get("pages.order")),
+        "home_sections": {sid: get("home.section_" + sid) != "false" for sid in HOME_SECTION_IDS},
         "wiki_hooks": wiki_hooks,
-        "sidebar_labels": {
-            "home": get("sidebar.label_home"),
-            "requests": get("sidebar.label_requests"),
-            "requests-embed": get("sidebar.label_requests_embed"),
-            "issues": get("sidebar.label_issues"),
-            "calendar": get("sidebar.label_calendar"),
-            "tickets": get("sidebar.label_tickets"),
-            "library": get("sidebar.label_library"),
-            "settings": get("sidebar.label_settings"),
-            "wiki": get("sidebar.label_wiki"),
-        },
-        "sidebar_sublabels": {
-            "home": get("sidebar.sublabel_home"),
-            "requests": get("sidebar.sublabel_requests"),
-            "requests-embed": get("sidebar.sublabel_requests_embed"),
-            "issues": get("sidebar.sublabel_issues"),
-            "calendar": get("sidebar.sublabel_calendar"),
-            "tickets": get("sidebar.sublabel_tickets"),
-            "library": get("sidebar.sublabel_library"),
-            "settings": get("sidebar.sublabel_settings"),
-            "wiki": get("sidebar.sublabel_wiki"),
-        },
+        "sidebar_labels": {p: get("sidebar.label_" + p) for p in pages},
+        "sidebar_sublabels": {p: get("sidebar.sublabel_" + p) for p in pages},
+        # Home and Settings are always on: Home is where everyone lands, and
+        # hiding Settings would lock the admin out of the page that turns it back on.
         "sidebar_enabled": {
-            "home": get("sidebar.enabled_home") != "false",
-            "requests": get("sidebar.enabled_requests") != "false",
-            "requests-embed": get("sidebar.enabled_requests_embed") != "false",
-            "issues": get("sidebar.enabled_issues") != "false",
-            "calendar": get("sidebar.enabled_calendar") != "false",
-            "tickets": get("sidebar.enabled_tickets") != "false",
-            "library": get("sidebar.enabled_library") != "false",
-            "wiki": get("sidebar.enabled_wiki") != "false",
-            # Always true; there is no key for it (see app/settings_registry.py).
-            "settings": True,
+            p: True if p in ("home", "settings") else get("sidebar.enabled_" + p) != "false" for p in pages
         },
-        "sidebar_new": {
-            "home": get("sidebar.new_home") == "true",
-            "requests": get("sidebar.new_requests") == "true",
-            "requests-embed": get("sidebar.new_requests_embed") == "true",
-            "issues": get("sidebar.new_issues") == "true",
-            "calendar": get("sidebar.new_calendar") == "true",
-            "tickets": get("sidebar.new_tickets") == "true",
-            "library": get("sidebar.new_library") == "true",
-            "wiki": get("sidebar.new_wiki") == "true",
-            "settings": get("sidebar.new_settings") == "true",
-        },
-        "icons": {
-            "nav_home": get("icon.nav_home"),
-            "nav_requests": get("icon.nav_requests"),
-            "nav_requests-embed": get("icon.nav_requests_embed"),
-            "nav_issues": get("icon.nav_issues"),
-            "nav_calendar": get("icon.nav_calendar"),
-            "nav_tickets": get("icon.nav_tickets"),
-            "nav_library": get("icon.nav_library"),
-            "nav_wiki": get("icon.nav_wiki"),
-            "nav_settings": get("icon.nav_settings"),
-            "sidebar_logo": get("icon.sidebar_logo"),
-            "section_services": get("icon.section_services"),
-            "section_news": get("icon.section_news"),
-            "section_streams": get("icon.section_streams"),
-            "section_releases": get("icon.section_releases"),
-            "section_requests": get("icon.section_requests"),
-        },
+        "sidebar_new": {p: get("sidebar.new_" + p) == "true" for p in pages},
+        "icons": icons,
         "news": {
             "homepage_count": _registry_int("news.homepage_count", get("news.homepage_count")),
             "homepage_max_age_days": _registry_int("news.homepage_max_age_days", get("news.homepage_max_age_days")),
