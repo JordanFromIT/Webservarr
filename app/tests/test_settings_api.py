@@ -184,6 +184,27 @@ class BulkSave(SettingsApiBase):
         self.assertIsNone(helpers.get(self.db, "branding.tagline"))
 
 
+    def test_a_racing_insert_is_retried_once(self):
+        # The other worker inserted the same new key first: the first commit
+        # hits the unique key, the retry updates the row instead.
+        from sqlalchemy.exc import IntegrityError
+        from sqlalchemy.orm import Session as SASession
+        real_commit = SASession.commit
+        calls = []
+
+        def racing(session):
+            calls.append(1)
+            if len(calls) == 1:
+                raise IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed: settings.key"))
+            return real_commit(session)
+
+        with mock.patch.object(SASession, "commit", autospec=True, side_effect=racing):
+            r = self.save(("branding.app_name", "Raced"))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(helpers.get(self.db, "branding.app_name"), "Raced")
+
+
 class LockoutGuard(SettingsApiBase):
     def test_turning_off_the_only_method_is_rejected(self):
         r = self.save(("features.show_simple_auth", "false"))
