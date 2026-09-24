@@ -267,19 +267,42 @@ def sanitize_book_html(html: str) -> str:
     )
 
 
-def _read_setting(key: str) -> str:
-    """Read one settings row's value (short-lived session); "" when unset."""
+def _read_settings(*keys: str) -> Dict[str, str]:
+    """Read several settings rows in one query (short-lived session).
+
+    Every requested key is present in the result; "" when unset."""
     db = SessionLocal()
     try:
-        row = db.query(Setting).filter(Setting.key == key).first()
-        return (row.value or "").strip() if row else ""
+        rows = db.query(Setting).filter(Setting.key.in_(keys)).all()
+        found = {row.key: (row.value or "").strip() for row in rows}
+        return {key: found.get(key, "") for key in keys}
     finally:
         db.close()
+
+
+def _read_setting(key: str) -> str:
+    """Read one settings row's value; "" when unset."""
+    return _read_settings(key)[key]
 
 
 def get_kavita_url() -> Optional[str]:
     """Read the configured Kavita base URL from settings."""
     return _read_setting("integration.kavita.url").rstrip("/") or None
+
+
+def kavita_url_for(user: Dict[str, str]) -> Optional[str]:
+    """The Kavita base URL for this caller, after the eBooks page switch.
+
+    Raises 403 for a non-admin while eBooks is switched off (Settings > Pages);
+    admins keep access so they can check the page while it is hidden. The switch
+    is read in the same query as the URL because the reader sends every page,
+    image and progress call through the proxy."""
+    if user.get("is_admin") == "true":
+        return get_kavita_url()
+    values = _read_settings("integration.kavita.url", "sidebar.enabled_library")
+    if values["sidebar.enabled_library"].lower() == "false":
+        raise HTTPException(status_code=403, detail="eBooks is turned off")
+    return values["integration.kavita.url"].rstrip("/") or None
 
 
 def get_authentik_url() -> str:
@@ -410,7 +433,7 @@ async def kavita_connect(
     an Authentik session — so Authentik returns immediately and the user sees no
     prompt and no consent screen.
     """
-    base = get_kavita_url()
+    base = kavita_url_for(current_user)
     if not base:
         raise HTTPException(status_code=503, detail="Kavita is not configured")
 
@@ -580,7 +603,7 @@ async def kavita_proxy(
     Authentication is mandatory. Without it this route would be an open relay
     into the home LAN.
     """
-    base = get_kavita_url()
+    base = kavita_url_for(current_user)
     if not base:
         raise HTTPException(status_code=503, detail="Kavita is not configured")
 

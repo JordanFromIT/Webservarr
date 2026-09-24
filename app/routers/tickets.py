@@ -75,13 +75,19 @@ class AdminTicketUpdate(BaseModel):
 
 # --- Helpers ---
 
-def _check_feature_enabled(db: Session) -> None:
-    """Raise 403 if features.show_tickets is 'false'."""
-    setting = db.query(Setting).filter(Setting.key == "features.show_tickets").first()
-    if setting and setting.value.lower() == "false":
+def _check_feature_enabled(db: Session, current_user: dict) -> None:
+    """403 for non-admins while the Tickets page is switched off (Settings > Pages).
+
+    Admins keep access so they can still read and close tickets while the page
+    is hidden from everyone else. The retired features.show_tickets flag is
+    deliberately not read: the page switch is the only gate."""
+    if current_user.get("is_admin") == "true":
+        return
+    setting = db.query(Setting).filter(Setting.key == "sidebar.enabled_tickets").first()
+    if setting and (setting.value or "").strip().lower() == "false":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Ticket system is disabled",
+            detail="The ticket system is turned off",
         )
 
 
@@ -236,7 +242,7 @@ async def list_tickets(
     List tickets visible to the current user.
     Non-admin: own tickets + public tickets.
     """
-    _check_feature_enabled(db)
+    _check_feature_enabled(db, current_user)
 
     username = current_user.get("username", "")
     is_admin = current_user.get("is_admin") == "true"
@@ -280,7 +286,7 @@ async def create_ticket(
     db: Session = Depends(get_db),
 ):
     """Create a new ticket. Accepts multipart form data with optional image."""
-    _check_feature_enabled(db)
+    _check_feature_enabled(db, current_user)
 
     # Validate category
     if category not in VALID_CATEGORIES:
@@ -335,7 +341,7 @@ async def ticket_counts(
     db: Session = Depends(get_db),
 ):
     """Get ticket counts by status for the current user's visible tickets."""
-    _check_feature_enabled(db)
+    _check_feature_enabled(db, current_user)
 
     username = current_user.get("username", "")
     is_admin = current_user.get("is_admin") == "true"
@@ -367,7 +373,7 @@ async def get_ticket(
     db: Session = Depends(get_db),
 ):
     """Get ticket detail with comments. Accessible if own ticket, public, or admin."""
-    _check_feature_enabled(db)
+    _check_feature_enabled(db, current_user)
 
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
@@ -407,7 +413,7 @@ async def add_comment(
     db: Session = Depends(get_db),
 ):
     """Add a comment to a ticket. Only ticket creator or admin can comment."""
-    _check_feature_enabled(db)
+    _check_feature_enabled(db, current_user)
 
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
@@ -475,7 +481,7 @@ async def admin_list_tickets(
     db: Session = Depends(get_db),
 ):
     """List ALL tickets with filters. Admin only."""
-    _check_feature_enabled(db)
+    _check_feature_enabled(db, current_user)
 
     query = db.query(Ticket)
 
@@ -513,7 +519,7 @@ async def admin_update_ticket(
     db: Session = Depends(get_db),
 ):
     """Update ticket status, priority, or visibility. Admin only."""
-    _check_feature_enabled(db)
+    _check_feature_enabled(db, current_user)
 
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
@@ -559,7 +565,7 @@ async def admin_delete_ticket(
     db: Session = Depends(get_db),
 ):
     """Delete a ticket and all its comments. Admin only."""
-    _check_feature_enabled(db)
+    _check_feature_enabled(db, current_user)
 
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
