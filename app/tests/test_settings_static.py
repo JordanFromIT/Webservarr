@@ -32,6 +32,8 @@ TINY_TEXT = re.compile(
     r"text-\[(?:(?:\d|1[01])(?:\.\d+)?px|" + _UNDER_075 + r")\]"
     r"|(?:font-size\s*:|fontSize\s*=)\s*['\"]?\s*(?:(?:\d|1[01])(?:\.\d+)?px\b|" + _UNDER_075 + r")")
 
+from app.tests.test_shell_contract import js_code_only
+
 try:
     from fastapi.testclient import TestClient  # noqa: F401
     from app.tests.test_page_gating import ADMIN_SESSION, MEMBER_SESSION, PageRoutesBase
@@ -63,6 +65,12 @@ def referenced_js():
     less the shared shell scripts."""
     h = (STATIC / FRAME).read_text(encoding="utf-8")
     return sorted(set(re.findall(r'\bsrc="/static/(js/[^"?]+\.js)[?"]', h)) - SHELL_JS)
+
+
+def kit_code() -> str:
+    """kit.js with comments removed and string contents blanked, so a pin is
+    only met by live code (a comment naming the fix does not count)."""
+    return js_code_only((STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8"))
 
 
 def settings_files():
@@ -124,7 +132,7 @@ class Frame(unittest.TestCase):
         # first-paint script or the kit reveals it.
         h = (STATIC / FRAME).read_text(encoding="utf-8")
         for side in ("Left", "Right"):
-            self.assertRegex(h, rf'<div id="settingsTabHint{side}"[^>]*style="opacity:0"', side)
+            self.assertRegex(h, rf'<div id="settingsTabHint{side}"[^>]*style="[^"]*\bopacity:\s*0(?![.\d])\s*;?[^"]*"', side)
 
     def test_reduced_motion_stills_the_tab_hints(self):
         # The hints fade with transition-opacity; reduced motion switches that off.
@@ -219,14 +227,18 @@ class KitApi(unittest.TestCase):
     def test_tab_switch_dialog_always_releases(self):
         # A dialog that fails must not leave S.asking set and block every
         # later tab switch: the reset sits after a catch, so it runs every time.
-        js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
-        self.assertRegex(js, r"S\.asking = true;[\s\S]*?\.catch\([\s\S]*?\}\)\.then\(function \(ok\) \{\s*S\.asking = false")
+        self.assertRegex(kit_code(), r"S\.asking = true;[\s\S]*?\.catch\([\s\S]*?\}\)\s*\.then\(function \(ok\) \{\s*S\.asking = false")
+
+    def test_a_held_history_step_restores_the_url(self):
+        # Back pressed while the tab-switch dialog is open is held, like the
+        # other refusals in show(): the address bar goes back to the tab shown.
+        self.assertRegex(kit_code(), r"if\s*\(S\.asking\)\s*\{[^{}]*\bhow\s*===[^{}]*setHash\(\s*from\b")
 
     def test_select_keeps_an_unknown_stored_value(self):
         # A stored value outside the options stays selected (a hidden,
         # disabled option) instead of the box showing blank and the first
         # click staging option 0.
-        js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        js = kit_code()
         body = js[js.index("api.select = function"):js.index("api.color = function")]
         self.assertIn(".disabled = true", body)
         self.assertIn(".hidden = true", body)
@@ -234,9 +246,11 @@ class KitApi(unittest.TestCase):
     def test_secret_refuses_the_mask_text(self):
         # Typing the mask itself would read as "unchanged"; it is refused with
         # an inline error, and a save the server silently skipped is never "Saved".
-        js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        js = kit_code()
         body = js[js.index("api.secret = function"):js.index("return api;")]
-        self.assertIn("=== S.mask", body[body.index("input.addEventListener('input'"):])
+        handler = re.search(r"\binput\.addEventListener\(", body)
+        self.assertIsNotNone(handler, "the secret input's handler")
+        self.assertIn("=== S.mask", body[handler.start():])
         self.assertIn("MSG.maskText", body)
         self.assertRegex(js, r"function applySaved[\s\S]*?!hasOwn\(values, k\)[\s\S]*?function applyErrors")
 
