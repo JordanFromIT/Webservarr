@@ -12,7 +12,7 @@ from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
 SHELL_PAGES = ["index", "requests", "requests-embed", "issues", "calendar", "tickets",
-               "library", "news", "wiki", "settings"]
+               "library", "news", "wiki", "settings", "settings-next"]
 BARE_PAGES = ["login", "setup", "reader"]
 
 # The repo is a template; an operator's own branding lives in the database,
@@ -361,7 +361,7 @@ class ShellContract(unittest.TestCase):
 
     def test_no_instance_specific_strings(self):
         files = (list(STATIC.glob("*.html")) + list((STATIC / "partials").glob("*.html"))
-                 + list((STATIC / "js").glob("*.js")))
+                 + list((STATIC / "js").glob("*.js")) + list((STATIC / "js" / "settings").glob("*.js")))
         for p in files:
             t = p.read_text(encoding="utf-8")
             for bad in FORBIDDEN_STRINGS:
