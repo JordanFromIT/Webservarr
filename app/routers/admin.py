@@ -365,10 +365,10 @@ async def upload_logo(
     request: Request,
     file: UploadFile = File(...),
     current_user: dict = Depends(require_admin),
-    db: Session = Depends(get_db),
 ):
     """
-    Upload a logo image file. Saves to /static/uploads/ and updates branding.logo_url.
+    Upload a logo image file to /static/uploads/ and return its URL.
+    The setting is written by Settings' Save (BulkSave), not here.
     Accepts PNG, JPEG, GIF, WebP up to 2MB. (SVG is rejected — XSS risk.)
     """
     if file.content_type not in ALLOWED_IMAGE_TYPES:
@@ -402,17 +402,7 @@ async def upload_logo(
     with open(filepath, "wb") as f:
         f.write(content)
 
-    logo_url = f"/static/uploads/{filename}"
-
-    # Update branding.logo_url setting
-    setting = db.query(Setting).filter(Setting.key == "branding.logo_url").first()
-    if setting:
-        setting.value = logo_url
-    else:
-        db.add(Setting(key="branding.logo_url", value=logo_url, description="URL to custom logo image"))
-    db.commit()
-
-    return {"url": logo_url}
+    return {"url": f"/static/uploads/{filename}"}
 
 
 # --- Admin Broadcast Notification ---

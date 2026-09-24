@@ -327,9 +327,14 @@ document.addEventListener('DOMContentLoaded', async function() {
         } catch (e) { /* use empty defaults */ }
     }
     var theme = window.WEBSERVARR_THEME || {};
-    if (theme.app_name) {
+    var siteName = typeof theme.app_name === 'string' ? theme.app_name.trim() : null;
+    if (siteName) {
         var el = document.getElementById('loginAppName');
-        if (el) el.textContent = theme.app_name;
+        if (el) el.textContent = siteName;
+    } else if (siteName === '') {
+        // No site name (Settings > General): the logo stands alone.
+        var nameEl = document.getElementById('loginAppName');
+        if (nameEl) nameEl.classList.add('hidden');
     }
     // Show branding logo if configured
     if (theme.logo_url) {

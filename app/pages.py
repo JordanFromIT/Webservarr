@@ -345,6 +345,16 @@ def fill(template: str, values: dict) -> str:
     return _ESC_RE.sub(lambda m: html.escape(str(values.get(m.group(1), "")), quote=True), template)
 
 
+def _site_name(branding: dict) -> str:
+    """The operator's site name, trimmed. It may be "": an empty name is a
+    deliberate choice (Settings > General) and the logo then stands alone.
+    Only a payload with no name at all falls back to the shipped default."""
+    value = branding.get("app_name")
+    if value is None:
+        value = _REGISTRY["branding.app_name"].default
+    return str(value).strip()
+
+
 def shell_values(branding: dict, user: Optional[dict], version: str, name: str) -> dict:
     is_admin = bool(user and user.get("is_admin"))
     icons = branding.get("icons") or {}
@@ -376,7 +386,9 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
         avatar_style = f"background-image:url({css_url});background-size:cover;background-position:center"
 
     return {
-        "app_name": branding.get("app_name") or _REGISTRY["branding.app_name"].default,
+        # May be empty (Settings > General): the sidebar then shows the logo alone.
+        "app_name": _site_name(branding),
+        "app_name_cls": "" if _site_name(branding) else "hidden",
         "logo_html": logo_html,
         "nav_links": render_nav_links(branding, is_admin, PAGE_NAV.get(name)),
         "version": ("v" + version) if version else "",
@@ -423,14 +435,16 @@ def _base_url(request: Optional[Request]) -> str:
 
 def _preview_meta(branding: dict, base_url: str, path: str) -> tuple:
     """
-    Build (app_name, meta_tags_html) for the link preview.
+    Build (app_name, meta_tags_html) for the link preview. app_name may be "":
+    the card then leads with the tagline and names no site.
 
     The image is omitted when the logo is an SVG: no major messaging client
     renders SVG in a link card, and advertising one produces a preview with a
     broken thumbnail rather than the clean text-only card you get without it.
     """
-    app_name = (branding.get("app_name") or "").strip() or _REGISTRY["branding.app_name"].default
+    app_name = _site_name(branding)
     tagline = (branding.get("tagline") or "").strip()
+    display = app_name or tagline
 
     image_url = ""
     logo = (branding.get("logo_url") or "").strip()
@@ -449,12 +463,12 @@ def _preview_meta(branding: dict, base_url: str, path: str) -> tuple:
     def e(v: str) -> str:
         return html.escape(v, quote=True)
 
-    tags = [
-        f'<meta property="og:site_name" content="{e(app_name)}">',
-        f'<meta property="og:title" content="{e(app_name)}">',
-        '<meta property="og:type" content="website">',
-        f'<meta name="twitter:title" content="{e(app_name)}">',
-    ]
+    tags = ['<meta property="og:type" content="website">']
+    if display:
+        tags.insert(0, f'<meta property="og:title" content="{e(display)}">')
+        tags.append(f'<meta name="twitter:title" content="{e(display)}">')
+    if app_name:
+        tags.insert(0, f'<meta property="og:site_name" content="{e(app_name)}">')
     if tagline:
         tags.insert(0, f'<meta name="description" content="{e(tagline)}">')
         tags.append(f'<meta property="og:description" content="{e(tagline)}">')
@@ -475,20 +489,28 @@ def _inject_head(content: str, branding: dict, user: Optional[dict], version: st
                  name: str, base_url: str, path: str) -> str:
     """Rewrite <title> and append, right after it: preview tags, theme, font, data."""
     app_name, tags = _preview_meta(branding, base_url, path)
+    # A page with no descriptive title of its own, on a site with no name,
+    # falls back to the tagline (or nothing) rather than a dangling " - ".
+    bare_title = app_name or (branding.get("tagline") or "").strip()
     extra = "\n".join([tags, theme_style(branding), font_links(branding),
                        data_block(branding, user, version, name)])
 
     def _rewrite(match):
         inner = match.group(0)[len("<title>"):-len("</title>")]
         suffix_match = _TITLE_SUFFIX_RE.match(inner)
-        title = f"{app_name} - {suffix_match.group('suffix')}" if suffix_match else app_name
+        suffix = suffix_match.group("suffix") if suffix_match else ""
+        if app_name:
+            title = f"{app_name} - {suffix}" if suffix else app_name
+        else:
+            # No site name: the tab shows just the page name.
+            title = suffix or bare_title
         return f"<title>{html.escape(title)}</title>\n{extra}"
 
     content, count = _TITLE_RE.subn(_rewrite, content, count=1)
     if count == 0:
         # No <title> to anchor to; fall back to the top of <head>.
         content = content.replace(
-            "<head>", f"<head>\n<title>{html.escape(app_name)}</title>\n{extra}", 1
+            "<head>", f"<head>\n<title>{html.escape(bare_title)}</title>\n{extra}", 1
         )
     return content
 

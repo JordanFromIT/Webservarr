@@ -109,12 +109,15 @@
     // Store on window for other scripts to use
     window.WEBSERVARR_THEME = data;
 
-    // Update page title with branding app_name, preserving page suffix
-    if (data.app_name) {
+    // Update page title with branding app_name, preserving page suffix.
+    // A blank name (the logo stands alone) leaves the server's title as is:
+    // it already reads just the page name, with no dangling " - ".
+    var siteName = typeof data.app_name === 'string' ? data.app_name.trim() : '';
+    if (siteName) {
       var currentTitle = document.title;
       var dashIndex = currentTitle.indexOf(' - ');
       var suffix = dashIndex !== -1 ? currentTitle.substring(dashIndex) : '';
-      document.title = data.app_name + suffix;
+      document.title = siteName + suffix;
     }
   }
 
