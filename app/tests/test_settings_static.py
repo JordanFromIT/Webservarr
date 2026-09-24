@@ -183,7 +183,7 @@ class KitApi(unittest.TestCase):
 
     def test_kit_public_api(self):
         js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
-        for name in ("boot", "registerTab", "go", "metaFor", "card"):
+        for name in ("boot", "registerTab", "go", "metaFor", "card", "leave"):
             self.assertRegex(js, rf"\b{name}: {name}\b", name)
         for method in ("text", "textarea", "toggle", "select", "color", "iconPicker", "secret", "track",
                        "get", "set", "stageDefaults", "onChange", "onSaved", "onDiscard", "beforeSave",
@@ -309,8 +309,72 @@ class GeneralTab(unittest.TestCase):
         body = general_function("logoCard")
         for probe in (r"\.test\(", r"\.exec\(", r"\.match\(", r"\bRegExp\b", r"\.startsWith\("):
             self.assertNotRegex(body, probe)
+        # Nor a prefix check by hand in the preview code (the upload's own
+        # type check further down may use indexOf).
+        preview = body[body.index("function placeholder("):body.index("var seq = 0")]
+        for probe in (r"[iI]ndexOf\(", r"\.slice\(", r"\.substring\(", r"\.substr\(", r"\.includes\(",
+                      r"\.charAt\(", r"\.charCodeAt\(", r"\[0\]\s*===?"):
+            self.assertNotRegex(preview, probe)
+        # The address is a kit field, so the server's message lands on it: live
+        # code (strings blanked, so a comment can't count), and the key it binds.
+        self.assertRegex(body, r"api\.text\(\{\s*key:\s*' {17}'")
         src = (STATIC / "js" / "settings" / "general.js").read_text(encoding="utf-8")
         self.assertRegex(src, r"api\.text\(\{\s*key:\s*'branding\.logo_url'")
+
+    def test_another_logo_choice_cancels_an_upload_in_flight(self):
+        # A late upload answer must not overwrite "No logo", the built-in logo
+        # or a typed address chosen after it started.
+        body = general_function("logoCard")
+        cancel = re.search(r"function cancelUpload\(\) \{([^{}]*)\}", body)
+        self.assertIsNotNone(cancel, "no cancelUpload()")
+        self.assertRegex(cancel.group(1), r"\bseq\s*\+=\s*1|\+\+seq\b|\bseq\+\+")
+        for control, event in (("builtIn", "click"), ("noLogo", "click"), ("input", "input")):
+            self.assertRegex(body, rf"\b{control}\.addEventListener\('\s{{{len(event)}}}', function \(\) \{{[^{{}}]*cancelUpload\(\)",
+                             control)
+        self.assertRegex(body, r"api\.onDiscard\(function \(\) \{[^{}]*cancelUpload\(\)")
+        self.assertRegex(body, r"if \(mine !== seq\) return;")
+
+    def test_import_rechecks_for_edits_before_confirm_and_apply(self):
+        # An edit made while the preview loads (or the dialog is up) would be
+        # thrown away by the reload after the import: check again at each step.
+        guard = general_function("blockedByEdits")
+        self.assertIn("dirtyKeys()", guard)
+        self.assertIn("MSG.dirty", guard)
+        start = general_function("startImport")
+        self.assertRegex(start, r"if \(blockedByEdits\(api\)\) return;\s*return WSSettings\.confirm\(\{\s*title:")
+        self.assertRegex(start, r"if \(!ok \|\| blockedByEdits\(api\)\) return;\s*return postImport\(data, false")
+        # The tab's fields are locked while an import runs.
+        backup = general_function("backupCard")
+        self.assertRegex(backup, r"\.inert = importing\b")
+
+    def test_leaving_goes_through_the_kit(self):
+        # One way out: WSSettings.leave() sets the kit's leaving flag so its
+        # beforeunload guard can't ask, then navigates (or reloads).
+        kit = kit_code()
+        leave = re.search(r"\n  function leave\(url\) \{(.*?)\n  \}", kit, re.S)
+        self.assertIsNotNone(leave, "kit has no leave(url)")
+        self.assertIn("S.leaving = true", leave.group(1))
+        self.assertIn("location.reload()", leave.group(1))
+        outside = kit.replace(leave.group(0), "")
+        self.assertNotRegex(outside, r"location\.href\s*=(?!=)|location\.reload\(")
+        general = js_code_only((STATIC / "js" / "settings" / "general.js").read_text(encoding="utf-8"))
+        self.assertNotRegex(general, r"location\.href\s*=(?!=)|location\.reload\(")
+        self.assertRegex(general_function("failure"), r"s === 401\) \{ WSSettings\.leave\(")
+        self.assertRegex(general_function("startImport"), r"setTimeout\(function \(\) \{ WSSettings\.leave\(\); \}")
+
+    def test_notices_have_one_button(self):
+        ui = js_code_only((STATIC / "js" / "ui.js").read_text(encoding="utf-8"))
+        # alert mode: no Cancel button, and Escape / the backdrop answer true.
+        self.assertRegex(ui, r"if \(!opts\.alert\) row\.appendChild\(cancel\)")
+        self.assertRegex(ui, r"d\.close\(d\.dismiss\)")
+        self.assertRegex(ui, r"close\(entry\.dismiss\)")
+        for fn in ("showProblems", "startImport"):
+            body = general_function(fn)
+            calls = re.findall(r"WSSettings\.confirm\(\{[^{}]*\}\)", body)
+            notices = [c for c in calls if "alert: true" in c]
+            self.assertTrue(notices, f"{fn} shows no one-button notice")
+            for c in notices:
+                self.assertNotIn("cancelLabel", c, fn)
 
 
 class Guards(unittest.TestCase):
