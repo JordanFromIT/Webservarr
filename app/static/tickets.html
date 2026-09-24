@@ -299,6 +299,21 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
   // ---- Load tickets ----
 
+  /* WS.getJSON for the ticket API. A member gets 403 once Tickets is switched
+     off (the tab was open, or the page came from the prefetch cache): send them
+     home as the server-side page gate would, instead of an error toast and a
+     403 every 30 s. The promise never settles, so nothing renders on the way out. */
+  function ticketsJSON(url) {
+    return WS.getJSON(url).catch(function (err) {
+      if (!_isAdmin && err && err.message === 'HTTP 403') {
+        if (_stopRefresh) _stopRefresh();
+        window.location.replace('/');
+        return new Promise(function () {});
+      }
+      throw err;
+    });
+  }
+
   function loadTickets() {
     var params = new URLSearchParams();
     if (_currentFilter !== 'all') params.set('status', _currentFilter);
@@ -308,7 +323,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
     var url = (_isAdmin ? '/api/admin/tickets' : '/api/tickets') + '?' + params.toString();
 
-    return WS.swr('tickets:' + url, function () { return WS.getJSON(url); }, function (data) {
+    return WS.swr('tickets:' + url, function () { return ticketsJSON(url); }, function (data) {
       _tickets = data.tickets || [];
       _total = data.total || 0;
       WS.arrive('list', function () {
@@ -321,7 +336,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
   }
 
   function loadCounts() {
-    return WS.swr('tickets:counts', function () { return WS.getJSON('/api/tickets/counts'); }, function (data) {
+    return WS.swr('tickets:counts', function () { return ticketsJSON('/api/tickets/counts'); }, function (data) {
       WS.arrive('counts', function () {
         document.getElementById('statTotal').textContent = data.total || 0;
         document.getElementById('statOpen').textContent = data.open || 0;
