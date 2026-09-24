@@ -102,18 +102,22 @@ class ShellRendering(unittest.TestCase):
         # anything with an id inside a link would appear twice, and
         # getElementById would only ever find the first (hidden on a phone).
         # Worst case: every page visible, every New! flag on, and both label
-        # layouts (with a sublabel line, and without one).
+        # layouts (with a sublabel line, and without one). The admin's "this
+        # page is turned off" banner is part of the shell too, so one render
+        # carries it.
         from app.settings_registry import SIDEBAR_PAGE_IDS
         on = {"integration.kavita.url": "http://192.168.1.50:5000"}
         on.update({"sidebar.new_" + pid: "true" for pid in SIDEBAR_PAGE_IDS})
         no_sub = dict(on, **{"sidebar.sublabel_" + pid: "" for pid in SIDEBAR_PAGE_IDS})
-        for name, values in (("with sublabels", on), ("without sublabels", no_sub)):
+        for name, values, flags in (("with sublabels", on, {}), ("without sublabels", no_sub, {}),
+                                    ("page switched off", on, {"page_off": True})):
             with self.subTest(name):
                 b = branding(**values)
                 for pid in SIDEBAR_PAGE_IDS:
                     self.assertTrue(b["sidebar_enabled"][pid], pid)
                     self.assertTrue(b["sidebar_new"][pid], pid)
-                out = render(user=ADMIN, b=b)
+                out = render(user=ADMIN, b=b, flags=flags)
+                self.assertEqual('id="pageOffBanner"' in out, bool(flags.get("page_off")))
                 nav = re.search(r'<nav id="drawerNav".*?</nav>', out, re.S).group(0)
                 self.assertEqual(len(re.findall(r"<a ", nav)), 8)      # every page is in the nav
                 self.assertEqual(nav.count('class="nav-new-badge"'), 8)
