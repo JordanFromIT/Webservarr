@@ -83,10 +83,11 @@
   // ---- Badge ----
 
   // Multiple bells may exist (desktop header + mobile top bar).
-  // We wire all of them so the dropdown works regardless of viewport.
+  // We wire all of them so the dropdown works regardless of viewport. Only one
+  // is ever visible: the other sits inside a display:none bar, so the dropdown
+  // is anchored to whichever bell was tapped, never to a fixed one.
   var _bellButtons = [];
   var _badgeEls = [];
-  var _primaryBell = null; // desktop bell used to anchor the dropdown
 
   /**
    * Find all bell buttons and wire them up with badges + click handlers.
@@ -120,16 +121,6 @@
 
     if (_bellButtons.length === 0) return;
 
-    // Determine primary bell (desktop — inside the hidden lg:flex header)
-    _primaryBell = _bellButtons[0];
-    for (var i = 0; i < _bellButtons.length; i++) {
-      var header = _bellButtons[i].closest('header');
-      if (header && header.classList.contains('lg:flex')) {
-        _primaryBell = _bellButtons[i];
-        break;
-      }
-    }
-
     // Add badge + click handler to each bell
     for (var i = 0; i < _bellButtons.length; i++) {
       var badge = createEl('span',
@@ -142,7 +133,7 @@
 
       _bellButtons[i].addEventListener('click', function(e) {
         e.stopPropagation();
-        toggleDropdown();
+        toggleDropdown(this);
       });
     }
   }
@@ -205,7 +196,7 @@
     if (_dropdown) return;
 
     _dropdown = createEl('div',
-      'absolute right-0 top-full mt-2 w-80 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl z-50 flex flex-col'
+      'absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl z-50 flex flex-col'
     );
     _dropdown.style.display = 'none';
 
@@ -251,20 +242,19 @@
     });
     footer.appendChild(prefsLink);
     _dropdown.appendChild(footer);
+  }
 
-    // Attach to primary bell's parent (relative container)
-    if (_primaryBell) {
-      // Need a relative wrapper for proper positioning
-      var wrapper = _primaryBell.parentElement;
-      if (wrapper) {
-        // Ensure parent has relative positioning for dropdown
-        var pos = getComputedStyle(wrapper).position;
-        if (pos === 'static') {
-          wrapper.style.position = 'relative';
-        }
-      }
-      _primaryBell.parentElement.appendChild(_dropdown);
+  /**
+   * Move the dropdown next to the given bell. The bell's parent is the
+   * positioning container, so the panel drops from the bell that was tapped.
+   */
+  function anchorDropdown(bell) {
+    var wrapper = bell && bell.parentElement;
+    if (!wrapper || _dropdown.parentElement === wrapper) return;
+    if (getComputedStyle(wrapper).position === 'static') {
+      wrapper.style.position = 'relative';
     }
+    wrapper.appendChild(_dropdown);
   }
 
   function loadDropdownItems() {
@@ -346,16 +336,19 @@
     return item;
   }
 
-  function toggleDropdown() {
-    if (_dropdownOpen) {
+  function toggleDropdown(bell) {
+    // Open under a different bell (the window crossed the desktop breakpoint)
+    // moves the panel to the bell that was tapped rather than closing it.
+    if (_dropdownOpen && _dropdown.parentElement === bell.parentElement) {
       closeDropdown();
     } else {
-      openDropdown();
+      openDropdown(bell);
     }
   }
 
-  function openDropdown() {
+  function openDropdown(bell) {
     buildDropdown();
+    anchorDropdown(bell);
     loadDropdownItems();
     if (_dropdown) _dropdown.style.display = '';
     _dropdownOpen = true;

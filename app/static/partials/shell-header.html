@@ -6,8 +6,9 @@
   it never says "Loading". shell.js paints the last known state from
   sessionStorage at once and revalidates in the background.
 
-  notifications.js finds the bell by title="Notifications" inside a <header>
-  whose class list contains lg:flex - keep both.
+  notifications.js finds the bells here and in the mobile top bar by
+  title="Notifications" and opens its dropdown in the tapped bell's parent -
+  keep the title.
 -->
 <header id="appHeader" class="h-16 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-black/40 backdrop-blur-md relative z-50">
   <div class="flex items-center gap-6">
