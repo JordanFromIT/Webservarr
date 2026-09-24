@@ -466,7 +466,10 @@ html:not([data-admin]) .ws-admin-only { display: none !important; }
   border-bottom: 2px solid transparent; border-radius: 10px 10px 0 0;
   transition: color 150ms ease-out, border-color 150ms ease-out, background-color 150ms ease-out;
 }
-.ws-tab:hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .04); }
+/* Hover only where there is a pointer: a tap would otherwise leave the tab tinted. */
+@media (hover: hover) {
+  .ws-tab:hover { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .04); }
+}
 /* The selected tab follows <html data-settings-tab>, set in <head>, so it can
    never paint unselected. */
 html[data-settings-tab="general"] #tab-general,
