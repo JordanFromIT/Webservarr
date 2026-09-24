@@ -699,6 +699,8 @@ def migrate_requests_source_v1(db: Session) -> None:
         db.add(Setting(key="requests.source", value=target, description=REGISTRY["requests.source"].description))
     elif (source.value or "").strip() == "native" and target == "seerr_embed":
         source.value = "seerr_embed"
+    # What the row holds now: an earlier choice other than "native" is kept.
+    stored = target if source is None else source.value
 
     if not native and embed:
         switch = _setting_row(db, "sidebar.enabled_requests")
@@ -706,4 +708,4 @@ def migrate_requests_source_v1(db: Session) -> None:
             switch.value = "true"
 
     if _finish_migration(db, marker, "One-time merge of the two requests pages into one with a source"):
-        logger.info("Requests source migration: source=%s", target)
+        logger.info("Requests source migration: source=%s", stored)
