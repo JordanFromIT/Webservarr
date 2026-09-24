@@ -189,10 +189,13 @@ class ShellContract(unittest.TestCase):
         strip = lambda text: re.sub(r"<!--.*?-->", "", text, flags=re.S)   # comments describe the contract too
         side = strip((STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8"))
         head = strip((STATIC / "partials" / "shell-header.html").read_text(encoding="utf-8"))
-        # notifications.js finds bells by title and anchors to the lg:flex header.
+        # notifications.js finds bells by title and opens the dropdown in the
+        # tapped bell's parent; the mobile bell's parent is the positioned box
+        # the panel drops from.
         self.assertEqual(head.count('title="Notifications"'), 1)
         self.assertEqual(side.count('title="Notifications"'), 1)
         self.assertRegex(head, r'<header[^>]*class="[^"]*lg:flex')
+        self.assertRegex(side, r'<div class="relative\b[^"]*">\s*<button[^>]*title="Notifications"')
         for i in ("desktopSidebar", "desktopNav", "drawerNav", "drawerOverlay", "drawerPanel",
                   "hamburgerBtn", "drawerCloseBtn", "mobileTopBar", "mobileUserMenuBtn",
                   "mobileUserMenuDropdown", "mobileUsername", "mobileRole", "scrollDownHint",
@@ -205,6 +208,17 @@ class ShellContract(unittest.TestCase):
         self.assertIn('type="speculationrules"', side)
         # Prerender/prefetch only nav links, never logout or arbitrary anchors.
         self.assertNotIn('"href_matches"', side)
+
+    def test_notification_dropdown_opens_under_the_tapped_bell(self):
+        # Only one bell is visible at a time: below lg the desktop header is
+        # display:none. A dropdown fixed to the desktop bell opened inside that
+        # hidden header on phones, so tapping the bell showed nothing.
+        code = js_code_only((STATIC / "js" / "notifications.js").read_text(encoding="utf-8"))
+        self.assertRegex(code, r"\btoggleDropdown\(\s*this\s*\)")
+        m = re.search(r"\bfunction openDropdown\(\s*(\w+)\s*\)\s*\{", code)
+        self.assertIsNotNone(m, "openDropdown(bell) not found")
+        body = code[m.end():matching_brace(code, m.end() - 1)]
+        self.assertRegex(body, rf"\banchorDropdown\(\s*{m.group(1)}\s*\)")
 
     def test_no_instance_specific_strings(self):
         files = (list(STATIC.glob("*.html")) + list((STATIC / "partials").glob("*.html"))
