@@ -194,6 +194,29 @@ class SetupTokenEncoding(unittest.TestCase):
         self.assertEqual(r.status_code, 403, r.text)
         self.assertEqual(self.users(), 0)
 
+    def test_lone_surrogate_token_is_403_on_both(self):
+        # A lone UTF-16 surrogate survives json.loads and Pydantic but can't
+        # be encoded as UTF-8. Hand-written JSON: json= might not keep it.
+        import json
+        escape = "\\ud800"
+        bodies = {
+            "/api/setup/test-connection": '{"setup_token": "%s", "service": "plex", '
+                                          '"url": "http://192.168.1.2:32400", "credentials": "%s"}' % (escape, PLEX_TOKEN),
+            "/api/setup/complete": '{"username": "owner", "password": "long-enough-pw", '
+                                   '"password_confirm": "long-enough-pw", "setup_token": "%s"}' % escape,
+        }
+        for path, content in bodies.items():
+            with self.subTest(path=path):
+                self.assertIn("\\ud800", content)
+                self.assertEqual(json.loads(content)["setup_token"], "\ud800")   # the request really carries it
+                calls = []
+                with mock.patch.object(health.httpx, "AsyncClient",
+                                       fake_factory({"status/sessions": _Resp(200, {})}, calls)):
+                    r = self.client.post(path, content=content, headers={"Content-Type": "application/json"})
+                self.assertEqual(r.status_code, 403, r.text)
+                self.assertEqual(calls, [])
+                self.assertEqual(self.users(), 0)
+
     def test_the_right_token_still_works_on_both(self):
         calls = []
         self.assertEqual(self.probe(SETUP_TOKEN, calls).json()["state"], "ok")
