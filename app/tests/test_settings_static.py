@@ -47,13 +47,10 @@ except Exception:  # pragma: no cover
 # Everything else the frame loads is a Settings file and is scanned below.
 SHELL_JS = {"js/theme-loader.js", "js/auth.js", "js/shell.js", "js/notifications.js"}
 
-# Files the frame references that later tasks write. Each task deletes its own
-# entries when it adds the file (a file here that exists fails the test), and
-# Task 8.4 asserts the set is empty. Task 3.2 added ui.js, kit.js and the first
-# General fields (general.js, which Task 4.3 completes).
-PENDING = {
-    "js/settings/notifications.js",      # Task 6.5
-}
+# Files the frame references that later tasks write. Each task deleted its own
+# entries when it added the file (a file here that exists fails the test);
+# Task 6.5 removed the last one, and Task 8.4 asserts the set stays empty.
+PENDING: set = set()
 
 
 def referenced_js():
@@ -1223,6 +1220,99 @@ class IntegrationsTab(unittest.TestCase):
         code = js_code_only(INTEGRATIONS.read_text(encoding="utf-8"))
         self.assertNotRegex(code, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment|setHTML")
         self.assertNotRegex(code, r"\bsetInterval\(|\bsetTimeout\(")
+
+
+NOTIFICATIONS = STATIC / "js" / "settings" / "notifications.js"
+
+
+def notifications_function(name: str, code: bool = True) -> str:
+    """One top-level function of notifications.js, as live code (comments
+    removed, strings blanked) or, with code=False, as written."""
+    src = NOTIFICATIONS.read_text(encoding="utf-8")
+    js = js_code_only(src) if code else src
+    m = re.search(rf"\n  (?://[^\n]*\n  )*function {name}\(.*?(?=\n  (?://[^\n]*\n  )*function |\n  WSSettings\.registerTab)",
+                  js, re.S)
+    if m is None:
+        raise AssertionError(f"notifications.js has no top-level function {name}()")
+    return m.group(0)
+
+
+class NotificationsTab(unittest.TestCase):
+    """The Notifications tab's rules that can be read from the code (R86)."""
+
+    def test_pending_is_empty(self):
+        # R86 (e): notifications.js was the last file a later task owed.
+        self.assertEqual(PENDING, set())
+        self.assertTrue(NOTIFICATIONS.exists())
+
+    def test_interval_range_comes_from_meta(self):
+        # R86 (c): the allowed range is each setting's own min and max, put
+        # into plain words here. No copy of the numbers or of a sentence
+        # naming them ("Between 30 seconds and an hour").
+        src = NOTIFICATIONS.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        rng = notifications_function("rangeOf")
+        self.assertTrue(live_matches(notifications_function("rangeOf", code=False),
+                                     r"var m = WSSettings\.metaFor\(key\);"), "the range isn't read from meta")
+        self.assertRegex(rng, r"if \(!m \|\| typeof m\.min !== ' {6}' \|\| typeof m\.max !== ' {6}'\) return ' *';")
+        self.assertRegex(rng, r"plainSeconds\(m\.min\) \+ ' +' \+ plainSeconds\(m\.max\)")
+        # Every interval's range is read, and the card (or, when they differ,
+        # each field) says it.
+        self.assertRegex(code, r"var ranges = INTERVALS\.map\(function \((\w+)\) \{ return rangeOf\(\1\[0\]\); \}\);")
+        card = re.search(r"WSSettings\.card\(' {18}',\s*\(shared \? ' {12}' \+ shared \+ ' {2}' : ' *'\) \+ MSG\.speed\)", code)
+        self.assertIsNotNone(card, "the card's description doesn't carry the shared range")
+        self.assertTrue(live_matches(src, r"WSSettings\.card\('How often to check',"))
+        self.assertRegex(code, r"var own = !shared && ranges\[i\] \? ' {10}' \+ ranges\[i\] \+ ' ' : ' *';")
+        self.assertRegex(code, r"help: x\[2\] \+ own, inputType: ' {6}', suffix: ' {7}' \}")
+        # No hand-kept range: no string naming an amount of time, no bare 30
+        # in live code (3600 may appear, as seconds in an hour).
+        strings = re.findall(r"'([^'\n]*)'", src)
+        for text in strings:
+            self.assertNotRegex(text, r"\b\d+ (?:seconds?|minutes?|hours?)\b|\ban hour\b|\bhalf a minute\b", text)
+        self.assertNotRegex(code, r"(?<![\d.])30(?![\d.])")
+
+    def test_last_push_copy(self):
+        # R86 (b): none since the server last started (Redis is embedded), a
+        # test push says so, and the delivered count is shown as it is, 0 too.
+        src = NOTIFICATIONS.read_text(encoding="utf-8")
+        self.assertEqual(len(live_matches(src, r"noLastPush: 'No pushes since the server last started\.'")), 1)
+        body = notifications_function("lastPushText")
+        self.assertRegex(body, r"\{\s*if \(!last \|\| typeof last !== ' {6}'\) return MSG\.noLastPush;")
+        self.assertRegex(body, r"last\.category === ' {4}' \? ' {9}' : ' *'")
+        self.assertTrue(live_matches(notifications_function("lastPushText", code=False),
+                                     r"last\.category === 'test' \? ' \(a test\)'"))
+        self.assertRegex(body, r"\+ num\(last\.succeeded\) \+ ' {4}' \+ plural\(tried, ")
+        self.assertEqual(len(re.findall(r"MSG\.noLastPush\b", js_code_only(src))), 1)
+        self.assertRegex(notifications_function("num"), r"return typeof v === ' {6}' && isFinite\(v\) && v >= 0 \?")
+
+    def test_no_mask_and_no_html(self):
+        # The tab has no secrets: no mask, literal or the kit's. Server and
+        # admin text goes in as text only; no timers but the shell's poll.
+        src = NOTIFICATIONS.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        self.assertNotIn("***masked***", src)
+        self.assertNotRegex(code, r"\bMASK\b")
+        self.assertNotRegex(code, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment|setHTML")
+        self.assertNotRegex(code, r"\bsetInterval\(")
+        # The one setTimeout is the cap on how long the tab waits for the status.
+        self.assertEqual(len(re.findall(r"\bsetTimeout\(", code)), 1)
+        self.assertRegex(code, r"return Promise\.race\(\[loadStatus\(\), new Promise\(function \((\w+)\) \{ "
+                               r"setTimeout\(\1, STATUS_WAIT\); \}\)\]\);")
+
+    def test_confirm_shows_the_title_as_text(self):
+        # R86 (g): the admin's announcement title reaches the dialog as a
+        # string body, which the dialog sets with textContent.
+        ui = js_code_only((STATIC / "js" / "ui.js").read_text(encoding="utf-8"))
+        self.assertRegex(ui, r"if \(typeof opts\.body === ' {6}'\) body\.textContent = opts\.body;")
+        self.assertRegex(ui, r"var title = el\(' {2}', ' +', opts\.title \|\| ' +'\);")
+        src = NOTIFICATIONS.read_text(encoding="utf-8")
+        self.assertTrue(live_matches(src, r"body: '“' \+ t \+ '” goes to everyone right away\. It can’t be taken back\.',"))
+
+    def test_session_end_leaves_through_the_kit(self):
+        src = NOTIFICATIONS.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        self.assertEqual(len(live_matches(src, r"if \(res\.status === 401\) \{ WSSettings\.leave\('/login'\); return; \}")), 3)
+        self.assertNotRegex(code, r"location\.href\s*=(?!=)|location\.reload\(|\.json\(\)")
 
 
 class Guards(unittest.TestCase):
