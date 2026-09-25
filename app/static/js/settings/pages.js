@@ -356,7 +356,7 @@
         // Cells in reading order, placed by the grid: on a wide screen one
         // line of columns; on a phone the icon and names first, then the move
         // buttons and the switches on a second line.
-        var moveBox = el('div', 'flex items-center gap-1 row-start-2 col-start-1 col-span-2 ' +
+        var moveBox = el('div', 'flex items-center gap-1 h-10 row-start-2 col-start-1 col-span-2 ' +
           'lg:col-start-1 lg:col-span-1 lg:row-start-1');
         if (!pinned) {
           // Not a <button>: some browsers won't start a drag from inside one.

@@ -76,12 +76,22 @@
       <div class="skel h-40" aria-hidden="true"></div>
     </section>
     <section id="panel-pages" data-settings-panel="pages" role="tabpanel" aria-labelledby="tab-pages">
-      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
-      <div class="skel skel-row mb-2" aria-hidden="true"></div>
-      <div class="skel skel-row mb-2" aria-hidden="true"></div>
-      <div class="skel skel-row mb-2" aria-hidden="true"></div>
-      <div class="skel skel-row mb-2" aria-hidden="true"></div>
-      <div class="skel skel-row" aria-hidden="true"></div>
+      <!-- The tab's own shape: the Pages heading and its description, the
+           column heads on a wide screen, then the eight page rows. -->
+      <div aria-hidden="true">
+        <div class="h-[124px] lg:h-[79px] mb-5 pt-1">
+          <div class="skel h-5 w-24 mb-4"></div>
+          <div class="skel h-4 w-[40rem] max-w-full mb-2"></div>
+          <div class="skel h-4 w-80 max-w-full"></div>
+        </div>
+        <div class="h-1 lg:h-[52px]"></div>
+        <div class="space-y-2">
+          <div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div><div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div>
+          <div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div><div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div>
+          <div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div><div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div>
+          <div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div><div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div>
+        </div>
+      </div>
     </section>
     <section id="panel-appearance" data-settings-panel="appearance" role="tabpanel" aria-labelledby="tab-appearance">
       <!-- The tab's own shape: the Colours heading and six fields, and on a
