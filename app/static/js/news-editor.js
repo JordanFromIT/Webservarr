@@ -220,7 +220,9 @@ var NewsEditor = (function () {
     editor.setAttribute('aria-label', 'Post');
     editor.style.minHeight = '300px';
     editor.style.maxHeight = '600px';
-    if (post) setEditorHtml(editor, post.content);
+    // content_html is the server's sanitised HTML. Seeded posts keep Markdown
+    // in content, which would open as raw text, so that copy is the fallback.
+    if (post) setEditorHtml(editor, post.content_html || post.content);
     editor.addEventListener('keydown', function (e) {
       if (previewing || !(e.ctrlKey || e.metaKey)) return;
       var k = e.key.toLowerCase();
