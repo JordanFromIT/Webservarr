@@ -301,7 +301,8 @@
         clearBtn.type = 'button';
         clearBtn.appendChild(icon('delete', 'text-base'));
         clearBtn.appendChild(document.createTextNode('Clear'));
-        var result = el('p', 'basis-full sm:basis-auto min-w-0 flex items-center gap-2 text-[13px] text-frosted-blue/70');
+        // On a phone the result has its own line, reserved, so it lands without moving anything.
+        var result = el('p', 'basis-full sm:basis-auto min-w-0 min-h-5 flex items-center gap-2 text-[13px] text-frosted-blue/70');
         result.setAttribute('aria-live', 'polite');
         actions.appendChild(testBtn);
         actions.appendChild(clearBtn);
@@ -365,7 +366,7 @@
           });
         });
 
-        cards[id] = { light: light, reason: reason, when: when };
+        cards[id] = { light: light, reason: reason, when: when, result: result };
         return root;
       }
 
@@ -381,12 +382,17 @@
 
       // After a save, each card whose settings were in it checks again, and
       // Chaptarr's lists load again when its address or key changed.
+      // A Test result describes the values tested; once those are saved or
+      // discarded it no longer does, and the light speaks for the card.
       document.addEventListener('ws-settings:saved', function (e) {
         var keys = e.detail && Array.isArray(e.detail.keys) ? e.detail.keys : [];
         Object.keys(CARDS).forEach(function (id) {
-          if (touches(keys, keysOf(id))) refresh(id);
+          if (touches(keys, keysOf(id))) { cards[id].result.replaceChildren(); refresh(id); }
         });
         if (chaptarr && touches(keys, CHAPTARR_CONN)) loadChoices();
+      });
+      api.onDiscard(function () {
+        Object.keys(cards).forEach(function (id) { cards[id].result.replaceChildren(); });
       });
       // "checked … ago" keeps counting while the tab is open.
       if (window.WS && WS.poll) {

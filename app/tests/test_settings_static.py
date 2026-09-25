@@ -1072,7 +1072,7 @@ class IntegrationsTab(unittest.TestCase):
         self.assertIsNotNone(hook, "nothing listens for a save")
         self.assertTrue(live_matches(src, r"document\.addEventListener\('ws-settings:saved', function"))
         body = code[hook.end() - 1:matching_brace(code, hook.end() - 1) + 1]
-        self.assertRegex(body, r"if \(touches\(keys, keysOf\(id\)\)\) refresh\(id\);")
+        self.assertRegex(body, r"if \(touches\(keys, keysOf\(id\)\)\) \{ cards\[id\]\.result\.replaceChildren\(\); refresh\(id\); \}")
         self.assertRegex(body, r"if \(chaptarr && touches\(keys, CHAPTARR_CONN\)\) loadChoices\(\);")
         self.assertTrue(live_matches(src, r"var CHAPTARR_CONN = \['integration\.chaptarr\.url', 'integration\.chaptarr\.api_key'\];"))
         self.assertTrue(live_matches(src, r"'\?refresh=1&service=' \+ encodeURIComponent\(id\)"))
