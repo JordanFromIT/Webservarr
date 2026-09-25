@@ -84,12 +84,22 @@
       <div class="skel skel-row" aria-hidden="true"></div>
     </section>
     <section id="panel-appearance" data-settings-panel="appearance" role="tabpanel" aria-labelledby="tab-appearance">
-      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
-      <div class="grid sm:grid-cols-2 gap-5 mb-8">
-        <div class="skel h-[72px]" aria-hidden="true"></div><div class="skel h-[72px]" aria-hidden="true"></div>
-        <div class="skel h-[72px]" aria-hidden="true"></div><div class="skel h-[72px]" aria-hidden="true"></div>
+      <!-- The tab's own shape: the Colours heading and six fields, and on a
+           wide screen the 320px preview card beside them. -->
+      <div class="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-10" aria-hidden="true">
+        <div class="min-w-0">
+          <div class="h-[57px] mb-5 pt-1">
+            <div class="skel h-5 w-32 mb-3"></div>
+            <div class="skel h-4 w-96 max-w-full"></div>
+          </div>
+          <div class="grid sm:grid-cols-2 gap-5">
+            <div class="skel h-[97px]"></div><div class="skel h-[97px]"></div>
+            <div class="skel h-[97px]"></div><div class="skel h-[97px]"></div>
+            <div class="skel h-[97px]"></div><div class="skel h-[97px]"></div>
+          </div>
+        </div>
+        <div class="hidden lg:block"><div class="skel h-[350px] rounded-2xl"></div></div>
       </div>
-      <div class="skel h-40" aria-hidden="true"></div>
     </section>
     <section id="panel-sign-in" data-settings-panel="sign-in" role="tabpanel" aria-labelledby="tab-sign-in">
       <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
