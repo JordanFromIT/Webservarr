@@ -1381,5 +1381,132 @@ class Route(PageRoutesBase):
         self.assertEqual((r.status_code, r.headers["location"]), (302, "/"))
 
 
+def news_script() -> str:
+    """The one inline <script> of news.html (raw source)."""
+    blocks = re.findall(r"<script>(.*?)</script>", (STATIC / "news.html").read_text(encoding="utf-8"), re.S)
+    assert len(blocks) == 1, "news.html should carry exactly one inline script"
+    return blocks[0]
+
+
+def raw_function(src: str, name: str) -> str:
+    """`function name(...) { ... }` in raw source, braces included (no braces
+    inside its strings, which holds for the functions checked here)."""
+    m = re.search(rf"\bfunction {name}\(", src)
+    assert m, f"function {name} not found"
+    start = src.index("{", m.end())
+    return src[m.start():matching_brace(src, start) + 1]
+
+
+class InPlaceNews(unittest.TestCase):
+    """News is written, edited, pinned and deleted on /news itself (Task 7.1)."""
+
+    def test_news_page_has_admin_tools(self):
+        h = (STATIC / "news.html").read_text(encoding="utf-8")
+        self.assertRegex(h, r'id="newsNewPost"[^>]*class="[^"]*ws-admin-only')
+        self.assertIn('id="newsEditor"', h)
+        self.assertLess(h.index("/static/js/ui.js?v="), h.index("/static/js/news-editor.js?v="))
+        self.assertIn("published_only=false", h)
+        home = (STATIC / "index.html").read_text(encoding="utf-8")
+        self.assertRegex(home, r'<a[^>]*href="/news"[^>]*class="[^"]*ws-admin-only[^"]*"[^>]*>\s*Manage news')
+
+    def test_editor_hygiene(self):
+        for name in ("news-editor.js", "news.html"):
+            path = STATIC / "js" / name if name.endswith(".js") else STATIC / name
+            text = path.read_text(encoding="utf-8")
+            self.assertIsNone(NATIVE_DIALOG.search(text), name)
+            self.assertIsNone(PALETTE_TEXT.search(text), name)
+
+    def test_every_value_written_into_a_card_is_escaped(self):
+        # Cards are HTML strings. Every post field concatenated into one goes
+        # through escapeHtml, except content_html: the server's bleach output,
+        # rendered once, the way the page always has.
+        body = function_body(js_code_only(news_script()), "renderCard")
+        rest = re.sub(r"escapeHtml\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)", "", body)
+        raw = re.findall(r"\+\s*\(?\s*post\.(\w+)(?!\s*\?)|post\.(\w+)\s*\)?\s*\+", rest)
+        self.assertEqual([a or b for a, b in raw], ["content_html"])
+        # The admin actions are part of the card itself, so they arrive with it.
+        card = raw_function(news_script(), "renderCard")
+        for action in ("edit", "pin", "delete"):
+            self.assertIn(f'data-news-action="{action}"', card)
+
+    def test_writes_clear_the_caches_and_reload_fresh(self):
+        src = news_script()
+        code = js_code_only(src)
+        changed = top_level(function_body(code, "newsChanged"))
+        self.assertRegex(changed, r"(?:^|[;{}])\s*WS\.clearPageCache\(\);")
+        self.assertRegex(changed, r"(?:^|[;{}])\s*WS\.dropCache\(")
+        self.assertRegex(changed, r"(?:^|[;{}])\s*reload\(\);")
+        self.assertEqual(len(live_matches(src, r"WS\.dropCache\('news:'\);")), 1)
+        # The editor (new and edit) and the pin and delete success paths all go through it.
+        self.assertEqual(len(re.findall(r"NewsEditor\.open\((?:null|post), newsChanged\)", code)), 2)
+        self.assertEqual(len(re.findall(r"\bnewsChanged\(\);", code)), 2)
+        # reload() skips the stale-while-revalidate copy: a fresh fetch, then paint.
+        self.assertRegex(top_level(function_body(code, "reload")), r"(?:^|[;{}])\s*loadPage\(true\);")
+        self.assertRegex(code, r"WS\.swr\(key, fetcher, render, fresh \? \{ maxAge: 0 \} : undefined\)")
+        # Admins keep their own cached copy (it holds drafts), apart from the members' one.
+        self.assertEqual(len(live_matches(src, r"isAdmin \? 'news:archive:admin' : 'news:archive'")), 1)
+
+    def test_drop_cache_removes_only_this_users_matching_swr_entries(self):
+        src = (STATIC / "js" / "shell.js").read_text(encoding="utf-8")
+        code = js_code_only(src)
+        self.assertIn("sessionStorage.removeItem(", function_body(code, "dropCache"))
+        fn = raw_function(src, "dropCache")
+        self.assertIn("var head = ns + 'swr:' + prefix;", fn)
+        self.assertIn("k.indexOf(head) === 0", fn)
+        self.assertRegex(code, r"window\.WS = \{[^}]*\bdropCache: dropCache\b")
+
+    def test_delete_asks_in_the_dialog_with_the_title_as_text(self):
+        src = news_script()
+        self.assertRegex(src, r"WSUI\.confirm\(\{ title: 'Delete this post\?', body: '“' \+ btn\.getAttribute\('data-title'\) \+")
+        self.assertRegex(src, r"danger: true \}\)")
+        # The title reaches the attribute escaped.
+        self.assertIn("data-title=\"' + escapeHtml(post.title) + '\"", src)
+
+    def test_editor_loads_saved_html_inertly(self):
+        src = (STATIC / "js" / "news-editor.js").read_text(encoding="utf-8")
+        self.assertIn("new DOMParser().parseFromString(", function_body(js_code_only(src), "setEditorHtml"))
+        # The one innerHTML write in the editor empties the target; nothing is parsed into the live page.
+        writes = live_matches(src, r"\.innerHTML\s*=(?!=)[^;]*;")
+        self.assertEqual([w.group(0) for w in writes], [".innerHTML = '';"])
+
+    def test_home_news_links_hold_still(self):
+        home = (STATIC / "index.html").read_text(encoding="utf-8")
+        # "View all" reserves its space from the first paint (invisible, not
+        # hidden), so it cannot push "Manage news" aside when news arrives; the
+        # header row wraps, so on a phone the links sit on their own line
+        # instead of squeezing the heading onto two.
+        view_all = re.search(r'<a href="/news" id="newsViewAll" class="([^"]*)"', home)
+        self.assertIsNotNone(view_all)
+        self.assertIn("invisible", view_all.group(1).split())
+        self.assertNotIn("hidden", view_all.group(1).split())
+        row = home[home.index('<section data-arrive="news">'):home.index('id="newsViewAll"')]
+        self.assertIn('<div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">', row)
+        script = "\n".join(re.findall(r"<script>(.*?)</script>", home, re.S))
+        body = function_body(js_code_only(script), "renderNews")
+        self.assertNotIn("classList.add(", body)
+        self.assertEqual(len(live_matches(script, r"viewAll\.classList\.remove\('invisible'\);")), 1)
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class InPlaceNewsRender(PageRoutesBase):
+    """The admin tools are gated at first paint by html[data-admin], which the
+    server sets only for admins; members never receive the attribute."""
+
+    def html_tag(self, text):
+        return re.search(r"<html\b[^>]*>", text).group(0)
+
+    def test_members_never_get_the_admin_gate(self):
+        for path in ("/news", "/"):
+            r = self.get(path, MEMBER_SESSION)
+            self.assertEqual(r.status_code, 200, path)
+            self.assertNotIn("data-admin", self.html_tag(r.text), path)
+            r = self.get(path, ADMIN_SESSION)
+            self.assertIn("data-admin", self.html_tag(r.text), path)
+        r = self.get("/news", MEMBER_SESSION)
+        self.assertRegex(r.text, r'id="newsNewPost"[^>]*class="[^"]*ws-admin-only')
+        css = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        self.assertIn("html:not([data-admin]) .ws-admin-only { display: none !important; }", css)
+
+
 if __name__ == "__main__":
     unittest.main()
