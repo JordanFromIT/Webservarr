@@ -24,7 +24,13 @@ BAD = [
     "/\t/evil.com",
     "/\n/evil.com",
     "https:\\\\evil.com",
-    "/&#92;evil.com",          # an entity is decoded before the check
+    # Bleach keeps character references as written and the browser decodes
+    # them, so the check reads the decoded value.
+    "/&#92;evil.com",
+    "/&#x5c;evil.com",
+    "/&bsol;evil.com",
+    "&sol;&sol;evil.com",
+    "/&Tab;/evil.com",
     "javascript:alert(1)",     # already stripped by bleach; stays stripped
 ]
 GOOD = [
