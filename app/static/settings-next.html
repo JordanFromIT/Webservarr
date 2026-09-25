@@ -118,11 +118,28 @@
       <div class="skel skel-card" aria-hidden="true"></div>
     </section>
     <section id="panel-integrations" data-settings-panel="integrations" role="tabpanel" aria-labelledby="tab-integrations">
-      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
-      <div class="skel skel-row mb-2" aria-hidden="true"></div>
-      <div class="skel skel-row mb-2" aria-hidden="true"></div>
-      <div class="skel skel-row mb-2" aria-hidden="true"></div>
-      <div class="skel skel-row" aria-hidden="true"></div>
+      <!-- The tab's own shape: the intro line, then the first three groups,
+           each a heading and its collapsed cards (taller on a phone, where
+           the longer descriptions wrap). -->
+      <div aria-hidden="true">
+        <div class="h-[45px] md:h-[22.5px] mb-8 pt-1"><div class="skel h-4 w-[36rem] max-w-full"></div></div>
+        <div class="mb-12">
+          <div class="h-[30px] mb-5 flex items-center"><div class="skel h-5 w-36"></div></div>
+          <div class="skel rounded-2xl h-[122px] sm:h-[103px]"></div>
+        </div>
+        <div class="mb-12">
+          <div class="h-[30px] mb-5 flex items-center"><div class="skel h-5 w-28"></div></div>
+          <div class="skel rounded-2xl h-[122px] sm:h-[103px]"></div>
+        </div>
+        <div>
+          <div class="h-[30px] mb-5 flex items-center"><div class="skel h-5 w-24"></div></div>
+          <div class="space-y-3">
+            <div class="skel rounded-2xl h-[103px]"></div>
+            <div class="skel rounded-2xl h-[122px] sm:h-[103px]"></div>
+            <div class="skel rounded-2xl h-[103px]"></div>
+          </div>
+        </div>
+      </div>
     </section>
     <section id="panel-notifications" data-settings-panel="notifications" role="tabpanel" aria-labelledby="tab-notifications">
       <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
