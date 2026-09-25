@@ -337,10 +337,16 @@
         var li = el('li', 'relative rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] ' +
           'transition-opacity motion-reduce:transition-none');
         li.setAttribute('data-page', id);
+        // The row is draggable only while the pointer is on its handle: the
+        // browser picks the drag source as the button goes down, so it has
+        // to be set by then (on hover), and off again elsewhere so text in
+        // the row's fields can still be selected with the mouse.
+        var pressed = false, handle = null;
         function release() {
           window.removeEventListener('pointerup', release);
           window.removeEventListener('pointercancel', release);
-          li.draggable = false;
+          pressed = false;
+          li.draggable = !!handle && handle.matches(':hover');
         }
         var line = el('div', 'grid grid-cols-[40px_minmax(0,1fr)_auto] ' +
           'lg:grid-cols-[88px_40px_minmax(0,1fr)_minmax(0,1fr)_96px_56px_56px] items-center gap-3 p-3');
@@ -354,7 +360,7 @@
           'lg:col-start-1 lg:col-span-1 lg:row-start-1');
         if (!pinned) {
           // Not a <button>: some browsers won't start a drag from inside one.
-          var handle = el('span', 'hidden lg:inline-flex items-center justify-center size-10 rounded-[10px] ' +
+          handle = el('span', 'hidden lg:inline-flex items-center justify-center size-10 rounded-[10px] ' +
             'text-frosted-blue/45 hover:text-frosted-blue hover:bg-frosted-blue/[0.06] cursor-grab ' +
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary');
           handle.tabIndex = 0;
@@ -362,10 +368,11 @@
           handle.setAttribute('aria-roledescription', 'drag handle');
           handle.appendChild(icon('drag_indicator', 'text-[22px]'));
           handle.setAttribute('aria-label', 'Move ' + name + '. Drag, or use the up and down arrow keys.');
-          // Only the handle starts a drag, so text in the row's fields can
-          // still be selected with the mouse. A press that never becomes a
-          // drag lets go wherever the pointer is released.
+          handle.addEventListener('pointerenter', function () { li.draggable = true; });
+          handle.addEventListener('pointerleave', function () { if (!pressed) li.draggable = false; });
+          // A press that never becomes a drag lets go wherever it ends.
           handle.addEventListener('pointerdown', function () {
+            pressed = true;
             li.draggable = true;
             window.addEventListener('pointerup', release);
             window.addEventListener('pointercancel', release);
@@ -467,7 +474,8 @@
           li.classList.add('opacity-50');
         });
         li.addEventListener('dragend', function () {
-          li.draggable = false;
+          pressed = false;
+          li.draggable = !!handle && handle.matches(':hover');
           li.classList.remove('opacity-50');
           dragId = null;
           clearMark();

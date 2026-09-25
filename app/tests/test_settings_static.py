@@ -793,8 +793,10 @@ class PagesTab(unittest.TestCase):
         self.assertRegex(row, r"var pinned = id === FIRST \|\| id === LAST;")
         guard = re.search(r"if \(!pinned\) \{", row)
         self.assertIsNotNone(guard, "the handle isn't kept off the pinned rows")
-        self.assertLess(guard.start(), row.index("var handle = "))
-        self.assertEqual(len(re.findall(r"var handle = ", row)), 1)
+        block = row[guard.end() - 1:matching_brace(row, guard.end() - 1) + 1]
+        made = re.findall(r"\bhandle = el\(", row)
+        self.assertEqual(len(made), 1, "one handle, made in one place")
+        self.assertRegex(block, r"\bhandle = el\(")
 
     def test_keyboard_reorder_keeps_focus_and_is_announced(self):
         src = PAGES.read_text(encoding="utf-8")
