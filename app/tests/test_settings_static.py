@@ -130,17 +130,27 @@ class Frame(unittest.TestCase):
             self.assertIn(token, css)
 
     def test_not_set_up_light_uses_the_off_token(self):
-        # R16 / R79 (c): G7's --ws-status-off is the accent, and the "not set
-        # up" light is drawn from it (an empty ring, so it can't pass for a
-        # live status whatever the accent is).
+        # R16 / R79 (c): G7's --ws-status-off is the accent. Integrations'
+        # "not set up" light is its own class drawn from it (an empty ring, so
+        # it can't pass for a live status whatever the accent is), while
+        # .ws-light-unconfigured - also the info toast's tone - stays the
+        # filled neutral dot it always was.
         css = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
         root = re.search(r":root \{([^}]*--ws-status-ok[^}]*)\}", css)
         self.assertIsNotNone(root)
         self.assertRegex(root.group(1), r"--ws-status-off:\s*var\(--color-accent\);")
-        rule = re.search(r"\.ws-light-unconfigured \{([^}]*)\}", css)
-        self.assertIsNotNone(rule)
-        self.assertIn("var(--ws-status-off)", rule.group(1))
-        self.assertRegex(rule.group(1), r"background:\s*transparent")
+        off = re.findall(r"\.ws-light-off \{([^}]*)\}", css)
+        self.assertEqual(len(off), 1, "one .ws-light-off rule")
+        self.assertIn("var(--ws-status-off)", off[0])
+        self.assertRegex(off[0], r"background:\s*transparent")
+        unconf = re.findall(r"\.ws-light-unconfigured \{([^}]*)\}", css)
+        self.assertEqual(unconf, [" background: rgb(var(--color-text) / .25); "], "the toast tone stays a filled dot")
+        # Nothing else restyles it (a second selector list naming it).
+        self.assertEqual(len(re.findall(r"\.ws-light-unconfigured\b", css)), 1)
+        ui = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
+        self.assertTrue(live_matches(ui, r"info: 'ws-light-unconfigured'"), "the info toast's tone moved")
+        src = (STATIC / "js" / "settings" / "integrations.js").read_text(encoding="utf-8")
+        self.assertTrue(live_matches(src, r"\bunconfigured: 'ws-light-off'"))
 
     def test_tab_scroll_hints_fade_the_strip_edge(self):
         # On a phone the arrows sit over the strip; each carries an edge fade
@@ -1057,8 +1067,10 @@ class IntegrationsTab(unittest.TestCase):
         src = INTEGRATIONS.read_text(encoding="utf-8")
         code = js_code_only(src)
         self.assertNotIn("***masked***", src)
-        self.assertTrue(live_matches(src, r"api\.saved\('integration\.chaptarr\.api_key'\) !== WSSettings\.MASK\b"))
-        self.assertTrue(live_matches(src, r"!api\.saved\('integration\.chaptarr\.url'\)"))
+        # The whole gate, one expression: either half missing means typed fields.
+        gate = live_matches(src, r"if \(!api\.saved\('integration\.chaptarr\.url'\) \|\| "
+                                 r"api\.saved\('integration\.chaptarr\.api_key'\) !== WSSettings\.MASK\) \{")
+        self.assertEqual(len(gate), 1, "the saved-address-and-key gate")
         self.assertNotRegex(code, r"\bMASK\s*[:=]\s*['\"`]")
         self.assertNotRegex(code, r"WSSettings\.values\b")
 
@@ -1072,7 +1084,7 @@ class IntegrationsTab(unittest.TestCase):
         self.assertIsNotNone(hook, "nothing listens for a save")
         self.assertTrue(live_matches(src, r"document\.addEventListener\('ws-settings:saved', function"))
         body = code[hook.end() - 1:matching_brace(code, hook.end() - 1) + 1]
-        self.assertRegex(body, r"if \(touches\(keys, keysOf\(id\)\)\) \{ cards\[id\]\.result\.replaceChildren\(\); refresh\(id\); \}")
+        self.assertRegex(body, r"if \(touches\(keys, keysOf\(id\)\)\) \{ cards\[id\]\.clearResult\(\); refresh\(id\); \}")
         self.assertRegex(body, r"if \(chaptarr && touches\(keys, CHAPTARR_CONN\)\) loadChoices\(\);")
         self.assertTrue(live_matches(src, r"var CHAPTARR_CONN = \['integration\.chaptarr\.url', 'integration\.chaptarr\.api_key'\];"))
         self.assertTrue(live_matches(src, r"'\?refresh=1&service=' \+ encodeURIComponent\(id\)"))
@@ -1087,6 +1099,119 @@ class IntegrationsTab(unittest.TestCase):
         self.assertTrue(live_matches(src, r"root\.addEventListener\('focus', function"))
         for card in ("plex", "kavita", "seerr", "chaptarr"):
             self.assertRegex(src, rf"\n    {card}: \{{ name: ", card)
+
+    def _mount_function(self, name: str) -> str:
+        """A function declared inside the tab's mount() (or a card builder), as live code."""
+        code = js_code_only(INTEGRATIONS.read_text(encoding="utf-8"))
+        m = re.search(rf"\n {{6,8}}function {name}\([^)]*\) \{{", code)
+        self.assertIsNotNone(m, f"no function {name}()")
+        return code[m.start():matching_brace(code, m.end() - 1) + 1]
+
+    def test_lights_take_only_fresh_entries(self):
+        # Fix round 1 (1, 3): an answer to refresh=1&service=X carries every
+        # other card's cached entry. A card takes its own entry only from an
+        # answer to a request that asked for it (and no newer one since); an
+        # id the answer left out is "couldn't check", never "Checking…"
+        # forever. Another card's entry is taken only while nothing is being
+        # asked for that card, and only if it is no older than what it shows.
+        body = self._mount_function("refresh")
+        self.assertRegex(body, r"ids\.forEach\(function \(k\) \{ asked\[k\] = mine; inflight\[k\] = mine; \}\);")
+        ok = re.search(r"\.then\(function \(data\) \{", body)
+        self.assertIsNotNone(ok)
+        branch = body[ok.end() - 1:matching_brace(body, ok.end() - 1) + 1]
+        self.assertRegex(branch, r"^\{\s*settle\(ids, mine\);")
+        self.assertRegex(branch, r"if \(ids\.indexOf\(k\) >= 0\) \{\s*if \(mine >= \(asked\[k\] \|\| 0\)\) "
+                                 r"health\[k\] = entry \|\| UNAVAILABLE\(\);\s*\} "
+                                 r"else if \(entry && !inflight\[k\] && newer\(entry, health\[k\]\)\) \{\s*health\[k\] = entry;")
+        self.assertEqual(len(re.findall(r"\bhealth\[k\] = ", branch)), 2, "no other write to a card's entry")
+        fail = re.search(r"\.catch\(function \(\) \{", body)
+        self.assertRegex(body[fail.end():], r"^\s*settle\(ids, mine\);")
+        self.assertRegex(self._mount_function("settle"), r"if \(inflight\[k\] === mine\) delete inflight\[k\];")
+        self.assertRegex(self._mount_function("newer"), r"return !b \|\| \(!!a && a >= b\);")
+
+    def test_every_state_has_a_visible_light(self):
+        # Fix round 1 (2): "couldn't check" (the client's own 'unknown') and any
+        # state the server might add get a filled neutral dot, never a bare
+        # 'ws-light ' with its reason and no mark.
+        src = INTEGRATIONS.read_text(encoding="utf-8")
+        light = live_matches(src, r"var LIGHT = \{([^}]*)\};")
+        self.assertEqual(len(light), 1)
+        states = dict(re.findall(r"(\w+): '([\w-]+)'", light[0].group(1)))
+        self.assertEqual(states, {"ok": "ws-light-ok", "warn": "ws-light-warn", "error": "ws-light-error",
+                                  "unconfigured": "ws-light-off", "unknown": "ws-light-unconfigured"})
+        self.assertTrue(live_matches(src, r"state: 'unknown', reason: MSG\.unavailable"))
+        self.assertRegex(self._mount_function("paint"), r"\(h \? \(LIGHT\[h\.state\] \|\| LIGHT\.unknown\) : ")
+        self.assertNotRegex(js_code_only(src), r"LIGHT\[[^\]]+\] \|\| ' *'")
+
+    def test_checked_ago_rounds_before_it_chooses_the_unit(self):
+        # Fix round 1 (4): 3570-3599 s rounds to 60 minutes, which is "1 h".
+        code = js_code_only(INTEGRATIONS.read_text(encoding="utf-8"))
+        body = function_body(code, "ago")
+        self.assertRegex(body, r"var m = Math\.round\(s / 60\);\s*if \(m < 60\) return ' {8}' \+ m \+ ' {8}';")
+        self.assertNotRegex(body, r"s < 3600")
+
+    def test_a_stale_test_answer_is_dropped(self):
+        # Fix round 1 (5): Save, Discard and a newer Test move the card's test
+        # number on; an answer still in flight from before is dropped, so it
+        # can't write over the cleared result.
+        src = INTEGRATIONS.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        clear = self._mount_function("clearResult")
+        self.assertRegex(clear, r"\{\s*testSeq \+= 1;\s*result\.replaceChildren\(\);\s*\}")
+        click = re.search(r"testBtn\.addEventListener\(' {5}', function \(\) \{", code)
+        self.assertIsNotNone(click)
+        handler = code[click.end() - 1:matching_brace(code, click.end() - 1) + 1]
+        self.assertRegex(handler, r"var mine = \+\+testSeq;")
+        answer = re.search(r"\.then\(readJson\)\.then\(function \(res\) \{", handler)
+        self.assertIsNotNone(answer)
+        after = handler[answer.end():]
+        guard = re.search(r"if \(mine !== testSeq\) return;", after)
+        self.assertIsNotNone(guard, "the answer isn't checked against the test number")
+        self.assertLess(guard.start(), after.index("showResult("), "the result is shown before the check")
+        self.assertRegex(handler, r"\.catch\(function \(\) \{\s*if \(mine === testSeq\) showResult\(")
+        self.assertEqual(len(re.findall(r"\bshowResult\(", handler)), 3, "every result write is accounted for")
+        self.assertRegex(code, r"if \(touches\(keys, keysOf\(id\)\)\) \{ cards\[id\]\.clearResult\(\); refresh\(id\); \}")
+        self.assertRegex(code, r"api\.onDiscard\(function \(\) \{\s*Object\.keys\(cards\)\.forEach\(function \(id\) "
+                               r"\{ cards\[id\]\.clearResult\(\); \}\);")
+        # The result is emptied only by clearResult(), which moves the number on.
+        self.assertEqual(len(re.findall(r"\bresult\.replaceChildren\(\);", code)), 1)
+
+    def test_network_units_come_from_meta(self):
+        # R82: the unit values are the setting's choices; only the plain-words
+        # labels live here, looked up by value, an unknown one shown as itself.
+        src = INTEGRATIONS.read_text(encoding="utf-8")
+        body = self._mount_function("netdataFields")
+        body_src = src[src.index("function netdataFields("):]
+        body_src = body_src[:body_src.index("\n      }\n") + 8]
+        self.assertTrue(live_matches(body_src, r"WSSettings\.metaFor\('netdata\.net_unit'\)"))
+        self.assertRegex(body, r"var units = unit && Array\.isArray\(unit\.choices\) \? unit\.choices : \[\];")
+        self.assertRegex(body, r"options: units\.map\(function \((\w+)\) \{\s*return \{ value: \1, label: "
+                               r"Object\.prototype\.hasOwnProperty\.call\(UNIT_LABELS, \1\) \? UNIT_LABELS\[\1\] : \1 \};")
+        self.assertNotRegex(body_src, r"value:\s*'")
+        labels = live_matches(src, r"var UNIT_LABELS = \{ mbps: 'Megabits per second \(Mbps\)', "
+                                   r"MBps: 'Megabytes per second \(MB/s\)' \};")
+        self.assertEqual(len(labels), 1)
+
+    def test_skeleton_reserves_every_group(self):
+        # Fix round 1 (8): the panel's skeleton holds one heading per group and
+        # one card per service, in GROUPS order, at the measured heights
+        # (phone first, then sm and up), so the swap moves nothing.
+        src = INTEGRATIONS.read_text(encoding="utf-8")
+        groups = re.search(r"var GROUPS = \[(.*?)\n  \];", src, re.S)
+        self.assertIsNotNone(groups)
+        counts = [len(re.findall(r"'(\w+)'", ids)) for ids in re.findall(r"\[\s*'[^']*',\s*\[([^\]]*)\]\]", groups.group(1))]
+        self.assertEqual(counts, [1, 1, 3, 2, 2])
+        h = (STATIC / FRAME).read_text(encoding="utf-8")
+        panel = h[h.index('<section id="panel-integrations"'):]
+        panel = panel[:panel.index("</section>")]
+        heads = re.findall(r'<div class="h-\[30px\] mb-5 flex items-center">', panel)
+        self.assertEqual(len(heads), len(counts), "one heading per group")
+        per_group = [len(re.findall(r'class="skel rounded-2xl ', block))
+                     for block in re.split(r'<div class="h-\[30px\] mb-5 flex items-center">', panel)[1:]]
+        self.assertEqual(per_group, counts, "one card per service, grouped as GROUPS")
+        heights = re.findall(r'class="skel rounded-2xl (h-\[[\d.]+px\](?: sm:h-\[[\d.]+px\])?)"', panel)
+        tall, short = "h-[122px] sm:h-[102.6px]", "h-[102.6px]"
+        self.assertEqual(heights, [tall, tall, short, tall, short, short, short, short, tall])
 
     def test_upstream_text_never_goes_in_as_html(self):
         code = js_code_only(INTEGRATIONS.read_text(encoding="utf-8"))
