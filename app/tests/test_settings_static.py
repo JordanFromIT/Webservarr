@@ -248,10 +248,13 @@ class KitApi(unittest.TestCase):
         self.assertIsNotNone(m)
         block = top_level(body[m.end():matching_brace(body, m.end() - 1)])
         self.assertRegex(block, r"(?:^|[;{}])\s*refreshShell\(keys\);")
-        calls = [c for c in re.findall(r"[^;{}]*\bWS\.clearPageCache\(\)[^;]*;",
-                                       top_level(function_body(code, "refreshShell")))]
-        self.assertEqual(len(calls), 1, "one unconditional WS.clearPageCache() in refreshShell")
-        self.assertNotRegex(calls[0], r"\bkeys\b|NAV_KEYS")
+        # A statement of its own (only its own existence check as a
+        # condition), with no early return ahead of it but the WS guard.
+        rs = top_level(function_body(code, "refreshShell"))
+        call = re.search(r"(?:^|[;{}])\s*(?P<stmt>(?:if \(WS\.clearPageCache\) )?WS\.clearPageCache\(\);)", rs)
+        self.assertIsNotNone(call, "an unconditional WS.clearPageCache() in refreshShell")
+        before = rs[:call.start("stmt")].replace("if (!WS) return;", "")
+        self.assertNotRegex(before, r"\breturn\b")
 
     def test_mask_comes_from_the_server(self):
         # One copy of the sentinel: the SettingsView payload. The kit re-exports
