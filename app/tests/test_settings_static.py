@@ -1524,12 +1524,12 @@ class InPlaceNews(unittest.TestCase):
         self.assertRegex(opened, r"var session = \{ id: post \? post\.id : null, onDone: onDone \|\| null \};\s*current = session;")
         self.assertRegex(top_level(opened), r"var session = \{\};\s*current = session;")   # unconditionally
         self.assertIn("host.replaceChildren(build(post, session));", opened)
-        self.assertRegex(function_body(code, "close"), r"current = null;")
+        self.assertRegex(function_body(code, "hide"), r"current = null;")
         save = function_body(code, "save")
         self.assertIn("content: box.innerHTML.trim()", save)
         after = save[save.index("fetch("):]
         self.assertRegex(after, r"^fetch\(s\.id \? '[^']*' \+ s\.id : '[^']*', \{\s*method: s\.id \? ")
-        self.assertRegex(after, r"if \(current === s\) close\(\);\s*if \(s\.onDone\) s\.onDone\(\);")
+        self.assertRegex(after, r"if \(current === s\) hide\(\);\s*if \(s\.onDone\) s\.onDone\(\);")
         # At response time only the save's own session (and whether it is still
         # current) is read: no live editor, host or callback.
         self.assertNotRegex(after, r"\b(?:editor|host|onDone)\b(?<!s\.onDone)")
@@ -1559,10 +1559,39 @@ class InPlaceNews(unittest.TestCase):
         # whichever answer lands last, and New post outranks an Edit in flight.
         code = js_code_only(news_script())
         self.assertRegex(code, r"\bvar _editClick = 0;")
-        self.assertRegex(code, r"var ticket = \+\+_editClick;\s*WS\.getJSON\(")
-        self.assertRegex(code, r"\.then\(function \(post\) \{\s*if \(ticket === _editClick\) NewsEditor\.open\(post, newsChanged\);\s*\}\)")
-        self.assertRegex(code, r"\.catch\(function \(\) \{\s*if \(ticket === _editClick\) WSUI\.toast\(")
+        also = r"(?: && seen === NewsEditor\.generation\(\))?"   # see test_cancel_drops_an_edit_still_fetching
+        self.assertRegex(code, r"var ticket = \+\+_editClick(?:, seen = NewsEditor\.generation\(\))?;\s*WS\.getJSON\(")
+        self.assertRegex(code, r"\.then\(function \(post\) \{\s*if \(ticket === _editClick" + also + r"\) NewsEditor\.open\(post, newsChanged\);\s*\}\)")
+        self.assertRegex(code, r"\.catch\(function \(\) \{\s*if \(ticket === _editClick" + also + r"\) WSUI\.toast\(")
         self.assertRegex(code, r"_editClick \+= 1;\s*NewsEditor\.open\(null, newsChanged\);")
+
+    def test_cancel_drops_an_edit_still_fetching(self):
+        # Edit, Edit again, Cancel: the second fetch answering afterwards must
+        # not reopen the editor the admin just dismissed, nor toast its failure.
+        # The editor counts every open and every dismissal; an Edit click reads
+        # the count before fetching and acts only if it has not moved.
+        src = (STATIC / "js" / "news-editor.js").read_text(encoding="utf-8")
+        code = js_code_only(src)
+        self.assertRegex(code, r"\bvar [^;]*\bgeneration = 0\b[^;]*;")
+        self.assertRegex(top_level(function_body(code, "open")), r"(?:^|[;{}])\s*generation \+= 1;")
+        self.assertRegex(top_level(function_body(code, "close")), r"^\s*generation \+= 1;\s*hide\(\);\s*$")
+        self.assertNotIn("generation", function_body(code, "hide"))
+        # Cancel and the public close() count; only a successful save's own
+        # teardown does not, so an Edit clicked while that save was in flight
+        # still opens.
+        self.assertEqual(len(live_matches(
+            src, r"cancel\.addEventListener\('click', function \(\) \{ if \(current === session\) close\(\); \}\);")), 1)
+        self.assertEqual(len(live_matches(src, r"if \(current === s\) hide\(\);")), 1)
+        self.assertEqual(len(live_matches(src, r"(?<!function )\bhide\(\);")), 2)
+        self.assertRegex(code, r"return \{ open: open, close: close, generation: function \(\) \{ return generation; \} \};")
+        # news.html reads it at click time, before the fetch, and both the open
+        # and the failure toast require it unchanged, as well as the ticket.
+        page = js_code_only(news_script())
+        self.assertRegex(page, r"var ticket = \+\+_editClick, seen = NewsEditor\.generation\(\);\s*WS\.getJSON\(")
+        live = r"ticket === _editClick && seen === NewsEditor\.generation\(\)"
+        self.assertRegex(page, r"\.then\(function \(post\) \{\s*if \(" + live + r"\) NewsEditor\.open\(post, newsChanged\);\s*\}\)")
+        self.assertRegex(page, r"\.catch\(function \(\) \{\s*if \(" + live + r"\) WSUI\.toast\(")
+        self.assertEqual(len(live_matches(news_script(), live)), 2)
 
     def test_a_page_started_before_a_reload_is_dropped(self):
         code = js_code_only(news_script())
