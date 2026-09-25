@@ -336,8 +336,14 @@ class ShellRendering(unittest.TestCase):
         out = render(b=b)
         self.assertIn("--color-primary:18 87 147", out)
         self.assertIn("family=Spline+Sans", out)
-        self.assertNotIn("@import", out.split("<body>")[0].replace(
-            re.search(r'<script id="ws-data".*?</script>', out, re.S).group(0), ""))
+        # The whole head, the #ws-data block included: theme-loader applies
+        # that block's font and colours inline, so it carries the safe values too.
+        head = out.split("<body>")[0]
+        self.assertNotIn("@import", head)
+        self.assertNotIn("body{display", head)
+        data = data_of(out)["branding"]
+        self.assertEqual(data["font"], "Spline Sans")
+        self.assertEqual(data["colors"]["primary"], "#125793")
 
     def test_ws_data_precedes_theme_loader(self):
         out = render()
