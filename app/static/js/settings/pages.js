@@ -204,7 +204,7 @@
     var b = el('button', cls.btnQuiet + ' px-2');
     b.type = 'button';
     b.setAttribute('aria-expanded', 'false');
-    b.setAttribute('aria-label', label);
+    if (label) b.setAttribute('aria-label', label);
     b.appendChild(icon('expand_more', 'text-[22px] transition-transform motion-reduce:transition-none'));
     return b;
   }
@@ -333,7 +333,6 @@
 
       function buildRow(id) {
         var pinned = id === FIRST || id === LAST;
-        var name = labelOf(api, id);
         var li = el('li', 'relative rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] ' +
           'transition-opacity motion-reduce:transition-none');
         li.setAttribute('data-page', id);
@@ -341,7 +340,7 @@
         // browser picks the drag source as the button goes down, so it has
         // to be set by then (on hover), and off again elsewhere so text in
         // the row's fields can still be selected with the mouse.
-        var pressed = false, handle = null;
+        var pressed = false, handle = null, up = null, down = null, pin = null, lockedSwitch = null, onSwitch = null;
         function release() {
           window.removeEventListener('pointerup', release);
           window.removeEventListener('pointercancel', release);
@@ -351,7 +350,6 @@
         var line = el('div', 'grid grid-cols-[40px_minmax(0,1fr)_auto] ' +
           'lg:grid-cols-[88px_40px_minmax(0,1fr)_minmax(0,1fr)_96px_56px_56px] items-center gap-3 p-3');
         line.setAttribute('role', 'group');
-        line.setAttribute('aria-label', name);
 
         // Cells in reading order, placed by the grid: on a wide screen one
         // line of columns; on a phone the icon and names first, then the move
@@ -367,7 +365,6 @@
           handle.setAttribute('role', 'button');
           handle.setAttribute('aria-roledescription', 'drag handle');
           handle.appendChild(icon('drag_indicator', 'text-[22px]'));
-          handle.setAttribute('aria-label', 'Move ' + name + '. Drag, or use the up and down arrow keys.');
           handle.addEventListener('pointerenter', function () { li.draggable = true; });
           handle.addEventListener('pointerleave', function () { if (!pressed) li.draggable = false; });
           // A press that never becomes a drag lets go wherever it ends.
@@ -384,15 +381,13 @@
             if (document.activeElement !== handle) handle.focus({ preventScroll: true });
             handle.scrollIntoView({ block: 'nearest' });
           });
-          var up = el('button', cls.btnQuiet + ' lg:hidden px-2 disabled:opacity-40 disabled:pointer-events-none');
+          up = el('button', cls.btnQuiet + ' lg:hidden px-2 disabled:opacity-40 disabled:pointer-events-none');
           up.type = 'button';
           up.appendChild(icon('arrow_upward', 'text-[20px]'));
-          up.setAttribute('aria-label', 'Move ' + name + ' up');
           up.addEventListener('click', function () { move(id, -1); up.scrollIntoView({ block: 'nearest' }); });
-          var down = el('button', cls.btnQuiet + ' lg:hidden px-2 disabled:opacity-40 disabled:pointer-events-none');
+          down = el('button', cls.btnQuiet + ' lg:hidden px-2 disabled:opacity-40 disabled:pointer-events-none');
           down.type = 'button';
           down.appendChild(icon('arrow_downward', 'text-[20px]'));
-          down.setAttribute('aria-label', 'Move ' + name + ' down');
           down.addEventListener('click', function () { move(id, 1); down.scrollIntoView({ block: 'nearest' }); });
           moveBox.appendChild(handle);
           moveBox.appendChild(up);
@@ -400,19 +395,18 @@
           li._up = up;
           li._down = down;
         } else {
-          var pin = el('span', 'inline-flex items-center justify-center size-10 text-frosted-blue/45');
-          pin.title = id === FIRST ? name + ' is always first' : name + ' is always last';
+          pin = el('span', 'inline-flex items-center justify-center size-10 text-frosted-blue/45');
           pin.appendChild(icon('push_pin', 'text-[18px]'));
           moveBox.appendChild(pin);
         }
 
         var exp = id === 'home' ? homeExpander(api) : id === 'requests' ? requestsExpander(api) : null;
-        var toggleBtn = exp ? expandButton('More settings for ' + name) : null;
+        var toggleBtn = exp ? expandButton() : null;
         if (toggleBtn) moveBox.appendChild(toggleBtn);
         line.appendChild(moveBox);
 
         var iconCell = el('div', 'self-start row-start-1 col-start-1 lg:self-center lg:col-start-2 lg:row-start-1');
-        iconCell.appendChild(api.iconPicker({ key: 'icon.nav_' + id, label: 'Icon for ' + name, compact: true }));
+        iconCell.appendChild(api.iconPicker({ key: 'icon.nav_' + id, label: 'Icon', compact: true }));
         line.appendChild(iconCell);
 
         var names = el('div', 'grid gap-2 lg:gap-3 lg:grid-cols-2 min-w-0 row-start-1 col-start-2 col-span-2 ' +
@@ -428,26 +422,51 @@
         var switches = el('div', 'flex items-center gap-4 row-start-2 col-start-3 lg:contents');
         var newBox = el('label', 'flex items-center gap-2 lg:col-start-6 lg:row-start-1');
         newBox.appendChild(el('span', 'lg:hidden text-[13px] text-frosted-blue/70', 'New!'));
-        newBox.appendChild(api.toggle({ key: 'sidebar.new_' + id, label: 'Show New! on ' + name, compact: true }));
+        var newSwitch = api.toggle({ key: 'sidebar.new_' + id, label: 'Show New!', compact: true });
+        newBox.appendChild(newSwitch);
         var onBox = el('label', 'flex items-center gap-2 lg:col-start-7 lg:row-start-1');
         onBox.appendChild(el('span', 'lg:hidden text-[13px] text-frosted-blue/70', 'On'));
         if (pinned) {
-          var lockedSwitch = el('button', 'ws-switch');
+          lockedSwitch = el('button', 'ws-switch');
           lockedSwitch.type = 'button';
           lockedSwitch.disabled = true;
           lockedSwitch.setAttribute('role', 'switch');
           lockedSwitch.setAttribute('aria-checked', 'true');
-          var why = hasOwn(LOCKED, id) ? LOCKED[id] : name + ' is always on.';
-          lockedSwitch.setAttribute('aria-label', why);
-          lockedSwitch.title = why;
           onBox.appendChild(lockedSwitch);
         } else {
-          onBox.appendChild(api.toggle({ key: 'sidebar.enabled_' + id, label: name + ' is on', compact: true }));
+          onSwitch = api.toggle({ key: 'sidebar.enabled_' + id, label: 'On', compact: true });
+          onBox.appendChild(onSwitch);
         }
         switches.appendChild(newBox);
         switches.appendChild(onBox);
         line.appendChild(switches);
         li.appendChild(line);
+
+        // Every name in the row says the page's label as it stands now
+        // (WCAG 2.5.3). The kit calls onChange listeners on a staged change,
+        // on Discard and after a save, so this one listener covers all three.
+        // The compact switches are the kit's own elements: their aria-label
+        // is set once by the kit and only renamed here.
+        function nameRow() {
+          var name = labelOf(api, id);
+          line.setAttribute('aria-label', name);
+          if (handle) handle.setAttribute('aria-label', 'Move ' + name + '. Drag, or use the up and down arrow keys.');
+          if (up) {
+            up.setAttribute('aria-label', 'Move ' + name + ' up');
+            down.setAttribute('aria-label', 'Move ' + name + ' down');
+          }
+          if (pin) pin.title = id === FIRST ? name + ' is always first' : name + ' is always last';
+          if (toggleBtn) toggleBtn.setAttribute('aria-label', 'More settings for ' + name);
+          newSwitch.setAttribute('aria-label', 'Show New! on ' + name);
+          if (onSwitch) onSwitch.setAttribute('aria-label', name + ' is on');
+          if (lockedSwitch) {
+            var why = hasOwn(LOCKED, id) ? LOCKED[id] : name + ' is always on.';
+            lockedSwitch.setAttribute('aria-label', why);
+            lockedSwitch.title = why;
+          }
+        }
+        nameRow();
+        api.onChange('sidebar.label_' + id, nameRow);
 
         var warn = el('div', 'px-3 pb-3 empty:hidden');
         li.appendChild(warn);
@@ -531,6 +550,8 @@
       });
 
       start.forEach(function (id) { rows[id] = buildRow(id); list.appendChild(rows[id]); });
+      // get() is part of the binding shape; the kit never reads it back (the
+      // staged text is the truth), so it just hands back the current value.
       api.track(ORDER_KEY, { get: function () { return api.get(ORDER_KEY); }, set: paint, el: list, errorEl: orderError });
       api.onSaved(function (keys) {
         if (keys.indexOf(ORDER_KEY) >= 0 && hasOwn(known, saved(ORDER_KEY))) savedOrder = known[saved(ORDER_KEY)];
