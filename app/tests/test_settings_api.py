@@ -536,8 +536,9 @@ class HelpersRestoreTheLimiter(unittest.TestCase):
 
 class ValidationOffTheLoop(SettingsApiBase):
     """Validating an address can resolve a hostname with a blocking lookup, so
-    BulkSave and SettingsImport validate in a worker thread: a slow DNS server
-    must not freeze the worker's event loop for every other request."""
+    BulkSave, the single-key save and SettingsImport validate in a worker
+    thread: a slow DNS server must not freeze the worker's event loop for
+    every other request."""
 
     def _spy(self):
         import asyncio
@@ -557,6 +558,15 @@ class ValidationOffTheLoop(SettingsApiBase):
         with spy:
             r = self.save(("integration.sonarr.url", "http://sonarr.lan:8989"))
         self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(seen, [("thread", "http://sonarr.lan:8989")])
+
+    def test_single_put_validates_off_the_event_loop(self):
+        seen, spy = self._spy()
+        with spy:
+            r = self.client.put("/api/admin/settings",
+                                json={"key": "integration.sonarr.url", "value": "http://sonarr.lan:8989"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(helpers.get(self.db, "integration.sonarr.url"), "http://sonarr.lan:8989")
         self.assertEqual(seen, [("thread", "http://sonarr.lan:8989")])
 
     def test_import_validates_off_the_event_loop(self):

@@ -60,6 +60,10 @@ def fake_factory(routes, calls):
     return lambda **kw: _FakeClient(routes, calls)
 
 
+# What Uptime Kuma's heartbeat endpoint returns for a status page with monitors.
+KUMA_PAGE = {"heartbeatList": {"1": [{"status": 1}]}, "uptimeList": {"1_24": 1.0}}
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class Mapping(unittest.TestCase):
     def test_spec_table(self):
@@ -91,6 +95,31 @@ class Mapping(unittest.TestCase):
         self.assertIn("/ebooks", reason)
         self.assertEqual(health.map_response("chaptarr", 200, [{"path": "/ebooks/"}],
                                              {"integration.chaptarr.root_folder": "/ebooks"})[0], "ok")
+
+    def test_uptime_kuma_page_without_monitors_is_amber(self):
+        # Uptime Kuma answers an unknown slug on the heartbeat path with 200
+        # and empty lists, not 404.
+        slug = {"integration.uptime_kuma.slug": "home"}
+        for body in ({"heartbeatList": {}, "uptimeList": {}}, {"uptimeList": {}}, {"heartbeatList": None}):
+            with self.subTest(body=body):
+                state, reason = health.map_response("uptime_kuma", 200, body, slug)
+                self.assertEqual(state, "warn")
+                self.assertEqual(reason, 'The status page "home" wasn\'t found or has no monitors')
+        # Same slug fallback as the 404 branch.
+        self.assertIn('"default"', health.map_response("uptime_kuma", 200, {"heartbeatList": {}}, {})[1])
+        self.assertIn('"default"', health.map_response("uptime_kuma", 200, {"heartbeatList": {}},
+                                                       {"integration.uptime_kuma.slug": "  "})[1])
+
+    def test_uptime_kuma_answer_that_is_not_an_object_is_amber(self):
+        for body in (None, [], "ok", 7):
+            with self.subTest(body=body):
+                state, reason = health.map_response("uptime_kuma", 200, body, {})
+                self.assertEqual(state, "warn")
+                self.assertEqual(reason, "It answered, but that address doesn't look like the right service")
+
+    def test_uptime_kuma_page_with_monitors_is_green(self):
+        self.assertEqual(health.map_response("uptime_kuma", 200, KUMA_PAGE,
+                                             {"integration.uptime_kuma.slug": "home"}), ("ok", "Connected"))
 
     def test_chaptarr_missing_audiobook_folder_is_amber(self):
         state, reason = health.map_response("chaptarr", 200, [{"path": "/ebooks"}],
@@ -125,6 +154,12 @@ class Probing(unittest.TestCase):
             result = asyncio.run(health.probe_one("uptime_kuma", self.VALUES))
         self.assertEqual(result["state"], "warn")
         self.assertTrue(calls[0]["url"].endswith("/api/status-page/heartbeat/home"))
+
+    def test_uptime_kuma_probe_reads_the_page(self):
+        for body, want in ((KUMA_PAGE, "ok"), ({"heartbeatList": {}, "uptimeList": {}}, "warn")):
+            with self.subTest(want=want), \
+                 mock.patch.object(health.httpx, "AsyncClient", fake_factory({"heartbeat/home": _Resp(200, body)}, [])):
+                self.assertEqual(asyncio.run(health.probe_one("uptime_kuma", self.VALUES))["state"], want)
 
     def test_one_slow_integration_does_not_hold_up_the_rest(self):
         async def slow():
@@ -219,7 +254,7 @@ class Probing(unittest.TestCase):
 
         with mock.patch.object(health, "PROBE_TIMEOUT", 0.3), \
              mock.patch("socket.getaddrinfo", getaddrinfo), \
-             mock.patch.object(health.httpx, "AsyncClient", fake_factory({}, calls)):
+             mock.patch.object(health.httpx, "AsyncClient", fake_factory({"heartbeat": _Resp(200, KUMA_PAGE)}, calls)):
             results, elapsed, worst_gap = asyncio.run(run())
         self.assertLess(elapsed, 0.3 + 0.5)
         self.assertEqual(results["sonarr"]["state"], "error")
@@ -407,6 +442,8 @@ class Safety(unittest.TestCase):
             "crash": {"192.168": RuntimeError(" ".join(SECRETS.values())),
                       "nytimes": RuntimeError(" ".join(SECRETS.values()))},
             "chaptarr body": {"rootfolder": _Resp(200, [{"path": v} for v in SECRETS.values()])},
+            "uptime kuma body": {"heartbeat": _Resp(200, leaky_body)},
+            "uptime kuma page": {"heartbeat": _Resp(200, {"heartbeatList": {v: [] for v in SECRETS.values()}})},
         }
         for name, routes in scenarios.items():
             with self.subTest(name):
@@ -468,11 +505,22 @@ class TestConnection(unittest.TestCase):
         # The old Settings page sends no slug: the saved one is what gets tested.
         helpers.put(self.db, "integration.uptime_kuma.slug", "family")
         calls = []
-        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({"heartbeat/family": _Resp(200, {})}, calls)):
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({"heartbeat/family": _Resp(200, KUMA_PAGE)}, calls)):
             r = self.client.post("/api/admin/test-connection", json={
                 "service": "uptime_kuma", "url": "http://192.168.1.7:3001", "credentials": ""})
         self.assertEqual(r.json(), {"success": True, "message": "Connected", "state": "ok"})
         self.assertTrue(calls[0]["url"].endswith("/api/status-page/heartbeat/family"))
+
+    def test_a_slug_with_no_status_page_is_amber(self):
+        calls = []
+        routes = {"heartbeat/no-such-page": _Resp(200, {"heartbeatList": {}, "uptimeList": {}})}
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory(routes, calls)):
+            r = self.client.post("/api/admin/test-connection", json={
+                "service": "uptime_kuma", "url": "http://192.168.1.7:3001", "slug": "no-such-page"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json(), {"success": False, "state": "warn",
+                                    "message": 'The status page "no-such-page" wasn\'t found or has no monitors'})
+        self.assertTrue(calls[0]["url"].endswith("/api/status-page/heartbeat/no-such-page"))
 
     def test_an_invalid_slug_is_refused_without_a_request(self):
         calls = []
@@ -676,6 +724,27 @@ class ChaptarrOptions(unittest.TestCase):
         self.assertEqual(len(seen), 3)
         self.assertEqual(r.status_code, 503, r.text)
         self.assertNotIn("/leak", r.text)
+
+
+
+class SetupWizardTest(unittest.TestCase):
+    """The setup wizard's Plex test posts the field the endpoint reads and
+    shows the probe's reason when it fails."""
+
+    def setUp(self):
+        import os
+        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "setup.html")
+        with open(path, encoding="utf-8") as f:
+            html = f.read()
+        start = html.index("/api/admin/test-connection")
+        self.block = html[start:html.index("testBtn.disabled = false", start)]
+
+    def test_posts_credentials(self):
+        self.assertRegex(self.block, r"JSON\.stringify\(\{[^}]*\bcredentials:\s*token\b")
+        self.assertNotRegex(self.block, r"\bcredential:")
+
+    def test_failure_shows_the_message_first(self):
+        self.assertRegex(self.block, r"textContent\s*=\s*data\.message\s*\|\|\s*data\.detail\s*\|\|\s*'Connection failed'")
 
 
 if __name__ == "__main__":
