@@ -307,7 +307,12 @@ var NewsEditor = (function () {
         if (current === s) close();
         if (s.onDone) s.onDone();
       }).catch(function () {
-        UI.toast('The post wasn’t saved. Your text is still here — try again.', 'err');
+        // "Your text is still here" holds only while this panel is on screen.
+        // Once another post's panel replaced it, say which post (the title this
+        // save sent, shown as text) and how to get back to it.
+        if (current === s) UI.toast('The post wasn’t saved. Your text is still here — try again.', 'err');
+        else if (!s.id) UI.toast('Your new post “' + payload.title + '” wasn’t saved. Open New post and try again.', 'err');
+        else UI.toast('“' + payload.title + '” wasn’t saved. Open it again and retry.', 'err');
       }).then(function () { publish.disabled = draft.disabled = cancel.disabled = false; });
     }
     publish.addEventListener('click', function () { save(true); });

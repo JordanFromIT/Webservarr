@@ -198,6 +198,10 @@
   // "Load older posts" still in flight when a write landed) is dropped when
   // it answers, so it can never paint the pre-write list.
   var _gen = 0;
+  // Bumped by every Edit and New post click. Edit fetches the post before the
+  // editor opens, so an older click whose answer lands late is ignored: the
+  // panel shown is always the one asked for last.
+  var _editClick = 0;
   // Admins see drafts too, and manage every post in place. The server decides
   // who gets drafts (published_only=false is ignored for anyone else); this
   // only chooses what to ask for and whether to draw the tools.
@@ -400,7 +404,9 @@
   }
 
   document.getElementById('newsNewPost').addEventListener('click', function () {
-    if (isAdmin) NewsEditor.open(null, newsChanged);
+    if (!isAdmin) return;
+    _editClick += 1;
+    NewsEditor.open(null, newsChanged);
   });
 
   document.addEventListener('click', function (e) {
@@ -409,8 +415,12 @@
     var id = parseInt(btn.getAttribute('data-id'), 10);
     var action = btn.getAttribute('data-news-action');
     if (action === 'edit') {
-      WS.getJSON('/api/news/' + id).then(function (post) { NewsEditor.open(post, newsChanged); })
-        .catch(function () { WSUI.toast('That post couldn’t be opened. Try again.', 'err'); });
+      var ticket = ++_editClick;
+      WS.getJSON('/api/news/' + id).then(function (post) {
+        if (ticket === _editClick) NewsEditor.open(post, newsChanged);
+      }).catch(function () {
+        if (ticket === _editClick) WSUI.toast('That post couldn’t be opened. Try again.', 'err');
+      });
     } else if (action === 'pin') {
       var pinned = btn.getAttribute('data-pinned') === '1';
       write(btn, '/api/news/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
