@@ -26,8 +26,8 @@ from app.dependencies import require_admin
 from app.limiter import limiter
 from app.models import Setting
 from app.settings_registry import (
-    MASK, PATTERN_DEFS, REGISTRY, USER_DATA_MESSAGE, active_defs, get_def, is_user_data, mask, meta_for,
-    validate_value,
+    MASK, PAGE_ADDRESSES, PATTERN_DEFS, REGISTRY, USER_DATA_MESSAGE, active_defs, get_def, is_user_data, mask,
+    meta_for, normalize_page_order, validate_value,
 )
 
 logger = logging.getLogger(__name__)
@@ -206,13 +206,18 @@ async def list_settings(
             if not is_user_data(row.key)     # per-user rows never reach Settings
         ]
 
-    values = {k: mask(k, v) for k, v in effective_values(db).items()}
+    effective = effective_values(db)
+    values = {k: mask(k, v) for k, v in effective.items()}
     meta = {d.key: meta_for(d) for d in active_defs()}
     for _rx, pd in PATTERN_DEFS:
         meta[pd.key] = meta_for(pd)
-    # "mask" is what a saved secret reads as in `values`; the front end takes it
-    # from here rather than keeping its own copy.
-    return {"values": values, "meta": meta, "mask": MASK}
+    # The front end takes these from here rather than keeping its own copies:
+    # "mask" is what a saved secret reads as in `values`; "page_order" is the
+    # sidebar order as the nav renders it (normalised, whatever the row
+    # holds); "page_addresses" are the fixed page routes.
+    return {"values": values, "meta": meta, "mask": MASK,
+            "page_order": normalize_page_order(effective["pages.order"]),
+            "page_addresses": dict(PAGE_ADDRESSES)}
 
 
 @router.put("/settings/bulk")

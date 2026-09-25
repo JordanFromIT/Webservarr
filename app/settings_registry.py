@@ -59,6 +59,14 @@ PAGE_DEFAULTS: Dict[str, Tuple[str, str, str]] = {
     "settings": ("Settings", "Manage the site", "settings"),
 }
 
+# page id -> its address. Routes, not settings: fixed, never stored. The one
+# copy: the nav (app/pages.py) renders from it and the Settings view serves
+# it to the Pages tab.
+PAGE_ADDRESSES: Dict[str, str] = {
+    "home": "/", "requests": "/requests", "issues": "/issues", "calendar": "/calendar",
+    "tickets": "/tickets", "library": "/ebooks", "wiki": "/wiki", "settings": "/settings",
+}
+
 _HOME_SECTION_DEFAULTS = {
     # section id -> (display name, icon)
     "services": ("Service Health", "health_metrics"),

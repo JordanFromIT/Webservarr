@@ -32,7 +32,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.config import settings
 from app.database import SessionLocal
-from app.settings_registry import PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order, safe_color, safe_font
+from app.settings_registry import (
+    PAGE_ADDRESSES, PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order, safe_color, safe_font,
+)
 from app.settings_registry import REGISTRY as _REGISTRY
 from app.utils import identity_email, safe_http_url, same_origin_path
 
@@ -47,14 +49,12 @@ STATIC_DIR = "/app/app/static"
 # ---------------------------------------------------------------------------
 #
 # The one list of destinations. Routes are fixed (page addresses are not
-# configurable). Labels, sublabels and icons are the shipped defaults from
-# app/settings_registry.py; the operator's overrides, switches and order come
-# from the branding payload (Settings) and are applied in visible_nav_items().
+# configurable) and, like the labels, sublabels and icons shipped as
+# defaults, come from app/settings_registry.py; the operator's overrides,
+# switches and order come from the branding payload (Settings) and are
+# applied in visible_nav_items().
 
-_NAV_HREF = {
-    "home": "/", "requests": "/requests", "issues": "/issues", "calendar": "/calendar",
-    "tickets": "/tickets", "library": "/ebooks", "wiki": "/wiki", "settings": "/settings",
-}
+_NAV_HREF = PAGE_ADDRESSES
 _NAV_EXTRA = {
     # The pending-requests count rides on the one Requests item.
     "requests": {"badge": "requestsBadge"},

@@ -50,7 +50,7 @@
     partial: 'Some changes weren’t saved. Check the marked fields.'
   };
 
-  var S = { values: {}, meta: {}, mask: null, booted: false, loaded: false, loadFailed: false, current: null,
+  var S = { values: {}, meta: {}, mask: null, view: {}, booted: false, loaded: false, loadFailed: false, current: null,
             tabs: {}, busy: false, saving: false, failed: false, asking: false, leaving: false,
             pendingFocus: null };
   var bar, barText, barDiscard, barSave;
@@ -967,6 +967,7 @@
       S.values = data.values;
       S.meta = data.meta;
       S.mask = data.mask;
+      S.view = data;
       S.loaded = true;
       return mount(S.current);
     }).catch(function (e) {
@@ -1000,8 +1001,14 @@
     return { root: root, body: body };
   }
 
+  // Another field of the settings view as the server sent it (page_order,
+  // page_addresses), or null when it has none. Read once, when a tab mounts.
+  function view(name) {
+    return hasOwn(S.view, name) ? S.view[name] : null;
+  }
+
   var WSSettings = {
-    boot: boot, registerTab: registerTab, go: go, metaFor: metaFor, card: card, leave: leave,
+    boot: boot, registerTab: registerTab, go: go, metaFor: metaFor, card: card, leave: leave, view: view,
     toast: UI.toast, confirm: UI.confirm, el: el, icon: icon, cls: cls
   };
   Object.defineProperty(WSSettings, 'values', { get: function () { return S.values; } });
