@@ -347,6 +347,25 @@ _ICON = re.compile(r"[a-z0-9_]{1,64}")
 _INT = re.compile(r"-?[0-9]{1,9}")   # ASCII digits only: \d also matches other scripts' digits
 
 
+def safe_font(value) -> str:
+    """The display font as it may reach CSS or a font URL: the stored name,
+    trimmed, when it full-matches theme.font's pattern, else its default.
+
+    The one rule for the branding payload (app/routers/branding.py, which
+    theme-loader.js applies inline on every page) and the page renderer's
+    #ws-theme / #ws-font (app/pages.py), so the two can't drift. A legacy or
+    hand-edited row never reaches the browser."""
+    d = REGISTRY["theme.font"]
+    v = value.strip() if isinstance(value, str) else ""
+    return v if d.pattern and re.fullmatch(d.pattern, v) else d.default
+
+
+def safe_color(key: str, value) -> str:
+    """A stored theme colour as it may reach CSS: exactly #rrggbb, else the
+    key's registry default. Shared like safe_font."""
+    return value if isinstance(value, str) and _HEX.fullmatch(value) else REGISTRY[key].default
+
+
 def _validate_url(d: SettingDef, v: str) -> Optional[str]:
     # Imported here: app.utils and app.routers.branding pull in the app, and the
     # branding router will itself import this module for its defaults.

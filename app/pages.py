@@ -32,7 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.config import settings
 from app.database import SessionLocal
-from app.settings_registry import PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order
+from app.settings_registry import PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order, safe_color, safe_font
 from app.settings_registry import REGISTRY as _REGISTRY
 from app.utils import identity_email, safe_http_url, same_origin_path
 
@@ -88,11 +88,9 @@ PAGE_NAV = {
 # Theme: colours, font
 # ---------------------------------------------------------------------------
 
-_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
-_FONT = re.compile(r"^[A-Za-z0-9 \-]{1,60}$")
 DEFAULT_FONT = _REGISTRY["theme.font"].default
 
-# Fallbacks when a stored colour is not a valid hex. Taken from the registry;
+# The registry's colour defaults, which safe_color falls back to;
 # app/static/css/theme.css repeats them as :root defaults (a test keeps the two equal).
 _DEFAULT_COLORS = {
     key: _REGISTRY["theme.color_" + key].default
@@ -119,14 +117,10 @@ def _rgb(hex_value: str) -> str:
     return f"{int(h[0:2], 16)} {int(h[2:4], 16)} {int(h[4:6], 16)}"
 
 
-def _safe_hex(value, fallback: str) -> str:
-    return value if isinstance(value, str) and _HEX.match(value) else fallback
-
-
-def _safe_font(value) -> str:
-    if isinstance(value, str) and _FONT.match(value.strip()):
-        return value.strip()
-    return DEFAULT_FONT
+# One rule with the branding payload (app/settings_registry.safe_font /
+# safe_color): the payload is already safe, and this keeps the page's own
+# #ws-theme and #ws-font safe for any branding dict it is handed.
+_safe_font = safe_font
 
 
 def _safe_url(value) -> str:
@@ -142,7 +136,7 @@ def theme_style(branding: dict) -> str:
     colors = branding.get("colors") or {}
     decls = []
     for var, key in _COLOR_VARS:
-        hexv = _safe_hex(colors.get(key), _DEFAULT_COLORS[key])
+        hexv = safe_color("theme.color_" + key, colors.get(key))
         decls.append(f"--color-{var}:{_rgb(hexv)}")
         decls.append(f"--hex-{var}:{hexv}")
     decls.append(f'--font-display:"{_safe_font(branding.get("font"))}",sans-serif')

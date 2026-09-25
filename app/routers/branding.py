@@ -13,7 +13,8 @@ from app.dependencies import get_current_user_optional
 from app.limiter import limiter
 from app.models import Setting
 from app.settings_registry import (
-    HOME_SECTION_IDS, REGISTRY, SIDEBAR_PAGE_IDS, normalize_page_order, public_defaults, switch_is_off,
+    HOME_SECTION_IDS, REGISTRY, SIDEBAR_PAGE_IDS, normalize_page_order, public_defaults, safe_color, safe_font,
+    switch_is_off,
 )
 from app.utils import safe_http_url, same_origin_path
 
@@ -148,19 +149,17 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         "app_name": get("branding.app_name"),
         "tagline": get("branding.tagline"),
         "logo_url": safe_logo_url(get("branding.logo_url")),
+        # Font and colours are made safe here, with the page renderer's own
+        # rule: theme-loader.js applies them inline on every page, over the
+        # server's #ws-theme, so a legacy or hand-edited row would otherwise
+        # break the whole site. Anything off becomes its registry default.
+        # The media type accents (media_*) are distinct hues; see app/settings_registry.py.
         "colors": {
-            "primary": get("theme.color_primary"),
-            "secondary": get("theme.color_secondary"),
-            "accent": get("theme.color_accent"),
-            "text": get("theme.color_text"),
-            "text_secondary": get("theme.color_text_secondary"),
-            "background": get("theme.color_background"),
-            # Media type accents - see app/settings_registry.py for why these are distinct hues.
-            "media_movie": get("theme.color_media_movie"),
-            "media_tv": get("theme.color_media_tv"),
-            "media_book": get("theme.color_media_book"),
+            key: safe_color("theme.color_" + key, get("theme.color_" + key))
+            for key in ("primary", "secondary", "accent", "text", "text_secondary", "background",
+                        "media_movie", "media_tv", "media_book")
         },
-        "font": get("theme.font"),
+        "font": safe_font(get("theme.font")),
         "custom_css": get("theme.custom_css"),
         "features": {
             "show_simple_auth": get("features.show_simple_auth") == "true",
