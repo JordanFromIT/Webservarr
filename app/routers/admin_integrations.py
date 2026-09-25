@@ -29,7 +29,9 @@ async def integrations_health(
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """IntegrationHealth: cached 30 s; refresh=1 re-probes (one service if given)."""
+    """IntegrationHealth, cached 30 s. refresh=1 re-probes: just `service` when
+    one is given and the cache is warm, everything when the cache is cold, so
+    the map always covers every integration."""
     if service is not None and service not in IDS:
         return JSONResponse(status_code=400, content={"detail": "Unknown integration"})
     return await get_health(effective_values(db), refresh=refresh, only=service)

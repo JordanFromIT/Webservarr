@@ -145,17 +145,26 @@ def map_exception(exc: BaseException) -> Tuple[str, str]:
 
 
 async def probe_one(service: str, values: Dict[str, str], client=None) -> dict:
-    probe, immediate = build_probe(service, values)
+    """One PROBE_TIMEOUT deadline covers the whole probe: address check and request."""
+    try:
+        return await asyncio.wait_for(_probe(service, values, client), timeout=PROBE_TIMEOUT)
+    except Exception as exc:  # noqa: BLE001 - every failure becomes a red light with a reason
+        return _result(*map_exception(exc))
+
+
+async def _probe(service: str, values: Dict[str, str], client) -> dict:
+    # build_probe's address check can resolve a hostname with a blocking
+    # getaddrinfo, so it runs in a worker thread rather than on the event loop.
+    # When the deadline passes first the thread is abandoned, not killed; the
+    # OS resolver's own timeout ends it.
+    probe, immediate = await asyncio.to_thread(build_probe, service, values)
     if immediate:
         return _result(*immediate)
     own = client is None
     if own:
         client = _client()
     try:
-        resp = await asyncio.wait_for(
-            client.get(probe["url"], headers=probe["headers"], params=probe["params"]),
-            timeout=PROBE_TIMEOUT,
-        )
+        resp = await client.get(probe["url"], headers=probe["headers"], params=probe["params"])
         body = None
         if service == "chaptarr" and 200 <= resp.status_code < 300:
             try:
@@ -163,8 +172,6 @@ async def probe_one(service: str, values: Dict[str, str], client=None) -> dict:
             except ValueError:
                 body = None
         return _result(*map_response(service, resp.status_code, body, values))
-    except Exception as exc:  # noqa: BLE001 - every failure becomes a red light with a reason
-        return _result(*map_exception(exc))
     finally:
         if own:
             await client.aclose()
@@ -196,9 +203,18 @@ async def _cache_write(data: dict) -> None:
         logger.debug("Could not cache integration health: %s", exc)
 
 
+def _complete(cached) -> bool:
+    """A snapshot is served only as a map with a map for every integration;
+    anything else in the cache key counts as a cold cache."""
+    if not isinstance(cached, dict):
+        return False
+    entries = cached.get("integrations")
+    return isinstance(entries, dict) and all(isinstance(entries.get(i), dict) for i in IDS)
+
+
 async def get_health(values: Dict[str, str], refresh: bool = False, only: Optional[str] = None) -> dict:
     cached = await _cache_read()
-    complete = bool(cached) and set(IDS) <= set((cached or {}).get("integrations", {}))
+    complete = _complete(cached)
     if complete and not refresh:
         return cached
     if refresh and only and complete:
