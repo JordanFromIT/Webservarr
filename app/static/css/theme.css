@@ -516,6 +516,15 @@ html[data-settings-tab="notifications"] [data-settings-panel="notifications"] { 
 
 .ws-invalid { border-color: rgb(var(--ws-status-err)) !important; box-shadow: 0 0 0 1px rgb(var(--ws-status-err)); }
 
+/* Settings > Pages: where a dragged row will land, drawn in the gap between
+   rows. Absolutely placed, so no row moves until the drop. */
+.ws-drop-before::before, .ws-drop-after::before {
+  content: ""; position: absolute; left: .75rem; right: .75rem; height: 3px; border-radius: 9999px;
+  background: rgb(var(--color-primary)); pointer-events: none;
+}
+.ws-drop-before::before { top: -6px; }
+.ws-drop-after::before { bottom: -6px; }
+
 .ws-savebar { transition: transform 200ms ease-out, opacity 200ms ease-out; }
 .ws-savebar.is-hidden { transform: translateY(calc(100% + 1.5rem)); opacity: 0; pointer-events: none; }
 /* The mobile scroll hint stays; it moves up while the save bar covers the bottom edge. */
