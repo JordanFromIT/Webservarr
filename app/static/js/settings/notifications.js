@@ -38,7 +38,9 @@
     sendOffline: 'The announcement wasn’t sent. Check your connection.',
     sendNobody: 'Nobody got it: no one has push on or has had a recent notification.',
     busy: 'That was a lot of tries in a row. Wait a minute, then try again.',
-    speed: 'Shorter means quicker alerts and a little more work for your services.'
+    // Short on purpose: with the range in front it stays two lines on a
+    // 360 px phone and one line from md, as the skeleton reserves.
+    speed: 'Shorter means quicker alerts.'
   };
 
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
