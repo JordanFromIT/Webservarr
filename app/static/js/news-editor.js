@@ -212,7 +212,7 @@ var NewsEditor = (function () {
     body.appendChild(toolbar);
 
     editor = el('div', 'w-full rounded-b-[10px] border border-frosted-blue/10 bg-frosted-blue/[0.02] px-4 py-3 text-[15px] ' +
-      'text-frosted-blue leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary overflow-y-auto');
+      'text-frosted-blue leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary overflow-y-auto custom-scrollbar');
     editor.id = 'postContent';
     editor.setAttribute('contenteditable', 'true');
     editor.setAttribute('role', 'textbox');

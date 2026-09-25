@@ -146,7 +146,7 @@
         <p class="text-sm text-steel-blue mt-0.5">Everything posted so far, newest first.</p>
       </div>
       <button id="newsNewPost" type="button" class="ws-admin-only inline-flex items-center gap-2 px-4 py-2.5 rounded-[10px] bg-primary text-bright text-sm font-semibold hover:bg-primary/90 transition-colors">
-        <span class="material-symbols-outlined text-base">add</span>New post
+        <span class="material-symbols-outlined text-base" aria-hidden="true">add</span>New post
       </button>
     </div>
   </div>
@@ -258,10 +258,10 @@
         '<p class="text-sm text-frosted-blue/60 mt-1 line-clamp-2">' + escapeHtml(excerpt(post.content_html, 180)) + '</p>' +
         '<div class="' + bodyClasses + ' hidden" data-news-body style="white-space:pre-line">' + post.content_html + '</div>' +
         (isAdmin
-          ? '<div class="mt-2 flex flex-wrap gap-1">' +
-              '<button type="button" data-news-action="edit" data-id="' + id + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base">edit</span>Edit</button>' +
-              '<button type="button" data-news-action="pin" data-id="' + id + '" data-pinned="' + (post.pinned ? '1' : '0') + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base">push_pin</span>' + (post.pinned ? 'Unpin' : 'Pin') + '</button>' +
-              '<button type="button" data-news-action="delete" data-id="' + id + '" data-title="' + escapeHtml(post.title) + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base">delete</span>Delete</button>' +
+          ? '<div class="mt-2 -ml-2 flex flex-wrap gap-1">' +
+              '<button type="button" data-news-action="edit" data-id="' + id + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">edit</span>Edit</button>' +
+              '<button type="button" data-news-action="pin" data-id="' + id + '" data-pinned="' + (post.pinned ? '1' : '0') + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">push_pin</span>' + (post.pinned ? 'Unpin' : 'Pin') + '</button>' +
+              '<button type="button" data-news-action="delete" data-id="' + id + '" data-title="' + escapeHtml(post.title) + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">delete</span>Delete</button>' +
             '</div>'
           : '') +
         '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-[11px] font-bold text-steel-blue hover:text-primary transition-colors">' +
