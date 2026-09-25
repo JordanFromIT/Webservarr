@@ -11,6 +11,7 @@ cross-linking and inline images work without a custom protocol list.
 The one exception is an address that only looks local: see _off_site_trick.
 """
 
+import html
 import re
 
 import markdown
@@ -42,8 +43,12 @@ def _off_site_trick(value: str) -> bool:
     """True for an address that reads like a local path but a browser sends
     to another site: protocol-relative ("//host") or containing a backslash
     anywhere (URL parsing treats "\\" as "/", so "/\\host" is host). No real
-    address needs either, and bleach's protocol check lets both through."""
-    v = _URL_IGNORED.sub("", value or "").lstrip(_URL_LEADING)
+    address needs either, and bleach's protocol check lets both through.
+
+    Bleach hands over the value with character references as written
+    ("&#92;") and keeps them in its output, where the browser decodes them,
+    so the check reads the decoded value."""
+    v = _URL_IGNORED.sub("", html.unescape(value or "")).lstrip(_URL_LEADING)
     return v.startswith("//") or "\\" in v
 
 
