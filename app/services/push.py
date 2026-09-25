@@ -9,7 +9,8 @@ import asyncio
 import json
 import logging
 import time
-from typing import Dict, List
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 
 from app.database import SessionLocal
@@ -32,6 +33,39 @@ PUSH_CONCURRENCY = 10
 # because Chromium does not rasterise SVG notification icons. Keep in step with
 # DEFAULT_ICON in app/static/sw.js.
 DEFAULT_PUSH_ICON = "/static/webservarr-192.png"
+
+# The most recent push that actually tried a device, for Settings >
+# Notifications. In Redis, because the two uvicorn workers share no memory and
+# must report the same answer.
+LAST_PUSH_KEY = "webservarr:push:last"
+
+
+async def _record_last_push(category: str, result: Dict[str, int]) -> None:
+    """Remember a push that tried at least one device; anything else is ignored."""
+    if not result.get("attempted"):
+        return
+    try:
+        from app.auth import session_manager
+        redis = await session_manager.get_redis()
+        await redis.set(LAST_PUSH_KEY, json.dumps({
+            "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "category": category,
+            "attempted": int(result["attempted"]),
+            "succeeded": int(result["succeeded"]),
+        }))
+    except Exception as exc:  # noqa: BLE001 - reporting must never break sending
+        logger.debug("Could not record the last push: %s", exc)
+
+
+async def read_last_push() -> Optional[dict]:
+    """The last recorded push, or None when there is none or Redis can't say."""
+    try:
+        from app.auth import session_manager
+        redis = await session_manager.get_redis()
+        raw = await redis.get(LAST_PUSH_KEY)
+        return json.loads(raw) if raw else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def load_vapid_key(private_key: str):
@@ -99,8 +133,23 @@ async def dispatch_push(
     """Like send_push_to_users, but report how many devices were tried.
 
     Returns ``{"attempted": n, "succeeded": m}``, where attempted counts the
-    stored subscriptions matched for ``emails``.
+    stored subscriptions matched for ``emails``. Every dispatch that tried a
+    device becomes the recorded last push; recording wraps the whole send, so
+    no return path inside it can skip it.
     """
+    result = await _dispatch_push(emails, title, body, category, url)
+    await _record_last_push(category, result)
+    return result
+
+
+async def _dispatch_push(
+    emails: List[str],
+    title: str,
+    body: str,
+    category: str,
+    url: str = "/",
+) -> Dict[str, int]:
+    """The send itself; dispatch_push records the outcome."""
     result = {"attempted": 0, "succeeded": 0}
     # Read VAPID keys and subscriptions with a short-lived session
     db = SessionLocal()

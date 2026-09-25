@@ -11,7 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Literal, Optional
+from typing import Literal, Optional, Set
 
 from datetime import datetime, timedelta
 
@@ -331,6 +331,28 @@ async def upload_logo(
 
 # --- Admin Broadcast Notification ---
 
+def _broadcast_recipients(db: Session) -> Set[str]:
+    """Everyone an announcement reaches: push subscribers plus anyone notified
+    in the last 30 days, by identity email (lower-cased, once each).
+
+    identity_email drops rows filed under no identity ("" or the old shared
+    "none"), so a broadcast never creates rows for one.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    push_emails = {
+        identity_email(row[0])
+        for row in db.query(PushSubscription.user_email).distinct().all()
+    }
+    notif_emails = {
+        identity_email(row[0])
+        for row in db.query(Notification.user_email)
+        .filter(Notification.created_at >= cutoff)
+        .distinct()
+        .all()
+    }
+    return (push_emails | notif_emails) - {""}
+
+
 @router.post("/notifications/send")
 @limiter.limit("30/minute")
 async def send_notification(
@@ -345,22 +367,7 @@ async def send_notification(
     creates a Notification row per user, and dispatches push notifications.
     Requires admin.
     """
-    # Collect all known user emails
-    cutoff = datetime.utcnow() - timedelta(days=30)
-    # identity_email drops rows filed under no identity ("" or the old
-    # shared "none"), so a broadcast never creates rows for one.
-    push_emails = {
-        identity_email(row[0])
-        for row in db.query(PushSubscription.user_email).distinct().all()
-    }
-    notif_emails = {
-        identity_email(row[0])
-        for row in db.query(Notification.user_email)
-        .filter(Notification.created_at >= cutoff)
-        .distinct()
-        .all()
-    }
-    all_emails = (push_emails | notif_emails) - {""}
+    all_emails = _broadcast_recipients(db)
 
     if not all_emails:
         return {"success": True, "sent_to": 0, "message": "No users to notify"}
@@ -407,6 +414,48 @@ async def send_test_push(
         "/",
     )
     return {"success": result["succeeded"] > 0, **result}
+
+
+@router.get("/notifications/status")
+@limiter.limit("60/minute")
+async def notifications_status(
+    request: Request,
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """PushStatus for Settings > Notifications: is push set up, how many
+    devices and people have it, how many people an announcement reaches, and
+    the last push. Counts only; no emails or endpoints leave the server.
+    """
+    from app.services import push
+
+    reason = None
+    pub = db.query(Setting).filter(Setting.key == "notifications.vapid_public_key").first()
+    priv = db.query(Setting).filter(Setting.key == "notifications.vapid_private_key").first()
+    if not pub or not priv or not pub.value or not priv.value:
+        reason = "Push keys haven't been created yet. Restart the server to create them."
+    else:
+        try:
+            import pywebpush  # noqa: F401
+            push.load_vapid_key(priv.value)
+        except ImportError:
+            reason = "Push support isn't installed on this server."
+        except Exception:  # noqa: BLE001
+            reason = "The push key couldn't be read."
+
+    # A device counts only when it belongs to an identity, the same rule
+    # dispatch_push uses to choose who gets a push; people are counted
+    # case-blind, as the broadcast list is.
+    owners = [identity_email(row[0]) for row in db.query(PushSubscription.user_email).all()]
+    owners = [e for e in owners if e]
+    return {
+        "push_ready": reason is None,
+        "reason": reason,
+        "devices": len(owners),
+        "users": len(set(owners)),
+        "recipients": len(_broadcast_recipients(db)),
+        "last_push": await push.read_last_push(),
+    }
 
 
 # --- Container Management ---

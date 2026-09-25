@@ -103,8 +103,11 @@ class SeededKeySignsPushes(unittest.TestCase):
             posts.append((url, kwargs))
             return _Response()
 
+        # _record_last_push is stubbed so these sends never overwrite the dev
+        # instance's real last push in Redis.
         with mock.patch.object(push, "SessionLocal", self.Session), \
              mock.patch.object(push, "is_safe_push_endpoint", return_value=True), \
+             mock.patch.object(push, "_record_last_push", mock.AsyncMock()), \
              mock.patch.object(requests.Session, "post", fake_post):
             result = asyncio.run(push.dispatch_push(emails, "Title", "Body", "news", "/"))
         return result, posts
