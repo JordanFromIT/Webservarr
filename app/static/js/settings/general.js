@@ -368,6 +368,9 @@
           return postImport(data, false, d.diff_token).then(function (applied) {
             if (applied.status === 200 && applied.data && Array.isArray(applied.data.applied)) {
               var n = applied.data.applied.length;
+              // Pages prefetched or prerendered before the import hold the
+              // old settings; dropped now, before the reload is even queued.
+              if (window.WS && WS.clearPageCache) WS.clearPageCache();
               WSSettings.toast('Imported ' + n + ' setting' + (n === 1 ? '' : 's') + '. Reloading…', 'ok');
               setTimeout(function () { WSSettings.leave(); }, 900);
               return 'reloading';

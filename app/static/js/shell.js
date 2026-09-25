@@ -15,7 +15,7 @@
  *   WS.serviceStatus()            deduplicated /api/integrations/service-status
  *   WS.setHTML(el, html)          innerHTML only when the string changed
  *   WS.wireNav()                  bind per-link behaviour to nav links not yet wired
- *   WS.clearPageCache()           drop prefetched pages (sign-out, a settings save)
+ *   WS.clearPageCache()           drop prefetched and prerendered pages (sign-out, a settings save)
  *   WS.arrive(key, write)         reveal sections top-down, in document order
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
  *   WS.dragScroll(el)             mouse drag-to-scroll for a sideways row
@@ -240,9 +240,39 @@
     wirePrefetch();
   }
 
+  // Pages the browser prerendered through the speculation rules (shell
+  // partial) were rendered before whatever made the page cache stale, so they
+  // show the old nav, theme or name. Removing the rules script discards what
+  // it started; a new script with the same rules re-arms them (a script
+  // element never runs twice). The copy goes in on a later task: the browser
+  // folds rule changes made in one task into a single update, and a removal
+  // plus an identical re-add in the same task would look like no change and
+  // keep the stale prerender. Nothing to do where the browser has no
+  // speculation rules or the page carries none.
+  function refreshSpeculation() {
+    try {
+      if (!(HTMLScriptElement.supports && HTMLScriptElement.supports('speculationrules'))) return;
+    } catch (e) { return; }
+    document.querySelectorAll('script[type="speculationrules"]').forEach(function (old) {
+      var parent = old.parentNode;
+      var next = old.nextSibling;
+      var rules = old.textContent;
+      var nonce = old.nonce;
+      parent.removeChild(old);
+      setTimeout(function () {
+        var fresh = document.createElement('script');
+        fresh.type = 'speculationrules';
+        if (nonce) fresh.nonce = nonce;
+        fresh.textContent = rules;
+        parent.insertBefore(fresh, next && next.parentNode === parent ? next : null);
+      }, 0);
+    });
+  }
+
   function clearPageCache() {
     // What was prefetched is gone, so the next hover must fetch again.
     prefetchedAt = {};
+    refreshSpeculation();
     try { if (window.caches) caches.delete(PAGE_CACHE); } catch (e) { /* ignore */ }
     try {
       var sw = navigator.serviceWorker && navigator.serviceWorker.controller;
