@@ -30,7 +30,8 @@
     stale: 'Settings changed since the preview — preview again.',
     importFailed: 'The import didn’t finish. Nothing was changed. Try again.',
     importUnknown: 'Couldn’t confirm the import finished. Reload the page to see your settings.',
-    dirty: 'Save or discard your changes on this tab before importing.'
+    dirty: 'Save or discard your changes on this tab before importing.',
+    uploading: 'Wait for the logo upload to finish, then import.'
   };
 
   // ---- Talking to the server ----
@@ -96,7 +97,8 @@
 
   // ---- Logo ----
 
-  function logoCard(api) {
+  // shared: {uploading, changed()}, so the backup card knows an upload is running.
+  function logoCard(api, shared) {
     var c = WSSettings.card('Logo', 'Shown at the top of the sidebar and on the sign-in page.');
     var row = el('div', 'flex flex-col sm:flex-row gap-5 sm:items-start');
 
@@ -197,6 +199,8 @@
     function busy(on) {
       uploading = on;
       upload.setAttribute('aria-disabled', on ? 'true' : 'false');
+      shared.uploading = on;
+      shared.changed();
     }
     // Any other logo choice (or a Discard) wins over an upload still in
     // flight: its answer is dropped when it arrives.
@@ -401,8 +405,10 @@
     }).catch(function () { WSSettings.toast(MSG.offline, 'err'); });
   }
 
-  // locked: the tab's other cards, which can't be edited while an import runs.
-  function backupCard(api, locked) {
+  // locked: the tab's other cards, which can't be edited while an import runs
+  // (the upload button included). shared: the logo upload's state; an import
+  // waits for an upload to finish, whose answer the reload would lose.
+  function backupCard(api, locked, shared) {
     var c = WSSettings.card('Backup',
       'Save your settings to a file, or restore them from one. Passwords, tokens and API keys are never included.');
     var row = el('div', 'flex flex-wrap gap-2');
@@ -435,15 +441,16 @@
     // makes the admin save or discard them.
     function sync() {
       var dirty = api.dirtyKeys().length > 0;
-      imp.disabled = dirty;
+      imp.disabled = dirty || shared.uploading;
       imp.setAttribute('aria-disabled', importing ? 'true' : 'false');
       locked.forEach(function (n) {
         n.inert = importing;
         if (importing) n.setAttribute('aria-busy', 'true'); else n.removeAttribute('aria-busy');
       });
-      note.textContent = dirty ? MSG.dirty
+      note.textContent = dirty ? MSG.dirty : shared.uploading ? MSG.uploading
         : 'Importing shows every change first. Nothing is applied until you confirm.';
     }
+    shared.changed = sync;
     TAB_KEYS.forEach(function (k) { api.onChange(k, sync); });
     api.onSaved(sync);
     api.onDiscard(sync);
@@ -459,12 +466,14 @@
       });
     });
     imp.addEventListener('click', function () {
-      if (!importing && !api.dirtyKeys().length) file.click();
+      if (!importing && !shared.uploading && !api.dirtyKeys().length) file.click();
     });
     file.addEventListener('change', function () {
       var f = file.files[0];
       file.value = '';
       if (!f) return;
+      // An upload may have started while the file chooser was open.
+      if (shared.uploading) { WSSettings.toast(MSG.uploading, 'err'); return; }
       if (api.dirtyKeys().length) { WSSettings.toast(MSG.dirty, 'err'); return; }
       importing = true;
       sync();
@@ -484,11 +493,12 @@
 
   WSSettings.registerTab('general', {
     mount: function (panel, api) {
+      var shared = { uploading: false, changed: function () {} };
       var site = siteCard(api);
-      var logo = logoCard(api);
+      var logo = logoCard(api, shared);
       panel.appendChild(site);
       panel.appendChild(logo.root);
-      panel.appendChild(backupCard(api, [site, logo.root]));
+      panel.appendChild(backupCard(api, [site, logo.root], shared));
       return logo.ready;
     }
   });
