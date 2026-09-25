@@ -52,7 +52,6 @@ SHELL_JS = {"js/theme-loader.js", "js/auth.js", "js/shell.js", "js/notifications
 # Task 8.4 asserts the set is empty. Task 3.2 added ui.js, kit.js and the first
 # General fields (general.js, which Task 4.3 completes).
 PENDING = {
-    "js/settings/signin.js",             # Task 4.5
     "js/settings/pages.js",              # Task 5.1
     "js/settings/integrations.js",       # Task 6.3
     "js/settings/notifications.js",      # Task 6.5
@@ -535,6 +534,117 @@ class AppearanceTab(unittest.TestCase):
         code = js_code_only(src)
         self.assertNotRegex(code, r"\.style\.(?:color|background(?:Color)?)\s*=")
         self.assertEqual(live_matches(src, r"setProperty\('--(?:color|hex)-[\w-]*'"), [])
+
+
+SIGNIN = STATIC / "js" / "settings" / "signin.js"
+
+
+def signin_function(name: str, code: bool = True) -> str:
+    """One top-level function of signin.js, as live code (comments removed,
+    strings blanked) or, with code=False, as written."""
+    src = SIGNIN.read_text(encoding="utf-8")
+    js = js_code_only(src) if code else src
+    m = re.search(rf"\n  function {name}\(.*?(?=\n  function |\n  WSSettings\.registerTab)", js, re.S)
+    if m is None:
+        raise AssertionError(f"signin.js has no top-level function {name}()")
+    return m.group(0)
+
+
+class SignInTab(unittest.TestCase):
+    """The Sign-in tab's security rules that can be read from the code (R62)."""
+
+    def test_mask_comes_from_the_kit(self):
+        # A saved Plex token reads as the server's mask, which the kit
+        # re-exports. No copy of it here: compared live, never a string.
+        src = SIGNIN.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        self.assertNotIn("***masked***", src)
+        self.assertTrue(live_matches(src, r"\('integration\.plex\.token'\)\s*===\s*WSSettings\.MASK\b"),
+                        "the Plex token isn't compared with WSSettings.MASK")
+        self.assertNotRegex(code, r"\bMASK\s*[:=]\s*['\"`]")
+
+    def test_own_method_warning_asks_with_the_kit_dialog_before_saving(self):
+        # Turning off the method this session signed in with asks first, in
+        # the kit's dialog, from a beforeSave hook: its answer decides the save.
+        code = js_code_only(SIGNIN.read_text(encoding="utf-8"))
+        hooks = list(re.finditer(r"api\.beforeSave\(function \((\w+)\) \{", code))
+        self.assertEqual(len(hooks), 1, "one beforeSave hook")
+        hook = hooks[0]
+        body = code[hook.end() - 1:matching_brace(code, hook.end() - 1) + 1]
+        self.assertRegex(body, r"\bsessionMethod\(\)")
+        self.assertRegex(signin_function("sessionMethod"), r"\bWS\.user\b[\s\S]*\.auth_method\b")
+        # Only when a key of that method is in the batch being saved.
+        self.assertRegex(body, rf"\b{hook.group(1)}\.indexOf\(")
+        ask = re.search(r"return WSSettings\.confirm\(\{([^{}]*)\}\)\.then\(function \((\w+)\) \{", body)
+        self.assertIsNotNone(ask, "the warning isn't the kit's dialog, or its answer is ignored")
+        self.assertNotIn("alert", ask.group(1))          # a real choice
+        self.assertIn("cancelLabel", ask.group(1))
+        answer = body[ask.end() - 1:matching_brace(body, ask.end() - 1) + 1]
+        self.assertRegex(answer, rf"return {ask.group(2)};")
+
+    def test_password_fields_are_the_browsers_and_never_the_kits(self):
+        src = SIGNIN.read_text(encoding="utf-8")
+        fields = re.findall(r"\bvar (\w+) = field\(\s*'(\w+)',\s*'[^']*',\s*'password',\s*'([a-z-]+)'", src)
+        self.assertEqual([f[2] for f in fields], ["current-password", "new-password", "new-password"])
+        for _, name, _ in fields:
+            self.assertEqual(len(live_matches(src, rf"field\(\s*'{name}'")), 1, name)
+        pw_vars = [f[0] for f in fields]
+        account = signin_function("accountForm")
+        make = re.search(r"\n    function field\(.*?\n    \}", account, re.S)
+        self.assertIsNotNone(make, "no field() helper")
+        self.assertRegex(make.group(0), r"\.type = type;")
+        self.assertRegex(make.group(0), r"\.autocomplete = autocomplete;")
+        # The form never touches the kit: no api, no staging, nothing logged or stored.
+        self.assertRegex(account, r"^\s*function accountForm\(\) \{")
+        for bad in (r"\bapi\b", r"\bstage\(", r"\btrack\(", r"\.set\(", r"console\.", r"Storage\b",
+                    r"WSSettings\.values", r"\bWS\.user\s*=[^=]"):
+            self.assertNotRegex(account, bad)
+        mount = js_code_only(src)[js_code_only(src).index("WSSettings.registerTab("):]
+        self.assertRegex(mount, r"\baccountForm\(\)")
+        # A password is read only into the request body, else only cleared.
+        body = re.search(r"var body = \{", account)
+        self.assertIsNotNone(body, "no request body")
+        span = (body.end() - 1, matching_brace(account, body.end() - 1))
+        for v in pw_vars:
+            reads = list(re.finditer(rf"\b{v}\.input\.value\b", account))
+            self.assertTrue(any(span[0] < m.start() < span[1] for m in reads), f"{v} never reaches the body")
+            for m in reads:
+                inside = span[0] < m.start() < span[1]
+                cleared = re.match(r"\s*=\s*'';", account[m.end():])
+                self.assertTrue(inside or cleared, f"{v}.input.value is read outside the request body")
+        # Cleared after every outcome: a refused form, and any answer (or none).
+        clear = re.search(r"function clearPasswords\(\) \{([^{}]*)\}", account)
+        self.assertIsNotNone(clear, "no clearPasswords()")
+        for v in pw_vars:
+            self.assertRegex(clear.group(1), rf"\b{v}\.input\.value = ''")
+        self.assertRegex(account, r"if \(problem\) \{\s*clearPasswords\(\);")
+        self.assertRegex(account, r"\.then\(function \((\w+)\) \{\s*clearPasswords\(\);")
+
+    def test_account_errors_are_plain_and_401_leaves_through_the_kit(self):
+        fail = signin_function("accountFailure")
+        self.assertRegex(fail, r"=== 401\) \{[^{}]*WSSettings\.leave\(")
+        self.assertTrue(live_matches(signin_function("accountFailure", code=False), r"WSSettings\.leave\('/login'\)"))
+        # The server's words only for a 400, and only when they are a sentence.
+        self.assertRegex(fail, r"=== 400 && \w+ && typeof \w+\.detail === ' {6}' && \w+\.detail\) return \w+\.detail;")
+        self.assertEqual(len(re.findall(r"\.detail\b", fail)), 3, "the detail is shown outside the 400 branch")
+        # A body that isn't JSON never reaches the admin as a parser error.
+        read = signin_function("readBody")
+        self.assertRegex(read, r"\.text\(\)")
+        self.assertRegex(read, r"try \{[^{}]*JSON\.parse\([^{}]*\} catch\b")
+        code = js_code_only(SIGNIN.read_text(encoding="utf-8"))
+        self.assertNotRegex(code, r"location\.href\s*=(?!=)|location\.reload\(")
+        self.assertNotRegex(code, r"\.json\(\)")
+
+    def test_plex_link_opens_integrations_even_before_the_card_exists(self):
+        # Task 6.3 gives the Plex card its id. Until then go() just opens the
+        # Integrations tab: only the kit looks the card up, and it skips one
+        # that isn't there.
+        src = SIGNIN.read_text(encoding="utf-8")
+        self.assertTrue(live_matches(src, r"var PLEX_CARD = 'integration-card-plex';"))
+        self.assertTrue(live_matches(src, r"WSSettings\.go\('integrations', PLEX_CARD\)"))
+        self.assertNotRegex(js_code_only(src), r"getElementById\(|querySelector(?:All)?\(|\bPLEX_CARD\)\.")
+        self.assertRegex(kit_code(), r"var target = document\.getElementById\(S\.pendingFocus\.id\);"
+                                     r"\s*S\.pendingFocus = null;\s*if \(target\) \{")
 
 
 class Guards(unittest.TestCase):
