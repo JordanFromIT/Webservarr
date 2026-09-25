@@ -586,3 +586,237 @@ class ValidationOffTheLoop(SettingsApiBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PushStatusApi(SettingsApiBase):
+    """GET /api/admin/notifications/status (PushStatus) and the recorded last push.
+
+    The last push lives in Redis so both uvicorn workers report the same one;
+    every test here swaps in a fake so nothing touches the dev instance's Redis."""
+
+    STATUS_KEYS = {"push_ready", "reason", "devices", "users", "recipients", "last_push"}
+
+    def setUp(self):
+        super().setUp()
+        self.store = {}
+        store = self.store
+
+        class FakeRedis:
+            async def set(self, key, value, **kw):
+                store[key] = value
+
+            async def get(self, key):
+                return store.get(key)
+
+        self.redis_patch = mock.patch("app.auth.session_manager.get_redis",
+                                      mock.AsyncMock(return_value=FakeRedis()))
+        self.redis_patch.start()
+
+    def tearDown(self):
+        self.redis_patch.stop()
+        super().tearDown()
+
+    def add_sub(self, email, n):
+        from app.models import PushSubscription
+        self.db.add(PushSubscription(user_email=email, endpoint=f"https://push.example.com/{email}/{n}",
+                                     p256dh="p", auth="a"))
+        self.db.commit()
+
+    def add_notification(self, email, days_ago):
+        from datetime import datetime, timedelta
+        from app.models import Notification
+        self.db.add(Notification(user_email=email, category="news", title="t", body="b",
+                                 created_at=datetime.utcnow() - timedelta(days=days_ago)))
+        self.db.commit()
+
+    def seed_keys(self):
+        from app.seed import seed_vapid_keys
+        seed_vapid_keys(self.db)
+
+    def status(self):
+        r = self.client.get("/api/admin/notifications/status")
+        self.assertEqual(r.status_code, 200, r.text)
+        return r
+
+    # --- the endpoint ---------------------------------------------------
+
+    def test_not_ready_without_keys(self):
+        from app.services import push
+        with mock.patch.object(push, "read_last_push", mock.AsyncMock(return_value=None)):
+            body = self.status().json()
+        self.assertFalse(body["push_ready"])
+        self.assertTrue(body["reason"])
+        self.assertEqual((body["devices"], body["users"], body["recipients"]), (0, 0, 0))
+        self.assertIsNone(body["last_push"])
+
+    def test_ready_with_the_seeded_keys(self):
+        self.seed_keys()
+        body = self.status().json()
+        self.assertTrue(body["push_ready"])
+        self.assertIsNone(body["reason"])
+
+    def test_unreadable_key_is_not_ready(self):
+        self.seed_keys()
+        helpers.put(self.db, "notifications.vapid_private_key", "not a key")
+        body = self.status().json()
+        self.assertFalse(body["push_ready"])
+        self.assertTrue(body["reason"])
+
+    def test_empty_key_is_not_ready(self):
+        self.seed_keys()
+        helpers.put(self.db, "notifications.vapid_public_key", "")
+        body = self.status().json()
+        self.assertFalse(body["push_ready"])
+        self.assertTrue(body["reason"])
+
+    def test_counts_devices_people_and_last_push(self):
+        from app.services import push
+        self.add_sub("a@example.com", 1)
+        self.add_sub("a@example.com", 2)
+        self.add_sub("b@example.com", 1)
+        last = {"at": "2026-09-22T10:00:00Z", "category": "test", "attempted": 2, "succeeded": 2}
+        with mock.patch.object(push, "read_last_push", mock.AsyncMock(return_value=last)):
+            body = self.status().json()
+        self.assertEqual((body["devices"], body["users"], body["recipients"]), (3, 2, 2))
+        self.assertEqual(body["last_push"], last)
+
+    def test_people_are_counted_case_blind(self):
+        # R84(a): one person whose devices were stored under two spellings.
+        self.add_sub("A@example.com", 1)
+        self.add_sub("a@example.com", 2)
+        self.add_sub("b@example.com", 1)
+        body = self.status().json()
+        self.assertEqual((body["devices"], body["users"], body["recipients"]), (3, 2, 2))
+
+    def test_recipients_are_the_broadcast_audience(self):
+        # Push subscribers plus anyone notified in the last 30 days, once each.
+        self.add_sub("a@example.com", 1)
+        self.add_notification("A@example.com", 1)     # same person, already counted
+        self.add_notification("c@example.com", 2)     # no device, still reached in-app
+        self.add_notification("old@example.com", 40)  # outside the window
+        self.add_notification("", 1)                  # no identity, never reached
+        body = self.status().json()
+        self.assertEqual((body["devices"], body["users"], body["recipients"]), (1, 1, 2))
+        from app.routers import admin as admin_router
+        self.assertEqual(admin_router._broadcast_recipients(self.db), {"a@example.com", "c@example.com"})
+
+    def test_response_carries_only_the_status_keys(self):
+        # R84(e): counts only; no emails, no endpoints.
+        self.seed_keys()
+        self.add_sub("a@example.com", 1)
+        self.add_notification("c@example.com", 1)
+        self.store["webservarr:push:last"] = (
+            '{"at": "2026-09-22T10:00:00Z", "category": "news", "attempted": 1, "succeeded": 1}')
+        r = self.status()
+        self.assertEqual(set(r.json()), self.STATUS_KEYS)
+        self.assertEqual(r.json()["last_push"]["category"], "news")
+        for leak in ("example.com", "push.example", "PRIVATE KEY"):
+            self.assertNotIn(leak, r.text)
+
+    def test_members_are_refused(self):
+        member = helpers.api_client(self.Session, helpers.MEMBER)
+        self.assertEqual(member.get("/api/admin/notifications/status").status_code, 403)
+
+    # --- recording the last push ----------------------------------------
+
+    def test_dispatch_records_the_last_push(self):
+        import asyncio
+        from app.services import push
+        asyncio.run(push._record_last_push("news", {"attempted": 3, "succeeded": 2}))
+        asyncio.run(push._record_last_push("news", {"attempted": 0, "succeeded": 0}))   # not a real push
+        got = asyncio.run(push.read_last_push())
+        self.assertEqual((got["category"], got["attempted"], got["succeeded"]), ("news", 3, 2))
+        self.assertRegex(got["at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+
+    def test_nothing_recorded_reads_as_none(self):
+        import asyncio
+        from app.services import push
+        self.assertIsNone(asyncio.run(push.read_last_push()))
+
+    def _dispatch(self, emails, category="news", webpush=None):
+        """Run the real dispatch_push against the test DB with the HTTP send faked."""
+        import asyncio
+        import pywebpush
+        from app.services import push
+        if webpush is None:
+            webpush = mock.Mock(return_value=None)
+        with mock.patch.object(push, "SessionLocal", self.Session), \
+             mock.patch.object(push, "is_safe_push_endpoint", return_value=True), \
+             mock.patch.object(pywebpush, "webpush", webpush):
+            return asyncio.run(push.dispatch_push(emails, "Title", "Body", category, "/"))
+
+    def test_a_real_dispatch_records_what_it_tried(self):
+        import json
+        import pywebpush
+        self.seed_keys()
+        self.add_sub("a@example.com", 1)
+        self.add_sub("a@example.com", 2)
+        self.add_sub("b@example.com", 1)
+        calls = []
+
+        def webpush(**kw):
+            calls.append(kw)
+            if kw["subscription_info"]["endpoint"].endswith("/2"):
+                raise pywebpush.WebPushException("rejected")
+
+        result = self._dispatch(["A@example.com"], "news", webpush)
+        self.assertEqual(result, {"attempted": 2, "succeeded": 1})
+        got = json.loads(self.store["webservarr:push:last"])
+        self.assertEqual((got["category"], got["attempted"], got["succeeded"]), ("news", 2, 1))
+        # R84(d): an admin test push is a push like any other.
+        self._dispatch(["b@example.com"], "test")
+        got = json.loads(self.store["webservarr:push:last"])
+        self.assertEqual((got["category"], got["attempted"], got["succeeded"]), ("test", 1, 1))
+
+    def test_a_dispatch_cut_off_by_the_budget_still_records(self):
+        # A different way out of the fan-out: a send abandoned at the
+        # wall-clock budget. It was attempted, so the push is recorded.
+        import json
+        import time
+        from app.services import push
+        self.seed_keys()
+        self.add_sub("a@example.com", 1)
+        self.add_sub("a@example.com", 2)
+
+        def webpush(**kw):
+            if kw["subscription_info"]["endpoint"].endswith("/2"):
+                time.sleep(1.0)
+                raise AssertionError("should have been abandoned")
+
+        with mock.patch.object(push, "PUSH_TOTAL_BUDGET", 0.3):
+            result = self._dispatch(["a@example.com"], "news", webpush)
+        self.assertEqual(result, {"attempted": 2, "succeeded": 1})
+        got = json.loads(self.store["webservarr:push:last"])
+        self.assertEqual((got["attempted"], got["succeeded"]), (2, 1))
+
+    def test_early_returns_record_nothing(self):
+        import asyncio
+        import sys
+        from app.services import push
+        self.add_sub("a@example.com", 1)
+        # No VAPID keys.
+        self.assertEqual(self._dispatch(["a@example.com"]), {"attempted": 0, "succeeded": 0})
+        self.assertNotIn("webservarr:push:last", self.store)
+        self.seed_keys()
+        # Nobody asked for has a device.
+        self.assertEqual(self._dispatch(["nobody@example.com"]), {"attempted": 0, "succeeded": 0})
+        # Nobody asked for has an identity.
+        self.assertEqual(self._dispatch(["", "none"]), {"attempted": 0, "succeeded": 0})
+        # Push support missing: a device matched but nothing could be sent.
+        with mock.patch.object(push, "SessionLocal", self.Session), \
+             mock.patch.object(push, "is_safe_push_endpoint", return_value=True), \
+             mock.patch.dict(sys.modules, {"pywebpush": None}):
+            result = asyncio.run(push.dispatch_push(["a@example.com"], "Title", "Body", "news", "/"))
+        self.assertEqual(result, {"attempted": 0, "succeeded": 0})
+        self.assertNotIn("webservarr:push:last", self.store)
+        # The same device with push support present is recorded, so the
+        # checks above were not passing for some other reason.
+        self._dispatch(["a@example.com"])
+        self.assertIn("webservarr:push:last", self.store)
+
+    def test_a_failed_record_never_breaks_sending(self):
+        self.seed_keys()
+        self.add_sub("a@example.com", 1)
+        with mock.patch("app.auth.session_manager.get_redis",
+                        mock.AsyncMock(side_effect=ConnectionError("redis down"))):
+            self.assertEqual(self._dispatch(["a@example.com"]), {"attempted": 1, "succeeded": 1})
