@@ -391,7 +391,7 @@
                 var resp = await fetch('/api/admin/test-connection', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ service: 'plex', url: url, credential: token })
+                    body: JSON.stringify({ service: 'plex', url: url, credentials: token })
                 });
                 var data = await resp.json();
                 if (resp.ok && data.success) {
