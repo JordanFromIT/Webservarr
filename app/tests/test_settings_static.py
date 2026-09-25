@@ -32,7 +32,7 @@ TINY_TEXT = re.compile(
     r"text-\[(?:(?:\d|1[01])(?:\.\d+)?px|" + _UNDER_075 + r")\]"
     r"|(?:font-size\s*:|fontSize\s*=)\s*['\"]?\s*(?:(?:\d|1[01])(?:\.\d+)?px\b|" + _UNDER_075 + r")")
 
-from app.tests.test_shell_contract import js_code_only
+from app.tests.test_shell_contract import js_code_only, live_matches, matching_brace
 
 try:
     from fastapi.testclient import TestClient  # noqa: F401
@@ -52,7 +52,6 @@ SHELL_JS = {"js/theme-loader.js", "js/auth.js", "js/shell.js", "js/notifications
 # Task 8.4 asserts the set is empty. Task 3.2 added ui.js, kit.js and the first
 # General fields (general.js, which Task 4.3 completes).
 PENDING = {
-    "js/settings/appearance.js",         # Task 4.4
     "js/settings/signin.js",             # Task 4.5
     "js/settings/pages.js",              # Task 5.1
     "js/settings/integrations.js",       # Task 6.3
@@ -390,6 +389,110 @@ class GeneralTab(unittest.TestCase):
             self.assertTrue(notices, f"{fn} shows no one-button notice")
             for c in notices:
                 self.assertNotIn("cancelLabel", c, fn)
+
+
+APPEARANCE = STATIC / "js" / "settings" / "appearance.js"
+# Any Tailwind palette colour on any utility, not only text: the preview card
+# and the controls are made of theme colours alone.
+ANY_PALETTE = re.compile(
+    r"\b(?:text|bg|border|ring|outline|fill|stroke|from|via|to|shadow|divide|placeholder|caret|decoration)-"
+    r"(?:white|black|(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|"
+    r"blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3})\b")
+
+
+def appearance_function(name: str, code: bool = True) -> str:
+    """One top-level function of appearance.js, as live code (comments removed,
+    strings blanked) or, with code=False, as written."""
+    src = APPEARANCE.read_text(encoding="utf-8")
+    js = js_code_only(src) if code else src
+    m = re.search(rf"\n  function {name}\(.*?(?=\n  function |\n  WSSettings\.registerTab)", js, re.S)
+    if m is None:
+        raise AssertionError(f"appearance.js has no top-level function {name}()")
+    return m.group(0)
+
+
+class AppearanceTab(unittest.TestCase):
+    """The Appearance tab's preview and reset rules that can be read from the code."""
+
+    def test_font_guard_comes_from_meta(self):
+        # R61: one pattern, the registry's, served in meta. No copy of it here.
+        src = APPEARANCE.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        guard = appearance_function("fontGuard")
+        self.assertTrue(live_matches(appearance_function("fontGuard", code=False),
+                                     r"WSSettings\.metaFor\('theme\.font'\)"), "the guard doesn't read meta")
+        self.assertRegex(appearance_function("fontGuard", code=False),
+                         r"new RegExp\('\^\(\?:' \+ \w+\.pattern \+ '\)\$'\)")   # anchored
+        self.assertIn(".pattern", guard)
+        # Every test the file runs is the guard built from meta.
+        made = re.search(r"\b(\w+) = fontGuard\(\)", code)
+        self.assertIsNotNone(made, "the guard is never built")
+        tests = re.findall(r"\b([\w.]+)\.test\(", code)
+        self.assertTrue(tests, "the font preview has no guard")
+        self.assertEqual(set(tests), {made.group(1)})
+        self.assertNotIn("A-Za-z0-9", src)
+        self.assertNotRegex(code, r"\bFONT_RE\b")
+
+    def test_discard_reverts_the_font_preview(self):
+        # Discard (and a tab switch that discards) repaints each changed
+        # control from its saved value; the font control's paint runs the
+        # preview, which puts the page's own font back at once: the preview
+        # stylesheet goes and --font-display gets its first value back.
+        src = APPEARANCE.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        self.assertRegex(kit_code(), r"function discard\(id\) \{[\s\S]*?b\.set\(baseline\(k\)\)")
+        self.assertTrue(live_matches(src, r"api\.track\('theme\.font', \{"))
+        track = re.search(r"api\.track\(' {10}', \{", code)
+        self.assertIsNotNone(track)
+        binding = code[track.end() - 1:matching_brace(code, track.end() - 1) + 1]
+        setter = re.search(r"\bset:\s*(\w+)", binding)
+        self.assertIsNotNone(setter, "the font binding has no set()")
+        paint = re.search(rf"function {setter.group(1)}\(v\) \{{", code)
+        self.assertIsNotNone(paint)
+        body = code[paint.end() - 1:matching_brace(code, paint.end() - 1) + 1]
+        self.assertRegex(body, r"\bpreviewFont\(v\)")
+
+        preview = appearance_function("previewFont")
+        back = re.search(r"if \(\w+ === pageFont\) \{ revertFont\(\); return; \}", preview)
+        self.assertIsNotNone(back, "the page's own font doesn't revert the preview")
+        self.assertLess(preview.index("clearTimeout(fontTimer)"), back.start())
+        self.assertLess(back.start(), preview.index("setTimeout("), "the revert waits on the typing delay")
+
+        revert = appearance_function("revertFont")
+        self.assertIn("clearTimeout(fontTimer)", revert)
+        self.assertRegex(revert, r"\.remove\(\)")
+        self.assertRegex(revert, r"style\.setProperty\([^)]*pageFontVar\)")
+        self.assertRegex(revert, r"style\.removeProperty\(")
+        revert_src = appearance_function("revertFont", code=False)
+        self.assertIn("querySelectorAll('link[data-ws-font-preview]')", revert_src)
+        self.assertIn("'--font-display'", revert_src)
+        # Every preview stylesheet carries the mark the revert looks for.
+        self.assertTrue(live_matches(src, r"setAttribute\('data-ws-font-preview', ''\)"))
+        self.assertTrue(live_matches(src, r"style\.setProperty\('--font-display', "))
+
+    def test_reset_asks_first(self):
+        code = js_code_only(APPEARANCE.read_text(encoding="utf-8"))
+        self.assertEqual(len(re.findall(r"\bapi\.stageDefaults\(", code)), 1)
+        ask = re.search(r"WSSettings\.confirm\(\{([^{}]*)\}\)\.then\(function \(ok\) \{\s*"
+                        r"if \(ok\) api\.stageDefaults\(KEYS\);\s*\}\)", code)
+        self.assertIsNotNone(ask, "Reset stages the defaults without asking")
+        self.assertNotIn("alert", ask.group(1))          # a real choice: Reset or Cancel
+        self.assertIn("cancelLabel", ask.group(1))
+
+    def test_no_palette_colours_or_default_hexes(self):
+        # Defaults come from meta (stageDefaults); colours from the theme.
+        # js_code_only blanks strings, where a class or hex would sit, so
+        # these read the whole file, comments included (stricter).
+        src = APPEARANCE.read_text(encoding="utf-8")
+        self.assertIsNone(re.search(r"#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?\b", src), "a hex colour")
+        self.assertIsNone(ANY_PALETTE.search(src), "a palette colour")
+        self.assertIsNone(PALETTE_TEXT.search(src), "an off-theme text colour")
+        for badge in ("badge-media-movie", "badge-media-tv", "badge-media-book"):
+            self.assertIn(f"'{badge}'", src)
+        # Live code never paints a colour itself: colours go through api.color.
+        code = js_code_only(src)
+        self.assertNotRegex(code, r"\.style\.(?:color|background(?:Color)?)\s*=")
+        self.assertEqual(live_matches(src, r"setProperty\('--(?:color|hex)-"), [])
 
 
 class Guards(unittest.TestCase):
