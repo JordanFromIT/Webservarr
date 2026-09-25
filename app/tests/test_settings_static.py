@@ -450,7 +450,7 @@ class AppearanceTab(unittest.TestCase):
         paint = re.search(rf"function {setter.group(1)}\(v\) \{{", code)
         self.assertIsNotNone(paint)
         body = code[paint.end() - 1:matching_brace(code, paint.end() - 1) + 1]
-        self.assertRegex(body, r"\bpreviewFont\(v\)")
+        self.assertRegex(body, r"\bpreviewFont\(v\b")
 
         preview = appearance_function("previewFont")
         back = re.search(r"if \(\w+ === pageFont\) \{ revertFont\(\); return; \}", preview)
