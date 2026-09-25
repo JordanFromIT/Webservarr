@@ -1308,6 +1308,29 @@ class NotificationsTab(unittest.TestCase):
         src = NOTIFICATIONS.read_text(encoding="utf-8")
         self.assertTrue(live_matches(src, r"body: '“' \+ t \+ '” goes to everyone right away\. It can’t be taken back\.',"))
 
+    def test_skeleton_is_the_tabs_shape(self):
+        # R86 (d): the panel's skeleton is the three cards at the heights
+        # measured at 390 and 1440 (phone first), and the check fields' grid
+        # is the tab's own grid with one cell per interval, so the swap moves
+        # nothing.
+        h = (STATIC / FRAME).read_text(encoding="utf-8")
+        panel = h[h.index('<section id="panel-notifications"'):]
+        panel = panel[:panel.index("</section>")]
+        heads = re.findall(r'<div class="(h-\[[\d.]+px\](?: md:h-\[[\d.]+px\])?) mb-5 pt-1">', panel)
+        self.assertEqual(heads, ["h-[79px] md:h-[56.5px]", "h-[79px] md:h-[56.5px]", "h-[79px]"])
+        self.assertIn('<div class="h-[193px] sm:h-[173.5px]">', panel)
+        self.assertIn('<div class="h-[288.6px] max-w-2xl">', panel)
+        src = NOTIFICATIONS.read_text(encoding="utf-8")
+        grid = live_matches(src, r"var grid = el\('div', '([^']*)'\);")
+        self.assertEqual(len(grid), 1)
+        m = re.search(rf'<div class="{re.escape(grid[0].group(1))}">(.*?)</div>\s*</div>', panel, re.S)
+        self.assertIsNotNone(m, "the skeleton's grid isn't the tab's")
+        intervals = re.findall(r"\['notifications\.poll_interval_\w+'", src)
+        self.assertEqual(len(re.findall(r'<div class="skel h-\[96\.6px\]">', m.group(1))), len(intervals))
+        self.assertEqual(len(intervals), 4)
+        # The announcement's fields are as wide as its skeleton.
+        self.assertTrue(live_matches(src, r"ann\.body\.classList\.add\('max-w-2xl'\);"))
+
     def test_session_end_leaves_through_the_kit(self):
         src = NOTIFICATIONS.read_text(encoding="utf-8")
         code = js_code_only(src)
