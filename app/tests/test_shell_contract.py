@@ -407,6 +407,38 @@ class ShellContract(unittest.TestCase):
         self.assertRegex(body("wirePrefetch"),
                          r"forEach\(function \((\w+)\) \{\s*if \(\1\._wsWired\) return;\s*\1\._wsWired = true;")
 
+    def test_clearing_the_page_cache_refreshes_speculation_rules(self):
+        # Pages Chrome prerendered through the speculation rules were rendered
+        # before the save (or sign-out) that cleared the page cache. Removing
+        # the rules script discards them; a NEW script with the same rules
+        # re-arms them (a script element never runs twice), inserted on a later
+        # task so Chrome does not fold the removal and the re-add into one
+        # unchanged update. Where the browser has no speculation rules it does
+        # nothing.
+        src = (STATIC / "js" / "shell.js").read_text(encoding="utf-8")
+        code = js_code_only(src)
+        def body(name):
+            m = re.search(rf"\bfunction {name}\(\)\s*\{{", code)
+            self.assertIsNotNone(m, name)
+            return code[m.end():matching_brace(code, m.end() - 1)]
+        from app.tests.test_settings_static import top_level
+        self.assertRegex(top_level(body("clearPageCache")), r"(?:^|[;{}])\s*refreshSpeculation\(\);")
+        spec = body("refreshSpeculation")
+        guard = re.search(r"HTMLScriptElement\.supports\(", spec)
+        self.assertIsNotNone(guard, "support check")
+        self.assertTrue(live_matches(src, r"HTMLScriptElement\.supports\('speculationrules'\)"))
+        removed = re.search(r"\.removeChild\((\w+)\)", spec)
+        self.assertIsNotNone(removed, "the old rules script is removed")
+        self.assertLess(guard.start(), removed.start())
+        later = re.search(r"setTimeout\(function \(\) \{", spec)
+        self.assertIsNotNone(later, "re-added on a later task")
+        self.assertLess(removed.end(), later.start())
+        readd = spec[later.end():matching_brace(spec, later.end() - 1)]
+        made = re.search(r"var (\w+) = document\.createElement\(", readd)
+        self.assertIsNotNone(made, "a new script element")
+        self.assertRegex(readd, rf"\.insertBefore\({made.group(1)}\b")
+        self.assertNotRegex(readd, rf"\.(?:insertBefore|appendChild)\({removed.group(1)}\b")
+
     def test_js_code_only_ignores_comments_and_strings(self):
         # Guards the helper the API test relies on.
         src = ("var a = 1; // b: b\n/* c: c */ var u = 'http://x/*y*/'; "

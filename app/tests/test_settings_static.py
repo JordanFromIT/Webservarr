@@ -217,8 +217,14 @@ class KitApi(unittest.TestCase):
         src = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
         for literal in ("'/api/admin/settings/shell'", "'desktopNav'", "'drawerNav'"):
             self.assertTrue(live_matches(src, re.escape(literal)), literal)
-        # The keys that change the sidebar, exactly (Task 5.2 / R69 d).
-        self.assertIn(r"var NAV_KEYS = /^(sidebar\.|icon\.nav_|pages\.order$|integration\.kavita\.url$)/;", src)
+        # The keys that change the sidebar, exactly (Task 5.2 / R69 d). The
+        # declaration must be live code (a copy in a comment does not count);
+        # js_code_only blanks a regex literal's body, so the live declaration
+        # is found first and the literal read from the source right after it.
+        decls = live_matches(src, r"\bvar NAV_KEYS = (?=/)")
+        self.assertEqual(len(decls), 1, "one live NAV_KEYS declaration")
+        self.assertTrue(src.startswith(r"/^(sidebar\.|icon\.nav_|pages\.order$|integration\.kavita\.url$)/;",
+                                       decls[0].end()), "NAV_KEYS is the ruled pattern")
         self.assertRegex(function_body(kit_code(), "refreshShell"),
                          r"if \(keys\.some\(function \((\w+)\) \{ return NAV_KEYS\.test\(\1\); \}\)\) patchShell\(\);")
 
@@ -255,6 +261,21 @@ class KitApi(unittest.TestCase):
         self.assertIsNotNone(call, "an unconditional WS.clearPageCache() in refreshShell")
         before = rs[:call.start("stmt")].replace("if (!WS) return;", "")
         self.assertNotRegex(before, r"\breturn\b")
+
+    def test_import_drops_prefetched_pages_before_reloading(self):
+        # An import writes settings like a save does: pages prefetched or
+        # prerendered before it hold the old nav, theme or name. The clear runs
+        # as soon as the import is confirmed applied, not inside the delayed
+        # reload (which a navigation could beat).
+        code = js_code_only((STATIC / "js" / "settings" / "general.js").read_text(encoding="utf-8"))
+        m = re.search(r"\bif \(applied\.status === 200 && applied\.data && Array\.isArray\(applied\.data\.applied\)\) \{", code)
+        self.assertIsNotNone(m, "the import's success branch")
+        block = top_level(code[m.end():matching_brace(code, m.end() - 1)])
+        clear = re.search(r"(?:^|[;{}])\s*(?P<stmt>(?:if \(window\.WS && WS\.clearPageCache\) )?WS\.clearPageCache\(\);)", block)
+        self.assertIsNotNone(clear, "an unconditional WS.clearPageCache() in the success branch")
+        reload = re.search(r"(?:^|[;{}])\s*setTimeout\(function \(\) \{\}", block)
+        self.assertIsNotNone(reload, "the delayed reload")
+        self.assertLess(clear.start("stmt"), reload.start(), "cleared before the reload is scheduled")
 
     def test_mask_comes_from_the_server(self):
         # One copy of the sentinel: the SettingsView payload. The kit re-exports
