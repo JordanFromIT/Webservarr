@@ -90,6 +90,11 @@ class RegistryView(SettingsApiBase):
         self.assertEqual(body["page_order"], reg.DEFAULT_PAGE_ORDER)
         self.assertEqual(body["page_addresses"], reg.PAGE_ADDRESSES)
         self.assertEqual(list(body["page_addresses"]), list(reg.SIDEBAR_PAGE_IDS))
+        # Each address is a page the app really serves.
+        from app.main import app
+        served = {r.path for r in app.routes if "GET" in (getattr(r, "methods", None) or ())}
+        for pid, path in reg.PAGE_ADDRESSES.items():
+            self.assertIn(path, served, pid)
         # A stale or hand-edited row is normalised exactly as the nav does it;
         # the raw value is still what `values` holds.
         stale = '["wiki", "settings", "bogus", "home", "wiki", "requests"]'
