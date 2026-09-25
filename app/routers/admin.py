@@ -11,7 +11,6 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Literal, Optional
-import httpx
 
 from datetime import datetime, timedelta
 
@@ -24,11 +23,12 @@ from app.limiter import limiter
 from app.models import Setting, Notification, PushSubscription, User
 from app.dependencies import require_admin
 from app.routers.admin_settings import (
-    apply_writes, mask_any, plan_writes, validation_error,
+    apply_writes, effective_values, mask_any, plan_writes, validation_error,
 )
+from app.services.integration_health import credential_key, probe_one
 from app.services.push import dispatch_push, send_push_to_users
-from app.settings_registry import MASK as MASK_SENTINEL, is_user_data, mask
-from app.utils import identity_email, validate_image_magic, is_safe_integration_url
+from app.settings_registry import MASK as MASK_SENTINEL, is_user_data, mask, validate_value
+from app.utils import identity_email, validate_image_magic
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +52,11 @@ class MonitorPreferences(BaseModel):
 
 
 class TestConnectionRequest(BaseModel):
-    """Schema for testing an external API connection."""
-    service: Literal["plex", "uptime_kuma", "seerr", "netdata", "sonarr", "radarr", "kavita", "chaptarr"]
-    url: str
+    """Test an integration with the values on screen (saved or not)."""
+    service: Literal["plex", "uptime_kuma", "seerr", "netdata", "sonarr", "radarr", "kavita", "chaptarr", "nyt"]
+    url: str = ""
     credentials: Optional[str] = None
+    slug: Optional[str] = None
 
 
 class AdminNotificationRequest(BaseModel):
@@ -237,21 +238,8 @@ async def update_setting(
     }
 
 
-# Service -> the settings key holding its credential, so a masked value coming
-# back from the browser (the real secret is never sent to the client) can be
-# resolved to the actual stored value instead of testing with an empty string.
-_SERVICE_CRED_KEY = {
-    "plex": "integration.plex.token",
-    "seerr": "integration.seerr.api_key",
-    "netdata": "integration.netdata.api_key",
-    "sonarr": "integration.sonarr.api_key",
-    "radarr": "integration.radarr.api_key",
-    "chaptarr": "integration.chaptarr.api_key",
-}
-
-
 @router.post("/test-connection")
-@limiter.limit("30/minute")
+@limiter.limit("20/minute")
 async def test_connection(
     request: Request,
     payload: TestConnectionRequest,
@@ -259,95 +247,28 @@ async def test_connection(
     db: Session = Depends(get_db)
 ):
     """
-    Test an external API connection.
-    Supports: plex, uptime_kuma, seerr, netdata, sonarr, radarr, kavita, chaptarr.
-    Requires admin authentication.
+    Test an integration with the values currently on screen.
 
-    The NYT Books API is deliberately absent: its endpoint is api.nytimes.com
-    rather than something an operator configures, so there is no URL to test
-    and nothing for the anti-SSRF check below to guard.
+    Uses exactly the probe behind the Settings status lights
+    (app/services/integration_health.py), so Test and the light always agree:
+    same path, credential in a header, no redirects followed, address checked
+    off the event loop, one 5 s deadline. A masked credential means "the one
+    already saved"; the browser never holds the real value. The NYT API has a
+    fixed address, so only its key is tested.
     """
     service = payload.service
-    url = payload.url.rstrip("/")
-    credentials = payload.credentials or ""
-
-    # The browser only ever holds the mask placeholder for an already-saved
-    # credential (GET /settings never returns the real value) - resolve it to
-    # the actual stored secret rather than testing with an empty string.
-    if credentials == MASK_SENTINEL:
-        cred_key = _SERVICE_CRED_KEY.get(service)
-        stored = db.query(Setting).filter(Setting.key == cred_key).first() if cred_key else None
-        credentials = stored.value if stored else ""
-
-    # Anti-SSRF: block loopback/link-local/metadata targets. LAN is allowed since
-    # integrations legitimately live on the LAN.
-    if not is_safe_integration_url(url):
-        return {
-            "success": False,
-            "message": "Refusing to connect: URL must be http/https and not a loopback, link-local, or metadata address",
-        }
-
-    try:
-        async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
-            if service == "plex":
-                resp = await client.get(
-                    f"{url}/status/sessions",
-                    params={"X-Plex-Token": credentials}
-                )
-            elif service == "uptime_kuma":
-                resp = await client.get(f"{url}/api/status-page/heartbeat")
-            elif service == "seerr":
-                resp = await client.get(
-                    f"{url}/api/v1/status",
-                    headers={"X-Api-Key": credentials}
-                )
-            elif service == "netdata":
-                headers = {"Accept": "application/json"}
-                if credentials:
-                    headers["Authorization"] = f"Bearer {credentials}"
-                resp = await client.get(
-                    f"{url}/api/v1/info",
-                    headers=headers
-                )
-            elif service == "sonarr":
-                resp = await client.get(
-                    f"{url}/api/v3/system/status",
-                    headers={"X-Api-Key": credentials}
-                )
-            elif service == "radarr":
-                resp = await client.get(
-                    f"{url}/api/v3/system/status",
-                    headers={"X-Api-Key": credentials}
-                )
-            elif service == "kavita":
-                # No credential: WebServarr never holds a Kavita account of its
-                # own, so the most this can prove is that the server is up and
-                # answering. Per-user auth happens at /kavita/connect.
-                resp = await client.get(f"{url}/api/health")
-            elif service == "chaptarr":
-                # rootfolder rather than system/status: it needs the API key AND
-                # confirms the folders requests will be filed into actually
-                # exist, which is the thing that silently breaks otherwise.
-                resp = await client.get(
-                    f"{url}/api/v1/rootfolder",
-                    headers={"X-Api-Key": credentials}
-                )
-            else:
-                return {"success": False, "message": f"Unknown service: {service}"}
-
-            if resp.status_code == 200:
-                return {"success": True, "message": "Connected successfully"}
-            else:
-                return {
-                    "success": False,
-                    "message": f"Service responded with HTTP {resp.status_code}"
-                }
-    except httpx.TimeoutException:
-        return {"success": False, "message": "Connection timed out (5s)"}
-    except httpx.ConnectError:
-        return {"success": False, "message": f"Could not connect to {url}"}
-    except Exception as e:
-        return {"success": False, "message": f"Connection error: {str(e)}"}
+    values = effective_values(db)
+    if service != "nyt":
+        values[f"integration.{service}.url"] = (payload.url or "").strip()
+    cred_key = credential_key(service)
+    if cred_key and payload.credentials is not None and payload.credentials != MASK_SENTINEL:
+        values[cred_key] = payload.credentials
+    if service == "uptime_kuma" and payload.slug is not None:
+        if validate_value("integration.uptime_kuma.slug", payload.slug):
+            return {"success": False, "message": "That status page slug isn't valid", "state": "warn"}
+        values["integration.uptime_kuma.slug"] = payload.slug
+    result = await probe_one(service, values)
+    return {"success": result["state"] == "ok", "message": result["reason"], "state": result["state"]}
 
 
 # --- Logo Upload ---

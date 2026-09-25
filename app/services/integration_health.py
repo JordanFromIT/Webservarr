@@ -58,7 +58,7 @@ def _result(state: str, reason: str) -> dict:
     return {"state": state, "reason": reason, "checked_at": _now()}
 
 
-def _client() -> httpx.AsyncClient:
+def make_client() -> httpx.AsyncClient:
     # verify=False matches every integration client (LAN services, self-signed
     # certs). follow_redirects=False is httpx's default, stated so nobody flips
     # it: a LAN service answering 302 to 169.254.169.254 would otherwise walk
@@ -156,13 +156,15 @@ async def _probe(service: str, values: Dict[str, str], client) -> dict:
     # build_probe's address check can resolve a hostname with a blocking
     # getaddrinfo, so it runs in a worker thread rather than on the event loop.
     # When the deadline passes first the thread is abandoned, not killed; the
-    # OS resolver's own timeout ends it.
+    # OS resolver's own timeout ends it. httpx resolves the hostname again for
+    # the request itself, through the same default executor, so a probe of a
+    # hostname can hold two of its threads at once.
     probe, immediate = await asyncio.to_thread(build_probe, service, values)
     if immediate:
         return _result(*immediate)
     own = client is None
     if own:
-        client = _client()
+        client = make_client()
     try:
         resp = await client.get(probe["url"], headers=probe["headers"], params=probe["params"])
         body = None
@@ -179,7 +181,7 @@ async def _probe(service: str, values: Dict[str, str], client) -> dict:
 
 async def check_all(values: Dict[str, str], only: Optional[str] = None) -> Dict[str, dict]:
     services = [only] if only else list(IDS)
-    async with _client() as client:
+    async with make_client() as client:
         results = await asyncio.gather(*(probe_one(s, values, client) for s in services))
     return dict(zip(services, results))
 
