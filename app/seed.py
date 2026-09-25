@@ -243,7 +243,7 @@ def seed_default_news(db: Session) -> None:
                 "> **Note:** This is an example post showing news formatting. "
                 "Edit or delete it from the **News** page.\n\n"
                 "We will be performing routine maintenance on **Saturday** from 2:00 AM to 4:00 AM.\n\n"
-                "**Services affected:**\n"
+                "**Services affected:**\n\n"
                 "- Media streaming (Plex)\n"
                 "- Media requests (Seerr)\n\n"
                 "Expected downtime: ~30 minutes. Thank you for your patience!"

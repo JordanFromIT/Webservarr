@@ -87,7 +87,20 @@ var NewsEditor = (function () {
     });
   }
 
-  var SAFE_URL = /^(https?:\/\/|\/(?!\/)|mailto:)/i;
+  // An address the editor may insert: http(s) anywhere, a path on this site,
+  // or mailto:. It is parsed the way the browser will resolve it, so an
+  // address that only looks local ("/\evil.com": a backslash counts as "/",
+  // or "//evil.com") is refused. The server's sanitiser strips both as well.
+  function safeUrl(raw) {
+    var v = String(raw == null ? '' : raw).trim();
+    if (!v || v.indexOf('\\') !== -1 || /[\t\n\r]/.test(v) || v.indexOf('//') === 0) return null;
+    var u;
+    try { u = new URL(v, location.origin); } catch (e) { return null; }
+    if (u.protocol === 'mailto:') return v;
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    if (/^https?:\/\//i.test(v)) return v;
+    return v.charAt(0) === '/' && u.origin === location.origin ? v : null;
+  }
 
   function run(cmd) {
     if (previewing) return;
@@ -113,10 +126,11 @@ var NewsEditor = (function () {
       var text = range ? range.toString() : '';
       ask('Insert a link', [['url', 'Web address', 'https://']]).then(function (v) {
         if (!v || !v.url) return;
-        if (!SAFE_URL.test(v.url)) { UI.toast('Use an address that starts with https://', 'err'); return; }
+        var url = safeUrl(v.url);
+        if (!url) { UI.toast('Use an address that starts with https://', 'err'); return; }
         editor.focus();
-        var a = el('a', null, text || v.url);
-        a.href = v.url;
+        var a = el('a', null, text || url);
+        a.href = url;
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
         place(a, range);
@@ -126,10 +140,11 @@ var NewsEditor = (function () {
     if (cmd === 'image') {
       ask('Insert an image', [['url', 'Image address', 'https://'], ['alt', 'Describe the image (optional)', '']]).then(function (v) {
         if (!v || !v.url) return;
-        if (!SAFE_URL.test(v.url)) { UI.toast('Use an address that starts with https://', 'err'); return; }
+        var url = safeUrl(v.url);
+        if (!url) { UI.toast('Use an address that starts with https://', 'err'); return; }
         editor.focus();
         var img = el('img');
-        img.src = v.url;
+        img.src = url;
         img.alt = v.alt || '';
         place(img, range);
       });
@@ -272,7 +287,10 @@ var NewsEditor = (function () {
         editor.focus();
         return;
       }
-      publish.disabled = draft.disabled = true;
+      // The callback belongs to the editor this save came from; Cancel waits
+      // for the answer, so a save that lands still refreshes the list.
+      var cb = done;
+      publish.disabled = draft.disabled = cancel.disabled = true;
       var payload = { title: title.value.trim(), content: editor.innerHTML.trim(), published: published, pinned: pin.checked };
       fetch(editingId ? '/api/news/' + editingId : '/api/news/', {
         method: editingId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -280,12 +298,11 @@ var NewsEditor = (function () {
         if (r.status === 401) { window.location.href = '/login'; return; }
         if (!r.ok) throw new Error('HTTP ' + r.status);
         UI.toast(published ? 'Published. It’s live on the site.' : 'Draft saved. Only admins can see it.', 'ok');
-        var cb = done;
         close();
         if (cb) cb();
       }).catch(function () {
         UI.toast('The post wasn’t saved. Your text is still here — try again.', 'err');
-      }).then(function () { publish.disabled = draft.disabled = false; });
+      }).then(function () { publish.disabled = draft.disabled = cancel.disabled = false; });
     }
     publish.addEventListener('click', function () { save(true); });
     draft.addEventListener('click', function () { save(false); });

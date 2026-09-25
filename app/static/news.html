@@ -194,6 +194,10 @@
   var _offset = 0;
   var _loading = false;
   var _reloadAfter = false;
+  // Bumped by every reload(). A page started before the latest reload (a
+  // "Load older posts" still in flight when a write landed) is dropped when
+  // it answers, so it can never paint the pre-write list.
+  var _gen = 0;
   // Admins see drafts too, and manage every post in place. The server decides
   // who gets drafts (published_only=false is ignored for anyone else); this
   // only chooses what to ask for and whether to draw the tools.
@@ -304,6 +308,7 @@
     moreText.textContent = 'Loading…';
 
     var offset = _offset;
+    var gen = _gen;
     // Fetch one past the page size: if it comes back, there is another page.
     // Cheaper than a separate count query and never goes stale against it.
     var url = '/api/news/?limit=' + (PAGE_SIZE + 1) + '&offset=' + offset + (isAdmin ? '&published_only=false' : '');
@@ -317,6 +322,7 @@
     }
 
     function render(posts) {
+      if (gen !== _gen) return;
       var hasMore = posts.length > PAGE_SIZE;
       var page = posts.slice(0, PAGE_SIZE);
 
@@ -344,6 +350,7 @@
         render(await fetcher());
       }
     } catch (err) {
+      if (gen !== _gen) return;
       console.error('Error loading news archive:', err);
       if (offset === 0) {
         WS.arrive('posts', function () {
@@ -367,6 +374,7 @@
 
   // Back to the first page, fetched fresh (never the cached copy).
   function reload() {
+    _gen += 1;
     _offset = 0;
     loadPage(true);
   }
