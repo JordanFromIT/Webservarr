@@ -427,9 +427,12 @@ class AppearanceTab(unittest.TestCase):
         # Every test the file runs is the guard built from meta.
         made = re.search(r"\b(\w+) = fontGuard\(\)", code)
         self.assertIsNotNone(made, "the guard is never built")
-        tests = re.findall(r"\b([\w.]+)\.test\(", code)
-        self.assertTrue(tests, "the font preview has no guard")
-        self.assertEqual(set(tests), {made.group(1)})
+        # A regex literal is blanked to spaces, so count every .test( call,
+        # whatever it is called on, against the guard's own.
+        guarded = len(re.findall(rf"\b{made.group(1)}\.test\(", code))
+        self.assertGreater(guarded, 0, "the font preview has no guard")
+        self.assertEqual(len(re.findall(r"\.test\(", code)), guarded, "a second pattern is tested")
+        self.assertNotRegex(code, r"\.(?:match|search|exec)\(")
         self.assertNotIn("A-Za-z0-9", src)
         self.assertNotRegex(code, r"\bFONT_RE\b")
 
@@ -457,6 +460,9 @@ class AppearanceTab(unittest.TestCase):
         self.assertIsNotNone(back, "the page's own font doesn't revert the preview")
         self.assertLess(preview.index("clearTimeout(fontTimer)"), back.start())
         self.assertLess(back.start(), preview.index("setTimeout("), "the revert waits on the typing delay")
+        # First thing after the timer is cleared: no name check stands in front of it.
+        first_check = re.search(r"\.test\(|===\s*shownFont|\breturn\b", preview)
+        self.assertGreaterEqual(first_check.start(), back.start(), "a name check comes before the revert")
 
         revert = appearance_function("revertFont")
         self.assertIn("clearTimeout(fontTimer)", revert)
@@ -492,7 +498,7 @@ class AppearanceTab(unittest.TestCase):
         # Live code never paints a colour itself: colours go through api.color.
         code = js_code_only(src)
         self.assertNotRegex(code, r"\.style\.(?:color|background(?:Color)?)\s*=")
-        self.assertEqual(live_matches(src, r"setProperty\('--(?:color|hex)-"), [])
+        self.assertEqual(live_matches(src, r"setProperty\('--(?:color|hex)-[\w-]*'"), [])
 
 
 class Guards(unittest.TestCase):
