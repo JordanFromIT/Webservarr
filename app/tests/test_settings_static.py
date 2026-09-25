@@ -1621,6 +1621,118 @@ class InPlaceNews(unittest.TestCase):
         self.assertEqual(len(live_matches(script, r"viewAll\.classList\.remove\('invisible'\);")), 1)
 
 
+
+def wiki_script() -> str:
+    """The one inline <script> of wiki.html (raw source)."""
+    blocks = re.findall(r"<script>(.*?)</script>", (STATIC / "wiki.html").read_text(encoding="utf-8"), re.S)
+    assert len(blocks) == 1, "wiki.html should carry exactly one inline script"
+    return blocks[0]
+
+
+def wiki_categories_js() -> str:
+    return (STATIC / "js" / "wiki-categories.js").read_text(encoding="utf-8")
+
+
+class InPlaceWiki(unittest.TestCase):
+    """Wiki categories are added, renamed, reordered and deleted on /wiki
+    itself, from a panel under the index's admin bar (Task 7.2)."""
+
+    def test_wiki_index_manages_categories(self):
+        h = (STATIC / "wiki.html").read_text(encoding="utf-8")
+        self.assertIn("/static/js/wiki-categories.js?v=", h)
+        self.assertLess(h.index("/static/js/ui.js?v="), h.index("/static/js/wiki-categories.js?v="))
+        self.assertIn("Manage categories", h)
+        js = (STATIC / "js" / "wiki-categories.js").read_text(encoding="utf-8")
+        self.assertIn("/api/wiki/categories", js)
+        self.assertIsNone(NATIVE_DIALOG.search(js))
+        self.assertIsNone(PALETTE_TEXT.search(js))
+
+    def test_names_go_in_as_text(self):
+        # A category name reaches the row, the aria-labels and the dialog title
+        # only as text: no markup is ever parsed from it.
+        src = wiki_categories_js()
+        self.assertIsNone(TINY_TEXT.search(src))
+        self.assertNotRegex(js_code_only(src), r"\.(?:innerHTML|outerHTML)\b|insertAdjacentHTML|document\.write")
+        self.assertEqual(len(live_matches(src, r"b\.setAttribute\('aria-label', label\);")), 1)
+        self.assertEqual(len(live_matches(src, r"title: 'Delete “' \+ cat\.name \+ '”\?',")), 1)
+        self.assertEqual(len(live_matches(src, r"cancelLabel: 'Keep it', danger: true")), 1)
+        # The dialog writes a string title with textContent.
+        ui = js_code_only((STATIC / "js" / "ui.js").read_text(encoding="utf-8"))
+        self.assertIn("n.textContent = String(text);", ui)
+
+    def test_every_write_clears_the_page_cache(self):
+        src = wiki_categories_js()
+        code = js_code_only(src)
+        # One fetch in the file, in send(), which clears the page cache once
+        # the write has answered - whether it landed, failed or never arrived.
+        self.assertEqual(len(re.findall(r"\bfetch\(", code)), 1)
+        send = function_body(code, "send")
+        self.assertRegex(send, r"^\s*return fetch\(")
+        self.assertRegex(send, r"\}, function \(\) \{\s*return \{ status: 0, ok: false, data: \{\} \};\s*\}\)"
+                               r"\.then\(function \(res\) \{\s*if \(window\.WS && WS\.clearPageCache\) WS\.clearPageCache\(\);\s*return res;")
+        writes = live_matches(src, r"\bsend\('(PUT|POST|DELETE)', ")
+        self.assertEqual(sorted(m.group(1) for m in writes), ["DELETE", "POST", "PUT", "PUT"])
+
+    def test_one_write_at_a_time(self):
+        # Every write starts with begin(), which refuses while one is in
+        # flight and otherwise disables the whole panel and the toggle.
+        code = js_code_only(wiki_categories_js())
+        self.assertRegex(function_body(code, "begin"), r"^\s*if \(busy\) return false;\s*setBusy\(true\);\s*return true;\s*$")
+        busy = function_body(code, "setBusy")
+        self.assertIn("root.querySelectorAll(", busy)
+        self.assertIn("n.disabled = on || n.hasAttribute(", busy)
+        self.assertIn("locks.forEach(function (n) { n.disabled = on; });", busy)
+        self.assertEqual(len(re.findall(r"(?<!function )\bbegin\(\)", code)), 4)            # move, edit, delete, add
+        self.assertEqual(len(re.findall(r"if \(!begin\(\)\) return", code)), 3)
+        self.assertEqual(len(re.findall(r"if \(!ok \|\| !begin\(\)\) return;", code)), 1)
+        # Each failure puts the controls back; a success leaves them off until
+        # the page draws the next panel.
+        self.assertEqual(len(re.findall(r"if \(!res\.ok\) \{ setBusy\(false\);", code)), 3)
+        self.assertRegex(function_body(code, "move"), r"if \(landed\) done\(focus\);\s*else setBusy\(false\);")
+        self.assertRegex(function_body(code, "done"), r"^\s*onChanged\(focus\);\s*$")
+
+    def test_reorder_reads_the_slug_at_click_time_and_works_on_a_copy(self):
+        code = js_code_only(wiki_categories_js())
+        self.assertRegex(code, r"function \(\) \{ move\(cat\.slug, -1\); \}")
+        self.assertRegex(code, r"function \(\) \{ move\(cat\.slug, 1\); \}")
+        move = function_body(code, "move")
+        self.assertRegex(move, r"cats\.forEach\(function \(c, i\) \{ if \(c\.slug === slug\) from = i; \}\);")
+        self.assertIn("var order = cats.slice();", move)
+        self.assertNotRegex(code, r"\bcats\.splice\(")
+
+    def test_the_panel_stays_open_across_its_own_redraws(self):
+        src = wiki_script()
+        code = js_code_only(src)
+        # The toggle state lives in the view, closes on navigation, and a
+        # redraw after a write reopens the panel with the focus hint.
+        self.assertRegex(code, r"\bvar _manage = false;")
+        self.assertRegex(top_level(function_body(code, "render")), r"var s = parse\(\);\s*_manage = false;")
+        index = function_body(code, "renderIndex")
+        self.assertRegex(index, r"^\s*var gen = \+\+_gen;\s*if \(!keep\) skeleton\('\s*'\);")
+        self.assertRegex(index, r"if \(_manage\) openPanel\(focus \|\| null\);")
+        opened = function_body(index, "openPanel")
+        self.assertRegex(opened, r"_cats = null;\s*if \(gen === _gen\) renderIndex\(true, next\);")
+        self.assertEqual(len(live_matches(src, r"\{ focus: hint, lock: \[bar\.querySelector\('\[data-wiki-manage\]'\)\] \}")), 1)
+
+    def test_an_index_load_overtaken_by_another_view_is_dropped(self):
+        code = js_code_only(wiki_script())
+        self.assertRegex(code, r"\bvar _gen = 0;")
+        index = function_body(code, "renderIndex")
+        self.assertRegex(index, r"catch \(e\) \{\s*if \(gen !== _gen\) return;")
+        self.assertRegex(index, r"\}\s*if \(gen !== _gen\) return;\s*_cats = results\[0\];")
+        for name in ("renderCategory", "renderSearch", "renderPage"):
+            self.assertRegex(function_body(code, name), r"^\s*_gen \+= 1;", name)
+
+    def test_only_admins_get_the_bar(self):
+        code = js_code_only(wiki_script())
+        self.assertRegex(function_body(code, "adminBar"), r"^\s*if \(!isAdmin\(\)\) return null;")
+
+    def test_seeded_example_points_at_the_wiki_index(self):
+        seed = (STATIC.parent / "seed.py").read_text(encoding="utf-8")
+        self.assertIn("Group related pages into categories with **Manage categories** on the ", seed)
+        self.assertNotIn("Settings > Wiki", seed)
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class InPlaceNewsRender(PageRoutesBase):
     """The admin tools are gated at first paint by html[data-admin], which the
