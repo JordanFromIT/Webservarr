@@ -22,6 +22,12 @@
                    oidc: ['features.show_authentik_auth', 'integration.authentik.url',
                           'integration.authentik.client_id'] };
   var NAMES = { simple: 'your username and password', plex: 'Plex', oidc: 'Authentik' };
+  // Every key on this tab that decides whether a method works.
+  var METHOD_KEYS = ['features.show_simple_auth', 'features.show_plex_auth', 'features.show_authentik_auth',
+                     'integration.authentik.url', 'integration.authentik.client_id'];
+  // The Authentik switch and the fields its setup group holds.
+  var AK_KEYS = ['features.show_authentik_auth', 'integration.authentik.url', 'integration.authentik.app_slug',
+                 'integration.authentik.client_id', 'integration.authentik.client_secret'];
   // Task 6.3's Plex card on Integrations. Until it exists, go() just opens the tab.
   var PLEX_CARD = 'integration-card-plex';
 
@@ -232,6 +238,8 @@
       btn.disabled = true;
       form.setAttribute('aria-busy', 'true');
       say('');
+      // What was sent, not what the box holds when the answer lands.
+      var sentName = body.new_username;
       sendAccount(body).then(function (res) {
         clearPasswords();
         body = null;
@@ -239,9 +247,8 @@
         btn.disabled = false;
         form.removeAttribute('aria-busy');
         if (res.status === 200 && res.data && res.data.success === true) {
-          var renamed = name.input.value.trim();
-          if (renamed && Array.isArray(res.data.updated) && res.data.updated.indexOf('username') >= 0) {
-            who.value = renamed;
+          if (sentName && Array.isArray(res.data.updated) && res.data.updated.indexOf('username') >= 0) {
+            who.value = sentName;
           }
           name.input.value = '';
           WSSettings.toast('Account updated', 'ok');
@@ -285,9 +292,16 @@
       akFields.appendChild(api.text({ key: 'integration.authentik.client_id', label: 'Client ID' }));
       akFields.appendChild(api.secret({ key: 'integration.authentik.client_secret', label: 'Client secret' }));
       ak.body.appendChild(akFields);
-      function syncAk(v) { akFields.classList.toggle('hidden', v !== 'true' && !api.get('integration.authentik.url')); }
-      api.onChange('features.show_authentik_auth', syncAk);
-      syncAk(api.get('features.show_authentik_auth'));
+      // Shown while Authentik is on or has an address, and never hidden while
+      // a field in it holds a change (a 422 lands there) or has focus.
+      function syncAk() {
+        var dirty = api.dirtyKeys();
+        var open = api.get('features.show_authentik_auth') === 'true' || !!api.get('integration.authentik.url') ||
+          AK_KEYS.some(function (k) { return dirty.indexOf(k) >= 0; }) || akFields.contains(document.activeElement);
+        akFields.classList.toggle('hidden', !open);
+      }
+      AK_KEYS.forEach(function (k) { api.onChange(k, syncAk); });
+      syncAk();
       intro.body.appendChild(ak.root);
 
       // Username & password
@@ -295,19 +309,23 @@
       simple.body.appendChild(api.toggle({ key: 'features.show_simple_auth', label: 'Allow sign-in with a username and password' }));
       var account = accountForm();
       simple.body.appendChild(account);
-      function syncSimple(v) { account.classList.toggle('hidden', v !== 'true'); }
-      api.onChange('features.show_simple_auth', syncSimple);
-      syncSimple(api.get('features.show_simple_auth'));
+      // Follows the saved switch, not a staged one, so the form (and its
+      // message) can't vanish mid-use; a save of the switch updates it.
+      function syncSimple() { account.classList.toggle('hidden', saved('features.show_simple_auth') !== 'true'); }
+      api.onSaved(syncSimple);
+      syncSimple();
       intro.body.appendChild(simple.root);
 
-      var allOff = note('Every method is off. The server won’t save this, so turn one back on.');
+      var allOff = note('No sign-in method is on and set up. The server won’t save this, so turn one on and set it up.');
+      // On and set up, by the same rule as the warning below: a switch that's
+      // on without its connection counts for nothing.
       function syncAll() {
-        var on = ['features.show_simple_auth', 'features.show_plex_auth', 'features.show_authentik_auth']
-          .some(function (k) { return api.get(k) === 'true'; });
+        var on = Object.keys(FLAGS).some(function (m) { return usable(m, api.get); });
         allOff.classList.toggle('hidden', on);
       }
-      ['features.show_simple_auth', 'features.show_plex_auth', 'features.show_authentik_auth']
-        .forEach(function (k) { api.onChange(k, syncAll); });
+      METHOD_KEYS.forEach(function (k) { api.onChange(k, syncAll); });
+      // The Plex connection is saved on Integrations.
+      document.addEventListener('ws-settings:saved', syncAll);
       syncAll();
       intro.body.appendChild(allOff);
       panel.appendChild(intro.root);
