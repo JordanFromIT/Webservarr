@@ -7,9 +7,10 @@
  *
  * The font preview loads the chosen Google Font beside the page's own and
  * points --font-display at it once it has loaded, so the page restyles once.
- * Back on the page's own font, the preview stylesheet is removed and
- * --font-display gets its first value back. Names are checked with the
- * registry's pattern, read from meta, before anything is fetched.
+ * Back on the saved font, the preview stylesheets are removed and
+ * --font-display gets the saved font's value back. A saved font's stylesheet
+ * stops being a preview and becomes the page's own. Names are checked with
+ * the registry's pattern, read from meta, before anything is fetched.
  */
 (function () {
   'use strict';
@@ -36,14 +37,16 @@
   var KEYS = COLORS.map(function (c) { return c[0]; })
     .concat(MEDIA.map(function (m) { return m[0]; }), ['theme.font', 'theme.custom_css']);
   var OTHER = '__other__';
-  var TYPING_DELAY = 300;       // ms after the last keystroke before a typed name is fetched
+  var TYPING_DELAY = 600;       // ms after the last keystroke before a typed name is fetched
 
   // ---- Font preview ----
 
   var root = document.documentElement;
   var fontRe = null;            // the registry's pattern, anchored; null means no preview
-  var pageFont = null;          // the font this page was served with
-  var pageFontVar = '';         // --font-display as the page set it, before any preview
+  var pageFont = null;          // the saved font: served with the page, or saved since
+  var baseFont = null;          // the font pageFontVar shows (pageFont, once it has loaded)
+  var pageFontVar = '';         // --font-display for baseFont, as the page or promote() set it
+  var baseLink = null;          // a saved font's stylesheet (none: the server's own #ws-font)
   var shownFont = null;         // the font the page shows now
   var fontTimer = null;
   var fontSeq = 0;              // bumped on every change, so a font still loading can't land late
@@ -55,15 +58,28 @@
     try { return new RegExp('^(?:' + m.pattern + ')$'); } catch (e) { return null; }
   }
 
-  // The page's own font, at once: every preview stylesheet goes (the one
-  // shown and any still loading) and --font-display is as the page set it.
+  // The saved font, at once: every preview stylesheet goes (the one shown
+  // and any still loading) and --font-display is as it was for that font. A
+  // font saved while it was still loading isn't on screen yet: fetch it.
   function revertFont() {
     clearTimeout(fontTimer);
     fontSeq += 1;
     document.querySelectorAll('link[data-ws-font-preview]').forEach(function (l) { l.remove(); });
     if (pageFontVar) root.style.setProperty('--font-display', pageFontVar);
     else root.style.removeProperty('--font-display');
-    shownFont = pageFont;
+    shownFont = baseFont;
+    if (baseFont !== pageFont) loadFont(pageFont);
+  }
+
+  // The saved font's stylesheet stops being a preview: it is the page's own
+  // now (until a reload serves it as #ws-font), and a revert comes back to it.
+  function promote(link) {
+    if (baseLink && baseLink !== link) baseLink.remove();
+    link.removeAttribute('data-ws-font-preview');
+    link.id = 'ws-font-saved';
+    baseLink = link;
+    baseFont = pageFont;
+    pageFontVar = root.style.getPropertyValue('--font-display');
   }
 
   function loadFont(name) {
@@ -80,6 +96,7 @@
       link.id = 'ws-font-preview';
       root.style.setProperty('--font-display', '"' + name + '", sans-serif');
       shownFont = name;
+      if (name === pageFont) promote(link);
     }
     link.onload = function () {
       if (mine !== fontSeq) { link.remove(); return; }
@@ -230,8 +247,16 @@
       if (pageFont === null) {
         pageFont = api.get('theme.font');
         pageFontVar = root.style.getPropertyValue('--font-display');
-        shownFont = pageFont;
+        baseFont = shownFont = pageFont;
       }
+      // A saved font is the one Discard comes back to from now on.
+      api.onSaved(function (keys) {
+        if (keys.indexOf('theme.font') < 0) return;
+        pageFont = api.get('theme.font');
+        if (pageFont === baseFont) return;
+        var shown = document.getElementById('ws-font-preview');
+        if (shownFont === pageFont && shown) promote(shown);     // else loadFont promotes it on arrival
+      });
 
       var layout = el('div', 'lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-10');
       var form = el('div', 'min-w-0');

@@ -504,7 +504,7 @@ class AppearanceTab(unittest.TestCase):
         # A saved font still loading is promoted when it lands.
         self.assertRegex(appearance_function("loadFont"), r"if \(name === pageFont\) promote\(link\)")
         # A revert while the saved font isn't on screen yet fetches it.
-        self.assertRegex(appearance_function("revertFont"), r"if \(baseFont !== pageFont\b[^)]*\) loadFont\(pageFont\)")
+        self.assertRegex(appearance_function("revertFont"), r"if \(baseFont !== pageFont\) loadFont\(pageFont\);")
 
     def test_typing_waits_long_enough(self):
         # Half-typed names shouldn't be fetched between keystrokes.

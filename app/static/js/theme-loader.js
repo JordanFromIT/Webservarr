@@ -76,9 +76,10 @@
     }
 
     // Font. The server emits the stylesheet link statically (#ws-font); only
-    // the fallback path has to inject one.
+    // the fallback path has to inject one. The name is quoted, as the server
+    // quotes it: unquoted, a family like "Exo 2" is not a valid font-family.
     if (data.font) {
-      root.style.setProperty('--font-display', data.font + ', sans-serif');
+      root.style.setProperty('--font-display', '"' + data.font + '", sans-serif');
       var fontId = 'webservarr-google-font';
       if (!document.getElementById('ws-font') && !document.getElementById(fontId)) {
         var link = document.createElement('link');
