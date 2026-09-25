@@ -16,7 +16,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from app.content import render_markdown
@@ -79,12 +79,28 @@ def is_admin(user: dict) -> bool:
 # Schemas
 # ============================================================
 
+# A Material Symbols ligature name. The icon is written with textContent, so
+# this is not an injection guard: it stops a typo (or a pasted word) from
+# showing up on the wiki index as literal text where the icon should be.
+ICON_NAME = re.compile(r"^[a-z0-9_]{1,64}$")
+
+
 class CategoryWrite(BaseModel):
     name: str
     slug: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
     sort_order: int = 0
+
+    @field_validator("icon")
+    @classmethod
+    def icon_is_a_symbol_name(cls, value: Optional[str]) -> Optional[str]:
+        # Empty means "no icon" (the index falls back to a folder), same as None.
+        if value is None or value == "":
+            return None
+        if not ICON_NAME.fullmatch(value):
+            raise ValueError("Use an icon name like folder or play_circle.")
+        return value
 
 
 class PageWrite(BaseModel):

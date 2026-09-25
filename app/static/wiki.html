@@ -80,6 +80,8 @@
 <script src="/static/js/auth.js?v=1"></script>
 <script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
+<script src="/static/js/ui.js?v=1"></script>
+<script src="/static/js/wiki-categories.js?v=1"></script>
 <script src="/static/js/wiki-editor.js?v=1"></script>
 <script>
 // WebServarr — Wiki
@@ -93,6 +95,12 @@ var WikiView = (function () {
   var root = document.getElementById('wikiRoot');
   var _user = null;
   var _cats = null;   // cached category list; invalidated on every refresh()
+  // Bumped by every view render. An index load that answers after a newer
+  // render started is dropped, so it can never paint over what replaced it.
+  var _gen = 0;
+  // Whether the category panel is open. It survives the panel's own redraws
+  // (after each category write) and closes on any navigation.
+  var _manage = false;
 
   // ---------- helpers ----------
 
@@ -187,17 +195,27 @@ var WikiView = (function () {
     return form;
   }
 
-  function adminBar(onNew) {
+  function adminBar(onNew, onManage) {
     if (!isAdmin()) return null;
-    var bar = el('div', 'flex justify-end mb-4');
-    var btn = el('button',
-      'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 text-primary ' +
-      'border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all');
-    btn.type = 'button';
-    btn.appendChild(icon('add', 'text-base'));
-    btn.appendChild(document.createTextNode('New page'));
-    btn.addEventListener('click', onNew);
-    bar.appendChild(btn);
+    var bar = el('div', 'flex flex-wrap justify-end gap-2 mb-4');
+    function button(glyph, label, handler, primary) {
+      var btn = el('button', primary
+        ? 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 text-primary border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all'
+        : 'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-frosted-blue/70 border border-frosted-blue/10 text-sm font-bold hover:text-frosted-blue hover:bg-frosted-blue/[0.06] transition-all disabled:opacity-50 disabled:cursor-not-allowed');
+      btn.type = 'button';
+      btn.appendChild(icon(glyph, 'text-base'));
+      btn.appendChild(document.createTextNode(label));
+      btn.addEventListener('click', handler);
+      bar.appendChild(btn);
+      return btn;
+    }
+    if (onManage) {
+      var manage = button('category', 'Manage categories', onManage, false);
+      manage.setAttribute('data-wiki-manage', '');
+      manage.setAttribute('aria-controls', 'wikiCatPanel');
+      manage.setAttribute('aria-expanded', _manage ? 'true' : 'false');
+    }
+    button('add', 'New page', onNew, true);
     return bar;
   }
 
@@ -259,8 +277,11 @@ var WikiView = (function () {
     return a;
   }
 
-  async function renderIndex() {
-    skeleton('index');
+  // keep: redraw in place after a category write - no skeleton, no scroll,
+  // the panel reopened with focus where the hint says.
+  async function renderIndex(keep, focus) {
+    var gen = ++_gen;
+    if (!keep) skeleton('index');
     var results;
     try {
       results = await Promise.all([
@@ -268,6 +289,7 @@ var WikiView = (function () {
         api('/api/wiki/pages?include_drafts=' + (isAdmin() ? 'true' : 'false') + '&limit=200')
       ]);
     } catch (e) {
+      if (gen !== _gen) return;
       if (e.message === 'unauthenticated') return;
       clear();
       root.appendChild(pageHeader('Wiki', null, '/', 'Back to home'));
@@ -276,6 +298,7 @@ var WikiView = (function () {
       return;
     }
 
+    if (gen !== _gen) return;
     _cats = results[0];
     var pages = results[1];
 
@@ -283,10 +306,29 @@ var WikiView = (function () {
     root.appendChild(pageHeader('Wiki', 'Guides and how-tos for the whole setup.', '/', 'Back to home'));
     root.appendChild(searchBox(''));
 
+    var catPanel = null;
     var bar = adminBar(function () {
       if (window.WikiEditor) WikiEditor.open(null);
+    }, function () {
+      _manage = !catPanel;
+      if (catPanel) { catPanel.remove(); catPanel = null; }
+      else openPanel(null);
+      manageBtn.setAttribute('aria-expanded', _manage ? 'true' : 'false');
     });
-    if (bar) root.appendChild(bar);
+    var manageBtn = bar && bar.querySelector('[data-wiki-manage]');
+    function openPanel(hint) {
+      catPanel = WikiCategories.panel(_cats, function (next) {
+        // A category write landed. Redraw the index in place with the panel
+        // still open - unless the admin has since moved to another view.
+        _cats = null;
+        if (gen === _gen) renderIndex(true, next);
+      }, { focus: hint, lock: [manageBtn] });
+      bar.parentNode.insertBefore(catPanel, bar.nextSibling);
+    }
+    if (bar) {
+      root.appendChild(bar);
+      if (_manage) openPanel(focus || null);
+    }
 
     if (!_cats.length && !pages.length) {
       root.appendChild(emptyState('menu_book', 'The wiki is empty',
@@ -325,6 +367,7 @@ var WikiView = (function () {
   // ---------- category ----------
 
   async function renderCategory(slug) {
+    _gen += 1;
     skeleton('index');
     var pages, cats;
     try {
@@ -378,6 +421,7 @@ var WikiView = (function () {
   }
 
   async function renderSearch(term) {
+    _gen += 1;
     skeleton('index');
     var results;
     try {
@@ -473,6 +517,7 @@ var WikiView = (function () {
   }
 
   async function renderPage(slug) {
+    _gen += 1;
     skeleton('page');
     var page;
     try {
@@ -607,6 +652,7 @@ var WikiView = (function () {
 
   function render() {
     var s = parse();
+    _manage = false;
     window.scrollTo(0, 0);
     if (s.view === 'index') return renderIndex();
     if (s.view === 'search') return renderSearch(s.q);

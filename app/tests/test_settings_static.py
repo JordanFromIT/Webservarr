@@ -1700,6 +1700,15 @@ class InPlaceWiki(unittest.TestCase):
         self.assertIn("var order = cats.slice();", move)
         self.assertNotRegex(code, r"\bcats\.splice\(")
 
+    def test_an_edit_keeps_the_address(self):
+        # Every PUT sends the category's own slug back, so a rename never
+        # changes its /wiki?category= address (the server re-slugs from the
+        # name when no slug is sent).
+        code = js_code_only(wiki_categories_js())
+        self.assertRegex(function_body(code, "body"), r"^\s*return \{ name: cat\.name, slug: cat\.slug,")
+        self.assertEqual(len(re.findall(r"var payload = body\(cat\);", code)), 1)
+        self.assertNotRegex(code, r"payload\.slug\s*=(?!=)|delete payload\.slug")
+
     def test_the_panel_stays_open_across_its_own_redraws(self):
         src = wiki_script()
         code = js_code_only(src)
@@ -1712,7 +1721,8 @@ class InPlaceWiki(unittest.TestCase):
         self.assertRegex(index, r"if \(_manage\) openPanel\(focus \|\| null\);")
         opened = function_body(index, "openPanel")
         self.assertRegex(opened, r"_cats = null;\s*if \(gen === _gen\) renderIndex\(true, next\);")
-        self.assertEqual(len(live_matches(src, r"\{ focus: hint, lock: \[bar\.querySelector\('\[data-wiki-manage\]'\)\] \}")), 1)
+        self.assertIn("}, { focus: hint, lock: [manageBtn] });", opened)
+        self.assertEqual(len(live_matches(src, r"var manageBtn = bar && bar\.querySelector\('\[data-wiki-manage\]'\);")), 1)
 
     def test_an_index_load_overtaken_by_another_view_is_dropped(self):
         code = js_code_only(wiki_script())
