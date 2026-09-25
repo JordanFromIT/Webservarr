@@ -135,5 +135,73 @@ class SetupTestConnection(unittest.TestCase):
             restore()
 
 
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class SetupTokenEncoding(unittest.TestCase):
+    """A setup token with non-ASCII characters is a wrong token (403), not a
+    crash (500), on both setup routes; the right token still works on both."""
+
+    BAD = "café-token"
+
+    def setUp(self):
+        from app.config import settings as app_settings
+        from app.routers import setup
+        self.Session = helpers.make_sessionmaker()
+        self.db = self.Session()
+        # complete_setup writes through SessionLocal and sets process-wide
+        # state; point it at the in-memory database and put the state back.
+        self.saved = (setup._setup_done, setup._setup_token, app_settings.app_secret_key)
+        self.patches = [
+            mock.patch("app.routers.setup.is_setup_completed", return_value=False),
+            mock.patch("app.routers.setup.get_or_create_setup_token", return_value=SETUP_TOKEN),
+            mock.patch("app.routers.setup.SessionLocal", self.Session),
+        ]
+        for p in self.patches:
+            p.start()
+        self.client = helpers.api_client(self.Session)
+
+    def tearDown(self):
+        from app.config import settings as app_settings
+        from app.routers import setup
+        helpers.reset_overrides()
+        for p in self.patches:
+            p.stop()
+        setup._setup_done, setup._setup_token, app_settings.app_secret_key = self.saved
+        self.db.close()
+
+    def users(self):
+        from app.models import User
+        self.db.expire_all()
+        return self.db.query(User).count()
+
+    def complete(self, token):
+        return self.client.post("/api/setup/complete", json={
+            "username": "owner", "password": "long-enough-pw", "password_confirm": "long-enough-pw",
+            "setup_token": token})
+
+    def probe(self, token, calls):
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({"status/sessions": _Resp(200, {})}, calls)):
+            return self.client.post("/api/setup/test-connection", json=dict(BODY, setup_token=token))
+
+    def test_non_ascii_token_is_403_on_the_test_route(self):
+        calls = []
+        r = self.probe(self.BAD, calls)
+        self.assertEqual(r.status_code, 403, r.text)
+        self.assertEqual(calls, [])
+
+    def test_non_ascii_token_is_403_on_complete(self):
+        r = self.complete(self.BAD)
+        self.assertEqual(r.status_code, 403, r.text)
+        self.assertEqual(self.users(), 0)
+
+    def test_the_right_token_still_works_on_both(self):
+        calls = []
+        self.assertEqual(self.probe(SETUP_TOKEN, calls).json()["state"], "ok")
+        self.assertEqual(len(calls), 1)
+        r = self.complete(SETUP_TOKEN)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.users(), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
