@@ -418,5 +418,265 @@ class Safety(unittest.TestCase):
                     self.assertEqual(set(entry), {"state", "reason", "checked_at"})
 
 
+
+def _private_limiter():
+    """Point the shared limiter at a private in-memory store (the real one is
+    the Redis the running instance uses). Returns a restore function."""
+    from limits.storage import MemoryStorage
+    from limits.strategies import FixedWindowRateLimiter
+    from app.limiter import limiter
+    saved = (limiter._storage, limiter._limiter)
+    storage = MemoryStorage()
+    limiter._storage, limiter._limiter = storage, FixedWindowRateLimiter(storage)
+    limiter.reset()
+
+    def restore():
+        limiter.reset()
+        limiter._storage, limiter._limiter = saved
+    return restore
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class TestConnection(unittest.TestCase):
+    """POST /api/admin/test-connection runs the status-light probe on the
+    values on screen, so Test and the light always agree."""
+
+    def setUp(self):
+        self.Session = helpers.make_sessionmaker()
+        self.db = self.Session()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        self.client = helpers.api_client(self.Session)
+
+    def tearDown(self):
+        helpers.reset_overrides()
+        self.setup_patch.stop()
+        self.db.close()
+
+    def test_uptime_kuma_test_uses_the_slug(self):
+        calls = []
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({"heartbeat/home": _Resp(404)}, calls)):
+            r = self.client.post("/api/admin/test-connection", json={
+                "service": "uptime_kuma", "url": "http://192.168.1.7:3001", "slug": "home"})
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["success"])
+        self.assertEqual(r.json()["state"], "warn")
+        self.assertIn('"home"', r.json()["message"])
+        self.assertTrue(calls[0]["url"].endswith("/api/status-page/heartbeat/home"))
+
+    def test_uptime_kuma_without_a_slug_uses_the_saved_one(self):
+        # The old Settings page sends no slug: the saved one is what gets tested.
+        helpers.put(self.db, "integration.uptime_kuma.slug", "family")
+        calls = []
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({"heartbeat/family": _Resp(200, {})}, calls)):
+            r = self.client.post("/api/admin/test-connection", json={
+                "service": "uptime_kuma", "url": "http://192.168.1.7:3001", "credentials": ""})
+        self.assertEqual(r.json(), {"success": True, "message": "Connected", "state": "ok"})
+        self.assertTrue(calls[0]["url"].endswith("/api/status-page/heartbeat/family"))
+
+    def test_an_invalid_slug_is_refused_without_a_request(self):
+        calls = []
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({}, calls)):
+            r = self.client.post("/api/admin/test-connection", json={
+                "service": "uptime_kuma", "url": "http://192.168.1.7:3001", "slug": "../admin"})
+        self.assertEqual(r.json()["state"], "warn")
+        self.assertFalse(r.json()["success"])
+        self.assertEqual(calls, [])
+
+    def test_masked_credential_uses_the_stored_one(self):
+        helpers.put(self.db, "integration.sonarr.api_key", "stored-key")
+        calls = []
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({"system/status": _Resp(200, {})}, calls)):
+            r = self.client.post("/api/admin/test-connection", json={
+                "service": "sonarr", "url": "http://192.168.1.5:8989", "credentials": "***masked***"})
+        self.assertTrue(r.json()["success"])
+        self.assertEqual(calls[0]["headers"]["X-Api-Key"], "stored-key")
+
+    def test_a_typed_credential_is_tested_as_typed(self):
+        helpers.put(self.db, "integration.sonarr.api_key", "stored-key")
+        calls = []
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({"system/status": _Resp(401)}, calls)):
+            r = self.client.post("/api/admin/test-connection", json={
+                "service": "sonarr", "url": "http://192.168.1.5:8989", "credentials": "new-key"})
+        self.assertEqual(calls[0]["headers"]["X-Api-Key"], "new-key")
+        self.assertEqual(r.json()["state"], "warn")
+        self.assertNotIn("new-key", r.text)
+
+    def test_unsafe_address_is_refused(self):
+        calls = []
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({}, calls)):
+            r = self.client.post("/api/admin/test-connection", json={
+                "service": "sonarr", "url": "http://127.0.0.1:8989", "credentials": "k"})
+        self.assertEqual(r.json()["state"], "error")
+        self.assertFalse(r.json()["success"])
+        self.assertEqual(calls, [])
+
+    def test_plex_token_travels_in_the_header_not_the_url(self):
+        calls = []
+        token = SECRETS["integration.plex.token"]
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({"status/sessions": _Resp(200, {})}, calls)):
+            r = self.client.post("/api/admin/test-connection", json={
+                "service": "plex", "url": "http://192.168.1.2:32400", "credentials": token})
+        self.assertTrue(r.json()["success"], r.text)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn(token, calls[0]["url"])
+        self.assertNotIn(token, json.dumps(calls[0]["params"]))
+        self.assertEqual(calls[0]["headers"]["X-Plex-Token"], token)
+        self.assertNotIn(token, r.text)
+
+    def test_nyt_is_testable(self):
+        calls = []
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({"nytimes": _Resp(200, {})}, calls)):
+            r = self.client.post("/api/admin/test-connection", json={
+                "service": "nyt", "url": "", "credentials": "n-key"})
+        self.assertTrue(r.json()["success"], r.text)
+        self.assertEqual(calls[0]["params"], {"api-key": "n-key"})
+
+    def test_admin_only(self):
+        helpers.reset_overrides()
+        member = helpers.api_client(self.Session, helpers.MEMBER)
+        r = member.post("/api/admin/test-connection", json={"service": "sonarr", "url": "http://192.168.1.5:8989"})
+        self.assertEqual(r.status_code, 403)
+
+    def test_rate_limited_to_twenty_a_minute(self):
+        restore = _private_limiter()
+        try:
+            helpers.set_rate_limits(True)
+            body = {"service": "kavita", "url": "http://192.168.1.8:5000"}
+            with mock.patch.object(health.httpx, "AsyncClient", fake_factory({}, [])):
+                codes = [self.client.post("/api/admin/test-connection", json=body).status_code for _ in range(21)]
+            self.assertEqual(codes[:20], [200] * 20)
+            self.assertEqual(codes[20], 429)
+        finally:
+            restore()
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class ChaptarrOptions(unittest.TestCase):
+    def setUp(self):
+        self.Session = helpers.make_sessionmaker()
+        self.db = self.Session()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        self.client = helpers.api_client(self.Session)
+
+    def tearDown(self):
+        helpers.reset_overrides()
+        self.setup_patch.stop()
+        self.db.close()
+
+    def configure(self, url="http://192.168.1.8:8789"):
+        helpers.put(self.db, "integration.chaptarr.url", url)
+        helpers.put(self.db, "integration.chaptarr.api_key", "c-key")
+
+    def call(self, routes, calls=None):
+        # The Chaptarr fetch uses integration_health's client helper, so the
+        # fake goes in where that helper builds its client.
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory(routes, [] if calls is None else calls)):
+            return self.client.get("/api/admin/chaptarr/options")
+
+    def test_unconfigured(self):
+        self.assertEqual(self.call({}).status_code, 400)
+
+    def test_lists_folders_and_profiles(self):
+        self.configure()
+        calls = []
+        r = self.call({
+            "rootfolder": _Resp(200, [{"path": "/books", "freeSpace": 1}, {"nope": 1}]),
+            "qualityprofile": _Resp(200, [{"id": 1, "name": "eBook"}, {"id": "x"}]),
+            "metadataprofile": _Resp(200, [{"id": 2, "name": "Standard"}]),
+        }, calls)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json(), {"root_folders": [{"path": "/books"}],
+                                    "quality_profiles": [{"id": 1, "name": "eBook"}],
+                                    "metadata_profiles": [{"id": 2, "name": "Standard"}]})
+        self.assertEqual(sorted(c["url"].rsplit("/", 1)[1] for c in calls),
+                         ["metadataprofile", "qualityprofile", "rootfolder"])
+        self.assertTrue(all(c["headers"]["X-Api-Key"] == "c-key" for c in calls))
+
+    def test_rejected_key_and_unreachable(self):
+        self.configure()
+        self.assertEqual(self.call({"rootfolder": _Resp(401)}).status_code, 400)
+        r = self.call({"rootfolder": httpx.ConnectError("refused")})
+        self.assertEqual(r.status_code, 503)
+        self.assertNotIn(r.status_code, (502, 504))
+
+    def test_unsafe_address_is_refused_without_a_request(self):
+        self.configure("http://127.0.0.1:8789")
+        calls = []
+        self.assertEqual(self.call({}, calls).status_code, 400)
+        self.assertEqual(calls, [])
+
+    def test_admin_only(self):
+        self.configure()
+        helpers.reset_overrides()
+        member = helpers.api_client(self.Session, helpers.MEMBER)
+        self.assertEqual(member.get("/api/admin/chaptarr/options").status_code, 403)
+
+    def test_a_slow_answer_is_503_within_the_deadline(self):
+        async def slow():
+            await asyncio.sleep(5)
+            return _Resp(200, [])
+        self.configure()
+        with mock.patch.object(health, "PROBE_TIMEOUT", 0.2):
+            started = time.monotonic()
+            r = self.call({"qualityprofile": slow})
+            elapsed = time.monotonic() - started
+        self.assertEqual(r.status_code, 503, r.text)
+        self.assertLess(elapsed, 2.0)
+
+    def test_a_slow_dns_lookup_is_off_the_loop_and_inside_the_deadline(self):
+        # The address check resolves the hostname with a blocking getaddrinfo:
+        # it must run in a worker thread, under the same one deadline.
+        import socket
+        import threading
+        real_getaddrinfo = socket.getaddrinfo
+        release = threading.Event()
+        on_loop = []
+
+        def getaddrinfo(host, *args, **kwargs):
+            if host == "slow-dns.example":
+                try:
+                    asyncio.get_running_loop()
+                    on_loop.append(True)
+                except RuntimeError:
+                    on_loop.append(False)
+                release.wait(3)
+                raise socket.gaierror("lookup timed out")
+            return real_getaddrinfo(host, *args, **kwargs)
+
+        self.configure("http://slow-dns.example:8789")
+        timer = threading.Timer(1.0, release.set)
+        timer.start()
+        try:
+            with mock.patch.object(health, "PROBE_TIMEOUT", 0.2), \
+                 mock.patch("socket.getaddrinfo", getaddrinfo):
+                r = self.call({})
+        finally:
+            release.set()
+            timer.cancel()
+        self.assertEqual(on_loop, [False])
+        self.assertEqual(r.status_code, 503, r.text)
+
+    def test_a_redirect_is_not_followed(self):
+        seen = []
+
+        def handler(request):
+            seen.append(str(request.url))
+            if "169.254" in request.url.host:
+                return httpx.Response(200, json=[{"path": "/leak"}])
+            return httpx.Response(302, headers={"Location": "http://169.254.169.254/latest/meta-data/"})
+
+        real = httpx.AsyncClient
+        factory = lambda **kw: real(transport=httpx.MockTransport(handler), **kw)  # noqa: E731
+        self.configure()
+        with mock.patch.object(health.httpx, "AsyncClient", factory):
+            r = self.client.get("/api/admin/chaptarr/options")
+        self.assertFalse([u for u in seen if "169.254" in u], seen)
+        self.assertEqual(len(seen), 3)
+        self.assertEqual(r.status_code, 503, r.text)
+        self.assertNotIn("/leak", r.text)
+
+
 if __name__ == "__main__":
     unittest.main()

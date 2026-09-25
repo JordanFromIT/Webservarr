@@ -533,5 +533,46 @@ class HelpersRestoreTheLimiter(unittest.TestCase):
             limiter.enabled = was
 
 
+
+class ValidationOffTheLoop(SettingsApiBase):
+    """Validating an address can resolve a hostname with a blocking lookup, so
+    BulkSave and SettingsImport validate in a worker thread: a slow DNS server
+    must not freeze the worker's event loop for every other request."""
+
+    def _spy(self):
+        import asyncio
+        seen = []
+
+        def is_safe(url):
+            try:
+                asyncio.get_running_loop()
+                seen.append(("loop", url))
+            except RuntimeError:
+                seen.append(("thread", url))
+            return True
+        return seen, mock.patch("app.utils.is_safe_integration_url", side_effect=is_safe)
+
+    def test_bulk_save_validates_off_the_event_loop(self):
+        seen, spy = self._spy()
+        with spy:
+            r = self.save(("integration.sonarr.url", "http://sonarr.lan:8989"))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(seen, [("thread", "http://sonarr.lan:8989")])
+
+    def test_import_validates_off_the_event_loop(self):
+        data = {"format": "webservarr-settings", "format_version": 1,
+                "settings": {"integration.radarr.url": "http://radarr.lan:7878"}}
+        seen, spy = self._spy()
+        with spy:
+            preview = self.client.post("/api/admin/settings/import?dry_run=true", json={"data": data})
+            self.assertEqual(preview.status_code, 200, preview.text)
+            r = self.client.post("/api/admin/settings/import?dry_run=false",
+                                 json={"data": data, "diff_token": preview.json()["diff_token"]})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(helpers.get(self.db, "integration.radarr.url"), "http://radarr.lan:7878")
+        self.assertTrue(seen)
+        self.assertEqual({where for where, _url in seen}, {"thread"})
+
+
 if __name__ == "__main__":
     unittest.main()
