@@ -1422,7 +1422,7 @@ class InPlaceNews(unittest.TestCase):
         # rendered once, the way the page always has.
         body = function_body(js_code_only(news_script()), "renderCard")
         rest = re.sub(r"escapeHtml\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)", "", body)
-        raw = re.findall(r"\+\s*\(?\s*post\.(\w+)(?!\s*\?)|post\.(\w+)\s*\)?\s*\+", rest)
+        raw = re.findall(r"\+\s*\(?\s*post\.(\w+)\b(?!\s*\?)|post\.(\w+)\s*\)?\s*\+", rest)
         self.assertEqual([a or b for a, b in raw], ["content_html"])
         # The admin actions are part of the card itself, so they arrive with it.
         card = raw_function(news_script(), "renderCard")
@@ -1437,9 +1437,14 @@ class InPlaceNews(unittest.TestCase):
         self.assertRegex(changed, r"(?:^|[;{}])\s*WS\.dropCache\(")
         self.assertRegex(changed, r"(?:^|[;{}])\s*reload\(\);")
         self.assertEqual(len(live_matches(src, r"WS\.dropCache\('news:'\);")), 1)
-        # The editor (new and edit) and the pin and delete success paths all go through it.
+        # The editor (new and edit) and the pin and delete success paths all go
+        # through it: pin and delete share write(), which calls it once the
+        # server said yes.
         self.assertEqual(len(re.findall(r"NewsEditor\.open\((?:null|post), newsChanged\)", code)), 2)
-        self.assertEqual(len(re.findall(r"\bnewsChanged\(\);", code)), 2)
+        self.assertEqual(len(re.findall(r"\bnewsChanged\(\);", code)), 1)
+        ok_path = function_body(code, "write")
+        self.assertRegex(ok_path, r"if \(!r\.ok\) throw new Error\([^)]*\);\s*WSUI\.toast\(okText, '\s*'\);\s*newsChanged\(\);")
+        self.assertEqual(len(re.findall(r"(?<!function )\bwrite\(btn, ", code)), 2)
         # reload() skips the stale-while-revalidate copy: a fresh fetch, then paint.
         self.assertRegex(top_level(function_body(code, "reload")), r"(?:^|[;{}])\s*loadPage\(true\);")
         self.assertRegex(code, r"WS\.swr\(key, fetcher, render, fresh \? \{ maxAge: 0 \} : undefined\)")
