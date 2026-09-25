@@ -1127,7 +1127,13 @@ class IntegrationsTab(unittest.TestCase):
         fail = re.search(r"\.catch\(function \(\) \{", body)
         self.assertRegex(body[fail.end():], r"^\s*settle\(ids, mine\);")
         self.assertRegex(self._mount_function("settle"), r"if \(inflight\[k\] === mine\) delete inflight\[k\];")
-        self.assertRegex(self._mount_function("newer"), r"return !b \|\| \(!!a && a >= b\);")
+        # R83: checked_at has whole-second resolution, so another card's
+        # cached entry from the same second may be staler than the answer the
+        # card already has: only a strictly newer one (or a first one) lands.
+        newer = self._mount_function("newer")
+        self.assertRegex(newer, r"\{\s*if \(!old\) return true;")
+        self.assertRegex(newer, r"return !b \|\| \(!!a && a > b\);")
+        self.assertNotRegex(newer, r">=")
 
     def test_every_state_has_a_visible_light(self):
         # Fix round 1 (2): "couldn't check" (the client's own 'unknown') and any
