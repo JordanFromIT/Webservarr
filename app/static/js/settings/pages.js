@@ -337,27 +337,21 @@
         var li = el('li', 'relative rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] ' +
           'transition-opacity motion-reduce:transition-none');
         li.setAttribute('data-page', id);
-        var line = el('div', 'grid grid-cols-[40px_minmax(0,1fr)] ' +
+        function release() {
+          window.removeEventListener('pointerup', release);
+          window.removeEventListener('pointercancel', release);
+          li.draggable = false;
+        }
+        var line = el('div', 'grid grid-cols-[40px_minmax(0,1fr)_auto] ' +
           'lg:grid-cols-[88px_40px_minmax(0,1fr)_minmax(0,1fr)_96px_56px_56px] items-center gap-3 p-3');
         line.setAttribute('role', 'group');
         line.setAttribute('aria-label', name);
 
-        var iconCell = el('div', 'self-start lg:self-center lg:col-start-2 lg:row-start-1');
-        iconCell.appendChild(api.iconPicker({ key: 'icon.nav_' + id, label: 'Icon for ' + name, compact: true }));
-        line.appendChild(iconCell);
-
-        var names = el('div', 'grid gap-2 lg:gap-3 lg:grid-cols-2 min-w-0 lg:col-start-3 lg:col-span-2 lg:row-start-1');
-        names.appendChild(nameField(api, 'sidebar.label_' + id, 'Label'));
-        names.appendChild(nameField(api, 'sidebar.sublabel_' + id, 'Sublabel', 'No sublabel'));
-        line.appendChild(names);
-
-        line.appendChild(el('span', 'hidden lg:block lg:col-start-5 lg:row-start-1 font-mono text-[13px] ' +
-          'text-frosted-blue/45 truncate', hasOwn(addresses, id) ? String(addresses[id]) : ''));
-
-        // Phones: move buttons and the switches share the row's last line.
-        // Wide screens: each is its own column.
-        var bar = el('div', 'col-span-2 flex items-center justify-between gap-3 lg:contents');
-        var moveBox = el('div', 'flex items-center gap-1 lg:col-start-1 lg:row-start-1');
+        // Cells in reading order, placed by the grid: on a wide screen one
+        // line of columns; on a phone the icon and names first, then the move
+        // buttons and the switches on a second line.
+        var moveBox = el('div', 'flex items-center gap-1 row-start-2 col-start-1 col-span-2 ' +
+          'lg:col-start-1 lg:col-span-1 lg:row-start-1');
         if (!pinned) {
           // Not a <button>: some browsers won't start a drag from inside one.
           var handle = el('span', 'hidden lg:inline-flex items-center justify-center size-10 rounded-[10px] ' +
@@ -369,10 +363,13 @@
           handle.appendChild(icon('drag_indicator', 'text-[22px]'));
           handle.setAttribute('aria-label', 'Move ' + name + '. Drag, or use the up and down arrow keys.');
           // Only the handle starts a drag, so text in the row's fields can
-          // still be selected with the mouse.
-          handle.addEventListener('pointerdown', function () { li.draggable = true; });
-          handle.addEventListener('pointerup', function () { li.draggable = false; });
-          handle.addEventListener('pointercancel', function () { li.draggable = false; });
+          // still be selected with the mouse. A press that never becomes a
+          // drag lets go wherever the pointer is released.
+          handle.addEventListener('pointerdown', function () {
+            li.draggable = true;
+            window.addEventListener('pointerup', release);
+            window.addEventListener('pointercancel', release);
+          });
           handle.addEventListener('keydown', function (e) {
             if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
             e.preventDefault();
@@ -405,9 +402,23 @@
         var exp = id === 'home' ? homeExpander(api) : id === 'requests' ? requestsExpander(api) : null;
         var toggleBtn = exp ? expandButton('More settings for ' + name) : null;
         if (toggleBtn) moveBox.appendChild(toggleBtn);
-        bar.appendChild(moveBox);
+        line.appendChild(moveBox);
 
-        var switches = el('div', 'flex items-center gap-4 lg:contents');
+        var iconCell = el('div', 'self-start row-start-1 col-start-1 lg:self-center lg:col-start-2 lg:row-start-1');
+        iconCell.appendChild(api.iconPicker({ key: 'icon.nav_' + id, label: 'Icon for ' + name, compact: true }));
+        line.appendChild(iconCell);
+
+        var names = el('div', 'grid gap-2 lg:gap-3 lg:grid-cols-2 min-w-0 row-start-1 col-start-2 col-span-2 ' +
+          'lg:col-start-3 lg:col-span-2 lg:row-start-1');
+        names.appendChild(nameField(api, 'sidebar.label_' + id, 'Label'));
+        names.appendChild(nameField(api, 'sidebar.sublabel_' + id, 'Sublabel', 'No sublabel'));
+        line.appendChild(names);
+
+        line.appendChild(el('span', 'hidden lg:block lg:col-start-5 lg:row-start-1 font-mono text-[13px] ' +
+          'text-frosted-blue/45 truncate', hasOwn(addresses, id) ? String(addresses[id]) : ''));
+
+
+        var switches = el('div', 'flex items-center gap-4 row-start-2 col-start-3 lg:contents');
         var newBox = el('label', 'flex items-center gap-2 lg:col-start-6 lg:row-start-1');
         newBox.appendChild(el('span', 'lg:hidden text-[13px] text-frosted-blue/70', 'New!'));
         newBox.appendChild(api.toggle({ key: 'sidebar.new_' + id, label: 'Show New! on ' + name, compact: true }));
@@ -428,8 +439,7 @@
         }
         switches.appendChild(newBox);
         switches.appendChild(onBox);
-        bar.appendChild(switches);
-        line.appendChild(bar);
+        line.appendChild(switches);
         li.appendChild(line);
 
         var warn = el('div', 'px-3 pb-3 empty:hidden');
