@@ -6,6 +6,7 @@ whose bodies Cloudflare replaces).
 """
 
 import asyncio
+import logging
 from typing import Optional
 
 import httpx
@@ -20,6 +21,8 @@ from app.routers.admin_settings import effective_values
 from app.services import integration_health
 from app.services.integration_health import IDS, get_health, make_client
 from app.utils import is_safe_integration_url
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -94,9 +97,22 @@ async def chaptarr_options(
     key = (values.get("integration.chaptarr.api_key") or "").strip()
     if not base or not key:
         return JSONResponse(status_code=400, content={"detail": "Chaptarr isn't set up yet"})
+    return await chaptarr_options_response(base, key)
+
+
+UNREACHABLE = "Couldn't reach Chaptarr. Check the address and try again."
+
+
+async def chaptarr_options_response(base: str, key: str):
+    """The fetch under its one deadline, every failure mapped to 4xx/503.
+    Cancellation is a BaseException, so it still propagates."""
     try:
         return await asyncio.wait_for(_fetch_chaptarr_options(base, key),
                                       timeout=integration_health.PROBE_TIMEOUT)
+    except httpx.InvalidURL:
+        return JSONResponse(status_code=400, content={"detail": "That address isn't valid. Check it and try again."})
     except (httpx.RequestError, asyncio.TimeoutError):
-        return JSONResponse(status_code=503,
-                            content={"detail": "Couldn't reach Chaptarr. Check the address and try again."})
+        return JSONResponse(status_code=503, content={"detail": UNREACHABLE})
+    except Exception as exc:  # noqa: BLE001 - never a 500; the type only, the message can hold the URL
+        logger.warning("Chaptarr options failed: %s", type(exc).__name__)
+        return JSONResponse(status_code=503, content={"detail": UNREACHABLE})

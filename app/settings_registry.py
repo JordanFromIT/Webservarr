@@ -36,6 +36,8 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Pattern, Tuple
 
+import httpx
+
 MASK = "***masked***"
 
 SIDEBAR_PAGE_IDS = ("home", "requests", "issues", "calendar", "tickets", "library", "wiki", "settings")
@@ -391,6 +393,13 @@ def _validate_url(d: SettingDef, v: str) -> Optional[str]:
         if d.allow_relative:
             return "Enter a full address starting with https://, or a path on this site"
         return "Enter a full address starting with http:// or https://"
+    else:
+        # A host httpx can't encode (an invalid IDNA name, say) would fail on
+        # every request that uses the address, so it isn't stored.
+        try:
+            httpx.URL(v)
+        except httpx.InvalidURL:
+            return "That address isn't valid"
     if d.key == "branding.logo_url":
         # The branding builder blanks any logo safe_logo_url rejects, so a logo
         # stored past that rule would silently vanish: store only what it serves.

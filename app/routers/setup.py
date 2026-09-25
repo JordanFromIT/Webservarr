@@ -9,6 +9,7 @@ out via the `setup.completed` setting.
 import hmac
 import logging
 import secrets
+from typing import Literal
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -133,6 +134,14 @@ class SetupRequest(BaseModel):
         return v
 
 
+class SetupTestConnectionRequest(BaseModel):
+    """The wizard's Plex test: Plex is the only integration it offers."""
+    setup_token: str = ""
+    service: Literal["plex"] = "plex"
+    url: str = ""
+    credentials: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -144,6 +153,33 @@ async def setup_page(request: Request):
         return RedirectResponse(url="/login", status_code=302)
     from app.pages import render_page
     return render_page("setup", request, None)
+
+
+@router.post("/api/setup/test-connection", tags=["Setup"])
+@limiter.limit("10/minute")
+async def setup_test_connection(request: Request, body: SetupTestConnectionRequest):
+    """Test the Plex details on the wizard's last step.
+
+    Nobody has a session before setup, so the wizard can't use the admin-only
+    /api/admin/test-connection. This route takes the first-run setup token
+    instead: the same trust as completing setup, which with that token can
+    create the admin account outright. Closed once setup is done. It runs the
+    status-light probe, so the token goes in a header, redirects are not
+    followed and the address is checked off the event loop."""
+    if is_setup_completed():
+        return JSONResponse(status_code=403, content={"detail": "Setup has already been completed."})
+    expected_token = get_or_create_setup_token()
+    if not body.setup_token or not hmac.compare_digest(body.setup_token, expected_token):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "The setup token isn't right. Go back to the first step and check it."},
+        )
+    from app.services.integration_health import probe_one
+    result = await probe_one("plex", {
+        "integration.plex.url": body.url.strip(),
+        "integration.plex.token": body.credentials.strip(),
+    })
+    return {"success": result["state"] == "ok", "message": result["reason"], "state": result["state"]}
 
 
 @router.post("/api/setup/complete", tags=["Setup"])

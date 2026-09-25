@@ -388,10 +388,12 @@
             testBtn.textContent = 'Testing...';
             testResult.textContent = '';
             try {
-                var resp = await fetch('/api/admin/test-connection', {
+                // Setup-only route: there is no admin session yet, so it takes
+                // the setup token from step 1 instead.
+                var resp = await fetch('/api/setup/test-connection', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ service: 'plex', url: url, credentials: token })
+                    body: JSON.stringify({ setup_token: storedStep1.token, service: 'plex', url: url, credentials: token })
                 });
                 var data = await resp.json();
                 if (resp.ok && data.success) {

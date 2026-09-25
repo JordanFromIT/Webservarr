@@ -360,7 +360,6 @@ async def setup_redirect_middleware(request: Request, call_next):
         "/api/setup/",
         "/static/",
         "/api/branding",
-        "/api/admin/test-connection",
         "/health",
     )
     if not any(path.startswith(p) for p in setup_exempt):
