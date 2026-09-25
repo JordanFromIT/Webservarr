@@ -28,7 +28,7 @@ class CategoryWrites(unittest.TestCase):
         db.add(cat)
         db.commit()
         db.add(WikiPage(title="First steps", slug="first-steps", content="x", content_html="<p>x</p>",
-                        category_id=cat.id, published=True))
+                        category_id=cat.id, published=True, author_name="Admin"))
         db.commit()
         db.close()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
