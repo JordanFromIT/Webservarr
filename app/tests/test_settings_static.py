@@ -1537,6 +1537,33 @@ class InPlaceNews(unittest.TestCase):
         self.assertEqual(len(live_matches(
             src, r"cancel\.addEventListener\('click', function \(\) \{ if \(current === session\) close\(\); \}\);")), 1)
 
+    def test_a_failed_save_says_which_post_once_its_panel_is_gone(self):
+        # "Your text is still here" is only true while the save's own panel is
+        # on screen. Replaced by another post's panel, the toast names the post
+        # (its captured title, as text) and says to open it again.
+        src = (STATIC / "js" / "news-editor.js").read_text(encoding="utf-8")
+        save = function_body(js_code_only(src), "save")
+        failed = save[save.index(".catch(function () {"):]
+        self.assertRegex(failed,
+            r"^\.catch\(function \(\) \{\s*"
+            r"if \(current === s\) UI\.toast\('[^']*', '[^']*'\);\s*"
+            r"else if \(!s\.id\) UI\.toast\('[^']*' \+ payload\.title \+ '[^']*', '[^']*'\);\s*"
+            r"else UI\.toast\('[^']*' \+ payload\.title \+ '[^']*', '[^']*'\);\s*\}\)")
+        for text in (r"'The post wasn’t saved\. Your text is still here — try again\.'",
+                     r"'Your new post “' \+ payload\.title \+ '” wasn’t saved\. Open New post and try again\.'",
+                     r"'“' \+ payload\.title \+ '” wasn’t saved\. Open it again and retry\.'"):
+            self.assertEqual(len(live_matches(src, text)), 1, text)
+
+    def test_only_the_latest_edit_click_opens(self):
+        # Edit fetches the post first; two quick clicks must open the second,
+        # whichever answer lands last, and New post outranks an Edit in flight.
+        code = js_code_only(news_script())
+        self.assertRegex(code, r"\bvar _editClick = 0;")
+        self.assertRegex(code, r"var ticket = \+\+_editClick;\s*WS\.getJSON\(")
+        self.assertRegex(code, r"\.then\(function \(post\) \{\s*if \(ticket === _editClick\) NewsEditor\.open\(post, newsChanged\);\s*\}\)")
+        self.assertRegex(code, r"\.catch\(function \(\) \{\s*if \(ticket === _editClick\) WSUI\.toast\(")
+        self.assertRegex(code, r"_editClick \+= 1;\s*NewsEditor\.open\(null, newsChanged\);")
+
     def test_a_page_started_before_a_reload_is_dropped(self):
         code = js_code_only(news_script())
         self.assertRegex(code, r"\bvar _gen = 0;")
