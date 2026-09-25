@@ -84,6 +84,15 @@ def get_or_create_setup_token() -> str:
         db.close()
 
 
+def setup_token_matches(supplied: str, expected: str) -> bool:
+    """Constant-time check of a submitted setup token. Compared as bytes:
+    compare_digest refuses str with non-ASCII characters (TypeError, a 500),
+    so a token like "café" must simply be a wrong token."""
+    if not supplied or not expected:
+        return False
+    return hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
+
+
 def is_setup_completed() -> bool:
     """Check whether initial setup has already been completed.
 
@@ -169,7 +178,7 @@ async def setup_test_connection(request: Request, body: SetupTestConnectionReque
     if is_setup_completed():
         return JSONResponse(status_code=403, content={"detail": "Setup has already been completed."})
     expected_token = get_or_create_setup_token()
-    if not body.setup_token or not hmac.compare_digest(body.setup_token, expected_token):
+    if not setup_token_matches(body.setup_token, expected_token):
         return JSONResponse(
             status_code=403,
             content={"detail": "The setup token isn't right. Go back to the first step and check it."},
@@ -195,7 +204,7 @@ async def complete_setup(request: Request, body: SetupRequest):
     # Require the first-run setup token (printed to the container logs at startup).
     # Blocks an anonymous attacker from racing to create the admin account.
     expected_token = get_or_create_setup_token()
-    if not body.setup_token or not hmac.compare_digest(body.setup_token, expected_token):
+    if not setup_token_matches(body.setup_token, expected_token):
         return JSONResponse(
             status_code=403,
             content={"detail": "Invalid or missing setup token. Check the container logs for the setup token (docker compose logs webservarr | grep -i 'setup token')."},
