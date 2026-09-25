@@ -635,6 +635,57 @@ class SignInTab(unittest.TestCase):
         self.assertNotRegex(code, r"location\.href\s*=(?!=)|location\.reload\(")
         self.assertNotRegex(code, r"\.json\(\)")
 
+    def _mount_function(self, name: str) -> str:
+        """A function declared inside the tab's mount(), as live code."""
+        code = js_code_only(SIGNIN.read_text(encoding="utf-8"))
+        m = re.search(rf"\n      function {name}\([^)]*\) \{{", code)
+        self.assertIsNotNone(m, f"mount() has no function {name}()")
+        return code[m.start():matching_brace(code, m.end() - 1) + 1]
+
+    def test_all_off_line_follows_usable_methods(self):
+        # "No method works" means on AND set up (the rule the warning uses),
+        # not just a switch reading 'true': Plex on with no connection counts
+        # for nothing.
+        body = self._mount_function("syncAll")
+        self.assertRegex(body, r"\busable\(\s*\w+\s*,\s*api\.get\s*\)")
+        self.assertNotRegex(body, r"===\s*' {4}'")         # no raw 'true' check
+        # Setup on this tab and on Integrations changes the answer too.
+        src = SIGNIN.read_text(encoding="utf-8")
+        keys = re.search(r"var METHOD_KEYS = \[([^\]]*)\]", src)
+        self.assertIsNotNone(keys, "no METHOD_KEYS")
+        for k in ("features.show_simple_auth", "features.show_plex_auth", "features.show_authentik_auth",
+                  "integration.authentik.url", "integration.authentik.client_id"):
+            self.assertIn(f"'{k}'", keys.group(1), k)
+        code = js_code_only(src)
+        self.assertRegex(code, r"METHOD_KEYS\.forEach\(function \((\w+)\) \{ api\.onChange\(\1, syncAll\); \}\)")
+        self.assertRegex(code, r"addEventListener\(' {17}', syncAll\)")
+
+    def test_authentik_fields_stay_open_while_they_hold_a_change(self):
+        # Turning Authentik off must not hide a field with a staged value (and
+        # the error the server may put on it), and clearing the address
+        # re-checks too, not only the switch.
+        body = self._mount_function("syncAk")
+        self.assertIn("api.dirtyKeys()", body)
+        self.assertRegex(body, r"\bAK_KEYS\b")
+        src = SIGNIN.read_text(encoding="utf-8")
+        keys = re.search(r"var AK_KEYS = \[([^\]]*)\]", src)
+        self.assertIsNotNone(keys, "no AK_KEYS")
+        for k in ("features.show_authentik_auth", "integration.authentik.url", "integration.authentik.app_slug",
+                  "integration.authentik.client_id", "integration.authentik.client_secret"):
+            self.assertIn(f"'{k}'", keys.group(1), k)
+        self.assertRegex(js_code_only(src), r"AK_KEYS\.forEach\(function \((\w+)\) \{ api\.onChange\(\1, syncAk\); \}\)")
+
+    def test_password_manager_hint_takes_the_name_sent(self):
+        # The name typed while the request was out isn't the one saved.
+        account = signin_function("accountForm")
+        take = re.search(r"var sentName = body\.new_username;", account)
+        send = account.find("sendAccount(body)")
+        self.assertIsNotNone(take, "the sent name isn't kept")
+        self.assertLess(take.start(), send)
+        self.assertRegex(account[send:], r"\bwho\.value = sentName;")
+        self.assertEqual(len(re.findall(r"\bwho\.value = ", account)), 2)      # set up, then the sent name
+        self.assertNotRegex(account[send:], r"\bwho\.value = (?!sentName;)")
+
     def test_plex_link_opens_integrations_even_before_the_card_exists(self):
         # Task 6.3 gives the Plex card its id. Until then go() just opens the
         # Integrations tab: only the kit looks the card up, and it skips one
