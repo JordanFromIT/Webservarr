@@ -511,9 +511,12 @@ html[data-settings-tab="notifications"] [data-settings-panel="notifications"] { 
 .ws-light-ok { background: rgb(var(--ws-status-ok)); }
 .ws-light-warn { background: rgb(var(--ws-status-warn)); }
 .ws-light-error { background: rgb(var(--ws-status-err)); }
-/* Not set up: an empty ring, so "off" reads from the shape and not from a hue
-   (the accent is a brand colour and, filled, would look like a live status). */
-.ws-light-unconfigured { background: transparent; box-shadow: inset 0 0 0 2px rgb(var(--ws-status-off) / .6); }
+.ws-light-unconfigured { background: rgb(var(--color-text) / .25); }
+/* Settings > Integrations "not set up": an empty ring, so "off" reads from the
+   shape and not from a hue (the accent is a brand colour and, filled, would
+   look like a live status). Its own class: ws-light-unconfigured is also the
+   info toast's tone and stays a filled dot. */
+.ws-light-off { background: transparent; box-shadow: inset 0 0 0 2px rgb(var(--ws-status-off) / .6); }
 .ws-light-checking { background: rgb(var(--color-text) / .25); animation: ws-pulse 1.2s ease-in-out infinite; }
 @keyframes ws-pulse { 50% { opacity: .35; } }
 

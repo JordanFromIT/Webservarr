@@ -60,7 +60,12 @@
   // Saving either of these changes what Chaptarr can list, so the choices load again.
   var CHAPTARR_CONN = ['integration.chaptarr.url', 'integration.chaptarr.api_key'];
   var NETDATA_KEYS = ['netdata.cpu_label', 'netdata.ram_label', 'netdata.net_label', 'netdata.net_unit', 'netdata.net_max'];
-  var LIGHT = { ok: 'ws-light-ok', warn: 'ws-light-warn', error: 'ws-light-error', unconfigured: 'ws-light-unconfigured' };
+  // "Not set up" is its own empty ring (ws-light-off); "couldn't check" is the
+  // neutral filled dot (ws-light-unconfigured, also the info toast's tone).
+  var LIGHT = { ok: 'ws-light-ok', warn: 'ws-light-warn', error: 'ws-light-error', unconfigured: 'ws-light-off',
+                unknown: 'ws-light-unconfigured' };
+  // Plain words for the network units. The units themselves are the setting's choices, from meta.
+  var UNIT_LABELS = { mbps: 'Megabits per second (Mbps)', MBps: 'Megabytes per second (MB/s)' };
 
   var MSG = {
     checking: 'Checking…',
@@ -93,7 +98,8 @@
     if (!t) return '';
     var s = Math.max(0, Math.round((Date.now() - t) / 1000));
     if (s < 60) return 'checked just now';
-    if (s < 3600) return 'checked ' + Math.round(s / 60) + ' min ago';
+    var m = Math.round(s / 60);
+    if (m < 60) return 'checked ' + m + ' min ago';
     return 'checked ' + Math.round(s / 3600) + ' h ago';
   }
 
@@ -118,14 +124,28 @@
       var cards = {};
       var health = {};
       // Answers can land out of order (a slow first check, then a card's
-      // re-check). Each request is numbered; a card only takes an answer at
-      // least as new as the last request made for it.
-      var seq = 0, asked = {};
+      // re-check). Each request is numbered. A card takes the entry for
+      // itself from an answer to a request that asked for it, and only if no
+      // newer request for it was made since. Every answer also carries the
+      // other cards' cached entries: a card takes one of those only while
+      // nothing is being asked for it and the entry is no older than its own.
+      var seq = 0, asked = {}, inflight = {};
+      var UNAVAILABLE = function () { return { state: 'unknown', reason: MSG.unavailable, checked_at: '' }; };
+
+      function newer(entry, old) {
+        if (!old) return true;
+        var a = Date.parse(entry.checked_at || ''), b = Date.parse(old.checked_at || '');
+        return !b || (!!a && a >= b);
+      }
+
+      function settle(ids, mine) {
+        ids.forEach(function (k) { if (inflight[k] === mine) delete inflight[k]; });
+      }
 
       function paint(id) {
         var c = cards[id], h = health[id];
         if (!c) return;
-        var light = 'ws-light ' + (h ? (LIGHT[h.state] || '') : 'ws-light-checking');
+        var light = 'ws-light ' + (h ? (LIGHT[h.state] || LIGHT.unknown) : 'ws-light-checking');
         if (c.light.className !== light) c.light.className = light;
         var reason = h ? String(h.reason || '') : MSG.checking;
         setText(c.reason, reason);
@@ -136,7 +156,7 @@
       function refresh(id) {
         var mine = ++seq;
         var ids = id ? [id] : Object.keys(cards);
-        ids.forEach(function (k) { asked[k] = mine; });
+        ids.forEach(function (k) { asked[k] = mine; inflight[k] = mine; });
         if (id) { delete health[id]; paint(id); }
         var url = HEALTH_URL + (id ? '?refresh=1&service=' + encodeURIComponent(id) : '');
         return fetch(url, { credentials: 'same-origin' }).then(function (r) {
@@ -144,14 +164,22 @@
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
         }).then(function (data) {
+          settle(ids, mine);
           var all = (data && data.integrations) || {};
           Object.keys(cards).forEach(function (k) {
-            if (all[k] && typeof all[k] === 'object' && mine >= (asked[k] || 0)) health[k] = all[k];
+            var entry = all[k] && typeof all[k] === 'object' ? all[k] : null;
+            if (ids.indexOf(k) >= 0) {
+              // Asked for here: the answer, or "couldn't check" if it has none.
+              if (mine >= (asked[k] || 0)) health[k] = entry || UNAVAILABLE();
+            } else if (entry && !inflight[k] && newer(entry, health[k])) {
+              health[k] = entry;
+            }
             paint(k);
           });
         }).catch(function () {
+          settle(ids, mine);
           ids.forEach(function (k) {
-            if (!health[k] && mine >= (asked[k] || 0)) health[k] = { state: 'unknown', reason: MSG.unavailable, checked_at: '' };
+            if (!health[k] && mine >= (asked[k] || 0)) health[k] = UNAVAILABLE();
             paint(k);
           });
         });
@@ -243,8 +271,12 @@
         grid.appendChild(api.text({ key: 'netdata.cpu_label', label: 'CPU gauge label', placeholder: 'For example 8 cores' }));
         grid.appendChild(api.text({ key: 'netdata.ram_label', label: 'Memory gauge label', placeholder: 'Leave empty to detect' }));
         grid.appendChild(api.text({ key: 'netdata.net_label', label: 'Network gauge label', placeholder: 'Leave empty to detect' }));
+        var unit = WSSettings.metaFor('netdata.net_unit');
+        var units = unit && Array.isArray(unit.choices) ? unit.choices : [];
         grid.appendChild(api.select({ key: 'netdata.net_unit', label: 'Network unit',
-          options: [{ value: 'mbps', label: 'Megabits per second (Mbps)' }, { value: 'MBps', label: 'Megabytes per second (MB/s)' }] }));
+          options: units.map(function (u) {
+            return { value: u, label: Object.prototype.hasOwnProperty.call(UNIT_LABELS, u) ? UNIT_LABELS[u] : u };
+          }) }));
         grid.appendChild(api.text({ key: 'netdata.net_max', label: 'Network gauge maximum', inputType: 'number',
           help: 'The speed that fills the gauge, in the unit above.' }));
         body.appendChild(grid);
@@ -310,8 +342,16 @@
         body.appendChild(actions);
         root.appendChild(body);
 
+        // Each Test is numbered; Save, Discard and a newer Test move the
+        // number on, so an answer still in flight from before is dropped.
+        var testSeq = 0;
+        function clearResult() {
+          testSeq += 1;
+          result.replaceChildren();
+        }
+
         function showResult(state, message) {
-          var dot = el('span', 'ws-light ' + (state === 'checking' ? 'ws-light-checking' : (LIGHT[state] || '')));
+          var dot = el('span', 'ws-light ' + (state === 'checking' ? 'ws-light-checking' : (LIGHT[state] || LIGHT.unknown)));
           dot.setAttribute('aria-hidden', 'true');
           result.replaceChildren(dot, el('span', 'min-w-0', message));
         }
@@ -335,6 +375,7 @@
           var payload = { service: id, url: c.url ? api.get(c.url) : '',
                           credentials: c.secret ? api.get(c.secret[0]) : null };
           if (id === 'uptime_kuma') payload.slug = api.get('integration.uptime_kuma.slug');
+          var mine = ++testSeq;
           showResult('checking', MSG.testing);
           testBtn.disabled = true;
           fetch('/api/admin/test-connection', {
@@ -342,13 +383,14 @@
             credentials: 'same-origin'
           }).then(readJson).then(function (res) {
             if (res.status === 401) { WSSettings.leave('/login'); return; }
+            if (mine !== testSeq) return;
             var d = res.d;
             var message = d.message || (typeof d.detail === 'string' && d.detail) || MSG.testFailed;
-            showResult(LIGHT[d.state] ? d.state : (res.ok ? '' : 'error'), String(message));
+            showResult(LIGHT[d.state] ? d.state : (res.ok ? 'unknown' : 'error'), String(message));
             // The saved values were tested: the light takes the fresh answer too.
             if (res.ok && !touches(api.dirtyKeys(), keysOf(id))) refresh(id);
           }).catch(function () {
-            showResult('error', MSG.testFailed);
+            if (mine === testSeq) showResult('error', MSG.testFailed);
           }).then(function () { testBtn.disabled = false; });
         });
 
@@ -366,7 +408,7 @@
           });
         });
 
-        cards[id] = { light: light, reason: reason, when: when, result: result };
+        cards[id] = { light: light, reason: reason, when: when, clearResult: clearResult };
         return root;
       }
 
@@ -387,12 +429,12 @@
       document.addEventListener('ws-settings:saved', function (e) {
         var keys = e.detail && Array.isArray(e.detail.keys) ? e.detail.keys : [];
         Object.keys(CARDS).forEach(function (id) {
-          if (touches(keys, keysOf(id))) { cards[id].result.replaceChildren(); refresh(id); }
+          if (touches(keys, keysOf(id))) { cards[id].clearResult(); refresh(id); }
         });
         if (chaptarr && touches(keys, CHAPTARR_CONN)) loadChoices();
       });
       api.onDiscard(function () {
-        Object.keys(cards).forEach(function (id) { cards[id].result.replaceChildren(); });
+        Object.keys(cards).forEach(function (id) { cards[id].clearResult(); });
       });
       // "checked … ago" keeps counting while the tab is open.
       if (window.WS && WS.poll) {
