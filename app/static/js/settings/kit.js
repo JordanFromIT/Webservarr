@@ -201,6 +201,8 @@
     }
 
     api.get = function (key) { return current(t, key); };
+    // The last-saved value (what Discard returns to), never a staged one.
+    api.saved = function (key) { return baseline(key); };
     api.set = function (key, value) { stage(key, value, false); };
     api.track = function (key, b) { t.bindings[key] = b; b.set(current(t, key)); };
     api.stageDefaults = function (keys) {
@@ -433,6 +435,12 @@
       input.type = 'password';
       input.id = uid(o.key);
       input.autocomplete = 'new-password';
+      // A key is not a password: password managers neither offer to save it
+      // nor fill a saved login into it (the fields sit outside any <form>).
+      input.setAttribute('data-1p-ignore', '');
+      input.setAttribute('data-lpignore', 'true');
+      input.setAttribute('data-bwignore', '');
+      input.setAttribute('data-form-type', 'other');
       input.spellcheck = false;
       input.setAttribute('aria-labelledby', label.id);
       var cancel = el('button', cls.btnQuiet, 'Cancel');
