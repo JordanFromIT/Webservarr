@@ -100,6 +100,10 @@ class SeededPostOpensRendered(unittest.TestCase):
         self.assertIn("<strong>Note:</strong>", html)
         self.assertIn("<strong>News</strong> page", html)
         self.assertNotIn("**", html)
+        # The affected services are a real list (a blank line before it in the seed).
+        self.assertIn("<ul>", html)
+        self.assertIn("<li>Media streaming (Plex)</li>", html)
+        self.assertIn("<li>Media requests (Seerr)</li>", html)
 
 
 if __name__ == "__main__":

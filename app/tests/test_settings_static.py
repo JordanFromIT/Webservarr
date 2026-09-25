@@ -1405,7 +1405,7 @@ class InPlaceNews(unittest.TestCase):
         self.assertRegex(h, r'id="newsNewPost"[^>]*class="[^"]*ws-admin-only')
         self.assertIn('id="newsEditor"', h)
         self.assertLess(h.index("/static/js/ui.js?v="), h.index("/static/js/news-editor.js?v="))
-        self.assertIn("published_only=false", h)
+        self.assertEqual(len(live_matches(news_script(), r"\(isAdmin \? '&published_only=false' : ''\)")), 1)
         home = (STATIC / "index.html").read_text(encoding="utf-8")
         self.assertRegex(home, r'<a[^>]*href="/news"[^>]*class="[^"]*ws-admin-only[^"]*"[^>]*>\s*Manage news')
 
@@ -1462,10 +1462,11 @@ class InPlaceNews(unittest.TestCase):
 
     def test_delete_asks_in_the_dialog_with_the_title_as_text(self):
         src = news_script()
-        self.assertRegex(src, r"WSUI\.confirm\(\{ title: 'Delete this post\?', body: '“' \+ btn\.getAttribute\('data-title'\) \+")
-        self.assertRegex(src, r"danger: true \}\)")
+        self.assertEqual(len(live_matches(
+            src, r"WSUI\.confirm\(\{ title: 'Delete this post\?', body: '“' \+ btn\.getAttribute\('data-title'\) \+")), 1)
+        self.assertEqual(len(live_matches(src, r"cancelLabel: 'Keep it', danger: true \}\)")), 1)
         # The title reaches the attribute escaped.
-        self.assertIn("data-title=\"' + escapeHtml(post.title) + '\"", src)
+        self.assertEqual(len(live_matches(src, r"'\" data-title=\"' \+ escapeHtml\(post\.title\) \+")), 1)
 
     def test_editor_loads_saved_html_inertly(self):
         src = (STATIC / "js" / "news-editor.js").read_text(encoding="utf-8")
@@ -1481,6 +1482,46 @@ class InPlaceNews(unittest.TestCase):
         src = (STATIC / "js" / "news-editor.js").read_text(encoding="utf-8")
         loads = live_matches(src, r"setEditorHtml\(editor, [^;]*\);")
         self.assertEqual([m.group(0) for m in loads], ["setEditorHtml(editor, post.content_html || post.content);"])
+
+    def test_link_and_image_addresses_are_parsed_not_prefix_matched(self):
+        # A prefix regex let "/\\evil.com" through (a backslash counts as "/").
+        # The address is parsed against this origin; a backslash or a leading
+        # "//" is refused outright; only http(s), this site's paths and mailto: pass.
+        src = (STATIC / "js" / "news-editor.js").read_text(encoding="utf-8")
+        code = js_code_only(src)
+        self.assertNotIn("SAFE_URL", code)
+        body = function_body(code, "safeUrl")
+        self.assertIn("new URL(v, location.origin)", body)
+        for line in (r"v\.indexOf\('\\\\'\) !== -1",
+                     r"v\.indexOf\('//'\) === 0",
+                     r"try \{ u = new URL\(v, location\.origin\); \} catch \(e\) \{ return null; \}",
+                     r"if \(u\.protocol === 'mailto:'\) return v;",
+                     r"if \(u\.protocol !== 'http:' && u\.protocol !== 'https:'\) return null;",
+                     r"return v\.charAt\(0\) === '/' && u\.origin === location\.origin \? v : null;"):
+            self.assertEqual(len(live_matches(src, line)), 1, line)
+        # Both the link and the image dialog use it, and insert what it returned.
+        self.assertEqual(len(re.findall(r"var url = safeUrl\(v\.url\);\s*if \(!url\)", code)), 2)
+        self.assertIn("a.href = url;", code)
+        self.assertIn("img.src = url;", code)
+
+    def test_a_save_in_flight_keeps_its_callback_and_cancel_waits(self):
+        code = js_code_only((STATIC / "js" / "news-editor.js").read_text(encoding="utf-8"))
+        body = function_body(code, "save")
+        self.assertRegex(body, r"var cb = done;\s*publish\.disabled = draft\.disabled = cancel\.disabled = true;")
+        self.assertIn("publish.disabled = draft.disabled = cancel.disabled = false;", body)
+        after = body[body.index("fetch("):]
+        self.assertNotRegex(after, r"\bdone\b")
+        self.assertRegex(after, r"close\(\);\s*if \(cb\) cb\(\);")
+
+    def test_a_page_started_before_a_reload_is_dropped(self):
+        code = js_code_only(news_script())
+        self.assertRegex(code, r"\bvar _gen = 0;")
+        self.assertRegex(top_level(function_body(code, "reload")), r"_gen \+= 1;\s*_offset = 0;\s*loadPage\(true\);")
+        load = function_body(code, "loadPage")
+        self.assertRegex(top_level(load), r"(?:^|[;{}])\s*var gen = _gen;")
+        self.assertRegex(function_body(code, "render"), r"^\s*if \(gen !== _gen\) return;")
+        catch = load[load.index("catch (err)"):]
+        self.assertRegex(catch, r"^catch \(err\) \{\s*if \(gen !== _gen\) return;")
 
     def test_home_news_links_hold_still(self):
         home = (STATIC / "index.html").read_text(encoding="utf-8")
