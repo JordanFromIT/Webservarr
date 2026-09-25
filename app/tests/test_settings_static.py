@@ -1474,6 +1474,14 @@ class InPlaceNews(unittest.TestCase):
         writes = live_matches(src, r"\.innerHTML\s*=(?!=)[^;]*;")
         self.assertEqual([w.group(0) for w in writes], [".innerHTML = '';"])
 
+    def test_editor_opens_the_rendered_copy(self):
+        # content_html is the server's sanitised HTML; for a seeded post
+        # content is Markdown, which would open as raw text. The Markdown copy
+        # is only the fallback.
+        src = (STATIC / "js" / "news-editor.js").read_text(encoding="utf-8")
+        loads = live_matches(src, r"setEditorHtml\(editor, [^;]*\);")
+        self.assertEqual([m.group(0) for m in loads], ["setEditorHtml(editor, post.content_html || post.content);"])
+
     def test_home_news_links_hold_still(self):
         home = (STATIC / "index.html").read_text(encoding="utf-8")
         # "View all" reserves its space from the first paint (invisible, not

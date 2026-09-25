@@ -67,5 +67,40 @@ class DraftGating(unittest.TestCase):
         self.assertEqual(titles, ["Live post"])
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class SeededPostOpensRendered(unittest.TestCase):
+    """The seeded posts keep Markdown in `content` and rendered HTML in
+    `content_html`. The /news editor opens content_html, so an admin's single
+    post read must carry it, rendered, next to the Markdown copy."""
+
+    def setUp(self):
+        from app.seed import seed_default_news
+
+        self.Session = helpers.make_sessionmaker()
+        db = self.Session()
+        seed_default_news(db)
+        db.close()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+
+    def tearDown(self):
+        helpers.reset_overrides()
+        self.setup_patch.stop()
+
+    def test_admin_read_of_a_seeded_post_carries_rendered_html(self):
+        client = helpers.api_client(self.Session, helpers.ADMIN)
+        posts = client.get("/api/news/?published_only=false&limit=21").json()
+        example = next(p for p in posts if p["title"].startswith("[Example]"))
+        r = client.get(f"/api/news/{example['id']}")
+        self.assertEqual(r.status_code, 200, r.text)
+        post = r.json()
+        self.assertIn("**Note:**", post["content"])            # the Markdown copy
+        html = post["content_html"]                              # what the editor opens
+        self.assertIn("<blockquote>", html)
+        self.assertIn("<strong>Note:</strong>", html)
+        self.assertIn("<strong>News</strong> page", html)
+        self.assertNotIn("**", html)
+
+
 if __name__ == "__main__":
     unittest.main()
