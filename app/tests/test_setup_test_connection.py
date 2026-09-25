@@ -96,6 +96,17 @@ class SetupTestConnection(unittest.TestCase):
         self.assertEqual(r.status_code, 403, r.text)
         self.assertEqual(calls, [])
 
+    def test_closed_once_setup_is_done_even_if_the_token_still_matched(self):
+        # The completion check comes first, as in complete_setup: it doesn't
+        # rely on the token getter having emptied.
+        self.completed = True
+        calls = []
+        with mock.patch("app.routers.setup.get_or_create_setup_token", return_value=SETUP_TOKEN):
+            r = self.post(BODY, calls)
+        self.assertEqual(r.status_code, 403, r.text)
+        self.assertEqual(r.json(), {"detail": "Setup has already been completed."})
+        self.assertEqual(calls, [])
+
     def test_plex_only(self):
         calls = []
         r = self.post(dict(BODY, service="sonarr"), calls)
