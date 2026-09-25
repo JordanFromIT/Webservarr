@@ -92,6 +92,16 @@ class Mapping(unittest.TestCase):
         self.assertEqual(health.map_response("chaptarr", 200, [{"path": "/ebooks/"}],
                                              {"integration.chaptarr.root_folder": "/ebooks"})[0], "ok")
 
+    def test_chaptarr_missing_audiobook_folder_is_amber(self):
+        state, reason = health.map_response("chaptarr", 200, [{"path": "/ebooks"}],
+                                            {"integration.chaptarr.audiobook_root_folder": "/audiobooks"})
+        self.assertEqual(state, "warn")
+        self.assertIn("/audiobooks", reason)
+        self.assertIn("audiobook", reason)
+        self.assertEqual(health.map_response("chaptarr", 200, [{"path": "/ebooks"}, {"path": "/audiobooks/"}],
+                                             {"integration.chaptarr.root_folder": "/ebooks",
+                                              "integration.chaptarr.audiobook_root_folder": "/audiobooks"})[0], "ok")
+
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class Probing(unittest.TestCase):
@@ -149,6 +159,115 @@ class Probing(unittest.TestCase):
         self.assertEqual(fresh["integrations"]["radarr"]["state"], "ok")
         write.assert_called_once()
 
+    def test_probes_run_in_parallel(self):
+        # Three probes that never answer: side by side they finish in about one
+        # PROBE_TIMEOUT; one after another they would take three.
+        async def slow():
+            await asyncio.sleep(5)
+            return _Resp(200, {})
+        calls = []
+        routes = {"192.168.1.5": slow, "192.168.1.6": slow, "192.168.1.7": slow}
+        with mock.patch.object(health, "PROBE_TIMEOUT", 0.5), \
+             mock.patch.object(health.httpx, "AsyncClient", fake_factory(routes, calls)):
+            started = time.monotonic()
+            results = asyncio.run(health.check_all(self.VALUES))
+            elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 2 * 0.5)
+        for service in ("sonarr", "radarr", "uptime_kuma"):
+            self.assertEqual(results[service]["state"], "error", service)
+
+    def test_slow_dns_is_bounded_and_does_not_block_the_loop(self):
+        # A hostname whose lookup hangs: the address check must run off the
+        # event loop and share the probe's one PROBE_TIMEOUT deadline.
+        import socket
+        import threading
+        real_getaddrinfo = socket.getaddrinfo
+        release = threading.Event()
+
+        def getaddrinfo(host, *args, **kwargs):
+            if host == "slow-dns.example":
+                release.wait(3)
+                raise socket.gaierror("lookup timed out")
+            return real_getaddrinfo(host, *args, **kwargs)
+
+        values = dict(self.VALUES, **{"integration.sonarr.url": "http://slow-dns.example:8989"})
+        calls = []
+
+        async def run():
+            ticks, running = [], [True]
+
+            async def heartbeat():
+                last = time.monotonic()
+                while running[0]:
+                    await asyncio.sleep(0.02)
+                    now = time.monotonic()
+                    ticks.append(now - last)
+                    last = now
+
+            beat = asyncio.create_task(heartbeat())
+            await asyncio.sleep(0.05)
+            started = time.monotonic()
+            try:
+                results = await health.check_all(values)
+            finally:
+                elapsed = time.monotonic() - started
+                release.set()      # free the worker thread so asyncio.run can shut down
+            await asyncio.sleep(0.05)
+            running[0] = False
+            await beat
+            return results, elapsed, max(ticks)
+
+        with mock.patch.object(health, "PROBE_TIMEOUT", 0.3), \
+             mock.patch("socket.getaddrinfo", getaddrinfo), \
+             mock.patch.object(health.httpx, "AsyncClient", fake_factory({}, calls)):
+            results, elapsed, worst_gap = asyncio.run(run())
+        self.assertLess(elapsed, 0.3 + 0.5)
+        self.assertEqual(results["sonarr"]["state"], "error")
+        self.assertEqual(results["radarr"]["state"], "ok")
+        self.assertEqual(results["uptime_kuma"]["state"], "ok")
+        self.assertLess(worst_gap, 0.2)
+
+    def test_a_cache_that_is_not_a_map_is_cold(self):
+        fresh = {i: {"state": "ok", "reason": "Connected", "checked_at": "y"} for i in health.IDS}
+        for bad in ([1, 2], "stale", 7, {"integrations": ["sonarr"]}, {"integrations": "x"},
+                    {"integrations": {i: "ok" for i in health.IDS}}):
+            with self.subTest(bad=bad):
+                check = mock.AsyncMock(return_value=fresh)
+                with mock.patch.object(health, "_cache_read", mock.AsyncMock(return_value=bad)), \
+                     mock.patch.object(health, "_cache_write", mock.AsyncMock()), \
+                     mock.patch.object(health, "check_all", check):
+                    served = asyncio.run(health.get_health({}))
+                    refreshed = asyncio.run(health.get_health({}, refresh=True, only="sonarr"))
+                self.assertEqual(served["integrations"], fresh)
+                self.assertEqual(refreshed["integrations"], fresh)
+                # Cold cache: even a single-service refresh checks everything.
+                self.assertEqual(check.call_args_list, [mock.call({}), mock.call({})])
+
+    def test_cache_round_trips_through_redis(self):
+        class FakeRedis:
+            def __init__(self):
+                self.store, self.sets = {}, []
+
+            async def get(self, key):
+                return self.store.get(key)
+
+            async def set(self, key, value, ex=None):
+                self.sets.append((key, ex))
+                self.store[key] = value.encode() if isinstance(value, str) else value
+
+        from app.auth import session_manager
+        redis = FakeRedis()
+        fresh = {i: {"state": "ok", "reason": "Connected", "checked_at": "y"} for i in health.IDS}
+        check = mock.AsyncMock(return_value=fresh)
+        with mock.patch.object(session_manager, "get_redis", mock.AsyncMock(return_value=redis)), \
+             mock.patch.object(health, "check_all", check):
+            first = asyncio.run(health.get_health({}))
+            second = asyncio.run(health.get_health({}))
+        self.assertEqual(redis.sets, [("webservarr:cache:integration-health", 30)])
+        self.assertEqual(json.loads(redis.store["webservarr:cache:integration-health"]), first)
+        self.assertEqual(second, first)
+        check.assert_called_once_with({})
+
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class Endpoint(unittest.TestCase):
@@ -174,6 +293,29 @@ class Endpoint(unittest.TestCase):
         helpers.reset_overrides()
         member = helpers.api_client(self.Session, helpers.MEMBER)
         self.assertEqual(member.get("/api/admin/integrations/health").status_code, 403)
+
+    def test_rate_limited_to_twenty_a_minute(self):
+        # The real limiter storage is the Redis the running instance shares, so
+        # this test counts in a private in-memory store, reset before and after.
+        from limits.storage import MemoryStorage
+        from limits.strategies import FixedWindowRateLimiter
+        from app.limiter import limiter
+        from app.routers import admin_integrations
+        saved = (limiter._storage, limiter._limiter)
+        storage = MemoryStorage()
+        limiter._storage, limiter._limiter = storage, FixedWindowRateLimiter(storage)
+        try:
+            limiter.reset()
+            admin = helpers.api_client(self.Session)
+            helpers.set_rate_limits(True)
+            payload = {"checked_at": "t", "integrations": {}}
+            with mock.patch.object(admin_integrations, "get_health", mock.AsyncMock(return_value=payload)):
+                codes = [admin.get("/api/admin/integrations/health").status_code for _ in range(21)]
+            self.assertEqual(codes[:20], [200] * 20)
+            self.assertEqual(codes[20], 429)
+        finally:
+            limiter.reset()
+            limiter._storage, limiter._limiter = saved
 
 
 # Distinctive credential strings: if any reaches a result, a reason or the
