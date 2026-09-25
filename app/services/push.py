@@ -38,32 +38,59 @@ DEFAULT_PUSH_ICON = "/static/webservarr-192.png"
 # Notifications. In Redis, because the two uvicorn workers share no memory and
 # must report the same answer.
 LAST_PUSH_KEY = "webservarr:push:last"
+# Recording runs after every dispatch (the poller's loops, the admin test
+# push), so a slow Redis must never hold one up: each call gives up after this.
+LAST_PUSH_REDIS_TIMEOUT = 1.0
 
 
 async def _record_last_push(category: str, result: Dict[str, int]) -> None:
     """Remember a push that tried at least one device; anything else is ignored."""
     if not result.get("attempted"):
         return
-    try:
+    record = json.dumps({
+        "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "category": category,
+        "attempted": int(result["attempted"]),
+        "succeeded": int(result["succeeded"]),
+    })
+
+    async def _write() -> None:
         from app.auth import session_manager
         redis = await session_manager.get_redis()
-        await redis.set(LAST_PUSH_KEY, json.dumps({
-            "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "category": category,
-            "attempted": int(result["attempted"]),
-            "succeeded": int(result["succeeded"]),
-        }))
+        await redis.set(LAST_PUSH_KEY, record)
+
+    try:
+        await asyncio.wait_for(_write(), timeout=LAST_PUSH_REDIS_TIMEOUT)
     except Exception as exc:  # noqa: BLE001 - reporting must never break sending
         logger.debug("Could not record the last push: %s", exc)
 
 
+def _last_push_shape(value) -> Optional[dict]:
+    """``value`` cut to the four PushStatus fields when each has its type, else None."""
+    if not isinstance(value, dict):
+        return None
+    at, category = value.get("at"), value.get("category")
+    attempted, succeeded = value.get("attempted"), value.get("succeeded")
+    if not isinstance(at, str) or not isinstance(category, str):
+        return None
+    # bool is an int subclass; True is not a count.
+    for n in (attempted, succeeded):
+        if not isinstance(n, int) or isinstance(n, bool):
+            return None
+    return {"at": at, "category": category, "attempted": attempted, "succeeded": succeeded}
+
+
 async def read_last_push() -> Optional[dict]:
-    """The last recorded push, or None when there is none or Redis can't say."""
-    try:
+    """The last recorded push, or None when there is none, it is malformed, or
+    Redis can't say within LAST_PUSH_REDIS_TIMEOUT."""
+    async def _read():
         from app.auth import session_manager
         redis = await session_manager.get_redis()
-        raw = await redis.get(LAST_PUSH_KEY)
-        return json.loads(raw) if raw else None
+        return await redis.get(LAST_PUSH_KEY)
+
+    try:
+        raw = await asyncio.wait_for(_read(), timeout=LAST_PUSH_REDIS_TIMEOUT)
+        return _last_push_shape(json.loads(raw)) if raw else None
     except Exception:  # noqa: BLE001
         return None
 
