@@ -562,6 +562,23 @@ class ShellRendering(unittest.TestCase):
         self.assertRegex(code, r"document\.title = siteName \+ suffix;")
         self.assertNotRegex(code, r"document\.title = data\.app_name")
 
+    def test_theme_loader_quotes_the_font_like_the_server(self):
+        # A family with a word that starts with a digit ("Exo 2", "Source Sans
+        # 3") is only a valid font-family when quoted. The loader's inline
+        # value beats the server's #ws-theme rule, so it quotes the same way.
+        src = static_text("js", "theme-loader.js")
+        expr = r"""'"' \+ data\.font \+ '", sans-serif'"""
+        self.assertEqual(len(live_matches(src, rf"setProperty\('--font-display', {expr}\)")), 1)
+        # No other live write of the variable (a comment can't count either way).
+        self.assertEqual(len(live_matches(src, r"setProperty\('--font-display',")), 1)
+        # Parity with the server for the names that need the quotes.
+        for family in ("Exo 2", "Source Sans 3", "Spline Sans"):
+            with self.subTest(family=family):
+                server = re.search(r"--font-display:([^;}]*)", pages.theme_style(branding(**{"theme.font": family})))
+                self.assertIsNotNone(server)
+                loader = '"' + family + '", sans-serif'     # what the pinned expression builds
+                self.assertEqual(loader.replace(", ", ","), server.group(1))
+
 
 class NavModel(unittest.TestCase):
     def nav_hrefs(self, out):

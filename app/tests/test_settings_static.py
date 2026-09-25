@@ -421,8 +421,8 @@ class AppearanceTab(unittest.TestCase):
         guard = appearance_function("fontGuard")
         self.assertTrue(live_matches(appearance_function("fontGuard", code=False),
                                      r"WSSettings\.metaFor\('theme\.font'\)"), "the guard doesn't read meta")
-        self.assertRegex(appearance_function("fontGuard", code=False),
-                         r"new RegExp\('\^\(\?:' \+ \w+\.pattern \+ '\)\$'\)")   # anchored
+        self.assertTrue(live_matches(appearance_function("fontGuard", code=False),
+                                     r"new RegExp\('\^\(\?:' \+ \w+\.pattern \+ '\)\$'\)"), "not anchored")
         self.assertIn(".pattern", guard)
         # Every test the file runs is the guard built from meta.
         made = re.search(r"\b(\w+) = fontGuard\(\)", code)
@@ -470,11 +470,47 @@ class AppearanceTab(unittest.TestCase):
         self.assertRegex(revert, r"style\.setProperty\([^)]*pageFontVar\)")
         self.assertRegex(revert, r"style\.removeProperty\(")
         revert_src = appearance_function("revertFont", code=False)
-        self.assertIn("querySelectorAll('link[data-ws-font-preview]')", revert_src)
-        self.assertIn("'--font-display'", revert_src)
+        self.assertTrue(live_matches(revert_src, r"querySelectorAll\('link\[data-ws-font-preview\]'\)"),
+                        "the revert doesn't remove the preview stylesheets")
+        self.assertTrue(live_matches(revert_src, r"setProperty\('--font-display', pageFontVar\)"))
+        self.assertTrue(live_matches(revert_src, r"removeProperty\('--font-display'\)"))
         # Every preview stylesheet carries the mark the revert looks for.
         self.assertTrue(live_matches(src, r"setAttribute\('data-ws-font-preview', ''\)"))
         self.assertTrue(live_matches(src, r"style\.setProperty\('--font-display', "))
+
+    def test_a_saved_font_becomes_the_page_font(self):
+        # After a save the font on screen is the saved one, served by the
+        # preview stylesheet. A later edit + Discard must return to it at once
+        # (the revert path), not re-fetch it, so a save moves pageFont and
+        # pageFontVar to the saved font.
+        src = APPEARANCE.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        hook = re.search(r"api\.onSaved\(function \((\w+)\) \{", code)
+        self.assertIsNotNone(hook, "nothing listens for a save")
+        body = code[hook.end() - 1:matching_brace(code, hook.end() - 1) + 1]
+        self.assertRegex(body, rf"{hook.group(1)}\.indexOf\(' {{10}}'\)")
+        self.assertRegex(body, r"\bpageFont = api\.get\(' {10}'\)")
+        body_src = src[src.index("api.onSaved(function ("):]
+        self.assertTrue(live_matches(body_src[:body_src.index("});") + 3], r"api\.get\('theme\.font'\)"))
+        self.assertRegex(body, r"\bpromote\(")
+        # Promoting takes the stylesheet out of the previews and makes the
+        # variable as it stands the one a revert restores.
+        promote = appearance_function("promote")
+        self.assertRegex(promote, r"\.removeAttribute\(' {20}'\)")
+        self.assertRegex(promote, r"\bpageFontVar = root\.style\.getPropertyValue\(' {14}'\)")
+        self.assertRegex(promote, r"\bbaseFont = pageFont\b")
+        self.assertTrue(live_matches(appearance_function("promote", code=False),
+                                     r"removeAttribute\('data-ws-font-preview'\)"))
+        # A saved font still loading is promoted when it lands.
+        self.assertRegex(appearance_function("loadFont"), r"if \(name === pageFont\) promote\(link\)")
+        # A revert while the saved font isn't on screen yet fetches it.
+        self.assertRegex(appearance_function("revertFont"), r"if \(baseFont !== pageFont\b[^)]*\) loadFont\(pageFont\)")
+
+    def test_typing_waits_long_enough(self):
+        # Half-typed names shouldn't be fetched between keystrokes.
+        m = re.search(r"\bvar TYPING_DELAY = (\d+);", js_code_only(APPEARANCE.read_text(encoding="utf-8")))
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)), 500)
 
     def test_reset_asks_first(self):
         code = js_code_only(APPEARANCE.read_text(encoding="utf-8"))
