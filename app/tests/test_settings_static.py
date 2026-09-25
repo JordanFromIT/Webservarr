@@ -52,7 +52,6 @@ SHELL_JS = {"js/theme-loader.js", "js/auth.js", "js/shell.js", "js/notifications
 # Task 8.4 asserts the set is empty. Task 3.2 added ui.js, kit.js and the first
 # General fields (general.js, which Task 4.3 completes).
 PENDING = {
-    "js/settings/pages.js",              # Task 5.1
     "js/settings/integrations.js",       # Task 6.3
     "js/settings/notifications.js",      # Task 6.5
 }
@@ -181,7 +180,7 @@ class KitApi(unittest.TestCase):
 
     def test_kit_public_api(self):
         js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
-        for name in ("boot", "registerTab", "go", "metaFor", "card", "leave"):
+        for name in ("boot", "registerTab", "go", "metaFor", "card", "leave", "view"):
             self.assertRegex(js, rf"\b{name}: {name}\b", name)
         for method in ("text", "textarea", "toggle", "select", "color", "iconPicker", "secret", "track",
                        "get", "set", "stageDefaults", "onChange", "onSaved", "onDiscard", "beforeSave",
@@ -696,6 +695,175 @@ class SignInTab(unittest.TestCase):
         self.assertNotRegex(js_code_only(src), r"getElementById\(|querySelector(?:All)?\(|\bPLEX_CARD\)\.")
         self.assertRegex(kit_code(), r"var target = document\.getElementById\(S\.pendingFocus\.id\);"
                                      r"\s*S\.pendingFocus = null;\s*if \(target\) \{")
+
+
+PAGES = STATIC / "js" / "settings" / "pages.js"
+# Page ids as the settings registry names them; pages.js must not list them.
+PAGE_IDS = ("home", "requests", "issues", "calendar", "tickets", "library", "wiki", "settings")
+
+
+def pages_function(name: str, code: bool = True) -> str:
+    """One top-level function of pages.js, as live code (comments removed,
+    strings blanked) or, with code=False, as written."""
+    src = PAGES.read_text(encoding="utf-8")
+    js = js_code_only(src) if code else src
+    m = re.search(rf"\n  function {name}\(.*?(?=\n  function |\n  // ---- |\n  WSSettings\.registerTab)", js, re.S)
+    if m is None:
+        raise AssertionError(f"pages.js has no top-level function {name}()")
+    return m.group(0)
+
+
+def pages_mount_part(pattern: str, code: bool = True) -> str:
+    """The block opened by the first match of pattern inside the tab's mount()
+    (a function or a handler), up to its closing brace."""
+    src = PAGES.read_text(encoding="utf-8")
+    js = js_code_only(src)
+    mount = js.index("WSSettings.registerTab(")
+    m = re.compile(pattern).search(js, mount)
+    if m is None:
+        raise AssertionError(f"mount() has no {pattern}")
+    open_at = js.index("{", m.end() - 1)
+    end = matching_brace(js, open_at) + 1
+    return js[m.start():end] if code else src[m.start():end]
+
+
+class PagesTab(unittest.TestCase):
+    """The Pages tab's order, reorder and fetch rules that can be read from the code (R67)."""
+
+    def test_order_and_addresses_come_from_the_server(self):
+        # R14: page_order (normalised) and page_addresses are the Settings
+        # view's, re-exported by the kit; no copy of either, and no own
+        # normaliser, lives here.
+        src = PAGES.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        self.assertEqual(len(live_matches(src, r"WSSettings\.view\('page_order'\)")), 1)
+        self.assertEqual(len(live_matches(src, r"WSSettings\.view\('page_addresses'\)")), 1)
+        self.assertNotRegex(code, r"\b(?:parseOrder|defaultOrder|ADDRESS(?:ES)?|normali[sz]e\w*)\b")
+        for route in ("/ebooks", "/requests", "/issues", "/calendar", "/tickets", "/wiki", "/settings"):
+            self.assertNotIn(f"'{route}'", src, route)
+        ids = "|".join(PAGE_IDS)
+        self.assertIsNone(re.search(rf"\[[^\[\]]*'(?:{ids})'[^\[\]]*'(?:{ids})'[^\[\]]*\]", src),
+                          "a list of page ids")
+        # The only JSON read here is the monitors answer; pages.order is never parsed.
+        self.assertEqual(code.count("JSON.parse("), pages_function("readJson").count("JSON.parse("))
+        self.assertEqual(code.count("JSON.parse("), 1)
+        # The rows are the server's order.
+        self.assertRegex(code, r"start\.forEach\(function \(id\) \{ rows\[id\] = buildRow\(id\);")
+        kit = kit_code()
+        self.assertRegex(kit, r"\bS\.view = data;")
+        self.assertRegex(kit, r"function view\(name\) \{\s*return hasOwn\(S\.view, name\) \? S\.view\[name\] : null;")
+
+    def test_every_reorder_goes_through_commit(self):
+        # Dragging, the arrow keys and the phone buttons all stage the order
+        # through one commit(); nothing else writes pages.order.
+        src = PAGES.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        self.assertEqual(len(re.findall(r"\bfunction commit\(", code)), 1)
+        commit = pages_mount_part(r"\n      function commit\(")
+        start = code.index(commit)
+        for m in re.finditer(r"\bapi\.set\(", code):
+            self.assertTrue(start < m.start() < start + len(commit), "pages.order is staged outside commit()")
+        self.assertIn("api.set(ORDER_KEY, ", commit)
+        self.assertTrue(live_matches(src, r"var ORDER_KEY = 'pages\.order';"))
+        self.assertNotIn("stageDefaults", code)
+        self.assertRegex(pages_mount_part(r"\n      function move\("), r"\bcommit\(\w+, id\);")
+        self.assertRegex(pages_mount_part(r"list\.addEventListener\(' {4}', function \(e\) \{"), r"\bcommit\(")
+        keys = pages_mount_part(r"handle\.addEventListener\(' {7}', function \(e\) \{")
+        self.assertRegex(keys, r"\bmove\(id, e\.key === ' {7}' \? -1 : 1\);")
+        self.assertNotIn("commit(", keys)
+        self.assertRegex(code, r"\bup\.addEventListener\(' {5}', function \(\) \{ move\(id, -1\);")
+        self.assertRegex(code, r"\bdown\.addEventListener\(' {5}', function \(\) \{ move\(id, 1\);")
+        # The list repaints from the tracked value, whoever staged it.
+        self.assertRegex(code, r"api\.track\(ORDER_KEY, \{[^\n]*\bset: paint\b")
+
+    def test_first_and_last_pages_stay_put(self):
+        # Home first and Settings last, exactly as normalize_page_order keeps
+        # them: taken from the server's order, held by commit(), no handle.
+        code = js_code_only(PAGES.read_text(encoding="utf-8"))
+        self.assertRegex(code, r"var FIRST = start\[0\], LAST = start\[start\.length - 1\];")
+        commit = pages_mount_part(r"\n      function commit\(")
+        self.assertRegex(commit, r"if \(id !== FIRST && id !== LAST && hasOwn\(rows, id\) && middle\.indexOf\(id\) < 0\)")
+        self.assertRegex(commit, r"var order = \[FIRST\]\.concat\(middle, \[LAST\]\);")
+        self.assertRegex(commit, r"if \(order\.length !== shown\.length\) return;")
+        self.assertRegex(pages_mount_part(r"\n      function move\("), r"i < 1 \|\| j < 1 \|\| j > order\.length - 2")
+        target = pages_mount_part(r"\n      function dropTarget\(")
+        self.assertIn("if (id === FIRST) after = true;", target)
+        self.assertIn("if (id === LAST) after = false;", target)
+        row = pages_mount_part(r"\n      function buildRow\(")
+        self.assertRegex(row, r"var pinned = id === FIRST \|\| id === LAST;")
+        guard = re.search(r"if \(!pinned\) \{", row)
+        self.assertIsNotNone(guard, "the handle isn't kept off the pinned rows")
+        self.assertLess(guard.start(), row.index("var handle = "))
+        self.assertEqual(len(re.findall(r"var handle = ", row)), 1)
+
+    def test_keyboard_reorder_keeps_focus_and_is_announced(self):
+        src = PAGES.read_text(encoding="utf-8")
+        keys = pages_mount_part(r"handle\.addEventListener\(' {7}', function \(e\) \{")
+        self.assertIn("e.preventDefault();", keys)
+        self.assertRegex(keys, r"handle\.focus\(")
+        # The row with focus stays put in the DOM while the others move.
+        paint = pages_mount_part(r"\n      function paint\(")
+        self.assertRegex(paint, r"rows\[id\]\.contains\(document\.activeElement\)")
+        self.assertRegex(paint, r"if \(k < at\) list\.insertBefore\(rows\[id\], rows\[anchor\]\);")
+        self.assertRegex(paint, r"else if \(k > at\) list\.appendChild\(rows\[id\]\);")
+        self.assertTrue(live_matches(src, r"live\.setAttribute\('aria-live', 'polite'\)"))
+        self.assertRegex(pages_mount_part(r"\n      function commit\("), r"if \(moved\) say\(")
+        self.assertRegex(pages_mount_part(r"\n      function say\("), r"live\.textContent = text")
+
+    def test_nothing_moves_while_dragging(self):
+        # A drag only draws the drop line (absolutely placed, in the gap);
+        # rows change places once, on drop.
+        over = pages_mount_part(r"list\.addEventListener\(' {8}', function \(e\) \{")
+        self.assertNotRegex(over, r"\b(?:commit|move|paint)\(|insertBefore|appendChild|\.style\.")
+        self.assertRegex(over, r"classList\.add\(")
+        src = PAGES.read_text(encoding="utf-8")
+        self.assertTrue(live_matches(src, r"'ws-drop-after' : 'ws-drop-before'"))
+        self.assertRegex(pages_mount_part(r"\n      function buildRow\(", code=False), r"el\('li', 'relative ")
+        css = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        rule = re.search(r"\.ws-drop-before::before, \.ws-drop-after::before \{([^}]*)\}", css)
+        self.assertIsNotNone(rule)
+        self.assertIn("position: absolute", rule.group(1))
+        self.assertIn("rgb(var(--color-primary))", rule.group(1))
+
+    def test_monitor_list_failures_are_plain(self):
+        # 401 -> sign in again through the kit; anything else that isn't a
+        # JSON list (5xx, no answer, an error page) -> a plain line, no list.
+        src = PAGES.read_text(encoding="utf-8")
+        self.assertTrue(live_matches(src, r"var MONITORS_URL = '/api/integrations/monitors';"))
+        load = pages_function("loadMonitors")
+        self.assertRegex(load, r"fetch\(MONITORS_URL, \{[^{}]*\}\)\s*\.then\(readJson, function \(\) \{ return \{ status: 0,")
+        self.assertRegex(load, r"=== 401\) \{ WSSettings\.leave\(")
+        self.assertTrue(live_matches(pages_function("loadMonitors", code=False), r"WSSettings\.leave\('/login'\)"))
+        failed = re.search(r"if \(res\.status !== 200 \|\| !Array\.isArray\(res\.data\)\) \{([^{}]*)", load)
+        self.assertIsNotNone(failed, "a non-list answer isn't refused")
+        self.assertRegex(failed.group(1), r"list\.replaceChildren\(actionNote\(MSG\.monitorsFailed")
+        self.assertLess(load.index("=== 401)"), failed.start())
+        read = pages_function("readJson")
+        self.assertRegex(read, r"\.text\(\)")
+        self.assertRegex(read, r"try \{[^{}]*JSON\.parse\([^{}]*\} catch\b")
+        code = js_code_only(src)
+        self.assertNotRegex(code, r"\.json\(\)|\.detail\b|location\.href\s*=(?!=)|location\.reload\(")
+        # Every id becomes a setting key: digits only.
+        # (A regex literal's body is blanked in live code, so read it as written.)
+        self.assertIn(r"/^\d{1,9}$/.test(String(m.id))", pages_function("loadMonitors", code=False))
+        self.assertIn(".test(String(m.id))", load)
+
+    def test_requests_source_options_come_from_meta(self):
+        body_src = pages_function("requestsExpander", code=False)
+        body = pages_function("requestsExpander")
+        self.assertTrue(live_matches(body_src, r"WSSettings\.metaFor\('requests\.source'\)"))
+        self.assertRegex(body, r"var choices = m && Array\.isArray\(m\.choices\) \? m\.choices : \[\];")
+        self.assertRegex(body, r"options: choices\.map\(")
+        self.assertNotRegex(body_src, r"value:\s*'")
+
+    def test_setup_links_open_integrations_even_before_the_cards_exist(self):
+        # Task 6.3 gives each card its id; until then go() just opens the tab.
+        src = PAGES.read_text(encoding="utf-8")
+        self.assertTrue(live_matches(src, r"WSSettings\.go\('integrations', 'integration-card-' \+ service\)"))
+        code = js_code_only(src)
+        self.assertNotIn("getElementById(", code)
+        self.assertEqual(code.count("querySelector"), 1)
+        self.assertIn("querySelector(", pages_function("nameField"))
 
 
 class Guards(unittest.TestCase):

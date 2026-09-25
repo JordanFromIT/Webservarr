@@ -83,6 +83,26 @@ class RegistryView(SettingsApiBase):
         self.assertEqual(body["mask"], reg.MASK)
         self.assertEqual(body["values"]["integration.plex.token"], body["mask"])
 
+    def test_view_carries_the_page_order_and_addresses(self):
+        # R14: the Pages tab shows the order the server renders and the fixed
+        # page addresses, both from here; it keeps no copy of either.
+        body = self.client.get("/api/admin/settings?view=registry").json()
+        self.assertEqual(body["page_order"], reg.DEFAULT_PAGE_ORDER)
+        self.assertEqual(body["page_addresses"], reg.PAGE_ADDRESSES)
+        self.assertEqual(list(body["page_addresses"]), list(reg.SIDEBAR_PAGE_IDS))
+        # A stale or hand-edited row is normalised exactly as the nav does it;
+        # the raw value is still what `values` holds.
+        stale = '["wiki", "settings", "bogus", "home", "wiki", "requests"]'
+        helpers.put(self.db, "pages.order", stale)
+        body = self.client.get("/api/admin/settings?view=registry").json()
+        self.assertEqual(body["page_order"], reg.normalize_page_order(stale))
+        self.assertEqual(body["page_order"], ["home", "wiki", "requests", "issues", "calendar", "tickets",
+                                              "library", "settings"])
+        self.assertEqual(body["values"]["pages.order"], stale)
+        helpers.put(self.db, "pages.order", "not json")
+        body = self.client.get("/api/admin/settings?view=registry").json()
+        self.assertEqual(body["page_order"], reg.DEFAULT_PAGE_ORDER)
+
     def test_per_user_rows_never_listed(self):
         helpers.put(self.db, USER_KEY, "false")
         for url in ("/api/admin/settings?view=registry", "/api/admin/settings"):

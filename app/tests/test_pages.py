@@ -635,6 +635,20 @@ class NavModel(unittest.TestCase):
         for item in NAV_ITEMS:
             self.assertEqual((item["label"], item["sublabel"], item["icon"]), PAGE_DEFAULTS[item["id"]])
 
+    def test_nav_addresses_come_from_the_registry(self):
+        # One map of page addresses (R14): the nav renders from it and the
+        # Settings view serves it to the Pages tab.
+        from app import settings_registry as reg
+        self.assertIs(pages._NAV_HREF, reg.PAGE_ADDRESSES)
+        self.assertEqual(list(reg.PAGE_ADDRESSES), list(reg.SIDEBAR_PAGE_IDS))
+        for item in NAV_ITEMS:
+            self.assertEqual(item["href"], reg.PAGE_ADDRESSES[item["id"]], item["id"])
+        # Every page shown (eBooks needs Kavita), in a custom order: the
+        # rendered links are the registry's addresses in that order.
+        order = ["home", "library", "wiki", "tickets", "calendar", "issues", "requests", "settings"]
+        b = branding(**{"integration.kavita.url": "http://192.168.1.50:5000", "pages.order": json.dumps(order)})
+        self.assertEqual(self.nav_hrefs(render(b=b)), [reg.PAGE_ADDRESSES[p] for p in order])
+
     def test_migrated_seerr_embed_install_shows_one_requests_item(self):
         # An install that had the built-in Requests page off and the Seerr embed
         # on: the v1.11 migration sets requests.source to seerr_embed and turns
