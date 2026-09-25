@@ -419,6 +419,7 @@ class NonAdmin(SettingsApiBase):
         self.assertEqual(self.client.get("/api/admin/settings").status_code, 403)
         self.assertEqual(self.save(("branding.app_name", "x")).status_code, 403)
         self.assertIsNone(helpers.get(self.db, "branding.app_name"))
+        self.assertEqual(self.client.get("/api/admin/settings/shell").status_code, 403)
 
 
 class SignedOut(SettingsApiBase):
@@ -437,6 +438,7 @@ class SignedOut(SettingsApiBase):
             ("GET", "/api/admin/settings?view=registry", None),
             ("PUT", "/api/admin/settings/bulk", {"settings": [{"key": "branding.app_name", "value": "x"}]}),
             ("GET", "/api/admin/settings/branding.app_name", None),
+            ("GET", "/api/admin/settings/shell", None),
             ("PUT", "/api/admin/settings", {"key": "branding.app_name", "value": "x"}),
         ):
             with self.subTest(method=method, url=url):
@@ -444,6 +446,45 @@ class SignedOut(SettingsApiBase):
                 r = self.client.request(method, url, json=body)
                 self.assertEqual(r.status_code, 401, r.text)
         self.assertIsNone(helpers.get(self.db, "branding.app_name"))
+
+
+class ShellPatch(SettingsApiBase):
+    """GET /api/admin/settings/shell: the sidebar links as every page renders
+    them now, for the Settings page to swap in after a save that changes them."""
+
+    def test_shell_fragment_reflects_saved_nav_settings(self):
+        r = self.save(("sidebar.label_issues", "Problems"),
+                      ("pages.order", '["home","wiki","requests","issues","calendar","tickets","library","settings"]'))
+        self.assertEqual(r.status_code, 200, r.text)
+        r = self.client.get("/api/admin/settings/shell")
+        self.assertEqual(r.status_code, 200, r.text)
+        nav = r.json()["nav_html"]
+        self.assertIn("Problems", nav)
+        self.assertLess(nav.index('href="/wiki"'), nav.index('href="/requests"'))
+        self.assertRegex(nav, r'<a[^>]*href="/settings"[^>]*aria-current="page"')
+
+    def test_not_shadowed_by_the_single_key_route(self):
+        # admin.router's GET /settings/{key} would answer 404 "Setting not
+        # found" for "shell" if it were matched first.
+        r = self.client.get("/api/admin/settings/shell")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(set(r.json()), {"nav_html"})
+
+    def test_fragment_is_the_page_renderer_output(self):
+        # Same renderer, same branding, same active page as /settings/next, so
+        # the patched sidebar cannot drift from a reloaded one: the requests
+        # badge is kept and the links carry no id (they fill two navs).
+        from app.pages import render_nav_links
+        from app.routers.branding import load_branding
+        r = self.save(("icon.nav_issues", "bug_report"), ("sidebar.label_wiki", "Help & <Guides>"))
+        self.assertEqual(r.status_code, 200, r.text)
+        nav = self.client.get("/api/admin/settings/shell").json()["nav_html"]
+        self.assertEqual(nav, render_nav_links(load_branding(self.db, True), True, "settings"))
+        self.assertIn(">bug_report<", nav)
+        self.assertIn("Help &amp; &lt;Guides&gt;", nav)
+        self.assertNotIn("<Guides>", nav)
+        self.assertRegex(nav, r'href="/requests"[^\n]*data-badge="requestsBadge"')
+        self.assertNotRegex(nav, r"""\sid=["']""")
 
 
 class LogoUpload(SettingsApiBase):

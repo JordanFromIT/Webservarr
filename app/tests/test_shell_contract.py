@@ -384,11 +384,28 @@ class ShellContract(unittest.TestCase):
         self.assertIsNotNone(m, "window.WS = { ... } not found")
         block = code[m.end():matching_brace(code, m.end() - 1)]
         for name in ("ready", "whenActive", "poll", "setHTML", "arrive", "swr", "serviceStatus", "clearCache",
-                     "dragScroll", "mediaType", "requestStatus"):
+                     "clearPageCache", "wireNav", "dragScroll", "mediaType", "requestStatus"):
             self.assertRegex(block, rf"\b{name}\s*:\s*{name}\b", name)
         # Pages call this to stop a row's momentum glide before scrolling it.
         self.assertIsNotNone(re.search(r"\bdragScroll\.stop\s*=\s*function\b", code),
                              "dragScroll.stop = function ... not defined (outside comments/strings)")
+
+    def test_nav_wiring_can_run_again(self):
+        # The Settings page swaps the nav links after a save and calls
+        # WS.wireNav() (kit.js). Boot goes through the same entry point, and a
+        # link that is already wired is skipped, so listeners never stack when
+        # WS.setHTML left a nav untouched.
+        code = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
+        def body(name):
+            m = re.search(rf"\bfunction {name}\(\)\s*\{{", code)
+            self.assertIsNotNone(m, name)
+            return code[m.end():matching_brace(code, m.end() - 1)]
+        self.assertIn("wirePrefetch();", body("wireNav"))
+        boot = code[code.rindex("ready(function () {"):]
+        self.assertIn("wireNav();", boot)
+        self.assertNotIn("wirePrefetch();", boot)
+        self.assertRegex(body("wirePrefetch"),
+                         r"forEach\(function \((\w+)\) \{\s*if \(\1\._wsWired\) return;\s*\1\._wsWired = true;")
 
     def test_js_code_only_ignores_comments_and_strings(self):
         # Guards the helper the API test relies on.

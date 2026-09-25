@@ -70,6 +70,27 @@ def kit_code() -> str:
     return js_code_only((STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8"))
 
 
+def function_body(code: str, name: str) -> str:
+    """The body of `function name(...) { ... }` in comment-free code."""
+    m = re.search(rf"\bfunction {name}\([^)]*\)\s*\{{", code)
+    assert m, f"function {name} not found"
+    return code[m.end():matching_brace(code, m.end() - 1)]
+
+
+def top_level(code: str) -> str:
+    """code with the contents of every nested {...} removed, so what is left is
+    only the statements that run unconditionally at this level."""
+    out, depth = [], 0
+    for ch in code:
+        if ch == "}":
+            depth -= 1
+        if depth == 0:
+            out.append(ch)
+        if ch == "{":
+            depth += 1
+    return "".join(out)
+
+
 def settings_files():
     """The frame, every Settings script it references that exists, and every
     js/settings/*.js file. A referenced file may only be missing while it is
@@ -191,6 +212,46 @@ class KitApi(unittest.TestCase):
         self.assertIn("beforeunload", js)
         self.assertIn("/api/admin/settings?view=registry", js)
         self.assertIn("/api/admin/settings/bulk", js)
+
+    def test_kit_patches_the_sidebar_after_nav_saves(self):
+        src = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        for literal in ("'/api/admin/settings/shell'", "'desktopNav'", "'drawerNav'"):
+            self.assertTrue(live_matches(src, re.escape(literal)), literal)
+        # The keys that change the sidebar, exactly (Task 5.2 / R69 d).
+        self.assertIn(r"var NAV_KEYS = /^(sidebar\.|icon\.nav_|pages\.order$|integration\.kavita\.url$)/;", src)
+        self.assertRegex(function_body(kit_code(), "refreshShell"),
+                         r"if \(keys\.some\(function \((\w+)\) \{ return NAV_KEYS\.test\(\1\); \}\)\) patchShell\(\);")
+
+    def test_sidebar_patch_uses_diff_writes_and_rewires_the_links(self):
+        # The fragment goes in through WS.setHTML only (the one HTML string the
+        # kit inserts, server-rendered and escaped), and the shell re-binds its
+        # per-link behaviour (hover prefetch) on the new links afterwards.
+        body = function_body(kit_code(), "patchShell")
+        self.assertNotRegex(body, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment")
+        write = re.search(r"\bWS\.setHTML\(document\.getElementById\((\w+)\), data\.nav_html\)", body)
+        self.assertIsNotNone(write, "the navs are written with WS.setHTML")
+        rewire = re.search(r"\bWS\.wireNav\(\)", body)
+        self.assertIsNotNone(rewire, "WS.wireNav() after the patch")
+        self.assertGreater(rewire.start(), write.end(), "wireNav runs after the links are replaced")
+        # A failed fetch is quiet: no toast, the save already succeeded.
+        self.assertNotIn("toast", body)
+
+    def test_every_save_drops_prefetched_pages(self):
+        # Pages the service worker prefetched before a save carry the old nav,
+        # theme or name. Every save that wrote a key clears them, not only a
+        # nav save: refreshShell runs unconditionally in applySaved's
+        # "something was written" block, and its clearPageCache call does not
+        # depend on which keys they were.
+        code = kit_code()
+        body = function_body(code, "applySaved")
+        m = re.search(r"\bif \(keys\.length\) \{", body)
+        self.assertIsNotNone(m)
+        block = top_level(body[m.end():matching_brace(body, m.end() - 1)])
+        self.assertRegex(block, r"(?:^|[;{}])\s*refreshShell\(keys\);")
+        calls = [c for c in re.findall(r"[^;{}]*\bWS\.clearPageCache\(\)[^;]*;",
+                                       top_level(function_body(code, "refreshShell")))]
+        self.assertEqual(len(calls), 1, "one unconditional WS.clearPageCache() in refreshShell")
+        self.assertNotRegex(calls[0], r"\bkeys\b|NAV_KEYS")
 
     def test_mask_comes_from_the_server(self):
         # One copy of the sentinel: the SettingsView payload. The kit re-exports
