@@ -7,6 +7,7 @@ import os
 import re
 import uuid
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, UploadFile, File, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -224,9 +225,11 @@ async def update_setting(
     """
     Create or update one setting, with the same registry validation and
     lockout guard as the bulk save (422 with per-key errors; nothing written).
+    Validation runs in a worker thread, as in the bulk save: checking an
+    address can resolve a hostname with a blocking lookup.
     Requires admin authentication.
     """
-    writes, errors = plan_writes(db, [(setting_data.key, setting_data.value)])
+    writes, errors = await run_in_threadpool(plan_writes, db, [(setting_data.key, setting_data.value)])
     errors = errors or apply_writes(db, writes)
     if errors:
         return validation_error(errors)

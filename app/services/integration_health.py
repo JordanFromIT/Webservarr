@@ -111,9 +111,23 @@ def build_probe(service: str, values: Dict[str, str]) -> Tuple[Optional[dict], O
     return None, (UNCONFIGURED, "Not set up yet")
 
 
+WRONG_SERVICE = "It answered, but that address doesn't look like the right service"
+
+
+def _kuma_slug(values: Dict[str, str]) -> str:
+    return (values.get("integration.uptime_kuma.slug") or "default").strip() or "default"
+
+
 def map_response(service: str, status_code: int, body=None, values: Optional[Dict[str, str]] = None) -> Tuple[str, str]:
     values = values or {}
     if 200 <= status_code < 300:
+        if service == "uptime_kuma":
+            # Uptime Kuma answers an unknown slug on the heartbeat path with
+            # 200 and empty lists rather than 404, so the body decides.
+            if not isinstance(body, dict):
+                return WARN, WRONG_SERVICE
+            if not body.get("heartbeatList"):
+                return WARN, f'The status page "{_kuma_slug(values)}" wasn\'t found or has no monitors'
         if service == "chaptarr" and isinstance(body, list):
             paths = {str(f.get("path", "")).rstrip("/") for f in body if isinstance(f, dict)}
             for key, label in (("integration.chaptarr.root_folder", "eBook"),
@@ -126,9 +140,8 @@ def map_response(service: str, status_code: int, body=None, values: Optional[Dic
         return WARN, "It rejected the token" if service == "plex" else "It rejected the API key"
     if status_code == 404:
         if service == "uptime_kuma":
-            slug = (values.get("integration.uptime_kuma.slug") or "default").strip() or "default"
-            return WARN, f'The status page "{slug}" wasn\'t found'
-        return WARN, "It answered, but that address doesn't look like the right service"
+            return WARN, f'The status page "{_kuma_slug(values)}" wasn\'t found'
+        return WARN, WRONG_SERVICE
     if status_code == 429:
         return WARN, "Too many requests right now. Try again in a minute."
     return WARN, f"It answered with an error (HTTP {status_code})"
@@ -168,7 +181,7 @@ async def _probe(service: str, values: Dict[str, str], client) -> dict:
     try:
         resp = await client.get(probe["url"], headers=probe["headers"], params=probe["params"])
         body = None
-        if service == "chaptarr" and 200 <= resp.status_code < 300:
+        if service in ("chaptarr", "uptime_kuma") and 200 <= resp.status_code < 300:
             try:
                 body = resp.json()
             except ValueError:

@@ -399,7 +399,7 @@
                     testResult.textContent = 'Connection successful!';
                 } else {
                     testResult.className = 'text-xs text-red-400';
-                    testResult.textContent = data.detail || 'Connection failed';
+                    testResult.textContent = data.message || data.detail || 'Connection failed';
                 }
             } catch (e) {
                 testResult.className = 'text-xs text-red-400';
