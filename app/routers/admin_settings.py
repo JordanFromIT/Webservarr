@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
@@ -228,8 +229,13 @@ async def bulk_update_settings(
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """BulkSave: validate everything, then write everything, or nothing."""
-    writes, errors = plan_writes(db, [(i.key, i.value) for i in payload.settings])
+    """BulkSave: validate everything, then write everything, or nothing.
+
+    Validation runs in a worker thread: checking an address can resolve a
+    hostname with a blocking lookup, which on the event loop would stall
+    every request this worker is serving. It is awaited, so the session is
+    still used by one thing at a time."""
+    writes, errors = await run_in_threadpool(plan_writes, db, [(i.key, i.value) for i in payload.settings])
     errors = errors or apply_writes(db, writes)
     if errors:
         return validation_error(errors)
@@ -360,8 +366,9 @@ async def import_settings(
     """SettingsImport: preview (dry_run=true) or apply exactly the previewed diff.
 
     Apply re-plans the file against the database as it is now and refuses
-    (409) unless that diff hashes to the token the preview returned."""
-    changes, ignored, warnings, errors = plan_import(db, payload.data)
+    (409) unless that diff hashes to the token the preview returned.
+    Planning validates, so it runs in a worker thread, as in BulkSave."""
+    changes, ignored, warnings, errors = await run_in_threadpool(plan_import, db, payload.data)
     if errors:
         return validation_error(errors)
     token = _diff_token(changes)
