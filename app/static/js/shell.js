@@ -16,6 +16,7 @@
  *   WS.setHTML(el, html)          innerHTML only when the string changed
  *   WS.wireNav()                  bind per-link behaviour to nav links not yet wired
  *   WS.clearPageCache()           drop prefetched and prerendered pages (sign-out, a settings save)
+ *   WS.dropCache(prefix)          forget this user's swr copies whose key starts with prefix
  *   WS.arrive(key, write)         reveal sections top-down, in document order
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
  *   WS.dragScroll(el)             mouse drag-to-scroll for a sideways row
@@ -53,6 +54,17 @@
       var keys = [];
       for (var i = 0; i < sessionStorage.length; i++) keys.push(sessionStorage.key(i));
       keys.forEach(function (k) { if (k && k.indexOf('ws:') === 0) sessionStorage.removeItem(k); });
+    } catch (e) { /* ignore */ }
+  }
+  // Forget this user's swr copies whose key starts with prefix, after a write
+  // that makes them wrong (a news post saved, pinned or deleted), so no page
+  // paints the old answer before it revalidates.
+  function dropCache(prefix) {
+    try {
+      var head = ns + 'swr:' + prefix;
+      var keys = [];
+      for (var i = 0; i < sessionStorage.length; i++) keys.push(sessionStorage.key(i));
+      keys.forEach(function (k) { if (k && k.indexOf(head) === 0) sessionStorage.removeItem(k); });
     } catch (e) { /* ignore */ }
   }
 
@@ -665,6 +677,7 @@
     getJSON: getJSON,
     serviceStatus: serviceStatus,
     clearCache: clearCache,
+    dropCache: dropCache,
     clearPageCache: clearPageCache,
     wireNav: wireNav,
     dragScroll: dragScroll,

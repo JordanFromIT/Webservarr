@@ -131,12 +131,17 @@
 </section>
 <!-- News & Updates -->
 <section data-arrive="news">
-<div class="flex items-center gap-3 mb-4">
+<div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">
 <span id="iconSectionNews" class="material-symbols-outlined text-steel-blue">newspaper</span>
 <h3 class="text-xl font-bold text-frosted-blue">News &amp; Updates</h3>
-<a href="/news" id="newsViewAll" class="ml-auto hidden items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors">
+<div class="ml-auto flex items-center gap-4">
+<a href="/news" class="ws-admin-only inline-flex items-center gap-1 text-sm font-bold text-steel-blue hover:text-primary transition-colors">
+Manage news<span class="material-symbols-outlined text-sm">edit</span>
+</a>
+<a href="/news" id="newsViewAll" class="invisible inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors">
 View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </a>
+</div>
 </div>
 <div id="newsContainer" class="grid gap-3">
 <div class="skel skel-card" aria-hidden="true"></div>
@@ -431,10 +436,11 @@ function renderNews(posts) {
             WS.setHTML(newsContainer, shown.map(function (post) { return renderNewsCard(post, false); }).join(''));
         }
         // Older posts may still exist beyond the age window, so the archive
-        // link stays available even when the homepage feed is empty.
+        // link stays available even when the homepage feed is empty. It holds
+        // its space from the first paint (invisible), so showing it moves
+        // nothing, including the admins' "Manage news" beside it.
         if (viewAll) {
-            viewAll.classList.remove('hidden');
-            viewAll.classList.add('flex');
+            viewAll.classList.remove('invisible');
         }
     });
 }

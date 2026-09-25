@@ -241,7 +241,7 @@ def seed_default_news(db: Session) -> None:
             "title": "[Example] Server Maintenance Notice",
             "content": (
                 "> **Note:** This is an example post showing news formatting. "
-                "Edit or delete it from **Settings > News**.\n\n"
+                "Edit or delete it from the **News** page.\n\n"
                 "We will be performing routine maintenance on **Saturday** from 2:00 AM to 4:00 AM.\n\n"
                 "**Services affected:**\n"
                 "- Media streaming (Plex)\n"

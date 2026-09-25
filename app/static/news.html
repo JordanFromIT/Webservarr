@@ -9,6 +9,119 @@
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
 <link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+<style>
+    /* News editor content (moved from the Settings page). Theme colours only. */
+    #postContent {
+        min-height: 300px;
+        outline: none;
+        caret-color: rgb(var(--color-text));
+    }
+    #postContent:empty::before {
+        content: 'Start writing your content...';
+        color: rgb(var(--color-accent) / 0.5);
+        pointer-events: none;
+    }
+    #postContent h1 {
+        font-size: 1.875rem;
+        font-weight: 700;
+        margin: 0.75rem 0 0.5rem;
+        color: rgb(var(--color-text));
+        line-height: 1.2;
+    }
+    #postContent h2 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin: 0.75rem 0 0.5rem;
+        color: rgb(var(--color-text));
+        line-height: 1.3;
+    }
+    #postContent h3 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0.5rem 0 0.25rem;
+        color: rgb(var(--color-text));
+        line-height: 1.4;
+    }
+    #postContent p {
+        margin: 0.5rem 0;
+    }
+    #postContent ul {
+        list-style-type: disc;
+        padding-left: 1.5rem;
+        margin: 0.5rem 0;
+    }
+    #postContent ol {
+        list-style-type: decimal;
+        padding-left: 1.5rem;
+        margin: 0.5rem 0;
+    }
+    #postContent li {
+        margin: 0.25rem 0;
+    }
+    #postContent blockquote {
+        border-left: 3px solid rgb(var(--color-accent));
+        padding-left: 1rem;
+        margin: 0.75rem 0;
+        color: rgb(var(--color-text) / 0.7);
+        font-style: italic;
+    }
+    #postContent pre {
+        background: rgb(var(--color-background) / 0.6);
+        border: 1px solid rgb(var(--color-accent) / 0.3);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin: 0.75rem 0;
+        overflow-x: auto;
+        font-family: 'Courier New', monospace;
+        font-size: 0.875rem;
+        color: rgb(var(--color-text));
+    }
+    #postContent code {
+        background: rgb(var(--color-background) / 0.4);
+        border: 1px solid rgb(var(--color-accent) / 0.2);
+        border-radius: 0.25rem;
+        padding: 0.125rem 0.375rem;
+        font-family: 'Courier New', monospace;
+        font-size: 0.875rem;
+        color: rgb(var(--color-text));
+    }
+    #postContent pre code {
+        background: none;
+        border: none;
+        padding: 0;
+        border-radius: 0;
+    }
+    #postContent a {
+        color: rgb(var(--color-text));
+        text-decoration: underline;
+        text-underline-offset: 2px;
+    }
+    #postContent a:hover {
+        color: rgb(var(--color-text));
+    }
+    #postContent img {
+        max-width: 100%;
+        border-radius: 0.5rem;
+        margin: 0.5rem 0;
+    }
+    #postContent hr {
+        border: none;
+        border-top: 1px solid rgb(var(--color-accent) / 0.3);
+        margin: 1rem 0;
+    }
+    #postContent s, #postContent del {
+        text-decoration: line-through;
+        opacity: 0.7;
+    }
+    #postContent.preview-mode {
+        background: rgb(var(--color-background) / 0.3);
+        cursor: default;
+    }
+    .toolbar-btn.active {
+        background: rgb(var(--color-primary) / 0.5);
+        color: rgb(var(--color-text));
+    }
+</style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <!-- ws:sidebar -->
@@ -23,17 +136,22 @@
 
   <!-- Page header -->
   <div class="mb-6">
-    <a href="/" class="inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors mb-3">
+    <a href="/" class="inline-flex items-center gap-1 text-sm font-bold text-steel-blue hover:text-primary transition-colors mb-3">
       <span class="material-symbols-outlined text-sm">chevron_left</span>Back to home
     </a>
-    <div class="flex items-center gap-3">
+    <div class="flex items-center gap-3 flex-wrap">
       <span class="material-symbols-outlined text-steel-blue text-3xl">newspaper</span>
-      <div>
+      <div class="min-w-0 flex-1">
         <h1 class="text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight">News &amp; Updates</h1>
         <p class="text-sm text-steel-blue mt-0.5">Everything posted so far, newest first.</p>
       </div>
+      <button id="newsNewPost" type="button" class="ws-admin-only inline-flex items-center gap-2 px-4 py-2.5 rounded-[10px] bg-primary text-bright text-sm font-semibold hover:bg-primary/90 transition-colors">
+        <span class="material-symbols-outlined text-base">add</span>New post
+      </button>
     </div>
   </div>
+
+  <div id="newsEditor" class="hidden mb-6"></div>
 
   <!-- Post list -->
   <div id="newsArchive" class="grid gap-3" data-arrive="posts">
@@ -59,6 +177,8 @@
 <script src="/static/js/auth.js?v=1"></script>
 <script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
+<script src="/static/js/ui.js?v=1"></script>
+<script src="/static/js/news-editor.js?v=1"></script>
 <script>
 // WebServarr — News Archive
 //
@@ -73,6 +193,11 @@
   var FRESH_MS = 72 * 60 * 60 * 1000; // matches the homepage's "New" threshold
   var _offset = 0;
   var _loading = false;
+  var _reloadAfter = false;
+  // Admins see drafts too, and manage every post in place. The server decides
+  // who gets drafts (published_only=false is ignored for anyone else); this
+  // only chooses what to ask for and whether to draw the tools.
+  var isAdmin = !!(window.WS && WS.user && WS.user.is_admin);
 
   var listEl = document.getElementById('newsArchive');
   var moreBtn = document.getElementById('newsLoadMore');
@@ -110,6 +235,10 @@
     } else if (isFresh) {
       flag = '<span class="shrink-0 mt-0.5 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-frosted-blue/15 text-frosted-blue">New</span>';
     }
+    if (!post.published) {
+      flag = '<span class="shrink-0 mt-0.5 text-xs font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-frosted-blue/10 text-frosted-blue/70">Draft</span>' + flag;
+    }
+    var id = escapeHtml(String(post.id));
 
     var bodyClasses = 'text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none [&>div]:mb-2 [&>p]:mb-2 [&_br]:block';
 
@@ -128,6 +257,13 @@
         '<p class="text-xs text-steel-blue/70 mt-0.5">By ' + escapeHtml(post.author_name || 'Unknown') + '</p>' +
         '<p class="text-sm text-frosted-blue/60 mt-1 line-clamp-2">' + escapeHtml(excerpt(post.content_html, 180)) + '</p>' +
         '<div class="' + bodyClasses + ' hidden" data-news-body style="white-space:pre-line">' + post.content_html + '</div>' +
+        (isAdmin
+          ? '<div class="mt-2 flex flex-wrap gap-1">' +
+              '<button type="button" data-news-action="edit" data-id="' + id + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base">edit</span>Edit</button>' +
+              '<button type="button" data-news-action="pin" data-id="' + id + '" data-pinned="' + (post.pinned ? '1' : '0') + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base">push_pin</span>' + (post.pinned ? 'Unpin' : 'Pin') + '</button>' +
+              '<button type="button" data-news-action="delete" data-id="' + id + '" data-title="' + escapeHtml(post.title) + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base">delete</span>Delete</button>' +
+            '</div>'
+          : '') +
         '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-[11px] font-bold text-steel-blue hover:text-primary transition-colors">' +
           '<span data-news-toggle-text>Read more</span>' +
           '<span class="material-symbols-outlined text-sm transition-transform" data-news-chevron>expand_more</span>' +
@@ -157,15 +293,21 @@
     '</div>';
   }
 
-  async function loadPage() {
-    if (_loading) return;
+  // fresh: skip the cached copy and paint the server's answer (after a write).
+  async function loadPage(fresh) {
+    if (_loading) {
+      if (fresh === true) _reloadAfter = true;   // a write landed mid-load: reload once it ends
+      return;
+    }
     _loading = true;
+    fresh = fresh === true;
     moreText.textContent = 'Loading…';
 
     var offset = _offset;
     // Fetch one past the page size: if it comes back, there is another page.
     // Cheaper than a separate count query and never goes stale against it.
-    var url = '/api/news/?limit=' + (PAGE_SIZE + 1) + '&offset=' + offset;
+    var url = '/api/news/?limit=' + (PAGE_SIZE + 1) + '&offset=' + offset + (isAdmin ? '&published_only=false' : '');
+    var key = isAdmin ? 'news:archive:admin' : 'news:archive';
 
     function fetcher() {
       return WS.getJSON(url).then(function (posts) {
@@ -196,8 +338,8 @@
     try {
       if (offset === 0) {
         // The first page paints from the last visit at once, then refreshes.
-        var fresh = await WS.swr('news:archive', fetcher, render);
-        if (fresh === null) throw new Error('Request failed');
+        var got = await WS.swr(key, fetcher, render, fresh ? { maxAge: 0 } : undefined);
+        if (got === null) throw new Error('Request failed');
       } else {
         render(await fetcher());
       }
@@ -215,10 +357,65 @@
       moreText.textContent = 'Try again';
     } finally {
       _loading = false;
+      if (_reloadAfter) { _reloadAfter = false; reload(); }
     }
   }
 
-  moreBtn.addEventListener('click', loadPage);
+  moreBtn.addEventListener('click', function () { loadPage(); });
+
+  // ---- Admin: manage posts in place ----
+
+  // Back to the first page, fetched fresh (never the cached copy).
+  function reload() {
+    _offset = 0;
+    loadPage(true);
+  }
+
+  // After every successful write: prefetched or prerendered copies of / and
+  // /news, and this user's cached news lists, all predate it.
+  function newsChanged() {
+    WS.clearPageCache();
+    WS.dropCache('news:');
+    reload();
+  }
+
+  function write(btn, url, init, okText, errText) {
+    btn.disabled = true;
+    fetch(url, init).then(function (r) {
+      if (r.status === 401) { window.location.href = '/login'; return; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      WSUI.toast(okText, 'ok');
+      newsChanged();
+    }).catch(function () {
+      WSUI.toast(errText, 'err');
+    }).then(function () { btn.disabled = false; });
+  }
+
+  document.getElementById('newsNewPost').addEventListener('click', function () {
+    if (isAdmin) NewsEditor.open(null, newsChanged);
+  });
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('[data-news-action]') : null;
+    if (!btn || !isAdmin) return;
+    var id = parseInt(btn.getAttribute('data-id'), 10);
+    var action = btn.getAttribute('data-news-action');
+    if (action === 'edit') {
+      WS.getJSON('/api/news/' + id).then(function (post) { NewsEditor.open(post, newsChanged); })
+        .catch(function () { WSUI.toast('That post couldn’t be opened. Try again.', 'err'); });
+    } else if (action === 'pin') {
+      var pinned = btn.getAttribute('data-pinned') === '1';
+      write(btn, '/api/news/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                                     body: JSON.stringify({ pinned: !pinned }) },
+            pinned ? 'Unpinned.' : 'Pinned to the top.', 'That didn’t work. Try again.');
+    } else if (action === 'delete') {
+      WSUI.confirm({ title: 'Delete this post?', body: '“' + btn.getAttribute('data-title') + '” will be gone for everyone. This can’t be undone.',
+                     confirmLabel: 'Delete post', cancelLabel: 'Keep it', danger: true }).then(function (ok) {
+        if (!ok) return;
+        write(btn, '/api/news/' + id, { method: 'DELETE' }, 'Post deleted.', 'The post wasn’t deleted. Try again.');
+      });
+    }
+  });
 
   // ---- Init ----
 
