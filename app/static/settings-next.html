@@ -156,9 +156,38 @@
       </div>
     </section>
     <section id="panel-notifications" data-settings-panel="notifications" role="tabpanel" aria-labelledby="tab-notifications">
-      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
-      <div class="skel skel-card mb-4" aria-hidden="true"></div>
-      <div class="skel skel-card" aria-hidden="true"></div>
+      <!-- The tab's own shape: its three cards, each a heading block and a
+           body at the measured heights (phone first, then wider: the first
+           two descriptions fit one line from md, the test-push help from sm,
+           where the four check fields also go two to a row). -->
+      <div aria-hidden="true">
+        <div class="mb-12">
+          <div class="h-[79px] md:h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-48 mb-3"></div><div class="skel h-4 w-[34rem] max-w-full"></div></div>
+          <div class="h-[193px] sm:h-[173.5px]">
+            <div class="space-y-2">
+              <div class="h-6 flex items-center"><div class="skel h-4 w-60 max-w-full"></div></div>
+              <div class="h-5 flex items-center"><div class="skel h-3 w-64 max-w-full"></div></div>
+              <div class="h-5 flex items-center"><div class="skel h-3 w-72 max-w-full"></div></div>
+            </div>
+            <div class="skel h-11 w-52 mt-6"></div>
+          </div>
+        </div>
+        <div class="mb-12">
+          <div class="h-[79px] md:h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-56 mb-3"></div><div class="skel h-4 w-[36rem] max-w-full"></div></div>
+          <div class="h-[288.6px] max-w-2xl">
+            <div class="skel h-[70px]"></div>
+            <div class="skel h-[126px] mt-6"></div>
+            <div class="skel h-11 w-52 mt-6"></div>
+          </div>
+        </div>
+        <div>
+          <div class="h-[79px] mb-5 pt-1"><div class="skel h-5 w-44 mb-3"></div><div class="skel h-4 w-[40rem] max-w-full mb-2"></div><div class="skel h-4 w-24"></div></div>
+          <div class="grid sm:grid-cols-2 gap-5 max-w-2xl">
+            <div class="skel h-[96.6px]"></div><div class="skel h-[96.6px]"></div>
+            <div class="skel h-[96.6px]"></div><div class="skel h-[96.6px]"></div>
+          </div>
+        </div>
+      </div>
     </section>
   </div>
 </div>
