@@ -10,7 +10,11 @@ var NewsEditor = (function () {
   'use strict';
 
   var UI = window.WSUI, el = UI.el, icon = UI.icon, cls = UI.cls;
-  var host = null, editor = null, toolbar = null, previewing = false, editingId = null, done = null;
+  // editor, toolbar and previewing belong to the panel on screen (the toolbar
+  // drives them). Which post a save writes, and whom it tells, belongs to the
+  // session its panel was opened with (see open), never to module state: a
+  // save can answer after another post has been opened.
+  var host = null, editor = null, toolbar = null, previewing = false, current = null;
   var TOOLS = [
     ['bold', 'format_bold', 'Bold (Ctrl+B)'], ['italic', 'format_italic', 'Italic (Ctrl+I)'],
     ['underline', 'format_underlined', 'Underline (Ctrl+U)'], ['strikeThrough', 'strikethrough_s', 'Strikethrough'],
@@ -171,7 +175,7 @@ var NewsEditor = (function () {
     pv.firstChild.textContent = on ? 'edit' : 'visibility';
   }
 
-  function build(post) {
+  function build(post, session) {
     var wrap = el('div', 'rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] p-5 space-y-5');
     wrap.appendChild(el('h2', 'text-[20px] font-bold tracking-tight text-frosted-blue', post ? 'Edit post' : 'New post'));
 
@@ -235,6 +239,7 @@ var NewsEditor = (function () {
     editor.setAttribute('aria-label', 'Post');
     editor.style.minHeight = '300px';
     editor.style.maxHeight = '600px';
+    var box = editor;   // this panel's own editor, for its save
     // content_html is the server's sanitised HTML. Seeded posts keep Markdown
     // in content, which would open as raw text, so that copy is the fallback.
     if (post) setEditorHtml(editor, post.content_html || post.content);
@@ -281,32 +286,33 @@ var NewsEditor = (function () {
     wrap.appendChild(actions);
 
     function save(published) {
+      var s = session;   // the post this panel edits and whom to tell; fixed for this save
       if (!title.value.trim()) { UI.toast('Give the post a title.', 'err'); title.focus(); return; }
-      if (!editor.textContent.trim() && !editor.querySelector('img, hr')) {
+      if (!box.textContent.trim() && !box.querySelector('img, hr')) {
         UI.toast('Write something in the post first.', 'err');
-        editor.focus();
+        box.focus();
         return;
       }
-      // The callback belongs to the editor this save came from; Cancel waits
-      // for the answer, so a save that lands still refreshes the list.
-      var cb = done;
+      // Cancel waits for the answer. Another post may be opened meanwhile, so
+      // the answer closes this panel only if it is still the one on screen,
+      // and always refreshes the list through this session's own callback.
       publish.disabled = draft.disabled = cancel.disabled = true;
-      var payload = { title: title.value.trim(), content: editor.innerHTML.trim(), published: published, pinned: pin.checked };
-      fetch(editingId ? '/api/news/' + editingId : '/api/news/', {
-        method: editingId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      var payload = { title: title.value.trim(), content: box.innerHTML.trim(), published: published, pinned: pin.checked };
+      fetch(s.id ? '/api/news/' + s.id : '/api/news/', {
+        method: s.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       }).then(function (r) {
         if (r.status === 401) { window.location.href = '/login'; return; }
         if (!r.ok) throw new Error('HTTP ' + r.status);
         UI.toast(published ? 'Published. It’s live on the site.' : 'Draft saved. Only admins can see it.', 'ok');
-        close();
-        if (cb) cb();
+        if (current === s) close();
+        if (s.onDone) s.onDone();
       }).catch(function () {
         UI.toast('The post wasn’t saved. Your text is still here — try again.', 'err');
       }).then(function () { publish.disabled = draft.disabled = cancel.disabled = false; });
     }
     publish.addEventListener('click', function () { save(true); });
     draft.addEventListener('click', function () { save(false); });
-    cancel.addEventListener('click', close);
+    cancel.addEventListener('click', function () { if (current === session) close(); });
     setTimeout(function () { title.focus(); }, 30);
     return wrap;
   }
@@ -314,10 +320,12 @@ var NewsEditor = (function () {
   function open(post, onDone) {
     host = document.getElementById('newsEditor');
     if (!host) return;
-    editingId = post ? post.id : null;
-    done = onDone || null;
+    // One session per open: its post id, its callback and (through build)
+    // its own panel. current marks the session on screen.
+    var session = { id: post ? post.id : null, onDone: onDone || null };
+    current = session;
     previewing = false;
-    host.replaceChildren(build(post));
+    host.replaceChildren(build(post, session));
     host.classList.remove('hidden');
     host.scrollIntoView({ block: 'start' });
   }
@@ -326,8 +334,7 @@ var NewsEditor = (function () {
     if (!host) return;
     host.replaceChildren();
     host.classList.add('hidden');
-    editingId = null;
-    done = null;
+    current = null;
   }
 
   return { open: open, close: close };
