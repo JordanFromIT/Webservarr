@@ -128,14 +128,16 @@
       // itself from an answer to a request that asked for it, and only if no
       // newer request for it was made since. Every answer also carries the
       // other cards' cached entries: a card takes one of those only while
-      // nothing is being asked for it and the entry is no older than its own.
+      // nothing is being asked for it, and only if it is strictly newer than
+      // the answer it has (checked_at is whole seconds, so a same-second
+      // cached entry may be the staler one) or it has none yet.
       var seq = 0, asked = {}, inflight = {};
       var UNAVAILABLE = function () { return { state: 'unknown', reason: MSG.unavailable, checked_at: '' }; };
 
       function newer(entry, old) {
         if (!old) return true;
         var a = Date.parse(entry.checked_at || ''), b = Date.parse(old.checked_at || '');
-        return !b || (!!a && a >= b);
+        return !b || (!!a && a > b);
       }
 
       function settle(ids, mine) {
