@@ -1507,11 +1507,35 @@ class InPlaceNews(unittest.TestCase):
     def test_a_save_in_flight_keeps_its_callback_and_cancel_waits(self):
         code = js_code_only((STATIC / "js" / "news-editor.js").read_text(encoding="utf-8"))
         body = function_body(code, "save")
-        self.assertRegex(body, r"var cb = done;\s*publish\.disabled = draft\.disabled = cancel\.disabled = true;")
+        self.assertRegex(body, r"^\s*var s = session;")
+        self.assertIn("publish.disabled = draft.disabled = cancel.disabled = true;", body)
         self.assertIn("publish.disabled = draft.disabled = cancel.disabled = false;", body)
-        after = body[body.index("fetch("):]
-        self.assertNotRegex(after, r"\bdone\b")
-        self.assertRegex(after, r"close\(\);\s*if \(cb\) cb\(\);")
+
+    def test_each_open_is_its_own_session(self):
+        # A save that answers after another post was opened must neither
+        # retarget that post's save (a POST duplicate) nor wipe its panel. So
+        # nothing module-level names the post or its callback; each open()
+        # makes a session, the save carries its own, and it closes the panel
+        # only while its session is the one on screen.
+        code = js_code_only((STATIC / "js" / "news-editor.js").read_text(encoding="utf-8"))
+        self.assertNotRegex(code, r"\beditingId\b")
+        self.assertNotRegex(code, r"\bdone\b")
+        opened = function_body(code, "open")
+        self.assertRegex(opened, r"var session = \{ id: post \? post\.id : null, onDone: onDone \|\| null \};\s*current = session;")
+        self.assertRegex(top_level(opened), r"var session = \{\};\s*current = session;")   # unconditionally
+        self.assertIn("host.replaceChildren(build(post, session));", opened)
+        self.assertRegex(function_body(code, "close"), r"current = null;")
+        save = function_body(code, "save")
+        self.assertIn("content: box.innerHTML.trim()", save)
+        after = save[save.index("fetch("):]
+        self.assertRegex(after, r"^fetch\(s\.id \? '[^']*' \+ s\.id : '[^']*', \{\s*method: s\.id \? ")
+        self.assertRegex(after, r"if \(current === s\) close\(\);\s*if \(s\.onDone\) s\.onDone\(\);")
+        # At response time only the save's own session (and whether it is still
+        # current) is read: no live editor, host or callback.
+        self.assertNotRegex(after, r"\b(?:editor|host|onDone)\b(?<!s\.onDone)")
+        src = (STATIC / "js" / "news-editor.js").read_text(encoding="utf-8")
+        self.assertEqual(len(live_matches(
+            src, r"cancel\.addEventListener\('click', function \(\) \{ if \(current === session\) close\(\); \}\);")), 1)
 
     def test_a_page_started_before_a_reload_is_dropped(self):
         code = js_code_only(news_script())
