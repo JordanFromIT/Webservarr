@@ -415,11 +415,13 @@
     var id = parseInt(btn.getAttribute('data-id'), 10);
     var action = btn.getAttribute('data-news-action');
     if (action === 'edit') {
-      var ticket = ++_editClick;
+      // Opens (or reports a failure) only if this is still the latest Edit
+      // click and nothing opened or dismissed the editor meanwhile.
+      var ticket = ++_editClick, seen = NewsEditor.generation();
       WS.getJSON('/api/news/' + id).then(function (post) {
-        if (ticket === _editClick) NewsEditor.open(post, newsChanged);
+        if (ticket === _editClick && seen === NewsEditor.generation()) NewsEditor.open(post, newsChanged);
       }).catch(function () {
-        if (ticket === _editClick) WSUI.toast('That post couldn’t be opened. Try again.', 'err');
+        if (ticket === _editClick && seen === NewsEditor.generation()) WSUI.toast('That post couldn’t be opened. Try again.', 'err');
       });
     } else if (action === 'pin') {
       var pinned = btn.getAttribute('data-pinned') === '1';

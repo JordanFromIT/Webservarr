@@ -15,6 +15,10 @@ var NewsEditor = (function () {
   // session its panel was opened with (see open), never to module state: a
   // save can answer after another post has been opened.
   var host = null, editor = null, toolbar = null, previewing = false, current = null;
+  // Counts every open and every dismissal. /news reads it when Edit is clicked
+  // and opens the fetched post only if it has not moved, so a Cancel (or any
+  // other open) meanwhile beats a fetch still in flight.
+  var generation = 0;
   var TOOLS = [
     ['bold', 'format_bold', 'Bold (Ctrl+B)'], ['italic', 'format_italic', 'Italic (Ctrl+I)'],
     ['underline', 'format_underlined', 'Underline (Ctrl+U)'], ['strikeThrough', 'strikethrough_s', 'Strikethrough'],
@@ -304,7 +308,9 @@ var NewsEditor = (function () {
         if (r.status === 401) { window.location.href = '/login'; return; }
         if (!r.ok) throw new Error('HTTP ' + r.status);
         UI.toast(published ? 'Published. It’s live on the site.' : 'Draft saved. Only admins can see it.', 'ok');
-        if (current === s) close();
+        // Not close(): this is the save finishing, not a dismissal, so an Edit
+        // clicked while it was in flight still opens.
+        if (current === s) hide();
         if (s.onDone) s.onDone();
       }).catch(function () {
         // "Your text is still here" holds only while this panel is on screen.
@@ -327,6 +333,7 @@ var NewsEditor = (function () {
     if (!host) return;
     // One session per open: its post id, its callback and (through build)
     // its own panel. current marks the session on screen.
+    generation += 1;
     var session = { id: post ? post.id : null, onDone: onDone || null };
     current = session;
     previewing = false;
@@ -335,12 +342,19 @@ var NewsEditor = (function () {
     host.scrollIntoView({ block: 'start' });
   }
 
-  function close() {
+  function hide() {
     if (!host) return;
     host.replaceChildren();
     host.classList.add('hidden');
     current = null;
   }
 
-  return { open: open, close: close };
+  // Cancel, or a caller dismissing the editor: also drops any Edit still
+  // fetching its post (see generation).
+  function close() {
+    generation += 1;
+    hide();
+  }
+
+  return { open: open, close: close, generation: function () { return generation; } };
 })();
