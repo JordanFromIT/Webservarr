@@ -347,6 +347,21 @@ class GeneralTab(unittest.TestCase):
         backup = general_function("backupCard")
         self.assertRegex(backup, r"\.inert = importing\b")
 
+    def test_no_import_while_a_logo_upload_is_in_flight(self):
+        # An upload still in flight has staged nothing, so the edit checks
+        # pass; its answer could then land during the reload and be lost.
+        # The import waits for it (refused, never a silent cancel).
+        logo = general_function("logoCard")
+        self.assertRegex(logo, r"function busy\(on\) \{[^{}]*shared\.uploading = on;[^{}]*shared\.changed\(\)")
+        backup = general_function("backupCard")
+        self.assertRegex(backup, r"imp\.disabled = dirty \|\| shared\.uploading;")
+        self.assertRegex(backup, r"shared\.changed = sync;")
+        handler = backup[backup.index("file.addEventListener("):]
+        guard = re.search(r"if \(shared\.uploading\) \{ WSSettings\.toast\(MSG\.uploading, '   '\); return; \}", handler)
+        self.assertIsNotNone(guard, "the import doesn't refuse during an upload")
+        self.assertLess(guard.start(), handler.index("startImport("))
+        self.assertNotRegex(backup, r"cancelUpload\(")
+
     def test_leaving_goes_through_the_kit(self):
         # One way out: WSSettings.leave() sets the kit's leaving flag so its
         # beforeunload guard can't ask, then navigates (or reloads).
