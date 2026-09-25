@@ -584,12 +584,8 @@ class ValidationOffTheLoop(SettingsApiBase):
         self.assertEqual({where for where, _url in seen}, {"thread"})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
-class PushStatusApi(SettingsApiBase):
-    """GET /api/admin/notifications/status (PushStatus) and the recorded last push.
+class PushStatusBase(SettingsApiBase):
+    """Fixtures for GET /api/admin/notifications/status (PushStatus) and the recorded last push.
 
     The last push lives in Redis so both uvicorn workers report the same one;
     every test here swaps in a fake so nothing touches the dev instance's Redis."""
@@ -638,6 +634,20 @@ class PushStatusApi(SettingsApiBase):
         self.assertEqual(r.status_code, 200, r.text)
         return r
 
+    def _dispatch(self, emails, category="news", webpush=None):
+        """Run the real dispatch_push against the test DB with the HTTP send faked."""
+        import asyncio
+        import pywebpush
+        from app.services import push
+        if webpush is None:
+            webpush = mock.Mock(return_value=None)
+        with mock.patch.object(push, "SessionLocal", self.Session), \
+             mock.patch.object(push, "is_safe_push_endpoint", return_value=True), \
+             mock.patch.object(pywebpush, "webpush", webpush):
+            return asyncio.run(push.dispatch_push(emails, "Title", "Body", category, "/"))
+
+
+class PushStatusApi(PushStatusBase):
     # --- the endpoint ---------------------------------------------------
 
     def test_not_ready_without_keys(self):
@@ -733,18 +743,6 @@ class PushStatusApi(SettingsApiBase):
         from app.services import push
         self.assertIsNone(asyncio.run(push.read_last_push()))
 
-    def _dispatch(self, emails, category="news", webpush=None):
-        """Run the real dispatch_push against the test DB with the HTTP send faked."""
-        import asyncio
-        import pywebpush
-        from app.services import push
-        if webpush is None:
-            webpush = mock.Mock(return_value=None)
-        with mock.patch.object(push, "SessionLocal", self.Session), \
-             mock.patch.object(push, "is_safe_push_endpoint", return_value=True), \
-             mock.patch.object(pywebpush, "webpush", webpush):
-            return asyncio.run(push.dispatch_push(emails, "Title", "Body", category, "/"))
-
     def test_a_real_dispatch_records_what_it_tried(self):
         import json
         import pywebpush
@@ -820,3 +818,146 @@ class PushStatusApi(SettingsApiBase):
         with mock.patch("app.auth.session_manager.get_redis",
                         mock.AsyncMock(side_effect=ConnectionError("redis down"))):
             self.assertEqual(self._dispatch(["a@example.com"]), {"attempted": 1, "succeeded": 1})
+
+
+class PushStatusFixRound1(PushStatusBase):
+    """Fix round 1: last_push shape, bounded Redis calls, no-identity devices,
+    the send cutoff, the unreadable-key reason and the status rate limit."""
+
+    VALID = {"at": "2026-09-22T10:00:00Z", "category": "news", "attempted": 2, "succeeded": 1}
+
+    def read(self):
+        import asyncio
+        from app.services import push
+        return asyncio.run(push.read_last_push())
+
+    # 1. read_last_push only passes the G4 shape through.
+
+    def test_read_rejects_anything_but_the_last_push_shape(self):
+        import json
+        bad = {
+            "list": [1, 2],
+            "int": 5,
+            "string": "news",
+            "partial": {"at": "2026-09-22T10:00:00Z", "category": "news"},
+            "at not str": dict(self.VALID, at=1),
+            "category not str": dict(self.VALID, category=None),
+            "attempted str": dict(self.VALID, attempted="2"),
+            "attempted bool": dict(self.VALID, attempted=True),
+            "succeeded bool": dict(self.VALID, succeeded=False),
+            "succeeded float": dict(self.VALID, succeeded=1.0),
+        }
+        for name, value in bad.items():
+            with self.subTest(name):
+                self.store["webservarr:push:last"] = json.dumps(value)
+                self.assertIsNone(self.read())
+        self.store["webservarr:push:last"] = "not json"
+        self.assertIsNone(self.read())
+        self.store["webservarr:push:last"] = json.dumps(self.VALID)
+        self.assertEqual(self.read(), self.VALID)
+
+    def test_read_keeps_only_the_four_fields(self):
+        import json
+        self.store["webservarr:push:last"] = json.dumps(dict(self.VALID, email="a@example.com"))
+        self.assertEqual(self.read(), self.VALID)
+
+    def test_endpoint_reports_a_malformed_record_as_none(self):
+        self.store["webservarr:push:last"] = "[1, 2]"
+        self.assertIsNone(self.status().json()["last_push"])
+
+    # 2. A slow Redis never holds up a dispatch or the status read.
+
+    def _slow_redis(self, seconds):
+        import asyncio
+
+        class SlowRedis:
+            async def set(self, key, value, **kw):
+                await asyncio.sleep(seconds)
+
+            async def get(self, key):
+                await asyncio.sleep(seconds)
+                return b"{}"
+
+        return mock.patch("app.auth.session_manager.get_redis", mock.AsyncMock(return_value=SlowRedis()))
+
+    def test_slow_redis_does_not_hold_up_a_dispatch(self):
+        import time
+        self.seed_keys()
+        self.add_sub("a@example.com", 1)
+        with self._slow_redis(3.0):
+            t0 = time.monotonic()
+            result = self._dispatch(["a@example.com"])
+            elapsed = time.monotonic() - t0
+        self.assertEqual(result, {"attempted": 1, "succeeded": 1})
+        self.assertLess(elapsed, 2.0)
+
+    def test_slow_redis_read_gives_up_as_none(self):
+        import time
+        with self._slow_redis(3.0):
+            t0 = time.monotonic()
+            got = self.read()
+            elapsed = time.monotonic() - t0
+        self.assertIsNone(got)
+        self.assertLess(elapsed, 2.0)
+
+    # 3. Subscriptions under no identity are not devices or people.
+
+    def test_no_identity_subscriptions_are_not_counted(self):
+        self.add_sub("a@example.com", 1)
+        self.add_sub("", 1)
+        self.add_sub("none", 1)
+        self.add_sub(" None ", 2)
+        body = self.status().json()
+        self.assertEqual((body["devices"], body["users"], body["recipients"]), (1, 1, 1))
+
+    # 4. The broadcast keeps the 30-day cutoff.
+
+    def test_send_skips_a_recipient_last_notified_over_30_days_ago(self):
+        from app.models import Notification
+        self.add_sub("fresh@example.com", 1)
+        self.add_notification("stale@example.com", 31)
+        sent = mock.AsyncMock(return_value=0)
+        with mock.patch("app.routers.admin.send_push_to_users", sent):
+            r = self.client.post("/api/admin/notifications/send", json={"title": "Hi", "body": "All"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["sent_to"], 1)
+        self.assertEqual(sent.await_args.args[0], ["fresh@example.com"])
+        self.db.expire_all()
+        got = sorted(n.user_email for n in self.db.query(Notification).filter(Notification.title == "Hi"))
+        self.assertEqual(got, ["fresh@example.com"])
+
+    # 5. The unreadable-key reason is the fixed sentence, never the error.
+
+    def test_unreadable_key_reason_is_static(self):
+        from app.services import push
+        self.seed_keys()
+        with mock.patch.object(push, "load_vapid_key",
+                               side_effect=ValueError("ASN.1 boom zq7-secret-detail")):
+            body = self.status().json()
+        self.assertFalse(body["push_ready"])
+        self.assertEqual(body["reason"], "The push key couldn't be read.")
+        for fragment in ("ASN.1", "boom", "zq7-secret-detail", "ValueError"):
+            self.assertNotIn(fragment, body["reason"])
+
+    # 6. Rate limited to 60 a minute, counted in a private store.
+
+    def test_status_is_rate_limited_to_sixty_a_minute(self):
+        from limits.storage import MemoryStorage
+        from limits.strategies import FixedWindowRateLimiter
+        from app.limiter import limiter
+        saved = (limiter._storage, limiter._limiter)
+        storage = MemoryStorage()
+        limiter._storage, limiter._limiter = storage, FixedWindowRateLimiter(storage)
+        try:
+            limiter.reset()
+            helpers.set_rate_limits(True)
+            codes = [self.client.get("/api/admin/notifications/status").status_code for _ in range(61)]
+            self.assertEqual(codes[:60], [200] * 60)
+            self.assertEqual(codes[60], 429)
+        finally:
+            limiter.reset()
+            limiter._storage, limiter._limiter = saved
+
+
+if __name__ == "__main__":
+    unittest.main()
