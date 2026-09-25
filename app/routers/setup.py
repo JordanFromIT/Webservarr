@@ -87,10 +87,16 @@ def get_or_create_setup_token() -> str:
 def setup_token_matches(supplied: str, expected: str) -> bool:
     """Constant-time check of a submitted setup token. Compared as bytes:
     compare_digest refuses str with non-ASCII characters (TypeError, a 500),
-    so a token like "café" must simply be a wrong token."""
+    so a token like "café" must simply be a wrong token. A lone surrogate
+    ("\\ud800" in the JSON) survives parsing but can't be encoded; the real
+    token is ASCII, so that too is a wrong token."""
     if not supplied or not expected:
         return False
-    return hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
+    try:
+        supplied_bytes = supplied.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(supplied_bytes, expected.encode("utf-8"))
 
 
 def is_setup_completed() -> bool:
