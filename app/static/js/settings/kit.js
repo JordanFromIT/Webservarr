@@ -630,6 +630,46 @@
     return fail(MSG.failed);
   }
 
+  // Saves that change the sidebar: a page's label, sublabel, icon, switch or
+  // New! flag, the page order, and the Kavita address (it decides whether
+  // Library is shown). A name or logo change shows on the next page load.
+  var NAV_KEYS = /^(sidebar\.|icon\.nav_|pages\.order$|integration\.kavita\.url$)/;
+  var shellSeq = 0;
+
+  // The sidebar is server-rendered. After a save that changes it, the links
+  // are fetched as every page now renders them and written into both navs
+  // (server-escaped markup: the only HTML the kit inserts this way), then the
+  // shell binds its per-link behaviour to the new links. A failed fetch stays
+  // quiet: the save itself succeeded, and the next page load shows it anyway.
+  function patchShell() {
+    var WS = window.WS;
+    if (!WS || !WS.setHTML) return;
+    var seq = ++shellSeq;
+    fetch('/api/admin/settings/shell', { credentials: 'same-origin' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function (data) {
+      // Two saves in a row: only the answer to the latest one is written.
+      if (seq !== shellSeq || !data || typeof data.nav_html !== 'string') return;
+      ['desktopNav', 'drawerNav'].forEach(function (id) {
+        WS.setHTML(document.getElementById(id), data.nav_html);
+      });
+      if (WS.wireNav) WS.wireNav();
+    }).catch(function (e) {
+      if (window.console && console.debug) console.debug('Sidebar not refreshed after save', e);
+    });
+  }
+
+  // After every save that wrote something: pages the service worker
+  // prefetched before it carry the old nav, theme or name, so they are
+  // dropped. A nav change is also shown in this page's sidebar at once.
+  function refreshShell(keys) {
+    var WS = window.WS;
+    if (!WS) return;
+    if (WS.clearPageCache) WS.clearPageCache();
+    if (keys.some(function (k) { return NAV_KEYS.test(k); })) patchShell();
+  }
+
   function applySaved(t, sent, values) {
     // The server answers with every key it wrote. One it skipped (a secret
     // sent as the mask means "leave it as it is") was not saved, whatever the
@@ -656,6 +696,7 @@
         try { fn(keys, values); } catch (e) { if (window.console) console.error(e); }
       });
       document.dispatchEvent(new CustomEvent('ws-settings:saved', { detail: { tab: t.id, keys: keys, values: values } }));
+      refreshShell(keys);
     }
     if (dropped.length) { UI.toast(MSG.partial, 'err'); return false; }
     UI.toast('Saved', 'ok');

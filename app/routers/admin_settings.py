@@ -331,6 +331,23 @@ async def export_settings(
     })
 
 
+@router.get("/settings/shell")
+@limiter.limit("60/minute")
+async def settings_shell(
+    request: Request,
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """ShellFragment: the sidebar links as they render now, so the Settings page
+    can show a saved label/icon/order/visibility change without a reload. The
+    markup comes from the same renderer as every page, so it cannot drift."""
+    from app.pages import render_nav_links
+    from app.routers.branding import load_branding
+
+    branding = load_branding(db, True)
+    return {"nav_html": render_nav_links(branding, True, "settings")}
+
+
 @router.post("/settings/import")
 @limiter.limit("10/minute")
 async def import_settings(

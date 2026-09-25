@@ -14,6 +14,8 @@
  *   WS.poll(fn, ms) -> stop()     visibility-aware interval, starts when active
  *   WS.serviceStatus()            deduplicated /api/integrations/service-status
  *   WS.setHTML(el, html)          innerHTML only when the string changed
+ *   WS.wireNav()                  bind per-link behaviour to nav links not yet wired
+ *   WS.clearPageCache()           drop prefetched pages (sign-out, a settings save)
  *   WS.arrive(key, write)         reveal sections top-down, in document order
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
  *   WS.dragScroll(el)             mouse drag-to-scroll for a sideways row
@@ -219,6 +221,8 @@
   function wirePrefetch() {
     if (!('serviceWorker' in navigator)) return;
     document.querySelectorAll('#desktopNav a, #drawerNav a').forEach(function (a) {
+      if (a._wsWired) return;
+      a._wsWired = true;
       var href = a.getAttribute('href');
       if (!href || href === location.pathname) return;
       var go = function () { prefetch(href); };
@@ -228,7 +232,17 @@
     });
   }
 
+  // Everything the shell binds to a single nav link. The Settings page swaps
+  // the links for freshly rendered ones after a save (settings/kit.js) and
+  // calls this again; a link already wired is skipped, so listeners never
+  // stack on links WS.setHTML left in place.
+  function wireNav() {
+    wirePrefetch();
+  }
+
   function clearPageCache() {
+    // What was prefetched is gone, so the next hover must fetch again.
+    prefetchedAt = {};
     try { if (window.caches) caches.delete(PAGE_CACHE); } catch (e) { /* ignore */ }
     try {
       var sw = navigator.serviceWorker && navigator.serviceWorker.controller;
@@ -621,6 +635,8 @@
     getJSON: getJSON,
     serviceStatus: serviceStatus,
     clearCache: clearCache,
+    clearPageCache: clearPageCache,
+    wireNav: wireNav,
     dragScroll: dragScroll,
     mediaType: mediaType,
     requestStatus: requestStatus
@@ -631,7 +647,7 @@
     arriveInit();
     wireChrome();
     wireScrollHint();
-    wirePrefetch();
+    wireNav();
 
     var cached = cacheGet('status');
     if (cached && cached.state) paintStatus(cached.state);
