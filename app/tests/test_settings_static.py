@@ -715,16 +715,25 @@ def pages_function(name: str, code: bool = True) -> str:
 
 def pages_mount_part(pattern: str, code: bool = True) -> str:
     """The block opened by the first match of pattern inside the tab's mount()
-    (a function or a handler), up to its closing brace."""
+    (a function or a handler), up to its closing brace: as live code, or with
+    code=False as written. js_code_only drops comments, so the written form
+    is found in the source itself and ends at the first line holding only
+    the block's own indentation and a closing brace."""
     src = PAGES.read_text(encoding="utf-8")
-    js = js_code_only(src)
-    mount = js.index("WSSettings.registerTab(")
-    m = re.compile(pattern).search(js, mount)
+    text = js_code_only(src) if code else src
+    mount = text.index("WSSettings.registerTab(")
+    m = re.compile(pattern).search(text, mount)
     if m is None:
         raise AssertionError(f"mount() has no {pattern}")
-    open_at = js.index("{", m.end() - 1)
-    end = matching_brace(js, open_at) + 1
-    return js[m.start():end] if code else src[m.start():end]
+    if code:
+        open_at = text.index("{", m.end() - 1)
+        return text[m.start():matching_brace(text, open_at) + 1]
+    line_start = text.rindex("\n", 0, m.start() + 1) + 1
+    indent = re.match(r"[ ]*", text[line_start:]).group(0)
+    close = re.compile(r"\n" + indent + r"\}").search(text, m.end())
+    if close is None:
+        raise AssertionError(f"no closing brace for {pattern}")
+    return text[m.start():close.end()]
 
 
 class PagesTab(unittest.TestCase):
@@ -811,6 +820,30 @@ class PagesTab(unittest.TestCase):
         self.assertTrue(live_matches(src, r"live\.setAttribute\('aria-live', 'polite'\)"))
         self.assertRegex(pages_mount_part(r"\n      function commit\("), r"if \(moved\) say\(")
         self.assertRegex(pages_mount_part(r"\n      function say\("), r"live\.textContent = text")
+
+    def test_row_names_follow_the_label(self):
+        # WCAG 2.5.3: every accessible name in a row carries the page's label
+        # as it stands now. A rename (staged, discarded or saved) renames the
+        # group, the handle, the move buttons, the expander and both switches.
+        src = PAGES.read_text(encoding="utf-8")
+        row = pages_mount_part(r"\n      function buildRow\(")
+        row_src = pages_mount_part(r"\n      function buildRow\(", code=False)
+        # One listener on the row's own label key; the kit calls onChange
+        # listeners on a staged change, on Discard and after a save.
+        self.assertRegex(row, r"api\.onChange\(' {14}' \+ id, nameRow\);")
+        self.assertTrue(live_matches(row_src, r"api\.onChange\('sidebar\.label_' \+ id, nameRow\)"))
+        self.assertRegex(kit_code(), r"function discard\(id\) \{[\s\S]*?notify\(t, k\);")
+        self.assertRegex(kit_code(), r"function applySaved\([\s\S]*?notify\(t, k\);")
+        name = re.search(r"\n        function nameRow\(\) \{", row)
+        self.assertIsNotNone(name, "buildRow has no nameRow()")
+        body = row[name.start():matching_brace(row, name.end() - 1) + 1]
+        self.assertRegex(body, r"var \w+ = labelOf\(api, id\);")
+        named = set(re.findall(r"\b(\w+)\.setAttribute\(' {10}',", body))
+        for el in ("line", "handle", "up", "down", "toggleBtn", "newSwitch", "onSwitch"):
+            self.assertIn(el, named, el)
+        # No name baked in once at build time (outside nameRow).
+        self.assertNotRegex(row.replace(body, ""), r"\blabelOf\(")
+        self.assertNotRegex(js_code_only(src), r"label: ' {9}' \+ name")
 
     def test_nothing_moves_while_dragging(self):
         # A drag only draws the drop line (absolutely placed, in the gap);
