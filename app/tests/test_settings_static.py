@@ -52,7 +52,6 @@ SHELL_JS = {"js/theme-loader.js", "js/auth.js", "js/shell.js", "js/notifications
 # Task 8.4 asserts the set is empty. Task 3.2 added ui.js, kit.js and the first
 # General fields (general.js, which Task 4.3 completes).
 PENDING = {
-    "js/settings/integrations.js",       # Task 6.3
     "js/settings/notifications.js",      # Task 6.5
 }
 
@@ -125,10 +124,23 @@ class Frame(unittest.TestCase):
             self.assertIn(f'html[data-settings-tab="{t}"] [data-settings-panel="{t}"]', css)
             # The selected tab's look comes from the same attribute.
             self.assertIn(f'html[data-settings-tab="{t}"] #tab-{t}', css)
-        for token in ("--ws-status-ok", "--ws-status-warn", "--ws-status-err", ".ws-light-ok",
+        for token in ("--ws-status-ok", "--ws-status-warn", "--ws-status-err", "--ws-status-off", ".ws-light-ok",
                       ".ws-light-warn", ".ws-light-error", ".ws-light-unconfigured", ".ws-invalid",
                       ".ws-switch", ".ws-tab", ".ws-savebar", ".ws-admin-only"):
             self.assertIn(token, css)
+
+    def test_not_set_up_light_uses_the_off_token(self):
+        # R16 / R79 (c): G7's --ws-status-off is the accent, and the "not set
+        # up" light is drawn from it (an empty ring, so it can't pass for a
+        # live status whatever the accent is).
+        css = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        root = re.search(r":root \{([^}]*--ws-status-ok[^}]*)\}", css)
+        self.assertIsNotNone(root)
+        self.assertRegex(root.group(1), r"--ws-status-off:\s*var\(--color-accent\);")
+        rule = re.search(r"\.ws-light-unconfigured \{([^}]*)\}", css)
+        self.assertIsNotNone(rule)
+        self.assertIn("var(--ws-status-off)", rule.group(1))
+        self.assertRegex(rule.group(1), r"background:\s*transparent")
 
     def test_tab_scroll_hints_fade_the_strip_edge(self):
         # On a phone the arrows sit over the strip; each carries an edge fade
@@ -205,7 +217,7 @@ class KitApi(unittest.TestCase):
             self.assertRegex(js, rf"\b{name}: {name}\b", name)
         for method in ("text", "textarea", "toggle", "select", "color", "iconPicker", "secret", "track",
                        "get", "set", "stageDefaults", "onChange", "onSaved", "onDiscard", "beforeSave",
-                       "fieldError", "dirtyKeys", "save"):
+                       "fieldError", "dirtyKeys", "save", "saved"):
             self.assertIn(f"api.{method} = function", js, method)
         for event in ("ws-settings:saved", "ws-settings:discarded", "ws-settings:tab"):
             self.assertIn(event, js)
@@ -276,6 +288,29 @@ class KitApi(unittest.TestCase):
         reload = re.search(r"(?:^|[;{}])\s*setTimeout\(function \(\) \{\}", block)
         self.assertIsNotNone(reload, "the delayed reload")
         self.assertLess(clear.start("stmt"), reload.start(), "cleared before the reload is scheduled")
+
+    def test_saved_is_the_baseline(self):
+        # R79 (a): api.saved(key) is the last-saved value (what Discard returns
+        # to), never a staged one: the kit's own baseline(), as live code.
+        src = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        found = live_matches(src, r"\bapi\.saved = function \((\w+)\) \{ return baseline\(\1\); \};")
+        self.assertEqual(len(found), 1, "api.saved returns baseline(key)")
+        # Inside makeApi, where the other controls are.
+        api = function_body(kit_code(), "makeApi")
+        self.assertRegex(api, r"\bapi\.saved = function \((\w+)\) \{ return baseline\(\1\); \};")
+
+    def test_secret_inputs_carry_password_manager_hints(self):
+        # R66 / R79 (f): an API key is not a password. Beside
+        # autocomplete="new-password", the secret input tells 1Password,
+        # LastPass, Bitwarden and Dashlane-style managers to leave it alone.
+        src = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        start, end = src.index("api.secret = function"), src.index("return api;")
+        body = src[start:end]
+        self.assertTrue(live_matches(body, r"\binput\.type = 'password';"))
+        self.assertTrue(live_matches(body, r"\binput\.autocomplete = 'new-password';"))
+        for name, value in (("data-1p-ignore", ""), ("data-lpignore", "true"), ("data-bwignore", ""),
+                            ("data-form-type", "other")):
+            self.assertEqual(len(live_matches(body, rf"\binput\.setAttribute\('{name}', '{value}'\);")), 1, name)
 
     def test_mask_comes_from_the_server(self):
         # One copy of the sentinel: the SettingsView payload. The kit re-exports
@@ -984,6 +1019,79 @@ class PagesTab(unittest.TestCase):
         self.assertNotIn("getElementById(", code)
         self.assertEqual(code.count("querySelector"), 1)
         self.assertIn("querySelector(", pages_function("nameField"))
+
+
+INTEGRATIONS = STATIC / "js" / "settings" / "integrations.js"
+
+
+class IntegrationsTab(unittest.TestCase):
+    """The Integrations tab's rules that can be read from the code (R79)."""
+
+    def _mount(self) -> str:
+        """The registered mount()'s body, as live code."""
+        code = js_code_only(INTEGRATIONS.read_text(encoding="utf-8"))
+        m = re.search(r"WSSettings\.registerTab\(' {12}', \{\s*mount: function \(panel, api\) \{", code)
+        self.assertIsNotNone(m, "no mount(panel, api)")
+        return code[m.end():matching_brace(code, m.end() - 1)]
+
+    def test_mount_does_not_wait_for_the_checks(self):
+        # R79 (d): a cold health check can take 5 s. The cards arrive at once
+        # with "Checking…"; mount() starts the check and returns nothing for
+        # the kit to wait on.
+        mount = top_level(self._mount())
+        self.assertRegex(mount, r"(?:^|[;}])\s*refresh\(\);\s*$", "the first check isn't started last, on its own")
+        self.assertNotRegex(mount, r"\breturn\b", "mount() returns something the kit would wait on")
+        self.assertNotRegex(mount, r"\bawait\b|\basync\b")
+        # Every card starts on "Checking…", in a status line of fixed height.
+        src = INTEGRATIONS.read_text(encoding="utf-8")
+        self.assertTrue(live_matches(src, r"var light = el\('span', 'ws-light ws-light-checking'\);"))
+        self.assertTrue(live_matches(src, r"var reason = el\('span', '[^']*\btruncate\b[^']*', MSG\.checking\);"))
+        status = live_matches(src, r"var status = el\('p', '([^']*)'\);")
+        self.assertEqual(len(status), 1)
+        self.assertIn("h-5", status[0].group(1).split())
+
+    def test_saved_secrets_are_compared_with_the_kits_mask(self):
+        # R79 (a, b): "address and key saved" reads the saved values through
+        # api.saved and compares the key with WSSettings.MASK; no literal copy
+        # of the mask and no WSSettings.values.
+        src = INTEGRATIONS.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        self.assertNotIn("***masked***", src)
+        self.assertTrue(live_matches(src, r"api\.saved\('integration\.chaptarr\.api_key'\) !== WSSettings\.MASK\b"))
+        self.assertTrue(live_matches(src, r"!api\.saved\('integration\.chaptarr\.url'\)"))
+        self.assertNotRegex(code, r"\bMASK\s*[:=]\s*['\"`]")
+        self.assertNotRegex(code, r"WSSettings\.values\b")
+
+    def test_a_save_rechecks_its_cards_and_reloads_chaptarrs_lists(self):
+        # R72 (2), R79 (a, g): after a save, each card whose keys were in it
+        # asks for a fresh check of that one service, and a save of Chaptarr's
+        # address or key loads its lists again, without a page reload.
+        src = INTEGRATIONS.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        hook = re.search(r"document\.addEventListener\(' {17}', function \((\w+)\) \{", code)
+        self.assertIsNotNone(hook, "nothing listens for a save")
+        self.assertTrue(live_matches(src, r"document\.addEventListener\('ws-settings:saved', function"))
+        body = code[hook.end() - 1:matching_brace(code, hook.end() - 1) + 1]
+        self.assertRegex(body, r"if \(touches\(keys, keysOf\(id\)\)\) refresh\(id\);")
+        self.assertRegex(body, r"if \(chaptarr && touches\(keys, CHAPTARR_CONN\)\) loadChoices\(\);")
+        self.assertTrue(live_matches(src, r"var CHAPTARR_CONN = \['integration\.chaptarr\.url', 'integration\.chaptarr\.api_key'\];"))
+        self.assertTrue(live_matches(src, r"'\?refresh=1&service=' \+ encodeURIComponent\(id\)"))
+
+    def test_cards_carry_the_ids_other_tabs_link_to(self):
+        # Pages and Sign-in open a card with WSSettings.go('integrations',
+        # 'integration-card-<id>'); the kit scrolls to it and focuses it, and
+        # the card opens on that focus.
+        src = INTEGRATIONS.read_text(encoding="utf-8")
+        self.assertTrue(live_matches(src, r"root\.id = 'integration-card-' \+ id;"))
+        self.assertTrue(live_matches(src, r"root\.tabIndex = -1;"))
+        self.assertTrue(live_matches(src, r"root\.addEventListener\('focus', function"))
+        for card in ("plex", "kavita", "seerr", "chaptarr"):
+            self.assertRegex(src, rf"\n    {card}: \{{ name: ", card)
+
+    def test_upstream_text_never_goes_in_as_html(self):
+        code = js_code_only(INTEGRATIONS.read_text(encoding="utf-8"))
+        self.assertNotRegex(code, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment|setHTML")
+        self.assertNotRegex(code, r"\bsetInterval\(|\bsetTimeout\(")
 
 
 class Guards(unittest.TestCase):
