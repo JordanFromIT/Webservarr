@@ -630,8 +630,8 @@ class ChaptarrOptions(unittest.TestCase):
         self.configure()
         calls = []
         r = self.call({
-            "rootfolder": _Resp(200, [{"path": "/books", "freeSpace": 1}, {"nope": 1}]),
-            "qualityprofile": _Resp(200, [{"id": 1, "name": "eBook"}, {"id": "x"}]),
+            "rootfolder": _Resp(200, [{"path": "/books", "freeSpace": 1}, {"nope": 1}, {"path": ""}]),
+            "qualityprofile": _Resp(200, [{"id": 1, "name": "eBook"}, {"id": "x"}, {"id": True, "name": "Bool"}]),
             "metadataprofile": _Resp(200, [{"id": 2, "name": "Standard"}]),
         }, calls)
         self.assertEqual(r.status_code, 200, r.text)
@@ -645,6 +645,11 @@ class ChaptarrOptions(unittest.TestCase):
     def test_rejected_key_and_unreachable(self):
         self.configure()
         self.assertEqual(self.call({"rootfolder": _Resp(401)}).status_code, 400)
+        for code in (401, 403):
+            with self.subTest(code=code):
+                r = self.call({"metadataprofile": _Resp(code)})
+                self.assertEqual(r.status_code, 400)
+                self.assertEqual(r.json(), {"detail": "Chaptarr rejected the API key"})
         r = self.call({"rootfolder": httpx.ConnectError("refused")})
         self.assertEqual(r.status_code, 503)
         self.assertNotIn(r.status_code, (502, 504))
@@ -706,6 +711,71 @@ class ChaptarrOptions(unittest.TestCase):
         self.assertEqual(on_loop, [False])
         self.assertEqual(r.status_code, 503, r.text)
 
+    def test_the_three_requests_run_side_by_side(self):
+        # Each answer fits the deadline; one after another they would not.
+        async def slow(body):
+            await asyncio.sleep(0.3)
+            return _Resp(200, body)
+        self.configure()
+        routes = {"rootfolder": lambda: slow([{"path": "/books"}]),
+                  "qualityprofile": lambda: slow([{"id": 1, "name": "eBook"}]),
+                  "metadataprofile": lambda: slow([{"id": 2, "name": "Standard"}])}
+        with mock.patch.object(health, "PROBE_TIMEOUT", 0.7):
+            r = self.call(routes)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["root_folders"], [{"path": "/books"}])
+
+    def test_an_address_httpx_cannot_parse_is_400(self):
+        # Real httpx parsing, no fake client: an IDNA-invalid host passes the
+        # address check (it doesn't resolve) but httpx refuses to build it.
+        self.configure("http://\u2260.example:8789")
+        r = self.client.get("/api/admin/chaptarr/options")
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertEqual(r.json(), {"detail": "That address isn't valid. Check it and try again."})
+
+    def test_the_registry_refuses_an_address_httpx_cannot_parse(self):
+        from app.settings_registry import validate_value
+        for key in ("integration.chaptarr.url", "integration.sonarr.url"):
+            with self.subTest(key=key):
+                self.assertEqual(validate_value(key, "http://\u2260.example:8789"), "That address isn't valid")
+        self.assertIsNone(validate_value("integration.chaptarr.url", "http://192.168.1.8:8789"))
+        r = self.client.put("/api/admin/settings/bulk", json={"settings": [
+            {"key": "integration.chaptarr.url", "value": "http://\u2260.example:8789"}]})
+        self.assertEqual(r.status_code, 422, r.text)
+        self.assertEqual(helpers.get(self.db, "integration.chaptarr.url"), None)
+
+    def test_an_unexpected_error_is_503_and_logs_only_its_type(self):
+        from app.routers import admin_integrations
+        self.configure()
+        boom = RuntimeError("http://192.168.1.8:8789 c-key")
+        with mock.patch.object(admin_integrations, "_fetch_chaptarr_options", mock.AsyncMock(side_effect=boom)), \
+             self.assertLogs("app.routers.admin_integrations", level="WARNING") as logs:
+            r = self.client.get("/api/admin/chaptarr/options")
+        self.assertEqual(r.status_code, 503, r.text)
+        self.assertEqual(r.json(), {"detail": "Couldn't reach Chaptarr. Check the address and try again."})
+        text = "\n".join(logs.output)
+        self.assertIn("RuntimeError", text)
+        self.assertNotIn("c-key", text)
+        self.assertNotIn("192.168.1.8", text)
+
+    def test_cancellation_still_propagates(self):
+        from app.routers import admin_integrations
+        with mock.patch.object(admin_integrations, "_fetch_chaptarr_options",
+                               mock.AsyncMock(side_effect=asyncio.CancelledError())):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(admin_integrations.chaptarr_options_response("http://192.168.1.8:8789", "c-key"))
+
+    def test_rate_limited_to_twenty_a_minute(self):
+        self.configure()
+        restore = _private_limiter()
+        try:
+            helpers.set_rate_limits(True)
+            codes = [self.call({}).status_code for _ in range(21)]
+            self.assertEqual(codes[:20], [200] * 20)
+            self.assertEqual(codes[20], 429)
+        finally:
+            restore()
+
     def test_a_redirect_is_not_followed(self):
         seen = []
 
@@ -728,16 +798,23 @@ class ChaptarrOptions(unittest.TestCase):
 
 
 class SetupWizardTest(unittest.TestCase):
-    """The setup wizard's Plex test posts the field the endpoint reads and
-    shows the probe's reason when it fails."""
+    """The setup wizard's Plex test goes to the setup-only route with the
+    setup token from step 1, posts the fields it reads, and shows the probe's
+    reason when it fails. (There is no admin session before setup.)"""
 
     def setUp(self):
         import os
         path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "setup.html")
         with open(path, encoding="utf-8") as f:
             html = f.read()
-        start = html.index("/api/admin/test-connection")
+        start = html.index("testBtn.addEventListener('click'")
         self.block = html[start:html.index("testBtn.disabled = false", start)]
+        self.html = html
+
+    def test_uses_the_setup_route_with_the_setup_token(self):
+        self.assertIn("fetch('/api/setup/test-connection'", self.block)
+        self.assertNotIn("/api/admin/test-connection", self.html)
+        self.assertRegex(self.block, r"\bsetup_token:\s*storedStep1\.token\b")
 
     def test_posts_credentials(self):
         self.assertRegex(self.block, r"JSON\.stringify\(\{[^}]*\bcredentials:\s*token\b")
