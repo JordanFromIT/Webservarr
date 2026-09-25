@@ -211,8 +211,11 @@ class NoSharedIdentityTests(unittest.TestCase):
             db.close()
 
     def _dispatch_to_no_identity(self):
+        # _record_last_push is stubbed: the check below makes a send attempt on
+        # purpose, and it must not become the dev instance's real last push.
         with mock.patch.object(push, "SessionLocal", self.Session), \
              mock.patch.object(push, "is_safe_push_endpoint", return_value=True), \
+             mock.patch.object(push, "_record_last_push", mock.AsyncMock()), \
              mock.patch.object(requests.Session, "post", side_effect=AssertionError("pushed")):
             return run(push.dispatch_push(["None", "none", ""], "t", "b", "news"))
 
