@@ -1317,7 +1317,13 @@ class NotificationsTab(unittest.TestCase):
         panel = h[h.index('<section id="panel-notifications"'):]
         panel = panel[:panel.index("</section>")]
         heads = re.findall(r'<div class="(h-\[[\d.]+px\](?: md:h-\[[\d.]+px\])?) mb-5 pt-1">', panel)
-        self.assertEqual(heads, ["h-[79px] md:h-[56.5px]", "h-[79px] md:h-[56.5px]", "h-[79px]"])
+        self.assertEqual(heads, ["h-[79px] md:h-[56.5px]"] * 3)
+        # Fix round 1 (R88): each card's description is two lines on every
+        # phone from 360 px and one line from md, so one reservation per
+        # breakpoint holds. The intervals card's text was cut to fit that:
+        # longer copy wrapped to a third line below about 400 px.
+        src = NOTIFICATIONS.read_text(encoding="utf-8")
+        self.assertEqual(len(live_matches(src, r"speed: 'Shorter means quicker alerts\.'")), 1)
         self.assertIn('<div class="h-[193px] sm:h-[173.5px]">', panel)
         self.assertIn('<div class="h-[288.6px] max-w-2xl">', panel)
         src = NOTIFICATIONS.read_text(encoding="utf-8")
