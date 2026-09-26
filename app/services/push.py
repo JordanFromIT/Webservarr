@@ -28,6 +28,10 @@ PUSH_SEND_TIMEOUT = 10
 PUSH_TOTAL_BUDGET = 30.0
 PUSH_CONCURRENCY = 10
 
+# The VAPID contact when Settings has no Admin email. Push services only need
+# a sub claim that parses as a mailto: address.
+FALLBACK_VAPID_EMAIL = "admin@localhost"
+
 # Shown on the notification when the operator's logo is not a same-origin path
 # (a service worker can only reliably load icons from its own origin). A PNG,
 # because Chromium does not rasterise SVG notification icons. Keep in step with
@@ -113,6 +117,29 @@ def load_vapid_key(private_key: str):
     if key.startswith("-----BEGIN"):
         return Vapid.from_pem(key.encode())
     return Vapid.from_string(private_key=key)
+
+
+def vapid_subject(admin_email: Optional[str]) -> str:
+    """The VAPID ``sub`` claim for the stored Admin email.
+
+    A missing, empty or whitespace-only value means "not set" and falls back
+    to FALLBACK_VAPID_EMAIL. An empty row is easy to get (clearing the field,
+    importing a backup from an install that never set it), and a bare
+    ``mailto:`` fails py_vapid's check, so every push would be refused before
+    it left the server."""
+    email = (admin_email or "").strip()
+    return f"mailto:{email or FALLBACK_VAPID_EMAIL}"
+
+
+def vapid_subject_ok(sub: str) -> bool:
+    """True when py_vapid will sign with ``sub``: the same check it runs.
+
+    Without py_vapid nothing can be signed anyway; PushStatus says so itself."""
+    try:
+        from py_vapid import _check_sub
+    except ImportError:
+        return True
+    return bool(_check_sub(sub))
 
 
 def _push_icon(logo_url: str) -> str:
@@ -201,8 +228,7 @@ async def _dispatch_push(
 
         # Build VAPID claims from admin email in Settings (no hardcoded domain)
         admin_email_setting = db.query(Setting).filter(Setting.key == "system.admin_email").first()
-        admin_email = admin_email_setting.value if admin_email_setting else "admin@localhost"
-        vapid_claims = {"sub": f"mailto:{admin_email}"}
+        vapid_claims = {"sub": vapid_subject(admin_email_setting.value if admin_email_setting else None)}
 
         # Normalise emails for matching
         normalised = [e for e in (identity_email(x) for x in emails) if e]

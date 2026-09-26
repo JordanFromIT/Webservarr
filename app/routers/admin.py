@@ -330,6 +330,13 @@ async def notifications_status(
             reason = "Push support isn't installed on this server."
         except Exception:  # noqa: BLE001
             reason = "The push key couldn't be read."
+    if reason is None:
+        # Every push is signed with the Admin email as its contact (an empty
+        # one falls back to a valid default); one py_vapid refuses stops them all.
+        email = db.query(Setting).filter(Setting.key == "system.admin_email").first()
+        if not push.vapid_subject_ok(push.vapid_subject(email.value if email else None)):
+            reason = ("Push services won't accept the Admin email on the Sign-in tab. "
+                      "Change it to a full email address, or clear it.")
 
     # A device counts only when it belongs to an identity, the same rule
     # dispatch_push uses to choose who gets a push; people are counted
