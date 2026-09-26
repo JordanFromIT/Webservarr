@@ -486,7 +486,9 @@ class DerivedDefaults(unittest.TestCase):
         from app import pages
         for key, value in pages._DEFAULT_COLORS.items():
             self.assertEqual(value, reg.REGISTRY["theme.color_" + key].default, key)
-            self.assertEqual(value, OLD_DEFAULT_VALUES["theme.color_" + key], key)
+            # Colours added since (status, New! flag) have no old default to keep.
+            if "theme.color_" + key in OLD_DEFAULT_VALUES:
+                self.assertEqual(value, OLD_DEFAULT_VALUES["theme.color_" + key], key)
         css_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "static", "css", "theme.css")
         with open(css_path, encoding="utf-8") as f:

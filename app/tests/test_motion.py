@@ -97,12 +97,15 @@ class StatusPill(unittest.TestCase):
         self.assertNotRegex(SHELL_JS, PALETTE)
         self.assertNotRegex(HEADER, PALETTE)
         self.assertNotIn("animate-pulse", SHELL_JS)
+        # The header pill is a .ws-pill: its tint, border and dot take the
+        # state's token (test_theme_engine pins the words' colour).
+        self.assertRegex(HEADER, r'id="systemStatus" data-state="unknown" class="ws-pill\b')
         for state in ("ok", "warn", "err"):
             self.assertIn(f"--ws-pill: var(--ws-status-{state})",
-                          css_rule(THEME, f'#systemStatus[data-state="{state}"]'))
-        self.assertIn("var(--ws-status-off)", css_rule(THEME, "#systemStatus"))
-        # The label is theme text; status tokens are for non-text marks only.
-        self.assertRegex(HEADER, r'data-status-text class="text-frosted-blue\b')
+                          css_rule(THEME, f'.ws-pill[data-state="{state}"]'))
+        self.assertIn("var(--ws-status-off)", css_rule(THEME, ".ws-pill"))
+        # The label is theme text; a status colour tints it only on warn or err.
+        self.assertRegex(HEADER, r'data-status-text class="ws-pill-label text-frosted-blue\b')
 
     def test_only_online_pings_and_the_ring_never_touches_layout(self):
         ring = css_rule(THEME, '#systemStatus[data-state="ok"] .ws-status-dot::after')
