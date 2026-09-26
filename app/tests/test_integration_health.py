@@ -532,6 +532,7 @@ class TestConnection(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_masked_credential_uses_the_stored_one(self):
+        helpers.put(self.db, "integration.sonarr.url", "http://192.168.1.5:8989")
         helpers.put(self.db, "integration.sonarr.api_key", "stored-key")
         calls = []
         with mock.patch.object(health.httpx, "AsyncClient", fake_factory({"system/status": _Resp(200, {})}, calls)):
@@ -539,6 +540,65 @@ class TestConnection(unittest.TestCase):
                 "service": "sonarr", "url": "http://192.168.1.5:8989", "credentials": "***masked***"})
         self.assertTrue(r.json()["success"])
         self.assertEqual(calls[0]["headers"]["X-Api-Key"], "stored-key")
+
+    def test_masked_credential_is_used_for_the_saved_address_however_it_is_written(self):
+        # Same address: the case of scheme and host and a trailing slash don't matter.
+        helpers.put(self.db, "integration.sonarr.url", "http://sonarr.lan:8989/")
+        helpers.put(self.db, "integration.sonarr.api_key", "stored-key")
+        for typed in ("http://sonarr.lan:8989", "HTTP://Sonarr.LAN:8989/", "http://sonarr.lan:8989/"):
+            with self.subTest(typed=typed):
+                calls = []
+                with mock.patch.object(health.httpx, "AsyncClient",
+                                       fake_factory({"system/status": _Resp(200, {})}, calls)):
+                    r = self.client.post("/api/admin/test-connection", json={
+                        "service": "sonarr", "url": typed, "credentials": "***masked***"})
+                self.assertEqual(len(calls), 1, r.text)
+                self.assertEqual(calls[0]["headers"]["X-Api-Key"], "stored-key")
+
+    def test_masked_credential_never_goes_to_a_new_address(self):
+        # Masking keeps saved secrets from an admin session; Test must not
+        # hand one to whatever address is on screen.
+        helpers.put(self.db, "integration.plex.url", "http://192.168.1.2:32400")
+        helpers.put(self.db, "integration.plex.token", "stored-token")
+        helpers.put(self.db, "integration.sonarr.url", "http://192.168.1.5:8989")
+        helpers.put(self.db, "integration.sonarr.api_key", "stored-key")
+        cases = (("sonarr", "http://203.0.113.9:8989", "***masked***", "key"),
+                 ("sonarr", "http://192.168.1.5:8989/other", "***masked***", "key"),
+                 ("sonarr", "https://192.168.1.5:8989", None, "key"),      # no credential sent = the saved one
+                 ("plex", "http://203.0.113.9:32400", "***masked***", "token"))
+        for service, url, cred, word in cases:
+            with self.subTest(service=service, url=url, cred=cred):
+                calls = []
+                body = {"service": service, "url": url}
+                if cred is not None:
+                    body["credentials"] = cred
+                with mock.patch.object(health.httpx, "AsyncClient", fake_factory({}, calls)):
+                    r = self.client.post("/api/admin/test-connection", json=body)
+                self.assertEqual(r.status_code, 200)
+                self.assertEqual(r.json(), {"success": False, "state": "warn",
+                                            "message": f"Enter the {word} again to test a new address"})
+                self.assertEqual(calls, [])
+                self.assertNotIn("stored-", r.text)
+
+    def test_masked_credential_with_nothing_saved_for_the_address(self):
+        helpers.put(self.db, "integration.sonarr.api_key", "stored-key")
+        calls = []
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({}, calls)):
+            r = self.client.post("/api/admin/test-connection", json={
+                "service": "sonarr", "url": "http://192.168.1.5:8989", "credentials": "***masked***"})
+        self.assertEqual(r.json()["state"], "warn")
+        self.assertEqual(calls, [])
+
+    def test_masked_nyt_key_is_always_the_saved_one(self):
+        # NYT has one fixed address, so the saved key can always be tested.
+        helpers.put(self.db, "integration.nyt.api_key", "n-stored")
+        calls = []
+        with mock.patch.object(health.httpx, "AsyncClient", fake_factory({"nytimes": _Resp(200, {})}, calls)):
+            r = self.client.post("/api/admin/test-connection", json={
+                "service": "nyt", "url": "http://203.0.113.9", "credentials": "***masked***"})
+        self.assertTrue(r.json()["success"], r.text)
+        self.assertEqual(calls[0]["params"], {"api-key": "n-stored"})
+        self.assertTrue(calls[0]["url"].startswith("https://api.nytimes.com/"))
 
     def test_a_typed_credential_is_tested_as_typed(self):
         helpers.put(self.db, "integration.sonarr.api_key", "stored-key")
