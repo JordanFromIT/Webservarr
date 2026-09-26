@@ -13,7 +13,7 @@ Run inside the container:
 import re
 import unittest
 
-from app.tests.test_shell_contract import STATIC, js_code_only, live_matches
+from app.tests.test_shell_contract import STATIC, js_code_only, live_matches, matching_brace
 
 THEME = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
 LOGIN = (STATIC / "login.html").read_text(encoding="utf-8")
@@ -148,8 +148,18 @@ class SoftOpenClose(unittest.TestCase):
         self.assertNotRegex(SIDEBAR, r'id="drawerPanel"[^>]*\b(?:duration-\d+|transition-transform)\b')
         self.assertTrue(live_matches(
             SHELL_JS, r"""CSS\.supports\(\s*['"]transition-behavior['"]\s*,\s*['"]allow-discrete['"]\s*\)"""))
-        # The timer is the fallback only: no unconditional delay hides the overlay.
+        # The timer is the fallback only, it is kept and cancelled by a reopen
+        # or another close (a stale one must never hide a reopened drawer),
+        # and reduced motion hides at once whatever the support.
         self.assertFalse(re.search(r"setTimeout\(function \(\) \{ overlay\.classList\.add\('hidden'\); \}, 300\)", SHELL_JS))
+        self.assertTrue(live_matches(SHELL_JS, r"hideTimer = setTimeout\("))
+        self.assertTrue(live_matches(SHELL_JS, r"clearTimeout\(hideTimer\)"))
+        self.assertTrue(live_matches(SHELL_JS, r"if \(discrete \|\| reducedMotion\(\)\) overlay\.classList\.add\('hidden'\);"))
+        for fn in ("openDrawer", "closeDrawer"):
+            m = live_matches(SHELL_JS, rf"function {fn}\(\) \{{")
+            self.assertTrue(m, fn)
+            body = SHELL_JS[m[0].end():matching_brace(SHELL_JS, m[0].end() - 1)]
+            self.assertTrue(live_matches(body, r"cancelHide\(\);"), f"{fn} must cancel a pending hide")
 
     def test_dialog_close_is_inert_before_focus_returns_then_leaves_the_dom(self):
         inert = live_matches(UI_JS, r"overlay\.inert\s*=\s*true")
@@ -201,19 +211,38 @@ class HoverLift(unittest.TestCase):
         self.assertIn("rgb(var(--color-background)", css_rule(hover.group(1), ".ws-lift:hover"))
         self.assertIn("transform: none", css_rule(THEME, '.ws-lift:disabled, .ws-lift[aria-disabled="true"]'))
 
-    def test_listed_surfaces_carry_the_class(self):
+    def test_lift_sits_only_on_what_is_clicked(self):
+        # A lift promises a click. Cards that only hold a button (news, search
+        # results, request status, streams, service tiles) carry none; the
+        # requests discover poster is itself the click target and keeps it,
+        # the search card's own Request button takes it, and so do a collapsed
+        # integration card (its header button fills it) and the WSUI buttons.
         index = (STATIC / "index.html").read_text(encoding="utf-8")
-        self.assertIn('class="glass-card ws-lift p-4 rounded-xl', index)                   # news card
-        self.assertIn('class="glass-card ws-lift rounded-xl overflow-hidden group"', index)  # stream card
-        self.assertIn('class="ws-lift bg-baltic-blue/10 rounded-xl', index)                # service tile
-        self.assertIn('class="glass-card ws-lift p-4 rounded-xl', (STATIC / "news.html").read_text(encoding="utf-8"))
+        news = (STATIC / "news.html").read_text(encoding="utf-8")
         requests = (STATIC / "requests.html").read_text(encoding="utf-8")
-        self.assertEqual(requests.count("glass-card ws-lift"), 3)
+        self.assertNotIn("ws-lift", index)
+        self.assertNotIn("ws-lift", news)
+        self.assertEqual(len(re.findall(r'class="[^"]*\bws-lift\b', requests)), 2)   # in markup, not in comments
+        self.assertIn('glass-card ws-lift cursor-pointer group"', requests)                      # discover poster
+        self.assertRegex(requests, r'data-request-id="[^"]*" class="ws-lift w-full')          # search card button
+        self.assertNotRegex(requests, r'<div class="glass-card ws-lift')                       # no inert card
         self.assertIn("'ws-lift scroll-mt-6 rounded-2xl", INTEGRATIONS_JS)
         self.assertTrue(live_matches(INTEGRATIONS_JS, r"""root\.classList\.toggle\(\s*['"]ws-lift['"]\s*,\s*!open\s*\)"""))
         for btn in ("btnPrimary", "btnGhost", "btnDanger"):
             self.assertRegex(UI_JS, rf"\b{btn}: 'ws-lift inline-flex", btn)
         self.assertRegex(UI_JS, r"\bbtnQuiet: 'inline-flex")
+
+    def test_a_dragged_row_neither_dips_nor_lifts_its_cards(self):
+        # WS.dragScroll holds the mouse down across the whole gesture, which
+        # would otherwise keep the card under the pointer pressed and lift the
+        # ones it passes. The guard shares the hover/press specificity and
+        # comes after both, so it wins the cascade.
+        guard = css_rule(THEME, ".ws-dragging .ws-lift, .ws-dragging.ws-lift")
+        self.assertIn("transform: none", guard)
+        self.assertIn("box-shadow: none", guard)
+        plain = top_level(THEME)
+        self.assertGreater(plain.index(".ws-dragging .ws-lift"), plain.index(".ws-lift:active"))
+        self.assertGreater(THEME.index(".ws-dragging .ws-lift"), THEME.index(".ws-lift:hover {"))
 
     def test_reduced_motion_drops_the_lift(self):
         self.assertTrue(stilled(THEME, ".ws-lift", "transition"))
