@@ -352,8 +352,9 @@ body {
   45%, 100% { transform: scale(2.4); opacity: 0; }
 }
 
+/* The same selector as the rule it stills: a shorter one loses to it. */
 @media (prefers-reduced-motion: reduce) {
-  .ws-status-dot::after { animation: none; }
+  #systemStatus[data-state="ok"] .ws-status-dot::after { animation: none; }
 }
 
 /* The dashboard's gauge block is static markup so it reserves its space from

@@ -113,7 +113,9 @@ class StatusPill(unittest.TestCase):
         self.assertIn("width: .5rem", dot)
         self.assertIn("height: .5rem", dot)
         self.assertRegex(HEADER, r'data-status-dot class="ws-status-dot"')
-        self.assertTrue(stilled(THEME, ".ws-status-dot::after", "animation"))
+        # The guard must carry the ping rule's own selector: a shorter one
+        # (.ws-status-dot::after) has less specificity and never applies.
+        self.assertTrue(stilled(THEME, '#systemStatus[data-state="ok"] .ws-status-dot::after', "animation"))
 
     def test_script_sets_the_state_and_the_words_only(self):
         self.assertRegex(SHELL_JS, r"PILL_LABEL\s*=\s*\{[^}]*\bok:[^}]*\bwarn:[^}]*\berr:")
