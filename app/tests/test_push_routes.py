@@ -190,5 +190,74 @@ class PushRouteTests(unittest.TestCase):
         self.assertEqual(tried, [ENDPOINT_A])
 
 
+# What browsers really send: an FCM/Mozilla/Apple endpoint of a few hundred
+# characters, an 87-character p256dh and a 22-character auth secret.
+REAL_ENDPOINT = "https://fcm.googleapis.com/fcm/send/" + "dAbC-123_xyz" * 50     # 636 characters
+REAL_KEYS = {"p256dh": "B" + "x" * 86, "auth": "y" * 22}
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class PushSubscribeLimits(unittest.TestCase):
+    """L2: a member can't fill the disk through push-subscribe. Each field has
+    a length cap (422 past it, nothing stored), and one account holds at most
+    MAX_PUSH_DEVICES subscriptions: a new device past that replaces the
+    account's oldest, so the browser in front of someone always works."""
+
+    # The same harness as PushRouteTests, without running its tests twice.
+    setUp = PushRouteTests.setUp
+    tearDown = PushRouteTests.tearDown
+    _rows = PushRouteTests._rows
+    _subscribe = PushRouteTests._subscribe
+
+    def post(self, endpoint, keys=None):
+        return self.client.post("/api/notifications/push-subscribe",
+                                json={"endpoint": endpoint, "keys": keys or REAL_KEYS})
+
+    def test_a_real_browser_subscription_is_accepted(self):
+        r = self.post(REAL_ENDPOINT)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self._rows(), [("alice@example.com", REAL_ENDPOINT)])
+
+    def test_fields_at_their_caps_are_accepted(self):
+        from app.routers import notifications as n
+        endpoint = "https://push.example.com/" + "e" * (n.MAX_PUSH_ENDPOINT - len("https://push.example.com/"))
+        r = self.post(endpoint, {"p256dh": "p" * n.MAX_PUSH_P256DH, "auth": "a" * n.MAX_PUSH_AUTH})
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def test_each_field_over_its_cap_is_422_and_stores_nothing(self):
+        from app.routers import notifications as n
+        self.assertEqual((n.MAX_PUSH_ENDPOINT, n.MAX_PUSH_P256DH, n.MAX_PUSH_AUTH), (2048, 256, 64))
+        huge = "https://push.example.com/" + "e" * (n.MAX_PUSH_ENDPOINT - len("https://push.example.com/") + 1)
+        for endpoint, keys in ((huge, REAL_KEYS),
+                               (ENDPOINT_A, {"p256dh": "p" * (n.MAX_PUSH_P256DH + 1), "auth": "a"}),
+                               (ENDPOINT_A, {"p256dh": "p", "auth": "a" * (n.MAX_PUSH_AUTH + 1)}),
+                               ("https://push.example.com/" + "e" * 3_000_000, REAL_KEYS)):
+            r = self.post(endpoint, keys)
+            self.assertEqual(r.status_code, 422, r.text[:200])
+        self.assertEqual(self._rows(), [])
+
+    def test_a_device_past_the_cap_replaces_the_oldest(self):
+        from app.routers import notifications as n
+        self.assertEqual(n.MAX_PUSH_DEVICES, 20)
+        self.user = {"email": "bob@example.com", "is_admin": "false"}
+        self._subscribe(ENDPOINT_B)                    # someone else's device is never touched
+        self.user = {"email": "alice@example.com", "is_admin": "false"}
+        devices = [f"https://push.example.com/send/device-{i:02d}" for i in range(n.MAX_PUSH_DEVICES + 3)]
+        for d in devices:
+            self._subscribe(d)
+        mine = [e for u, e in self._rows() if u == "alice@example.com"]
+        self.assertEqual(len(mine), n.MAX_PUSH_DEVICES)
+        self.assertEqual(sorted(mine), sorted(devices[3:]))
+        self.assertIn(("bob@example.com", ENDPOINT_B), self._rows())
+
+    def test_renewing_a_device_at_the_cap_removes_nothing(self):
+        from app.routers import notifications as n
+        devices = [f"https://push.example.com/send/device-{i:02d}" for i in range(n.MAX_PUSH_DEVICES)]
+        for d in devices:
+            self._subscribe(d)
+        self._subscribe(devices[0])                    # the same browser renewing its keys
+        self.assertEqual(sorted(e for _u, e in self._rows()), sorted(devices))
+
+
 if __name__ == "__main__":
     unittest.main()
