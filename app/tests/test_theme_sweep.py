@@ -24,6 +24,53 @@ except Exception:  # pragma: no cover - the laptop has no FastAPI
     ADMIN_SESSION = {}
 
 REQUESTS = (STATIC / "requests.html").read_text(encoding="utf-8")
+
+# ---- G1.2: no palette colour on text or surfaces ---------------------------
+#
+# Every colour on the site comes from the theme engine (theme-loader's CSS
+# variables and the Tailwind names mapped onto them). A Tailwind palette
+# colour (text-green-400, bg-black/80, hover:text-red-300, placeholder-slate-500,
+# text-[#ff0000] ...) ignores the operator's theme, and on a light theme it is
+# often unreadable. This scan keeps them from coming back.
+PALETTE_NAMES = ("slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|"
+                 "blue|indigo|violet|purple|fuchsia|pink|rose|white|black")
+_VARIANTS = r"(?:[\w\[\]&-]+:)*"
+TEXT_PALETTE = re.compile(r"(?<![\w-])(" + _VARIANTS + r"(?:text|placeholder)-(?:" + PALETTE_NAMES +
+                          r")(?:-\d{2,3})?(?:/(?:\d+|\[[\d.]+\]))?)(?![\w-])")
+SURFACE_PALETTE = re.compile(r"(?<![\w-])(" + _VARIANTS + r"(?:bg|border(?:-[trblxy])?|ring|ring-offset|from|via|to|fill|"
+                             r"stroke|outline|divide|decoration|caret|accent)-(?:" + PALETTE_NAMES +
+                             r")(?:-\d{2,3})?(?:/(?:\d+|\[[\d.]+\]))?)(?![\w-])")
+ARBITRARY_HEX = re.compile(r"(?<![\w-])(" + _VARIANTS + r"(?:text|placeholder|bg|border|ring|from|via|to|fill|stroke|"
+                           r"outline|decoration|shadow)-\[#[0-9a-fA-F]{3,8}\])")
+
+# The only sanctioned exceptions (audit M10): the Plex sign-in buttons wear
+# Plex's own brand colours. Each entry is (file, class, a snippet that marks
+# the line), so a new use elsewhere, even of the same class, still fails.
+M10_ALLOWED = {
+    ("login.html", "text-black", 'id="plexLoginBtn"'),
+    ("login.html", "text-black", 'id="authentikLoginBtn"'),
+    ("login.html", "bg-[#E5A00D]", 'id="plexLoginBtn"'),
+    ("login.html", "bg-[#E5A00D]", 'id="authentikLoginBtn"'),
+    ("login.html", "hover:bg-[#cc8f0c]", 'id="plexLoginBtn"'),
+    ("login.html", "hover:bg-[#cc8f0c]", 'id="authentikLoginBtn"'),
+}
+
+
+def swept_files():
+    files = sorted(set(STATIC.glob("**/*.html")) | set((STATIC / "js").glob("**/*.js")))
+    return files + [STATIC.parent / "pages.py"]
+
+
+def palette_hits(pattern):
+    hits = []
+    for path in swept_files():
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for m in pattern.finditer(line):
+                cls = m.group(1)
+                if any(path.name == f and cls == c and mark in line for f, c, mark in M10_ALLOWED):
+                    continue
+                hits.append(f"{path.relative_to(STATIC.parent)}:{n}: {cls}")
+    return hits
 ISSUES = (STATIC / "issues.html").read_text(encoding="utf-8")
 
 
@@ -136,6 +183,45 @@ class FormControlsFollowTheTheme(unittest.TestCase):
     def test_the_preference_toggles_hide_the_plugin_border(self):
         notif = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
         self.assertEqual(notif.count("appearance:none; -webkit-appearance:none; border-color:transparent;"), 2)
+
+
+
+class NoPaletteColours(unittest.TestCase):
+    """G1.2 (R139): after the sweep, no text anywhere uses a colour outside
+    the theme engine, and no surface or mark is a fixed palette colour. The
+    only exceptions are the Plex brand buttons (M10)."""
+
+    def test_the_scan_sees_the_whole_site(self):
+        names = {p.name for p in swept_files()}
+        for must in ("index.html", "login.html", "shell-sidebar.html", "notifications.js", "kit.js", "pages.py"):
+            self.assertIn(must, names)
+
+    def test_the_patterns_catch_what_they_should(self):
+        for bad in ("text-green-400", "hover:text-red-300", "placeholder-slate-500", "placeholder:text-gray-400",
+                    "text-white", "sm:text-yellow-300/80", "text-blue-500/[0.5]"):
+            self.assertRegex(" " + bad + " ", TEXT_PALETTE, bad)
+        for bad in ("bg-black/80", "from-black", "to-black", "border-red-500/30", "ring-black/60", "hover:bg-black"):
+            self.assertRegex(" " + bad + " ", SURFACE_PALETTE, bad)
+        self.assertRegex(" text-[#ff0000] ", ARBITRARY_HEX)
+        for ok in ("text-frosted-blue", "text-status-err-text", "bg-background-dark/80", "text-bright",
+                   "from-background-dark", "bg-status-ok/10", "shadow-black/40", "text-media-movie"):
+            self.assertNotRegex(" " + ok + " ", TEXT_PALETTE, ok)
+            self.assertNotRegex(" " + ok + " ", SURFACE_PALETTE, ok)
+
+    def test_no_palette_text_colour(self):
+        self.assertEqual(palette_hits(TEXT_PALETTE), [])
+
+    def test_no_palette_surface_or_mark(self):
+        self.assertEqual(palette_hits(SURFACE_PALETTE), [])
+
+    def test_no_arbitrary_hex_colour(self):
+        self.assertEqual(palette_hits(ARBITRARY_HEX), [])
+
+    def test_the_allowlist_is_only_the_m10_buttons(self):
+        login = (STATIC / "login.html").read_text(encoding="utf-8")
+        for _f, cls, mark in M10_ALLOWED:
+            line = next(l for l in login.splitlines() if mark in l)
+            self.assertIn(cls, line)
 
 
 if __name__ == "__main__":
