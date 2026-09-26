@@ -85,6 +85,11 @@ body {
 .text-media-tv    { color: rgb(var(--color-media-tv)); }
 .text-media-book  { color: rgb(var(--color-media-book)); }
 
+/* Dot form (a release's type on the home page's calendar strip). */
+.bg-media-movie { background-color: rgb(var(--color-media-movie)); }
+.bg-media-tv    { background-color: rgb(var(--color-media-tv)); }
+.bg-media-book  { background-color: rgb(var(--color-media-book)); }
+
 /* Badge form: the same hue as a tint behind its own text. */
 .badge-media-movie {
   color: rgb(var(--color-media-movie));

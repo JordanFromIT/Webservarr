@@ -74,12 +74,12 @@
 <div class="relative w-28 h-28 lg:w-36 lg:h-36">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
-<circle id="cpuGaugeCircle" class="text-cyan-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+<circle id="cpuGaugeCircle" class="text-steel-blue stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
 </svg>
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
 <span class="text-xs text-steel-blue font-medium">CPU</span>
 <span id="cpuGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
-<span id="cpuGaugeDetail" class="min-h-[1.5em] text-[10px] text-steel-blue/70"></span>
+<span id="cpuGaugeDetail" class="min-h-[1.5em] text-[10px] text-frosted-blue/70"></span>
 </div>
 </div>
 </div>
@@ -88,12 +88,12 @@
 <div class="relative w-28 h-28 lg:w-36 lg:h-36">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
-<circle id="ramGaugeCircle" class="text-purple-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+<circle id="ramGaugeCircle" class="text-steel-blue stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
 </svg>
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
 <span class="text-xs text-steel-blue font-medium">RAM</span>
 <span id="ramGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
-<span id="ramGaugeDetail" class="min-h-[1.5em] text-[10px] text-steel-blue/70"></span>
+<span id="ramGaugeDetail" class="min-h-[1.5em] text-[10px] text-frosted-blue/70"></span>
 </div>
 </div>
 </div>
@@ -102,7 +102,7 @@
 <div class="relative w-28 h-28 lg:w-36 lg:h-36">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
-<circle id="netGaugeCircle" class="text-orange-500 stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+<circle id="netGaugeCircle" class="text-steel-blue stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
 </svg>
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center pt-1">
 <span class="text-xs text-steel-blue font-medium uppercase">Network</span>
@@ -110,15 +110,15 @@
 <div class="flex items-center text-[11px] text-frosted-blue space-x-0.5">
 <span class="material-symbols-outlined text-[11px]">arrow_upward</span>
 <span id="netUpText">0.0</span>
-<span id="netUpUnit" class="text-steel-blue/60">Mbps</span>
+<span id="netUpUnit" class="text-frosted-blue/60">Mbps</span>
 </div>
 <div class="flex items-center text-[11px] text-frosted-blue space-x-0.5 mt-0.5">
 <span class="material-symbols-outlined text-[11px]">arrow_downward</span>
 <span id="netDownText">0.0</span>
-<span id="netDownUnit" class="text-steel-blue/60">Mbps</span>
+<span id="netDownUnit" class="text-frosted-blue/60">Mbps</span>
 </div>
 </div>
-<span id="netGaugeDetail" class="min-h-[1.5em] text-[9px] text-steel-blue/60 mt-0.5"></span>
+<span id="netGaugeDetail" class="min-h-[1.5em] text-[9px] text-frosted-blue/60 mt-0.5"></span>
 </div>
 </div>
 </div>
@@ -140,10 +140,10 @@
 <span id="iconSectionNews" class="material-symbols-outlined text-steel-blue">newspaper</span>
 <h3 class="text-xl font-bold text-frosted-blue">News &amp; Updates</h3>
 <div class="ml-auto flex items-center gap-4">
-<a href="/news" class="ws-admin-only inline-flex items-center gap-1 text-sm font-bold text-steel-blue hover:text-primary transition-colors">
+<a href="/news" class="ws-admin-only inline-flex items-center gap-1 text-sm font-bold text-steel-blue hover:text-frosted-blue transition-colors">
 Manage news<span class="material-symbols-outlined text-sm">edit</span>
 </a>
-<a href="/news" id="newsViewAll" class="invisible inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors">
+<a href="/news" id="newsViewAll" class="invisible inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors">
 View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </a>
 </div>
@@ -193,7 +193,7 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 <span id="iconSectionReleases" class="material-symbols-outlined text-steel-blue">calendar_month</span>
 <h3 class="text-xl font-bold text-frosted-blue">Upcoming Releases</h3>
 </div>
-<a href="/calendar" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors uppercase tracking-wider">
+<a href="/calendar" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors uppercase tracking-wider">
 View Calendar
 <span class="material-symbols-outlined text-sm">arrow_forward</span>
 </a>
@@ -209,7 +209,7 @@ View Calendar
 <span id="iconSectionRequests" class="material-symbols-outlined text-steel-blue">shopping_cart</span>
 <h3 class="text-xl font-bold text-frosted-blue">Recent Requests</h3>
 </div>
-<a id="viewRequestsLink" href="/requests" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors uppercase tracking-wider">
+<a id="viewRequestsLink" href="/requests" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors uppercase tracking-wider">
 View Requests
 <span class="material-symbols-outlined text-sm">arrow_forward</span>
 </a>
@@ -351,11 +351,11 @@ function renderNewsCard(post, expanded) {
     var isFresh = (Date.now() - created.getTime()) < NEWS_FRESH_MS;
     var accent = post.pinned ? 'border-l-primary' : (isFresh ? 'border-l-frosted-blue' : 'border-l-steel-blue/40');
     var icon = post.pinned ? 'push_pin' : (isFresh ? 'campaign' : 'article');
-    var iconColor = post.pinned ? 'text-primary' : (isFresh ? 'text-frosted-blue' : 'text-steel-blue');
+    var iconColor = post.pinned ? 'text-frosted-blue' : (isFresh ? 'text-frosted-blue' : 'text-steel-blue');
 
     var flag = '';
     if (post.pinned) {
-        flag = '<span class="shrink-0 mt-0.5 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-primary/20 text-primary">Pinned</span>';
+        flag = '<span class="shrink-0 mt-0.5 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-primary/20 text-frosted-blue">Pinned</span>';
     } else if (isFresh) {
         flag = '<span class="shrink-0 mt-0.5 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-frosted-blue/15 text-frosted-blue">New</span>';
     }
@@ -371,7 +371,7 @@ function renderNewsCard(post, expanded) {
 
     var toggle = open
         ? ''
-        : '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-[11px] font-bold text-steel-blue hover:text-primary transition-colors">' +
+        : '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-[11px] font-bold text-steel-blue hover:text-frosted-blue transition-colors">' +
             '<span data-news-toggle-text>Read more</span>' +
             '<span class="material-symbols-outlined text-sm transition-transform" data-news-chevron>expand_more</span>' +
           '</button>';
@@ -431,8 +431,8 @@ async function loadNews() {
             console.error('Error loading news:', error);
             WS.arrive('news', function () {
                 WS.setHTML(document.getElementById('newsContainer'), `
-                    <div class="text-center text-red-400 py-8">
-                        <span class="material-symbols-outlined text-4xl mb-2 block">error</span>
+                    <div class="text-center text-frosted-blue/70 py-8">
+                        <span class="material-symbols-outlined text-4xl mb-2 block text-status-err-text">error</span>
                         <p>Error loading news</p>
                     </div>
                 `);
@@ -585,15 +585,15 @@ function renderActiveStreams(streams) {
                 const detailId = `detail-${sessionId || Math.random().toString(36).slice(2)}`;
                 playTypeHtml = `
                     <div>
-                        <span class="text-yellow-300 text-[11px] font-bold">Warning: Not playing at full quality!</span>
-                        <button onclick="document.getElementById('${detailId}').classList.toggle('hidden')" class="text-yellow-300/50 hover:text-yellow-300/80 text-[10px] underline cursor-pointer block mt-0.5">More info</button>
-                        <div id="${detailId}" class="hidden mt-1.5 text-[10px] text-yellow-300/60 leading-relaxed">
+                        <span class="text-status-warn-text text-[11px] font-bold">Warning: Not playing at full quality!</span>
+                        <button onclick="document.getElementById('${detailId}').classList.toggle('hidden')" class="text-frosted-blue/70 hover:text-frosted-blue text-[10px] underline cursor-pointer block mt-0.5">More info</button>
+                        <div id="${detailId}" class="hidden mt-1.5 text-[10px] text-frosted-blue/70 leading-relaxed">
                             <p>Source file is ${sourceHeight ? sourceHeight + 'p' : escapeHtml(sourceQuality)} but you're streaming at ${streamHeight ? streamHeight + 'p' : escapeHtml(streamQuality)}${sourceQuality === streamQuality ? ' (if these values are the same it means it\'s a lower bitrate)' : ''}</p>
                             <p class="mt-1">Transcoding gives you a lower quality experience, change your Plex app quality setting to "Original" for the best experience.</p>
                         </div>
                     </div>`;
             } else {
-                playTypeHtml = `<span class="text-green-400 text-xs font-bold">${escapeHtml(decision)} (Full Quality)</span>`;
+                playTypeHtml = `<span class="text-frosted-blue/70 text-xs font-bold">${escapeHtml(decision)} (Full Quality)</span>`;
             }
 
             const bgStyle = thumbUrl
@@ -604,7 +604,7 @@ function renderActiveStreams(streams) {
                 <div class="glass-card rounded-xl overflow-hidden group">
                     <div class="aspect-video relative overflow-hidden">
                         <div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110" style="${bgStyle}"></div>
-                        <div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
+                        <div class="absolute inset-0 bg-gradient-to-t from-background-dark via-transparent to-transparent"></div>
                         <div class="absolute bottom-4 left-4 right-4">
                             <h4 class="text-lg font-bold text-frosted-blue">${displayTitle}</h4>
                         </div>
@@ -617,7 +617,7 @@ function renderActiveStreams(streams) {
                                 <span>${Math.round(progress)}%</span>
                             </div>
                             <div class="h-1 bg-frosted-blue/10 rounded-full overflow-hidden">
-                                <div class="h-full w-[${Math.round(progress)}%]"></div>
+                                <div class="h-full bg-primary rounded-full" style="width: ${Math.min(100, Math.max(0, Math.round(progress) || 0))}%"></div>
                             </div>
                         </div>
                     </div>
@@ -695,7 +695,7 @@ const REQUEST_TONE_CLASSES = {
     ready: 'bg-primary/30 text-bright',
     go:    'bg-frosted-blue/15 text-frosted-blue',
     wait:  'bg-steel-blue/20 text-steel-blue',
-    dead:  'bg-steel-blue/10 text-steel-blue/75'
+    dead:  'bg-steel-blue/10 text-frosted-blue/70'
 };
 
 function renderRecentRequests(requests) {
@@ -744,7 +744,7 @@ function renderRecentRequests(requests) {
                 <tr>
                     <td class="px-4 lg:px-6 py-3.5">
                         <div class="flex items-center gap-3 min-w-0">
-                            <div class="size-8 rounded bg-black/40 shrink-0 flex items-center justify-center" style="${posterStyle}">${thumbInner}</div>
+                            <div class="size-8 rounded bg-frosted-blue/[0.04] shrink-0 flex items-center justify-center" style="${posterStyle}">${thumbInner}</div>
                             <div class="min-w-0 flex-1">
                                 <p class="font-medium text-frosted-blue truncate">${title}</p>
                                 <div class="sm:hidden mt-1">${typePill}</div>
@@ -825,27 +825,30 @@ function renderServices(data) {
         }
 
         WS.setHTML(servicesContainer, services.map(function(service) {
-            var barBg, statusLabel;
+            var barBg, dotCls, textCls, statusLabel;
 
             switch(service.status) {
+                // A tint of the state's colour with its dot, like the header
+                // pill: the words stay quiet theme text while all is well and
+                // take the status-text colour only when something is wrong.
                 case 'up':
-                    barBg = 'bg-green-500';
+                    barBg = 'bg-status-ok/10'; dotCls = 'ws-light-ok'; textCls = 'text-frosted-blue';
                     statusLabel = 'Online';
                     break;
                 case 'degraded':
-                    barBg = 'bg-yellow-500';
+                    barBg = 'bg-status-warn/10'; dotCls = 'ws-light-warn'; textCls = 'text-status-warn-text';
                     statusLabel = 'Degraded';
                     break;
                 case 'down':
-                    barBg = 'bg-red-500';
+                    barBg = 'bg-status-err/10'; dotCls = 'ws-light-error'; textCls = 'text-status-err-text';
                     statusLabel = 'Offline';
                     break;
                 case 'maintenance':
-                    barBg = 'bg-steel-blue';
+                    barBg = 'bg-steel-blue/20'; dotCls = 'ws-light-unconfigured'; textCls = 'text-frosted-blue/70';
                     statusLabel = 'Maintenance';
                     break;
                 default:
-                    barBg = 'bg-steel-blue';
+                    barBg = 'bg-steel-blue/20'; dotCls = 'ws-light-off'; textCls = 'text-frosted-blue/70';
                     statusLabel = 'Unknown';
             }
 
@@ -864,8 +867,9 @@ function renderServices(data) {
                     iconHtml +
                     '<span class="text-[11px] font-medium leading-tight line-clamp-2 text-frosted-blue">' + escapeHtml(service.display_name) + '</span>' +
                 '</div>' +
-                '<div class="' + barBg + ' py-1 flex justify-center">' +
-                    '<span class="text-[10px] font-bold text-bright uppercase tracking-wider">' + statusLabel + '</span>' +
+                '<div class="' + barBg + ' py-1 flex items-center justify-center gap-1.5">' +
+                    '<span class="ws-light ' + dotCls + '" aria-hidden="true"></span>' +
+                    '<span class="text-[10px] font-bold ' + textCls + ' uppercase tracking-wider">' + statusLabel + '</span>' +
                 '</div>' +
             '</div>';
         }).join(''));
@@ -933,7 +937,7 @@ function renderUpcomingReleases(releases) {
                 if (dayReleases.length === 0 && !isToday) continue;
 
                 var row = document.createElement('div');
-                var rowCls = 'rounded-lg p-3 bg-black/30 flex gap-3';
+                var rowCls = 'rounded-lg p-3 bg-frosted-blue/[0.04] flex gap-3';
                 if (isToday) rowCls += ' ring-1 ring-primary bg-primary/10';
                 row.className = rowCls;
 
@@ -941,11 +945,11 @@ function renderUpcomingReleases(releases) {
                 var dateCol = document.createElement('div');
                 dateCol.className = 'shrink-0 w-12 text-center';
                 var dayName = document.createElement('div');
-                dayName.className = 'text-[10px] font-bold uppercase tracking-wider ' + (isToday ? 'text-primary' : 'text-steel-blue/60');
+                dayName.className = 'text-[10px] font-bold uppercase tracking-wider ' + (isToday ? 'text-frosted-blue' : 'text-frosted-blue/60');
                 dayName.textContent = dayNames[cellDate.getDay()];
                 dateCol.appendChild(dayName);
                 var dayNum = document.createElement('div');
-                dayNum.className = 'text-lg font-bold ' + (isToday ? 'text-primary' : 'text-frosted-blue');
+                dayNum.className = 'text-lg font-bold text-frosted-blue';
                 dayNum.textContent = cellDate.getDate();
                 dateCol.appendChild(dayNum);
                 row.appendChild(dateCol);
@@ -956,7 +960,7 @@ function renderUpcomingReleases(releases) {
 
                 if (dayReleases.length === 0) {
                     var empty = document.createElement('span');
-                    empty.className = 'text-xs text-steel-blue/30 italic';
+                    empty.className = 'text-xs text-frosted-blue/60 italic';
                     empty.textContent = 'No releases';
                     relCol.appendChild(empty);
                 } else {
@@ -967,10 +971,10 @@ function renderUpcomingReleases(releases) {
 
                         var typeBadge = document.createElement('span');
                         if (rel.media_type === 'movie') {
-                            typeBadge.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 shrink-0';
+                            typeBadge.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded badge-media-movie shrink-0';
                             typeBadge.textContent = 'MOV';
                         } else {
-                            typeBadge.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 shrink-0';
+                            typeBadge.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded badge-media-tv shrink-0';
                             typeBadge.textContent = 'TV';
                         }
                         badge.appendChild(typeBadge);
@@ -1003,7 +1007,7 @@ function renderUpcomingReleases(releases) {
                 var dayDate = new Date(today);
                 dayDate.setDate(dayDate.getDate() + d);
                 var hdr = document.createElement('div');
-                hdr.className = 'text-center text-[10px] font-bold uppercase tracking-wider text-steel-blue/60';
+                hdr.className = 'text-center text-[10px] font-bold uppercase tracking-wider text-frosted-blue/60';
                 hdr.textContent = dayNames[dayDate.getDay()];
                 headerRow.appendChild(hdr);
             }
@@ -1020,13 +1024,13 @@ function renderUpcomingReleases(releases) {
                 var dayReleases = grouped[dateStr] || [];
 
                 var cell = document.createElement('div');
-                var cellCls = 'rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col bg-black/30';
+                var cellCls = 'rounded-lg p-2 lg:p-3 min-h-[130px] flex flex-col bg-frosted-blue/[0.04]';
                 if (isToday) cellCls += ' ring-1 ring-primary bg-primary/10';
                 cell.className = cellCls;
 
                 // Day number
                 var dayLabel = document.createElement('div');
-                dayLabel.className = 'text-xs font-bold mb-1 ' + (isToday ? 'text-primary' : 'text-steel-blue');
+                dayLabel.className = 'text-xs font-bold mb-1 ' + (isToday ? 'text-frosted-blue' : 'text-steel-blue');
                 dayLabel.textContent = cellDate.getDate();
                 cell.appendChild(dayLabel);
 
@@ -1050,9 +1054,9 @@ function renderUpcomingReleases(releases) {
 
                         var dot = document.createElement('span');
                         if (rel.media_type === 'movie') {
-                            dot.className = 'size-1.5 rounded-full bg-purple-400 shrink-0';
+                            dot.className = 'size-1.5 rounded-full bg-media-movie shrink-0';
                         } else {
-                            dot.className = 'size-1.5 rounded-full bg-blue-400 shrink-0';
+                            dot.className = 'size-1.5 rounded-full bg-media-tv shrink-0';
                         }
                         badge.appendChild(dot);
 
@@ -1069,7 +1073,7 @@ function renderUpcomingReleases(releases) {
                     }
                     if (dayReleases.length > maxShow) {
                         var more = document.createElement('span');
-                        more.className = 'text-[9px] text-steel-blue/50 pl-3';
+                        more.className = 'text-[9px] text-frosted-blue/60 pl-3';
                         more.textContent = '+' + (dayReleases.length - maxShow) + ' more';
                         rlist.appendChild(more);
                     }
