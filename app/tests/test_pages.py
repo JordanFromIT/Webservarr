@@ -708,3 +708,27 @@ class AssetStamping(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SettingsSetupFlags(unittest.TestCase):
+    """Polish A fix round 1: the Settings skeleton takes the tab's shape from
+    which connections are set up, served in the data block of that page only."""
+
+    def test_the_flags_ride_in_the_data_block_only_when_given(self):
+        setup = {"plex": False, "seerr": True}
+        self.assertEqual(data_of(render(name="settings", flags={"setup": setup}))["setup"], setup)
+        self.assertNotIn("setup", data_of(render(name="index")))
+
+    def test_flags_are_truthiness_of_the_saved_values(self):
+        class Row:
+            def __init__(self, key, value):
+                self.key, self.value = key, value
+        rows = [Row("integration.plex.url", "http://plex:32400"), Row("integration.plex.token", ""),
+                Row("integration.seerr.url", "http://seerr"), Row("integration.authentik.client_secret", "s")]
+        session = mock.MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = rows
+        with mock.patch.object(pages, "SessionLocal", return_value=session):
+            got = pages.settings_setup()
+        self.assertEqual(got, {"plex": False, "seerr": True, "chaptarr": False, "sonarr": False, "radarr": False,
+                               "kavita": False, "authentik_url": False, "authentik_secret": True})
+        session.close.assert_called_once()

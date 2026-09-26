@@ -272,3 +272,24 @@ class SwitchIsOff(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SettingsSetupFlagsRoute(PageRoutesBase):
+    """Polish A fix round 1: only the admin Settings page carries the setup
+    flags its skeleton takes its shape from."""
+
+    def test_only_the_admin_settings_page_carries_them(self):
+        import json
+        import re
+
+        def data_of(text):
+            return json.loads(re.search(r'<script id="ws-data" type="application/json">(.*?)</script>', text, re.S).group(1))
+        flags = {"plex": True, "seerr": False, "chaptarr": False, "sonarr": True, "radarr": False,
+                 "kavita": True, "authentik_url": False, "authentik_secret": False}
+        with mock.patch.object(pages, "settings_setup", return_value=flags) as called:
+            r = self.get("/settings", ADMIN_SESSION)
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(data_of(r.text)["setup"], flags)
+            self.assertNotIn("setup", data_of(self.get("/", ADMIN_SESSION).text))
+            self.assertEqual(called.call_count, 1)
+            self.assertEqual(self.get("/settings", MEMBER_SESSION).status_code, 302)
