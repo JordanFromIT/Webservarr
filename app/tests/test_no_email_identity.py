@@ -127,6 +127,10 @@ class NoSharedIdentityTests(unittest.TestCase):
         app.dependency_overrides[get_current_user] = lambda: self.user
         self._limiter_was = limiter.enabled
         limiter.enabled = False
+        # Past the setup redirect without reading the instance's real database.
+        setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        setup_patch.start()
+        self.addCleanup(setup_patch.stop)
         self.client = TestClient(app)
 
     def tearDown(self):

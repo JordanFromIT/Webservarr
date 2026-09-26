@@ -7,6 +7,7 @@ through a guarded, idempotent migration in seed.py, and the earlier
 username->email settings rows (push.user.<hash>.email) are deleted.
 """
 import unittest
+from unittest import mock
 
 try:
     from fastapi.testclient import TestClient
@@ -109,6 +110,10 @@ class StampingTests(unittest.TestCase):
         }
         self._limiter_was = limiter.enabled
         limiter.enabled = False
+        # Past the setup redirect without reading the instance's real database.
+        setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        setup_patch.start()
+        self.addCleanup(setup_patch.stop)
         self.client = TestClient(app)
 
     def tearDown(self):
