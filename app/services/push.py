@@ -142,6 +142,32 @@ def vapid_subject_ok(sub: str) -> bool:
     return bool(_check_sub(sub))
 
 
+def status_reason(db) -> Optional[str]:
+    """Why push can't send right now, in plain words, or None when it can.
+
+    The one rule: GET /api/admin/notifications/status reports it, and the
+    Settings page's skeleton (app/pages.py) shows the same line before the
+    first paint, so the two can't disagree."""
+    pub = db.query(Setting).filter(Setting.key == "notifications.vapid_public_key").first()
+    priv = db.query(Setting).filter(Setting.key == "notifications.vapid_private_key").first()
+    if not pub or not priv or not pub.value or not priv.value:
+        return "Push keys haven't been created yet. Restart the server to create them."
+    try:
+        import pywebpush  # noqa: F401
+        load_vapid_key(priv.value)
+    except ImportError:
+        return "Push support isn't installed on this server."
+    except Exception:  # noqa: BLE001
+        return "The push key couldn't be read."
+    # Every push is signed with the Admin email as its contact (an empty one
+    # falls back to a valid default); one py_vapid refuses stops them all.
+    email = db.query(Setting).filter(Setting.key == "system.admin_email").first()
+    if not vapid_subject_ok(vapid_subject(email.value if email else None)):
+        return ("Push services won't accept the Admin email on the Sign-in tab. "
+                "Change it to a full email address, or clear it.")
+    return None
+
+
 def _push_icon(logo_url: str) -> str:
     """The operator's logo when it is a same-origin raster image, else the bundled PNG.
 

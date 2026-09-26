@@ -34,7 +34,7 @@ settings and the settings API must never write them.
 import json
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Pattern, Tuple
+from typing import Callable, Dict, List, Optional, Pattern, Tuple
 
 import httpx
 
@@ -98,6 +98,20 @@ class SettingDef:
     ssrf_check: bool = False
     pattern: Optional[str] = None
     pattern_hint: Optional[str] = None
+    # A last check the pattern can't express: a plain-English reason, or None.
+    check: Optional[Callable[[str], Optional[str]]] = None
+
+
+def _push_contact_problem(value: str) -> Optional[str]:
+    """Every push is signed with the Admin email as its contact, and py_vapid
+    refuses some addresses the pattern lets through ("name@gmail..com"), which
+    would stop every push without a word. The push module's own check decides,
+    so a saved Admin email can't break push."""
+    from app.services import push   # at call time: push imports the database layer
+
+    if push.vapid_subject_ok(push.vapid_subject(value)):
+        return None
+    return "Push services won't accept this address. Enter a full email address, like you@example.com"
 
 
 def _text(key, default, description, **kw):
@@ -173,7 +187,8 @@ def _build() -> List[SettingDef]:
         _text("integration.authentik.app_slug", "", "Authentik application slug (used for sign-out)",
               max_length=100, pattern=_TOKEN, pattern_hint=_TOKEN_HINT),
         _text("system.admin_email", "", "People who sign in with this email become admins", seed=False,
-              max_length=254, pattern=r"[^@\s]+@[^@\s]+\.[^@\s]+", pattern_hint="Enter a full email address"),
+              max_length=254, pattern=r"[^@\s]+@[^@\s]+\.[^@\s]+", pattern_hint="Enter a full email address",
+              check=_push_contact_problem),
     ]
 
     # ---- Pages ----
@@ -466,6 +481,8 @@ def validate_value(key: str, value: str) -> Optional[str]:
         return None
     if d.pattern and not re.fullmatch(d.pattern, value):
         return d.pattern_hint or "That value isn't allowed"
+    if d.check:
+        return d.check(value)
     return None
 
 
