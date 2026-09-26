@@ -369,6 +369,17 @@
       row.appendChild(picker);
       row.appendChild(hex);
       var shell = fieldShell(o, hex, row);
+      // A saved value that isn't a colour (an old or hand-edited row): the
+      // site paints the default instead (safe_color), so the field shows that
+      // default and says why. Nothing is staged until the admin changes it.
+      var stale = el('p', cls.error + ' hidden');
+      stale.id = hex.id + '-stored';
+      shell.root.insertBefore(stale, shell.error);
+      hex.setAttribute('aria-describedby', ((hex.getAttribute('aria-describedby') || '') + ' ' + stale.id).trim());
+      function inUse() {
+        var m = metaFor(o.key);
+        return m && HEX.test(String(m.default)) ? String(m.default) : '';
+      }
       function preview(v) {
         if (!o.cssVar || !HEX.test(v)) return;
         var st = document.documentElement.style;
@@ -376,18 +387,34 @@
         st.setProperty('--hex-' + o.cssVar, v);
       }
       picker.addEventListener('input', function () {
+        stale.classList.add('hidden');
         hex.value = picker.value.toUpperCase();
         preview(hex.value);
         stage(o.key, hex.value, true);
       });
       hex.addEventListener('input', function () {
+        stale.classList.add('hidden');
         var v = hex.value.trim();
         if (HEX.test(v)) { picker.value = v.toLowerCase(); preview(v); }
         stage(o.key, v, true);
       });
       api.track(o.key, {
         get: function () { return hex.value; },
-        set: function (v) { hex.value = v; if (HEX.test(v)) { picker.value = v.toLowerCase(); preview(v); } },
+        set: function (v) {
+          var stored = v === baseline(o.key) && !HEX.test(v);
+          var shown = stored ? inUse() : v;
+          hex.value = shown;
+          if (HEX.test(shown)) { picker.value = shown.toLowerCase(); preview(shown); }
+          var said = v.length > 40 ? v.slice(0, 40) + '…' : v;
+          stale.textContent = '';
+          if (stored) {
+            stale.appendChild(icon('error', 'text-base'));
+            stale.appendChild(document.createTextNode(v.trim()
+              ? 'Your saved value “' + said + '” isn’t a colour, so your site uses this one.'
+              : 'Nothing is saved here, so your site uses this one.'));
+          }
+          stale.classList.toggle('hidden', !stored);
+        },
         el: hex, errorEl: shell.error
       });
       return shell.root;

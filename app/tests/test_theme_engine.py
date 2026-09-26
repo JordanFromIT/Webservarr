@@ -365,7 +365,7 @@ class SettingsShowsTheColourInUse(unittest.TestCase):
         ctl = kit_color_control()
         self.assertIn("isn’t a colour, so your site uses this one.", ctl)
         self.assertTrue(live_matches(ctl, r"stale\.classList\.toggle\('hidden', !stored\)"))
-        self.assertTrue(live_matches(ctl, r"stale\.textContent = "))
+        self.assertTrue(live_matches(ctl, r"stale\.appendChild\(document\.createTextNode\("))
         # Painting never stages: only the admin's own input does.
         set_fn = re.search(r"set: function \(v\) \{(.*?)\n        \}", ctl, re.S).group(1)
         self.assertNotIn("stage(", set_fn)
