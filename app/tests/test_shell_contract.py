@@ -12,7 +12,7 @@ from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
 SHELL_PAGES = ["index", "requests", "requests-embed", "issues", "calendar", "tickets",
-               "library", "news", "wiki", "settings", "settings-next"]
+               "library", "news", "wiki", "settings"]
 BARE_PAGES = ["login", "setup", "reader"]
 
 # The repo is a template; an operator's own branding lives in the database,

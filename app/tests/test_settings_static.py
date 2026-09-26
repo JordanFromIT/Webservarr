@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
-FRAME = "settings-next.html"     # renamed to settings.html in Task 8.1
+FRAME = "settings.html"
 TABS = ["general", "pages", "appearance", "sign-in", "integrations", "notifications"]
 MODULES = {"general": "general.js", "pages": "pages.js", "appearance": "appearance.js",
            "sign-in": "signin.js", "integrations": "integrations.js", "notifications": "notifications.js"}
@@ -1372,13 +1372,23 @@ class Guards(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class Route(PageRoutesBase):
-    def test_admins_get_the_frame_members_go_home(self):
-        r = self.get("/settings/next", ADMIN_SESSION)
+    def test_admins_get_the_page_members_go_home(self):
+        r = self.get("/settings", ADMIN_SESSION)
         self.assertEqual(r.status_code, 200)
-        self.assertIn('data-page="settings-next"', r.text)
+        self.assertIn('data-page="settings"', r.text)
+        self.assertIn('id="settingsTabs"', r.text)
         self.assertRegex(r.text, r'<a[^>]*href="/settings"[^>]*aria-current="page"')
-        r = self.get("/settings/next", MEMBER_SESSION)
+        r = self.get("/settings", MEMBER_SESSION)
         self.assertEqual((r.status_code, r.headers["location"]), (302, "/"))
+
+    def test_the_preview_address_redirects(self):
+        r = self.get("/settings/next", ADMIN_SESSION)
+        self.assertEqual((r.status_code, r.headers["location"]), (301, "/settings"))
+
+    def test_old_settings_assets_are_gone(self):
+        self.assertFalse((STATIC / "settings-next.html").exists())
+        self.assertFalse((STATIC / "js" / "wiki-settings.js").exists())
+        self.assertNotIn("wiki-settings.js", (STATIC / "settings.html").read_text(encoding="utf-8"))
 
 
 def news_script() -> str:

@@ -471,7 +471,7 @@ class ShellPatch(SettingsApiBase):
         self.assertEqual(set(r.json()), {"nav_html"})
 
     def test_fragment_is_the_page_renderer_output(self):
-        # Same renderer, same branding, same active page as /settings/next, so
+        # Same renderer, same branding, same active page as /settings, so
         # the patched sidebar cannot drift from a reloaded one: the requests
         # badge is kept and the links carry no id (they fill two navs).
         from app.pages import render_nav_links
