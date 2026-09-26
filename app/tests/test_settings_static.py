@@ -1695,7 +1695,10 @@ class InPlaceWiki(unittest.TestCase):
         self.assertEqual(len(re.findall(r"(?<!function )\bbegin\(\)", code)), 4)            # move, edit, delete, add
         self.assertEqual(len(re.findall(r"if \(!begin\(\)\) return", code)), 2)            # the two form saves
         self.assertEqual(len(re.findall(r"if \(formOpen \|\| !begin\(\)\) return;", code)), 1)  # move
-        self.assertEqual(len(re.findall(r"if \(!ok \|\| !begin\(\)\) return;", code)), 1)
+        # Delete: its confirm dialog is answered later, so it checks for an open
+        # form again then (R103); a confirmed delete never lands under a form.
+        self.assertEqual(len(re.findall(r"if \(!ok \|\| formOpen \|\| !begin\(\)\) return;", code)), 1)
+        self.assertEqual(len(re.findall(r"if \(!ok \|\| !begin\(\)\) return;", code)), 0)
         # Each failure puts the controls back; a success leaves them off until
         # the page draws the next panel.
         self.assertEqual(len(re.findall(r"if \(!res\.ok\) \{ setBusy\(false\);", code)), 3)
