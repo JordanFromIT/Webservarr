@@ -263,6 +263,23 @@ class Validation(unittest.TestCase):
     def ok(self, key, value):
         self.assertIsNone(reg.validate_value(key, value), f"{key}={value!r} should be accepted")
 
+    def test_whitespace_only_is_not_a_value(self):
+        # A required label of spaces renders a blank nav item; a font of
+        # spaces is no font. Empty stays allowed where the key allows it.
+        for key in ("sidebar.label_home", "sidebar.label_wiki", "branding.app_name", "theme.font"):
+            for blank in ("   ", "\t", " \n "):
+                with self.subTest(key=key, value=repr(blank)):
+                    self.bad(key, blank)
+        self.ok("sidebar.label_home", "Home")
+        self.ok("theme.font", "Spline Sans")
+        self.ok("sidebar.sublabel_home", "")
+        self.ok("branding.tagline", "")
+        # An Authentik client ID of spaces would count as set up for sign-in.
+        for bad in ("  ", " abc", "abc "):
+            self.bad("integration.authentik.client_id", bad)
+        self.ok("integration.authentik.client_id", "")
+        self.ok("integration.authentik.client_id", "webservarr-client.01")
+
     def test_unknown_key(self):
         self.assertEqual(reg.validate_value("nope.nothing", "x"), "Unknown setting")
         self.assertEqual(reg.validate_value("system.secret_key", "x"), "Unknown setting")
