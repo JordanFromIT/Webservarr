@@ -128,6 +128,21 @@ def theme_style(branding: dict) -> str:
     return '<style id="ws-theme">:root{' + ";".join(decls) + "}</style>"
 
 
+def custom_css_style(branding: dict) -> str:
+    """The operator's custom CSS as a <style>, or "" when there is none.
+
+    Written as the last thing in <head> (see _inject_head), after app.css,
+    theme.css and the page's own styles, so an ordinary rule wins at equal
+    specificity. A style element ends at the first "</style", so every "<" is
+    written as its CSS escape: outside a string a "<" is not valid CSS, and
+    inside one "\\3C " is the same character. The #ws-data copy is escaped
+    for JSON, as before."""
+    css = branding.get("custom_css")
+    if not isinstance(css, str) or not css.strip():
+        return ""
+    return '<style id="webservarr-custom-css">' + css.replace("<", "\\3C ") + "</style>"
+
+
 def font_links(branding: dict) -> str:
     """
     The display font, loaded statically with preconnects (no runtime injection).
@@ -498,7 +513,8 @@ def _preview_meta(branding: dict, base_url: str, path: str) -> tuple:
 
 def _inject_head(content: str, branding: dict, user: Optional[dict], version: str,
                  name: str, base_url: str, path: str, setup: Optional[dict] = None) -> str:
-    """Rewrite <title> and append, right after it: preview tags, theme, font, data."""
+    """Rewrite <title> and append, right after it: preview tags, theme, font, data.
+    The custom CSS goes last in <head> instead, after every stylesheet."""
     app_name, tags = _preview_meta(branding, base_url, path)
     # A page with no descriptive title of its own, on a site with no name,
     # falls back to the tagline (or nothing) rather than a dangling " - ".
@@ -523,6 +539,12 @@ def _inject_head(content: str, branding: dict, user: Optional[dict], version: st
         content = content.replace(
             "<head>", f"<head>\n<title>{html.escape(bare_title)}</title>\n{extra}", 1
         )
+    custom = custom_css_style(branding)
+    if custom:
+        if "</head>" in content:
+            content = content.replace("</head>", custom + "\n</head>", 1)
+        else:  # no </head> to anchor to: after the theme, which is at least early
+            content = content.replace(extra, extra + "\n" + custom, 1)
     return content
 
 

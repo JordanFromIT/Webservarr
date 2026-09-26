@@ -30,8 +30,10 @@
 
   /**
    * Apply branding data to the document via CSS custom properties.
+   * fromPage: the data came from the page's own #ws-data block, whose server
+   * render already carries the custom CSS (last in <head>).
    */
-  function applyTheme(data) {
+  function applyTheme(data, fromPage) {
     var root = document.documentElement;
     var c = data.colors || {};
 
@@ -81,8 +83,11 @@
     root.classList.add('dark');
     root.classList.remove('light');
 
-    // Custom CSS injection (textContent, never markup)
-    if (data.custom_css) {
+    // Custom CSS, on the fallback path only: the server writes it into every
+    // page it renders, as the last thing in <head> so it wins the cascade.
+    // Here it arrives after the fetch and is appended to the end of <head>,
+    // after every stylesheet, so it wins too (textContent, never markup).
+    if (data.custom_css && !fromPage) {
       var styleId = 'webservarr-custom-css';
       var el = document.getElementById(styleId);
       if (!el) {
@@ -117,13 +122,13 @@
   var inline = readInline();
   if (inline) {
     window.WS_DATA = inline;
-    applyTheme(inline.branding || {});
+    applyTheme(inline.branding || {}, true);
   } else {
     window.WS_DATA = null;
     var run = function () {
       fetch('/api/branding')
         .then(function (r) { return r.json(); })
-        .then(applyTheme)
+        .then(function (data) { applyTheme(data, false); })
         .catch(function () { /* keep the defaults */ });
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
