@@ -440,8 +440,11 @@ class ContrastGuard(unittest.TestCase):
 
     def test_it_measures_the_colour_in_use(self):
         # A stored value that isn't a colour is measured as the default the site uses (L8).
-        self.assertTrue(live_matches(APPEARANCE, r"function inUse\(api, key\)"))
-        self.assertTrue(live_matches(APPEARANCE, r"WSSettings\.metaFor\(key\)"))
+        self.assertTrue(live_matches(APPEARANCE, r"function inUse\(api, key\) \{ return api\.colorInUse\(key\); \}"))
+        rule = re.search(r"api\.colorInUse = function \(key\) \{(.*?)\n    \};", KIT, re.S)
+        self.assertIsNotNone(rule)
+        self.assertIn("if (HEX.test(v)) return v;", rule.group(1))
+        self.assertIn("var m = metaFor(key);", rule.group(1))
 
     def test_saving_very_hard_to_read_text_asks_first(self):
         self.assertTrue(live_matches(APPEARANCE, r"api\.beforeSave\(function \(keys\) \{"))
@@ -468,7 +471,7 @@ class SafeColours(unittest.TestCase):
         self.assertIn("--color-background:0 0 0", out)
         self.assertIn('--font-display:"Spline Sans"', out)
         self.assertNotIn("webservarr-custom-css", out)
-        self.assertRegex(out, r"<html[^>]* data-safe-theme")
+        self.assertIn(" data-safe-theme", re.search(r"<html\b[^>]*>", out).group(0))
         # The saved custom CSS is still in the data block: the Appearance
         # skeleton opens the Custom CSS section by it, as the tab does.
         self.assertEqual(json.loads(re.search(r'id="ws-data" type="application/json">(.*?)</script>', out).group(1)
@@ -493,10 +496,10 @@ class SafeColours(unittest.TestCase):
         self.assertEqual(safe.status_code, 200)
         self.assertIn("--color-primary:18 87 147", safe.text)
         self.assertNotIn("webservarr-custom-css", safe.text)
-        self.assertIn("data-safe-theme", safe.text)
+        self.assertIn(" data-safe-theme", re.search(r"<html\b[^>]*>", safe.text).group(0))
         self.assertIn("--color-primary:255 0 255", plain.text)
         self.assertIn('<style id="webservarr-custom-css">', plain.text)
-        self.assertNotRegex(plain.text, r"<html[^>]* data-safe-theme")
+        self.assertNotIn("data-safe-theme", re.search(r"<html\b[^>]*>", plain.text).group(0))
         self.assertEqual(member.status_code, 302)
 
     def test_the_page_says_so_and_offers_the_way_out(self):

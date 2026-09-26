@@ -55,6 +55,11 @@
             pendingFocus: null };
   var bar, barText, barDiscard, barSave;
   var hasOwn = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
+  // Settings in safe colours (/settings?theme=safe, app/pages.py): the page
+  // keeps the shipped colours so it stays readable, and a colour being edited
+  // restyles only the Appearance preview cards ([data-ws-theme-preview]).
+  var SAFE = document.documentElement.hasAttribute('data-safe-theme');
+  var scoped = {};
 
   function reducedMotion() {
     return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -157,6 +162,21 @@
     return parseInt(h.slice(1, 3), 16) + ' ' + parseInt(h.slice(3, 5), 16) + ' ' + parseInt(h.slice(5, 7), 16);
   }
 
+  // Safe colours: every previewed colour as one rule on the preview cards.
+  // Names are the tabs' own cssVar constants and values are #rrggbb.
+  function scopedPreview(name, v) {
+    scoped[name] = v;
+    var tag = document.getElementById('ws-theme-preview');
+    if (!tag) {
+      tag = document.createElement('style');
+      tag.id = 'ws-theme-preview';
+      document.head.appendChild(tag);
+    }
+    tag.textContent = '[data-ws-theme-preview]{' + Object.keys(scoped).map(function (k) {
+      return '--color-' + k + ':' + hexToRgb(scoped[k]) + ';--hex-' + k + ':' + scoped[k];
+    }).join(';') + '}';
+  }
+
   function openIconDialog(currentName, onPick) {
     var picked = currentName || '';
     var body = el('div');
@@ -239,6 +259,14 @@
       return !!b;
     };
     api.dirtyKeys = function () { return Object.keys(t.staged); };
+    // The colour the site paints for a colour key: the value being edited
+    // when it is #rrggbb, else the registry default (the server's safe_color).
+    api.colorInUse = function (key) {
+      var v = current(t, key);
+      if (HEX.test(v)) return v;
+      var m = metaFor(key);
+      return m && HEX.test(String(m.default)) ? String(m.default) : null;
+    };
     api.save = function () { return save(t.id); };
 
     api.text = function (o) {
@@ -382,6 +410,7 @@
       }
       function preview(v) {
         if (!o.cssVar || !HEX.test(v)) return;
+        if (SAFE) { scopedPreview(o.cssVar, v); return; }
         var st = document.documentElement.style;
         st.setProperty('--color-' + o.cssVar, hexToRgb(v));
         st.setProperty('--hex-' + o.cssVar, v);

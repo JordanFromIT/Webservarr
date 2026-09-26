@@ -652,6 +652,23 @@ html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
    (L4). */
 .ws-scrim { background-color: rgb(var(--color-background) / .7); }
 
+/* Safe colours (/settings?theme=safe): Settings in the shipped colours, the
+   way back from an unreadable theme. The notice shows only then. The
+   Appearance preview cards are where edited colours show meanwhile (the kit
+   writes them onto [data-ws-theme-preview] instead of the page), so the
+   status tokens are derived again on the card, and in safe colours the card
+   paints its own background. */
+html:not([data-safe-theme]) #safeThemeNotice { display: none; }
+[data-ws-theme-preview] {
+  --ws-status-ok: var(--color-status-ok);
+  --ws-status-warn: var(--color-status-warn);
+  --ws-status-err: var(--color-status-err);
+  --ws-status-off: var(--color-text);
+}
+html[data-safe-theme] [data-ws-theme-preview] {
+  background: linear-gradient(rgb(var(--color-text) / .04), rgb(var(--color-text) / .04)), rgb(var(--color-background));
+}
+
 /* The renderer stamps data-admin on <html> for admins, so admin-only
    controls on shared pages never flash for members. */
 html:not([data-admin]) .ws-admin-only { display: none !important; }

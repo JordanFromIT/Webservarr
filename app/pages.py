@@ -511,8 +511,17 @@ def _preview_meta(branding: dict, base_url: str, path: str) -> tuple:
     return app_name, "\n".join(tags)
 
 
+def safe_theme_branding(branding: dict) -> dict:
+    """The branding payload with the shipped colours and font: Settings in
+    safe colours (/settings?theme=safe), the way back from a theme that made
+    it unreadable. The custom CSS stays in the payload (the Appearance
+    skeleton reads it) but the page doesn't apply it (render_html)."""
+    return dict(branding, colors=dict(_DEFAULT_COLORS), font=DEFAULT_FONT)
+
+
 def _inject_head(content: str, branding: dict, user: Optional[dict], version: str,
-                 name: str, base_url: str, path: str, setup: Optional[dict] = None) -> str:
+                 name: str, base_url: str, path: str, setup: Optional[dict] = None,
+                 custom_css: bool = True) -> str:
     """Rewrite <title> and append, right after it: preview tags, theme, font, data.
     The custom CSS goes last in <head> instead, after every stylesheet."""
     app_name, tags = _preview_meta(branding, base_url, path)
@@ -539,7 +548,7 @@ def _inject_head(content: str, branding: dict, user: Optional[dict], version: st
         content = content.replace(
             "<head>", f"<head>\n<title>{html.escape(bare_title)}</title>\n{extra}", 1
         )
-    custom = custom_css_style(branding)
+    custom = custom_css_style(branding) if custom_css else ""
     if custom:
         if "</head>" in content:
             content = content.replace("</head>", custom + "\n</head>", 1)
@@ -628,8 +637,15 @@ def _fill_login_name(out: str, branding: dict) -> str:
 
 def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dict],
                 version: str, base_url: str, path: str, flags: dict) -> str:
-    """Pure: turn a static page into the document this user should receive."""
-    out = _inject_head(page_html, branding, user, version, name, base_url, path, flags.get("setup"))
+    """Pure: turn a static page into the document this user should receive.
+
+    flags["safe_theme"]: Settings in safe colours; pass safe_theme_branding()
+    as the branding. The page carries no custom CSS and is marked
+    <html data-safe-theme>, which shows its notice and keeps colour previews
+    in the preview cards."""
+    safe = bool(flags.get("safe_theme"))
+    out = _inject_head(page_html, branding, user, version, name, base_url, path, flags.get("setup"),
+                       custom_css=not safe)
 
     if SIDEBAR_MARKER in out or HEADER_MARKER in out:
         values = shell_values(branding, user, version, name)
@@ -651,6 +667,8 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
             attrs += f' data-home-hide="{html.escape(" ".join(off), quote=True)}"'
     if flags.get("netdata"):
         attrs += " data-netdata"
+    if safe:
+        attrs += " data-safe-theme"
     out = re.sub(r"<html\b", "<html" + attrs, out, count=1)
 
     return _stamp_asset_versions(out)
@@ -748,6 +766,12 @@ def render_page(name: str, request: Optional[Request], user: Optional[dict],
         name = pick(branding)
     if name == "settings" and user and user.get("is_admin") == "true":
         flags = dict(flags, setup=settings_setup())
+        # The way back from an unreadable theme: Settings in the shipped
+        # colours and font, without the custom CSS, on this one request.
+        # Nothing is saved; the rest of the site keeps the operator's theme.
+        if request is not None and request.query_params.get("theme") == "safe":
+            branding = safe_theme_branding(branding)
+            flags = dict(flags, safe_theme=True)
 
     filepath = os.path.join(STATIC_DIR, name + ".html")
     try:

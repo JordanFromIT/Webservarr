@@ -293,6 +293,10 @@ docker compose exec webservarr supervisorctl status
 - Check that the Plex URL is reachable from the WebServarr container
 - Check logs: `docker compose logs webservarr | grep -i plex`
 
+### Colours or custom CSS made Settings unreadable
+
+Open `/settings?theme=safe#appearance` on your site while signed in as an admin. Settings is shown in the original colours and font, without your custom CSS, so you can fix the colours (or press **Reset this tab to defaults**) and save. Visiting the address changes nothing by itself; everyone else keeps seeing your saved theme until you save.
+
 ### Reset everything (destroys all data)
 
 ```bash

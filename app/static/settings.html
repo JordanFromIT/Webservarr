@@ -31,6 +31,12 @@
       <h1 class="text-[24px] lg:text-[32px] font-bold tracking-tight text-frosted-blue leading-tight">Settings</h1>
       <p class="text-[15px] text-frosted-blue/70 mt-1">Set up your site, choose what people see, and connect your services.</p>
     </header>
+    <!-- Safe colours (/settings?theme=safe, app/pages.py): shown only on
+         <html data-safe-theme>, so it is never painted and then removed. -->
+    <div id="safeThemeNotice" class="mb-6 flex items-start gap-3 rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] px-4 py-3 text-[15px] text-frosted-blue" role="status">
+      <span class="material-symbols-outlined text-steel-blue" aria-hidden="true">palette</span>
+      <p class="min-w-0">You’re seeing Settings in the original colours, so you can fix your theme. Everyone else still sees your saved colours. <a href="/settings#appearance" class="font-semibold underline underline-offset-2">Show my colours</a></p>
+    </div>
 
     <div class="relative border-b border-frosted-blue/10 mb-8">
       <div id="settingsTabScroller" class="overflow-x-auto ws-hide-scrollbar">

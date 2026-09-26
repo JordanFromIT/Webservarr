@@ -72,7 +72,8 @@ jobs:
           fi
 
   # Front-end checks that need JavaScript, which the Python image has none of:
-  # the Integrations tab's sameAddress() against the server's shared cases.
+  # the Integrations tab's sameAddress() against the server's shared cases,
+  # and the Appearance tab's contrast maths against the Python reference.
   js-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -83,7 +84,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run the JavaScript checks
-        run: node app/tests/js/same_address.mjs
+        run: |
+          node app/tests/js/same_address.mjs
+          node app/tests/js/contrast.mjs
 
   build-and-push:
     needs: [test, js-checks]
