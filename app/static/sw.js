@@ -9,7 +9,7 @@
  *    served twice, and the cache is cleared on sign-out.
  */
 
-var PAGE_CACHE = 'ws-pages-v1';
+var PAGE_CACHE = 'ws-pages-v2';
 var PAGE_TTL_MS = 30 * 1000;
 var pending = {};
 // key -> ms the worker itself cached that page. Lives only in worker memory, so
@@ -20,10 +20,15 @@ var prefetched = new Map();
 
 self.addEventListener('install', function () { self.skipWaiting(); });
 self.addEventListener('activate', function (event) {
-  // Drop any prefetch cache from the previous worker: a poisoned entry can't
-  // survive a service-worker update.
+  // Drop every prefetch cache a previous worker left, under this name or an
+  // older one (a PAGE_CACHE bump), so a poisoned or stale entry can't survive
+  // a service-worker update.
   event.waitUntil(
-    caches.delete(PAGE_CACHE).then(function () { return self.clients.claim(); })
+    caches.keys().then(function (names) {
+      return Promise.all(names.filter(function (name) {
+        return name.indexOf('ws-pages-') === 0;
+      }).map(function (name) { return caches.delete(name); }));
+    }).then(function () { return self.clients.claim(); })
   );
 });
 

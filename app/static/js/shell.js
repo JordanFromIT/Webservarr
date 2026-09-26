@@ -218,7 +218,7 @@
   // honours them. The service worker (sw.js) fetches the target document while
   // the pointer is still over the link and hands it to the navigation that
   // follows, so the click lands on a document already in hand.
-  var PAGE_CACHE = 'ws-pages-v1';
+  var PAGE_CACHE = 'ws-pages-v2';
   var prefetchedAt = {};
 
   function prefetch(href) {
