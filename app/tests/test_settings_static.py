@@ -463,10 +463,15 @@ class KavitaAddressConfirm(unittest.TestCase):
         # Keeping the old address puts it back and stops the save.
         self.assertRegex(hook, r"if \(!ok\) api\.set\(k, api\.saved\(k\)\);\s*return ok;")
 
-    def test_same_address_matches_the_server(self):
-        fn = self.SRC[self.SRC.index("  function sameAddress("):self.SRC.index("\n  }\n", self.SRC.index("  function sameAddress("))]
-        self.assertIn(".trim().replace(/\\/+$/, '')", fn)
-        self.assertIn("toLowerCase()", fn)
+    def test_same_address_is_the_servers_rule_not_new_url(self):
+        # R136: the check splits the address as Python's urlsplit does (the
+        # shared cases in same_address_vectors.json run it, see
+        # test_same_address.py); new URL() would normalise ports, IPv6 and
+        # paths the server compares as written.
+        fn = self.SRC[self.SRC.index("  function splitAddress("):self.SRC.index("  WSSettings.registerTab(")]
+        self.assertIn("function sameAddress(a, b) {", fn)
+        self.assertIn("var na = splitAddress(a), nb = splitAddress(b);", fn)
+        self.assertNotRegex(fn[:fn.index("function bracketedHostOk(")], r"new URL\(")
 
 
 class KitApi(unittest.TestCase):

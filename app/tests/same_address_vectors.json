@@ -1,0 +1,203 @@
+{
+  "_about": "Shared cases for same_address (app/integrations/config.py) and the Integrations tab's sameAddress (app/static/js/settings/integrations.js). 'same' is what the server answers; test_same_address.py checks the Python side and app/tests/js/same_address.mjs the JavaScript side (CI job js-checks, or npm run test:js).",
+  "cases": [
+    {
+      "why": "trailing slash",
+      "a": "http://192.168.1.20:5000",
+      "b": "http://192.168.1.20:5000/",
+      "same": true
+    },
+    {
+      "why": "several trailing slashes (double slash at the end)",
+      "a": "http://192.168.1.20:5000//",
+      "b": "http://192.168.1.20:5000",
+      "same": true
+    },
+    {
+      "why": "bare trailing ?",
+      "a": "http://192.168.1.20:5000?",
+      "b": "http://192.168.1.20:5000",
+      "same": true
+    },
+    {
+      "why": "bare trailing #",
+      "a": "http://192.168.1.20:5000#",
+      "b": "http://192.168.1.20:5000",
+      "same": true
+    },
+    {
+      "why": "bare ? after a slash keeps the path /",
+      "a": "http://192.168.1.20:5000/?",
+      "b": "http://192.168.1.20:5000",
+      "same": false
+    },
+    {
+      "why": "bare ? on both after a path",
+      "a": "http://kavita.lan/books/?",
+      "b": "http://kavita.lan/books?",
+      "same": false
+    },
+    {
+      "why": "different port",
+      "a": "http://192.168.1.20:5000",
+      "b": "http://192.168.1.20:5001",
+      "same": false
+    },
+    {
+      "why": "default port is not dropped",
+      "a": "http://kavita.lan:80",
+      "b": "http://kavita.lan",
+      "same": false
+    },
+    {
+      "why": "different scheme",
+      "a": "https://kavita.lan",
+      "b": "http://kavita.lan",
+      "same": false
+    },
+    {
+      "why": "scheme case",
+      "a": "HTTP://kavita.lan",
+      "b": "http://kavita.lan",
+      "same": true
+    },
+    {
+      "why": "host case",
+      "a": "http://Kavita.LAN:5000",
+      "b": "http://kavita.lan:5000",
+      "same": true
+    },
+    {
+      "why": "path case matters",
+      "a": "http://kavita.lan/Books",
+      "b": "http://kavita.lan/books",
+      "same": false
+    },
+    {
+      "why": "double slash inside the path",
+      "a": "http://kavita.lan//books",
+      "b": "http://kavita.lan/books",
+      "same": false
+    },
+    {
+      "why": "path with a trailing slash",
+      "a": "http://kavita.lan/books/",
+      "b": "http://kavita.lan/books",
+      "same": true
+    },
+    {
+      "why": "userinfo added",
+      "a": "http://user@kavita.lan",
+      "b": "http://kavita.lan",
+      "same": false
+    },
+    {
+      "why": "userinfo trick",
+      "a": "http://kavita.lan@evil.example",
+      "b": "http://kavita.lan",
+      "same": false
+    },
+    {
+      "why": "userinfo case (the whole netloc is compared in any case)",
+      "a": "http://USER@kavita.lan",
+      "b": "http://user@kavita.lan",
+      "same": true
+    },
+    {
+      "why": "IPv6 compressed vs expanded",
+      "a": "http://[::1]:5000",
+      "b": "http://[0:0:0:0:0:0:0:1]:5000",
+      "same": false
+    },
+    {
+      "why": "IPv6 same, trailing slash",
+      "a": "http://[fd00::20]:5000",
+      "b": "http://[FD00::20]:5000/",
+      "same": true
+    },
+    {
+      "why": "IPv6 unclosed bracket is never the same",
+      "a": "http://[::1:5000",
+      "b": "http://[::1:5000",
+      "same": false
+    },
+    {
+      "why": "IPv6 bracket that is not an address",
+      "a": "http://[zzz]:5000",
+      "b": "http://[zzz]:5000",
+      "same": false
+    },
+    {
+      "why": "IPv4 in brackets",
+      "a": "http://[192.168.1.20]:5000",
+      "b": "http://[192.168.1.20]:5000",
+      "same": false
+    },
+    {
+      "why": "whitespace around",
+      "a": "  http://kavita.lan:5000 \t",
+      "b": "http://kavita.lan:5000",
+      "same": true
+    },
+    {
+      "why": "tab inside",
+      "a": "http://kavita.lan\t:5000",
+      "b": "http://kavita.lan:5000",
+      "same": true
+    },
+    {
+      "why": "newline inside",
+      "a": "http://kavita.lan:50\n00",
+      "b": "http://kavita.lan:5000",
+      "same": true
+    },
+    {
+      "why": "query differs",
+      "a": "http://kavita.lan/?a=1",
+      "b": "http://kavita.lan/?a=2",
+      "same": false
+    },
+    {
+      "why": "query same with a trailing slash after it",
+      "a": "http://kavita.lan/x?a=1/",
+      "b": "http://kavita.lan/x?a=1",
+      "same": true
+    },
+    {
+      "why": "fragment differs",
+      "a": "http://kavita.lan/#a",
+      "b": "http://kavita.lan/",
+      "same": false
+    },
+    {
+      "why": "different host",
+      "a": "http://192.168.1.20:5000",
+      "b": "http://10.66.6.6:5000",
+      "same": false
+    },
+    {
+      "why": "both empty",
+      "a": "",
+      "b": "",
+      "same": true
+    },
+    {
+      "why": "empty vs an address",
+      "a": "",
+      "b": "http://kavita.lan",
+      "same": false
+    },
+    {
+      "why": "no scheme",
+      "a": "kavita.lan:5000",
+      "b": "KAVITA.lan:5000",
+      "same": true
+    },
+    {
+      "why": "same address",
+      "a": "http://192.168.1.20:5000",
+      "b": "http://192.168.1.20:5000",
+      "same": true
+    }
+  ]
+}
