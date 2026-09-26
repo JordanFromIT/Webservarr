@@ -242,10 +242,13 @@ async def list_settings(
     # The front end takes these from here rather than keeping its own copies:
     # "mask" is what a saved secret reads as in `values`; "page_order" is the
     # sidebar order as the nav renders it (normalised, whatever the row
-    # holds); "page_addresses" are the fixed page routes.
+    # holds); "page_addresses" are the fixed page routes; "address_credentials"
+    # pairs each address with the secret sent to it, so editing either half
+    # clears a message the save put on the pair.
     return {"values": values, "meta": meta, "mask": MASK,
             "page_order": normalize_page_order(effective["pages.order"]),
-            "page_addresses": dict(PAGE_ADDRESSES)}
+            "page_addresses": dict(PAGE_ADDRESSES),
+            "address_credentials": dict(integration_config.ADDRESS_CREDENTIALS)}
 
 
 @router.put("/settings/bulk")

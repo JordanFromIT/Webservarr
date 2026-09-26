@@ -192,6 +192,17 @@
     setTimeout(function () { search.focus(); }, 30);
   }
 
+  // The other half of an address/secret pair (address_credentials, from the
+  // server), or null.
+  function pairedWith(key) {
+    var pairs = view('address_credentials');
+    if (!pairs || typeof pairs !== 'object') return null;
+    if (hasOwn(pairs, key)) return pairs[key];
+    var found = null;
+    Object.keys(pairs).forEach(function (url) { if (pairs[url] === key) found = url; });
+    return found;
+  }
+
   function makeApi(t) {
     var api = {};
 
@@ -200,6 +211,11 @@
       if (sameAsBaseline(key, value)) delete t.staged[key]; else t.staged[key] = value;
       var b = t.bindings[key];
       if (b) { if (!fromControl) b.set(current(t, key)); showError(b, null); }
+      // An address and the secret sent to it are one pair: a message on
+      // either ("Enter the key again for the new address") is about both, so
+      // editing either half clears it.
+      var partner = pairedWith(key);
+      if (partner && t.bindings[partner]) showError(t.bindings[partner], null);
       S.failed = false;
       notify(t, key);
       refreshBar();
