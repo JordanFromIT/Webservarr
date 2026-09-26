@@ -411,6 +411,16 @@ main            { view-transition-name: ws-content; }
   animation: ws-shimmer 1.4s ease-in-out infinite;
 }
 .skel-line   { height: 0.85em; border-radius: 6px; }
+/* The real words in a skeleton built from the real markup (Settings): they
+   take their real space and wrap where the real text will, and show only as a
+   tint behind each line. */
+.skel-text {
+  color: transparent;
+  background: rgb(var(--color-text) / 0.06);
+  border-radius: 6px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
 .skel-num    { display: inline-block; width: 2.2ch; height: 1em; vertical-align: -0.1em; border-radius: 6px; }
 .skel-card   { height: 116px; border-radius: 12px; }
 .skel-row    { height: 56px; border-radius: 10px; }
