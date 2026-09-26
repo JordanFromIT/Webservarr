@@ -252,7 +252,14 @@ def check_page_uses_helper(t, html, retry_id, retry_handler):
     real button wired through it."""
     helper_at = html.find(f'<script src="{HELPER}')
     t.assertNotEqual(helper_at, -1, f"the page does not load {HELPER}")
-    t.assertLess(helper_at, html.find("<script>"), "the page loads the helper after its own code")
+    # The helper loads before any of the page's own code that calls Kavita or
+    # the helper. An inline script that does neither (the eBooks page sets its
+    # shelf slots from one before the first paint) may come earlier.
+    own = [m for m in re.finditer(r"<script>(.*?)</script>", html, re.S)
+           if re.search(r"\bWSKavita\b|\bfunction kavita\s*\(", m.group(1))]
+    t.assertTrue(own, "no inline script uses the helper")
+    for m in own:
+        t.assertLess(helper_at, m.start(), "the page loads the helper after its own code")
     js = inline_js(html)
 
     kav = body_of(t, js, "kavita")
