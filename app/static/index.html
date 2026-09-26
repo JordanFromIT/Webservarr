@@ -148,9 +148,13 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </a>
 </div>
 </div>
+<!-- Skeleton cards are renderNewsCard's collapsed card with nothing in it
+     (title, two-line excerpt, Read more), so an older post lands on its
+     skeleton exactly. A pinned or new post opens in full and is as tall as
+     it is written, which no skeleton can know. -->
 <div id="newsContainer" class="grid gap-3">
-<div class="skel skel-card" aria-hidden="true"></div>
-<div class="skel skel-card" aria-hidden="true"></div>
+<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold">&nbsp;</p><p class="text-sm mt-1">&nbsp;<br>&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold">&nbsp;</p><p class="text-sm mt-1">&nbsp;<br>&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
 </div>
 </section>
 </div>
