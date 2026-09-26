@@ -278,5 +278,59 @@ class SettingsBackup(unittest.TestCase):
         self.assertIsNone(helpers.get(self.db, "branding.tagline"))
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class OldBackupEmptySlug(unittest.TestCase):
+    """An older install's page could save an empty Uptime Kuma slug, which the
+    client reads as the default page. Settings now refuses an empty slug, so
+    an import reads one in the file the same way: as "default"."""
+
+    def setUp(self):
+        self.Session = helpers.make_sessionmaker()
+        self.db = self.Session()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        self.client = helpers.api_client(self.Session)
+
+    def tearDown(self):
+        helpers.reset_overrides()
+        self.setup_patch.stop()
+        self.db.close()
+
+    def file(self, **settings):
+        return {"format": "webservarr-settings", "format_version": 1, "app_version": "1.10.11",
+                "exported_at": "2026-09-01T00:00:00Z", "settings": settings, "secrets_excluded": []}
+
+    def preview(self, data):
+        r = self.client.post("/api/admin/settings/import?dry_run=true", json={"data": data})
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+    def apply(self, data):
+        token = self.preview(data)["diff_token"]
+        r = self.client.post("/api/admin/settings/import?dry_run=false", json={"data": data, "diff_token": token})
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+    def test_empty_slug_onto_a_default_install_is_no_change(self):
+        for empty in ("", "  "):
+            with self.subTest(value=repr(empty)):
+                body = self.preview(self.file(**{"integration.uptime_kuma.slug": empty}))
+                self.assertEqual(body["changes"], [])
+
+    def test_empty_slug_onto_a_custom_slug_becomes_default(self):
+        helpers.put(self.db, "integration.uptime_kuma.slug", "family")
+        data = self.file(**{"integration.uptime_kuma.slug": ""})
+        self.assertEqual(self.preview(data)["changes"],
+                         [{"key": "integration.uptime_kuma.slug", "old": "family", "new": "default"}])
+        self.apply(data)
+        self.assertEqual(helpers.get(self.db, "integration.uptime_kuma.slug"), "default")
+
+    def test_other_changes_in_the_same_file_still_apply(self):
+        data = self.file(**{"integration.uptime_kuma.slug": "", "branding.app_name": "Cinema"})
+        body = self.apply(data)
+        self.assertEqual(body["applied"], ["branding.app_name"])
+        self.assertEqual(helpers.get(self.db, "branding.app_name"), "Cinema")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -94,5 +94,58 @@ class Timestamps(unittest.TestCase):
         self.assertEqual(utc_iso(aware), "2026-09-01T14:30:05.000Z")
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class TicketAndNotificationTimestamps(unittest.TestCase):
+    """Tickets, their comments and the notification bell show "time ago":
+    read as local time, everything west of UTC said "just now" for hours."""
+
+    def setUp(self):
+        from app.models import Notification, Ticket, TicketComment
+
+        self.Session = helpers.make_sessionmaker()
+        db = self.Session()
+        ticket = Ticket(title="Help", description="d", category="other", creator_username="admin",
+                        creator_name="Admin", created_at=WHEN, updated_at=WHEN)
+        db.add(ticket)
+        db.commit()
+        self.ticket_id = ticket.id
+        db.add(TicketComment(ticket_id=ticket.id, author_username="admin", author_name="Admin",
+                             message="m", created_at=WHEN))
+        db.add(Notification(user_email=helpers.ADMIN["email"], category="news", title="t", created_at=WHEN))
+        db.commit()
+        db.close()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        self.client = helpers.api_client(self.Session, helpers.ADMIN)
+
+    def tearDown(self):
+        helpers.reset_overrides()
+        self.setup_patch.stop()
+
+    def assertUtc(self, value, expected=WHEN):
+        self.assertRegex(value, UTC_Z)
+        self.assertEqual(instant(value), expected.replace(tzinfo=timezone.utc))
+
+    def test_ticket_list_detail_and_comments(self):
+        listed = self.client.get("/api/tickets").json()
+        tickets = listed["tickets"] if isinstance(listed, dict) else listed
+        self.assertUtc(tickets[0]["created_at"])
+        self.assertUtc(tickets[0]["updated_at"])
+        detail = self.client.get(f"/api/tickets/{self.ticket_id}").json()
+        self.assertUtc(detail["created_at"])
+        self.assertUtc(detail["comments"][0]["created_at"])
+
+    def test_a_new_comment_answers_in_utc(self):
+        r = self.client.post(f"/api/tickets/{self.ticket_id}/comments", data={"message": "another"})
+        self.assertIn(r.status_code, (200, 201), r.text)
+        body = r.json()
+        stamp = body.get("created_at") or (body.get("comment") or {}).get("created_at")
+        self.assertRegex(stamp, UTC_Z)
+
+    def test_notifications(self):
+        body = self.client.get("/api/notifications").json()
+        self.assertUtc(body["notifications"][0]["created_at"])
+
+
 if __name__ == "__main__":
     unittest.main()
