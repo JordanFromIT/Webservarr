@@ -218,8 +218,11 @@ var WikiCategories = (function () {
       line.appendChild(text);
       var tools = el('div', 'flex items-center gap-1');
       line.appendChild(tools);
+      // 36px square with a mouse; on a touch screen at least 44px, the size
+      // a fingertip can hit without taking the neighbouring arrow with it.
       function btn(glyph, label, onClick, fixedOff) {
-        var b = el('button', cls.btnQuiet + ' px-2 disabled:opacity-40 disabled:cursor-not-allowed');
+        var b = el('button', cls.btnQuiet + ' px-2 disabled:opacity-40 disabled:cursor-not-allowed ' +
+          '[@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11');
         b.type = 'button';
         b.setAttribute('aria-label', label);
         b.title = label;
