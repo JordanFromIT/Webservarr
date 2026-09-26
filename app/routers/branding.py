@@ -60,10 +60,13 @@ def _resolve_wiki_hooks(db: Session, get, is_signed_in: bool) -> dict:
     nulls, which the login page has no use for anyway.
 
     A hook pointing at a deleted or unpublished page also resolves to None, so
-    the card simply does not render instead of producing a dead link.
+    the card simply does not render instead of producing a dead link. So does
+    every hook while the Wiki page is switched off: its link would only send a
+    member home, and the hidden wiki's page titles would reach them. Off means
+    no card, for admins too.
     """
     hooks = {"tickets": None, "issues": None, "playback": None}
-    if not is_signed_in:
+    if not is_signed_in or switch_is_off(get("sidebar.enabled_wiki")):
         return hooks
 
     from app.models import WikiPage
