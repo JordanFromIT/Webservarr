@@ -391,6 +391,22 @@ main            { view-transition-name: ws-content; }
 ::view-transition-old(ws-content) { animation: ws-vt-out 90ms ease-out both; }
 ::view-transition-new(ws-content) { animation: ws-vt-in 140ms ease-out both; }
 
+/* The active page's highlight is the one part of the sidebar that differs
+   between two pages, so it carries a name of its own: the browser lifts it
+   out of the sidebar's snapshot and glides its box from the old item to the
+   new one (220ms). Only the new image is drawn, stretched to the moving box,
+   so nothing crossfades or doubles: the new page's highlight simply arrives
+   from where the old one was. Only the desktop sidebar's copy is named: the
+   drawer is closed again on the next page, and a name with nothing to arrive
+   at would leave its old image fading over the closed drawer. A reload or a
+   same-document load never starts a cross-document transition, so the
+   highlight never moves then; Firefox, without cross-document transitions,
+   keeps the instant swap. */
+#desktopNav a[aria-current="page"] { view-transition-name: ws-nav-active; }
+::view-transition-group(ws-nav-active) { animation-duration: 220ms; animation-timing-function: cubic-bezier(.2, .7, .2, 1); }
+::view-transition-old(ws-nav-active) { display: none; }
+::view-transition-new(ws-nav-active) { animation: none; inline-size: 100%; block-size: 100%; }
+
 /* The login page has no shell and its <main> carries no name (login.html:
    a named <main> would stop the card's backdrop blur reaching the artwork).
    The card takes a name of its own instead, so it fades rather than
