@@ -18,6 +18,7 @@ from typing import Dict, Iterable, Mapping, Optional
 
 from app.database import SessionLocal
 from app.models import Setting
+from app.settings_registry import REGISTRY
 
 CREDENTIAL_KEYS: Dict[str, str] = {
     "plex": "integration.plex.token",
@@ -30,9 +31,9 @@ CREDENTIAL_KEYS: Dict[str, str] = {
 }
 
 KUMA_SLUG_KEY = "integration.uptime_kuma.slug"
-# The page Uptime Kuma's own "default" status page lives at. Also the
-# registry default for the slug; an empty or missing row means this page.
-DEFAULT_KUMA_SLUG = "default"
+# The registry default for the slug ("default", Uptime Kuma's own default
+# status page); an empty or missing row means this page.
+DEFAULT_KUMA_SLUG = REGISTRY[KUMA_SLUG_KEY].default
 
 
 def url_key(service: str) -> str:

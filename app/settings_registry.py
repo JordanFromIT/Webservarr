@@ -16,10 +16,10 @@ module rather than keeping their own copy:
 
 Still outside it: the integration clients and the notification poller keep
 their own fallback for a missing row (Chaptarr profile ids, the Netdata unit
-and gauge maximum, the Uptime Kuma slug, the poll intervals), and the static
-front end repeats some defaults (app/static/css/theme.css repeats the colours
-as :root defaults, which a test keeps equal to this module; the old Settings
-page carries its own fallbacks until it is replaced).
+and gauge maximum, the poll intervals), and app/static/css/theme.css repeats
+the colours as :root defaults, which a test keeps equal to this module. The
+Uptime Kuma slug's fallback (app/integrations/config.py) is this module's
+default, and the Settings page takes every default from the settings API.
 
 Changing a default here does nothing on installs that already have the row:
 seeding only inserts missing keys, so an operator's choices survive upgrades.
