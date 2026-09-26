@@ -1,11 +1,17 @@
 /*
  * WebServarr — Shared Theme Styles
- * CSS custom properties are set by theme-loader.js from /api/branding.
- * Fallback values match the default Baltic Blue palette.
+ * The operator's colours arrive in each page's <head> as #ws-theme (a :root
+ * rule written by app/pages.py) and again from theme-loader.js as inline
+ * styles. The values below are only the shipped palette's fallbacks.
  */
 
-/* ---- CSS Custom Property Defaults ---- */
-:root {
+/* ---- CSS Custom Property Defaults ----
+ *
+ * :where() gives these zero specificity, so the server's #ws-theme, which
+ * comes earlier in the document, still wins: the first paint is in the
+ * operator's colours even before (or without) theme-loader.js.
+ */
+:where(:root) {
   --color-primary: 18 87 147;
   --color-secondary: 44 109 161;
   --color-accent: 70 132 176;
