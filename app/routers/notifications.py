@@ -6,7 +6,7 @@ import hashlib
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from app.database import get_db
@@ -31,15 +31,27 @@ class PreferencesUpdate(BaseModel):
     ticket: Optional[bool] = None
 
 
+# Caps on what a push subscription may store, well above what browsers send
+# (endpoints run about 200-600 characters, p256dh is 87 and auth 22), so a
+# member can't fill the disk with multi-megabyte rows. Over a cap is a 422.
+MAX_PUSH_ENDPOINT = 2048
+MAX_PUSH_P256DH = 256
+MAX_PUSH_AUTH = 64
+# Devices one account may subscribe. A new one past this replaces that
+# account's oldest subscription, so the browser in front of someone always
+# works; the one replaced is the likeliest to be long gone.
+MAX_PUSH_DEVICES = 20
+
+
 class PushSubscribeKeys(BaseModel):
     """Push subscription key pair."""
-    p256dh: str
-    auth: str
+    p256dh: str = Field(max_length=MAX_PUSH_P256DH)
+    auth: str = Field(max_length=MAX_PUSH_AUTH)
 
 
 class PushSubscribeRequest(BaseModel):
     """Schema for registering a browser push subscription."""
-    endpoint: str
+    endpoint: str = Field(max_length=MAX_PUSH_ENDPOINT)
     keys: PushSubscribeKeys
 
 
@@ -301,6 +313,15 @@ async def push_subscribe(
         existing.p256dh = body.keys.p256dh
         existing.auth = body.keys.auth
     else:
+        # At the device cap, the oldest go to make room for this one.
+        mine = (
+            db.query(PushSubscription)
+            .filter(PushSubscription.user_email == email)
+            .order_by(PushSubscription.created_at.desc(), PushSubscription.id.desc())
+            .all()
+        )
+        for old in mine[MAX_PUSH_DEVICES - 1:]:
+            db.delete(old)
         db.add(PushSubscription(
             user_email=email,
             endpoint=body.endpoint,
