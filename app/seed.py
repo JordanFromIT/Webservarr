@@ -69,13 +69,26 @@ def migrate_drop_push_username_rows(db: Session) -> None:
     from different sign-in methods can collide, so that mapping could send
     one person's ticket alerts to another; tickets now store the creator's
     email instead. Idempotent.
+
+    Guarded by migration.drop_push_username_rows_v1, written in the same
+    commit, so the scan runs on the first start only.
     """
+    from sqlalchemy.exc import IntegrityError
+
+    marker = "migration.drop_push_username_rows_v1"
+    if db.query(Setting).filter(Setting.key == marker).first():
+        return
     removed = (
         db.query(Setting)
         .filter(Setting.key.like("push.user.%.email"))
         .delete(synchronize_session=False)
     )
-    db.commit()
+    db.add(Setting(key=marker, value="done", description="One-time removal of push.user.*.email rows"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # the other worker ran it first
+        return
     if removed:
         logger.info("Removed %d push.user.*.email setting row(s)", removed)
 
@@ -89,16 +102,27 @@ def migrate_no_email_identity(db: Session) -> None:
     preferences and ticket creator_email. Those rows cannot be attributed to
     anyone, so they are removed (a ticket just loses its creator_email).
     Idempotent.
+
+    Guarded by migration.no_email_identity_v1, written in the same commit, so
+    the full-table scans run on the first start only.
     """
     from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
     from app.routers.notifications import _email_hash
 
+    marker = "migration.no_email_identity_v1"
+    if db.query(Setting).filter(Setting.key == marker).first():
+        return
     db.execute(text("DELETE FROM push_subscriptions WHERE lower(trim(user_email)) IN ('none', '')"))
     db.execute(text("DELETE FROM notifications WHERE lower(trim(user_email)) IN ('none', '')"))
     db.execute(text("UPDATE tickets SET creator_email = NULL WHERE lower(trim(creator_email)) IN ('none', '')"))
     prefix = f"notify.{_email_hash('none')}."
     db.query(Setting).filter(Setting.key.like(prefix + "%")).delete(synchronize_session=False)
-    db.commit()
+    db.add(Setting(key=marker, value="done", description="One-time removal of data filed under no email"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # the other worker ran it first
 
 
 def seed_default_settings(db: Session) -> None:
