@@ -55,11 +55,21 @@ jobs:
 
       # Tests skip themselves when the app cannot import or Redis is missing,
       # so a skip here means a broken environment, not a pass.
+      # Actions masks only the whole comma-joined secret, so each string is
+      # masked on its own first: any assertion, traceback or log line that
+      # echoes one prints *** instead. The test matches untrimmed strings, and
+      # each contains its trimmed form, so masking the trimmed form covers it.
       - name: Run the test suite
         working-directory: /app
         env:
           WEBSERVARR_FORBIDDEN_STRINGS: ${{ secrets.WEBSERVARR_FORBIDDEN_STRINGS }}
         run: |
+          IFS=',' read -ra forbidden <<< "$WEBSERVARR_FORBIDDEN_STRINGS"
+          for s in "${forbidden[@]}"; do
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            if [ -n "$s" ]; then echo "::add-mask::$s"; fi
+          done
           python -m unittest discover -s /app/app/tests -t /app 2>&1 | tee /tmp/unittest.log
           if grep -q "skipped=" /tmp/unittest.log; then
             echo "::error::Tests were skipped; the CI environment is missing something the suite needs."
