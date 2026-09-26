@@ -178,6 +178,8 @@ def _build() -> List[SettingDef]:
         _color("theme.color_status_ok", "#4ADE80", "Colour for things that are working"),
         _color("theme.color_status_warn", "#FBBF24", "Colour for things that are slow or partly working"),
         _color("theme.color_status_err", "#F87171", "Colour for things that are down"),
+        # The sidebar's New! flag: its gradient, outline and glow are all shades of this.
+        _color("theme.color_new_flag", "#FFD60A", "Colour of the New! flag in the sidebar"),
         _text("theme.font", "Spline Sans", "Google Font family name", public=True, allow_empty=False,
               max_length=60, pattern=r"[A-Za-z0-9 \-]{1,60}", pattern_hint="Use a Google Font family name"),
         _text("theme.custom_css", "", "Custom CSS added to every page", public=True, max_length=20000),

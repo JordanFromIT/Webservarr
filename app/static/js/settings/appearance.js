@@ -30,6 +30,7 @@
     ['theme.color_media_tv', 'TV shows', 'media-tv'],
     ['theme.color_media_book', 'Books', 'media-book']
   ];
+  var NEW_FLAG = ['theme.color_new_flag', 'New! flag', 'new-flag', 'Marks a page as new in the sidebar.'];
   // One colour per state drives the dot, the ring and (on warn and err only)
   // the words, everywhere a status shows.
   var STATUS = [
@@ -43,7 +44,7 @@
     'Sora', 'Lexend', 'Figtree', 'Work Sans', 'Jost', 'Albert Sans', 'Barlow', 'Red Hat Display', 'Rubik',
     'Nunito Sans', 'Cabin', 'Karla', 'Quicksand', 'Exo 2'];
   var KEYS = COLORS.map(function (c) { return c[0]; })
-    .concat(MEDIA.map(function (m) { return m[0]; }), STATUS.map(function (x) { return x[0]; }),
+    .concat(MEDIA.map(function (m) { return m[0]; }), [NEW_FLAG[0]], STATUS.map(function (x) { return x[0]; }),
       ['theme.font', 'theme.custom_css']);
   var OTHER = '__other__';
   var TYPING_DELAY = 600;       // ms after the last keystroke before a typed name is fetched
@@ -227,7 +228,10 @@
     head.appendChild(icon('palette', 'text-base text-steel-blue'));
     head.appendChild(el('p', 'text-[13px] font-semibold text-frosted-blue/70', 'Preview'));
     box.appendChild(head);
-    box.appendChild(el('p', 'text-[20px] font-bold tracking-tight text-frosted-blue', 'Tonight’s picks'));
+    // The sidebar's New! flag, beside a heading as it sits beside a page's name.
+    var title = el('p', 'text-[20px] font-bold tracking-tight text-frosted-blue', 'Tonight’s picks');
+    title.appendChild(el('span', 'nav-new-badge', 'New!'));
+    box.appendChild(title);
     box.appendChild(el('p', 'text-[15px] text-frosted-blue', 'This is how most text looks.'));
     box.appendChild(el('p', 'text-[13px] text-frosted-blue/70', 'Quieter text, like dates and descriptions.'));
     var surface = el('div', 'flex items-center gap-2 rounded-xl bg-cornflower-ocean/20 px-3 py-2.5');
@@ -293,10 +297,13 @@
       colours.body.appendChild(grid);
       form.appendChild(colours.root);
 
-      var media = WSSettings.card('Media colours', 'Badges and accents that tell movies, TV shows and books apart.');
+      var media = WSSettings.card('Media colours', 'Badges and accents that tell movies, TV shows and books apart, and the flag on a new page.');
       var mgrid = el('div', 'grid sm:grid-cols-3 gap-5 ' + cls.fieldWidth);
       MEDIA.forEach(function (m) { mgrid.appendChild(api.color({ key: m[0], label: m[1], cssVar: m[2] })); });
       media.body.appendChild(mgrid);
+      var fgrid = el('div', 'grid sm:grid-cols-2 gap-5 ' + cls.fieldWidth);
+      fgrid.appendChild(api.color({ key: NEW_FLAG[0], label: NEW_FLAG[1], cssVar: NEW_FLAG[2], help: NEW_FLAG[3] }));
+      media.body.appendChild(fgrid);
       form.appendChild(media.root);
 
       var status = WSSettings.card('Status colours', 'The dots and words that show whether your services are working. The words take the colour only when something is wrong.');
