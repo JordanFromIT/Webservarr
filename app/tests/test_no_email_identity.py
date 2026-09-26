@@ -272,7 +272,23 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual([n.user_email for n in db.query(Notification).all()], ["bob@example.com"])
             self.assertEqual(sorted((t.title, t.creator_email) for t in db.query(Ticket).all()),
                              [("t1", None), ("t2", "bob@example.com")])
-            self.assertEqual([s.key for s in db.query(Setting).all()], [f"notify.{real_hash}.news"])
+            self.assertEqual([s.key for s in db.query(Setting).all() if not s.key.startswith("migration.")],
+                             [f"notify.{real_hash}.news"])
+        finally:
+            db.close()
+
+    def test_runs_once_behind_its_marker(self):
+        # The DELETE/UPDATE scans run on the first start only: a marker row,
+        # written in the same commit, stops every later start (both workers).
+        Session = make_session_factory()
+        db = Session()
+        try:
+            migrate_no_email_identity(db)
+            self.assertEqual(db.query(Setting).filter(Setting.key == "migration.no_email_identity_v1").count(), 1)
+            db.add(Notification(user_email="none", category="news", title="after"))
+            db.commit()
+            migrate_no_email_identity(db)
+            self.assertEqual([n.title for n in db.query(Notification).all()], ["after"])
         finally:
             db.close()
 

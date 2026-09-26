@@ -72,8 +72,21 @@ class MigrationTests(unittest.TestCase):
             db.commit()
             migrate_drop_push_username_rows(db)
             migrate_drop_push_username_rows(db)   # idempotent
-            keys = [s.key for s in db.query(Setting).all()]
+            keys = [s.key for s in db.query(Setting).all() if not s.key.startswith("migration.")]
             self.assertEqual(keys, ["notify.0123456789abcdef.news"])
+        finally:
+            db.close()
+
+    def test_drop_runs_once_behind_its_marker(self):
+        db = make_session_factory()()
+        try:
+            migrate_drop_push_username_rows(db)
+            self.assertEqual(db.query(Setting).filter(
+                Setting.key == "migration.drop_push_username_rows_v1").count(), 1)
+            db.add(Setting(key="push.user.fedcba9876543210.email", value="later@example.com"))
+            db.commit()
+            migrate_drop_push_username_rows(db)
+            self.assertEqual(db.query(Setting).filter(Setting.key.like("push.user.%")).count(), 1)
         finally:
             db.close()
 
