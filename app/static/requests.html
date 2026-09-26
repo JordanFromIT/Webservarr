@@ -108,7 +108,7 @@ body.rs-resizing { cursor: col-resize; user-select: none; }
 .rs-chip-go    { background: rgb(var(--color-text) / 0.14);    color: rgb(var(--color-text)); }
 .rs-chip-wait  { background: rgb(var(--color-accent) / 0.18);  color: rgb(var(--color-text) / 0.85); }
 .rs-chip-stuck { background: rgb(var(--color-secondary) / 0.3); color: rgb(var(--color-text)); }
-.rs-chip-dead  { background: rgb(var(--color-accent) / 0.12);  color: rgb(var(--color-text) / 0.7); }
+.rs-chip-dead  { background: rgb(var(--color-accent) / 0.12);  color: rgb(var(--color-text) / 0.8); }
 .rs-select {
   background: rgb(var(--color-text) / 0.04);
   border: 1px solid rgb(var(--color-accent) / 0.2);
@@ -362,7 +362,7 @@ html[data-rs-empty] #rsSection { display: none; }
     <span class="material-symbols-outlined text-steel-blue">pending_actions</span>
     <h3 class="text-lg font-bold text-frosted-blue">Request Status</h3>
     <span id="rsCount" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-steel-blue/20 text-frosted-blue"></span>
-    <span id="rsFresh" class="ml-auto text-[11px] text-frosted-blue/60"></span>
+    <span id="rsFresh" class="ml-auto text-[11px] text-frosted-blue/70"></span>
   </div>
   <p class="text-xs text-frosted-blue/70 mb-3">
     Everything that&rsquo;s been asked for and isn&rsquo;t on the server yet, and why.
@@ -776,11 +776,11 @@ var RS = (function () {
         '<tr class="rs-row" data-id="' + escapeHtml(id) + '">' +
           '<td class="rs-td rs-sticky">' +
             '<div class="flex items-center gap-2 min-w-0">' +
-              '<span class="material-symbols-outlined text-frosted-blue/60 text-[18px] shrink-0 rs-only-sm">' +
+              '<span class="material-symbols-outlined text-frosted-blue/70 text-[18px] shrink-0 rs-only-sm">' +
                 (open ? 'expand_less' : 'expand_more') + '</span>' +
               '<div class="min-w-0">' +
                 '<span class="font-bold text-frosted-blue break-words">' + escapeHtml(cellValue(r, 'title')) + '</span>' +
-                (r.year ? ' <span class="text-frosted-blue/60 text-xs">' + escapeHtml(String(r.year)) + '</span>' : '') +
+                (r.year ? ' <span class="text-frosted-blue/70 text-xs">' + escapeHtml(String(r.year)) + '</span>' : '') +
                 (scope ? '<span class="block text-[10px] uppercase tracking-wider text-steel-blue">' + escapeHtml(scope) + '</span>' : '') +
               '</div>' +
             '</div>' +
@@ -1082,7 +1082,7 @@ function renderDiscoverRow(rowId, items) {
   var row = document.getElementById(rowId);
   if (!row) return;
   if (!items || items.length === 0) {
-    row.innerHTML = '<p class="text-frosted-blue/60 text-xs py-4 px-2 italic">Nothing to show</p>';
+    row.innerHTML = '<p class="text-frosted-blue/70 text-xs py-4 px-2 italic">Nothing to show</p>';
     updateDiscoverArrows(row);
     return;
   }
@@ -1106,7 +1106,7 @@ function renderDiscoverRow(rowId, items) {
 function renderDiscoverRowError(rowId) {
   var row = document.getElementById(rowId);
   if (!row) return;
-  row.innerHTML = '<p class="text-frosted-blue/60 text-xs py-4 px-2 italic">Could not load</p>';
+  row.innerHTML = '<p class="text-frosted-blue/70 text-xs py-4 px-2 italic">Could not load</p>';
   // A failed row has nothing to scroll, so it should not offer to.
   updateDiscoverArrows(row);
 }
@@ -1945,7 +1945,7 @@ var STATUS_TONE_CLASSES = {
     ready: {bg: 'bg-primary/30',      text: 'text-frosted-blue',    border: 'border-primary/40'},
     go:    {bg: 'bg-frosted-blue/15', text: 'text-frosted-blue',    border: 'border-frosted-blue/20'},
     wait:  {bg: 'bg-steel-blue/20',   text: 'text-frosted-blue/80', border: 'border-steel-blue/30'},
-    dead:  {bg: 'bg-steel-blue/10',   text: 'text-frosted-blue/70', border: 'border-steel-blue/20'}
+    dead:  {bg: 'bg-steel-blue/10',   text: 'text-frosted-blue/80', border: 'border-steel-blue/20'}
 };
 
 function getStatusPresentation(status, mediaType, item) {
@@ -2226,7 +2226,7 @@ function buildRequestCard(req) {
                 getStatusBadge(status, mediaType) +
             '</div>' +
             '<p class="text-frosted-blue text-sm font-bold leading-tight line-clamp-2">' + title + '</p>' +
-            (requestedDate ? '<p class="text-[10px] text-frosted-blue/60 font-medium uppercase">' + requestedDate + '</p>' : '') +
+            (requestedDate ? '<p class="text-[10px] text-frosted-blue/70 font-medium uppercase">' + requestedDate + '</p>' : '') +
         '</div>' +
     '</div>';
 }

@@ -368,7 +368,7 @@ function buildAgendaView(container, grouped) {
 
         if (dayReleases.length === 0) {
             var noReleases = document.createElement('span');
-            noReleases.className = 'text-sm text-frosted-blue/60 italic';
+            noReleases.className = 'text-sm text-frosted-blue/70 italic';
             noReleases.textContent = 'No releases';
             releasesCol.appendChild(noReleases);
         } else {
@@ -461,7 +461,7 @@ function buildDayCell(dayNum, dateStr, isCurrentMonth, isToday, releases) {
     // "+N more" overflow
     if (releases.length > maxShow) {
         var moreEl = document.createElement('div');
-        moreEl.className = 'text-[9px] text-frosted-blue/60 font-medium mt-0.5 pl-0.5';
+        moreEl.className = 'text-[9px] text-frosted-blue/70 font-medium mt-0.5 pl-0.5';
         moreEl.textContent = '+' + (releases.length - maxShow) + ' more';
         cell.appendChild(moreEl);
     }

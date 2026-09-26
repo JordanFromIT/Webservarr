@@ -280,7 +280,7 @@ async function performSearch(query) {
             list.innerHTML = '<div class="text-center text-steel-blue py-4">' +
                 '<span class="material-symbols-outlined text-2xl mb-1 block opacity-50">search_off</span>' +
                 '<p class="text-xs">No library items found for "' + escapeHtml(query) + '"</p>' +
-                '<p class="text-[10px] text-frosted-blue/60 mt-1">Only titles already in the library can be reported here</p></div>';
+                '<p class="text-[10px] text-frosted-blue/70 mt-1">Only titles already in the library can be reported here</p></div>';
             return;
         }
 
@@ -562,7 +562,7 @@ function buildIssueCard(issue) {
                 getIssueTypeBadge(issue.issue_type) +
                 getIssueStatusBadge(issue.status) +
             '</div>' +
-            (dateStr ? '<p class="text-[10px] text-frosted-blue/60 mt-1.5">' + dateStr + '</p>' : '') +
+            (dateStr ? '<p class="text-[10px] text-frosted-blue/70 mt-1.5">' + dateStr + '</p>' : '') +
         '</div>' +
     '</div>';
 }
@@ -656,7 +656,7 @@ function renderIssueDetail(issue) {
     var commentsHtml = comments.map(function(c) {
         var commentDate = c.created_date ? getTimeAgo(new Date(c.created_date)) : '';
         return '<div class="p-3 rounded-lg bg-frosted-blue/5 border border-steel-blue/10">' +
-            (commentDate ? '<p class="text-[10px] text-frosted-blue/60 mb-1.5">' + commentDate + '</p>' : '') +
+            (commentDate ? '<p class="text-[10px] text-frosted-blue/70 mb-1.5">' + commentDate + '</p>' : '') +
             '<p class="text-sm text-frosted-blue/80 whitespace-pre-wrap">' + escapeHtml(c.message || '') + '</p>' +
         '</div>';
     }).join('');
@@ -671,13 +671,13 @@ function renderIssueDetail(issue) {
                     getIssueTypeBadge(issue.issue_type) +
                     getIssueStatusBadge(issue.status) +
                 '</div>' +
-                (dateStr ? '<p class="text-xs text-frosted-blue/60 mt-2">' + dateStr + '</p>' : '') +
+                (dateStr ? '<p class="text-xs text-frosted-blue/70 mt-2">' + dateStr + '</p>' : '') +
             '</div>' +
         '</div>' +
         // Comments
         '<div class="border-t border-steel-blue/20 pt-4">' +
             '<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-3">Comments (' + comments.length + ')</p>' +
-            (commentsHtml ? '<div class="space-y-2 mb-4">' + commentsHtml + '</div>' : '<p class="text-sm text-frosted-blue/60 mb-4">No comments yet</p>') +
+            (commentsHtml ? '<div class="space-y-2 mb-4">' + commentsHtml + '</div>' : '<p class="text-sm text-frosted-blue/70 mb-4">No comments yet</p>') +
         '</div>' +
         // Add comment form
         '<div class="border-t border-steel-blue/20 pt-4">' +

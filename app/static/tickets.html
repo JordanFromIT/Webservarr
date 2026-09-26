@@ -217,7 +217,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
     open: 'bg-steel-blue/20 text-frosted-blue/80',
     in_progress: 'bg-frosted-blue/15 text-frosted-blue',
     resolved: 'bg-primary/30 text-frosted-blue',
-    closed: 'bg-steel-blue/10 text-frosted-blue/70'
+    closed: 'bg-steel-blue/10 text-frosted-blue/80'
   };
   var PRIORITY_COLORS = {
     low: 'bg-frosted-blue/10 text-frosted-blue/80',
@@ -463,7 +463,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
       // Bottom row: description snippet + time
       var bottomRow = createEl('div', 'flex items-center justify-between gap-3');
       var descSnippet = createEl('p', 'text-xs text-steel-blue truncate flex-1', ticket.description);
-      var timeEl = createEl('span', 'text-[10px] text-frosted-blue/60 shrink-0', timeAgo(ticket.created_at));
+      var timeEl = createEl('span', 'text-[10px] text-frosted-blue/70 shrink-0', timeAgo(ticket.created_at));
       bottomRow.appendChild(descSnippet);
       bottomRow.appendChild(timeEl);
       card.appendChild(bottomRow);
@@ -684,7 +684,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
     // Comments list
     if (comments.length === 0) {
-      content.appendChild(createEl('p', 'text-sm text-frosted-blue/60 italic mb-4', 'No comments yet'));
+      content.appendChild(createEl('p', 'text-sm text-frosted-blue/70 italic mb-4', 'No comments yet'));
     } else {
       var commentsList = createEl('div', 'space-y-3 mb-4');
       comments.forEach(function(comment) {
@@ -703,7 +703,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
         } else {
           cHeader.appendChild(cAuthor);
         }
-        cHeader.appendChild(createEl('span', 'text-[10px] text-frosted-blue/60', timeAgo(comment.created_at)));
+        cHeader.appendChild(createEl('span', 'text-[10px] text-frosted-blue/70', timeAgo(comment.created_at)));
         cDiv.appendChild(cHeader);
 
         // Message

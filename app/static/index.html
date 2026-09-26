@@ -697,7 +697,7 @@ const REQUEST_TONE_CLASSES = {
     ready: 'bg-primary/30 text-frosted-blue',
     go:    'bg-frosted-blue/15 text-frosted-blue',
     wait:  'bg-steel-blue/20 text-frosted-blue/80',
-    dead:  'bg-steel-blue/10 text-frosted-blue/70'
+    dead:  'bg-steel-blue/10 text-frosted-blue/80'
 };
 
 function renderRecentRequests(requests) {
@@ -947,7 +947,7 @@ function renderUpcomingReleases(releases) {
                 var dateCol = document.createElement('div');
                 dateCol.className = 'shrink-0 w-12 text-center';
                 var dayName = document.createElement('div');
-                dayName.className = 'text-[10px] font-bold uppercase tracking-wider ' + (isToday ? 'text-frosted-blue' : 'text-frosted-blue/60');
+                dayName.className = 'text-[10px] font-bold uppercase tracking-wider ' + (isToday ? 'text-frosted-blue' : 'text-frosted-blue/70');
                 dayName.textContent = dayNames[cellDate.getDay()];
                 dateCol.appendChild(dayName);
                 var dayNum = document.createElement('div');
@@ -962,7 +962,7 @@ function renderUpcomingReleases(releases) {
 
                 if (dayReleases.length === 0) {
                     var empty = document.createElement('span');
-                    empty.className = 'text-xs text-frosted-blue/60 italic';
+                    empty.className = 'text-xs text-frosted-blue/70 italic';
                     empty.textContent = 'No releases';
                     relCol.appendChild(empty);
                 } else {
@@ -1009,7 +1009,7 @@ function renderUpcomingReleases(releases) {
                 var dayDate = new Date(today);
                 dayDate.setDate(dayDate.getDate() + d);
                 var hdr = document.createElement('div');
-                hdr.className = 'text-center text-[10px] font-bold uppercase tracking-wider text-frosted-blue/60';
+                hdr.className = 'text-center text-[10px] font-bold uppercase tracking-wider text-frosted-blue/70';
                 hdr.textContent = dayNames[dayDate.getDay()];
                 headerRow.appendChild(hdr);
             }
@@ -1075,7 +1075,7 @@ function renderUpcomingReleases(releases) {
                     }
                     if (dayReleases.length > maxShow) {
                         var more = document.createElement('span');
-                        more.className = 'text-[9px] text-frosted-blue/60 pl-3';
+                        more.className = 'text-[9px] text-frosted-blue/70 pl-3';
                         more.textContent = '+' + (dayReleases.length - maxShow) + ' more';
                         rlist.appendChild(more);
                     }

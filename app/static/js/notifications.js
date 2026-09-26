@@ -307,14 +307,14 @@
     // Title row
     var titleRow = createEl('div', 'flex items-center gap-2');
     var titleEl = createEl('span', 'text-xs font-bold text-frosted-blue truncate', n.title || 'Notification');
-    var timeEl = createEl('span', 'text-[10px] text-frosted-blue/60 shrink-0 ml-auto', timeAgo(n.created_at));
+    var timeEl = createEl('span', 'text-[10px] text-frosted-blue/70 shrink-0 ml-auto', timeAgo(n.created_at));
     titleRow.appendChild(titleEl);
     titleRow.appendChild(timeEl);
     content.appendChild(titleRow);
 
     // Body (truncated)
     if (n.body) {
-      var bodyEl = createEl('p', 'text-[11px] text-frosted-blue/60 mt-0.5 line-clamp-2');
+      var bodyEl = createEl('p', 'text-[11px] text-frosted-blue/70 mt-0.5 line-clamp-2');
       bodyEl.textContent = n.body.length > 100 ? n.body.substring(0, 100) + '...' : n.body;
       content.appendChild(bodyEl);
     }
