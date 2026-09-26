@@ -138,7 +138,7 @@
     if (o.suffix) {
       var wrap = el('div', 'flex items-center gap-2');
       wrap.appendChild(row);
-      wrap.appendChild(el('span', 'text-[13px] text-frosted-blue/45 shrink-0', o.suffix));
+      wrap.appendChild(el('span', 'text-[13px] text-frosted-blue/60 shrink-0', o.suffix));
       row = wrap;
     }
     root.appendChild(row);
@@ -197,7 +197,7 @@
         b.setAttribute('aria-pressed', n === picked ? 'true' : 'false');
         b.setAttribute('aria-label', n);
         b.appendChild(icon(n, 'text-[24px] text-frosted-blue'));
-        b.appendChild(el('span', 'text-xs text-frosted-blue/45 truncate w-full text-center', n));
+        b.appendChild(el('span', 'text-xs text-frosted-blue/60 truncate w-full text-center', n));
         b.addEventListener('click', function () { picked = n; render(); });
         grid.appendChild(b);
       });
@@ -332,7 +332,7 @@
       var described = [];
       var helpText = o.locked && o.lockedReason ? o.lockedReason : o.help;
       if (helpText) {
-        var help = el('p', 'text-[13px] text-frosted-blue/45 mt-0.5', helpText);
+        var help = el('p', 'text-[13px] text-frosted-blue/60 mt-0.5', helpText);
         help.id = btn.id + '-help';
         described.push(help.id);
         text.appendChild(help);
@@ -930,7 +930,7 @@
     var host = panelHost(id);
     if (!host) return;
     var box = el('div', 'py-16 text-center');
-    box.appendChild(icon('cloud_off', 'text-[40px] text-frosted-blue/45'));
+    box.appendChild(icon('cloud_off', 'text-[40px] text-frosted-blue/60'));
     box.appendChild(el('p', 'mt-3 text-[15px] font-semibold text-frosted-blue', message));
     var btn = el('button', cls.btnGhost + ' mt-4', 'Try again');
     btn.type = 'button';

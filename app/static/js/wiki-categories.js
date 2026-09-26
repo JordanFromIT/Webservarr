@@ -214,7 +214,7 @@ var WikiCategories = (function () {
       text.appendChild(el('p', 'text-[15px] font-semibold text-frosted-blue break-words', cat.name));
       var count = cat.page_count === 1 ? '1 page' : cat.page_count + ' pages';
       if (cat.draft_count) count += ' · ' + cat.draft_count + ' draft' + (cat.draft_count === 1 ? '' : 's');
-      text.appendChild(el('p', 'text-[13px] text-frosted-blue/45', count));
+      text.appendChild(el('p', 'text-[13px] text-frosted-blue/60', count));
       line.appendChild(text);
       var tools = el('div', 'flex items-center gap-1');
       line.appendChild(tools);

@@ -217,20 +217,20 @@ def public_user(session: Optional[dict]) -> Optional[dict]:
 # content globs (tailwind.config.js), so every class below is compiled.
 
 _LINK_ACTIVE = (
-    '<a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary text-background-dark '
+    '<a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary text-bright '
     'font-bold transition-all shadow-baltic-blue/20" href="{href}" aria-current="page">'
     '<span class="material-symbols-outlined fill-1 shrink-0">{icon}</span>{label}{badge}</a>'
 )
 _LINK = (
     '<a class="relative flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-frosted-blue/5 text-frosted-blue '
     'transition-all group" href="{href}">'
-    '<span class="material-symbols-outlined text-steel-blue group-hover:text-primary transition-colors shrink-0">{icon}</span>'
+    '<span class="material-symbols-outlined text-steel-blue group-hover:text-frosted-blue transition-colors shrink-0">{icon}</span>'
     '{label}{badge}</a>'
 )
 # A sublabel stacks under the label instead of sitting beside it, so the nav
 # keeps one scannable column of names with the clarification as secondary
-# text. On the active pill it rides the inherited colour at reduced opacity
-# rather than introducing a second one.
+# text. On the active pill it is the pill's own Bright text at 80%, which
+# still clears 4.5:1 on Primary (opacity-70 did not).
 #
 # The New! flag is a sibling of the truncating label, never inside it:
 # truncate is overflow:hidden, and the flag deliberately paints taller than
@@ -316,7 +316,7 @@ def render_nav_links(branding: dict, is_admin: bool, active_id: Optional[str]) -
                 label=html.escape(it["label"]),
                 flag=flag,
                 sub=html.escape(it["sublabel"]),
-                subcls="opacity-70" if active else "text-steel-blue",
+                subcls="text-bright/80" if active else "text-steel-blue",
             )
         else:
             label = "<span>" + html.escape(it["label"]) + flag + "</span>"
@@ -384,7 +384,7 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
         logo_html = (
             '<div class="size-14 bg-primary rounded-lg flex items-center justify-center '
             'shadow-lg shadow-baltic-blue/20 mb-3">'
-            f'<span class="material-symbols-outlined text-background-dark font-bold text-3xl">{logo_icon}</span>'
+            f'<span class="material-symbols-outlined text-bright font-bold text-3xl">{logo_icon}</span>'
             '</div>'
         )
 
@@ -398,7 +398,7 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
                     'class="h-8 w-24 object-contain">')
         else:
             mark = ('<span class="size-8 bg-primary rounded-md flex items-center justify-center">'
-                    f'<span class="material-symbols-outlined text-background-dark text-xl">{logo_icon}</span>'
+                    f'<span class="material-symbols-outlined text-bright text-xl">{logo_icon}</span>'
                     '</span>')
         bar_logo_html = f'<a href="/" aria-label="Home" class="flex items-center justify-center max-w-[40%]">{mark}</a>'
 

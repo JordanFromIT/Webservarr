@@ -129,7 +129,7 @@
 
     var sec = el('div', 'space-y-4');
     sec.appendChild(el('p', 'text-[15px] font-semibold text-frosted-blue', 'Sections'));
-    sec.appendChild(el('p', 'text-[13px] text-frosted-blue/45 -mt-3',
+    sec.appendChild(el('p', 'text-[13px] text-frosted-blue/60 -mt-3',
       'A section that is off is left out of the home page entirely.'));
     SECTIONS.forEach(function (s) {
       var row = el('div', 'flex items-center gap-3');
@@ -249,7 +249,7 @@
         'Rename pages and the line under each name, pick their icons, choose the order, and turn pages off. ' +
         'A page that is off disappears from the sidebar and only admins can open it.');
       var head = el('div', 'hidden lg:grid grid-cols-[88px_40px_minmax(0,1fr)_minmax(0,1fr)_96px_56px_56px] gap-3 ' +
-        'px-[13px] pb-2 text-[13px] font-semibold text-frosted-blue/45');
+        'px-[13px] pb-2 text-[13px] font-semibold text-frosted-blue/60');
       ['', 'Icon', 'Label', 'Sublabel', 'Address', 'New!', 'On'].forEach(function (h) { head.appendChild(el('span', '', h)); });
       card.body.appendChild(head);
 
@@ -351,7 +351,7 @@
         if (!pinned) {
           // Not a <button>: some browsers won't start a drag from inside one.
           handle = el('span', 'hidden lg:inline-flex items-center justify-center size-10 rounded-[10px] ' +
-            'text-frosted-blue/45 hover:text-frosted-blue hover:bg-frosted-blue/[0.06] cursor-grab ' +
+            'text-frosted-blue/60 hover:text-frosted-blue hover:bg-frosted-blue/[0.06] cursor-grab ' +
             'focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary');
           handle.tabIndex = 0;
           handle.setAttribute('role', 'button');
@@ -387,7 +387,7 @@
           li._up = up;
           li._down = down;
         } else {
-          pin = el('span', 'inline-flex items-center justify-center size-10 text-frosted-blue/45');
+          pin = el('span', 'inline-flex items-center justify-center size-10 text-frosted-blue/60');
           pin.appendChild(icon('push_pin', 'text-[18px]'));
           moveBox.appendChild(pin);
         }
@@ -408,7 +408,7 @@
         line.appendChild(names);
 
         line.appendChild(el('span', 'hidden lg:block lg:col-start-5 lg:row-start-1 font-mono text-[13px] ' +
-          'text-frosted-blue/45 truncate', hasOwn(addresses, id) ? String(addresses[id]) : ''));
+          'text-frosted-blue/60 truncate', hasOwn(addresses, id) ? String(addresses[id]) : ''));
 
 
         var switches = el('div', 'flex items-center gap-4 row-start-2 col-start-3 lg:contents');
@@ -557,7 +557,7 @@
 
       // Below the divider: pages that are not in the sidebar.
       var divider = el('div', 'flex items-center gap-3 pt-6');
-      divider.appendChild(el('span', 'text-[13px] font-semibold text-frosted-blue/45', 'Not in the sidebar'));
+      divider.appendChild(el('span', 'text-[13px] font-semibold text-frosted-blue/60', 'Not in the sidebar'));
       divider.appendChild(el('span', 'flex-1 h-px bg-frosted-blue/10'));
       card.body.appendChild(divider);
       var login = el('div', 'rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04]');
@@ -565,7 +565,7 @@
       var loginBtn = expandButton('More settings for the login page');
       loginLine.appendChild(loginBtn);
       loginLine.appendChild(el('span', 'flex-1 text-[15px] font-semibold text-frosted-blue', 'Login page'));
-      loginLine.appendChild(el('span', 'font-mono text-[13px] text-frosted-blue/45', '/login'));
+      loginLine.appendChild(el('span', 'font-mono text-[13px] text-frosted-blue/60', '/login'));
       login.appendChild(loginLine);
       var loginBody = el('div', 'hidden border-t border-frosted-blue/10 p-5');
       loginBody.id = 'pages-expander-login';

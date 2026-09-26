@@ -107,7 +107,7 @@
       'bg-frosted-blue/[0.04] border border-frosted-blue/10 overflow-hidden');
     var img = el('img', 'max-w-full max-h-full object-contain hidden');
     img.alt = 'Logo preview';
-    var none = el('div', 'flex flex-col items-center gap-1 text-frosted-blue/45 hidden');
+    var none = el('div', 'flex flex-col items-center gap-1 text-frosted-blue/60 hidden');
     none.appendChild(icon('image', 'text-[28px]'));
     var noneText = el('span', 'text-[13px]');
     none.appendChild(noneText);
@@ -270,7 +270,7 @@
   // Custom CSS in full, in a monospace block that scrolls on its own.
   function cssBlock(label, v) {
     var wrap = el('div', 'mt-2');
-    wrap.appendChild(el('p', 'text-[12px] text-frosted-blue/45', label));
+    wrap.appendChild(el('p', 'text-[12px] text-frosted-blue/60', label));
     wrap.appendChild(el('pre', 'mt-1 max-h-48 overflow-auto rounded-lg border border-frosted-blue/10 ' +
       'px-2 py-1.5 font-mono text-[12px] leading-5 text-frosted-blue/70 whitespace-pre-wrap break-all', shown(v)));
     return wrap;
@@ -306,7 +306,7 @@
     }
     if (Object.keys(warnings).length) {
       wrap.appendChild(el('p', 'mt-4 text-[13px] font-semibold text-frosted-blue', 'Kept as-is'));
-      wrap.appendChild(el('p', 'text-[13px] text-frosted-blue/45',
+      wrap.appendChild(el('p', 'text-[13px] text-frosted-blue/60',
         'These match what you have now, but wouldn’t be accepted as new values. They stay as they are.'));
       var kept = el('ul', 'mt-2 divide-y divide-frosted-blue/10 max-h-[30vh] overflow-y-auto rounded-xl border border-frosted-blue/10');
       Object.keys(warnings).forEach(function (k) {
@@ -319,7 +319,7 @@
       wrap.appendChild(kept);
     }
     if (ignored.length) {
-      wrap.appendChild(el('p', 'mt-3 text-[13px] text-frosted-blue/45', changes.some(function (c) { return noteOf(c) && !c.effect; })
+      wrap.appendChild(el('p', 'mt-3 text-[13px] text-frosted-blue/60', changes.some(function (c) { return noteOf(c) && !c.effect; })
         ? 'Passwords and keys in the file were skipped. Yours stay as they are, apart from any cleared above.'
         : 'Passwords and keys in the file were skipped; yours stay as they are.'));
     }
@@ -337,12 +337,12 @@
       var message = typeof errs[k] === 'string' && errs[k] ? errs[k] : 'That value isn’t allowed';
       if (k !== '_file') {
         li.appendChild(el('p', 'text-[13px] font-semibold text-frosted-blue break-words', nameOf(k)));
-        if (nameOf(k) !== k) li.appendChild(el('p', 'text-[13px] font-mono text-frosted-blue/45 break-words', k));
+        if (nameOf(k) !== k) li.appendChild(el('p', 'text-[13px] font-mono text-frosted-blue/60 break-words', k));
       }
       li.appendChild(el('p', 'text-[13px] text-frosted-blue/70 break-words', message));
       list.appendChild(li);
     });
-    if (keys.length > 10) list.appendChild(el('li', 'text-[13px] text-frosted-blue/45', 'and ' + (keys.length - 10) + ' more'));
+    if (keys.length > 10) list.appendChild(el('li', 'text-[13px] text-frosted-blue/60', 'and ' + (keys.length - 10) + ' more'));
     return WSSettings.confirm({ title: 'This file can’t be imported', body: list, confirmLabel: 'OK', alert: true });
   }
 

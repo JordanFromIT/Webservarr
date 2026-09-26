@@ -19,8 +19,8 @@
   </div>
 </aside>
 
-<div id="mobileTopBar" class="lg:hidden sticky top-0 z-40 h-14 bg-black/80 backdrop-blur-md border-b border-steel-blue/20 flex items-center justify-between px-4">
-  <button id="hamburgerBtn" class="p-2 text-steel-blue hover:text-bright transition-colors" aria-label="Open menu">
+<div id="mobileTopBar" class="lg:hidden sticky top-0 z-40 h-14 bg-background-dark/80 backdrop-blur-md border-b border-steel-blue/20 flex items-center justify-between px-4">
+  <button id="hamburgerBtn" class="p-2 text-steel-blue hover:text-frosted-blue transition-colors" aria-label="Open menu">
     <span class="material-symbols-outlined">menu</span>
   </button>
   <span class="text-frosted-blue font-bold text-sm truncate max-w-[40%] {{app_name_cls}}">{{app_name}}</span>
@@ -35,7 +35,7 @@
         <p id="mobileRole" class="text-[10px] text-steel-blue hidden sm:block">{{user_role}}</p>
       </div>
     </button>
-    <div id="mobileUserMenuDropdown" class="ws-pop hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
+    <div id="mobileUserMenuDropdown" class="ws-pop hidden absolute right-0 top-full mt-2 w-48 bg-background-dark/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
       <a href="/settings#sign-in" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors {{admin_block}}">
         <span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>
         Account settings
@@ -53,7 +53,7 @@
     <div class="p-6">
       <div class="flex items-center justify-between mb-3">
         <div class="flex-1"></div>
-        <button id="drawerCloseBtn" class="p-1 text-steel-blue hover:text-bright transition-colors" aria-label="Close menu">
+        <button id="drawerCloseBtn" class="p-1 text-steel-blue hover:text-frosted-blue transition-colors" aria-label="Close menu">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
@@ -66,7 +66,7 @@
 {{{nav_links}}}
     </nav>
     <div class="p-4 border-t border-steel-blue/20">
-      <button data-logout class="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-steel-blue hover:text-bright transition-colors">
+      <button data-logout class="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-steel-blue hover:text-frosted-blue transition-colors">
         <span class="material-symbols-outlined text-sm">logout</span> Sign Out
       </button>
       <p class="appVersionMobile text-steel-blue text-[10px] text-center mt-2 {{admin_block}}">{{version}}</p>

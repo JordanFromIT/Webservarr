@@ -12,7 +12,7 @@
   keep the title. The bell is inline-flex so its height is the icon's own,
   not a text line whose height changes when the icon font lands.
 -->
-<header id="appHeader" class="h-16 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-black/40 backdrop-blur-md relative z-50">
+<header id="appHeader" class="h-16 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-background-dark/40 backdrop-blur-md relative z-50">
   <div class="flex items-center gap-6">
     <div id="systemStatus" data-state="unknown" class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border">
       <span data-status-dot class="ws-status-dot" aria-hidden="true"></span>
@@ -31,7 +31,7 @@
         </div>
         <div id="headerAvatar" class="size-9 rounded-full bg-gradient-to-br from-baltic-blue to-cornflower-ocean border border-steel-blue/40" style="{{avatar_style}}"></div>
       </button>
-      <div id="userMenuDropdown" class="ws-pop hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
+      <div id="userMenuDropdown" class="ws-pop hidden absolute right-0 top-full mt-2 w-48 bg-background-dark/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
         <a href="/settings#sign-in" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors {{admin_block}}">
           <span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>
           Account settings

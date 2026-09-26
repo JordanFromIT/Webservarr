@@ -6,8 +6,9 @@
  * same, and nothing uses the browser's alert/confirm/prompt.
  *
  * Class strings are literal so Tailwind compiles them (app/static/js is in
- * the content globs). Text colours are theme colours only; a toast's tone is
- * a status light beside the text, never the text itself. The primary, ghost
+ * the content globs). Text colours are theme colours only. A toast's tone is
+ * the status light beside the text; an error's words also take the derived
+ * status-text colour (R140), while ok and info stay quiet. The primary, ghost
  * and danger buttons carry ws-lift (theme.css): a pixel of lift on hover and
  * a dip on press; the quiet text button does not.
  */
@@ -16,10 +17,10 @@
 
   var cls = {
     input: 'w-full rounded-[10px] bg-frosted-blue/[0.04] border border-frosted-blue/10 px-3.5 py-2.5 ' +
-      'text-[15px] text-frosted-blue placeholder:text-frosted-blue/45 focus:outline-none focus:ring-2 ' +
+      'text-[15px] text-frosted-blue placeholder:text-frosted-blue/60 focus:outline-none focus:ring-2 ' +
       'focus:ring-primary focus:border-transparent transition-colors disabled:opacity-50',
     label: 'block text-[13px] font-semibold text-frosted-blue/70 mb-1.5',
-    help: 'text-[13px] text-frosted-blue/45 mt-1.5',
+    help: 'text-[13px] text-frosted-blue/60 mt-1.5',
     error: 'text-[13px] font-semibold text-frosted-blue mt-1.5 flex items-center gap-1.5',
     // The widest a field, or a grid of fields, runs: a card description's width.
     fieldWidth: 'max-w-2xl',
@@ -60,6 +61,8 @@
   // ---- Toast ----
 
   var TONE_LIGHT = { ok: 'ws-light-ok', err: 'ws-light-error', info: 'ws-light-unconfigured' };
+  // Status colour only on deviation: an error's words, never a success's.
+  var TONE_TEXT = { ok: 'text-frosted-blue', err: 'text-status-err-text', info: 'text-frosted-blue' };
   var toastBox = null;
 
   function toast(message, tone) {
@@ -75,7 +78,7 @@
     }
     var t = el('div', 'pointer-events-auto flex items-center gap-3 max-w-md px-4 py-3 rounded-2xl border ' +
       'border-frosted-blue/10 bg-background-dark/90 backdrop-blur-md shadow-2xl text-sm font-semibold ' +
-      'text-frosted-blue ws-panel-in');
+      'ws-panel-in ' + TONE_TEXT[tone]);
     if (tone === 'err') t.setAttribute('role', 'alert');
     t.appendChild(el('span', 'ws-light ' + TONE_LIGHT[tone]));
     t.appendChild(el('span', 'min-w-0', message));

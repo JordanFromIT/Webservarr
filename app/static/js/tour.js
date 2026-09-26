@@ -47,16 +47,16 @@
         '<div id="tourArrow" class="tour-arrow" data-side="top"></div>' +
         '<div class="p-4">' +
           '<div class="flex items-start gap-2">' +
-            '<span id="tourIcon" class="material-symbols-outlined text-[20px] text-frosted-blue shrink-0">auto_stories</span>' +
-            '<h3 id="tourTitle" class="flex-1 font-bold text-frosted-blue text-sm leading-snug"></h3>' +
-            '<button id="tourSkip" type="button" class="text-[11px] text-frosted-blue/60 hover:text-frosted-blue shrink-0">Skip</button>' +
+            '<span id="tourIcon" class="material-symbols-outlined text-[20px] text-bright shrink-0">auto_stories</span>' +
+            '<h3 id="tourTitle" class="flex-1 font-bold text-bright text-sm leading-snug"></h3>' +
+            '<button id="tourSkip" type="button" class="text-[11px] text-bright/80 hover:text-bright shrink-0">Skip</button>' +
           '</div>' +
-          '<p id="tourBody" class="mt-2 text-[13px] text-frosted-blue/85 leading-relaxed"></p>' +
+          '<p id="tourBody" class="mt-2 text-[13px] text-bright/90 leading-relaxed"></p>' +
           '<div class="mt-3 flex items-center gap-3">' +
             '<div id="tourDots" class="flex items-center gap-1.5"></div>' +
             '<div class="ml-auto flex items-center gap-2">' +
-              '<button id="tourBack" type="button" class="px-2.5 py-1 rounded-lg text-[12px] text-frosted-blue/80 hover:text-frosted-blue hover:bg-frosted-blue/10">Back</button>' +
-              '<button id="tourNext" type="button" class="px-3 py-1.5 rounded-lg bg-frosted-blue text-background-dark text-[12px] font-bold hover:bg-frosted-blue/90">Continue</button>' +
+              '<button id="tourBack" type="button" class="px-2.5 py-1 rounded-lg text-[12px] text-bright/80 hover:text-bright hover:bg-bright/10">Back</button>' +
+              '<button id="tourNext" type="button" class="px-3 py-1.5 rounded-lg bg-bright text-primary text-[12px] font-bold hover:bg-bright/90">Continue</button>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -204,7 +204,7 @@
       dots.innerHTML = '';
       STEPS.forEach(function (_, i) {
         var d = document.createElement('span');
-        d.className = 'size-1.5 rounded-full ' + (i === step ? 'bg-frosted-blue' : 'bg-frosted-blue/30');
+        d.className = 'size-1.5 rounded-full ' + (i === step ? 'bg-bright' : 'bg-bright/30');
         dots.appendChild(d);
       });
 

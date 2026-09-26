@@ -125,7 +125,7 @@
     for (var i = 0; i < _bellButtons.length; i++) {
       var badge = createEl('span',
         'absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center ' +
-        'rounded-full bg-red-500 text-bright text-[10px] font-bold leading-none px-1 pointer-events-none'
+        'rounded-full bg-primary text-bright text-[10px] font-bold leading-none px-1 pointer-events-none'
       );
       badge.style.display = 'none';
       _bellButtons[i].appendChild(badge);
@@ -206,14 +206,14 @@
 
     // ws-pop: theme.css fades it open and closed through .hidden.
     _dropdown = createEl('div',
-      'ws-pop hidden absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl z-50 flex flex-col'
+      'ws-pop hidden absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-background-dark/95 border border-steel-blue/30 rounded-xl shadow-xl z-50 flex flex-col'
     );
 
     // Header
     var header = createEl('div', 'flex items-center justify-between px-4 py-3 border-b border-steel-blue/20');
     var title = createEl('span', 'text-sm font-bold text-frosted-blue', 'Notifications');
     var headerActions = createEl('div', 'flex items-center gap-3');
-    var markAllBtn = createEl('button', 'text-[11px] text-steel-blue hover:text-primary transition-colors cursor-pointer', 'Mark all read');
+    var markAllBtn = createEl('button', 'text-[11px] text-steel-blue hover:text-frosted-blue transition-colors cursor-pointer', 'Mark all read');
     markAllBtn.addEventListener('click', function(e) {
       e.stopPropagation();
       markAllRead().then(function() {
@@ -221,7 +221,7 @@
         loadDropdownItems();
       });
     });
-    var clearAllBtn = createEl('button', 'text-[11px] text-steel-blue hover:text-red-400 transition-colors cursor-pointer', 'Clear all');
+    var clearAllBtn = createEl('button', 'text-[11px] text-steel-blue hover:text-frosted-blue transition-colors cursor-pointer', 'Clear all');
     clearAllBtn.addEventListener('click', function(e) {
       e.stopPropagation();
       fetch('/api/notifications', { method: 'DELETE' })
@@ -243,7 +243,7 @@
 
     // Footer
     var footer = createEl('div', 'px-4 py-3 border-t border-steel-blue/20');
-    var prefsLink = createEl('button', 'text-[11px] text-steel-blue hover:text-primary transition-colors cursor-pointer w-full text-center', 'Notification settings');
+    var prefsLink = createEl('button', 'text-[11px] text-steel-blue hover:text-frosted-blue transition-colors cursor-pointer w-full text-center', 'Notification settings');
     prefsLink.addEventListener('click', function(e) {
       e.stopPropagation();
       closeDropdown();
@@ -307,7 +307,7 @@
     // Title row
     var titleRow = createEl('div', 'flex items-center gap-2');
     var titleEl = createEl('span', 'text-xs font-bold text-frosted-blue truncate', n.title || 'Notification');
-    var timeEl = createEl('span', 'text-[10px] text-steel-blue/60 shrink-0 ml-auto', timeAgo(n.created_at));
+    var timeEl = createEl('span', 'text-[10px] text-frosted-blue/60 shrink-0 ml-auto', timeAgo(n.created_at));
     titleRow.appendChild(titleEl);
     titleRow.appendChild(timeEl);
     content.appendChild(titleRow);
@@ -402,7 +402,7 @@
     });
 
     // Modal card
-    var card = createEl('div', 'bg-black/95 border border-steel-blue/30 rounded-2xl shadow-2xl w-full max-w-md mx-4');
+    var card = createEl('div', 'bg-background-dark/95 border border-steel-blue/30 rounded-2xl shadow-2xl w-full max-w-md mx-4');
 
     // Header
     var header = createEl('div', 'flex items-center justify-between px-6 py-4 border-b border-steel-blue/20');
@@ -437,7 +437,7 @@
       toggle.checked = true; // default, will be updated by loadPreferences
       toggle.className = 'notif-toggle';
       toggle.dataset.category = cat;
-      toggle.style.cssText = 'width:36px; height:20px; appearance:none; -webkit-appearance:none; ' +
+      toggle.style.cssText = 'width:36px; height:20px; appearance:none; -webkit-appearance:none; border-color:transparent; ' +
         'background:rgb(var(--color-accent) / 0.3); border-radius:10px; position:relative; cursor:pointer; ' +
         'transition: background 0.2s;';
       applyToggleStyle(toggle, toggle.checked);
@@ -454,7 +454,7 @@
     // Push notification toggle (conditional)
     if ('serviceWorker' in navigator && 'PushManager' in window) {
       var divider = createEl('div', 'border-t border-steel-blue/20 pt-4 mt-2');
-      var pushLabel = createEl('p', 'text-[11px] text-steel-blue/60 uppercase font-bold tracking-wider mb-3', 'Push Notifications');
+      var pushLabel = createEl('p', 'text-[11px] text-frosted-blue/70 uppercase font-bold tracking-wider mb-3', 'Push Notifications');
       divider.appendChild(pushLabel);
 
       var pushRow = createEl('div', 'flex items-center justify-between py-2');
@@ -468,7 +468,7 @@
       var pushToggle = document.createElement('input');
       pushToggle.type = 'checkbox';
       pushToggle.id = 'pushToggle';
-      pushToggle.style.cssText = 'width:36px; height:20px; appearance:none; -webkit-appearance:none; ' +
+      pushToggle.style.cssText = 'width:36px; height:20px; appearance:none; -webkit-appearance:none; border-color:transparent; ' +
         'background:rgb(var(--color-accent) / 0.3); border-radius:10px; position:relative; cursor:pointer; ' +
         'transition: background 0.2s;';
       applyToggleStyle(pushToggle, false);

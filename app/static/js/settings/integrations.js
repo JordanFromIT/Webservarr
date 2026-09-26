@@ -361,13 +361,13 @@
         var light = el('span', 'ws-light ws-light-checking');
         light.setAttribute('aria-hidden', 'true');
         var reason = el('span', 'min-w-0 truncate', MSG.checking);
-        var when = el('span', 'text-frosted-blue/45 shrink-0');
+        var when = el('span', 'text-frosted-blue/60 shrink-0');
         status.appendChild(light);
         status.appendChild(reason);
         status.appendChild(when);
         text.appendChild(status);
         head.appendChild(text);
-        var chev = icon('expand_more', 'text-[22px] text-frosted-blue/45 transition-transform');
+        var chev = icon('expand_more', 'text-[22px] text-frosted-blue/60 transition-transform');
         head.appendChild(chev);
         root.appendChild(head);
 
