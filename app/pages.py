@@ -171,14 +171,20 @@ def font_links(branding: dict) -> str:
 # Data block and user
 # ---------------------------------------------------------------------------
 
-def data_block(branding: dict, user: Optional[dict], version: str, name: str) -> str:
+def data_block(branding: dict, user: Optional[dict], version: str, name: str,
+               setup: Optional[dict] = None) -> str:
     """
     The payload the client reads at parse time.
 
     It is data, not code: a JSON script type never executes, so CSP does not
     apply. Every '<' is emitted as \\u003c so no value can close the element.
+
+    setup: which connections are set up (settings_setup), on the Settings
+    page only.
     """
     payload = {"branding": branding, "user": user, "version": version, "page": name}
+    if setup is not None:
+        payload["setup"] = setup
     text = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c")
     return f'<script id="ws-data" type="application/json">{text}</script>'
 
@@ -505,14 +511,14 @@ def _preview_meta(branding: dict, base_url: str, path: str) -> tuple:
 
 
 def _inject_head(content: str, branding: dict, user: Optional[dict], version: str,
-                 name: str, base_url: str, path: str) -> str:
+                 name: str, base_url: str, path: str, setup: Optional[dict] = None) -> str:
     """Rewrite <title> and append, right after it: preview tags, theme, font, data."""
     app_name, tags = _preview_meta(branding, base_url, path)
     # A page with no descriptive title of its own, on a site with no name,
     # falls back to the tagline (or nothing) rather than a dangling " - ".
     bare_title = app_name or (branding.get("tagline") or "").strip()
     extra = "\n".join([tags, theme_style(branding), font_links(branding),
-                       data_block(branding, user, version, name)])
+                       data_block(branding, user, version, name, setup)])
 
     def _rewrite(match):
         inner = match.group(0)[len("<title>"):-len("</title>")]
@@ -615,7 +621,7 @@ def _fill_login_name(out: str, branding: dict) -> str:
 def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dict],
                 version: str, base_url: str, path: str, flags: dict) -> str:
     """Pure: turn a static page into the document this user should receive."""
-    out = _inject_head(page_html, branding, user, version, name, base_url, path)
+    out = _inject_head(page_html, branding, user, version, name, base_url, path, flags.get("setup"))
 
     if SIDEBAR_MARKER in out or HEADER_MARKER in out:
         values = shell_values(branding, user, version, name)
@@ -668,6 +674,48 @@ def load_context(signed_in: bool) -> tuple:
     return branding, flags
 
 
+# The connections whose being set up changes the shape of a Settings tab: the
+# Sign-in tab's Plex hint and Authentik fields, the Pages rows that say a page
+# needs one. The Settings skeleton (settings.html) takes that shape before the
+# first paint from these. Booleans only, and only on the admin-only Settings
+# page: which services an install uses is not for every visitor.
+_SETUP_KEYS = (
+    "integration.plex.url", "integration.plex.token", "integration.seerr.url", "integration.chaptarr.url",
+    "integration.sonarr.url", "integration.radarr.url", "integration.kavita.url",
+    "integration.authentik.url", "integration.authentik.client_secret",
+)
+
+
+def settings_setup() -> dict:
+    """{connection: set up?} for the Settings skeleton; all False if the database is unavailable."""
+    values = {}
+    db = None
+    try:
+        from app.models import Setting
+
+        db = SessionLocal()
+        values = {r.key: r.value for r in db.query(Setting).filter(Setting.key.in_(_SETUP_KEYS)).all()}
+    except Exception:  # pragma: no cover - defensive
+        logger.warning("Could not read setup flags for the Settings page", exc_info=True)
+    finally:
+        if db is not None:
+            db.close()
+
+    def has(key: str) -> bool:   # truthy, as the tabs test api.saved(key)
+        return bool(values.get(key))
+
+    return {
+        "plex": has("integration.plex.url") and has("integration.plex.token"),
+        "seerr": has("integration.seerr.url"),
+        "chaptarr": has("integration.chaptarr.url"),
+        "sonarr": has("integration.sonarr.url"),
+        "radarr": has("integration.radarr.url"),
+        "kavita": has("integration.kavita.url"),
+        "authentik_url": has("integration.authentik.url"),
+        "authentik_secret": has("integration.authentik.client_secret"),
+    }
+
+
 def render_page(name: str, request: Optional[Request], user: Optional[dict],
                 gate: Optional[str] = None, pick: Optional[Callable[[dict], str]] = None):
     """Read app/static/<name>.html, render it for this user, and return it, or 404.
@@ -683,6 +731,8 @@ def render_page(name: str, request: Optional[Request], user: Optional[dict],
         flags = dict(flags, page_off=True)
     if pick is not None:
         name = pick(branding)
+    if name == "settings" and user and user.get("is_admin") == "true":
+        flags = dict(flags, setup=settings_setup())
 
     filepath = os.path.join(STATIC_DIR, name + ".html")
     try:
