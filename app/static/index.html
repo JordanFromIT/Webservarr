@@ -154,8 +154,8 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
      skeleton exactly. A pinned or new post opens in full and is as tall as
      it is written, which no skeleton can know. -->
 <div id="newsContainer" class="grid gap-3">
-<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold">&nbsp;<br class="sm:hidden">&nbsp;</p><p class="text-sm mt-1">&nbsp;<br>&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
-<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold">&nbsp;<br class="sm:hidden">&nbsp;</p><p class="text-sm mt-1">&nbsp;<br>&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
 </div>
 </section>
 </div>
@@ -366,7 +366,7 @@ function renderNewsCard(post, expanded) {
 
     var body = open
         ? '<div class="' + bodyClasses + '" style="white-space:pre-line">' + post.content_html + '</div>'
-        : '<p class="text-sm text-frosted-blue/60 mt-1 line-clamp-2">' + escapeHtml(excerpt) + '</p>' +
+        : '<p class="text-sm text-frosted-blue/60 mt-1 line-clamp-2 min-h-10">' + escapeHtml(excerpt) + '</p>' +
           '<div class="' + bodyClasses + ' hidden" data-news-body style="white-space:pre-line">' + post.content_html + '</div>';
 
     var toggle = open
@@ -381,14 +381,16 @@ function renderNewsCard(post, expanded) {
     // min-content width and pushes the whole page into horizontal scroll on a
     // phone. The title wraps rather than truncating for the same reason it is
     // not clipped -- on a narrow screen a cut-off headline is unreadable, and
-    // there is room for two lines.
+    // there is room for two lines. The title keeps two lines' room on a phone
+    // and the excerpt two lines everywhere (min-h), so a short post is the
+    // height of its skeleton card instead of shrinking under it.
     return '<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 min-w-0 ' + accent + (open ? '' : ' opacity-80') + '">' +
         '<span class="material-symbols-outlined ' + iconColor + ' mt-0.5 shrink-0">' + icon + '</span>' +
         '<div class="flex-1 min-w-0">' +
             '<div class="flex items-start justify-between gap-3">' +
                 '<div class="flex items-start gap-2 min-w-0">' +
                     flag +
-                    '<h4 class="font-bold text-frosted-blue break-words min-w-0">' + escapeHtml(post.title) + '</h4>' +
+                    '<h4 class="font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0">' + escapeHtml(post.title) + '</h4>' +
                 '</div>' +
                 '<span class="shrink-0 text-[10px] text-steel-blue font-bold uppercase">' + escapeHtml(newsDateLabel(created)) + '</span>' +
             '</div>' +

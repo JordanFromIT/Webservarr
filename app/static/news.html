@@ -160,9 +160,9 @@
        only when the real one will be) and Read more. So a card lands on its
        skeleton without anything inside moving. Change one, change both. -->
   <div id="newsArchive" class="grid gap-3" data-arrive="posts">
-    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold">&nbsp;<br class="sm:hidden">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1">&nbsp;<br>&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
-    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold">&nbsp;<br class="sm:hidden">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1">&nbsp;<br>&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
-    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold">&nbsp;<br class="sm:hidden">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1">&nbsp;<br>&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
   </div>
 
   <!-- Pagination -->
@@ -258,18 +258,20 @@
 
     // min-w-0: see the matching note on the homepage renderer. Grid items
     // default to min-width:auto and will otherwise overflow the page on mobile.
+    // The min-h on the title (phone) and the excerpt keep a short post the
+    // height of its skeleton card.
     return '<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 min-w-0 ' + accent + '">' +
       '<span class="material-symbols-outlined ' + iconColor + ' mt-0.5 shrink-0">' + icon + '</span>' +
       '<div class="flex-1 min-w-0">' +
         '<div class="flex items-start justify-between gap-3">' +
           '<div class="flex items-start gap-2 min-w-0">' +
             flag +
-            '<h2 class="font-bold text-frosted-blue break-words min-w-0">' + escapeHtml(post.title) + '</h2>' +
+            '<h2 class="font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0">' + escapeHtml(post.title) + '</h2>' +
           '</div>' +
           '<span class="shrink-0 text-[10px] text-steel-blue font-bold uppercase">' + escapeHtml(dateLabel(created)) + '</span>' +
         '</div>' +
         '<p class="text-xs text-steel-blue/70 mt-0.5">By ' + escapeHtml(post.author_name || 'Unknown') + '</p>' +
-        '<p class="text-sm text-frosted-blue/60 mt-1 line-clamp-2">' + escapeHtml(excerpt(post.content_html, 180)) + '</p>' +
+        '<p class="text-sm text-frosted-blue/60 mt-1 line-clamp-2 min-h-10">' + escapeHtml(excerpt(post.content_html, 180)) + '</p>' +
         '<div class="' + bodyClasses + ' hidden" data-news-body style="white-space:pre-line">' + post.content_html + '</div>' +
         (isAdmin
           ? '<div class="mt-2 -ml-2 flex flex-wrap gap-1">' +
