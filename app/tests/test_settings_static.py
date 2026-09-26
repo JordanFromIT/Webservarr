@@ -1367,7 +1367,7 @@ class IntegrationsTab(unittest.TestCase):
                      for block in re.split(r'<div class="h-\[30px\] mb-5 flex items-center">', panel)[1:]]
         self.assertEqual(per_group, counts, "one card per service, grouped as GROUPS")
         heights = re.findall(r'class="skel rounded-2xl (h-\[[\d.]+px\](?: sm:h-\[[\d.]+px\])?)"', panel)
-        tall, short = "h-[122px] sm:h-[102.6px]", "h-[102.6px]"
+        tall, short = "h-[122.1px] sm:h-[102.6px]", "h-[102.6px]"
         self.assertEqual(heights, [tall, tall, short, tall, short, short, short, short, tall])
 
     def test_upstream_text_never_goes_in_as_html(self):
