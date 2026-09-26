@@ -665,6 +665,23 @@ class PushStatusApi(PushStatusBase):
         self.assertFalse(body["push_ready"])
         self.assertTrue(body["reason"])
 
+    def test_empty_admin_email_is_still_ready(self):
+        # Push falls back to a valid contact when the Admin email is empty.
+        self.seed_keys()
+        helpers.put(self.db, "system.admin_email", "  ")
+        body = self.status().json()
+        self.assertTrue(body["push_ready"])
+        self.assertIsNone(body["reason"])
+
+    def test_admin_email_push_cannot_sign_with_is_not_ready(self):
+        # "x@bad!.com" passes the Settings email pattern, but push services
+        # need a contact py_vapid accepts: every push would be refused.
+        self.seed_keys()
+        helpers.put(self.db, "system.admin_email", "x@bad!.com")
+        body = self.status().json()
+        self.assertFalse(body["push_ready"])
+        self.assertIn("Admin email", body["reason"])
+
     def test_counts_devices_people_and_last_push(self):
         from app.services import push
         self.add_sub("a@example.com", 1)

@@ -204,6 +204,53 @@ class SeededKeySignsPushes(unittest.TestCase):
         self.assertEqual(push._push_icon("/\\evil.example/x.png"), push.DEFAULT_PUSH_ICON)
         self.assertEqual(push._push_icon("/\t/evil.example/x.png"), push.DEFAULT_PUSH_ICON)
 
+    # --- the VAPID contact (sub) claim ------------------------------------
+
+    def _set_admin_email(self, value):
+        db = self.Session()
+        try:
+            db.add(Setting(key="system.admin_email", value=value))
+            db.commit()
+        finally:
+            db.close()
+
+    def _sent_sub(self):
+        """Dispatch to one device and return the sub claim the push service got."""
+        self._subscribe("someone@example.com", "https://push.example.com/send/abc")
+        result, posts = self._dispatch(["someone@example.com"])
+        self.assertEqual(result, {"attempted": 1, "succeeded": 1})
+        self.assertEqual(len(posts), 1)
+        headers = posts[0][1]["headers"]
+        self._verify_vapid(headers, "https://push.example.com")
+        token = dict(p.split("=", 1) for p in headers["Authorization"][len("vapid "):].split(","))["t"]
+        return json.loads(_b64url_decode(token.strip().split(".")[1]))["sub"]
+
+    def test_empty_admin_email_row_falls_back_to_a_valid_contact(self):
+        # Clearing Admin email, or importing a backup that never set it, leaves
+        # an empty row; "mailto:" alone fails py_vapid and every push was refused.
+        self._set_admin_email("")
+        self.assertEqual(self._sent_sub(), "mailto:admin@localhost")
+
+    def test_whitespace_admin_email_row_falls_back_to_a_valid_contact(self):
+        self._set_admin_email("   ")
+        self.assertEqual(self._sent_sub(), "mailto:admin@localhost")
+
+    def test_admin_email_is_trimmed_into_the_contact(self):
+        self._set_admin_email("  owner@example.com ")
+        self.assertEqual(self._sent_sub(), "mailto:owner@example.com")
+
+    def test_no_admin_email_row_uses_the_fallback(self):
+        self.assertEqual(self._sent_sub(), "mailto:admin@localhost")
+
+    def test_vapid_subject_helpers(self):
+        self.assertEqual(push.vapid_subject(None), "mailto:admin@localhost")
+        self.assertEqual(push.vapid_subject(""), "mailto:admin@localhost")
+        self.assertEqual(push.vapid_subject(" a@example.com "), "mailto:a@example.com")
+        self.assertTrue(push.vapid_subject_ok(push.vapid_subject("")))
+        self.assertTrue(push.vapid_subject_ok("mailto:owner@example.com"))
+        # Passes the Settings email pattern, but py_vapid won't sign with it.
+        self.assertFalse(push.vapid_subject_ok(push.vapid_subject("x@bad!.com")))
+
 
 BADGE_RE = re.compile(r"""['"]?badge['"]?\s*[:=]""", re.I)
 
