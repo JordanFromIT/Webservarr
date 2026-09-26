@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.content import render_markdown
 from app.database import get_db
@@ -83,6 +84,8 @@ def is_admin(user: dict) -> bool:
 # its links, a deleted page drops them, and a write that fails moves nothing.
 HOOK_KEYS = {"tickets": "wiki.hook_tickets", "issues": "wiki.hook_issues", "playback": "wiki.hook_playback"}
 HelpName = Literal["tickets", "issues", "playback"]
+
+PAGE_DELETED = "That page was deleted."
 
 
 def _hook_rows(db: Session) -> Dict[str, Optional[Setting]]:
@@ -421,6 +424,8 @@ async def get_page(
         # Which help links this page holds, and who holds the others, for the
         # editor's "Show as help on" boxes. Admins only: a member has no use
         # for it, and a holder may be a draft they must not learn the title of.
+        # A holder is {title, slug}: the editor tells pages apart by address,
+        # since two pages can share a title.
         hooks = _hooks(db)
         data["help_on"] = [name for name, held in hooks.items() if held == page.slug]
         holders = {}
@@ -428,7 +433,7 @@ async def get_page(
             holder = None
             if held and held != page.slug:
                 other = db.query(WikiPage).filter(WikiPage.slug == held).first()
-                holder = other.title if other else None
+                holder = {"title": other.title, "slug": other.slug} if other else None
             holders[name] = holder
         data["help_holders"] = holders
     return data
@@ -533,7 +538,18 @@ async def update_page(
         page.content_html = render_markdown(payload.content)
 
     _apply_help(db, page.slug, payload.help_on, old_slug=old_slug)
-    db.commit()
+    # _apply_help took the write lock, so no delete can land from here to the
+    # commit. One that landed after this request read the page is caught now,
+    # rather than as a failed UPDATE at commit.
+    if db.query(WikiPage.id).filter(WikiPage.id == page.id).first() is None:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=PAGE_DELETED)
+    try:
+        db.commit()
+    except StaleDataError:
+        # Backstop for the same race: the row the UPDATE targeted is gone.
+        db.rollback()
+        raise HTTPException(status_code=404, detail=PAGE_DELETED)
     db.refresh(page)
     cat = db.query(WikiCategory).filter(WikiCategory.id == page.category_id).first() if page.category_id else None
     return _page_brief(page, cat)

@@ -33,29 +33,30 @@ var WikiEditor = (function () {
   // Order-free comparison of two help lists.
   function helpKey(list) { return (list || []).slice().sort().join(','); }
 
-  // Who holds each help link as this editor sees it: the other page's title
-  // for a page response, or - for a new page, which has none - the branding
-  // payload already on this page, which names the published page each help
-  // card points at. No extra request either way.
+  // Who holds each help link as this editor sees it, as { slug, title }:
+  // from the page response, or - for a new page, which has none - from the
+  // branding payload already on this page, which names the published page
+  // each help card points at. No extra request either way.
   function helpHolders(page) {
     var out = {};
     var hooks = (window.WEBSERVARR_THEME && window.WEBSERVARR_THEME.wiki_hooks) || {};
     HELP_PLACES.forEach(function (h) {
-      var n = h[0];
-      if (page) out[n] = (page.help_holders || {})[n] || null;
-      else out[n] = hooks[n] && hooks[n].title ? hooks[n].title : null;
+      var n = h[0], held = page ? (page.help_holders || {})[n] : hooks[n];
+      out[n] = held && held.slug ? { slug: held.slug, title: held.title || held.slug } : null;
     });
     return out;
   }
 
   // One word per place for the state the boxes started from: 'self', the
-  // holder ('other:' + title) or '' for nobody. A draft records it so a
-  // restore can tell whether a change the admin made still applies.
+  // holder by address ('page:' + slug) or '' for nobody. Addresses, not
+  // titles: two pages can share a title, and a draft must not mistake one for
+  // the other. A draft records this so a restore can tell whether a change
+  // the admin made still applies.
   function helpSeen(helpBase, holders) {
     var seen = {};
     HELP_PLACES.forEach(function (h) {
       var n = h[0];
-      seen[n] = helpBase.indexOf(n) >= 0 ? 'self' : (holders[n] ? 'other:' + holders[n] : '');
+      seen[n] = helpBase.indexOf(n) >= 0 ? 'self' : (holders[n] ? 'page:' + holders[n].slug : '');
     });
     return seen;
   }
@@ -280,6 +281,16 @@ var WikiEditor = (function () {
       return;
     }
 
+    if (res.status === 404) {
+      // The page was deleted while this editor was open (or the category it
+      // was filed under was). The draft is kept.
+      var gone = await res.json().catch(function () { return {}; });
+      status(gone.detail === 'Category not found'
+        ? 'That category no longer exists. Pick another one and save again.'
+        : 'This page was deleted while you were editing, so it can’t be saved. Your text is still here — copy it before you leave.', 'bad');
+      return;
+    }
+
     if (!res.ok) {
       status('The save failed (HTTP ' + res.status + '). Your text is still here — try again.', 'bad');
       return;
@@ -382,10 +393,12 @@ var WikiEditor = (function () {
     _mirrorTimer = setTimeout(function () {
       _mirrorTimer = null;
       if (_session !== s) return;
-      // help_seen records the state the boxes started from, so a restore can
-      // tell a change the admin made, and whether it still applies.
+      // help_state records the state the boxes started from, so a restore can
+      // tell a change the admin made, and whether it still applies. (Older
+      // drafts carried help_base or help_seen, keyed on titles; they are never
+      // replayed.)
       var fields = collect();
-      fields.help_seen = Object.assign({}, s.helpSeen);
+      fields.help_state = Object.assign({}, s.helpSeen);
       saveDraft(s.slug, fields);
     }, MIRROR_DEBOUNCE_MS);
   }
@@ -446,7 +459,7 @@ var WikiEditor = (function () {
       // leaving AND that link is still where it was then. Everything else
       // shows the links as they are now, so an old draft can neither undo a
       // move made since nor quietly take a link another page now holds.
-      var f = draft.fields, then = f.help_seen;
+      var f = draft.fields, then = f.help_state;
       var usable = !!then && typeof then === 'object' && !Array.isArray(then) && Array.isArray(f.help_on);
       var on = [];
       HELP_PLACES.forEach(function (h) {
@@ -551,7 +564,7 @@ var WikiEditor = (function () {
       line.appendChild(box);
       line.appendChild(document.createTextNode(h[1]));
       // The other page's title goes in as text, never as markup.
-      if (holders[h[0]]) line.appendChild(el('span', 'text-xs text-steel-blue', '(now on “' + holders[h[0]] + '” — ticking moves it here)'));
+      if (holders[h[0]]) line.appendChild(el('span', 'text-xs text-steel-blue', '(now on “' + holders[h[0]].title + '” — ticking moves it here)'));
       help.appendChild(line);
     });
     help.appendChild(el('p', 'text-xs text-steel-blue', 'A link to this page appears above that form once the page is published. Only one page can be linked in each place.'));
