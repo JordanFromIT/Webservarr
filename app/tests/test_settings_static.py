@@ -671,6 +671,44 @@ class GeneralTab(unittest.TestCase):
         self.assertLess(size.start(), read.start(), "the size is checked after the file is read")
         self.assertRegex(body, r"try\s*\{[^{}]*JSON\.parse\([^{}]*\}\s*catch\b")
 
+    def test_the_import_preview_shows_values_whole(self):
+        # L1 / M2: a long address (or CSS) is exactly what must be read to the
+        # end, so nothing in the preview is cut short.
+        shown = general_function("shown")
+        for cut in (r"\.slice\(", r"\.substring\(", r"\.substr\(", r"\.length\s*>"):
+            self.assertNotRegex(shown, cut)
+        body = general_function("previewBody")
+        self.assertNotRegex(body, r"\btruncate\b|\bline-clamp|\btext-ellipsis\b")
+        src = (STATIC / "js" / "settings" / "general.js").read_text(encoding="utf-8")
+        raw = src[src.index("\n  function previewBody("):src.index("\n  function showProblems(")]
+        # An old -> new line wraps anywhere, so a long address never runs off.
+        self.assertRegex(raw, r"'[^']*\bbreak-all\b[^']*',\s*shown\(c\.old\)")
+
+    def test_the_import_preview_flags_custom_css_in_full(self):
+        src = (STATIC / "js" / "settings" / "general.js").read_text(encoding="utf-8")
+        raw = src[src.index("\n  function previewBody("):src.index("\n  function showProblems(")]
+        self.assertIn("c.key === 'theme.custom_css'", raw)
+        self.assertIn("flag('Changes the site’s custom CSS')", raw)
+        self.assertRegex(raw, r"cssBlock\('[^']+', c\.old\)")
+        self.assertRegex(raw, r"cssBlock\('[^']+', c\['new'\]\)")
+        block = src[src.index("\n  function cssBlock("):src.index("\n  function previewBody(")]
+        pre = re.search(r"el\('pre', ([^;]*)\);", block, re.S)
+        self.assertIsNotNone(pre, "the CSS is not in a <pre>")
+        for c in ("overflow-auto", "font-mono", "whitespace-pre-wrap", "max-h-"):
+            self.assertIn(c, pre.group(1))
+        self.assertIn("shown(v)", pre.group(1))          # the whole value, as text
+
+    def test_the_import_preview_says_which_keys_it_clears(self):
+        # M2: the server's sentence ("Sonarr API key will be cleared (its
+        # address changed)") is shown as text in place of old -> new.
+        src = (STATIC / "js" / "settings" / "general.js").read_text(encoding="utf-8")
+        raw = src[src.index("\n  function previewBody("):src.index("\n  function showProblems(")]
+        self.assertRegex(raw, r"if \(noteOf\(c\)\) \{\s*li\.appendChild\(flag\(noteOf\(c\)\)\);")
+        self.assertRegex(src, r"function noteOf\(c\) \{ return typeof c\.note === 'string' \? c\.note : ''; \}")
+        flag = src[src.index("\n  function flag("):src.index("\n  function cssBlock(")]
+        self.assertIn("el('span', null, text)", flag)    # textContent, never markup
+        self.assertNotIn("innerHTML", flag)
+
     def test_no_client_check_on_the_logo_address(self):
         # R14: the server's 422 on Save is the check, shown on the field by the kit.
         body = general_function("logoCard")
