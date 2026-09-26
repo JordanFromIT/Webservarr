@@ -1678,18 +1678,40 @@ class InPlaceWiki(unittest.TestCase):
         # flight and otherwise disables the whole panel and the toggle.
         code = js_code_only(wiki_categories_js())
         self.assertRegex(function_body(code, "begin"), r"^\s*if \(busy\) return false;\s*setBusy\(true\);\s*return true;\s*$")
-        busy = function_body(code, "setBusy")
+        busy = function_body(code, "sync")
         self.assertIn("root.querySelectorAll(", busy)
-        self.assertIn("n.disabled = on || n.hasAttribute(", busy)
-        self.assertIn("locks.forEach(function (n) { n.disabled = on; });", busy)
+        self.assertIn("n.disabled = busy || n.hasAttribute(", busy)
+        self.assertIn("locks.forEach(function (n) { n.disabled = busy || ", busy)
         self.assertEqual(len(re.findall(r"(?<!function )\bbegin\(\)", code)), 4)            # move, edit, delete, add
-        self.assertEqual(len(re.findall(r"if \(!begin\(\)\) return", code)), 3)
+        self.assertEqual(len(re.findall(r"if \(!begin\(\)\) return", code)), 2)            # the two form saves
+        self.assertEqual(len(re.findall(r"if \(formOpen \|\| !begin\(\)\) return;", code)), 1)  # move
         self.assertEqual(len(re.findall(r"if \(!ok \|\| !begin\(\)\) return;", code)), 1)
         # Each failure puts the controls back; a success leaves them off until
         # the page draws the next panel.
         self.assertEqual(len(re.findall(r"if \(!res\.ok\) \{ setBusy\(false\);", code)), 3)
         self.assertRegex(function_body(code, "move"), r"if \(landed\) done\(focus\);\s*else setBusy\(false\);")
         self.assertRegex(function_body(code, "done"), r"^\s*onChanged\(focus\);\s*$")
+
+    def test_an_open_form_holds_the_panel(self):
+        # Any other write would redraw the panel and throw away an unsaved
+        # Edit or Add form. So while one is open, every control outside it
+        # (and the toggle) is really disabled, and nothing else can start.
+        code = js_code_only(wiki_categories_js())
+        self.assertRegex(code, r"\bvar formOpen = null;")
+        sync = function_body(code, "sync")
+        self.assertIn("n.disabled = busy || n.hasAttribute(", sync)
+        self.assertIn("|| (formOpen !== null && !formOpen.contains(n));", sync)
+        self.assertIn("locks.forEach(function (n) { n.disabled = busy || formOpen !== null; });", sync)
+        self.assertRegex(function_body(code, "setBusy"), r"^\s*busy = on;\s*sync\(\);\s*$")
+        self.assertRegex(function_body(code, "showForm"), r"slot\.replaceChildren\(f\);\s*formOpen = f;\s*sync\(\);")
+        self.assertRegex(function_body(code, "closeForm"), r"formOpen = null;\s*sync\(\);\s*$")
+        # Edit and Add open through showForm, their Cancels close through closeForm.
+        self.assertEqual(len(re.findall(r"\bshowForm\((?:li|addSlot), form\(", code)), 2)
+        self.assertEqual(len(re.findall(r"\bcloseForm\((?:li, line|addSlot)\);", code)), 2)
+        self.assertNotRegex(code, r"(?:li|addSlot)\.replaceChildren\(")
+        # Every action that is not the form's own save refuses while a form is open.
+        self.assertEqual(len(re.findall(r"if \(busy \|\| formOpen\) return;", code)), 3)   # edit, delete, add
+        self.assertRegex(function_body(code, "move"), r"if \(formOpen \|\| !begin\(\)\) return;")
 
     def test_reorder_reads_the_slug_at_click_time_and_works_on_a_copy(self):
         code = js_code_only(wiki_categories_js())
