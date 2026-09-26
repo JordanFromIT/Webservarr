@@ -72,6 +72,10 @@
     var SEEN_KEY = opts.seenKey;
     var step = 0;
     var active = false;
+    // False until this run's first placement: the layer stays invisible and
+    // untransitioned until then, so the bubble never shows at a stale spot
+    // and slides from it.
+    var placed = false;
 
     /* Measured rather than asked, because offsetParent is null for any
        position:fixed element - which silently rejected the reader's page-turn
@@ -90,7 +94,29 @@
       return visible(fb) ? fb : null;
     }
 
+    /* Positions are transforms, never top/left. Moving a fixed box by its
+       offsets is a layout shift on every frame of the glide between steps
+       (the spotlight is as big as the screen, so the page scored 0.6);
+       a transform moves it without laying anything out. */
+    function moveTo(node, x, y) {
+      node.style.transform = 'translate(' + Math.round(x) + 'px, ' + Math.round(y) + 'px)';
+    }
+
     function place() {
+      position();
+      if (active && !placed) reveal();
+    }
+
+    // The first placement of a run lands with no transition, then shows.
+    function reveal() {
+      placed = true;
+      var layer = q('tourLayer');
+      void layer.offsetWidth;   // commit the first position before transitions return
+      layer.classList.remove('tour-placing');
+      layer.style.visibility = '';
+    }
+
+    function position() {
       var s = STEPS[step];
       if (!s) return;
       var el = targetFor(s);
@@ -110,15 +136,13 @@
          no hole. The ring and the arrow are hidden, since neither has anything
          to mark. */
       if (!el) {
-        spot.style.top = (window.innerHeight / 2) + 'px';
-        spot.style.left = (window.innerWidth / 2) + 'px';
+        moveTo(spot, window.innerWidth / 2, window.innerHeight / 2);
         spot.style.width = '0px';
         spot.style.height = '0px';
         spot.style.opacity = '1';
         spot.classList.add('tour-spotlight-empty');
         arrow.style.display = 'none';
-        bubble.style.top = Math.max(margin, (window.innerHeight - bh) / 2) + 'px';
-        bubble.style.left = Math.max(margin, (window.innerWidth - bw) / 2) + 'px';
+        moveTo(bubble, Math.max(margin, (window.innerWidth - bw) / 2), Math.max(margin, (window.innerHeight - bh) / 2));
         return;
       }
 
@@ -128,8 +152,7 @@
       var pad = 8;
       var r = el.getBoundingClientRect();
 
-      spot.style.top = (r.top - pad) + 'px';
-      spot.style.left = (r.left - pad) + 'px';
+      moveTo(spot, r.left - pad, r.top - pad);
       spot.style.width = (r.width + pad * 2) + 'px';
       spot.style.height = (r.height + pad * 2) + 'px';
       spot.style.opacity = '1';
@@ -156,8 +179,7 @@
 
       left = Math.max(margin, Math.min(left, window.innerWidth - bw - margin));
       top = Math.max(margin, Math.min(top, window.innerHeight - bh - margin));
-      bubble.style.top = top + 'px';
-      bubble.style.left = left + 'px';
+      moveTo(bubble, left, top);
 
       arrow.setAttribute('data-side', side);
       arrow.style.left = arrow.style.top = '';
@@ -206,7 +228,11 @@
       if (active || !STEPS.length) return;
       active = true;
       step = 0;
-      q('tourLayer').classList.remove('hidden');
+      placed = false;
+      var layer = q('tourLayer');
+      layer.classList.add('tour-placing');
+      layer.style.visibility = 'hidden';
+      layer.classList.remove('hidden');
       render();
       window.addEventListener('resize', place);
       window.addEventListener('scroll', place, true);
