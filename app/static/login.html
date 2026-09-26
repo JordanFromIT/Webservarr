@@ -94,7 +94,7 @@
 <!-- Login Card -->
 <div class="w-full max-w-[440px] login-glass-card ws-login-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
 <!-- Logo Section -->
-<div class="mb-8 flex flex-col items-center">
+<div class="mb-8 w-full flex flex-col items-center">
 <img id="loginLogo" alt="Logo" class="h-48 w-auto object-contain border-none mb-2 hidden"/>
 <h1 id="loginAppName" class="text-frosted-blue text-2xl font-bold mt-4 tracking-tight text-center">WebServarr</h1>
 </div>
@@ -140,6 +140,66 @@
 </button>
 </form>
 </div>
+<script>
+// The logo and the sign-in methods are known before the first paint: the
+// branding is already in window.WEBSERVARR_THEME (theme-loader reads it from
+// the page). Setting them here, as soon as the card is parsed, means the
+// first frame is the finished card. Done later, the card painted with every
+// method in it and no logo, then shrank and re-centred under the reader's
+// eyes. The form stays invisible until .auth-ready either way (see the
+// #loginForm rule above); this only decides what is in it by then.
+// The DOMContentLoaded handler below calls this again, for the rare page
+// whose branding had to be fetched. Every step is safe to repeat.
+function applyLoginBranding(theme) {
+    // Show branding logo if configured. Its box (h-48) is there from the
+    // moment it shows, and the w-full column around it keeps the image's
+    // arriving width from moving anything.
+    if (theme.logo_url) {
+        var logoEl = document.getElementById('loginLogo');
+        if (logoEl && logoEl.getAttribute('src') !== theme.logo_url) {
+            logoEl.src = theme.logo_url;
+        }
+        if (logoEl) logoEl.classList.remove('hidden');
+    }
+
+    // --- Auth method visibility ---
+    var authMethods = theme.auth_methods || {};
+    // If auth_methods not loaded yet (no cache), default to showing simple auth
+    var hasAnyAuthConfig = authMethods.simple !== undefined || authMethods.plex !== undefined || authMethods.authentik !== undefined;
+
+    // Hide Plex button if not configured
+    if (!authMethods.plex) {
+        var plexBtn = document.getElementById('plexLoginBtn');
+        if (plexBtn) plexBtn.classList.add('hidden');
+    }
+
+    // Show Authentik button if configured (its click is wired on DOMContentLoaded)
+    if (authMethods.authentik) {
+        var authentikBtn = document.getElementById('authentikLoginBtn');
+        if (authentikBtn) authentikBtn.classList.remove('hidden');
+    }
+
+    // Hide SSO divider if no SSO buttons are visible
+    if (!authMethods.plex && !authMethods.authentik) {
+        var ssoDivider = document.getElementById('ssoDivider');
+        if (ssoDivider) ssoDivider.classList.add('hidden');
+    }
+
+    // Hide simple auth form elements only if explicitly disabled (not when auth_methods missing)
+    if (hasAnyAuthConfig && !authMethods.simple) {
+        var formEl = document.getElementById('loginForm');
+        var children = formEl.children;
+        for (var i = 0; i < children.length; i++) {
+            var child = children[i];
+            // Keep SSO buttons visible, hide form inputs and dividers
+            if (child.id !== 'plexLoginBtn' && child.id !== 'authentikLoginBtn') {
+                child.style.display = 'none';
+            }
+        }
+    }
+}
+if (window.WEBSERVARR_THEME) applyLoginBranding(window.WEBSERVARR_THEME);
+</script>
 </main>
 <!-- Footer: System Status -->
 <footer class="relative z-20 p-8 flex items-center justify-center">
@@ -328,53 +388,18 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     var theme = window.WEBSERVARR_THEME || {};
     // The site name (or, with none set, its absence) is rendered by the server.
-    // Show branding logo if configured
-    if (theme.logo_url) {
-        var logoEl = document.getElementById('loginLogo');
-        if (logoEl) {
-            logoEl.src = theme.logo_url;
-            logoEl.classList.remove('hidden');
-        }
-    }
+    // The logo and the sign-in methods were set under the card before the
+    // first paint; this repeats it for a page whose branding was fetched above.
+    applyLoginBranding(theme);
 
-    // --- Auth method visibility ---
+    // The Authentik button signs in through the OIDC login.
     var authMethods = theme.auth_methods || {};
-    // If auth_methods not loaded yet (no cache), default to showing simple auth
-    var hasAnyAuthConfig = authMethods.simple !== undefined || authMethods.plex !== undefined || authMethods.authentik !== undefined;
-
-    // Hide Plex button if not configured
-    if (!authMethods.plex) {
-        var plexBtn = document.getElementById('plexLoginBtn');
-        if (plexBtn) plexBtn.classList.add('hidden');
-    }
-
-    // Show Authentik button if configured
     if (authMethods.authentik) {
         var authentikBtn = document.getElementById('authentikLoginBtn');
         if (authentikBtn) {
-            authentikBtn.classList.remove('hidden');
             authentikBtn.addEventListener('click', function() {
                 window.location.href = '/auth/login';
             });
-        }
-    }
-
-    // Hide SSO divider if no SSO buttons are visible
-    if (!authMethods.plex && !authMethods.authentik) {
-        var ssoDivider = document.getElementById('ssoDivider');
-        if (ssoDivider) ssoDivider.classList.add('hidden');
-    }
-
-    // Hide simple auth form elements only if explicitly disabled (not when auth_methods missing)
-    if (hasAnyAuthConfig && !authMethods.simple) {
-        var formEl = document.getElementById('loginForm');
-        var children = formEl.children;
-        for (var i = 0; i < children.length; i++) {
-            var child = children[i];
-            // Keep SSO buttons visible, hide form inputs and dividers
-            if (child.id !== 'plexLoginBtn' && child.id !== 'authentikLoginBtn') {
-                child.style.display = 'none';
-            }
         }
     }
 
