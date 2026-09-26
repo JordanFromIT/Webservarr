@@ -16,6 +16,9 @@ THEME = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
 LOADER = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
 HEADER = (STATIC / "partials" / "shell-header.html").read_text(encoding="utf-8")
 APPEARANCE = (STATIC / "js" / "settings" / "appearance.js").read_text(encoding="utf-8")
+UI_JS = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
+NOTIF_JS = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
+SIDEBAR = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
 TAILWIND = (STATIC.parents[1] / "tailwind.config.js").read_text(encoding="utf-8")
 
 # The status colours (R138): one setting per state drives the dot, the ring and
@@ -224,6 +227,53 @@ class NewFlagIsATheme(unittest.TestCase):
         self.assertIn("'theme.color_new_flag'", APPEARANCE)
         self.assertIn("'new-flag'", APPEARANCE)
         self.assertIn("'nav-new-badge'", APPEARANCE)
+
+
+
+class MotionFollowsTheTheme(unittest.TestCase):
+    """L3: the hover lift's shadow and the pill's live ring stay visible on a
+    light theme. Both are derived from theme colours: the shadow is the
+    background mixed toward black (black on the shipped black page, as before;
+    a grey shadow on a white one), the ring is the state's colour pulled
+    toward the text colour, which contrasts with the page by construction."""
+
+    def test_the_shade_is_the_background_darkened(self):
+        tokens = {}
+        for body in blocks(THEME, ":root"):
+            tokens.update(declared(body))
+        self.assertRegex(tokens.get("--ws-shade", ""),
+                         r"^color-mix\(in srgb, rgb\(var\(--color-background\)\) \d+%, black\)$")
+
+    def test_the_lift_shadow_uses_the_shade(self):
+        # The one hover rule (inside the pointer media query).
+        found = re.findall(r"\.ws-lift:hover \{([^}]*)\}", THEME)
+        self.assertEqual(len(found), 1)
+        hover = found[0]
+        self.assertIn("box-shadow: 0 6px 14px -8px color-mix(in srgb, var(--ws-shade) 90%, transparent)", hover)
+        self.assertNotIn("--color-background", hover)
+
+    def test_the_ring_is_pulled_toward_the_text_colour(self):
+        ring = css_rule(THEME, ".ws-status-dot::after")
+        self.assertIn("background: color-mix(in srgb, rgb(var(--ws-pill, var(--ws-status-off))) 75%, "
+                      "rgb(var(--color-text)))", ring)
+        self.assertNotIn("inherit", ring)
+
+
+class OneScrim(unittest.TestCase):
+    """L4: the WSUI dialog, the phone drawer and the notification preferences
+    dim the page with one token, derived from the background colour."""
+
+    def test_the_scrim_is_the_background(self):
+        self.assertIn("background-color: rgb(var(--color-background) / .7)", css_rule(THEME, ".ws-scrim"))
+
+    def test_every_shared_backdrop_uses_it(self):
+        self.assertRegex(UI_JS, r"'ws-dialog [^']*\bws-scrim\b")
+        self.assertNotIn("bg-background-dark/70", UI_JS)
+        overlay = re.search(r'<div id="drawerOverlay" class="([^"]*)"', SIDEBAR).group(1).split()
+        self.assertIn("ws-scrim", overlay)
+        self.assertFalse([c for c in overlay if c.startswith("bg-")], overlay)
+        self.assertRegex(NOTIF_JS, r"_modal = createEl\('div', '[^']*\bws-scrim\b")
+        self.assertNotRegex(NOTIF_JS, r"_modal\.style\.backgroundColor")
 
 
 if __name__ == "__main__":
