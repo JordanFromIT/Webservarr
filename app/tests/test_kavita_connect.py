@@ -688,6 +688,38 @@ class LibraryShelvesDontWaitForEachOther(unittest.TestCase):
         self.assertTrue(live_matches(self.shelves, r"Promise\.race\(\[settled, deadline\]\)"))
         # A failed or timed-out shelf drops out; a late one goes in below.
         self.assertTrue(live_matches(self.shelves, r"results\[i\] = null;"))
-        self.assertTrue(live_matches(self.shelves, r"if \(swapped && section && !stopped\) box\.appendChild\(section\);"))
+        self.assertTrue(live_matches(self.shelves, r"if \(swapped && section && !stopped\) placeLate\(i, section\);"))
         # Nothing goes in once Kavita has said no.
         self.assertTrue(live_matches(self.shelves, r"if \(stopped\) return;"))
+
+    def test_a_late_shelf_takes_its_place_in_shelves_order(self):
+        # R129: after the swap a shelf goes in before the first shelf already
+        # showing that comes later in SHELVES, else at the end - never in the
+        # order the network happened to answer.
+        late = body_of(self, self.shelves, "placeLate")
+        self.assertTrue(live_matches(late, r"for \(var j = i \+ 1; j < SHELVES\.length; j\+\+\) \{"))
+        self.assertTrue(live_matches(late, r"var next = results\[j\] && results\[j\]\.section;"))
+        self.assertTrue(live_matches(late, r"if \(next && next\.parentNode === box\) \{ box\.insertBefore\(section, next\); return; \}"))
+        self.assertTrue(live_matches(late, r"box\.appendChild\(section\);\s*$"), "no append when nothing later is showing")
+        # The only other append-like write in loadShelves is the one swap.
+        rest = self.shelves.replace(late, "")
+        self.assertFalse(live_matches(rest, r"appendChild\(section\)"), "a late shelf is appended in arrival order again")
+        # The model of that rule, in arrival orders the network can produce:
+        # the result is always SHELVES order.
+        import itertools
+
+        def place(box, i, present):
+            for j in range(i + 1, 3):
+                if j in present:
+                    box.insert(box.index(j), i)
+                    return
+            box.append(i)
+        for arrival in itertools.permutations(range(3)):
+            for swapped_with in range(4):          # how many had arrived by the swap
+                box = sorted(arrival[:swapped_with])
+                present = set(box)
+                for i in arrival[swapped_with:]:
+                    place(box, i, present)
+                    present.add(i)
+                self.assertEqual(box, sorted(box), (arrival, swapped_with))
+
