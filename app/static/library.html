@@ -980,11 +980,13 @@
 
   function bdEl(id) { return document.getElementById(id); }
 
+  // Kavita's summary is upstream HTML. It is parsed into an inert document
+  // (no scripts run, no images load, so no onerror fires) and only its text
+  // is kept; the caller writes that with textContent.
   function stripHtml(html) {
     if (!html) return '';
-    var d = document.createElement('div');
-    d.innerHTML = html;
-    return (d.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+    var doc = new DOMParser().parseFromString(String(html), 'text/html');
+    return ((doc.body && doc.body.textContent) || '').replace(/\n{3,}/g, '\n\n').trim();
   }
 
   function fact(label, value) {
