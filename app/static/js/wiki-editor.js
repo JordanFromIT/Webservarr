@@ -8,6 +8,11 @@
  * their text. Every keystroke is mirrored to localStorage, every failure path
  * leaves the textarea populated, and the draft is cleared only after the server
  * confirms a write.
+ *
+ * Each open() is a session: the page it edits, the help links that page held
+ * when it was loaded, and the form it drew. A save or delete carries its own
+ * session, disables that form while it is in flight, and once it answers acts
+ * on screen only while its session is still the one showing.
  */
 var WikiEditor = (function () {
   'use strict';
@@ -20,6 +25,19 @@ var WikiEditor = (function () {
   var _slug = null;          // null while creating a new page
   var _slugTouched = false;  // once the author edits the slug, stop deriving it
   var _cats = [];
+  var _session = null;       // the editor on screen: { slug, helpBase, form, busy }
+
+  // The places a page can be linked as help, in the order the editor lists them.
+  var HELP_PLACES = [['tickets', 'Tickets'], ['issues', 'Issues'], ['playback', 'Playback problems']];
+
+  // Order-free comparison of two help lists.
+  function helpKey(list) { return (list || []).slice().sort().join(','); }
+
+  function clearPageCache() {
+    // A saved page can change the help card on /tickets and /issues, and a
+    // title or address on any page that lists it; drop what was prefetched.
+    if (window.WS && WS.clearPageCache) WS.clearPageCache();
+  }
 
   // ---------- draft mirroring ----------
 
@@ -128,11 +146,25 @@ var WikiEditor = (function () {
       summary: (document.getElementById('wikiEditSummary') || {}).value || '',
       content: (document.getElementById('wikiEditContent') || {}).value || '',
       category_slug: (document.getElementById('wikiEditCategory') || {}).value || null,
-      sort_order: parseInt((document.getElementById('wikiEditSort') || {}).value, 10) || 0
+      sort_order: parseInt((document.getElementById('wikiEditSort') || {}).value, 10) || 0,
+      help_on: Array.prototype.slice.call(document.querySelectorAll('input[name="wikiEditHelp"]'))
+        .filter(function (i) { return i.checked; })
+        .map(function (i) { return i.value; })
     };
   }
 
+  // While a write is in flight nothing in its form can be pressed or edited:
+  // a second Publish would send a duplicate, and text typed now would be lost
+  // when the save lands and shows the page.
+  function setBusy(s, busy) {
+    s.busy = busy;
+    Array.prototype.slice.call(s.form.querySelectorAll('button, input, select, textarea'))
+      .forEach(function (n) { n.disabled = busy; });
+  }
+
   async function save(publish) {
+    var s = _session;
+    if (!s || s.busy) return;
     var fields = collect();
     if (!fields.title.trim()) { status('Give the page a title before saving.', 'bad'); return; }
     if (!fields.content.trim()) { status('The page is empty.', 'bad'); return; }
@@ -144,22 +176,37 @@ var WikiEditor = (function () {
       content: fields.content,
       category_slug: fields.category_slug || null,
       sort_order: fields.sort_order,
-      published: publish
+      published: publish,
+      // Only a change the admin made to the boxes is sent; otherwise null
+      // leaves the links as the server has them. So a save never moves a link
+      // back that another page took after this editor opened, and an old
+      // draft's boxes cannot either.
+      help_on: helpKey(fields.help_on) !== helpKey(s.helpBase) ? fields.help_on : null
     };
 
+    setBusy(s, true);
     status('Saving…');
     var res;
     try {
-      res = await fetch(_slug ? '/api/wiki/pages/' + encodeURIComponent(_slug) : '/api/wiki/pages', {
-        method: _slug ? 'PUT' : 'POST',
+      res = await fetch(s.slug ? '/api/wiki/pages/' + encodeURIComponent(s.slug) : '/api/wiki/pages', {
+        method: s.slug ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
     } catch (e) {
-      // Network died. The text is still on screen and still mirrored.
-      status('Could not reach the server. Your text is safe here — try again.', 'bad');
+      // Network died. The text is still on screen and still mirrored. The
+      // write may still have landed, so the prefetched pages go either way.
+      clearPageCache();
+      setBusy(s, false);
+      if (_session === s) status('Could not reach the server. Your text is safe here — try again.', 'bad');
       return;
     }
+    clearPageCache();
+
+    if (!res.ok) setBusy(s, false);
+    // Another editor opened while this one was saving: its form is not ours to
+    // write into, and a landed save must not pull the admin away from it.
+    if (_session !== s) return;
 
     if (res.status === 409) {
       var body = await res.json().catch(function () { return {}; });
@@ -194,7 +241,8 @@ var WikiEditor = (function () {
     }
 
     var saved = await res.json();
-    clearDraft(_slug);
+    if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
+    clearDraft(s.slug);
     clearDraft(null);
     status(publish ? 'Published.' : 'Saved as a draft.');
 
@@ -203,20 +251,30 @@ var WikiEditor = (function () {
   }
 
   async function remove() {
-    if (!_slug) { close(); return; }
+    var s = _session;
+    if (!s || s.busy) return;
+    if (!s.slug) { close(); return; }
     var ok = window.confirm('Delete this page? This cannot be undone.');
     if (!ok) return;
+    setBusy(s, true);
+    var res;
     try {
-      var res = await fetch('/api/wiki/pages/' + encodeURIComponent(_slug), { method: 'DELETE' });
-      if (!res.ok && res.status !== 204) {
-        status('Delete failed (HTTP ' + res.status + ').', 'bad');
-        return;
-      }
-      clearDraft(_slug);
-      WikiView.navigate('/wiki');
+      res = await fetch('/api/wiki/pages/' + encodeURIComponent(s.slug), { method: 'DELETE' });
     } catch (e) {
-      status('Could not reach the server.', 'bad');
+      clearPageCache();
+      setBusy(s, false);
+      if (_session === s) status('Could not reach the server.', 'bad');
+      return;
     }
+    clearPageCache();
+    if (!res.ok && res.status !== 204) {
+      setBusy(s, false);
+      if (_session === s) status('Delete failed (HTTP ' + res.status + ').', 'bad');
+      return;
+    }
+    if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
+    clearDraft(s.slug);
+    if (_session === s) WikiView.navigate('/wiki');
   }
 
   function close() {
@@ -275,8 +333,15 @@ var WikiEditor = (function () {
 
   function mirror() {
     if (_mirrorTimer) clearTimeout(_mirrorTimer);
+    var s = _session;
     _mirrorTimer = setTimeout(function () {
-      saveDraft(_slug, collect());
+      _mirrorTimer = null;
+      if (_session !== s) return;
+      // help_base records the links the boxes started from, so a restore can
+      // tell a change the admin made from boxes they never touched.
+      var fields = collect();
+      fields.help_base = s.helpBase.slice();
+      saveDraft(s.slug, fields);
     }, MIRROR_DEBOUNCE_MS);
   }
 
@@ -287,6 +352,7 @@ var WikiEditor = (function () {
 
     _slug = slug || null;
     _slugTouched = !!slug;
+    if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
     _root = document.getElementById('wikiRoot');
     if (!_root) return;
 
@@ -317,15 +383,27 @@ var WikiEditor = (function () {
       }
     }
 
+    var helpBase = page ? (page.help_on || []).slice() : [];
     var initial = useDraft ? draft.fields : {
       title: page ? page.title : '',
       slug: page ? page.slug : '',
       summary: page ? (page.summary || '') : '',
       content: page ? page.content : '',
       category_slug: page ? (page.category_slug || '') : '',
-      sort_order: page ? page.sort_order : 0
+      sort_order: page ? page.sort_order : 0,
+      help_on: helpBase.slice()
     };
+    if (useDraft) {
+      // A restored draft keeps its help boxes only where the admin changed
+      // them before leaving. Boxes they never touched show the links as they
+      // are now, so an old draft cannot quietly move a link back.
+      var f = draft.fields;
+      var touched = Array.isArray(f.help_on) && Array.isArray(f.help_base) &&
+                    helpKey(f.help_on) !== helpKey(f.help_base);
+      initial = Object.assign({}, f, { help_on: touched ? f.help_on.slice() : helpBase.slice() });
+    }
 
+    _session = { slug: _slug, helpBase: helpBase, form: null, busy: false };
     render(initial, page);
   }
 
@@ -397,6 +475,26 @@ var WikiEditor = (function () {
     sort.addEventListener('input', mirror);
     row.appendChild(field('Order', sort, 'Lower numbers appear first.'));
     form.appendChild(row);
+
+    var help = el('fieldset', 'grid gap-2');
+    help.appendChild(el('legend', 'block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5', 'Show as help on'));
+    var holders = (page && page.help_holders) || {};
+    HELP_PLACES.forEach(function (h) {
+      var line = el('label', 'inline-flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-frosted-blue cursor-pointer');
+      var box = el('input', 'size-4 rounded border-steel-blue/40 bg-transparent text-primary focus:ring-primary');
+      box.type = 'checkbox';
+      box.name = 'wikiEditHelp';
+      box.value = h[0];
+      box.checked = (initial.help_on || []).indexOf(h[0]) >= 0;
+      box.addEventListener('change', mirror);
+      line.appendChild(box);
+      line.appendChild(document.createTextNode(h[1]));
+      // The other page's title goes in as text, never as markup.
+      if (holders[h[0]]) line.appendChild(el('span', 'text-xs text-steel-blue', '(now on “' + holders[h[0]] + '” — ticking moves it here)'));
+      help.appendChild(line);
+    });
+    help.appendChild(el('p', 'text-xs text-steel-blue', 'A link to this page appears above that form. Only one page can be linked in each place.'));
+    form.appendChild(help);
 
     var contentWrap = el('div');
     contentWrap.appendChild(el('label', 'block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5', 'Content'));
@@ -509,6 +607,7 @@ var WikiEditor = (function () {
     form.appendChild(statusRow);
 
     _root.appendChild(form);
+    _session.form = form;
   }
 
   return { open: open };

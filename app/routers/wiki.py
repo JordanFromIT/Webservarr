@@ -12,7 +12,7 @@ import os
 import re
 import unicodedata
 import uuid
-from typing import Optional
+from typing import Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
@@ -23,7 +23,8 @@ from app.content import render_markdown
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.limiter import limiter
-from app.models import WikiCategory, WikiPage
+from app.models import Setting, WikiCategory, WikiPage
+from app.settings_registry import REGISTRY, validate_value
 from app.utils import validate_image_magic
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,62 @@ def is_admin(user: dict) -> bool:
     return user.get("is_admin") == "true"
 
 
+# Contextual help links. Each setting holds a page slug, or "" for none, and
+# /api/branding turns it into the help card above that form. They are kept in
+# step here, inside the page write's own transaction, so a renamed page keeps
+# its links, a deleted page drops them, and a write that fails moves nothing.
+HOOK_KEYS = {"tickets": "wiki.hook_tickets", "issues": "wiki.hook_issues", "playback": "wiki.hook_playback"}
+HelpName = Literal["tickets", "issues", "playback"]
+
+
+def _hook_rows(db: Session) -> Dict[str, Optional[Setting]]:
+    rows = {r.key: r for r in db.query(Setting).filter(Setting.key.in_(list(HOOK_KEYS.values()))).all()}
+    return {name: rows.get(key) for name, key in HOOK_KEYS.items()}
+
+
+def _hooks(db: Session) -> Dict[str, str]:
+    return {name: (row.value or "") if row else "" for name, row in _hook_rows(db).items()}
+
+
+def _set_hook(db: Session, rows: Dict[str, Optional[Setting]], name: str, slug: str) -> None:
+    """Point one hook at `slug` ("" clears it). Nothing is committed here.
+
+    A slug from slugify() always passes the registry's rule; checking anyway
+    means a hook can never hold a value the Settings API itself would refuse."""
+    key = HOOK_KEYS[name]
+    problem = validate_value(key, slug)
+    if problem:
+        raise HTTPException(status_code=400, detail=f"That page can't be linked as help: {problem}")
+    row = rows[name]
+    if row is None:
+        rows[name] = Setting(key=key, value=slug, description=REGISTRY[key].description)
+        db.add(rows[name])
+    else:
+        row.value = slug
+
+
+def _apply_help(db: Session, slug: str, help_on: Optional[List[str]], old_slug: Optional[str] = None) -> None:
+    """Keep the hooks in step with a page write. Call before db.commit().
+
+    A changed address carries the page's links with it. help_on None leaves
+    the links alone; a list means exactly these point at this page, taking
+    each one from whichever page held it, and any other this page held is
+    cleared."""
+    rows = _hook_rows(db)
+    if old_slug and old_slug != slug:
+        for name in HOOK_KEYS:
+            if rows[name] is not None and rows[name].value == old_slug:
+                _set_hook(db, rows, name, slug)
+    if help_on is None:
+        return
+    wanted = set(help_on)
+    for name in HOOK_KEYS:
+        if name in wanted:
+            _set_hook(db, rows, name, slug)
+        elif rows[name] is not None and rows[name].value == slug:
+            _set_hook(db, rows, name, "")
+
+
 # ============================================================
 # Schemas
 # ============================================================
@@ -111,6 +168,8 @@ class PageWrite(BaseModel):
     category_slug: Optional[str] = None
     sort_order: int = 0
     published: bool = False
+    # None leaves the help links alone; a list sets exactly these (see _apply_help).
+    help_on: Optional[List[HelpName]] = None
 
 
 # ============================================================
@@ -341,6 +400,20 @@ async def get_page(
         "created_at": page.created_at.isoformat() if page.created_at else None,
         "siblings": siblings,
     })
+    if is_admin(current_user):
+        # Which help links this page holds, and who holds the others, for the
+        # editor's "Show as help on" boxes. Admins only: a member has no use
+        # for it, and a holder may be a draft they must not learn the title of.
+        hooks = _hooks(db)
+        data["help_on"] = [name for name, held in hooks.items() if held == page.slug]
+        holders = {}
+        for name, held in hooks.items():
+            holder = None
+            if held and held != page.slug:
+                other = db.query(WikiPage).filter(WikiPage.slug == held).first()
+                holder = other.title if other else None
+            holders[name] = holder
+        data["help_holders"] = holders
     return data
 
 
@@ -388,6 +461,7 @@ async def create_page(
         author_name=current_user.get("username", "admin"),
     )
     db.add(page)
+    _apply_help(db, slug, payload.help_on)
     db.commit()
     db.refresh(page)
     cat = db.query(WikiCategory).filter(WikiCategory.id == page.category_id).first() if page.category_id else None
@@ -406,6 +480,7 @@ async def update_page(
     page = db.query(WikiPage).filter(WikiPage.slug == slug).first()
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
+    old_slug = page.slug
 
     new_slug = slugify(payload.slug or payload.title)
     if new_slug != page.slug:
@@ -440,6 +515,7 @@ async def update_page(
         page.content = payload.content
         page.content_html = render_markdown(payload.content)
 
+    _apply_help(db, page.slug, payload.help_on, old_slug=old_slug)
     db.commit()
     db.refresh(page)
     cat = db.query(WikiCategory).filter(WikiCategory.id == page.category_id).first() if page.category_id else None
@@ -457,6 +533,10 @@ async def delete_page(
     page = db.query(WikiPage).filter(WikiPage.slug == slug).first()
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
+    rows = _hook_rows(db)
+    for name in HOOK_KEYS:
+        if rows[name] is not None and rows[name].value == page.slug:
+            _set_hook(db, rows, name, "")
     db.delete(page)
     db.commit()
     return None
