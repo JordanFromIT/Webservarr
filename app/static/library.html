@@ -36,25 +36,40 @@
 
 
   <!-- Discovery shelves: continue reading, recently added, top rated.
-       Each shelf lands in a skeleton slot built like renderShelf's section:
-       the heading line, then the eight covers a shelf asks for (one row wide,
-       two or three on narrower screens) with a two-line title under each. The script below keeps
-       as many slots as there were shelves last time (one on a first visit);
-       loadShelves fills them in order and drops any left over. -->
-  <div id="shelves" class="space-y-8"><section data-shelf-skel aria-hidden="true"><div class="flex items-center gap-3 mb-4"><div class="skel h-5 w-44"></div><span class="text-xl">&nbsp;</span></div><div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8 gap-4"><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div></div></section></div>
+       The script below reserves the shelves this person had last time (per
+       user, from localStorage; Recently Added with eight books on a first
+       visit): for each, a slot built like renderShelf's section, with the
+       shelf's own title as a tint and as many covers as it held, so the rows
+       wrap as the real ones will. loadShelves swaps every shelf in at once
+       when they have all answered, so the grid below moves at most once, and
+       not at all when the shelves are the ones reserved. -->
+  <div id="shelves" class="space-y-8"></div>
+  <template id="shelfSlot"><section aria-hidden="true"><div class="flex items-center gap-3 mb-4"><span class="material-symbols-outlined invisible">book</span><h3 class="text-xl font-bold text-frosted-blue"><span class="skel-text" data-shelf-title></span></h3></div><div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8 gap-4" data-shelf-row><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div></div></section></template>
   <script>
     (function () {
-      var n = 1;
+      // The shelves' titles, as SHELVES below names them.
+      var TITLES = { bookshelf: 'Your Bookshelf', recent: 'Recently Added', toprated: 'Top Rated' };
+      var user = ((window.WS_DATA || {}).user || {}).username || '';
+      var plan = [['recent', 8]];
       try {
-        var v = parseInt(localStorage.getItem('webservarr_library_shelves'), 10);
-        if (v >= 0 && v <= 3) n = v;
-      } catch (e) { /* private mode: one slot */ }
+        var saved = JSON.parse(localStorage.getItem('webservarr_library_shelves:' + user) || 'null');
+        if (Array.isArray(saved)) {
+          plan = saved.filter(function (s) {
+            return Array.isArray(s) && Object.prototype.hasOwnProperty.call(TITLES, s[0]) && s[1] >= 1 && s[1] <= 8;
+          });
+        }
+      } catch (e) { /* private mode or an old value: the first-visit shape */ }
       // Back from a Kavita sign-in that failed (kavita-connect.js): the page
       // shows that message and loads no shelves, so it reserves none.
-      if (/[?&]kavita=error(&|$)/.test(location.search)) n = 0;
-      var box = document.getElementById('shelves'), slot = box.firstElementChild;
-      if (!n) { box.removeChild(slot); return; }
-      for (var i = 1; i < n; i++) box.appendChild(slot.cloneNode(true));
+      if (/[?&]kavita=error(&|$)/.test(location.search)) plan = [];
+      var box = document.getElementById('shelves'), tpl = document.getElementById('shelfSlot');
+      plan.forEach(function (s) {
+        var slot = tpl.content.firstElementChild.cloneNode(true);
+        slot.querySelector('[data-shelf-title]').textContent = TITLES[s[0]];
+        var row = slot.querySelector('[data-shelf-row]');
+        while (row.children.length > s[1]) row.removeChild(row.lastElementChild);
+        box.appendChild(slot);
+      });
     })();
   </script>
 
@@ -111,14 +126,14 @@
          two lines of title, so the first row lands in place. -->
     <div id="loadingState" aria-busy="true">
       <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-8 gap-4" aria-hidden="true">
-        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
-        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
-        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
-        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
-        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
-        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
-        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
-        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div>
       </div>
     </div>
 
@@ -274,7 +289,9 @@
         '<img class="book-cover-img w-full h-full object-cover" loading="lazy" alt="" src="' + coverUrl(series.id) + '"' +
              ' onerror="this.style.display=\'none\'"/>' +
       '</div>' +
-      '<p class="mt-2 text-sm text-frosted-blue leading-snug line-clamp-2">' + escapeHtml(name) + '</p>';
+      // Two lines' room whatever the name, so every row of covers is one
+      // height and lands on its skeleton.
+      '<p class="mt-2 text-sm text-frosted-blue leading-snug line-clamp-2 min-h-[2.75em]">' + escapeHtml(name) + '</p>';
 
     a.appendChild(buildCardMenu(series, a, onRemoveFromBookshelf));
     return a;
@@ -601,13 +618,14 @@
     }
   ];
 
+  // The shelf's section, or null when it has nothing worth showing.
   function renderShelf(shelf, items) {
-    if (!items || !items.length) return;
+    if (!items || !items.length) return null;
     if (shelf.requiresRatings) {
       var anyRated = items.some(function (s) {
         return (s.userRating || 0) > 0 || (s.avgRating || 0) > 0;
       });
-      if (!anyRated) return;   // nothing rated yet; an arbitrary order helps nobody
+      if (!anyRated) return null;   // nothing rated yet; an arbitrary order helps nobody
     }
 
     var section = document.createElement('section');
@@ -624,11 +642,7 @@
     });
     section.appendChild(head);
     section.appendChild(row);
-    // Into the first skeleton slot still waiting, so nothing below moves;
-    // after the others when there are more shelves than slots.
-    var slot = el('shelves').querySelector('[data-shelf-skel]');
-    if (slot) el('shelves').replaceChild(section, slot);
-    else el('shelves').appendChild(section);
+    return section;
   }
 
   /**
@@ -659,20 +673,20 @@
       });
   }
 
-  var SHELF_COUNT_KEY = 'webservarr_library_shelves';
+  // Per person: what the next visit's skeleton reserves (see the script by #shelves).
+  var SHELF_PLAN_KEY = 'webservarr_library_shelves:' + (((window.WS_DATA || {}).user || {}).username || '');
 
   function loadShelves() {
-    // Shelves from an earlier load go; the skeleton slots stay to be filled.
-    Array.prototype.forEach.call(el('shelves').querySelectorAll('section:not([data-shelf-skel])'), function (s) {
-      s.parentNode.removeChild(s);
-    });
-    var answered = false;
-    // Sequential so the shelves always render in a stable order.
+    var answered = false, built = [];
+    // Sequential so the shelves always come in a stable order.
     return SHELVES.reduce(function (chain, shelf) {
       return chain.then(function () {
         return shelf.load()
           .then(function (r) { if (r.ok) answered = true; return r.ok ? r.json() : []; })
-          .then(function (items) { renderShelf(shelf, items); })
+          .then(function (items) {
+            var section = renderShelf(shelf, items);
+            if (section) built.push({ id: shelf.id, n: Math.min(items.length, 8), section: section });
+          })
           .catch(function (err) {
             // Kavita said no and the page now shows why: the remaining
             // shelves would only ask again, so stop the chain here.
@@ -683,13 +697,15 @@
     }, Promise.resolve()).then(function () { return true; })
       .catch(function () { return false; /* stopped on 'reconnecting'; see above */ })
       .then(function (finished) {
-        // Slots nobody filled go. The count is kept for the next visit's
-        // skeleton, but only from a run Kavita actually answered.
-        Array.prototype.forEach.call(el('shelves').querySelectorAll('[data-shelf-skel]'), function (s) {
-          s.parentNode.removeChild(s);
-        });
-        if (finished && answered) {
-          try { localStorage.setItem(SHELF_COUNT_KEY, String(el('shelves').children.length)); } catch (e) { /* private mode */ }
+        if (!finished) return;   // leaving for the sign-in, or showing why not
+        // One write: the slots go and every shelf arrives together.
+        var box = el('shelves');
+        box.replaceChildren.apply(box, built.map(function (b) { return b.section; }));
+        // Kept for the next visit's skeleton, but only from a run Kavita answered.
+        if (answered) {
+          try {
+            localStorage.setItem(SHELF_PLAN_KEY, JSON.stringify(built.map(function (b) { return [b.id, b.n]; })));
+          } catch (e) { /* private mode */ }
         }
       });
   }
@@ -917,7 +933,9 @@
     var canAdvance = state.totalPages ? state.page < state.totalPages : state.hasNext;
     if (canAdvance) { state.page++; loadPage(); }
   });
-  el('retryBtn').addEventListener('click', function () { loadPage(); loadShelves(); });
+  // Try again goes the way the first load did, so a first-time visitor whose
+  // library loads on the retry still gets the guide.
+  el('retryBtn').addEventListener('click', function () { Promise.all([loadPage(), loadShelves()]).then(startGuide); });
 
   /* ---- Book detail sheet ----
    *
