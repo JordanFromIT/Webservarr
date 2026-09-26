@@ -17,6 +17,7 @@ from typing import Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.content import render_markdown
@@ -85,15 +86,36 @@ HelpName = Literal["tickets", "issues", "playback"]
 
 
 def _hook_rows(db: Session) -> Dict[str, Optional[Setting]]:
-    rows = {r.key: r for r in db.query(Setting).filter(Setting.key.in_(list(HOOK_KEYS.values()))).all()}
+    rows = {r.key: r for r in db.query(Setting).filter(
+        Setting.key.in_(list(HOOK_KEYS.values()))).populate_existing().all()}
     return {name: rows.get(key) for name, key in HOOK_KEYS.items()}
+
+
+def _claim_hook_rows(db: Session) -> Dict[str, Setting]:
+    """The three hook rows, locked for this write. Call before reading them.
+
+    The insert gives any missing row an empty value and leaves a row that is
+    already there (or that another request has just added) alone, so two
+    writers can never collide on the key. It is also this transaction's first
+    write, which is where SQLite takes its write lock - even when it inserts
+    nothing - so a second page write waits here (up to the connection's busy
+    timeout) until the first has committed, then reads the rows as that write
+    left them. Deciding from rows read before the lock let two concurrent
+    writes each miss the other's claim."""
+    db.execute(
+        sqlite_insert(Setting)
+        .values([{"key": key, "value": "", "description": REGISTRY[key].description}
+                 for key in HOOK_KEYS.values()])
+        .on_conflict_do_nothing(index_elements=["key"])
+    )
+    return _hook_rows(db)
 
 
 def _hooks(db: Session) -> Dict[str, str]:
     return {name: (row.value or "") if row else "" for name, row in _hook_rows(db).items()}
 
 
-def _set_hook(db: Session, rows: Dict[str, Optional[Setting]], name: str, slug: str) -> None:
+def _set_hook(rows: Dict[str, Setting], name: str, slug: str) -> None:
     """Point one hook at `slug` ("" clears it). Nothing is committed here.
 
     A slug from slugify() always passes the registry's rule; checking anyway
@@ -102,12 +124,7 @@ def _set_hook(db: Session, rows: Dict[str, Optional[Setting]], name: str, slug: 
     problem = validate_value(key, slug)
     if problem:
         raise HTTPException(status_code=400, detail=f"That page can't be linked as help: {problem}")
-    row = rows[name]
-    if row is None:
-        rows[name] = Setting(key=key, value=slug, description=REGISTRY[key].description)
-        db.add(rows[name])
-    else:
-        row.value = slug
+    rows[name].value = slug
 
 
 def _apply_help(db: Session, slug: str, help_on: Optional[List[str]], old_slug: Optional[str] = None) -> None:
@@ -117,19 +134,19 @@ def _apply_help(db: Session, slug: str, help_on: Optional[List[str]], old_slug: 
     the links alone; a list means exactly these point at this page, taking
     each one from whichever page held it, and any other this page held is
     cleared."""
-    rows = _hook_rows(db)
+    rows = _claim_hook_rows(db)
     if old_slug and old_slug != slug:
         for name in HOOK_KEYS:
-            if rows[name] is not None and rows[name].value == old_slug:
-                _set_hook(db, rows, name, slug)
+            if rows[name].value == old_slug:
+                _set_hook(rows, name, slug)
     if help_on is None:
         return
     wanted = set(help_on)
     for name in HOOK_KEYS:
         if name in wanted:
-            _set_hook(db, rows, name, slug)
-        elif rows[name] is not None and rows[name].value == slug:
-            _set_hook(db, rows, name, "")
+            _set_hook(rows, name, slug)
+        elif rows[name].value == slug:
+            _set_hook(rows, name, "")
 
 
 # ============================================================
@@ -533,10 +550,10 @@ async def delete_page(
     page = db.query(WikiPage).filter(WikiPage.slug == slug).first()
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
-    rows = _hook_rows(db)
+    rows = _claim_hook_rows(db)
     for name in HOOK_KEYS:
-        if rows[name] is not None and rows[name].value == page.slug:
-            _set_hook(db, rows, name, "")
+        if rows[name].value == page.slug:
+            _set_hook(rows, name, "")
     db.delete(page)
     db.commit()
     return None

@@ -25,13 +25,56 @@ var WikiEditor = (function () {
   var _slug = null;          // null while creating a new page
   var _slugTouched = false;  // once the author edits the slug, stop deriving it
   var _cats = [];
-  var _session = null;       // the editor on screen: { slug, helpBase, form, busy }
+  var _session = null;       // the editor on screen: { slug, helpBase, helpSeen, holders, form, busy }
 
   // The places a page can be linked as help, in the order the editor lists them.
   var HELP_PLACES = [['tickets', 'Tickets'], ['issues', 'Issues'], ['playback', 'Playback problems']];
 
   // Order-free comparison of two help lists.
   function helpKey(list) { return (list || []).slice().sort().join(','); }
+
+  // Who holds each help link as this editor sees it: the other page's title
+  // for a page response, or - for a new page, which has none - the branding
+  // payload already on this page, which names the published page each help
+  // card points at. No extra request either way.
+  function helpHolders(page) {
+    var out = {};
+    var hooks = (window.WEBSERVARR_THEME && window.WEBSERVARR_THEME.wiki_hooks) || {};
+    HELP_PLACES.forEach(function (h) {
+      var n = h[0];
+      if (page) out[n] = (page.help_holders || {})[n] || null;
+      else out[n] = hooks[n] && hooks[n].title ? hooks[n].title : null;
+    });
+    return out;
+  }
+
+  // One word per place for the state the boxes started from: 'self', the
+  // holder ('other:' + title) or '' for nobody. A draft records it so a
+  // restore can tell whether a change the admin made still applies.
+  function helpSeen(helpBase, holders) {
+    var seen = {};
+    HELP_PLACES.forEach(function (h) {
+      var n = h[0];
+      seen[n] = helpBase.indexOf(n) >= 0 ? 'self' : (holders[n] ? 'other:' + holders[n] : '');
+    });
+    return seen;
+  }
+
+  // Keep the branding payload's help links in step with a landed write, so a
+  // New page opened later on this page load (the wiki never reloads between
+  // views) names the right holders. Mirrors /api/branding: a link to an
+  // unpublished page shows as nobody.
+  function syncHooks(s, saved, helpOn) {
+    var hooks = window.WEBSERVARR_THEME && window.WEBSERVARR_THEME.wiki_hooks;
+    if (!hooks) return;
+    HELP_PLACES.forEach(function (h) {
+      var n = h[0], cur = hooks[n];
+      var mine = !!(cur && s.slug && cur.slug === s.slug);
+      var holds = saved ? (helpOn ? helpOn.indexOf(n) >= 0 : s.helpBase.indexOf(n) >= 0) : false;
+      if (holds) hooks[n] = saved.published ? { slug: saved.slug, title: saved.title } : null;
+      else if (mine) hooks[n] = null;
+    });
+  }
 
   function clearPageCache() {
     // A saved page can change the help card on /tickets and /issues, and a
@@ -202,6 +245,8 @@ var WikiEditor = (function () {
       return;
     }
     clearPageCache();
+    var saved = res.ok ? await res.json() : null;
+    if (saved) syncHooks(s, saved, payload.help_on);
 
     if (!res.ok) setBusy(s, false);
     // Another editor opened while this one was saving: its form is not ours to
@@ -240,7 +285,6 @@ var WikiEditor = (function () {
       return;
     }
 
-    var saved = await res.json();
     if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
     clearDraft(s.slug);
     clearDraft(null);
@@ -272,6 +316,7 @@ var WikiEditor = (function () {
       if (_session === s) status('Delete failed (HTTP ' + res.status + ').', 'bad');
       return;
     }
+    syncHooks(s, null, null);
     if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
     clearDraft(s.slug);
     if (_session === s) WikiView.navigate('/wiki');
@@ -337,10 +382,10 @@ var WikiEditor = (function () {
     _mirrorTimer = setTimeout(function () {
       _mirrorTimer = null;
       if (_session !== s) return;
-      // help_base records the links the boxes started from, so a restore can
-      // tell a change the admin made from boxes they never touched.
+      // help_seen records the state the boxes started from, so a restore can
+      // tell a change the admin made, and whether it still applies.
       var fields = collect();
-      fields.help_base = s.helpBase.slice();
+      fields.help_seen = Object.assign({}, s.helpSeen);
       saveDraft(s.slug, fields);
     }, MIRROR_DEBOUNCE_MS);
   }
@@ -384,6 +429,9 @@ var WikiEditor = (function () {
     }
 
     var helpBase = page ? (page.help_on || []).slice() : [];
+    var holders = helpHolders(page);
+    var seenNow = helpSeen(helpBase, holders);
+    var dropped = false;
     var initial = useDraft ? draft.fields : {
       title: page ? page.title : '',
       slug: page ? page.slug : '',
@@ -394,17 +442,30 @@ var WikiEditor = (function () {
       help_on: helpBase.slice()
     };
     if (useDraft) {
-      // A restored draft keeps its help boxes only where the admin changed
-      // them before leaving. Boxes they never touched show the links as they
-      // are now, so an old draft cannot quietly move a link back.
-      var f = draft.fields;
-      var touched = Array.isArray(f.help_on) && Array.isArray(f.help_base) &&
-                    helpKey(f.help_on) !== helpKey(f.help_base);
-      initial = Object.assign({}, f, { help_on: touched ? f.help_on.slice() : helpBase.slice() });
+      // A restored draft replays a box only where the admin changed it before
+      // leaving AND that link is still where it was then. Everything else
+      // shows the links as they are now, so an old draft can neither undo a
+      // move made since nor quietly take a link another page now holds.
+      var f = draft.fields, then = f.help_seen;
+      var usable = !!then && typeof then === 'object' && !Array.isArray(then) && Array.isArray(f.help_on);
+      var on = [];
+      HELP_PLACES.forEach(function (h) {
+        var n = h[0], want = seenNow[n] === 'self';
+        if (usable) {
+          var ticked = f.help_on.indexOf(n) >= 0;
+          if (ticked !== (then[n] === 'self')) {
+            if (then[n] === seenNow[n]) want = ticked;
+            else dropped = true;
+          }
+        }
+        if (want) on.push(n);
+      });
+      initial = Object.assign({}, f, { help_on: on });
     }
 
-    _session = { slug: _slug, helpBase: helpBase, form: null, busy: false };
+    _session = { slug: _slug, helpBase: helpBase, helpSeen: seenNow, holders: holders, form: null, busy: false };
     render(initial, page);
+    if (dropped) status('Your unsaved change to the help links was left out: that link has changed since.');
   }
 
   function render(initial, page) {
@@ -478,7 +539,7 @@ var WikiEditor = (function () {
 
     var help = el('fieldset', 'grid gap-2');
     help.appendChild(el('legend', 'block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5', 'Show as help on'));
-    var holders = (page && page.help_holders) || {};
+    var holders = _session.holders;
     HELP_PLACES.forEach(function (h) {
       var line = el('label', 'inline-flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-frosted-blue cursor-pointer');
       var box = el('input', 'size-4 rounded border-steel-blue/40 bg-transparent text-primary focus:ring-primary');
@@ -493,7 +554,7 @@ var WikiEditor = (function () {
       if (holders[h[0]]) line.appendChild(el('span', 'text-xs text-steel-blue', '(now on “' + holders[h[0]] + '” — ticking moves it here)'));
       help.appendChild(line);
     });
-    help.appendChild(el('p', 'text-xs text-steel-blue', 'A link to this page appears above that form. Only one page can be linked in each place.'));
+    help.appendChild(el('p', 'text-xs text-steel-blue', 'A link to this page appears above that form once the page is published. Only one page can be linked in each place.'));
     form.appendChild(help);
 
     var contentWrap = el('div');
