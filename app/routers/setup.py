@@ -6,6 +6,7 @@ integration setup. Once completed, the wizard is permanently locked
 out via the `setup.completed` setting.
 """
 
+import asyncio
 import hmac
 import logging
 import secrets
@@ -20,7 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from app.database import SessionLocal
 from app.limiter import limiter
 from app.models import Setting, User
-from app.utils import is_safe_integration_url
+from app.settings_registry import validate_value
 
 # Settings key under which the shared first-run setup token is persisted so all
 # worker processes validate against ONE value (L11).
@@ -223,14 +224,18 @@ async def complete_setup(request: Request, body: SetupRequest):
             content={"detail": "Passwords do not match."},
         )
 
-    # Validate the optional Plex URL through the same anti-SSRF guard /settings
-    # uses, so the setup wizard can't seed a loopback/link-local/metadata URL
-    # that the poller would later fetch (L16).
-    if body.plex_url.strip() and not is_safe_integration_url(body.plex_url.strip()):
-        return JSONResponse(
-            status_code=400,
-            content={"detail": "Plex URL must be http/https and not a loopback, link-local, or metadata address."},
-        )
+    # The optional Plex address and token are stored only if Settings would
+    # store them: the registry's own rule (validate_value), which includes the
+    # anti-SSRF check, so the wizard can't seed a loopback/link-local/metadata
+    # URL the poller would later fetch (L16), nor one that fails to parse. The
+    # address check can resolve a hostname, so it runs off the event loop.
+    plex_url, plex_token = body.plex_url.strip(), body.plex_token.strip()
+    for key, value, label in (("integration.plex.url", plex_url, "Plex address"),
+                              ("integration.plex.token", plex_token, "Plex token")):
+        if value:
+            error = await asyncio.to_thread(validate_value, key, value)
+            if error:
+                return JSONResponse(status_code=400, content={"detail": f"{label}: {error}"})
 
     # Determine secret key
     secret_key = body.secret_key.strip() or secrets.token_hex(32)
@@ -261,25 +266,25 @@ async def complete_setup(request: Request, body: SetupRequest):
             ))
 
         # Optional Plex integration
-        if body.plex_url.strip():
+        if plex_url:
             existing = db.query(Setting).filter(Setting.key == "integration.plex.url").first()
             if existing:
-                existing.value = body.plex_url.strip()
+                existing.value = plex_url
             else:
                 db.add(Setting(
                     key="integration.plex.url",
-                    value=body.plex_url.strip(),
+                    value=plex_url,
                     description="Plex server URL",
                 ))
 
-        if body.plex_token.strip():
+        if plex_token:
             existing = db.query(Setting).filter(Setting.key == "integration.plex.token").first()
             if existing:
-                existing.value = body.plex_token.strip()
+                existing.value = plex_token
             else:
                 db.add(Setting(
                     key="integration.plex.token",
-                    value=body.plex_token.strip(),
+                    value=plex_token,
                     description="Plex authentication token",
                 ))
 
