@@ -291,61 +291,154 @@ def skeleton_of(tab: str) -> str:
     return panel[:panel.index("</section>")]
 
 
+def joined(src: str) -> str:
+    """JS source with adjacent string literals joined ('a ' +\n  'b' -> 'a b')."""
+    return re.sub(r"'\s*\+\s*'", "", src)
+
+
+def skeleton_words(tab: str) -> list:
+    """The words a tab's skeleton shows as tint, unescaped."""
+    import html
+    return [html.unescape(w) for w in re.findall(r'<span class="skel-text">(.*?)</span>', skeleton_of(tab))]
+
+
+def module_strings(*names: str) -> set:
+    """Every live string literal in these files (JS modules, or Python)."""
+    out = set()
+    for name in names:
+        src = (STATIC.parent / name).read_text(encoding="utf-8") if name.endswith(".py") else \
+            joined((STATIC / "js" / name).read_text(encoding="utf-8"))
+        for m in re.finditer(r"'((?:[^'\\\n]|\\.)*)'|\"((?:[^\"\\\n]|\\.)*)\"", src):
+            out.add((m.group(1) if m.group(1) is not None else m.group(2)).replace("\\'", "'").replace('\\"', '"'))
+    return out
+
+
+def plain_seconds(s: int) -> str:
+    """notifications.js plainSeconds, for the check intervals' shared range."""
+    def plural(n, one, many):
+        return f"{n} {one if n == 1 else many}"
+    if s >= 3600 and s % 3600 == 0:
+        return plural(s // 3600, "hour", "hours")
+    if s >= 60 and s % 60 == 0:
+        return plural(s // 60, "minute", "minutes")
+    return plural(s, "second", "seconds")
+
+
 class Skeletons(unittest.TestCase):
-    """Polish A: each tab's skeleton at the heights measured at 390, 640, 768
-    and 1440 with Spline Sans loaded (phone first), so the swap moves nothing.
-    Change a tab's layout, re-measure, then change these."""
+    """Polish A fix round 1: each tab's skeleton is the tab's own markup (the
+    kit's class lists and the tab's own words, the words shown as tint), so it
+    wraps and sizes exactly as the tab does on any device and font. Measured
+    against the real tabs in a browser harness in both a fresh and a fully
+    configured install (see the Polish A report); these pins keep the parts
+    the harness can't: the words, the classes and the state rules."""
 
-    def heads(self, panel):
-        return re.findall(r'<div class="(h-\[[\d.]+px\](?: (?:sm|md):h-\[[\d.]+px\])?) mb-5 pt-1">', panel)
+    MODULE = {"general": "settings/general.js", "pages": "settings/pages.js",
+              "appearance": "settings/appearance.js", "sign-in": "settings/signin.js",
+              "integrations": "settings/integrations.js", "notifications": "settings/notifications.js"}
 
-    def test_general(self):
-        panel = skeleton_of("general")
-        self.assertEqual(self.heads(panel), ["h-[56.5px]", "h-[79px] sm:h-[56.5px]", "h-[79px]"])
-        self.assertEqual(re.findall(r'<div class="skel (h-\[116\.1px\] sm:h-\[96\.6px\])"></div>', panel),
-                         ["h-[116.1px] sm:h-[96.6px]"] * 2, "Your site's two fields")
-        self.assertIn('<div class="space-y-6 max-w-2xl">', panel)
-        self.assertIn('<div class="h-[352.6px] sm:h-[236.6px] md:h-[192.6px]">', panel)   # the logo row
-        self.assertIn('<div class="h-[39px] sm:h-[19.5px] flex items-center">', panel)     # the backup note
+    def test_every_panel_holds_one_composed_skeleton(self):
+        for tab in TABS:
+            with self.subTest(tab):
+                panel = skeleton_of(tab)
+                self.assertEqual(panel.count(f'<div aria-hidden="true" data-skel="{tab}">'), 1)
+                self.assertTrue(skeleton_words(tab), "no words")
 
-    def test_sign_in_takes_the_setups_shape(self):
-        panel = skeleton_of("sign-in")
-        self.assertEqual(self.heads(panel), ["h-[79px] md:h-[56.5px]", "h-[56.5px]"])
-        blocks = re.findall(r'<div class="skel rounded-2xl ([^"]+)"(?: data-skel-when="([\w-]+)")?( hidden)?></div>', panel)
-        self.assertEqual(blocks, [
-            ("h-[126.6px]", "", ""),                                   # Plex
-            ("h-[126.6px]", "ak-bare", ""),
-            ("h-[510.9px] sm:h-[334.3px]", "ak-fields", " hidden"),
-            ("h-[147.6px] sm:h-[126.6px]", "simple-bare", ""),
-            ("h-[214.6px] sm:h-[174.1px]", "simple-line", " hidden"),
-            ("h-[602.5px] sm:h-[407.3px]", "simple-full", " hidden"),
-        ])
-        self.assertIn('<div class="skel h-[116.1px] md:h-[96.6px] max-w-2xl"></div>', panel)   # Admin email
-        script = re.search(r"<script>(.*?)</script>", panel, re.S).group(1)
-        flat = re.sub(r"\s+", " ", script)
-        for rule in ("'ak-bare': !m.authentik, 'ak-fields': !!m.authentik,",
-                     "'simple-bare': !m.simple,",
-                     "'simple-line': !!m.simple && u.auth_method !== 'simple',",
-                     "'simple-full': !!m.simple && u.auth_method === 'simple'",
-                     "n.hidden = !show[n.getAttribute('data-skel-when')];"):
-            self.assertIn(rule, flat)
+    def test_the_skeleton_says_only_the_tabs_own_words(self):
+        # A word in a skeleton is a string in the tab (or the kit it uses, or
+        # the server message the tab shows), so a copy change can't leave the
+        # skeleton wrapping differently from the tab.
+        try:
+            from app.settings_registry import REGISTRY
+        except ImportError:  # pragma: no cover - the container and CI have the app's dependencies
+            self.skipTest("needs the app's dependencies")
+        lo, hi = REGISTRY["notifications.poll_interval_seerr"].min, REGISTRY["notifications.poll_interval_seerr"].max
+        extra = {"notifications": {f"Each can be from {plain_seconds(lo)} to {plain_seconds(hi)}. Shorter means quicker alerts."}}
+        for tab in TABS:
+            known = module_strings(self.MODULE[tab], "ui.js", "settings/kit.js") | extra.get(tab, set())
+            if tab == "notifications":
+                known |= module_strings("routers/admin.py")
+            with self.subTest(tab):
+                missing = [w for w in skeleton_words(tab) if w not in known]
+                self.assertEqual(missing, [], f"{tab}: words its tab doesn't say")
 
-    def test_pages(self):
-        panel = skeleton_of("pages")
-        self.assertIn('<div class="h-[124px] sm:h-[79px] mb-5 pt-1">', panel)
-        self.assertIn('<div class="h-1 lg:h-[51.5px]"></div>', panel)
-        self.assertEqual(panel.count('<div class="skel rounded-2xl h-[176.8px] lg:h-[71.2px]"></div>'), 8)
+    def test_every_card_the_tab_builds_is_in_its_skeleton(self):
+        for tab in TABS:
+            src = joined((STATIC / "js" / self.MODULE[tab]).read_text(encoding="utf-8"))
+            words = set(skeleton_words(tab))
+            with self.subTest(tab):
+                for m in live_matches(src, r"WSSettings\.card\('([^']+)'(?:,\s*'([^']+)')?"):
+                    for w in m.groups():
+                        if w:
+                            self.assertIn(w, words, f"{tab}: card text {w!r}")
 
-    def test_appearance(self):
-        panel = skeleton_of("appearance")
-        self.assertIn('<div class="h-[79px] sm:h-[56.5px] mb-5 pt-1">', panel)
-        grid = re.search(r'<div class="grid sm:grid-cols-2 gap-5 max-w-2xl">(.*?)</div>\s*</div>', panel, re.S)
-        self.assertIsNotNone(grid, "the colours grid isn't the tab's (capped) grid")
-        self.assertEqual(grid.group(1).count('<div class="skel h-[96.6px]">'), 6)
-        self.assertIn('<div class="hidden lg:block"><div class="skel h-[349.6px] rounded-2xl"></div></div>', panel)
+    def test_the_skeleton_uses_the_kits_class_lists(self):
+        kit = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        ui = joined((STATIC / "js" / "ui.js").read_text(encoding="utf-8"))
+        h2 = re.search(r"head\.appendChild\(el\('h2', '([^']+)', title\)\)", kit).group(1)
+        desc = re.search(r"head\.appendChild\(el\('p', '([^']+)', description\)\)", kit).group(1)
+        label = re.search(r"label: '([^']+)'", ui).group(1)
+        help_ = re.search(r"help: '([^']+)'", ui).group(1)
+        panels = "".join(skeleton_of(t) for t in TABS)
+        self.assertGreater(panels.count(f'<h2 class="{h2}">'), 10)
+        self.assertGreater(panels.count(f'<p class="{desc}">'), 10)
+        self.assertGreater(panels.count(f'<div class="{label}">'), 20)
+        self.assertGreater(panels.count(f'<p class="{help_}">'), 10)
+        # A control block is the input's box: its padding, text size, line and border.
+        for token in ("px-3.5", "py-2.5", "text-[15px]", "rounded-[10px]", "border"):
+            self.assertRegex(ui, rf"input: '[^']*(?<![\w-]){re.escape(token)}(?![\w-])")
+        self.assertIn('class="skel w-full rounded-[10px] border border-transparent px-3.5 py-2.5 text-[15px] leading-6"', panels)
 
-    def test_integrations_intro(self):
-        self.assertIn('<div class="h-[45px] sm:h-[22.5px] mb-8 pt-1">', skeleton_of("integrations"))
+    def test_integrations_has_a_card_per_service_in_group_order(self):
+        src = INTEGRATIONS.read_text(encoding="utf-8")
+        names = re.findall(r"^\s+\w+: \{ name: '([^']+)', icon: '([\w_]+)', purpose: '([^']+)'", src, re.M)
+        order = [i for ids in re.findall(r"\[\s*'[^']*',\s*\[([^\]]*)\]\]", re.search(r"var GROUPS = \[(.*?)\n  \];", src, re.S).group(1))
+                 for i in re.findall(r"'(\w+)'", ids)]
+        keys = re.findall(r"^\s+(\w+): \{ name:", src, re.M)
+        by_id = dict(zip(keys, names))
+        words = skeleton_words("integrations")
+        seq = [w for w in words if w in {n for n, _i, _p in names}]
+        self.assertEqual(seq, [by_id[i][0] for i in order])
+        for i in order:
+            self.assertIn(by_id[i][2], words)
+
+    def test_the_state_rules_are_the_tabs(self):
+        h = (STATIC / FRAME).read_text(encoding="utf-8")
+        script = h[h.index("'plex-hint'") - 900:]
+        script = re.sub(r"\s+", " ", script[:script.index("</script>")])
+        for rule in ("'plex-hint': !s.plex,",
+                     "var akOpen = !!(f.show_authentik_auth || s.authentik_url);",
+                     "'ak-fields-saved': akOpen && !!s.authentik_secret,",
+                     "'ak-fields-input': akOpen && !s.authentik_secret,",
+                     "'account-full': !!f.show_simple_auth && u.auth_method === 'simple',",
+                     "'account-line': !!f.show_simple_auth && u.auth_method !== 'simple',",
+                     "'css-open': !!b.custom_css,",
+                     "'push-ready': !!b.vapid_public_key,",
+                     "library: s.kavita ? '' : 'kavita',",
+                     "requests: b.requests_source === 'seerr_embed' && !s.seerr ? 'seerr-embed' : (!s.seerr && !s.chaptarr ? 'requests' : ''),",
+                     "calendar: s.sonarr || s.radarr ? '' : 'arr'",
+                     "(b.pages_order || []).forEach(function (id) {"):
+            self.assertIn(rule, script)
+        # Every state's parts exist, and each page note is needsSetup()'s own words.
+        for key in ("plex-hint", "ak-fields-saved", "ak-fields-input", "account-full", "account-line",
+                    "all-off", "css-open", "push-ready", "push-nokeys"):
+            self.assertIn(f'data-skel-when="{key}"', h, key)
+        pages = (STATIC / "js" / "settings" / "pages.js").read_text(encoding="utf-8")
+        for key, text in (("kavita", "eBooks needs Kavita. It stays out of the sidebar until Kavita is set up."),
+                          ("seerr-embed", "The Seerr page needs the Seerr connection."),
+                          ("requests", "Requests needs Seerr for movies and TV, or Chaptarr for books."),
+                          ("arr", "Calendar needs Sonarr or Radarr.")):
+            self.assertIn(f"'{text}'", pages)
+            self.assertRegex(skeleton_of("pages"), rf'data-skel-warn="{key}" hidden>.*?{re.escape(text)}')
+        try:
+            from app.settings_registry import SIDEBAR_PAGE_IDS
+        except ImportError:  # pragma: no cover - the container and CI have the app's dependencies
+            self.skipTest("needs the app's dependencies")
+        self.assertEqual(re.findall(r'data-skel-page="(\w+)"', skeleton_of("pages")), list(SIDEBAR_PAGE_IDS))
+
+    def test_the_setup_flags_come_from_the_server(self):
+        py = (STATIC.parent / "pages.py").read_text(encoding="utf-8")
+        for flag in ("plex", "seerr", "chaptarr", "sonarr", "radarr", "kavita", "authentik_url", "authentik_secret"):
+            self.assertIn(f'"{flag}": ', py)
 
 
 class KitApi(unittest.TestCase):
@@ -1349,27 +1442,6 @@ class IntegrationsTab(unittest.TestCase):
                                    r"MBps: 'Megabytes per second \(MB/s\)' \};")
         self.assertEqual(len(labels), 1)
 
-    def test_skeleton_reserves_every_group(self):
-        # Fix round 1 (8): the panel's skeleton holds one heading per group and
-        # one card per service, in GROUPS order, at the measured heights
-        # (phone first, then sm and up), so the swap moves nothing.
-        src = INTEGRATIONS.read_text(encoding="utf-8")
-        groups = re.search(r"var GROUPS = \[(.*?)\n  \];", src, re.S)
-        self.assertIsNotNone(groups)
-        counts = [len(re.findall(r"'(\w+)'", ids)) for ids in re.findall(r"\[\s*'[^']*',\s*\[([^\]]*)\]\]", groups.group(1))]
-        self.assertEqual(counts, [1, 1, 3, 2, 2])
-        h = (STATIC / FRAME).read_text(encoding="utf-8")
-        panel = h[h.index('<section id="panel-integrations"'):]
-        panel = panel[:panel.index("</section>")]
-        heads = re.findall(r'<div class="h-\[30px\] mb-5 flex items-center">', panel)
-        self.assertEqual(len(heads), len(counts), "one heading per group")
-        per_group = [len(re.findall(r'class="skel rounded-2xl ', block))
-                     for block in re.split(r'<div class="h-\[30px\] mb-5 flex items-center">', panel)[1:]]
-        self.assertEqual(per_group, counts, "one card per service, grouped as GROUPS")
-        heights = re.findall(r'class="skel rounded-2xl (h-\[[\d.]+px\](?: sm:h-\[[\d.]+px\])?)"', panel)
-        tall, short = "h-[122.1px] sm:h-[102.6px]", "h-[102.6px]"
-        self.assertEqual(heights, [tall, tall, short, tall, short, short, short, short, tall])
-
     def test_upstream_text_never_goes_in_as_html(self):
         code = js_code_only(INTEGRATIONS.read_text(encoding="utf-8"))
         self.assertNotRegex(code, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment|setHTML")
@@ -1463,34 +1535,26 @@ class NotificationsTab(unittest.TestCase):
         self.assertTrue(live_matches(src, r"body: '“' \+ t \+ '” goes to everyone right away\. It can’t be taken back\.',"))
 
     def test_skeleton_is_the_tabs_shape(self):
-        # R86 (d): the panel's skeleton is the three cards at the heights
-        # measured at 390 and 1440 (phone first), and the check fields' grid
-        # is the tab's own grid with one cell per interval, so the swap moves
-        # nothing.
-        h = (STATIC / FRAME).read_text(encoding="utf-8")
-        panel = h[h.index('<section id="panel-notifications"'):]
-        panel = panel[:panel.index("</section>")]
-        heads = re.findall(r'<div class="(h-\[[\d.]+px\](?: (?:sm|md):h-\[[\d.]+px\])?) mb-5 pt-1">', panel)
-        self.assertEqual(heads, ["h-[79px] sm:h-[56.5px]"] * 3)
-        # Fix round 1 (R88): each card's description is two lines on every
-        # phone from 360 px and one line from sm (Polish A re-measured it at
-        # 640, where md still reserved two), so one reservation per
-        # breakpoint holds. The intervals card's text was cut to fit that:
-        # longer copy wrapped to a third line below about 400 px.
-        src = NOTIFICATIONS.read_text(encoding="utf-8")
-        self.assertEqual(len(live_matches(src, r"speed: 'Shorter means quicker alerts\.'")), 1)
-        self.assertIn('<div class="h-[193px] sm:h-[173.5px]">', panel)
-        self.assertIn('<div class="h-[288.6px] max-w-2xl">', panel)
+        # The check fields' grid is the tab's own grid with one field per
+        # interval (each with the interval's help and the seconds suffix), and
+        # the announcement's fields are as wide as the kit's field width.
+        panel = skeleton_of("notifications")
         src = NOTIFICATIONS.read_text(encoding="utf-8")
         grid = live_matches(src, r"var grid = el\('div', '([^']*) ' \+ cls\.fieldWidth\);")
         self.assertEqual(len(grid), 1)
-        m = re.search(rf'<div class="{re.escape(grid[0].group(1))} {FIELD_WIDTH}">(.*?)</div>\s*</div>', panel, re.S)
+        m = re.search(rf'<div class="{re.escape(grid[0].group(1))} {FIELD_WIDTH}">(.*)', panel, re.S)
         self.assertIsNotNone(m, "the skeleton's grid isn't the tab's")
-        intervals = re.findall(r"\['notifications\.poll_interval_\w+'", src)
-        self.assertEqual(len(re.findall(r'<div class="skel h-\[96\.6px\]">', m.group(1))), len(intervals))
+        intervals = re.findall(r"\['notifications\.poll_interval_\w+', '([^']+)', '([^']+)'\]", src)
         self.assertEqual(len(intervals), 4)
-        # The announcement's fields are as wide as its skeleton.
+        for label, help_ in intervals:
+            self.assertIn(f'<span class="skel-text">{label}</span>', m.group(1))
+            self.assertIn(f'<span class="skel-text">{help_}</span>', m.group(1))
+        self.assertEqual(m.group(1).count('<span class="skel-text">seconds</span>'), 4)
         self.assertTrue(live_matches(src, r"ann\.body\.classList\.add\(cls\.fieldWidth\);"))
+        self.assertIn(f'<div class="space-y-6 {FIELD_WIDTH}">', panel)
+        # The message box is a real textarea with the tab's rows, sized by the engine.
+        self.assertTrue(live_matches(src, r"body\.rows = 3;"))
+        self.assertIn('rows="3" tabindex="-1" disabled></textarea>', panel)
 
     def test_session_end_leaves_through_the_kit(self):
         src = NOTIFICATIONS.read_text(encoding="utf-8")
