@@ -220,8 +220,9 @@
       sendBtn.appendChild(document.createTextNode('Send announcement'));
       var f1 = el('div'); f1.appendChild(titleLabel); f1.appendChild(title);
       var f2 = el('div'); f2.appendChild(bodyLabel); f2.appendChild(body);
-      // Text fields as wide as the card's own description, not the whole page.
-      ann.body.classList.add('max-w-2xl');
+      // Text fields as wide as the card's own description, not the whole page
+      // (the kit's width convention; these two fields are built by hand).
+      ann.body.classList.add(cls.fieldWidth);
       ann.body.appendChild(f1);
       ann.body.appendChild(f2);
       ann.body.appendChild(sendBtn);
@@ -270,7 +271,7 @@
       var shared = ranges.every(function (r) { return r === ranges[0]; }) ? ranges[0] : '';
       var checks = WSSettings.card('How often to check',
         (shared ? 'Each can be ' + shared + '. ' : '') + MSG.speed);
-      var grid = el('div', 'grid sm:grid-cols-2 gap-5 max-w-2xl');
+      var grid = el('div', 'grid sm:grid-cols-2 gap-5 ' + cls.fieldWidth);
       INTERVALS.forEach(function (x, i) {
         var own = !shared && ranges[i] ? ' Any time ' + ranges[i] + '.' : '';
         grid.appendChild(api.text({ key: x[0], label: x[1], help: x[2] + own, inputType: 'number', suffix: 'seconds' }));

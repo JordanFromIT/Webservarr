@@ -115,9 +115,14 @@
   }
 
   // label + control (+ suffix) + help + error line, or just the control when compact.
+  //
+  // The width convention, one for every tab: a field, or a grid of fields,
+  // is never wider than max-w-2xl (the width of a card's description), so a
+  // text box doesn't stretch across a wide screen. Lists of rows and cards
+  // use the full width. A compact control lives in a row and follows it.
   function fieldShell(o, control, row) {
     row = row || control;
-    var root = el('div', 'min-w-0');
+    var root = el('div', o.compact ? 'min-w-0' : 'min-w-0 ' + cls.fieldWidth);
     if (o.compact) {
       control.setAttribute('aria-label', o.label || o.key);
     } else {
@@ -275,7 +280,7 @@
         api.track(o.key, { get: get, set: paint, el: btn, errorEl: null });
         return btn;
       }
-      var root = el('div', 'flex items-start justify-between gap-4');
+      var root = el('div', 'flex items-start justify-between gap-4 ' + cls.fieldWidth);
       var text = el('div', 'min-w-0');
       var label = el('label', 'block text-[15px] font-semibold text-frosted-blue', o.label || '');
       label.htmlFor = btn.id;
@@ -406,7 +411,7 @@
     };
 
     api.secret = function (o) {
-      var root = el('div', 'min-w-0');
+      var root = el('div', 'min-w-0 ' + cls.fieldWidth);
       var label = el('p', cls.label, o.label || '');
       label.id = uid(o.key) + '-label';
       root.appendChild(label);

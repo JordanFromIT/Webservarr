@@ -143,7 +143,7 @@
 
     var news = el('div', 'space-y-4');
     news.appendChild(el('p', 'text-[15px] font-semibold text-frosted-blue', 'News on the home page'));
-    var grid = el('div', 'grid sm:grid-cols-2 gap-5');
+    var grid = el('div', 'grid sm:grid-cols-2 gap-5 ' + cls.fieldWidth);
     grid.appendChild(api.text({ key: 'news.homepage_count', label: 'Posts to show', inputType: 'number' }));
     grid.appendChild(api.text({ key: 'news.homepage_max_age_days', label: 'Hide posts older than', inputType: 'number',
       suffix: 'days', help: '0 keeps posts on the home page until newer ones replace them. Pinned posts always show.' }));

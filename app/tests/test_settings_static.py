@@ -253,6 +253,37 @@ class OwnSignInGuard(unittest.TestCase):
         self.assertRegex(guard, r"if \(!ok\) touched\.forEach\(function \(k\) \{ api\.set\(k, api\.saved\(k\)\); \}\);\s*return ok;")
 
 
+# The one field-width convention (Polish A item 10): a field, or a grid of
+# fields, is never wider than this; lists of rows and cards use the full width.
+FIELD_WIDTH = "max-w-2xl"
+
+
+class FieldWidth(unittest.TestCase):
+    def test_ui_names_the_width(self):
+        js = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
+        self.assertTrue(live_matches(js, rf"fieldWidth: '{FIELD_WIDTH}',"))
+
+    def test_every_kit_field_is_capped_and_compact_ones_are_not(self):
+        code = kit_code()
+        shell = function_body(code, "fieldShell")
+        self.assertRegex(shell, r"var root = el\(' {3}', o\.compact \? ' {7}' : ' {8}' \+ cls\.fieldWidth\);")
+        self.assertRegex(code, r"var root = el\(' {3}', ' {39}' \+ cls\.fieldWidth\);")   # the toggle row
+        secret = code[code.index("api.secret = function"):]
+        self.assertRegex(secret, r"^api\.secret = function \(o\) \{\s*var root = el\(' {3}', ' {8}' \+ cls\.fieldWidth\);")
+
+    def test_every_grid_of_fields_is_capped(self):
+        # A grid that holds kit fields carries the width, in every tab.
+        for name in MODULES.values():
+            with self.subTest(name):
+                src = (STATIC / "js" / "settings" / name).read_text(encoding="utf-8")
+                for m in live_matches(src, r"var (\w+) = el\('div', '(grid [^']*)'( \+ cls\.fieldWidth)?\);"):
+                    grid, classes, capped = m.group(1), m.group(2), m.group(3)
+                    holds_fields = live_matches(src, rf"\b{grid}\.appendChild\((?:api\.|f\.box|slot)")
+                    if holds_fields or re.search(rf"\[[^\]]*\]\.forEach\(function \(f\) \{{ {grid}\.appendChild", src):
+                        self.assertTrue(capped, f"{name}: {grid} ({classes}) runs full width")
+                        self.assertNotIn("max-w-", classes)
+
+
 class KitApi(unittest.TestCase):
     def test_ui_js_public_api(self):
         js = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
@@ -1386,15 +1417,15 @@ class NotificationsTab(unittest.TestCase):
         self.assertIn('<div class="h-[193px] sm:h-[173.5px]">', panel)
         self.assertIn('<div class="h-[288.6px] max-w-2xl">', panel)
         src = NOTIFICATIONS.read_text(encoding="utf-8")
-        grid = live_matches(src, r"var grid = el\('div', '([^']*)'\);")
+        grid = live_matches(src, r"var grid = el\('div', '([^']*) ' \+ cls\.fieldWidth\);")
         self.assertEqual(len(grid), 1)
-        m = re.search(rf'<div class="{re.escape(grid[0].group(1))}">(.*?)</div>\s*</div>', panel, re.S)
+        m = re.search(rf'<div class="{re.escape(grid[0].group(1))} {FIELD_WIDTH}">(.*?)</div>\s*</div>', panel, re.S)
         self.assertIsNotNone(m, "the skeleton's grid isn't the tab's")
         intervals = re.findall(r"\['notifications\.poll_interval_\w+'", src)
         self.assertEqual(len(re.findall(r'<div class="skel h-\[96\.6px\]">', m.group(1))), len(intervals))
         self.assertEqual(len(intervals), 4)
         # The announcement's fields are as wide as its skeleton.
-        self.assertTrue(live_matches(src, r"ann\.body\.classList\.add\('max-w-2xl'\);"))
+        self.assertTrue(live_matches(src, r"ann\.body\.classList\.add\(cls\.fieldWidth\);"))
 
     def test_session_end_leaves_through_the_kit(self):
         src = NOTIFICATIONS.read_text(encoding="utf-8")

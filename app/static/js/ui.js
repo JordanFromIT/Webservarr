@@ -19,6 +19,8 @@
     label: 'block text-[13px] font-semibold text-frosted-blue/70 mb-1.5',
     help: 'text-[13px] text-frosted-blue/45 mt-1.5',
     error: 'text-[13px] font-semibold text-frosted-blue mt-1.5 flex items-center gap-1.5',
+    // The widest a field, or a grid of fields, runs: a card description's width.
+    fieldWidth: 'max-w-2xl',
     btnPrimary: 'inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-primary text-bright ' +
       'text-sm font-semibold hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 ' +
       'focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors ' +

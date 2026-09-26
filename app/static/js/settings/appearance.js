@@ -266,13 +266,13 @@
       side.appendChild(sticky);
 
       var colours = WSSettings.card('Colours', 'Your site restyles as you change them. Nothing is saved until you press Save.');
-      var grid = el('div', 'grid sm:grid-cols-2 gap-5');
+      var grid = el('div', 'grid sm:grid-cols-2 gap-5 ' + cls.fieldWidth);
       COLORS.forEach(function (c) { grid.appendChild(api.color({ key: c[0], label: c[1], cssVar: c[2], help: c[3] })); });
       colours.body.appendChild(grid);
       form.appendChild(colours.root);
 
       var media = WSSettings.card('Media colours', 'Badges and accents that tell movies, TV shows and books apart.');
-      var mgrid = el('div', 'grid sm:grid-cols-3 gap-5');
+      var mgrid = el('div', 'grid sm:grid-cols-3 gap-5 ' + cls.fieldWidth);
       MEDIA.forEach(function (m) { mgrid.appendChild(api.color({ key: m[0], label: m[1], cssVar: m[2] })); });
       media.body.appendChild(mgrid);
       var phonePreview = el('div', 'lg:hidden');

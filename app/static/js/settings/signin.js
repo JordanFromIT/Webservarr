@@ -153,7 +153,7 @@
     var pw = field('signinNewPassword', 'New password', 'password', 'new-password', 'At least 8 characters');
     var pw2 = field('signinConfirmPassword', 'Confirm new password', 'password', 'new-password');
     name.input.setAttribute('autocapitalize', 'off');
-    var grid = el('div', 'grid sm:grid-cols-2 gap-4');
+    var grid = el('div', 'grid sm:grid-cols-2 gap-4 ' + cls.fieldWidth);
     [cur, name, pw, pw2].forEach(function (f) { grid.appendChild(f.box); });
     form.appendChild(grid);
 
@@ -256,7 +256,7 @@
       // Authentik
       var ak = methodCard('shield', 'Authentik', 'People sign in through your Authentik server.');
       ak.body.appendChild(api.toggle({ key: 'features.show_authentik_auth', label: 'Allow sign-in with Authentik' }));
-      var akFields = el('div', 'grid sm:grid-cols-2 gap-5');
+      var akFields = el('div', 'grid sm:grid-cols-2 gap-5 ' + cls.fieldWidth);
       akFields.appendChild(api.text({ key: 'integration.authentik.url', label: 'Authentik address', inputType: 'url',
         placeholder: 'https://auth.example.com' }));
       akFields.appendChild(api.text({ key: 'integration.authentik.app_slug', label: 'Application slug',

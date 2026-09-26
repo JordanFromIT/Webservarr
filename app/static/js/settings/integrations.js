@@ -190,7 +190,7 @@
       var chaptarr = null;
 
       function chaptarrFields(body) {
-        var grid = el('div', 'grid sm:grid-cols-2 lg:grid-cols-3 gap-5');
+        var grid = el('div', 'grid sm:grid-cols-2 gap-5 ' + cls.fieldWidth);
         var slots = {};
         CHAPTARR_KEYS.forEach(function (k) {
           var slot = el('div', 'min-w-0');
@@ -269,7 +269,7 @@
       }
 
       function netdataFields(body) {
-        var grid = el('div', 'grid sm:grid-cols-2 lg:grid-cols-3 gap-5');
+        var grid = el('div', 'grid sm:grid-cols-2 gap-5 ' + cls.fieldWidth);
         grid.appendChild(api.text({ key: 'netdata.cpu_label', label: 'CPU gauge label', placeholder: 'For example 8 cores' }));
         grid.appendChild(api.text({ key: 'netdata.ram_label', label: 'Memory gauge label', placeholder: 'Leave empty to detect' }));
         grid.appendChild(api.text({ key: 'netdata.net_label', label: 'Network gauge label', placeholder: 'Leave empty to detect' }));
@@ -317,7 +317,7 @@
         var body = el('div', 'hidden border-t border-frosted-blue/10 p-5 space-y-5');
         body.id = 'integration-body-' + id;
         head.setAttribute('aria-controls', body.id);
-        var grid = el('div', 'grid sm:grid-cols-2 gap-5');
+        var grid = el('div', 'grid sm:grid-cols-2 gap-5 ' + cls.fieldWidth);
         if (c.url) grid.appendChild(api.text({ key: c.url, label: 'Address', inputType: 'url', placeholder: c.placeholder }));
         if (c.secret) grid.appendChild(api.secret({ key: c.secret[0], label: c.secret[1], help: c.secret[2] }));
         (c.extra || []).forEach(function (x) { grid.appendChild(api.text({ key: x[0], label: x[1], help: x[2] })); });
