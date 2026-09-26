@@ -263,7 +263,7 @@ var WikiCategories = (function () {
                   : 'This category has no pages.',
           confirmLabel: 'Delete category', cancelLabel: 'Keep it', danger: true
         }).then(function (ok) {
-          if (!ok || !begin()) return;
+          if (!ok || formOpen || !begin()) return;
           send('DELETE', '/api/wiki/categories/' + encodeURIComponent(cat.slug)).then(function (res) {
             if (!res.ok) { setBusy(false); UI.toast(problem(res), 'err'); return; }
             UI.toast('Category deleted.', 'ok');
