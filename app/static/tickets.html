@@ -178,6 +178,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 <script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script src="/static/js/wiki-hook.js?v=1"></script>
+<script src="/static/js/ui.js?v=1"></script>
 <script>
 // WebServarr — Tickets Page
 (function() {
@@ -658,16 +659,22 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
       // Delete button
       var delBtn = createEl('button', 'px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-bold transition-all', 'Delete');
       delBtn.addEventListener('click', function() {
-        if (!confirm('Delete this ticket permanently?')) return;
-        fetch('/api/admin/tickets/' + ticket.id, { method: 'DELETE' })
-          .then(function(r) { return r.json(); })
-          .then(function() {
-            closeDetailModal();
-            showToast('Ticket deleted', 'success');
-            loadTickets();
-            loadCounts();
-          })
-          .catch(function() { showToast('Failed to delete', 'error'); });
+        window.WSUI.confirm({
+          title: 'Delete this ticket?',
+          body: 'The ticket and its comments are removed for good.',
+          confirmLabel: 'Delete ticket', cancelLabel: 'Keep it', danger: true
+        }).then(function (ok) {
+          if (!ok) return;
+          fetch('/api/admin/tickets/' + ticket.id, { method: 'DELETE' })
+            .then(function(r) { return r.json(); })
+            .then(function() {
+              closeDetailModal();
+              showToast('Ticket deleted', 'success');
+              loadTickets();
+              loadCounts();
+            })
+            .catch(function() { showToast('Failed to delete', 'error'); });
+        });
       });
 
       controlsDiv.appendChild(statusSelect);

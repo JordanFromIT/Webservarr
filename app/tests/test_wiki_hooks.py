@@ -628,7 +628,7 @@ class WikiEditorDialogs(unittest.TestCase):
         self.assertRegex(field, r"label\.htmlFor = control\.id;")
         self.assertIn("contentLabel.htmlFor = 'wikiEditContent';".replace("'wikiEditContent'", "'               '"), code)
         # Every control handed to field() has an id for its label to name.
-        for name in ("title", "slug", "summary", "cat", "sort"):
+        for name in ("title", "slugIn", "summary", "cat", "sort"):
             self.assertRegex(code, r"\b" + name + r"\.id = '")
 
 

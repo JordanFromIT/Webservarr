@@ -142,7 +142,9 @@ var WikiEditor = (function () {
 
   function field(labelText, control, hint) {
     var wrap = el('div');
-    wrap.appendChild(el('label', 'block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5', labelText));
+    var label = el('label', 'block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5', labelText);
+    label.htmlFor = control.id;
+    wrap.appendChild(label);
     wrap.appendChild(control);
     if (hint) wrap.appendChild(el('p', 'text-xs text-steel-blue mt-1', hint));
     return wrap;
@@ -309,8 +311,14 @@ var WikiEditor = (function () {
     var s = _session;
     if (!s || s.busy) return;
     if (!s.slug) { close(); return; }
-    var ok = window.confirm('Delete this page? This cannot be undone.');
-    if (!ok) return;
+    var ok = await window.WSUI.confirm({
+      title: 'Delete this page?',
+      body: 'It can’t be brought back, and any help links to it are removed.',
+      confirmLabel: 'Delete page', cancelLabel: 'Keep it', danger: true
+    });
+    // The answer comes later: delete only if this editor is still the one
+    // showing and nothing else is writing from it.
+    if (!ok || _session !== s || s.busy) return;
     setBusy(s, true);
     var res;
     try {
@@ -420,7 +428,7 @@ var WikiEditor = (function () {
       catch (e) {
         // Stop here rather than falling through and loading `undefined` into the
         // fields — the News editor shipped exactly that bug once.
-        window.alert('Could not load that page for editing.');
+        window.WSUI.toast('Couldn’t load that page for editing. Try again.', 'err');
         return;
       }
     }
@@ -434,9 +442,16 @@ var WikiEditor = (function () {
       var draftStamp = Date.parse(draft.at || '') || 0;
       var differs = !page || draft.fields.content !== page.content;
       if (differs && draftStamp > serverStamp) {
-        useDraft = window.confirm(
-          'You have unsaved changes from ' + new Date(draftStamp).toLocaleString() +
-          '. Restore them?\n\nCancel keeps the saved version.');
+        var here = location.href;
+        useDraft = await window.WSUI.confirm({
+          title: 'Restore your unsaved changes?',
+          body: 'You have unsaved changes from ' + new Date(draftStamp).toLocaleString() +
+            '. Restore them, or keep the saved version.',
+          confirmLabel: 'Restore changes', cancelLabel: 'Keep saved version'
+        });
+        // The reader may have gone elsewhere while the question was up; the
+        // editor is then not drawn over the new view (the draft stays).
+        if (location.href !== here) return;
         if (!useDraft) clearDraft(_slug);
       }
     }
@@ -571,7 +586,9 @@ var WikiEditor = (function () {
     form.appendChild(help);
 
     var contentWrap = el('div');
-    contentWrap.appendChild(el('label', 'block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5', 'Content'));
+    var contentLabel = el('label', 'block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5', 'Content');
+    contentLabel.htmlFor = 'wikiEditContent';
+    contentWrap.appendChild(contentLabel);
     contentWrap.appendChild(toolbar());
 
     var ta = el('textarea', INPUT_CLS + ' font-mono text-sm leading-relaxed');
