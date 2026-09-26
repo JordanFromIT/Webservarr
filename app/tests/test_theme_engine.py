@@ -19,6 +19,7 @@ APPEARANCE = (STATIC / "js" / "settings" / "appearance.js").read_text(encoding="
 UI_JS = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
 NOTIF_JS = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
 SIDEBAR = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
+KIT = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
 TAILWIND = (STATIC.parents[1] / "tailwind.config.js").read_text(encoding="utf-8")
 
 # The status colours (R138): one setting per state drives the dot, the ring and
@@ -334,6 +335,42 @@ class CustomCssComesLast(unittest.TestCase):
         self.assertTrue(live_matches(LOADER, r"if \(data\.custom_css && !fromPage\)"))
         self.assertTrue(live_matches(LOADER, r"\.then\(function \(data\) \{ applyTheme\(data, false\); \}\)"))
         self.assertTrue(live_matches(LOADER, r"el\.textContent = data\.custom_css"))
+
+
+
+def kit_color_control() -> str:
+    """api.color in kit.js, as written."""
+    m = re.search(r"\n    api\.color = function \(o\) \{.*?\n    \};\n", KIT, re.S)
+    assert m, "api.color not found"
+    return m.group(0)
+
+
+class SettingsShowsTheColourInUse(unittest.TestCase):
+    """L8: a stored colour that isn't #rrggbb (an old or hand-edited row) is
+    replaced by its default everywhere the site paints (safe_color). The
+    colour field used to show the raw text and a black swatch, which is
+    neither. It now shows the default the site uses and says the saved value
+    isn't a colour; nothing is staged until the admin changes it."""
+
+    def test_the_field_paints_the_default_for_a_stored_value_that_is_not_a_colour(self):
+        ctl = kit_color_control()
+        self.assertTrue(live_matches(ctl, r"var stored = v === baseline\(o\.key\) && !HEX\.test\(v\);"))
+        self.assertTrue(live_matches(ctl, r"var shown = stored \? inUse\(\) : v;"))
+        self.assertTrue(live_matches(ctl, r"hex\.value = shown;"))
+        # The default comes from the registry meta, never a copy in the page.
+        self.assertTrue(live_matches(ctl, r"var m = metaFor\(o\.key\);"))
+        self.assertNotRegex(ctl, r"#[0-9a-fA-F]{6}")
+
+    def test_it_says_so_and_stages_nothing(self):
+        ctl = kit_color_control()
+        self.assertIn("isn’t a colour, so your site uses this one.", ctl)
+        self.assertTrue(live_matches(ctl, r"stale\.classList\.toggle\('hidden', !stored\)"))
+        self.assertTrue(live_matches(ctl, r"stale\.textContent = "))
+        # Painting never stages: only the admin's own input does.
+        set_fn = re.search(r"set: function \(v\) \{(.*?)\n        \}", ctl, re.S).group(1)
+        self.assertNotIn("stage(", set_fn)
+        # Typing a new value is the fix: the note goes.
+        self.assertTrue(live_matches(ctl, r"stale\.classList\.add\('hidden'\)"))
 
 
 if __name__ == "__main__":
