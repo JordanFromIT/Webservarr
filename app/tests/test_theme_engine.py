@@ -9,6 +9,7 @@ Run inside the container:
 import json
 import re
 import unittest
+from html.parser import HTMLParser
 from unittest import mock
 
 from app.tests.test_motion import css_rule, top_level
@@ -328,15 +329,47 @@ class CustomCssComesLast(unittest.TestCase):
             self.assertLess(head.index(earlier), head.index(style), earlier)
 
     def test_it_cannot_close_its_element(self):
-        css = "/* </style><script>alert(1)</script> */ a::after { content: \"<\"; } </STYLE ><b>"
+        # R141: a <style> is raw text that ends only at "</style" (any case),
+        # so "</" is written "<\\/" (the same characters to CSS) and nothing
+        # else changes. A parser then sees exactly one style element holding
+        # the whole CSS, and none of the tags inside it.
+        css = "/* </style><script>alert(1)</script> */ a::after { content: \"<\"; } </STYLE ><b> </sTyLe\t>"
         out = render(payload({"theme.custom_css": css}))
         m = re.search(r'<style id="webservarr-custom-css">(.*?)</style>', out, re.S)
         self.assertIsNotNone(m)
-        self.assertNotIn("<", m.group(1))
-        self.assertIn("\\3C /style>", m.group(1))
-        self.assertIn('content: "\\3C "', m.group(1))
-        self.assertNotIn("<script>alert", out)
-        self.assertNotIn("<b>", out)
+        self.assertEqual(m.group(1), css.replace("</", "<\\/"))
+        self.assertNotIn("</", m.group(1))
+        self.assertIn('content: "<"', m.group(1))
+
+        class Tags(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.tags, self.styles, self._in = [], [], None
+
+            def handle_starttag(self, tag, attrs):
+                self.tags.append(tag)
+                self._in = dict(attrs).get("id") if tag == "style" else None
+
+            def handle_data(self, data):
+                if self._in == "webservarr-custom-css":
+                    self.styles.append(data)
+
+            def handle_endtag(self, tag):
+                self._in = None
+
+        t = Tags()
+        t.feed(out)
+        self.assertNotIn("b", t.tags)
+        self.assertEqual(t.tags.count("script"), 2, "only theme-loader and #ws-data")
+        self.assertEqual("".join(t.styles), m.group(1))
+
+    def test_range_queries_are_kept_as_written(self):
+        # Media and container query range syntax uses a bare "<"; escaping it
+        # stopped the rule from ever applying.
+        css = ("@media (400px < width < 9000px) { .x { color: red; } }\n"
+               "@container (width < 30em) { .y { color: blue; } }")
+        out = render(payload({"theme.custom_css": css}))
+        self.assertIn(f'<style id="webservarr-custom-css">{css}</style>', out)
 
     def test_no_custom_css_no_element(self):
         for css in ("", "   \n"):
