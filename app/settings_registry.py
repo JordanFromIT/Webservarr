@@ -172,6 +172,12 @@ def _build() -> List[SettingDef]:
         _color("theme.color_media_movie", "#E9D5FF", "Accent for movies"),
         _color("theme.color_media_tv", "#67E8F9", "Accent for TV shows"),
         _color("theme.color_media_book", "#FCD34D", "Accent for books and audiobooks"),
+        # Status colours: one per state drives the dot, the ring and the words
+        # ("status colour only on deviation": the words take it on warn and err).
+        # The defaults suit a dark background; a light theme picks darker ones.
+        _color("theme.color_status_ok", "#4ADE80", "Colour for things that are working"),
+        _color("theme.color_status_warn", "#FBBF24", "Colour for things that are slow or partly working"),
+        _color("theme.color_status_err", "#F87171", "Colour for things that are down"),
         _text("theme.font", "Spline Sans", "Google Font family name", public=True, allow_empty=False,
               max_length=60, pattern=r"[A-Za-z0-9 \-]{1,60}", pattern_hint="Use a Google Font family name"),
         _text("theme.custom_css", "", "Custom CSS added to every page", public=True, max_length=20000),
@@ -331,6 +337,13 @@ def switch_is_off(value: Optional[str]) -> bool:
     cannot turn a page off in one place and leave it on in the other. Anything
     but "false" (after strip, any case), a missing row included, means on."""
     return (value or "").strip().lower() == "false"
+
+
+# Every theme colour, as the branding payload names it ("primary", "media_tv",
+# ...): the registry's colour rows in their order. The payload, the page's
+# #ws-theme and theme-loader.js all follow this, so a colour added here
+# reaches every page without a second list to update.
+COLOR_KEYS: Tuple[str, ...] = tuple(x.key[len("theme.color_"):] for x in _DEFS if x.type == "color")
 
 
 def public_defaults() -> Dict[str, str]:

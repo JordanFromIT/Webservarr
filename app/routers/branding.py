@@ -13,8 +13,8 @@ from app.dependencies import get_current_user_optional
 from app.limiter import limiter
 from app.models import Setting
 from app.settings_registry import (
-    HOME_SECTION_IDS, REGISTRY, SIDEBAR_PAGE_IDS, normalize_page_order, public_defaults, safe_color, safe_font,
-    switch_is_off,
+    COLOR_KEYS, HOME_SECTION_IDS, REGISTRY, SIDEBAR_PAGE_IDS, normalize_page_order, public_defaults, safe_color,
+    safe_font, switch_is_off,
 )
 from app.utils import safe_http_url, same_origin_path
 
@@ -156,12 +156,9 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         # rule: theme-loader.js applies them inline on every page, over the
         # server's #ws-theme, so a legacy or hand-edited row would otherwise
         # break the whole site. Anything off becomes its registry default.
-        # The media type accents (media_*) are distinct hues; see app/settings_registry.py.
-        "colors": {
-            key: safe_color("theme.color_" + key, get("theme.color_" + key))
-            for key in ("primary", "secondary", "accent", "text", "text_secondary", "background",
-                        "media_movie", "media_tv", "media_book")
-        },
+        # Every registry colour, in its order (COLOR_KEYS): the palette, the
+        # media type accents and the status colours.
+        "colors": {key: safe_color("theme.color_" + key, get("theme.color_" + key)) for key in COLOR_KEYS},
         "font": safe_font(get("theme.font")),
         "custom_css": get("theme.custom_css"),
         "features": {

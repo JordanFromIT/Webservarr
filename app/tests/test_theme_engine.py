@@ -108,8 +108,8 @@ class StatusColoursAreSettings(unittest.TestCase):
         try:
             for key, (value, desc) in seed.DEFAULT_SETTINGS.items():
                 if not key.startswith("theme.color_status_"):
+                    value = "#FF00FF" if key == "theme.color_primary" else value
                     db.add(Setting(key=key, value=value, description=desc))
-            db.query(Setting).filter(Setting.key == "theme.color_primary").one().value = "#FF00FF"
             db.commit()
             seed.seed_default_settings(db)
             got = {r.key: r.value for r in db.query(Setting).all()}

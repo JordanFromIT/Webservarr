@@ -33,7 +33,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.config import settings
 from app.database import SessionLocal
 from app.settings_registry import (
-    PAGE_ADDRESSES, PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order, safe_color, safe_font,
+    COLOR_KEYS, PAGE_ADDRESSES, PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order, safe_color, safe_font,
 )
 from app.settings_registry import REGISTRY as _REGISTRY
 from app.utils import identity_email, safe_http_url, same_origin_path
@@ -91,23 +91,9 @@ DEFAULT_FONT = _REGISTRY["theme.font"].default
 
 # The registry's colour defaults, which safe_color falls back to;
 # app/static/css/theme.css repeats them as :root defaults (a test keeps the two equal).
-_DEFAULT_COLORS = {
-    key: _REGISTRY["theme.color_" + key].default
-    for key in ("primary", "secondary", "accent", "text", "text_secondary", "background",
-                "media_movie", "media_tv", "media_book")
-}
-# (css variable suffix, branding colour key)
-_COLOR_VARS = [
-    ("primary", "primary"),
-    ("secondary", "secondary"),
-    ("accent", "accent"),
-    ("text", "text"),
-    ("text-secondary", "text_secondary"),
-    ("background", "background"),
-    ("media-movie", "media_movie"),
-    ("media-tv", "media_tv"),
-    ("media-book", "media_book"),
-]
+_DEFAULT_COLORS = {key: _REGISTRY["theme.color_" + key].default for key in COLOR_KEYS}
+# (css variable suffix, branding colour key): --color-media-tv from media_tv.
+_COLOR_VARS = [(key.replace("_", "-"), key) for key in COLOR_KEYS]
 
 
 def _rgb(hex_value: str) -> str:

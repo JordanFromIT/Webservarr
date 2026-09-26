@@ -1,5 +1,6 @@
 /**
- * Settings > Appearance: colours (with a live preview), font, custom CSS.
+ * Settings > Appearance: colours (with a live preview), status colours, font,
+ * custom CSS.
  *
  * Colour and font edits restyle the page as you type; Discard, switching tab
  * or leaving reverts them because the kit repaints every control from its
@@ -29,13 +30,21 @@
     ['theme.color_media_tv', 'TV shows', 'media-tv'],
     ['theme.color_media_book', 'Books', 'media-book']
   ];
+  // One colour per state drives the dot, the ring and (on warn and err only)
+  // the words, everywhere a status shows.
+  var STATUS = [
+    ['theme.color_status_ok', 'Online', 'status-ok'],
+    ['theme.color_status_warn', 'Degraded', 'status-warn'],
+    ['theme.color_status_err', 'Offline', 'status-err']
+  ];
   // Choices offered in the list; any Google Font name can be typed instead.
   var FONTS = ['Spline Sans', 'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat', 'Poppins', 'Nunito',
     'Raleway', 'Source Sans 3', 'Ubuntu', 'Outfit', 'Space Grotesk', 'DM Sans', 'Manrope', 'Plus Jakarta Sans',
     'Sora', 'Lexend', 'Figtree', 'Work Sans', 'Jost', 'Albert Sans', 'Barlow', 'Red Hat Display', 'Rubik',
     'Nunito Sans', 'Cabin', 'Karla', 'Quicksand', 'Exo 2'];
   var KEYS = COLORS.map(function (c) { return c[0]; })
-    .concat(MEDIA.map(function (m) { return m[0]; }), ['theme.font', 'theme.custom_css']);
+    .concat(MEDIA.map(function (m) { return m[0]; }), STATUS.map(function (x) { return x[0]; }),
+      ['theme.font', 'theme.custom_css']);
   var OTHER = '__other__';
   var TYPING_DELAY = 600;       // ms after the last keystroke before a typed name is fetched
 
@@ -238,6 +247,19 @@
         badges.appendChild(s);
       });
     box.appendChild(badges);
+    // The header's status pill, in each state: the dot always takes the
+    // state's colour, the words only when something is wrong.
+    var states = el('div', 'flex flex-wrap items-center gap-2');
+    [['ok', 'Online'], ['warn', 'Degraded'], ['err', 'Offline']].forEach(function (x) {
+      var pill = el('span', 'ws-pill inline-flex items-center gap-2 px-3 py-1 rounded-full border');
+      pill.setAttribute('data-state', x[0]);
+      var dot = el('span', 'ws-status-dot');
+      dot.setAttribute('aria-hidden', 'true');
+      pill.appendChild(dot);
+      pill.appendChild(el('span', 'ws-pill-label text-[13px] font-semibold text-frosted-blue', x[1]));
+      states.appendChild(pill);
+    });
+    box.appendChild(states);
     return box;
   }
 
@@ -275,10 +297,17 @@
       var mgrid = el('div', 'grid sm:grid-cols-3 gap-5 ' + cls.fieldWidth);
       MEDIA.forEach(function (m) { mgrid.appendChild(api.color({ key: m[0], label: m[1], cssVar: m[2] })); });
       media.body.appendChild(mgrid);
+      form.appendChild(media.root);
+
+      var status = WSSettings.card('Status colours', 'The dots and words that show whether your services are working. The words take the colour only when something is wrong.');
+      var sgrid = el('div', 'grid sm:grid-cols-3 gap-5 ' + cls.fieldWidth);
+      STATUS.forEach(function (x) { sgrid.appendChild(api.color({ key: x[0], label: x[1], cssVar: x[2] })); });
+      status.body.appendChild(sgrid);
+      // On a phone the preview follows the last colours, not the side column.
       var phonePreview = el('div', 'lg:hidden');
       phonePreview.appendChild(previewCard());
-      media.body.appendChild(phonePreview);
-      form.appendChild(media.root);
+      status.body.appendChild(phonePreview);
+      form.appendChild(status.root);
 
       var type = WSSettings.card('Font');
       type.body.appendChild(fontControl(api));

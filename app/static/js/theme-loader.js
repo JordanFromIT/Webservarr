@@ -35,33 +35,19 @@
     var root = document.documentElement;
     var c = data.colors || {};
 
-    // Color CSS custom properties (RGB triplets for Tailwind alpha support).
-    // The server already inlined these (#ws-theme); setting them again is
-    // harmless and keeps the fallback path identical.
-    if (c.primary) root.style.setProperty('--color-primary', hexToRgb(c.primary));
-    if (c.secondary) root.style.setProperty('--color-secondary', hexToRgb(c.secondary));
-    if (c.accent) root.style.setProperty('--color-accent', hexToRgb(c.accent));
-    if (c.text) root.style.setProperty('--color-text', hexToRgb(c.text));
-    if (c.text_secondary) root.style.setProperty('--color-text-secondary', hexToRgb(c.text_secondary));
-    if (c.background) root.style.setProperty('--color-background', hexToRgb(c.background));
-
-    // Media type accents. Consumed by the .text-media-* / .badge-media-*
-    // classes in theme.css rather than by Tailwind, so they work on every page.
-    if (c.media_movie) root.style.setProperty('--color-media-movie', hexToRgb(c.media_movie));
-    if (c.media_tv) root.style.setProperty('--color-media-tv', hexToRgb(c.media_tv));
-    if (c.media_book) root.style.setProperty('--color-media-book', hexToRgb(c.media_book));
-    if (c.new_flag) root.style.setProperty('--color-new-flag', hexToRgb(c.new_flag));
-
-    // Raw hex values (for non-Tailwind use like scrollbar styling)
-    if (c.primary) root.style.setProperty('--hex-primary', c.primary);
-    if (c.secondary) root.style.setProperty('--hex-secondary', c.secondary);
-    if (c.accent) root.style.setProperty('--hex-accent', c.accent);
-    if (c.text) root.style.setProperty('--hex-text', c.text);
-    if (c.text_secondary) root.style.setProperty('--hex-text-secondary', c.text_secondary);
-    if (c.background) root.style.setProperty('--hex-background', c.background);
-    if (c.media_movie) root.style.setProperty('--hex-media-movie', c.media_movie);
-    if (c.media_tv) root.style.setProperty('--hex-media-tv', c.media_tv);
-    if (c.media_book) root.style.setProperty('--hex-media-book', c.media_book);
+    // Every colour the server sends (app/settings_registry.COLOR_KEYS): the
+    // palette, the media accents, the status colours. Each becomes an RGB
+    // triplet (--color-media-tv, for Tailwind's alpha syntax) and its raw hex
+    // (--hex-media-tv). The server already inlined these (#ws-theme); setting
+    // them again is harmless and keeps the fallback path identical. The
+    // payload is already safe; the checks keep a stray value off the page.
+    Object.keys(c).forEach(function (key) {
+      var hex = c[key];
+      if (!/^[a-z_]+$/.test(key) || typeof hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(hex)) return;
+      var name = key.replace(/_/g, '-');
+      root.style.setProperty('--color-' + name, hexToRgb(hex));
+      root.style.setProperty('--hex-' + name, hex);
+    });
 
     // Favicon follows the configured logo, so a rebranded install is branded
     // in the browser tab too. The pages ship a static icon link as well.

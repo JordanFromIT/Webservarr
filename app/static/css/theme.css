@@ -26,6 +26,13 @@
   --color-media-tv: 103 232 249;
   --color-media-book: 252 211 77;
 
+  /* Status colours (Settings > Appearance > Status colours). --ws-status-*
+     below point at these, so one setting per state drives the dot, the ring
+     and, on warn and err, the words. */
+  --color-status-ok: 74 222 128;
+  --color-status-warn: 251 191 36;
+  --color-status-err: 248 113 113;
+
   /* Bright gold for the "New" flag. A separate token because no palette
      entry is a true yellow-gold - the eBook amber turns orange under a glow. */
   --color-new-flag: 255 214 10;
@@ -40,6 +47,9 @@
   --hex-media-movie: #E9D5FF;
   --hex-media-tv: #67E8F9;
   --hex-media-book: #FCD34D;
+  --hex-status-ok: #4ADE80;
+  --hex-status-warn: #FBBF24;
+  --hex-status-err: #F87171;
   --hex-new-flag: #FFD60A;
 
   --font-display: "Spline Sans", sans-serif;
@@ -334,7 +344,10 @@ body {
  * last known state in sessionStorage and revalidates in the background; the
  * colours are all here, keyed on that state. They are the status tokens,
  * never palette classes: the tint, the border and the dot take the state's
- * token, the label stays theme text (status tokens are for non-text marks).
+ * token. The words follow Part 5's "status colour only on deviation": theme
+ * text while all is well, the state's status colour on warn and err.
+ * .ws-pill is the reusable part (the Appearance preview wears it too);
+ * #systemStatus adds the unknown state and the live ring.
  *
  * "Online" reads as live: a soft ring leaves the dot every 2.8s and is gone
  * by half way, so the pill rests longer than it moves. The ring is the dot's
@@ -343,10 +356,12 @@ body {
  * signal is for good news only. Unknown paints nothing at all.
  */
 #systemStatus[data-state="unknown"] { visibility: hidden; }
-#systemStatus { --ws-pill: var(--ws-status-off); background: rgb(var(--ws-pill) / .10); border-color: rgb(var(--ws-pill) / .30); }
-#systemStatus[data-state="ok"]   { --ws-pill: var(--ws-status-ok); }
-#systemStatus[data-state="warn"] { --ws-pill: var(--ws-status-warn); }
-#systemStatus[data-state="err"]  { --ws-pill: var(--ws-status-err); }
+.ws-pill { --ws-pill: var(--ws-status-off); background: rgb(var(--ws-pill) / .10); border-color: rgb(var(--ws-pill) / .30); }
+.ws-pill[data-state="ok"]   { --ws-pill: var(--ws-status-ok); }
+.ws-pill[data-state="warn"] { --ws-pill: var(--ws-status-warn); }
+.ws-pill[data-state="err"]  { --ws-pill: var(--ws-status-err); }
+.ws-pill[data-state="warn"] .ws-pill-label { color: rgb(var(--color-status-warn)); }
+.ws-pill[data-state="err"] .ws-pill-label { color: rgb(var(--color-status-err)); }
 .ws-status-dot {
   position: relative; flex-shrink: 0; width: .5rem; height: .5rem; border-radius: 9999px;
   background: rgb(var(--ws-pill, var(--ws-status-off)));
@@ -602,14 +617,16 @@ html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
 
 /* ---- Settings ----
  *
- * Status tokens are for NON-TEXT marks only (lights, invalid-field borders);
- * status text always uses theme colours. Panels are shown by the tab named on
- * <html data-settings-tab>, which an inline script sets before first paint.
+ * The --ws-status-* tokens are for NON-TEXT marks (lights, rings, invalid-field
+ * borders). They are the operator's status colours, so words that must carry
+ * a status colour use the same setting as --color-status-* (text-status-*).
+ * Panels are shown by the tab named on <html data-settings-tab>, which an
+ * inline script sets before first paint.
  */
 :root {
-  --ws-status-ok: 34 197 94;
-  --ws-status-warn: 245 158 11;
-  --ws-status-err: 239 68 68;
+  --ws-status-ok: var(--color-status-ok);
+  --ws-status-warn: var(--color-status-warn);
+  --ws-status-err: var(--color-status-err);
   --ws-status-off: var(--color-accent);
 }
 
