@@ -295,40 +295,24 @@
   // ---- Status pill ----
   //
   // Painted from the last known state at once, revalidated in the background.
-  // Unknown (first ever visit) reserves the space and says nothing.
-  var PILL = {
-    ok: {
-      pill: 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30',
-      dot: 'flex size-2 rounded-full bg-green-500 animate-pulse',
-      text: 'text-green-500 text-xs font-bold uppercase tracking-widest',
-      label: 'All Systems Online'
-    },
-    warn: {
-      pill: 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-yellow-500/10 border border-yellow-500/30',
-      dot: 'flex size-2 rounded-full bg-yellow-500',
-      text: 'text-yellow-500 text-xs font-bold uppercase tracking-widest',
-      label: 'Degraded Performance'
-    },
-    err: {
-      pill: 'flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/30',
-      dot: 'flex size-2 rounded-full bg-red-500',
-      text: 'text-red-500 text-xs font-bold uppercase tracking-widest',
-      label: 'System Issues Detected'
-    }
+  // Unknown (first ever visit) reserves the space and says nothing. The script
+  // owns the state and the words only; every colour, and the live ring on
+  // "ok", is theme.css keyed on data-state (status tokens, not palette classes).
+  var PILL_LABEL = {
+    ok: 'All Systems Online',
+    warn: 'Degraded Performance',
+    err: 'System Issues Detected'
   };
 
   function paintStatus(state) {
     var pill = document.getElementById('systemStatus');
     if (!pill) return;
-    var s = PILL[state];
-    if (!s) { pill.setAttribute('data-state', 'unknown'); return; }
+    var label = PILL_LABEL[state];
+    if (!label) { pill.setAttribute('data-state', 'unknown'); return; }
     if (pill.getAttribute('data-state') === state) return;
-    pill.className = s.pill;
     pill.setAttribute('data-state', state);
-    var dot = pill.querySelector('[data-status-dot]');
     var text = pill.querySelector('[data-status-text]');
-    if (dot) dot.className = s.dot;
-    if (text) { text.className = s.text; text.textContent = s.label; }
+    if (text) text.textContent = label;
   }
 
   function summarise(services) {

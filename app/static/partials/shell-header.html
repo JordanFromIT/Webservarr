@@ -3,8 +3,9 @@
 
   Server-rendered (app/pages.py) with the user already filled in. The pill
   starts in the "unknown" state, which reserves its width but paints nothing -
-  it never says "Loading". shell.js paints the last known state from
-  sessionStorage at once and revalidates in the background.
+  it never says "Loading". shell.js sets data-state and the words from the
+  last known state at once and revalidates in the background; every colour
+  the pill takes is in theme.css, keyed on that state.
 
   notifications.js finds the bells here and in the mobile top bar by
   title="Notifications" and opens its dropdown in the tapped bell's parent -
@@ -13,9 +14,9 @@
 -->
 <header id="appHeader" class="h-16 border-b border-steel-blue/20 hidden lg:flex items-center justify-between px-8 bg-black/40 backdrop-blur-md relative z-50">
   <div class="flex items-center gap-6">
-    <div id="systemStatus" data-state="unknown" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-steel-blue/10 border border-steel-blue/30">
-      <span data-status-dot class="flex size-2 rounded-full bg-steel-blue"></span>
-      <span data-status-text class="text-steel-blue text-xs font-bold uppercase tracking-widest">&nbsp;</span>
+    <div id="systemStatus" data-state="unknown" class="flex items-center gap-2 px-3 py-1.5 rounded-full border">
+      <span data-status-dot class="ws-status-dot" aria-hidden="true"></span>
+      <span data-status-text class="text-frosted-blue text-xs font-bold uppercase tracking-widest">&nbsp;</span>
     </div>
   </div>
   <div class="flex items-center gap-4">

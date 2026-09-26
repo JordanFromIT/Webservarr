@@ -324,10 +324,37 @@ body {
 /* ---- Page shell ----
  *
  * The status pill starts in the "unknown" state: it keeps its box (so the
- * header never reflows) but paints nothing. shell.js paints the last known
- * state from sessionStorage and revalidates in the background.
+ * header never reflows) but paints nothing. shell.js sets data-state from the
+ * last known state in sessionStorage and revalidates in the background; the
+ * colours are all here, keyed on that state. They are the status tokens,
+ * never palette classes: the tint, the border and the dot take the state's
+ * token, the label stays theme text (status tokens are for non-text marks).
+ *
+ * "Online" reads as live: a soft ring leaves the dot every 2.8s and is gone
+ * by half way, so the pill rests longer than it moves. The ring is the dot's
+ * own pseudo-element scaled up in place, so the dot's box, and the header,
+ * never change size. Degraded and issues are steady dots: a calm, repeating
+ * signal is for good news only. Unknown paints nothing at all.
  */
 #systemStatus[data-state="unknown"] { visibility: hidden; }
+#systemStatus { --ws-pill: var(--ws-status-off); background: rgb(var(--ws-pill) / .10); border-color: rgb(var(--ws-pill) / .30); }
+#systemStatus[data-state="ok"]   { --ws-pill: var(--ws-status-ok); }
+#systemStatus[data-state="warn"] { --ws-pill: var(--ws-status-warn); }
+#systemStatus[data-state="err"]  { --ws-pill: var(--ws-status-err); }
+.ws-status-dot {
+  position: relative; flex-shrink: 0; width: .5rem; height: .5rem; border-radius: 9999px;
+  background: rgb(var(--ws-pill, var(--ws-status-off)));
+}
+.ws-status-dot::after { content: ""; position: absolute; inset: 0; border-radius: 9999px; background: inherit; opacity: 0; }
+#systemStatus[data-state="ok"] .ws-status-dot::after { animation: ws-ping 2.8s cubic-bezier(0, 0, .2, 1) infinite; }
+@keyframes ws-ping {
+  0%        { transform: scale(1);   opacity: .55; }
+  45%, 100% { transform: scale(2.4); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-status-dot::after { animation: none; }
+}
 
 /* The dashboard's gauge block is static markup so it reserves its space from
    the first paint; the server marks <html data-netdata> when Netdata is
