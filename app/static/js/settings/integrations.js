@@ -119,6 +119,16 @@
 
   function setText(node, text) { if (node.textContent !== text) node.textContent = text; }
 
+  // The server's same_address(): trimmed, without trailing slashes, with the
+  // scheme and host in any case.
+  function sameAddress(a, b) {
+    function norm(u) {
+      var m = /^([a-z][a-z0-9+.-]*:)?(\/\/[^\/?#]*)?([\s\S]*)$/i.exec(String(u || '').trim().replace(/\/+$/, ''));
+      return (m[1] || '').toLowerCase() + (m[2] || '').toLowerCase() + m[3];
+    }
+    return norm(a) === norm(b);
+  }
+
   WSSettings.registerTab('integrations', {
     mount: function (panel, api) {
       var cards = {};
@@ -449,6 +459,24 @@
       // Signed in with Plex: ask before a save clears or changes the Plex
       // address or token, the way the Sign-in tab asks about its own switches.
       WSSettings.ownSignIn.guard(api, { plex: ['integration.plex.url', 'integration.plex.token'] }, { askOnChange: true });
+      // Each member's eBooks sign-in belongs to the Kavita address it came
+      // from, so moving the address resets them all (the server does it on
+      // save). Ask first. Respelling the address or clearing it resets
+      // nothing and doesn't ask.
+      api.beforeSave(function (keys) {
+        var k = CARDS.kavita.url;
+        if (keys.indexOf(k) < 0) return true;
+        var next = api.get(k);
+        if (!next || sameAddress(next, api.saved(k))) return true;
+        return WSSettings.confirm({
+          title: 'Change the Kavita address?',
+          body: 'Changing this address resets everyone’s eBooks connection. They’ll sign in to eBooks again.',
+          confirmLabel: 'Save the change', cancelLabel: 'Keep the old one', danger: true
+        }).then(function (ok) {
+          if (!ok) api.set(k, api.saved(k));
+          return ok;
+        });
+      });
       // Not returned: the tab shows at once and the lights fill in.
       refresh();
     }

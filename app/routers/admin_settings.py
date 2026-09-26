@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth import session_manager
 from app.config import settings as app_settings
 from app.database import get_db
 from app.integrations import config as integration_config
@@ -42,6 +43,34 @@ _SIGN_IN_KEYS = (
 LOCKOUT_MESSAGE = ("Keep at least one sign-in method on and set up, "
                    "or nobody (including you) will be able to sign in.")
 SAVE_FAILED_MESSAGE = "Couldn't save the settings right now. Nothing was changed; please try again."
+
+
+# Kavita keeps no saved secret, but each member's own Kavita sign-in (held in
+# their session) is sent to its address. A save or import that moves the
+# address to a different place resets them all, so none follows it there.
+KAVITA_URL_KEY = "integration.kavita.url"
+KAVITA_RESET = "reset_ebooks_connections"
+KAVITA_RESET_LABEL = "eBooks connections"
+KAVITA_RESET_NOTE = "Everyone's eBooks connection will be reset (its address changed)"
+
+
+def kavita_moves(current: Dict[str, str], writes: Dict[str, str]) -> bool:
+    """True when `writes` moves the Kavita address somewhere else (not merely
+    respelled, and not cleared: an empty address sends nothing anywhere)."""
+    new_url = writes.get(KAVITA_URL_KEY)
+    return bool(new_url) and not integration_config.same_address(new_url, current.get(KAVITA_URL_KEY))
+
+
+async def reset_kavita_connections() -> None:
+    """Drop every member's Kavita sign-in after the address moved. A failure
+    is logged, not raised: the save has landed, and the proxy sends a token
+    only to the address it was obtained from, so none reaches the new one."""
+    try:
+        cleared = await session_manager.clear_kavita_connections()
+        logger.info("Kavita address changed: reset %d eBooks connection(s)", cleared)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Kavita address changed but the eBooks connections weren't reset (%s)",
+                       type(exc).__name__)
 
 
 def reenter_message(cred_key: str) -> str:
@@ -234,9 +263,12 @@ async def bulk_update_settings(
     every request this worker is serving. It is awaited, so the session is
     still used by one thing at a time."""
     writes, errors = await run_in_threadpool(plan_writes, db, [(i.key, i.value) for i in payload.settings])
+    kavita_moved = not errors and kavita_moves(effective_values(db), writes)
     errors = errors or apply_writes(db, writes)
     if errors:
         return validation_error(errors)
+    if kavita_moved:
+        await reset_kavita_connections()
     return {"saved": list(writes), "values": {k: mask(k, v) for k, v in writes.items()}}
 
 
@@ -269,7 +301,9 @@ def plan_import(db: Session, data: Any) -> Tuple[List[dict], List[str], Dict[str
     always imports back onto the install it came from. Secrets (and any key
     marked deprecated) are ignored, and a saved secret whose address the file
     changes is cleared; per-user, internal and unknown keys, the keys retired
-    in v1.11 among them, are errors."""
+    in v1.11 among them, are errors. A change that moves the Kavita address
+    is followed by an entry that is not a setting ("effect": everyone's eBooks
+    connection is reset), so the preview and the diff token both carry it."""
     if (not isinstance(data, dict) or data.get("format") != EXPORT_FORMAT
             or not isinstance(data.get("settings"), dict)):
         return [], [], {}, {"_file": "This isn't a WebServarr settings file"}
@@ -330,6 +364,10 @@ def plan_import(db: Session, data: Any) -> Tuple[List[dict], List[str], Dict[str
         if k in cleared:
             change["note"] = f"{get_def(k).description} will be cleared (its address changed)"
         changes.append(change)
+        if k == KAVITA_URL_KEY and kavita_moves(current, writes):
+            # Not a setting: what applying the address change also does.
+            changes.append({"key": k, "effect": KAVITA_RESET, "label": KAVITA_RESET_LABEL,
+                            "note": KAVITA_RESET_NOTE})
     return changes, sorted(ignored), warnings, {}
 
 
@@ -400,7 +438,10 @@ async def import_settings(
         return {"changes": changes, "ignored": ignored, "warnings": warnings, "diff_token": token}
     if not payload.diff_token or payload.diff_token != token:
         return JSONResponse(status_code=409, content={"detail": IMPORT_STALE_MESSAGE})
-    errors = apply_writes(db, {c["key"]: c["new"] for c in changes})
+    writes = {c["key"]: c["new"] for c in changes if "effect" not in c}
+    errors = apply_writes(db, writes)
     if errors:
         return validation_error(errors)
-    return {"applied": [c["key"] for c in changes]}
+    if any(c.get("effect") == KAVITA_RESET for c in changes):
+        await reset_kavita_connections()
+    return {"applied": list(writes)}

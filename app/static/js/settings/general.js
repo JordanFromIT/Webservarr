@@ -278,15 +278,18 @@
 
   // The preview: every change (old → new), then the unchanged values today's
   // rules would refuse, which the import leaves as they are. A saved key the
-  // import clears (its address changed) reads as the server's sentence, and
-  // custom CSS is flagged and shown in full.
+  // import clears (its address changed), or everyone's eBooks connection
+  // being reset, reads as the server's sentence, and custom CSS is flagged
+  // and shown in full.
   function previewBody(changes, ignored, warnings) {
     var wrap = el('div');
     if (changes.length) {
       var list = el('ul', 'mt-2 divide-y divide-frosted-blue/10 max-h-[40vh] overflow-y-auto rounded-xl border border-frosted-blue/10');
       changes.forEach(function (c) {
         var li = el('li', 'px-3 py-2');
-        li.appendChild(el('p', 'text-[13px] font-semibold text-frosted-blue', nameOf(c.key)));
+        // An entry that is not a setting (resetting eBooks connections) names itself.
+        var label = typeof c.label === 'string' && c.label ? c.label : nameOf(c.key);
+        li.appendChild(el('p', 'text-[13px] font-semibold text-frosted-blue', label));
         if (noteOf(c)) {
           li.appendChild(flag(noteOf(c)));
         } else if (c.key === 'theme.custom_css') {
@@ -316,7 +319,7 @@
       wrap.appendChild(kept);
     }
     if (ignored.length) {
-      wrap.appendChild(el('p', 'mt-3 text-[13px] text-frosted-blue/45', changes.some(noteOf)
+      wrap.appendChild(el('p', 'mt-3 text-[13px] text-frosted-blue/45', changes.some(function (c) { return noteOf(c) && !c.effect; })
         ? 'Passwords and keys in the file were skipped. Yours stay as they are, apart from any cleared above.'
         : 'Passwords and keys in the file were skipped; yours stay as they are.'));
     }

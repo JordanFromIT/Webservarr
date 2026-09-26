@@ -29,6 +29,7 @@ from app.auth import session_manager
 from app.config import settings
 from app.database import SessionLocal
 from app.dependencies import get_current_user
+from app.integrations.config import same_address
 from app.limiter import limiter
 from app.models import Setting
 from app.settings_registry import switch_is_off
@@ -588,9 +589,12 @@ async def signin_oidc(
         logger.warning("Kavita handshake completed without a token (HTTP %d)", callback.status_code)
         return RedirectResponse("/ebooks?kavita=error", status_code=302)
 
+    # The address is stored with the token: the proxy sends the token only to
+    # the address it came from, so one obtained just before the Kavita address
+    # moved (or missed by the reset) never reaches the new one.
     await session_manager.update_session(
         session_id,
-        {"kavita_token": token, "kavita_api_key": kavita_api_key or ""},
+        {"kavita_token": token, "kavita_api_key": kavita_api_key or "", "kavita_base": base},
     )
     return RedirectResponse("/ebooks", status_code=302)
 
@@ -623,6 +627,12 @@ async def kavita_proxy(
         raise HTTPException(status_code=404, detail="Not found")
 
     token = current_user.get("kavita_token") or None
+    api_key = current_user.get("kavita_api_key") or None
+    if not same_address(current_user.get("kavita_base"), base):
+        # Obtained from another Kavita address (or before the address was
+        # recorded with it): never sent here. Kavita answers 401 and the page
+        # reconnects, which stores a token for this address.
+        token = api_key = None
     headers = build_forward_headers(request, token)
     body = await request.body()
 
@@ -636,7 +646,6 @@ async def kavita_proxy(
     if ("apiKey" not in params) and (
         lowered.startswith("api/image/") or "book-resources" in lowered
     ):
-        api_key = current_user.get("kavita_api_key")
         if api_key:
             params["apiKey"] = api_key
 

@@ -138,6 +138,10 @@ class OIDCClient:
                 )
 
 
+# The session fields that hold a member's Kavita sign-in (kavita_proxy.py).
+KAVITA_SESSION_FIELDS = ("kavita_token", "kavita_api_key", "kavita_base")
+
+
 class SessionManager:
     """Manage user sessions in Redis."""
 
@@ -252,6 +256,19 @@ class SessionManager:
             mapping={k: "" if v is None else str(v) for k, v in fields.items()},
         )
         await redis.expire(session_key, self.max_age)
+
+    async def clear_kavita_connections(self) -> int:
+        """Drop every session's Kavita sign-in (token, key and the address it
+        came from). Run when the Kavita address moves: those credentials
+        belong to the old address and must never be sent to the new one.
+        Each member reconnects through /kavita/connect on their next visit.
+        Returns the number of sessions that held one."""
+        redis = await self.get_redis()
+        cleared = 0
+        async for key in redis.scan_iter(match="session:*", count=500):
+            if await redis.hdel(key, *KAVITA_SESSION_FIELDS):
+                cleared += 1
+        return cleared
 
     async def get_session(self, session_id: str) -> Optional[Dict[str, str]]:
         """
