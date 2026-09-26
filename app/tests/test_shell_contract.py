@@ -18,7 +18,16 @@ BARE_PAGES = ["login", "setup", "reader"]
 # The repo is a template; an operator's own branding lives in the database,
 # never in these files. Operators can add their own names to the guard without
 # committing them: WEBSERVARR_FORBIDDEN_STRINGS="My Server,myserver.example".
-FORBIDDEN_STRINGS = [s for s in os.environ.get("WEBSERVARR_FORBIDDEN_STRINGS", "").split(",") if s.strip()]
+
+
+def parse_forbidden(raw: str) -> list:
+    """Commas, newlines and carriage returns all separate entries (a value pasted
+    into a textarea may carry line breaks); each entry is trimmed, blanks dropped.
+    CI masks exactly this list in its log (.github/workflows/docker-publish.yml)."""
+    return [s.strip() for s in re.split(r"[,\r\n]", raw) if s.strip()]
+
+
+FORBIDDEN_STRINGS = parse_forbidden(os.environ.get("WEBSERVARR_FORBIDDEN_STRINGS", ""))
 
 
 def read(name: str) -> str:
@@ -375,6 +384,11 @@ class ShellContract(unittest.TestCase):
             m = re.search(r"<title>(.*?)</title>", p.read_text(encoding="utf-8"), re.S)
             self.assertIsNotNone(m, p.name)
             self.assertTrue(m.group(1).strip().startswith("WebServarr - "), f"{p.name}: {m.group(1)!r}")
+
+    def test_forbidden_strings_split_on_commas_and_newlines(self):
+        self.assertEqual(parse_forbidden("alpha\nbeta gamma,\r\ndelta,,"), ["alpha", "beta gamma", "delta"])
+        self.assertEqual(parse_forbidden(" one , two\n\n"), ["one", "two"])
+        self.assertEqual(parse_forbidden(""), [])
 
     def test_polls_go_through_ws_poll(self):
         for n in SHELL_PAGES:
