@@ -284,6 +284,70 @@ class FieldWidth(unittest.TestCase):
                         self.assertNotIn("max-w-", classes)
 
 
+def skeleton_of(tab: str) -> str:
+    """The markup of a tab's panel in the frame (its skeleton)."""
+    h = (STATIC / FRAME).read_text(encoding="utf-8")
+    panel = h[h.index(f'<section id="panel-{tab}"'):]
+    return panel[:panel.index("</section>")]
+
+
+class Skeletons(unittest.TestCase):
+    """Polish A: each tab's skeleton at the heights measured at 390, 640, 768
+    and 1440 with Spline Sans loaded (phone first), so the swap moves nothing.
+    Change a tab's layout, re-measure, then change these."""
+
+    def heads(self, panel):
+        return re.findall(r'<div class="(h-\[[\d.]+px\](?: (?:sm|md):h-\[[\d.]+px\])?) mb-5 pt-1">', panel)
+
+    def test_general(self):
+        panel = skeleton_of("general")
+        self.assertEqual(self.heads(panel), ["h-[56.5px]", "h-[79px] sm:h-[56.5px]", "h-[79px]"])
+        self.assertEqual(re.findall(r'<div class="skel (h-\[116\.1px\] sm:h-\[96\.6px\])"></div>', panel),
+                         ["h-[116.1px] sm:h-[96.6px]"] * 2, "Your site's two fields")
+        self.assertIn('<div class="space-y-6 max-w-2xl">', panel)
+        self.assertIn('<div class="h-[352.6px] sm:h-[236.6px] md:h-[192.6px]">', panel)   # the logo row
+        self.assertIn('<div class="h-[39px] sm:h-[19.5px] flex items-center">', panel)     # the backup note
+
+    def test_sign_in_takes_the_setups_shape(self):
+        panel = skeleton_of("sign-in")
+        self.assertEqual(self.heads(panel), ["h-[79px] md:h-[56.5px]", "h-[56.5px]"])
+        blocks = re.findall(r'<div class="skel rounded-2xl ([^"]+)"(?: data-skel-when="([\w-]+)")?( hidden)?></div>', panel)
+        self.assertEqual(blocks, [
+            ("h-[126.6px]", "", ""),                                   # Plex
+            ("h-[126.6px]", "ak-bare", ""),
+            ("h-[510.9px] sm:h-[334.3px]", "ak-fields", " hidden"),
+            ("h-[147.6px] sm:h-[126.6px]", "simple-bare", ""),
+            ("h-[214.6px] sm:h-[174.1px]", "simple-line", " hidden"),
+            ("h-[602.5px] sm:h-[407.3px]", "simple-full", " hidden"),
+        ])
+        self.assertIn('<div class="skel h-[116.1px] md:h-[96.6px] max-w-2xl"></div>', panel)   # Admin email
+        script = re.search(r"<script>(.*?)</script>", panel, re.S).group(1)
+        flat = re.sub(r"\s+", " ", script)
+        for rule in ("'ak-bare': !m.authentik, 'ak-fields': !!m.authentik,",
+                     "'simple-bare': !m.simple,",
+                     "'simple-line': !!m.simple && u.auth_method !== 'simple',",
+                     "'simple-full': !!m.simple && u.auth_method === 'simple'",
+                     "n.hidden = !show[n.getAttribute('data-skel-when')];"):
+            self.assertIn(rule, flat)
+
+    def test_pages(self):
+        panel = skeleton_of("pages")
+        self.assertIn('<div class="h-[124px] sm:h-[79px] mb-5 pt-1">', panel)
+        self.assertIn('<div class="h-1 lg:h-[51.5px]"></div>', panel)
+        self.assertEqual(panel.count('<div class="skel rounded-2xl h-[176.8px] lg:h-[71.2px]"></div>'), 8)
+
+    def test_appearance(self):
+        panel = skeleton_of("appearance")
+        self.assertIn('<div class="h-[79px] sm:h-[56.5px] mb-5 pt-1">', panel)
+        grid = re.search(r'<div class="grid sm:grid-cols-2 gap-5 max-w-2xl">(.*?)</div>\s*</div>', panel, re.S)
+        self.assertIsNotNone(grid, "the colours grid isn't the tab's (capped) grid")
+        self.assertEqual(grid.group(1).count('<div class="skel h-[96.6px]">'), 6)
+        self.assertIn('<div class="hidden lg:block"><div class="skel h-[349.6px] rounded-2xl"></div></div>', panel)
+
+    def test_integrations_intro(self):
+        self.assertIn('<div class="h-[45px] sm:h-[22.5px] mb-8 pt-1">', skeleton_of("integrations"))
+
+
 class KitApi(unittest.TestCase):
     def test_ui_js_public_api(self):
         js = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
@@ -1406,10 +1470,11 @@ class NotificationsTab(unittest.TestCase):
         h = (STATIC / FRAME).read_text(encoding="utf-8")
         panel = h[h.index('<section id="panel-notifications"'):]
         panel = panel[:panel.index("</section>")]
-        heads = re.findall(r'<div class="(h-\[[\d.]+px\](?: md:h-\[[\d.]+px\])?) mb-5 pt-1">', panel)
-        self.assertEqual(heads, ["h-[79px] md:h-[56.5px]"] * 3)
+        heads = re.findall(r'<div class="(h-\[[\d.]+px\](?: (?:sm|md):h-\[[\d.]+px\])?) mb-5 pt-1">', panel)
+        self.assertEqual(heads, ["h-[79px] sm:h-[56.5px]"] * 3)
         # Fix round 1 (R88): each card's description is two lines on every
-        # phone from 360 px and one line from md, so one reservation per
+        # phone from 360 px and one line from sm (Polish A re-measured it at
+        # 640, where md still reserved two), so one reservation per
         # breakpoint holds. The intervals card's text was cut to fit that:
         # longer copy wrapped to a third line below about 400 px.
         src = NOTIFICATIONS.read_text(encoding="utf-8")
