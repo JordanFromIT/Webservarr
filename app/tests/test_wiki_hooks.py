@@ -612,7 +612,9 @@ class WikiEditorDialogs(unittest.TestCase):
 
     def test_a_page_that_will_not_load_is_a_toast(self):
         opened = function_body(js_code_only(editor_js()), "open")
-        self.assertRegex(opened, r"window\.WSUI\.toast\(\s*'\s*', 'err'\);\s*return;")
+        self.assertRegex(opened, r"window\.WSUI\.toast\('\s*', '\s{3}'\);\s*return;")
+        self.assertEqual(len(live_matches(
+            editor_js(), r"window\.WSUI\.toast\('Couldn’t load that page for editing\. Try again\.', 'err'\);")), 1)
 
     def test_restoring_a_draft_asks_in_page(self):
         opened = function_body(js_code_only(editor_js()), "open")
