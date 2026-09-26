@@ -6,8 +6,7 @@ Fetches active streams for dashboard display.
 import logging
 import xml.etree.ElementTree as ET
 import httpx
-from app.database import SessionLocal
-from app.models import Setting
+from app.integrations import config as integration_config
 
 logger = logging.getLogger(__name__)
 
@@ -21,17 +20,13 @@ MAX_THUMBNAIL_BYTES = 10 * 1024 * 1024
 
 
 def _get_config() -> dict:
-    """Read Plex config from settings table (short-lived session)."""
-    db = SessionLocal()
-    try:
-        url_setting = db.query(Setting).filter(Setting.key == "integration.plex.url").first()
-        token_setting = db.query(Setting).filter(Setting.key == "integration.plex.token").first()
-        return {
-            "url": url_setting.value.rstrip("/") if url_setting else None,
-            "token": token_setting.value if token_setting else None,
-        }
-    finally:
-        db.close()
+    """Read Plex config from the settings table, through the reader the
+    Settings status light uses (app/integrations/config.py)."""
+    values = integration_config.read((integration_config.url_key("plex"), integration_config.CREDENTIAL_KEYS["plex"]))
+    return {
+        "url": integration_config.base_url("plex", values),
+        "token": integration_config.credential("plex", values),
+    }
 
 
 async def _get_best_media_quality(

@@ -18,6 +18,7 @@ from app.database import get_db
 from app.dependencies import require_admin
 from app.limiter import limiter
 from app.routers.admin_settings import effective_values
+from app.integrations import config as integration_config
 from app.services import integration_health
 from app.services.integration_health import IDS, get_health, make_client
 from app.utils import is_safe_integration_url
@@ -93,8 +94,9 @@ async def chaptarr_options(
     """ChaptarrOptions: root folders and profiles for the Settings dropdowns,
     fetched under one PROBE_TIMEOUT deadline (address check included)."""
     values = effective_values(db)
-    base = (values.get("integration.chaptarr.url") or "").strip().rstrip("/")
-    key = (values.get("integration.chaptarr.api_key") or "").strip()
+    # Read as the Chaptarr client and the status light read them.
+    base = integration_config.base_url("chaptarr", values) or ""
+    key = integration_config.credential("chaptarr", values) or ""
     if not base or not key:
         return JSONResponse(status_code=400, content={"detail": "Chaptarr isn't set up yet"})
     return await chaptarr_options_response(base, key)

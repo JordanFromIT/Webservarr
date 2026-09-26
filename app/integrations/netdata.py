@@ -5,6 +5,7 @@ Fetches CPU usage, RAM usage, uptime, and hostname from a Netdata agent.
 
 import logging
 import httpx
+from app.integrations import config as integration_config
 from app.models import Setting
 from app.database import SessionLocal
 
@@ -24,9 +25,14 @@ def _get_config() -> dict:
         net_label = db.query(Setting).filter(Setting.key == "netdata.net_label").first()
         net_unit = db.query(Setting).filter(Setting.key == "netdata.net_unit").first()
         net_max = db.query(Setting).filter(Setting.key == "netdata.net_max").first()
+        # Address and key through the reader the Settings status light uses.
+        conn = {
+            integration_config.url_key("netdata"): url_setting.value if url_setting else None,
+            integration_config.CREDENTIAL_KEYS["netdata"]: key_setting.value if key_setting else None,
+        }
         return {
-            "url": url_setting.value.rstrip("/") if url_setting else None,
-            "api_key": key_setting.value if key_setting else None,
+            "url": integration_config.base_url("netdata", conn),
+            "api_key": integration_config.credential("netdata", conn),
             "cpu_label": cpu_label.value if cpu_label else None,
             "ram_label": ram_label.value if ram_label else None,
             "net_label": net_label.value if net_label else None,

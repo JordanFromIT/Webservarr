@@ -24,6 +24,7 @@ from urllib.parse import quote
 
 import httpx
 
+from app.integrations import config as integration_config
 from app.integrations.nyt import BASE_URL as NYT_BASE_URL
 
 logger = logging.getLogger(__name__)
@@ -35,19 +36,8 @@ CACHE_KEY = "webservarr:cache:integration-health"
 CACHE_TTL = 30
 
 
-_CREDENTIAL_KEYS = {
-    "plex": "integration.plex.token",
-    "seerr": "integration.seerr.api_key",
-    "chaptarr": "integration.chaptarr.api_key",
-    "nyt": "integration.nyt.api_key",
-    "sonarr": "integration.sonarr.api_key",
-    "radarr": "integration.radarr.api_key",
-    "netdata": "integration.netdata.api_key",
-}
-
-
 def credential_key(service: str) -> Optional[str]:
-    return _CREDENTIAL_KEYS.get(service)
+    return integration_config.CREDENTIAL_KEYS.get(service)
 
 
 def _now() -> str:
@@ -66,27 +56,38 @@ def make_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=PROBE_TIMEOUT, verify=False, follow_redirects=False)
 
 
+def _spaced(what: str) -> Tuple[str, str]:
+    return WARN, f"The {what} starts or ends with a space. Enter it again without it."
+
+
 def build_probe(service: str, values: Dict[str, str]) -> Tuple[Optional[dict], Optional[Tuple[str, str]]]:
-    """(request, None) to probe, or (None, (state, reason)) when no request is needed."""
-    def val(key: str) -> str:
-        return (values.get(key) or "").strip()
+    """(request, None) to probe, or (None, (state, reason)) when no request is needed.
 
+    Every value is read through app/integrations/config.py, the reader the
+    real client uses, and used as stored: the probe tests what the client will
+    send. A value with spaces around it can't be sent (httpx refuses such a
+    header), so it is named rather than cleaned up and tested green."""
+    cred = integration_config.credential(service, values) or ""
+    cred_name = "token" if service == "plex" else "API key"
     if service == "nyt":
-        key = val("integration.nyt.api_key")
-        if not key:
+        if not cred:
             return None, (UNCONFIGURED, "Not set up yet")
+        if integration_config.padded(cred):
+            return None, _spaced(cred_name)
         return {"url": NYT_BASE_URL.format(list_name="combined-print-and-e-book-fiction"),
-                "headers": {}, "params": {"api-key": key}}, None
+                "headers": {}, "params": {"api-key": cred}}, None
 
-    base = val(f"integration.{service}.url").rstrip("/")
+    base = integration_config.base_url(service, values) or ""
     if not base:
         return None, (UNCONFIGURED, "Not set up yet")
+    if integration_config.padded(base):
+        return None, _spaced("address")
     from app.utils import is_safe_integration_url
     if not is_safe_integration_url(base):
         return None, (ERROR, "That address isn't allowed")
 
-    cred_key = credential_key(service)
-    cred = val(cred_key) if cred_key else ""
+    if integration_config.padded(cred):
+        return None, _spaced(cred_name)
     if service == "plex":
         if not cred:
             return None, (WARN, "Add the Plex token")
@@ -101,7 +102,7 @@ def build_probe(service: str, values: Dict[str, str]) -> Tuple[Optional[dict], O
     if service == "kavita":
         return {"url": f"{base}/api/health", "headers": {}, "params": {}}, None
     if service == "uptime_kuma":
-        slug = val("integration.uptime_kuma.slug") or "default"
+        slug = integration_config.kuma_slug(values)
         return {"url": f"{base}/api/status-page/heartbeat/{quote(slug, safe='')}", "headers": {}, "params": {}}, None
     if service == "netdata":
         headers = {"Accept": "application/json"}
@@ -115,7 +116,7 @@ WRONG_SERVICE = "It answered, but that address doesn't look like the right servi
 
 
 def _kuma_slug(values: Dict[str, str]) -> str:
-    return (values.get("integration.uptime_kuma.slug") or "default").strip() or "default"
+    return integration_config.kuma_slug(values)
 
 
 def map_response(service: str, status_code: int, body=None, values: Optional[Dict[str, str]] = None) -> Tuple[str, str]:
@@ -132,7 +133,8 @@ def map_response(service: str, status_code: int, body=None, values: Optional[Dic
             paths = {str(f.get("path", "")).rstrip("/") for f in body if isinstance(f, dict)}
             for key, label in (("integration.chaptarr.root_folder", "eBook"),
                                ("integration.chaptarr.audiobook_root_folder", "audiobook")):
-                want = (values.get(key) or "").strip().rstrip("/")
+                # As the client sends it: "/books " is not the "/books" folder.
+                want = (values.get(key) or "").rstrip("/")
                 if want and want not in paths:
                     return WARN, f'The {label} folder "{want}" isn\'t set up in Chaptarr'
         return OK, "Connected"

@@ -10,9 +10,8 @@ import time
 from datetime import datetime
 from statistics import median
 import httpx
-from app.database import SessionLocal
+from app.integrations import config as integration_config
 from app.integrations import sonarr
-from app.models import Setting
 
 logger = logging.getLogger(__name__)
 
@@ -60,17 +59,13 @@ ISSUE_STATUS_MAP = {
 
 
 def _get_config() -> dict:
-    """Read Seerr config from settings table (short-lived session)."""
-    db = SessionLocal()
-    try:
-        url_setting = db.query(Setting).filter(Setting.key == "integration.seerr.url").first()
-        key_setting = db.query(Setting).filter(Setting.key == "integration.seerr.api_key").first()
-        return {
-            "url": url_setting.value.rstrip("/") if url_setting else None,
-            "api_key": key_setting.value if key_setting else None,
-        }
-    finally:
-        db.close()
+    """Read Seerr config from the settings table, through the reader the
+    Settings status light uses (app/integrations/config.py)."""
+    values = integration_config.read((integration_config.url_key("seerr"), integration_config.CREDENTIAL_KEYS["seerr"]))
+    return {
+        "url": integration_config.base_url("seerr", values),
+        "api_key": integration_config.credential("seerr", values),
+    }
 
 
 async def _fetch_media_details(client: httpx.AsyncClient, base_url: str, api_key: str,

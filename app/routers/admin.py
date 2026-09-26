@@ -150,7 +150,8 @@ async def test_connection(
     service = payload.service
     values = effective_values(db)
     if service != "nyt":
-        values[f"integration.{service}.url"] = (payload.url or "").strip()
+        # As typed, like the credential: the probe tests what Save would store.
+        values[f"integration.{service}.url"] = payload.url or ""
     cred_key = credential_key(service)
     if cred_key and payload.credentials is not None and payload.credentials != MASK_SENTINEL:
         values[cred_key] = payload.credentials

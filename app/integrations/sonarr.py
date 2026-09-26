@@ -9,8 +9,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 import httpx
-from app.database import SessionLocal
-from app.models import Setting
+from app.integrations import config as integration_config
 
 logger = logging.getLogger(__name__)
 
@@ -35,17 +34,13 @@ RECENT_DAYS = 30
 
 
 def _get_config() -> dict:
-    """Read Sonarr config from settings table (short-lived session)."""
-    db = SessionLocal()
-    try:
-        url_setting = db.query(Setting).filter(Setting.key == "integration.sonarr.url").first()
-        key_setting = db.query(Setting).filter(Setting.key == "integration.sonarr.api_key").first()
-        return {
-            "url": url_setting.value.rstrip("/") if url_setting else None,
-            "api_key": key_setting.value if key_setting else None,
-        }
-    finally:
-        db.close()
+    """Read Sonarr config from the settings table, through the reader the
+    Settings status light uses (app/integrations/config.py)."""
+    values = integration_config.read((integration_config.url_key("sonarr"), integration_config.CREDENTIAL_KEYS["sonarr"]))
+    return {
+        "url": integration_config.base_url("sonarr", values),
+        "api_key": integration_config.credential("sonarr", values),
+    }
 
 
 async def episode_counts() -> dict:

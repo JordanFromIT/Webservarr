@@ -23,8 +23,7 @@ from typing import Dict, List, Optional
 
 import httpx
 
-from app.database import SessionLocal
-from app.models import Setting
+from app.integrations import config as integration_config
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +62,9 @@ async def _throttle() -> None:
 
 
 def _api_key() -> Optional[str]:
-    db = SessionLocal()
-    try:
-        row = db.query(Setting).filter(Setting.key == "integration.nyt.api_key").first()
-        return row.value if row and row.value else None
-    finally:
-        db.close()
+    """The stored key, through the reader the Settings status light uses."""
+    key = integration_config.CREDENTIAL_KEYS["nyt"]
+    return integration_config.credential("nyt", integration_config.read((key,)))
 
 
 async def _fetch_list(client: httpx.AsyncClient, list_name: str, key: str) -> List[Dict[str, str]]:

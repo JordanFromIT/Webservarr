@@ -236,8 +236,10 @@ def _build() -> List[SettingDef]:
         _url("integration.radarr.url", "", "Radarr address", ssrf_check=True, seed=False),
         _secret("integration.radarr.api_key", "Radarr API key", seed=False),
         _url("integration.uptime_kuma.url", "", "Uptime Kuma address", ssrf_check=True, seed=False),
+        # Not empty: Clear on the Integrations card then restores "default", the
+        # page the client and the status light fall back to for an empty row.
         _text("integration.uptime_kuma.slug", "default", "Uptime Kuma status page slug", seed=False,
-              max_length=100, pattern=_TOKEN, pattern_hint=_TOKEN_HINT),
+              max_length=100, allow_empty=False, pattern=_TOKEN, pattern_hint=_TOKEN_HINT),
         _url("integration.netdata.url", "", "Netdata address", ssrf_check=True, seed=False),
         _secret("integration.netdata.api_key", "Netdata API token", seed=False),
         _text("netdata.cpu_label", "", "Label under the CPU gauge", max_length=40),
@@ -427,6 +429,11 @@ def validate_value(key: str, value: str) -> Optional[str]:
         return None if value in ("true", "false") else "Must be on or off"
     if value == "":
         return None if d.allow_empty else "This can't be empty"
+    if d.secret and value != value.strip():
+        # Tokens and keys never start or end with a space, and a client can't
+        # send one that does (httpx refuses the header), so a pasted extra
+        # space is caught here rather than breaking the integration quietly.
+        return "Remove the space at the start or end"
     if len(value) > d.max_length:
         return f"Must be {d.max_length} characters or fewer"
     if d.type == "int":

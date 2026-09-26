@@ -32,6 +32,7 @@ import redis.asyncio as aioredis
 
 from app.config import settings
 from app.database import SessionLocal
+from app.integrations import config as integration_config
 from app.integrations import openlibrary
 from app.models import Setting
 
@@ -55,10 +56,12 @@ def _get_config() -> dict:
             row = db.query(Setting).filter(Setting.key == key).first()
             return row.value if row and row.value else None
 
-        url = _val("integration.chaptarr.url")
+        # Address and key through the reader the Settings status light uses.
+        conn = {k: _val(k) for k in (integration_config.url_key("chaptarr"),
+                                     integration_config.CREDENTIAL_KEYS["chaptarr"])}
         return {
-            "url": url.rstrip("/") if url else None,
-            "api_key": _val("integration.chaptarr.api_key"),
+            "url": integration_config.base_url("chaptarr", conn),
+            "api_key": integration_config.credential("chaptarr", conn),
             "root_folder": _val("integration.chaptarr.root_folder") or "",
             "quality_profile_id": _val("integration.chaptarr.quality_profile_id") or "1",
             "metadata_profile_id": _val("integration.chaptarr.metadata_profile_id") or "2",

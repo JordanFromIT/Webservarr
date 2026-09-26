@@ -6,8 +6,7 @@ Fetches upcoming movies from Radarr's calendar API.
 import logging
 from datetime import datetime, timedelta, timezone
 import httpx
-from app.database import SessionLocal
-from app.models import Setting
+from app.integrations import config as integration_config
 
 logger = logging.getLogger(__name__)
 
@@ -18,17 +17,13 @@ RECENT_DAYS = 30
 
 
 def _get_config() -> dict:
-    """Read Radarr config from settings table (short-lived session)."""
-    db = SessionLocal()
-    try:
-        url_setting = db.query(Setting).filter(Setting.key == "integration.radarr.url").first()
-        key_setting = db.query(Setting).filter(Setting.key == "integration.radarr.api_key").first()
-        return {
-            "url": url_setting.value.rstrip("/") if url_setting else None,
-            "api_key": key_setting.value if key_setting else None,
-        }
-    finally:
-        db.close()
+    """Read Radarr config from the settings table, through the reader the
+    Settings status light uses (app/integrations/config.py)."""
+    values = integration_config.read((integration_config.url_key("radarr"), integration_config.CREDENTIAL_KEYS["radarr"]))
+    return {
+        "url": integration_config.base_url("radarr", values),
+        "api_key": integration_config.credential("radarr", values),
+    }
 
 
 async def library_summary() -> dict:

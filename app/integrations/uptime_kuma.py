@@ -5,8 +5,7 @@ Fetches service status from Uptime Kuma's public status page API.
 
 import logging
 import httpx
-from app.database import SessionLocal
-from app.models import Setting
+from app.integrations import config as integration_config
 
 logger = logging.getLogger(__name__)
 
@@ -24,16 +23,12 @@ STATUS_MAP = {
 
 def _get_config() -> dict:
     """Read Uptime Kuma config from settings table (short-lived session)."""
-    db = SessionLocal()
-    try:
-        url_setting = db.query(Setting).filter(Setting.key == "integration.uptime_kuma.url").first()
-        slug_setting = db.query(Setting).filter(Setting.key == "integration.uptime_kuma.slug").first()
-        return {
-            "url": url_setting.value.rstrip("/") if url_setting else None,
-            "slug": slug_setting.value if slug_setting else "default",
-        }
-    finally:
-        db.close()
+    values = integration_config.read((integration_config.url_key("uptime_kuma"), integration_config.KUMA_SLUG_KEY))
+    return {
+        "url": integration_config.base_url("uptime_kuma", values),
+        # An empty slug means the default page, as the Settings status light tests it.
+        "slug": integration_config.kuma_slug(values),
+    }
 
 
 async def get_monitors() -> list:
