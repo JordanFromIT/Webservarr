@@ -176,9 +176,11 @@ class StatusColoursAreSettings(unittest.TestCase):
             self.assertEqual(tokens.get(f"--ws-status-{state}"), f"var(--color-status-{state})", state)
 
     def test_tailwind_names_them(self):
+        cfg = repo_file(self, "tailwind.config.js")
         for state in ("ok", "warn", "err"):
-            self.assertIn(f'"status-{state}": "rgb(var(--color-status-{state}) / <alpha-value>)"',
-                          repo_file(self, "tailwind.config.js"))
+            self.assertIn(f'"status-{state}": "rgb(var(--color-status-{state}) / <alpha-value>)"', cfg)
+            # R140: the status-text colours too (text-status-ok-text, ...).
+            self.assertIn(f'"status-{state}-text": "var(--ws-status-{state}-text)"', cfg)
 
     def test_appearance_has_a_status_group(self):
         self.assertTrue(live_matches(APPEARANCE, r"WSSettings\.card\('Status colours'"))
@@ -240,11 +242,6 @@ class DerivedStatusText(unittest.TestCase):
             self.assertEqual(got.get(f"--ws-status-{s}-text"), self.MIX.format(s=s), s)
         # Same specificity as the preview card's fallback, so it must come later.
         self.assertGreater(THEME.index("@supports (color: color-mix("), THEME.index("[data-ws-theme-preview] {"))
-
-    def test_tailwind_names_them(self):
-        cfg = repo_file(self, "tailwind.config.js")
-        for s in ("ok", "warn", "err"):
-            self.assertIn(f'"status-{s}-text": "var(--ws-status-{s}-text)"', cfg)
 
     def test_no_css_paints_words_in_a_pure_status_colour(self):
         self.assertNotRegex(THEME, r"(?<![-\w])color:\s*rgb\(var\(--(?:color|ws)-status-")
