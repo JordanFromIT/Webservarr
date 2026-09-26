@@ -110,5 +110,33 @@ class PageStylesAreInTheHead(unittest.TestCase):
             self.assertNotIn("<style", body, name)
 
 
+
+class FormControlsFollowTheTheme(unittest.TestCase):
+    """L6: the forms plugin's grey chevron, blue focus ring and checkbox, and
+    white ring offset are replaced by theme colours, at the plugin's own
+    specificity so a page's utility classes still win."""
+
+    THEME = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+
+    def rule(self, selector):
+        m = re.search(re.escape(selector) + r" \{([^}]*)\}", self.THEME)
+        self.assertIsNotNone(m, selector)
+        return m.group(1)
+
+    def test_chevron_focus_checkbox_and_placeholder(self):
+        chevron = self.rule("select:where(:not([multiple]))")
+        self.assertIn("rgb(var(--color-text) / .6)", chevron)
+        self.assertNotIn("url(", chevron)
+        focus = self.rule("input:focus, textarea:focus, select:focus")
+        self.assertIn("--tw-ring-color: rgb(var(--color-primary))", focus)
+        self.assertIn("--tw-ring-offset-color: rgb(var(--color-background))", focus)
+        self.assertIn("color: rgb(var(--color-primary))", self.rule("input:where([type='checkbox'], [type='radio'])"))
+        self.assertIn("color: rgb(var(--color-text) / .6)", self.rule("input::placeholder, textarea::placeholder"))
+
+    def test_the_preference_toggles_hide_the_plugin_border(self):
+        notif = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
+        self.assertEqual(notif.count("appearance:none; -webkit-appearance:none; border-color:transparent;"), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

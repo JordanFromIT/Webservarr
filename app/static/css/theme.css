@@ -60,6 +60,36 @@ body {
   font-family: var(--font-display);
 }
 
+/* ---- Form controls (L6) ----
+ *
+ * The Tailwind forms plugin (app.css) gives controls fixed greys and blues: a
+ * grey select chevron, blue focus rings and checkboxes, a white ring offset.
+ * These rules put the theme in their place. Each has the plugin rule's own
+ * specificity and comes later, so it replaces the plugin's colour but still
+ * loses to any utility class a page puts on the control.
+ *
+ * The chevron can't be the plugin's SVG in the text colour (a data: image
+ * can't read a CSS variable), so it is drawn with two gradients: a small
+ * down-pointing triangle where the plugin's chevron sits.
+ */
+select:where(:not([multiple])) {
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgb(var(--color-text) / .6) 50%),
+    linear-gradient(135deg, rgb(var(--color-text) / .6) 50%, transparent 50%);
+  background-position: right calc(.5rem + .75em) center, right calc(.5rem + .75em - 5px) center;
+  background-size: 5px 5px, 5px 5px;
+}
+input:focus, textarea:focus, select:focus {
+  --tw-ring-color: rgb(var(--color-primary));
+  --tw-ring-offset-color: rgb(var(--color-background));
+  border-color: rgb(var(--color-primary));
+}
+input:where([type='checkbox'], [type='radio']) {
+  color: rgb(var(--color-primary));
+  border-color: rgb(var(--color-accent) / .5);
+}
+input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .6); }
+
 /* An icon is one glyph, one em wide. Until the icon font arrives, its name
  * ("notifications") is laid out as a word in the fallback font (display=block
  * hides it but keeps its width), then snaps to one glyph and pulls everything
