@@ -418,6 +418,58 @@ main            { view-transition-name: ws-content; }
   @view-transition { navigation: none; }
 }
 
+/* ---- Soft open and close ----
+ *
+ * The account menus, the bell panel and the drawer overlay all show and hide
+ * through display (Tailwind's .hidden), which cannot transition on its own.
+ * transition-behavior: allow-discrete keeps the element displayed until its
+ * fade has run, and @starting-style gives the first displayed frame its
+ * "from" state, so one class does both directions with no timers. A browser
+ * without them (Firefox before 129, Safari before 17.5) shows and hides at
+ * once, as before. Close is quicker than open. A closing panel takes no
+ * pointer: pointer-events is not in the transition list, so it switches off
+ * the moment the close begins, and the drop is small (6px) so the panel
+ * never seems to travel.
+ */
+.ws-pop { transition: opacity 180ms ease-out, transform 180ms ease-out, display 180ms allow-discrete; }
+.ws-pop.hidden { opacity: 0; transform: translateY(-6px); pointer-events: none; transition-duration: 140ms; }
+@starting-style {
+  .ws-pop { opacity: 0; transform: translateY(-6px); }
+}
+
+/* The drawer: its dim overlay fades while the panel slides in from the left
+   edge; on close both leave together, a little faster. shell.js adds .hidden
+   to the overlay at once and this transition holds it displayed until the
+   panel is gone (shell.js keeps a timer only for a browser without
+   allow-discrete). */
+#drawerOverlay { transition: opacity 200ms ease-out, display 200ms allow-discrete; }
+#drawerOverlay.hidden { opacity: 0; pointer-events: none; transition-duration: 160ms; }
+@starting-style {
+  #drawerOverlay { opacity: 0; }
+}
+#drawerPanel { transition: transform 200ms ease-out; }
+#drawerPanel.-translate-x-full { transition-duration: 160ms; }
+
+/* The WSUI dialog (ui.js): the dim fades in and the box rises 6px with it;
+   on close ui.js marks the overlay .is-closing (and inert, so nothing in it
+   can be clicked or focused meanwhile) and removes it after the fade. */
+.ws-dialog { transition: opacity 160ms ease-out; }
+.ws-dialog > .ws-dialog-box { animation: ws-dialog-in 180ms ease-out both; }
+@keyframes ws-dialog-in {
+  from { opacity: 0; transform: translateY(6px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+@starting-style {
+  .ws-dialog { opacity: 0; }
+}
+.ws-dialog.is-closing { opacity: 0; pointer-events: none; transition-duration: 130ms; }
+.ws-dialog.is-closing > .ws-dialog-box { transform: translateY(4px); transition: transform 130ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-pop, #drawerOverlay, #drawerPanel, .ws-dialog, .ws-dialog.is-closing > .ws-dialog-box { transition: none; }
+  .ws-dialog > .ws-dialog-box { animation: none; }
+}
+
 /* ---- Skeletons ----
  *
  * The shape of what is coming, in the theme's own text colour, at the size

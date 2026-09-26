@@ -360,10 +360,15 @@
       panel.classList.remove('-translate-x-full');
       panel.classList.add('translate-x-0');
     }
+    // The overlay's transition (theme.css) holds it displayed while it and the
+    // panel fade out; a browser without allow-discrete would hide both at
+    // once, so there the timer hides the overlay when the panel has left.
+    var discrete = !!(window.CSS && CSS.supports && CSS.supports('transition-behavior', 'allow-discrete'));
     function closeDrawer() {
       panel.classList.remove('translate-x-0');
       panel.classList.add('-translate-x-full');
-      setTimeout(function () { overlay.classList.add('hidden'); }, 300);
+      if (discrete) overlay.classList.add('hidden');
+      else setTimeout(function () { overlay.classList.add('hidden'); }, 160);
     }
     if (overlay && panel) {
       if (hamburger) hamburger.addEventListener('click', openDrawer);

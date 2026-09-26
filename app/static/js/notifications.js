@@ -204,10 +204,10 @@
   function buildDropdown() {
     if (_dropdown) return;
 
+    // ws-pop: theme.css fades it open and closed through .hidden.
     _dropdown = createEl('div',
-      'absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl z-50 flex flex-col'
+      'ws-pop hidden absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl z-50 flex flex-col'
     );
-    _dropdown.style.display = 'none';
 
     // Header
     var header = createEl('div', 'flex items-center justify-between px-4 py-3 border-b border-steel-blue/20');
@@ -360,7 +360,7 @@
     buildDropdown();
     anchorDropdown(bell);
     loadDropdownItems();
-    if (_dropdown) _dropdown.style.display = '';
+    if (_dropdown) _dropdown.classList.remove('hidden');
     _dropdownOpen = true;
     // Close the account menu (see the ws:menu-open note in shell.js).
     document.dispatchEvent(new CustomEvent('ws:menu-open', { detail: _dropdown }));
@@ -371,7 +371,7 @@
   }
 
   function closeDropdown() {
-    if (_dropdown) _dropdown.style.display = 'none';
+    if (_dropdown) _dropdown.classList.add('hidden');
     _dropdownOpen = false;
   }
 

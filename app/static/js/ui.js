@@ -134,10 +134,12 @@
     opts = opts || {};
     return new Promise(function (resolve) {
       var previous = document.activeElement;
-      var overlay = el('div', 'fixed inset-0 z-[95] flex items-end sm:items-center justify-center p-4 ' +
+      // ws-dialog / ws-dialog-box: theme.css fades the dim in and lifts the
+      // box 6px with it, and fades both out again on close.
+      var overlay = el('div', 'ws-dialog fixed inset-0 z-[95] flex items-end sm:items-center justify-center p-4 ' +
         'bg-background-dark/70 backdrop-blur-sm');
-      var box = el('div', 'w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border border-frosted-blue/10 ' +
-        'bg-background-dark shadow-2xl p-6 ws-panel-in');
+      var box = el('div', 'ws-dialog-box w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border ' +
+        'border-frosted-blue/10 bg-background-dark shadow-2xl p-6');
       box.setAttribute('role', opts.danger || opts.alert ? 'alertdialog' : 'dialog');
       box.setAttribute('aria-modal', 'true');
       dialogCount += 1;
@@ -176,7 +178,16 @@
           document.removeEventListener('keydown', onKey, true);
           document.removeEventListener('focusin', onFocusIn, true);
         }
-        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        // The overlay fades before it leaves the DOM; inert meanwhile, so
+        // nothing in it can be clicked or take focus. Reduced motion removes
+        // it at once.
+        function remove() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+        if (reducedMotion()) remove();
+        else {
+          overlay.inert = true;
+          overlay.classList.add('is-closing');
+          setTimeout(remove, 160);
+        }
         // Only the dialog on top owns focus. Hand it back to what opened this
         // one, unless that is gone or sits outside the dialog now on top.
         if (wasTop) {

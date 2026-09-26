@@ -35,7 +35,7 @@
         <p id="mobileRole" class="text-[10px] text-steel-blue hidden sm:block">{{user_role}}</p>
       </div>
     </button>
-    <div id="mobileUserMenuDropdown" class="hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
+    <div id="mobileUserMenuDropdown" class="ws-pop hidden absolute right-0 top-full mt-2 w-48 bg-black/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
       <a href="/settings#sign-in" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors {{admin_block}}">
         <span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>
         Account settings
@@ -49,7 +49,7 @@
 </div>
 
 <div id="drawerOverlay" class="lg:hidden fixed inset-0 z-50 bg-black/60 hidden" style="backdrop-filter:blur(2px)">
-  <aside id="drawerPanel" class="w-72 bg-background-dark border-r border-steel-blue/30 h-full flex flex-col transform -translate-x-full transition-transform duration-300">
+  <aside id="drawerPanel" class="w-72 bg-background-dark border-r border-steel-blue/30 h-full flex flex-col transform -translate-x-full">
     <div class="p-6">
       <div class="flex items-center justify-between mb-3">
         <div class="flex-1"></div>
