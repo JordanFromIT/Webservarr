@@ -346,7 +346,22 @@ class Validation(unittest.TestCase):
         self.bad("system.admin_email", "not-an-email")
         self.ok("system.admin_email", "")
         self.ok("system.admin_email", "admin@example.com")
+        # Polish A R127: addresses the pattern lets through but py_vapid won't
+        # sign with, which would stop every push.
+        self.bad("system.admin_email", "name@gmail..com")
+        self.bad("system.admin_email", "x@bad!.com")
         self.bad("wiki.hook_tickets", "Not A Slug")
+
+    def test_admin_email_is_judged_by_the_push_modules_own_check(self):
+        # The registry reuses push.vapid_subject_ok on push.vapid_subject(v),
+        # so the two can't disagree about which addresses break push.
+        from unittest import mock
+        from app.services import push
+        with mock.patch.object(push, "vapid_subject_ok", return_value=False) as ok:
+            self.assertIn("Push services won't accept", reg.validate_value("system.admin_email", "admin@example.com"))
+        ok.assert_called_once_with("mailto:admin@example.com")
+        with mock.patch.object(push, "vapid_subject_ok", return_value=True):
+            self.assertIsNone(reg.validate_value("system.admin_email", "name@gmail..com"))
 
     def test_unstorable_characters(self):
         # A lone UTF-16 surrogate can't be encoded, so SQLite can't store it:

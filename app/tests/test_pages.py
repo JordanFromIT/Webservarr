@@ -727,10 +727,12 @@ class SettingsSetupFlags(unittest.TestCase):
                 Row("integration.seerr.url", "http://seerr"), Row("integration.authentik.client_secret", "s")]
         session = mock.MagicMock()
         session.query.return_value.filter.return_value.all.return_value = rows
-        with mock.patch.object(pages, "SessionLocal", return_value=session):
+        from app.services import push
+        with mock.patch.object(pages, "SessionLocal", return_value=session), \
+             mock.patch.object(push, "status_reason", return_value=None):
             got = pages.settings_setup()
         self.assertEqual(got, {"plex": False, "seerr": True, "chaptarr": False, "sonarr": False, "radarr": False,
-                               "kavita": False, "authentik_url": False, "authentik_secret": True})
+                               "kavita": False, "authentik_url": False, "authentik_secret": True, "push_reason": None})
         session.close.assert_called_once()
 
 
@@ -740,10 +742,15 @@ class NewsCardsHoldTheirSkeleton(unittest.TestCase):
     home page and the archive."""
 
     def test_renderers_and_skeletons_agree(self):
+        titles = {"index.html": "'<h4 data-news-title class=\"font-bold text-frosted-blue break-words min-w-0' + "
+                                "(open ? '' : ' min-h-12 sm:min-h-0') + '\">'",
+                  "news.html": "'<h2 data-news-title class=\"font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0\">'"}
         for name, tag, cards in (("index.html", "h4", 2), ("news.html", "h2", 3)):
             with self.subTest(name):
                 page = static_text(name)
-                self.assertIn(f"'<{tag} class=\"font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0\">'", page)
+                self.assertIn(titles[name], page)
+                # Fix round 2: an open card (pinned, new, or after Read more) has no title gap.
+                self.assertIn("if (title) title.classList.toggle('min-h-12', !nowOpen);", page)
                 self.assertIn("'<p class=\"text-sm text-frosted-blue/60 mt-1 line-clamp-2 min-h-10\">'", page)
                 self.assertEqual(page.count('<p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p>'), cards)
                 self.assertEqual(page.count('<p class="text-sm mt-1 min-h-10">&nbsp;</p>'), cards)

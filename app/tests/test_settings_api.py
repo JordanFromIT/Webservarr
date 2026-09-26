@@ -964,3 +964,37 @@ class PushStatusFixRound1(PushStatusBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AdminEmailPushContact(PushStatusBase):
+    """Polish A R127: a saved Admin email can't silently break push, an old
+    bad row still explains itself, and the Settings skeleton's push line is
+    the status endpoint's own reason."""
+
+    def test_saving_an_address_push_refuses_is_refused(self):
+        errors = self.assertRejected(self.save(("system.admin_email", "name@gmail..com")))
+        self.assertIn("Push services won't accept", errors["system.admin_email"])
+        self.assertIsNone(helpers.get(self.db, "system.admin_email"))
+        self.assertEqual(self.save(("system.admin_email", "owner@example.com")).status_code, 200)
+
+    def test_an_existing_bad_row_still_explains_itself_and_blocks_nothing_else(self):
+        self.seed_keys()
+        helpers.put(self.db, "system.admin_email", "name@gmail..com")   # saved before the rule
+        body = self.status().json()
+        self.assertFalse(body["push_ready"])
+        self.assertIn("Admin email", body["reason"])
+        # Only a change to the field is judged: other saves go through.
+        self.assertEqual(self.save(("branding.app_name", "Cinema")).status_code, 200)
+
+    def test_the_status_and_the_skeleton_share_one_rule(self):
+        from app import pages
+        from app.services import push
+        with mock.patch.object(push, "status_reason", return_value="Some reason.") as rule, \
+             mock.patch.object(push, "read_last_push", mock.AsyncMock(return_value=None)):
+            self.assertEqual(self.status().json()["reason"], "Some reason.")
+            with mock.patch.object(pages, "SessionLocal", self.Session):
+                self.assertEqual(pages.settings_setup()["push_reason"], "Some reason.")
+        self.assertEqual(rule.call_count, 2)
+        self.seed_keys()
+        with mock.patch.object(pages, "SessionLocal", self.Session):
+            self.assertIsNone(pages.settings_setup()["push_reason"])

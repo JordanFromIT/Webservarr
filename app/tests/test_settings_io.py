@@ -334,3 +334,22 @@ class OldBackupEmptySlug(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ImportAdminEmailPushContact(SettingsBackup):
+    """Polish A R127: an import can't bring in an Admin email push refuses;
+    one already stored and unchanged by the file is only a warning."""
+
+    def test_a_changed_bad_address_is_refused(self):
+        data = self.export().json()
+        data["settings"]["system.admin_email"] = "name@gmail..com"
+        errors = self.assertRejected(self.post(data))
+        self.assertIn("system.admin_email", errors)
+
+    def test_an_unchanged_bad_row_is_a_warning(self):
+        helpers.put(self.db, "system.admin_email", "name@gmail..com")
+        data = self.export().json()
+        self.assertEqual(data["settings"]["system.admin_email"], "name@gmail..com")
+        r = self.post(data)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("system.admin_email", r.json()["warnings"])

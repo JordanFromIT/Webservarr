@@ -356,7 +356,7 @@ class Skeletons(unittest.TestCase):
         for tab in TABS:
             known = module_strings(self.MODULE[tab], "ui.js", "settings/kit.js") | extra.get(tab, set())
             if tab == "notifications":
-                known |= module_strings("routers/admin.py")
+                known |= module_strings("services/push.py")
             with self.subTest(tab):
                 missing = [w for w in skeleton_words(tab) if w not in known]
                 self.assertEqual(missing, [], f"{tab}: words its tab doesn't say")
@@ -412,7 +412,9 @@ class Skeletons(unittest.TestCase):
                      "'account-full': !!f.show_simple_auth && u.auth_method === 'simple',",
                      "'account-line': !!f.show_simple_auth && u.auth_method !== 'simple',",
                      "'css-open': !!b.custom_css,",
-                     "'push-ready': !!b.vapid_public_key,",
+                     "'push-ready': !s.push_reason,",
+                     "'push-reason': !!s.push_reason",
+                     "if (s.push_reason) document.querySelector('[data-skel-when=\"push-reason\"] .skel-text').textContent = s.push_reason;",
                      "library: s.kavita ? '' : 'kavita',",
                      "requests: b.requests_source === 'seerr_embed' && !s.seerr ? 'seerr-embed' : (!s.seerr && !s.chaptarr ? 'requests' : ''),",
                      "calendar: s.sonarr || s.radarr ? '' : 'arr'",
@@ -420,7 +422,7 @@ class Skeletons(unittest.TestCase):
             self.assertIn(rule, script)
         # Every state's parts exist, and each page note is needsSetup()'s own words.
         for key in ("plex-hint", "ak-fields-saved", "ak-fields-input", "account-full", "account-line",
-                    "all-off", "css-open", "push-ready", "push-nokeys"):
+                    "all-off", "css-open", "push-ready", "push-reason"):
             self.assertIn(f'data-skel-when="{key}"', h, key)
         pages = (STATIC / "js" / "settings" / "pages.js").read_text(encoding="utf-8")
         for key, text in (("kavita", "eBooks needs Kavita. It stays out of the sidebar until Kavita is set up."),
@@ -437,7 +439,8 @@ class Skeletons(unittest.TestCase):
 
     def test_the_setup_flags_come_from_the_server(self):
         py = (STATIC.parent / "pages.py").read_text(encoding="utf-8")
-        for flag in ("plex", "seerr", "chaptarr", "sonarr", "radarr", "kavita", "authentik_url", "authentik_secret"):
+        for flag in ("plex", "seerr", "chaptarr", "sonarr", "radarr", "kavita", "authentik_url", "authentik_secret",
+                     "push_reason"):
             self.assertIn(f'"{flag}": ', py)
 
 
