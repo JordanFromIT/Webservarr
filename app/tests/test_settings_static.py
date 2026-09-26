@@ -212,6 +212,47 @@ class Hygiene(unittest.TestCase):
                 self.assertNotIn(leaked, text, f"{f.name} carries a default ({leaked}); read it from meta")
 
 
+class OwnSignInGuard(unittest.TestCase):
+    """One copy of "which sign-in methods work" and of the question asked
+    before a save stops the admin's own method (settings/signin-rule.js),
+    used by the Sign-in tab and by Integrations' Plex card."""
+
+    def rule(self):
+        return js_code_only((STATIC / "js" / "settings" / "signin-rule.js").read_text(encoding="utf-8"))
+
+    def test_loaded_with_the_kit_not_with_a_tab(self):
+        # Tab modules load the first time their tab opens, in any order.
+        h = (STATIC / FRAME).read_text(encoding="utf-8")
+        tag = '<script src="/static/js/settings/signin-rule.js?v=1"></script>'
+        self.assertEqual(h.count(tag), 1)
+        self.assertLess(h.index("/static/js/settings/kit.js?v="), h.index(tag))
+        self.assertLess(h.index("</template>"), h.index(tag))
+        self.assertLess(h.index(tag), h.index("WSSettings.boot()"))
+
+    def test_the_rule_lives_once(self):
+        rule = self.rule()
+        self.assertRegex(rule, r"WSSettings\.ownSignIn = \{")
+        # Plex is set up with an address and any token, as the server's lockout guard reads it.
+        self.assertRegex(rule, r"if \(method === '    '\) return !!read\('[^']*'\) && !!read\('[^']*'\);")
+        signin = js_code_only((STATIC / "js" / "settings" / "signin.js").read_text(encoding="utf-8"))
+        for name in ("setUp", "usable", "sessionMethod"):
+            self.assertNotRegex(signin, r"\bfunction " + name + r"\(", name)
+        self.assertNotRegex(signin, r"\bapi\.beforeSave\(")
+        self.assertEqual(len(re.findall(r"\bWSSettings\.ownSignIn\.guard\(api, OWN_KEYS\);", signin)), 1)
+
+    def test_integrations_asks_before_the_plex_connection_changes(self):
+        src = (STATIC / "js" / "settings" / "integrations.js").read_text(encoding="utf-8")
+        self.assertEqual(len(live_matches(src, r"WSSettings\.ownSignIn\.guard\(api, \{ plex: \['integration\.plex\.url', "
+                                               r"'integration\.plex\.token'\] \}, \{ askOnChange: true \}\);")), 1)
+
+    def test_the_guard(self):
+        guard = function_body(self.rule(), "guard")
+        self.assertIn("if (!touched.length || !usable(mine, api.saved)) return true;", guard)
+        self.assertIn("var breaks = !usable(mine, api.get);", guard)
+        self.assertIn("if (!breaks && !opts.askOnChange) return true;", guard)
+        self.assertRegex(guard, r"if \(!ok\) touched\.forEach\(function \(k\) \{ api\.set\(k, api\.saved\(k\)\); \}\);\s*return ok;")
+
+
 class KitApi(unittest.TestCase):
     def test_ui_js_public_api(self):
         js = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
