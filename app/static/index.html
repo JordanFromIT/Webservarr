@@ -64,7 +64,9 @@
 <h3 class="text-xl font-bold text-frosted-blue">Service Health</h3>
 <span id="serviceLastChecked" class="text-[10px] text-steel-blue ml-auto"></span>
 </div>
-<!-- Netdata Gauges -->
+<!-- Netdata Gauges. The CPU and RAM detail lines hold their one line of
+     height before loadSystemStats fills them (the core count and memory
+     always arrive with the stats), so the centred readings don't hop up. -->
 <div id="netdataGauges" class="bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 mb-4">
 <div class="flex justify-between items-center">
 <!-- CPU Gauge -->
@@ -77,7 +79,7 @@
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
 <span class="text-xs text-steel-blue font-medium">CPU</span>
 <span id="cpuGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
-<span id="cpuGaugeDetail" class="text-[10px] text-steel-blue/70"></span>
+<span id="cpuGaugeDetail" class="min-h-[1.5em] text-[10px] text-steel-blue/70"></span>
 </div>
 </div>
 </div>
@@ -91,7 +93,7 @@
 <div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
 <span class="text-xs text-steel-blue font-medium">RAM</span>
 <span id="ramGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
-<span id="ramGaugeDetail" class="text-[10px] text-steel-blue/70"></span>
+<span id="ramGaugeDetail" class="min-h-[1.5em] text-[10px] text-steel-blue/70"></span>
 </div>
 </div>
 </div>
