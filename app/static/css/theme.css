@@ -366,8 +366,8 @@ body {
 .ws-pill[data-state="ok"]   { --ws-pill: var(--ws-status-ok); }
 .ws-pill[data-state="warn"] { --ws-pill: var(--ws-status-warn); }
 .ws-pill[data-state="err"]  { --ws-pill: var(--ws-status-err); }
-.ws-pill[data-state="warn"] .ws-pill-label { color: rgb(var(--color-status-warn)); }
-.ws-pill[data-state="err"] .ws-pill-label { color: rgb(var(--color-status-err)); }
+.ws-pill[data-state="warn"] .ws-pill-label { color: var(--ws-status-warn-text); }
+.ws-pill[data-state="err"] .ws-pill-label { color: var(--ws-status-err-text); }
 .ws-status-dot {
   position: relative; flex-shrink: 0; width: .5rem; height: .5rem; border-radius: 9999px;
   background: rgb(var(--ws-pill, var(--ws-status-off)));
@@ -630,8 +630,10 @@ html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
 /* ---- Settings ----
  *
  * The --ws-status-* tokens are for NON-TEXT marks (lights, rings, invalid-field
- * borders). They are the operator's status colours, so words that must carry
- * a status colour use the same setting as --color-status-* (text-status-*).
+ * borders, fills). Words that carry a status use the -text variants below
+ * (text-status-ok-text, ...): the status colour mixed half and half with the
+ * text colour, so they keep the state's hue and still read on the operator's
+ * own background, light or dark (R140).
  * Panels are shown by the tab named on <html data-settings-tab>, which an
  * inline script sets before first paint.
  */
@@ -642,6 +644,14 @@ html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
   /* "Off" (not set up) is neutral: the text colour, drawn faint, so it never
      reads as an error or as pending whatever the accent is (L5). */
   --ws-status-off: var(--color-text);
+
+  /* Status words (R140). Plain theme text first: a var() declaration can't
+     fall back on its own (it is only found invalid once computed), so the
+     mix is switched on under @supports below, and a browser without
+     color-mix() shows the words in the text colour. */
+  --ws-status-ok-text: rgb(var(--color-text));
+  --ws-status-warn-text: rgb(var(--color-text));
+  --ws-status-err-text: rgb(var(--color-text));
 
   /* A shadow in the page's own hue, dark enough to read on any background:
      black on the shipped black page, a soft grey on a white one (L3). */
@@ -664,6 +674,20 @@ html:not([data-safe-theme]) #safeThemeNotice { display: none; }
   --ws-status-warn: var(--color-status-warn);
   --ws-status-err: var(--color-status-err);
   --ws-status-off: var(--color-text);
+  --ws-status-ok-text: rgb(var(--color-text));
+  --ws-status-warn-text: rgb(var(--color-text));
+  --ws-status-err-text: rgb(var(--color-text));
+}
+
+/* 50% is the most status colour that still clears 4.5:1 for 12px bold words
+   with the shipped status colours on both the shipped black background and a
+   near-white one (#F8FAFC); 55% drops the light-theme ok/warn words to 4.3. */
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+  :root, [data-ws-theme-preview] {
+    --ws-status-ok-text: color-mix(in srgb, rgb(var(--ws-status-ok)) 50%, rgb(var(--color-text)));
+    --ws-status-warn-text: color-mix(in srgb, rgb(var(--ws-status-warn)) 50%, rgb(var(--color-text)));
+    --ws-status-err-text: color-mix(in srgb, rgb(var(--ws-status-err)) 50%, rgb(var(--color-text)));
+  }
 }
 html[data-safe-theme] [data-ws-theme-preview] {
   background: linear-gradient(rgb(var(--color-text) / .04), rgb(var(--color-text) / .04)), rgb(var(--color-background));

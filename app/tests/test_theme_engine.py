@@ -207,8 +207,47 @@ class StatusColourOnlyOnDeviation(unittest.TestCase):
     def test_only_warn_and_err_tint_the_words(self):
         for state in ("warn", "err"):
             rule = css_rule(THEME, f'.ws-pill[data-state="{state}"] .ws-pill-label')
-            self.assertIn(f"color: rgb(var(--color-status-{state}))", rule)
+            self.assertIn(f"color: var(--ws-status-{state}-text)", rule)
         self.assertNotRegex(top_level(THEME), r'\[data-state="ok"\][^{,]*(?:ws-pill-label|data-status-text)')
+
+
+class DerivedStatusText(unittest.TestCase):
+    """R140: status WORDS are the status colour mixed with the text colour, so
+    they keep the state's hue and still clear 4.5:1 on the operator's own
+    background, light or dark. The pure status colours stay for marks."""
+
+    MIX = "color-mix(in srgb, rgb(var(--ws-status-{s})) 50%, rgb(var(--color-text)))"
+
+    def supports_block(self) -> str:
+        m = re.search(r"@supports \(color: color-mix\(in srgb, red 50%, blue\)\) \{\s*"
+                      r":root, \[data-ws-theme-preview\] \{([^{}]*)\}\s*\}", THEME)
+        self.assertIsNotNone(m, "no @supports block switching the mix on")
+        return m.group(1)
+
+    def test_plain_text_is_the_fallback(self):
+        # Without color-mix() the words are the text colour, never unset.
+        tokens = {}
+        for body in blocks(THEME, ":root"):
+            tokens.update(declared(body))
+        preview = declared(blocks(THEME, "[data-ws-theme-preview]")[0])
+        for s in ("ok", "warn", "err"):
+            self.assertEqual(tokens.get(f"--ws-status-{s}-text"), "rgb(var(--color-text))", s)
+            self.assertEqual(preview.get(f"--ws-status-{s}-text"), "rgb(var(--color-text))", s)
+
+    def test_the_mix_applies_where_supported_and_after_the_fallbacks(self):
+        got = declared(self.supports_block())
+        for s in ("ok", "warn", "err"):
+            self.assertEqual(got.get(f"--ws-status-{s}-text"), self.MIX.format(s=s), s)
+        # Same specificity as the preview card's fallback, so it must come later.
+        self.assertGreater(THEME.index("@supports (color: color-mix("), THEME.index("[data-ws-theme-preview] {"))
+
+    def test_tailwind_names_them(self):
+        cfg = repo_file(self, "tailwind.config.js")
+        for s in ("ok", "warn", "err"):
+            self.assertIn(f'"status-{s}-text": "var(--ws-status-{s}-text)"', cfg)
+
+    def test_no_css_paints_words_in_a_pure_status_colour(self):
+        self.assertNotRegex(THEME, r"(?<![-\w])color:\s*rgb\(var\(--(?:color|ws)-status-")
 
 
 

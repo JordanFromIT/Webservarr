@@ -26,11 +26,17 @@ module.exports = {
         "frosted-blue": "rgb(var(--color-text) / <alpha-value>)",
         "bright": "rgb(var(--color-text-secondary) / <alpha-value>)",
         "background-dark": "rgb(var(--color-background) / <alpha-value>)",
-        // The operator's status colours (Settings > Appearance). Text in them
-        // only where the state is the point: status colour on deviation.
+        // The operator's status colours (Settings > Appearance), for dots,
+        // rings, fills and borders.
         "status-ok": "rgb(var(--color-status-ok) / <alpha-value>)",
         "status-warn": "rgb(var(--color-status-warn) / <alpha-value>)",
         "status-err": "rgb(var(--color-status-err) / <alpha-value>)",
+        // Status WORDS (R140): the status colour mixed with the text colour
+        // (theme.css --ws-status-*-text), so they read on any background.
+        // Only where the state is the point: status colour on deviation.
+        "status-ok-text": "var(--ws-status-ok-text)",
+        "status-warn-text": "var(--ws-status-warn-text)",
+        "status-err-text": "var(--ws-status-err-text)",
       },
       fontFamily: {
         "display": ["var(--font-display)", "sans-serif"],
