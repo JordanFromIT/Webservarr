@@ -403,7 +403,6 @@ main            { view-transition-name: ws-content; }
 }
 .skel-line   { height: 0.85em; border-radius: 6px; }
 .skel-num    { display: inline-block; width: 2.2ch; height: 1em; vertical-align: -0.1em; border-radius: 6px; }
-.skel-tile   { height: 92px; border-radius: 12px; }
 .skel-card   { height: 116px; border-radius: 12px; }
 .skel-row    { height: 56px; border-radius: 10px; }
 .skel-poster { aspect-ratio: 2 / 3; border-radius: 12px; }

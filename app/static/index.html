@@ -123,10 +123,13 @@
 </div>
 </div>
 <!-- Service Tiles -->
+<!-- Skeleton tiles are built like the real tile in renderServices: the same
+     border, the same fixed-height top (a 32px icon and a two-line label slot)
+     and the same status bar, with nothing in them. Change one, change both. -->
 <div id="servicesContainer" class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr))">
-<div class="skel skel-tile" aria-hidden="true"></div>
-<div class="skel skel-tile" aria-hidden="true"></div>
-<div class="skel skel-tile" aria-hidden="true"></div>
+<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="min-h-[calc(4rem_+_27.5px)]"></div><div class="py-1 text-[10px]">&nbsp;</div></div>
+<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="min-h-[calc(4rem_+_27.5px)]"></div><div class="py-1 text-[10px]">&nbsp;</div></div>
+<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="min-h-[calc(4rem_+_27.5px)]"></div><div class="py-1 text-[10px]">&nbsp;</div></div>
 </div>
 </section>
 <!-- News & Updates -->
@@ -165,8 +168,15 @@ View all<span class="material-symbols-outlined text-sm">chevron_right</span>
 </button>
 </div>
 </div>
+<!-- One row of skeleton cards (one on a phone, two from md, three from lg),
+     each built like a real Direct Play card in renderActiveStreams: the 16:9
+     artwork, then the play line and the progress block with nothing in them.
+     So one row of streams lands without moving anything; more rows grow
+     downward. STREAM_CARD_SHAPE below is the same card. Change one, change all. -->
 <div id="streamsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-<div class="skel rounded-xl h-64" aria-hidden="true"></div>
+<div class="skel rounded-xl overflow-hidden border border-transparent" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 space-y-3 invisible"><span class="text-xs font-bold">Direct Play</span><div class="space-y-1"><div class="flex text-[10px] font-bold uppercase"><span>Progress</span></div><div class="h-1"></div></div></div></div>
+<div class="skel rounded-xl overflow-hidden border border-transparent hidden md:block" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 space-y-3 invisible"><span class="text-xs font-bold">Direct Play</span><div class="space-y-1"><div class="flex text-[10px] font-bold uppercase"><span>Progress</span></div><div class="h-1"></div></div></div></div>
+<div class="skel rounded-xl overflow-hidden border border-transparent hidden lg:block" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 space-y-3 invisible"><span class="text-xs font-bold">Direct Play</span><div class="space-y-1"><div class="flex text-[10px] font-bold uppercase"><span>Progress</span></div><div class="h-1"></div></div></div></div>
 </div>
 </section>
 <!-- Upcoming Releases -->
@@ -481,15 +491,36 @@ async function loadActiveStreams() {
             if (_lastStreams && _lastStreams.length > 0) return;
             WS.arrive('streams', function () {
                 document.getElementById('streamChevrons').classList.add('hidden');
-                WS.setHTML(document.getElementById('streamsContainer'), `
-                    <div class="text-center text-steel-blue py-8 col-span-3">
-                        <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
-                        <p>Plex not configured</p>
-                    </div>
-                `);
+                WS.setHTML(document.getElementById('streamsContainer'), streamsStateRow('Plex not configured'));
             });
         }
     });
+}
+
+// A Direct Play card with nothing in it: the shape the skeleton row in
+// #streamsContainer is built from, repeated here for the empty and error
+// states. Change one, change both.
+const STREAM_CARD_SHAPE =
+    '<div class="rounded-xl border border-transparent"><div class="aspect-video"></div>' +
+    '<div class="p-4 space-y-3"><span class="text-xs font-bold">Direct Play</span>' +
+    '<div class="space-y-1"><div class="flex text-[10px] font-bold uppercase"><span>Progress</span></div>' +
+    '<div class="h-1"></div></div></div></div>';
+
+// The empty and error states hold the height of the one row of cards the
+// skeleton reserved, so the section neither shrinks when there is nothing
+// playing nor jumps when the first stream starts. The message sits over an
+// invisible card in the same grid columns. `label` is always a fixed string
+// from this file, never data.
+function streamsStateRow(label) {
+    return '<div class="col-span-full relative">' +
+            '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 invisible" aria-hidden="true">' +
+                STREAM_CARD_SHAPE +
+            '</div>' +
+            '<div class="absolute inset-0 flex flex-col items-center justify-center text-center text-steel-blue">' +
+                '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>' +
+                '<p>' + label + '</p>' +
+            '</div>' +
+        '</div>';
 }
 
 function renderActiveStreams(streams) {
@@ -504,12 +535,7 @@ function renderActiveStreams(streams) {
 
     WS.arrive('streams', function () {
         if (!Array.isArray(streams) || streams.length === 0) {
-            WS.setHTML(container, `
-                <div class="text-center text-steel-blue py-8 col-span-3">
-                    <span class="material-symbols-outlined text-4xl mb-2 block opacity-50">play_circle</span>
-                    <p>No active streams</p>
-                </div>
-            `);
+            WS.setHTML(container, streamsStateRow('No active streams'));
             return;
         }
 
@@ -813,10 +839,15 @@ function renderServices(data) {
             var iconUrl = getServiceIconUrl(service.display_name);
             var iconHtml = iconUrl
                 ? '<img src="' + iconUrl + '" alt="" class="service-icon w-8 h-8 object-contain">'
-                : '<span class="material-symbols-outlined text-3xl text-steel-blue">' + escapeHtml(service.icon) + '</span>';
+                : '<span class="material-symbols-outlined text-3xl leading-8 text-steel-blue">' + escapeHtml(service.icon) + '</span>';
 
+            // Every tile is the same height whatever its name: the top holds
+            // p-3, the 32px icon (the font icon's line box is 32px too), the
+            // gap and two lines of 11px leading-tight label (27.5px), and the
+            // label is clamped to two lines, so nothing can make it taller.
+            // The skeleton tiles in #servicesContainer are this tile, empty.
             return '<div class="bg-baltic-blue/10 rounded-xl overflow-hidden border border-steel-blue/20 flex flex-col hover:border-primary/40 transition-all">' +
-                '<div class="flex-1 p-3 flex flex-col items-center justify-center text-center space-y-2 min-h-[80px]">' +
+                '<div class="flex-1 p-3 flex flex-col items-center justify-center text-center space-y-2 min-h-[calc(4rem_+_27.5px)]">' +
                     iconHtml +
                     '<span class="text-[11px] font-medium leading-tight line-clamp-2 text-frosted-blue">' + escapeHtml(service.display_name) + '</span>' +
                 '</div>' +
