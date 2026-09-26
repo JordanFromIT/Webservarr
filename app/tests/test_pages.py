@@ -623,7 +623,11 @@ class NavModel(unittest.TestCase):
         self.assertNotIn("requests-embed", b["sidebar_labels"])
         self.assertNotIn("show_tickets", b["features"])
         self.assertNotIn("show_requests", b["features"])
-        self.assertFalse(b["features"]["show_books"])
+        # "Kavita is set up" is its own name, not the retired features.show_books key.
+        self.assertNotIn("show_books", b["features"])
+        self.assertFalse(b["features"]["ebooks_configured"])
+        self.assertTrue(branding(**{"integration.kavita.url": "http://192.168.1.50:5000"})["features"]["ebooks_configured"])
+        self.assertEqual([i.get("feature") for i in NAV_ITEMS if i["id"] == "library"], ["ebooks_configured"])
         b = branding(**{"requests.source": "seerr_embed", "home.section_news": "false"})
         self.assertEqual(b["requests_source"], "seerr_embed")
         self.assertFalse(b["home_sections"]["news"])
