@@ -192,5 +192,39 @@ class StatusColourOnlyOnDeviation(unittest.TestCase):
         self.assertNotRegex(top_level(THEME), r'\[data-state="ok"\][^{,]*(?:ws-pill-label|data-status-text)')
 
 
+
+def nav_new_badge_rule() -> str:
+    return css_rule(THEME, ".nav-new-badge")
+
+
+class NewFlagIsATheme(unittest.TestCase):
+    """M9: the New! flag's colour was a default only (theme-loader read a key
+    the server never sent). It is now a theme option like the media colours,
+    and every colour in the flag is derived from it: no fixed golds, and no
+    outline in the background colour (it vanished on a light page)."""
+
+    @unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+    def test_registry_payload_and_inline_theme(self):
+        d = REGISTRY["theme.color_new_flag"]
+        self.assertEqual((d.type, d.default, d.public), ("color", "#FFD60A", True))
+        b = payload({"theme.color_new_flag": "#22D3EE"})
+        self.assertEqual(b["colors"]["new_flag"], "#22D3EE")
+        self.assertEqual(payload({"theme.color_new_flag": "gold"})["colors"]["new_flag"], "#FFD60A")
+        self.assertIn("--color-new-flag:34 211 238", pages.theme_style(b))
+
+    def test_every_colour_in_the_flag_comes_from_its_setting(self):
+        rule = nav_new_badge_rule()
+        self.assertNotRegex(rule, r"rgb\(\s*\d", "a fixed colour in the flag")
+        self.assertNotIn("--color-background", rule)
+        self.assertGreaterEqual(rule.count("rgb(var(--color-new-flag))"), 4)
+        self.assertIn("-webkit-text-stroke: 1.25px var(--ws-new-flag-edge)", rule)
+        self.assertRegex(rule, r"--ws-new-flag-edge:\s*color-mix\(in srgb, rgb\(var\(--color-new-flag\)\) \d+%, black\)")
+
+    def test_appearance_offers_it_and_previews_it(self):
+        self.assertIn("'theme.color_new_flag'", APPEARANCE)
+        self.assertIn("'new-flag'", APPEARANCE)
+        self.assertIn("'nav-new-badge'", APPEARANCE)
+
+
 if __name__ == "__main__":
     unittest.main()
