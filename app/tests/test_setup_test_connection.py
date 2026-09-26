@@ -226,5 +226,77 @@ class SetupTokenEncoding(unittest.TestCase):
         self.assertEqual(self.users(), 1)
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class SetupCompleteValidatesPlex(unittest.TestCase):
+    """Finishing setup stores the Plex address and token only if Settings
+    would store them (validate_value), and answers a bad one with 400 and a
+    plain message, never a 500. Nothing is written when it refuses."""
+
+    def setUp(self):
+        from app.config import settings as app_settings
+        from app.routers import setup
+        self.Session = helpers.make_sessionmaker()
+        self.db = self.Session()
+        self.saved = (setup._setup_done, setup._setup_token, app_settings.app_secret_key)
+        self.patches = [
+            mock.patch("app.routers.setup.is_setup_completed", return_value=False),
+            mock.patch("app.routers.setup.get_or_create_setup_token", return_value=SETUP_TOKEN),
+            mock.patch("app.routers.setup.SessionLocal", self.Session),
+        ]
+        for p in self.patches:
+            p.start()
+        # A 500 comes back as a response, not a raised exception, as a browser would see it.
+        from fastapi.testclient import TestClient
+        from app.main import app
+        helpers.api_client(self.Session)
+        self.client = TestClient(app, raise_server_exceptions=False)
+
+    def tearDown(self):
+        from app.config import settings as app_settings
+        from app.routers import setup
+        helpers.reset_overrides()
+        for p in self.patches:
+            p.stop()
+        setup._setup_done, setup._setup_token, app_settings.app_secret_key = self.saved
+        self.db.close()
+
+    def complete(self, **plex):
+        return self.client.post("/api/setup/complete", json=dict({
+            "username": "owner", "password": "long-enough-pw", "password_confirm": "long-enough-pw",
+            "setup_token": SETUP_TOKEN}, **plex))
+
+    def stored(self):
+        from app.models import Setting, User
+        self.db.expire_all()
+        keys = {r.key: r.value for r in self.db.query(Setting).filter(Setting.key.like("integration.plex.%")).all()}
+        return self.db.query(User).count(), keys
+
+    def test_a_malformed_address_is_400_not_500(self):
+        for url in ("http://[::1", "http://plex.lan:99999", "ftp://192.168.1.2", "http://127.0.0.1:32400",
+                    "http://192.168.1.2:32400 x"):
+            with self.subTest(url=url):
+                r = self.complete(plex_url=url, plex_token=PLEX_TOKEN)
+                self.assertEqual(r.status_code, 400, r.text)
+                self.assertIn("Plex address", r.json()["detail"])
+                self.assertEqual(self.stored(), (0, {}))
+
+    def test_a_token_settings_would_refuse_is_400(self):
+        r = self.complete(plex_url="http://192.168.1.2:32400", plex_token="bad\u0000token")
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertIn("Plex token", r.json()["detail"])
+        self.assertEqual(self.stored(), (0, {}))
+
+    def test_a_good_address_and_token_are_stored(self):
+        r = self.complete(plex_url=" http://192.168.1.2:32400 ", plex_token=f" {PLEX_TOKEN} ")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.stored(), (1, {"integration.plex.url": "http://192.168.1.2:32400",
+                                             "integration.plex.token": PLEX_TOKEN}))
+
+    def test_no_plex_at_all_is_fine(self):
+        r = self.complete()
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.stored(), (1, {}))
+
+
 if __name__ == "__main__":
     unittest.main()
