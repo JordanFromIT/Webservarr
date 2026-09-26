@@ -444,6 +444,31 @@ class Skeletons(unittest.TestCase):
             self.assertIn(f'"{flag}": ', py)
 
 
+class KavitaAddressConfirm(unittest.TestCase):
+    """R133: saving a new Kavita address asks first, since the server resets
+    everyone's eBooks connection; a respelled or cleared address doesn't ask."""
+
+    SRC = (STATIC / "js" / "settings" / "integrations.js").read_text(encoding="utf-8")
+
+    def hook(self):
+        start = self.SRC.index("api.beforeSave(function (keys) {\n        var k = CARDS.kavita.url;")
+        return self.SRC[start:self.SRC.index("\n      });", start)]
+
+    def test_the_save_asks_before_moving_the_address(self):
+        hook = self.hook()
+        self.assertIn("if (!next || sameAddress(next, api.saved(k))) return true;", hook)
+        self.assertIn("Changing this address resets everyone’s eBooks connection. They’ll sign in to eBooks again.",
+                      hook)
+        self.assertIn("WSSettings.confirm(", hook)
+        # Keeping the old address puts it back and stops the save.
+        self.assertRegex(hook, r"if \(!ok\) api\.set\(k, api\.saved\(k\)\);\s*return ok;")
+
+    def test_same_address_matches_the_server(self):
+        fn = self.SRC[self.SRC.index("  function sameAddress("):self.SRC.index("\n  }\n", self.SRC.index("  function sameAddress("))]
+        self.assertIn(".trim().replace(/\\/+$/, '')", fn)
+        self.assertIn("toLowerCase()", fn)
+
+
 class KitApi(unittest.TestCase):
     def test_ui_js_public_api(self):
         js = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
@@ -708,6 +733,13 @@ class GeneralTab(unittest.TestCase):
         flag = src[src.index("\n  function flag("):src.index("\n  function cssBlock(")]
         self.assertIn("el('span', null, text)", flag)    # textContent, never markup
         self.assertNotIn("innerHTML", flag)
+
+    def test_the_import_preview_names_an_entry_that_is_not_a_setting(self):
+        # R133: "eBooks connections" (resetting them) is listed by its own label.
+        src = (STATIC / "js" / "settings" / "general.js").read_text(encoding="utf-8")
+        raw = src[src.index("\n  function previewBody("):src.index("\n  function showProblems(")]
+        self.assertRegex(raw, r"var label = typeof c\.label === 'string' && c\.label \? c\.label : nameOf\(c\.key\);")
+        self.assertRegex(raw, r"el\('p', '[^']*', label\)")
 
     def test_no_client_check_on_the_logo_address(self):
         # R14: the server's 422 on Save is the check, shown on the field by the kit.

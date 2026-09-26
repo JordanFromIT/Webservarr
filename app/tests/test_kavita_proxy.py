@@ -157,6 +157,12 @@ class HandshakeLandsOnEbooks(unittest.TestCase):
         self.assertEqual((r.status_code, r.headers["location"]), (302, "/"))
         self.update.assert_not_called()
 
+    def test_the_token_is_stored_with_the_address_it_came_from(self):
+        # R133: the proxy sends a token only to that address.
+        self.finish(".AspNetCore.Cookies=abc")
+        fields = self.update.await_args.args[1]
+        self.assertEqual(fields, {"kavita_token": "jwt", "kavita_api_key": "key", "kavita_base": KAVITA})
+
     def test_admins_finish_the_handshake_while_ebooks_is_off(self):
         r = self.finish(".AspNetCore.Cookies=abc", {"username": "admin", "is_admin": "true"}, "false")
         self.assertEqual((r.status_code, r.headers["location"]), (302, "/ebooks"))
