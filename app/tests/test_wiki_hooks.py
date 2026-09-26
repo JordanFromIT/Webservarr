@@ -234,6 +234,139 @@ class WikiHooks(unittest.TestCase):
         self.assertEqual(self.hooks(), ("a", "", ""))
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class ConcurrentHookWrites(unittest.TestCase):
+    """Two page writes at once, as two uvicorn workers send them: each has
+    its own connection to a file-backed database. The hook rows are read under
+    SQLite's write lock, so the second write waits for the first, decides from
+    what it left, and a missing row cannot collide on its key."""
+
+    def setUp(self):
+        import tempfile
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app import models  # noqa: F401 - registers the tables
+        from app.database import Base
+        self.tmp = tempfile.TemporaryDirectory()
+        self.engine = create_engine(f"sqlite:///{self.tmp.name}/race.db",
+                                    connect_args={"check_same_thread": False, "timeout": 10})
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        self.client = helpers.api_client(self.Session)
+
+    def tearDown(self):
+        helpers.reset_overrides()
+        self.setup_patch.stop()
+        self.engine.dispose()
+        self.tmp.cleanup()
+
+    def seed(self, pages, hook_rows=True):
+        from app.models import Setting, WikiPage
+        db = self.Session()
+        for slug in pages:
+            db.add(WikiPage(title=slug, slug=slug, content="x", content_html="<p>x</p>", published=True,
+                            author_name="admin"))
+        if hook_rows:
+            for name in ("tickets", "issues", "playback"):
+                db.add(Setting(key="wiki.hook_" + name, value=""))
+        db.commit()
+        db.close()
+
+    def set_hooks(self, **values):
+        db = self.Session()
+        for name, value in values.items():
+            helpers.put(db, "wiki.hook_" + name, value)
+        db.close()
+
+    def hooks(self):
+        db = self.Session()
+        try:
+            return tuple(helpers.get(db, "wiki.hook_" + n) for n in ("tickets", "issues", "playback"))
+        finally:
+            db.close()
+
+    def race(self, *calls, after=None):
+        """Run two calls on two threads. Each pauses just after it reads the
+        hook rows until the other has read them too, or 1.5s pass. Without the
+        lock both reads land before either write; with it the second read can
+        only happen once the first write has committed, so the pause runs out.
+        after={endpoint: seconds} holds that endpoint back a little longer after
+        its read, to fix which write lands last."""
+        import sys
+        import threading
+        import time
+
+        import app.routers.wiki as wiki
+        barrier = threading.Barrier(2, timeout=1.5)
+        real = wiki._hook_rows
+
+        def paused(db):
+            rows = real(db)
+            try:
+                barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+            # The endpoint runs on the TestClient's event-loop thread, not the
+            # one that started the call, so find it on the stack instead.
+            frame = sys._getframe(1)
+            while frame is not None:
+                if frame.f_code.co_name in (after or {}):
+                    time.sleep(after[frame.f_code.co_name])
+                    break
+                frame = frame.f_back
+            return rows
+
+        out = [None] * len(calls)
+
+        def run(i, call):
+            try:
+                out[i] = call()
+            except Exception as exc:  # a 500 re-raised by the TestClient
+                out[i] = exc
+        with mock.patch.object(wiki, "_hook_rows", paused):
+            threads = [threading.Thread(target=run, args=(i, c)) for i, c in enumerate(calls)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(30)
+        return out
+
+    def put_help(self, slug, help_on):
+        return lambda: self.client.put(f"/api/wiki/pages/{slug}", json={"title": slug, "slug": slug, "content": "x",
+                                                                        "published": True, "help_on": help_on})
+
+    def test_two_writes_to_one_page_leave_exactly_one_list(self):
+        self.seed(["page-a"])
+        r1, r2 = self.race(self.put_help("page-a", ["tickets"]), self.put_help("page-a", ["issues"]))
+        self.assertEqual([getattr(r, "status_code", r) for r in (r1, r2)], [200, 200])
+        self.assertIn(self.hooks(), [("page-a", "", ""), ("", "page-a", "")])
+
+    def test_a_delete_cannot_undo_a_claim_made_meanwhile(self):
+        self.seed(["page-a", "page-b"])
+        self.set_hooks(tickets="page-a")
+        # The delete writes last: deciding from its early read, it would clear
+        # the link page-b had just taken.
+        r1, r2 = self.race(lambda: self.client.delete("/api/wiki/pages/page-a"), self.put_help("page-b", ["tickets"]),
+                           after={"delete_page": 0.3})
+        self.assertEqual([getattr(r, "status_code", r) for r in (r1, r2)], [204, 200])
+        self.assertEqual(self.hooks(), ("page-b", "", ""))
+
+    def test_a_missing_row_cannot_collide(self):
+        # Rows are seeded at startup, but a missing one must not turn two
+        # concurrent first claims into a primary-key clash and a 500.
+        self.seed([], hook_rows=False)
+        post = lambda slug: (lambda: self.client.post("/api/wiki/pages", json={
+            "title": slug, "slug": slug, "content": "x", "published": True, "help_on": ["tickets"]}))
+        r1, r2 = self.race(post("page-x"), post("page-y"))
+        self.assertEqual([getattr(r, "status_code", r) for r in (r1, r2)], [201, 201])
+        tickets, issues, playback = self.hooks()
+        self.assertIn(tickets, ("page-x", "page-y"))
+        self.assertEqual((issues, playback), ("", ""))
+
+
 def editor_js() -> str:
     return (STATIC / "js" / "wiki-editor.js").read_text(encoding="utf-8")
 
@@ -267,15 +400,62 @@ class WikiEditorHelp(unittest.TestCase):
         self.assertEqual(len(live_matches(editor_js(), r"return \(list \|\| \[\]\)\.slice\(\)\.sort\(\)\.join\(','\);")), 1)
         opened = function_body(code, "open")
         self.assertIn("var helpBase = page ? (page.help_on || []).slice() : [];", opened)
-        self.assertIn("_session = { slug: _slug, helpBase: helpBase, form: null, busy: false };", opened)
+        self.assertIn("_session = { slug: _slug, helpBase: helpBase, helpSeen: seenNow, holders: holders, form: null, busy: false };", opened)
 
-    def test_a_restored_draft_keeps_only_boxes_the_admin_changed(self):
-        code = js_code_only(editor_js())
-        opened = function_body(code, "open")
-        self.assertRegex(opened, r"var touched = Array\.isArray\(f\.help_on\) && Array\.isArray\(f\.help_base\) &&\s*"
-                                 r"helpKey\(f\.help_on\) !== helpKey\(f\.help_base\);")
-        self.assertIn("initial = Object.assign({}, f, { help_on: touched ? f.help_on.slice() : helpBase.slice() });", opened)
-        self.assertIn("fields.help_base = s.helpBase.slice();", function_body(code, "mirror"))
+    def test_a_restored_draft_replays_a_box_only_where_the_link_has_not_moved(self):
+        # Per place: a box the admin changed before leaving is replayed only
+        # while that link is where it was then (then[n] === seenNow[n]);
+        # otherwise the box shows the link as it is now and the admin is told.
+        src = editor_js()
+        opened = function_body(js_code_only(src), "open")
+        self.assertIn("var holders = helpHolders(page);", opened)
+        self.assertIn("var seenNow = helpSeen(helpBase, holders);", opened)
+        self.assertRegex(opened, r"var usable = !!then && typeof then === '\s*' && !Array\.isArray\(then\) && Array\.isArray\(f\.help_on\);")
+        for line in (r"var n = h\[0\], want = seenNow\[n\] === 'self';",
+                     r"if \(ticked !== \(then\[n\] === 'self'\)\) \{\s*if \(then\[n\] === seenNow\[n\]\) want = ticked;\s*else dropped = true;\s*\}",
+                     r"initial = Object\.assign\(\{\}, f, \{ help_on: on \}\);",
+                     r"if \(dropped\) status\('Your unsaved change to the help links was left out: that link has changed since\.'\);"):
+            self.assertEqual(len(live_matches(src, line)), 1, line)
+        self.assertIn("fields.help_seen = Object.assign({}, s.helpSeen);", function_body(js_code_only(src), "mirror"))
+
+    def test_mirror_timers_and_guards(self):
+        # (a) a landed save or delete cancels the pending mirror, so no draft
+        # reappears for what was just published or deleted; (b) a mirror only
+        # writes while its own editor is on screen, so B's fields never land in
+        # A's draft; (c) a tick is autosaved like any other edit.
+        src = editor_js()
+        code = js_code_only(src)
+        cancel = "if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }"
+        for name in ("save", "remove", "open"):
+            self.assertEqual(function_body(code, name).count(cancel), 1, name)
+        save = function_body(code, "save")
+        self.assertLess(save.index(cancel), save.index("clearDraft(s.slug);"))
+        remove = function_body(code, "remove")
+        self.assertLess(remove.index(cancel), remove.index("clearDraft(s.slug);"))
+        self.assertRegex(function_body(code, "mirror"),
+                         r"var s = _session;\s*_mirrorTimer = setTimeout\(function \(\) \{\s*_mirrorTimer = null;\s*"
+                         r"if \(_session !== s\) return;")
+        self.assertEqual(len(live_matches(src, r"box\.addEventListener\('change', mirror\);")), 1)
+
+    def test_a_new_page_names_holders_from_the_branding_payload(self):
+        src = editor_js()
+        code = js_code_only(src)
+        holders = function_body(code, "helpHolders")
+        self.assertIn("var hooks = (window.WEBSERVARR_THEME && window.WEBSERVARR_THEME.wiki_hooks) || {};", holders)
+        self.assertIn("if (page) out[n] = (page.help_holders || {})[n] || null;", holders)
+        self.assertIn("else out[n] = hooks[n] && hooks[n].title ? hooks[n].title : null;", holders)
+        self.assertIn("var holders = _session.holders;", function_body(code, "render"))
+        # No extra request: the same five fetches as before (save, remove, page,
+        # categories, image upload).
+        self.assertEqual(len(re.findall(r"\bfetch\(", code)), 5)
+        # A landed write keeps that payload in step; the hint says when the link shows.
+        self.assertIn("if (saved) syncHooks(s, saved, payload.help_on);", function_body(code, "save"))
+        self.assertIn("syncHooks(s, null, null);", function_body(code, "remove"))
+        self.assertRegex(function_body(code, "syncHooks"),
+                         r"if \(holds\) hooks\[n\] = saved\.published \? \{ slug: saved\.slug, title: saved\.title \} : null;\s*"
+                         r"else if \(mine\) hooks\[n\] = null;")
+        self.assertEqual(len(live_matches(src, r"'A link to this page appears above that form once the page is published\. "
+                                               r"Only one page can be linked in each place\.'")), 1)
 
     def test_every_write_clears_the_page_cache(self):
         code = js_code_only(editor_js())
