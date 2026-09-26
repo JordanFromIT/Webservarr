@@ -223,7 +223,9 @@ class HoverLift(unittest.TestCase):
         self.assertLessEqual(properties(css_rule(hover.group(1), ".ws-lift:hover")), {"transform", "box-shadow"})
         self.assertLessEqual(properties(css_rule(THEME, ".ws-lift:active")), {"transform", "transition-duration"})
         self.assertRegex(css_rule(hover.group(1), ".ws-lift:hover"), r"translateY\(-[12]px\)")
-        self.assertIn("rgb(var(--color-background)", css_rule(hover.group(1), ".ws-lift:hover"))
+        # The shadow is the theme's shade (the background darkened), so it
+        # shows on a light page too (test_theme_engine.MotionFollowsTheTheme).
+        self.assertIn("var(--ws-shade)", css_rule(hover.group(1), ".ws-lift:hover"))
         self.assertIn("transform: none", css_rule(THEME, '.ws-lift:disabled, .ws-lift[aria-disabled="true"]'))
 
     def test_lift_sits_only_on_what_is_clicked(self):

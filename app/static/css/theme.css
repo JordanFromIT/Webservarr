@@ -372,7 +372,13 @@ body {
   position: relative; flex-shrink: 0; width: .5rem; height: .5rem; border-radius: 9999px;
   background: rgb(var(--ws-pill, var(--ws-status-off)));
 }
-.ws-status-dot::after { content: ""; position: absolute; inset: 0; border-radius: 9999px; background: inherit; opacity: 0; }
+/* The ring is the state's colour pulled a quarter of the way toward the text
+   colour: still the state's hue, and never faint against the page, which the
+   text colour contrasts with by construction (a light theme included). */
+.ws-status-dot::after {
+  content: ""; position: absolute; inset: 0; border-radius: 9999px; opacity: 0;
+  background: color-mix(in srgb, rgb(var(--ws-pill, var(--ws-status-off))) 75%, rgb(var(--color-text)));
+}
 #systemStatus[data-state="ok"] .ws-status-dot::after { animation: ws-ping 2.8s cubic-bezier(0, 0, .2, 1) infinite; }
 @keyframes ws-ping {
   0%        { transform: scale(1);   opacity: .55; }
@@ -529,7 +535,7 @@ main            { view-transition-name: ws-content; }
     border-color 150ms ease-out, color 150ms ease-out, opacity 150ms ease-out;
 }
 @media (hover: hover) and (pointer: fine) {
-  .ws-lift:hover { transform: translateY(-1px); box-shadow: 0 6px 14px -8px rgb(var(--color-background) / .9); }
+  .ws-lift:hover { transform: translateY(-1px); box-shadow: 0 6px 14px -8px color-mix(in srgb, var(--ws-shade) 90%, transparent); }
 }
 .ws-lift:active { transform: translateY(0) scale(.985); transition-duration: 80ms; }
 .ws-lift:disabled, .ws-lift[aria-disabled="true"] { transform: none; box-shadow: none; }
@@ -636,7 +642,15 @@ html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
   /* "Off" (not set up) is neutral: the text colour, drawn faint, so it never
      reads as an error or as pending whatever the accent is (L5). */
   --ws-status-off: var(--color-text);
+
+  /* A shadow in the page's own hue, dark enough to read on any background:
+     black on the shipped black page, a soft grey on a white one (L3). */
+  --ws-shade: color-mix(in srgb, rgb(var(--color-background)) 35%, black);
 }
+
+/* The one dim behind a dialog or the phone drawer, from the background colour
+   (L4). */
+.ws-scrim { background-color: rgb(var(--color-background) / .7); }
 
 /* The renderer stamps data-admin on <html> for admins, so admin-only
    controls on shared pages never flash for members. */

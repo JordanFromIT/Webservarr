@@ -253,7 +253,9 @@ class MotionFollowsTheTheme(unittest.TestCase):
         self.assertNotIn("--color-background", hover)
 
     def test_the_ring_is_pulled_toward_the_text_colour(self):
-        ring = css_rule(THEME, ".ws-status-dot::after")
+        found = blocks(THEME, ".ws-status-dot::after")
+        self.assertEqual(len(found), 1)
+        ring = " ".join(found[0].split())
         self.assertIn("background: color-mix(in srgb, rgb(var(--ws-pill, var(--ws-status-off))) 75%, "
                       "rgb(var(--color-text)))", ring)
         self.assertNotIn("inherit", ring)
@@ -267,7 +269,7 @@ class OneScrim(unittest.TestCase):
         self.assertIn("background-color: rgb(var(--color-background) / .7)", css_rule(THEME, ".ws-scrim"))
 
     def test_every_shared_backdrop_uses_it(self):
-        self.assertRegex(UI_JS, r"'ws-dialog [^']*\bws-scrim\b")
+        self.assertRegex(UI_JS, r"el\('div', 'ws-dialog [^;]*?\bws-scrim\b")
         self.assertNotIn("bg-background-dark/70", UI_JS)
         overlay = re.search(r'<div id="drawerOverlay" class="([^"]*)"', SIDEBAR).group(1).split()
         self.assertIn("ws-scrim", overlay)

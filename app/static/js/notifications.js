@@ -393,8 +393,7 @@
     }
 
     // Build overlay
-    _modal = createEl('div', 'fixed inset-0 z-[60] flex items-center justify-center');
-    _modal.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
+    _modal = createEl('div', 'fixed inset-0 z-[60] flex items-center justify-center ws-scrim');
     _modal.style.backdropFilter = 'blur(4px)';
 
     // Close on backdrop click

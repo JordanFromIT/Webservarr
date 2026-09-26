@@ -139,7 +139,7 @@
       // ws-dialog / ws-dialog-box: theme.css fades the dim in and lifts the
       // box 6px with it, and fades both out again on close.
       var overlay = el('div', 'ws-dialog fixed inset-0 z-[95] flex items-end sm:items-center justify-center p-4 ' +
-        'bg-background-dark/70 backdrop-blur-sm');
+        'ws-scrim backdrop-blur-sm');
       var box = el('div', 'ws-dialog-box w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border ' +
         'border-frosted-blue/10 bg-background-dark shadow-2xl p-6');
       box.setAttribute('role', opts.danger || opts.alert ? 'alertdialog' : 'dialog');
