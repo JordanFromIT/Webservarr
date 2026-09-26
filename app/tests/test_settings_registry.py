@@ -195,26 +195,26 @@ OLD_BRANDING_KEYS = [
     "theme.color_secondary", "theme.color_text", "theme.color_text_secondary", "theme.custom_css",
     "theme.font", "wiki.hook_issues", "wiki.hook_playback", "wiki.hook_tickets",
 ]
-# Folded into one switch per page and one Requests item (v1.11 Task 2.1):
-# deprecated, so neither seeded nor part of the branding defaults.
-RETIRED_BY_REDESIGN = [
-    "features.show_requests", "features.show_tickets", "features.show_books",
-    "sidebar.label_requests_embed", "sidebar.sublabel_requests_embed", "sidebar.enabled_requests_embed",
-    "sidebar.new_requests_embed", "icon.nav_requests_embed",
-]
+# Retired in v1.11: folded into one switch per page and one Requests item
+# (Task 2.1), plus the Uptime Kuma API key nothing ever read. Their
+# definitions are gone (Task 8.3); old rows are read only by seed.py migrations.
+RETIRED = ["features.show_requests", "features.show_tickets", "features.show_books",
+           "sidebar.label_requests_embed", "sidebar.sublabel_requests_embed", "sidebar.enabled_requests_embed",
+           "sidebar.new_requests_embed", "icon.nav_requests_embed", "integration.uptime_kuma.api_key"]
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class Coverage(unittest.TestCase):
     def test_nothing_the_app_used_is_missing(self):
         for key in OLD_SEED_KEYS + OLD_BRANDING_ONLY_KEYS + OLD_UI_ONLY_KEYS:
+            if key in RETIRED:
+                continue
             self.assertIsNotNone(reg.get_def(key), key)
 
-    def test_uptime_kuma_api_key_is_retired(self):
-        d = reg.get_def("integration.uptime_kuma.api_key")
-        self.assertTrue(d.deprecated)
-        self.assertNotIn("integration.uptime_kuma.api_key", [x.key for x in reg.active_defs()])
-        self.assertNotIn("integration.uptime_kuma.api_key", reg.seed_defaults())
+    def test_retired_keys_are_gone(self):
+        for key in RETIRED:
+            self.assertIsNone(reg.get_def(key), key)
+            self.assertEqual(reg.validate_value(key, "true"), "Unknown setting")
 
     def test_every_default_passes_its_own_validation(self):
         for d in reg.REGISTRY.values():
@@ -433,18 +433,19 @@ class DerivedDefaults(unittest.TestCase):
         from app import seed
         from app.routers import branding
         for key, value in OLD_DEFAULT_VALUES.items():
-            self.assertEqual(reg.REGISTRY[key].default, value, key)
-        # The keys the redesign retired are no longer seeded or read by the
-        # branding builder; they stay in the registry, marked deprecated.
-        for key in RETIRED_BY_REDESIGN:
-            self.assertTrue(reg.REGISTRY[key].deprecated, key)
+            if key not in RETIRED:
+                self.assertEqual(reg.REGISTRY[key].default, value, key)
+        # The retired keys are gone from the registry, so nothing seeds them
+        # and the branding builder has no default for them.
+        for key in RETIRED:
+            self.assertNotIn(key, reg.REGISTRY, key)
             self.assertNotIn(key, seed.DEFAULT_SETTINGS, key)
             self.assertNotIn(key, branding.DEFAULTS, key)
         for key in OLD_SEED_KEYS:
-            if key not in RETIRED_BY_REDESIGN:
+            if key not in RETIRED:
                 self.assertEqual(seed.DEFAULT_SETTINGS[key][0], OLD_DEFAULT_VALUES[key], key)
         for key in OLD_BRANDING_KEYS:
-            if key not in RETIRED_BY_REDESIGN:
+            if key not in RETIRED:
                 self.assertEqual(branding.DEFAULTS[key], OLD_DEFAULT_VALUES[key], key)
 
     def test_renderer_and_theme_css_colours_match_the_registry(self):
@@ -514,7 +515,7 @@ class DerivedDefaults(unittest.TestCase):
                 self.assertEqual(helpers.get(db, "home.section_" + sid), "true")
             self.assertEqual(helpers.get(db, "requests.source"), "native")
             self.assertIsNone(helpers.get(db, "system.admin_email"))          # seed=False
-            self.assertIsNone(helpers.get(db, "integration.uptime_kuma.api_key"))  # deprecated
+            self.assertIsNone(helpers.get(db, "integration.uptime_kuma.api_key"))  # retired
             for retired in ("features.show_tickets", "features.show_books", "features.show_requests",
                             "sidebar.enabled_requests_embed", "icon.nav_requests_embed"):
                 self.assertIsNone(helpers.get(db, retired), retired)

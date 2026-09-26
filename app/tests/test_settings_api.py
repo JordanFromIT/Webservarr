@@ -1,10 +1,9 @@
 """
-GET /api/admin/settings?view=registry and PUT /api/admin/settings/bulk.
+GET /api/admin/settings (SettingsView) and PUT /api/admin/settings/bulk.
 
 Every write is validated against the registry before anything is stored; a
 single bad value rejects the whole save with per-key messages (422). The 422
-body also carries `detail` (the first message) for the old settings page,
-which reads only that.
+body also carries `detail`, a copy of the first message.
 """
 import os
 import unittest
@@ -114,22 +113,25 @@ class RegistryView(SettingsApiBase):
             r = self.client.get(url)
             self.assertEqual(r.status_code, 200, url)
             self.assertNotIn(USER_KEY, r.text, url)
-        self.assertEqual(self.client.get("/api/admin/settings/" + USER_KEY).status_code, 404)
 
-    def test_legacy_list_is_kept_until_switch_over(self):
+    def test_default_view_is_the_registry(self):
+        body = self.client.get("/api/admin/settings").json()
+        self.assertIn("values", body)
+        self.assertIn("meta", body)
+
+    def test_default_view_is_masked_and_leaves_internal_rows_out(self):
+        # The old row list masked internal secrets by name; the view never lists them at all.
         helpers.put(self.db, "integration.plex.token", "real-token")
         helpers.put(self.db, "system.secret_key", "never-shown")
+        helpers.put(self.db, "features.show_tickets", "false")      # a retired key's leftover row
         r = self.client.get("/api/admin/settings")
         self.assertEqual(r.status_code, 200)
-        rows = {row["key"]: row["value"] for row in r.json()}
-        self.assertEqual(rows["integration.plex.token"], reg.MASK)
-        self.assertEqual(rows["system.secret_key"], reg.MASK)
-
-    def test_single_get_masks_secrets(self):
-        helpers.put(self.db, "integration.plex.token", "real-token")
-        helpers.put(self.db, "system.secret_key", "never-shown")
-        self.assertEqual(self.client.get("/api/admin/settings/integration.plex.token").json()["value"], reg.MASK)
-        self.assertEqual(self.client.get("/api/admin/settings/system.secret_key").json()["value"], reg.MASK)
+        body = r.json()
+        self.assertEqual(body["values"]["integration.plex.token"], reg.MASK)
+        self.assertNotIn("system.secret_key", body["values"])
+        self.assertNotIn("features.show_tickets", body["values"])
+        self.assertNotIn("real-token", r.text)
+        self.assertNotIn("never-shown", r.text)
 
 
 class BulkSave(SettingsApiBase):
@@ -197,30 +199,19 @@ class BulkSave(SettingsApiBase):
         self.assertNotIn("abc123", r.text)
         self.assertEqual(helpers.get(self.db, "integration.seerr.api_key"), "abc123")
 
-    def test_deprecated_key_still_accepted_during_build_alongside(self):
-        r = self.save(("integration.uptime_kuma.api_key", "old"))
-        self.assertEqual(r.status_code, 200, r.text)
+    def test_retired_keys_are_rejected(self):
+        r = self.save(("features.show_tickets", "false"))
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(r.json()["errors"]["features.show_tickets"], "Unknown setting")
 
-    def test_old_settings_page_save_with_retired_page_keys_still_works(self):
-        # Until the old Settings page is replaced (Task 8.3) its Theme save
-        # still sends five of the keys the redesign retired, and its Seerr save
-        # sends features.show_requests. The whole save must keep working.
-        sent_by_old_page = [
-            ("sidebar.label_requests_embed", "Requests (Embed)"),
-            ("sidebar.enabled_requests_embed", "true"),
-            ("sidebar.new_requests_embed", "false"),
-            ("icon.nav_requests_embed", "download"),
-            ("features.show_tickets", "true"),
-            ("features.show_requests", "false"),
-        ]
-        for key in ("features.show_requests", "features.show_tickets", "features.show_books",
-                    "sidebar.label_requests_embed", "sidebar.sublabel_requests_embed",
-                    "sidebar.enabled_requests_embed", "sidebar.new_requests_embed", "icon.nav_requests_embed"):
-            self.assertTrue(reg.REGISTRY[key].deprecated, key)
-        r = self.save(("sidebar.label_home", "Start"), *sent_by_old_page)
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(helpers.get(self.db, "sidebar.label_home"), "Start")
-        self.assertEqual(helpers.get(self.db, "icon.nav_requests_embed"), "download")
+    def test_a_save_carrying_a_retired_key_writes_nothing(self):
+        r = self.save(("sidebar.label_home", "Start"), ("integration.uptime_kuma.api_key", "old"),
+                      ("icon.nav_requests_embed", "download"))
+        errors = self.assertRejected(r)
+        self.assertEqual(errors, {"integration.uptime_kuma.api_key": "Unknown setting",
+                                  "icon.nav_requests_embed": "Unknown setting"})
+        self.assertIsNone(helpers.get(self.db, "sidebar.label_home"))
+        self.assertIsNone(helpers.get(self.db, "icon.nav_requests_embed"))
 
     def test_monitor_pattern_key(self):
         r = self.save(("monitor.12.enabled", "false"))
@@ -356,13 +347,6 @@ class LockoutGuard(SettingsApiBase):
         self.assertIsNone(helpers.get(self.db, "features.show_simple_auth"))
         self.assertEqual(helpers.get(self.db, "features.show_plex_auth"), "false")   # the other save stands
 
-    def test_the_race_is_caught_on_the_single_put_too(self):
-        self._put_all(self.PLEX_READY)
-        with self._race("app.routers.admin.plan_writes", (("features.show_plex_auth", "false"),)):
-            r = self.client.put("/api/admin/settings", json={"key": "features.show_simple_auth", "value": "false"})
-        self.assertRejected(r)
-        self.assertIsNone(helpers.get(self.db, "features.show_simple_auth"))
-
     def test_a_race_that_leaves_a_method_is_saved(self):
         self._put_all(self.PLEX_READY)
         with self._race("app.routers.admin_settings.plan_writes", (("branding.app_name", "Other"),)):
@@ -374,41 +358,6 @@ class LockoutGuard(SettingsApiBase):
         helpers.put(self.db, "features.show_simple_auth", "false")
         r = self.save(("branding.app_name", "Fine"))
         self.assertEqual(r.status_code, 200, r.text)
-
-
-class SingleKeyPut(SettingsApiBase):
-    def test_single_put_uses_the_same_validation(self):
-        r = self.client.put("/api/admin/settings", json={"key": "theme.color_primary", "value": "red"})
-        self.assertRejected(r)
-        r = self.client.put("/api/admin/settings", json={"key": "theme.color_primary", "value": "#ff0000"})
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(r.json()["value"], "#ff0000")
-        self.assertEqual(helpers.get(self.db, "theme.color_primary"), "#ff0000")
-
-    def test_single_put_refuses_internal_and_per_user_keys(self):
-        for key in ("system.secret_key", USER_KEY):
-            with self.subTest(key=key):
-                r = self.client.put("/api/admin/settings", json={"key": key, "value": "x"})
-                self.assertRejected(r)
-                self.assertIsNone(helpers.get(self.db, key))
-
-    def test_single_put_applies_the_lockout_guard(self):
-        r = self.client.put("/api/admin/settings", json={"key": "features.show_simple_auth", "value": "false"})
-        self.assertRejected(r)
-
-    def test_single_put_masked_secret_is_unchanged(self):
-        helpers.put(self.db, "integration.seerr.api_key", "abc123")
-        r = self.client.put("/api/admin/settings", json={"key": "integration.seerr.api_key", "value": reg.MASK})
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(r.json()["value"], reg.MASK)
-        self.assertEqual(helpers.get(self.db, "integration.seerr.api_key"), "abc123")
-
-    def test_single_put_commit_failure_is_503(self):
-        from sqlalchemy.orm import Session as SASession
-        with mock.patch.object(SASession, "commit", autospec=True, side_effect=RuntimeError("database is locked")):
-            r = self.client.put("/api/admin/settings", json={"key": "branding.app_name", "value": "X"})
-        self.assertEqual(r.status_code, 503, r.text)
-        self.assertIsNone(helpers.get(self.db, "branding.app_name"))
 
 
 class NonAdmin(SettingsApiBase):
@@ -437,15 +386,54 @@ class SignedOut(SettingsApiBase):
             ("GET", "/api/admin/settings", None),
             ("GET", "/api/admin/settings?view=registry", None),
             ("PUT", "/api/admin/settings/bulk", {"settings": [{"key": "branding.app_name", "value": "x"}]}),
-            ("GET", "/api/admin/settings/branding.app_name", None),
             ("GET", "/api/admin/settings/shell", None),
-            ("PUT", "/api/admin/settings", {"key": "branding.app_name", "value": "x"}),
         ):
             with self.subTest(method=method, url=url):
                 self.assertFalse(self.client.cookies)
                 r = self.client.request(method, url, json=body)
                 self.assertEqual(r.status_code, 401, r.text)
         self.assertIsNone(helpers.get(self.db, "branding.app_name"))
+
+
+class RemovedRoutes(SettingsApiBase):
+    """Admin routes removed in v1.11 because nothing called them any more.
+
+    Each now answers 404 (no such path) or 405 (the path serves another
+    method), never a 500, whoever asks."""
+
+    REMOVED = (
+        ("GET", "/api/admin/settings/branding.app_name", None),
+        ("PUT", "/api/admin/settings", {"key": "branding.app_name", "value": "x"}),
+        ("PUT", "/api/admin/monitors/7", {"enabled": False, "icon": "x"}),
+        ("POST", "/api/admin/restart-container", None),
+        ("POST", "/api/admin/shutdown-container", None),
+    )
+
+    def _check(self):
+        for method, url, body in self.REMOVED:
+            with self.subTest(method=method, url=url):
+                r = self.client.request(method, url, json=body)
+                self.assertIn(r.status_code, (404, 405), r.text)
+        self.assertIsNone(helpers.get(self.db, "branding.app_name"))
+        self.assertIsNone(helpers.get(self.db, "monitor.7.enabled"))
+        self.assertIsNone(helpers.get(self.db, "monitor.7.icon"))
+
+    def test_removed_routes_are_gone_for_admins(self):
+        self._check()
+
+    def test_removed_routes_are_gone_when_signed_out(self):
+        from app.dependencies import get_current_user, get_current_user_optional
+        from app.main import app
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_current_user_optional, None)
+        self._check()
+
+    def test_the_removed_handlers_and_their_models_are_deleted(self):
+        from app.routers import admin
+        self.assertFalse(hasattr(admin, "CONTAINER_NAME"))
+        for name in ("restart_container", "shutdown_container", "update_monitor_preferences",
+                     "get_setting", "update_setting", "SettingCreate", "MonitorPreferences"):
+            self.assertFalse(hasattr(admin, name), name)
 
 
 class ShellPatch(SettingsApiBase):
@@ -463,9 +451,9 @@ class ShellPatch(SettingsApiBase):
         self.assertLess(nav.index('href="/wiki"'), nav.index('href="/requests"'))
         self.assertRegex(nav, r'<a[^>]*href="/settings"[^>]*aria-current="page"')
 
-    def test_not_shadowed_by_the_single_key_route(self):
-        # admin.router's GET /settings/{key} would answer 404 "Setting not
-        # found" for "shell" if it were matched first.
+    def test_not_shadowed_by_a_key_route(self):
+        # A GET /settings/{key} route (admin.router had one until v1.11)
+        # would answer 404 for "shell" if it were matched first.
         r = self.client.get("/api/admin/settings/shell")
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(set(r.json()), {"nav_html"})
@@ -536,7 +524,7 @@ class HelpersRestoreTheLimiter(unittest.TestCase):
 
 class ValidationOffTheLoop(SettingsApiBase):
     """Validating an address can resolve a hostname with a blocking lookup, so
-    BulkSave, the single-key save and SettingsImport validate in a worker
+    BulkSave and SettingsImport validate in a worker
     thread: a slow DNS server must not freeze the worker's event loop for
     every other request."""
 
@@ -558,15 +546,6 @@ class ValidationOffTheLoop(SettingsApiBase):
         with spy:
             r = self.save(("integration.sonarr.url", "http://sonarr.lan:8989"))
         self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(seen, [("thread", "http://sonarr.lan:8989")])
-
-    def test_single_put_validates_off_the_event_loop(self):
-        seen, spy = self._spy()
-        with spy:
-            r = self.client.put("/api/admin/settings",
-                                json={"key": "integration.sonarr.url", "value": "http://sonarr.lan:8989"})
-        self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(helpers.get(self.db, "integration.sonarr.url"), "http://sonarr.lan:8989")
         self.assertEqual(seen, [("thread", "http://sonarr.lan:8989")])
 
     def test_import_validates_off_the_event_loop(self):

@@ -179,8 +179,9 @@ class TicketApiGate(unittest.TestCase):
         self.assertEqual(member.get(path).status_code, 404)
 
     def test_old_flag_cannot_turn_tickets_back_on(self):
-        # The legacy settings page writes features.show_tickets="true" on every
-        # save; that must not reopen a Tickets page switched off here.
+        # An old database may still hold features.show_tickets="true" (the
+        # key was retired in v1.11); that must not reopen a Tickets page
+        # switched off here.
         helpers.put(self.db, "features.show_tickets", "true")
         helpers.put(self.db, "sidebar.enabled_tickets", "false")
         member = helpers.api_client(self.Session, helpers.MEMBER)

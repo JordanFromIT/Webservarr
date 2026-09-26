@@ -136,6 +136,35 @@ class SettingsBackup(unittest.TestCase):
         self.post(data, dry=False, token=dry.json()["diff_token"])
         self.assertEqual(helpers.get(self.db, "integration.plex.token"), "real")
 
+    def test_retired_rows_never_reach_the_export(self):
+        # Rows for keys retired in v1.11 may remain in an old database.
+        for key, value in (("features.show_tickets", "false"), ("icon.nav_requests_embed", "download"),
+                           ("integration.uptime_kuma.api_key", "old-key")):
+            helpers.put(self.db, key, value)
+        r = self.export()
+        body = r.json()
+        for key in ("features.show_tickets", "icon.nav_requests_embed", "integration.uptime_kuma.api_key"):
+            self.assertNotIn(key, body["settings"], key)
+            self.assertNotIn(key, body["secrets_excluded"], key)
+        self.assertNotIn("old-key", r.text)
+        # So a file from this install imports back onto it unchanged.
+        dry = self.post(body)
+        self.assertEqual(dry.status_code, 200, dry.text)
+        self.assertEqual(dry.json()["changes"], [])
+        self.assertEqual(dry.json()["ignored"], [])
+
+    def test_a_retired_key_in_a_file_is_an_unknown_setting(self):
+        data = self.export().json()
+        data["settings"]["branding.app_name"] = "Fine"
+        data["settings"]["features.show_tickets"] = "false"
+        data["settings"]["integration.uptime_kuma.api_key"] = "old-key"
+        errors = self.assertRejected(self.post(data))
+        self.assertEqual(errors, {"features.show_tickets": "Unknown setting",
+                                  "integration.uptime_kuma.api_key": "Unknown setting"})
+        self.assertRejected(self.post(data, dry=False, token="anything"))
+        self.assertIsNone(helpers.get(self.db, "branding.app_name"))
+        self.assertIsNone(helpers.get(self.db, "features.show_tickets"))
+
     def test_an_invalid_value_rejects_the_whole_file(self):
         data = self.export().json()
         data["settings"]["branding.app_name"] = "Fine"

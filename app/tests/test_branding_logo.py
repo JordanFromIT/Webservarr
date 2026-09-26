@@ -112,6 +112,11 @@ class LogoWriteValidationTests(unittest.TestCase):
         app.dependency_overrides.clear()
         limiter.enabled = self._limiter_was
 
+    def _save_one(self, key, value):
+        """A one-item BulkSave, which is what the Settings page sends."""
+        return self.client.put("/api/admin/settings/bulk",
+                               json={"settings": [{"key": key, "value": value}]})
+
     def _stored(self, key):
         db = self.Session()
         try:
@@ -125,12 +130,11 @@ class LogoWriteValidationTests(unittest.TestCase):
                     "javascript:alert(1)", "http://[::1", "https://[", "http://",
                     "https://:80/x"):
             with self.subTest(bad=bad):
-                r = self.client.put("/api/admin/settings",
-                                    json={"key": "branding.logo_url", "value": bad})
+                r = self._save_one("branding.logo_url", bad)
                 self.assertEqual(r.status_code, 422, r.text)
                 message = r.json()["errors"]["branding.logo_url"]
                 self.assertTrue(message)
-                self.assertEqual(r.json()["detail"], message)   # the old settings page shows detail
+                self.assertEqual(r.json()["detail"], message)
                 self.assertIsNone(self._stored("branding.logo_url"))
 
     def test_lone_surrogates_are_refused_not_500(self):
@@ -138,7 +142,7 @@ class LogoWriteValidationTests(unittest.TestCase):
                            ("branding.logo_url", "/static/\ud800.png"),
                            ("branding.app_name", "Name \ud800")):
             with self.subTest(key=key, value=ascii(value)):
-                r = self.client.put("/api/admin/settings", json={"key": key, "value": value})
+                r = self._save_one(key, value)
                 self.assertEqual(r.status_code, 422, r.text)
                 self.assertEqual(r.json()["errors"][key], "Contains characters that can't be stored")
                 self.assertEqual(r.json()["detail"], "Contains characters that can't be stored")
@@ -154,8 +158,7 @@ class LogoWriteValidationTests(unittest.TestCase):
     def test_good_logo_urls_are_saved(self):
         for good in ("/static/uploads/logo-1.png", "HTTPS://cdn.example.com/l.png", ""):
             with self.subTest(good=good):
-                r = self.client.put("/api/admin/settings",
-                                    json={"key": "branding.logo_url", "value": good})
+                r = self._save_one("branding.logo_url", good)
                 self.assertEqual(r.status_code, 200, r.text)
                 self.assertEqual(self._stored("branding.logo_url"), good)
 
