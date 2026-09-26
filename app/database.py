@@ -2,23 +2,36 @@
 SQLite database configuration using SQLAlchemy.
 """
 
+from typing import Optional
+
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.config import settings
 
-# Create SQLite engine
-# connect_args needed for SQLite to work with FastAPI
-engine = create_engine(
-    settings.database_url,
-    connect_args={"check_same_thread": False},
-    echo=settings.app_debug,  # Log SQL queries in debug mode
-    pool_size=10,
-    max_overflow=20,
-    pool_timeout=5,
-    pool_pre_ping=True,
-    pool_recycle=300,
-)
+
+def make_engine(url: str, connect_args: Optional[dict] = None):
+    """The app's engine for `url` (a test can build one with the same options).
+
+    hide_parameters keeps bound values out of every SQLAlchemy exception and
+    of the debug echo: a failed write (SQLite's "database is locked" with two
+    workers, say) would otherwise print the value being written, which for a
+    settings save can be a token or API key, into the container log."""
+    return create_engine(
+        url,
+        # check_same_thread=False: FastAPI hands a session between threads.
+        connect_args={"check_same_thread": False} if connect_args is None else connect_args,
+        echo=settings.app_debug,  # Log SQL queries in debug mode
+        hide_parameters=True,
+        pool_size=10,
+        max_overflow=20,
+        pool_timeout=5,
+        pool_pre_ping=True,
+        pool_recycle=300,
+    )
+
+
+engine = make_engine(settings.database_url)
 
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
