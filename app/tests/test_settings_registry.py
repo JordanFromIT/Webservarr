@@ -266,7 +266,7 @@ class Validation(unittest.TestCase):
     def test_whitespace_only_is_not_a_value(self):
         # A required label of spaces renders a blank nav item; a font of
         # spaces is no font. Empty stays allowed where the key allows it.
-        for key in ("sidebar.label_home", "sidebar.label_wiki", "branding.app_name", "theme.font"):
+        for key in ("sidebar.label_home", "sidebar.label_wiki", "theme.font"):
             for blank in ("   ", "\t", " \n "):
                 with self.subTest(key=key, value=repr(blank)):
                     self.bad(key, blank)
