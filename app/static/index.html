@@ -688,13 +688,15 @@ async function loadRecentRequests() {
 }
 
 // Status chip per tone (WS.requestStatus). Theme classes only, and the same
-// grouping the Request Status page uses: finished reads brightest, things in
-// motion in the text colour, not-yet-started in the accent, and a request that
-// will not happen dimmed rather than alarming.
+// grouping the requests page uses: finished on a primary tint, things in
+// motion in the text colour, not-yet-started on the accent, and a request that
+// will not happen dimmed rather than alarming. The words are always the text
+// colour (at a step that still reads): Bright text is for solid primary
+// fills, and plain accent text on its own tint fell short of 4.5:1.
 const REQUEST_TONE_CLASSES = {
-    ready: 'bg-primary/30 text-bright',
+    ready: 'bg-primary/30 text-frosted-blue',
     go:    'bg-frosted-blue/15 text-frosted-blue',
-    wait:  'bg-steel-blue/20 text-steel-blue',
+    wait:  'bg-steel-blue/20 text-frosted-blue/80',
     dead:  'bg-steel-blue/10 text-frosted-blue/70'
 };
 

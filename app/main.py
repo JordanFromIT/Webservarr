@@ -23,6 +23,7 @@ from app.seed import seed_secret_key
 from app.pages import render_page
 from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status
 from app.services.notification_poller import start_poller, stop_poller
+from app.services import request_status as request_status_service
 from app.services.shelf_warmer import start_warmer, stop_warmer
 from app.services.request_status_warmer import (
     start_warmer as start_request_status_warmer,
@@ -444,7 +445,13 @@ async def requests_page(
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("requests", request, user, gate="requests", pick=_requests_page)
+    # Request Status starts collapsed when the cached snapshot (the one its API
+    # will return) has nothing waiting, so hiding it never moves the page. A
+    # cold cache (None) leaves the section to the page script.
+    snapshot = await request_status_service.get_cached_snapshot()
+    rs_empty = isinstance(snapshot, dict) and (bool(snapshot.get("error")) or not snapshot.get("items"))
+    return render_page("requests", request, user, gate="requests", pick=_requests_page,
+                       extra_flags={"rs_empty": rs_empty})
 
 
 # Legacy redirect: /requests-embed → /requests (301)

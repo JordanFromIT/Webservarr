@@ -670,6 +670,10 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
         attrs += " data-netdata"
     if safe:
         attrs += " data-safe-theme"
+    if flags.get("rs_empty"):
+        # /requests: nothing waiting in Request Status, so the section is
+        # collapsed from the first paint (requests.html).
+        attrs += " data-rs-empty"
     out = re.sub(r"<html\b", "<html" + attrs, out, count=1)
 
     return _stamp_asset_versions(out)
@@ -751,14 +755,18 @@ def settings_setup() -> dict:
 
 
 def render_page(name: str, request: Optional[Request], user: Optional[dict],
-                gate: Optional[str] = None, pick: Optional[Callable[[dict], str]] = None):
+                gate: Optional[str] = None, pick: Optional[Callable[[dict], str]] = None,
+                extra_flags: Optional[dict] = None):
     """Read app/static/<name>.html, render it for this user, and return it, or 404.
 
     gate: the nav page id this route belongs to. When the operator switched it
     off, members are sent home (302) and admins get the page with a banner.
     pick: chooses the file from the branding payload (used by /requests, which
-    shows the Seerr embed when that is the chosen source)."""
+    shows the Seerr embed when that is the chosen source).
+    extra_flags: route-specific render flags (render_html), e.g. rs_empty."""
     branding, flags = load_context(user is not None)
+    if extra_flags:
+        flags = dict(flags, **extra_flags)
     if gate and page_is_off(gate, branding):
         if not (user and user.get("is_admin") == "true"):
             return RedirectResponse(url="/", status_code=302)

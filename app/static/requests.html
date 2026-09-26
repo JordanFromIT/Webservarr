@@ -9,11 +9,199 @@
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
 <link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+<style>
+/* ---- Request Status grid ------------------------------------------------
+   A data grid that still has to read well to someone checking on one film.
+   Columns auto-fit (table-layout:auto + min-widths) rather than being fixed,
+   the header and the title column stay pinned while the rest scrolls, and the
+   scroll container carries edge shadows so it is obvious there is more to the
+   right rather than looking cut off. Below lg the extra columns are dropped
+   and a tapped row reveals them, so nothing is ever hidden off-screen on a
+   phone. */
+.rs-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scroll-snap-type: y proximity;
+  -webkit-overflow-scrolling: touch;
+  position: relative;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--color-accent) / 0.4) transparent;
+}
+/* Only once capped does the body scroll vertically; below five rows it sits at
+   its natural height with no scrollbar at all. */
+.rs-scroll.rs-capped { overflow-y: auto; }
+.rs-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+.rs-scroll::-webkit-scrollbar-track { background: transparent; }
+.rs-scroll::-webkit-scrollbar-thumb {
+  background: rgb(var(--color-accent) / 0.35);
+  border-radius: 4px;
+}
+.rs-scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--color-accent) / 0.6); }
+/* Fades that appear only when there is actually more table that way. */
+.rs-scroll.rs-more-right::after,
+.rs-scroll.rs-more-left::before {
+  content: ''; position: sticky; top: 0; height: 100%;
+  width: 28px; display: block; pointer-events: none; z-index: 3;
+}
+.rs-scroll.rs-more-right::after {
+  float: right; margin-left: -28px;
+  background: linear-gradient(to left, rgb(var(--color-background)), transparent);
+}
+.rs-scroll.rs-more-left::before {
+  float: left; margin-right: -28px;
+  background: linear-gradient(to right, rgb(var(--color-background)), transparent);
+}
+.rs-grid { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; }
+.rs-th {
+  position: sticky; top: 0; z-index: 2;
+  background: rgb(var(--color-primary) / 0.12);
+  backdrop-filter: blur(8px);
+  text-align: left; white-space: nowrap;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid rgb(var(--color-accent) / 0.25);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgb(var(--color-accent));
+}
+.rs-sort {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer;
+}
+.rs-sort:hover { color: rgb(var(--color-primary)); }
+.rs-resizer {
+  position: absolute; top: 0; right: 0; width: 7px; height: 100%;
+  cursor: col-resize; user-select: none;
+}
+.rs-resizer:hover { background: rgb(var(--color-primary) / 0.4); }
+.rs-th { position: sticky; }
+.rs-th, .rs-td { position: relative; }
+body.rs-resizing { cursor: col-resize; user-select: none; }
+.rs-td {
+  padding: 0.65rem 0.9rem; font-size: 0.875rem; vertical-align: top;
+  border-bottom: 1px solid rgb(var(--color-accent) / 0.1);
+}
+.rs-row:hover .rs-td { background: rgb(var(--color-text) / 0.04); }
+/* The title column stays put while the rest scrolls — without it a wide grid
+   loses the only thing identifying each row. */
+@media (min-width: 1024px) {
+  .rs-th.rs-sticky, .rs-td.rs-sticky {
+    position: sticky; left: 0; z-index: 1;
+    background: rgb(var(--color-background));
+    box-shadow: 1px 0 0 rgb(var(--color-accent) / 0.15);
+  }
+  .rs-th.rs-sticky { z-index: 3; background: rgb(var(--color-primary) / 0.12); }
+  .rs-row:hover .rs-td.rs-sticky { background: rgb(var(--color-background)); }
+  .rs-only-sm { display: none; }
+  .rs-only-sm-row { display: none; }
+}
+@media (max-width: 1023px) {
+  .rs-hide-sm { display: none; }
+  .rs-row { cursor: pointer; }
+  .rs-detail .rs-td { background: rgb(var(--color-primary) / 0.06); }
+}
+.rs-chip {
+  display: inline-block; white-space: nowrap;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 0.2rem 0.5rem; border-radius: 9999px;
+}
+.rs-chip-ready { background: rgb(var(--color-primary) / 0.22); color: rgb(var(--color-text)); }
+.rs-chip-go    { background: rgb(var(--color-text) / 0.14);    color: rgb(var(--color-text)); }
+.rs-chip-wait  { background: rgb(var(--color-accent) / 0.18);  color: rgb(var(--color-text) / 0.85); }
+.rs-chip-stuck { background: rgb(var(--color-secondary) / 0.3); color: rgb(var(--color-text)); }
+.rs-chip-dead  { background: rgb(var(--color-accent) / 0.12);  color: rgb(var(--color-text) / 0.7); }
+.rs-select {
+  background: rgb(var(--color-text) / 0.04);
+  border: 1px solid rgb(var(--color-accent) / 0.2);
+  border-radius: 0.5rem; padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem; color: rgb(var(--color-text));
+}
+.rs-select:focus { outline: none; border-color: rgb(var(--color-primary) / 0.6); }
+.rs-tab {
+  background: rgb(var(--color-accent) / 0.1);
+  color: rgb(var(--color-text) / 0.8);
+  border: 1px solid transparent;
+}
+.rs-tab.active {
+  background: rgb(var(--color-primary) / 0.2);
+  color: rgb(var(--color-text));
+  border-color: rgb(var(--color-primary) / 0.3);
+}
+.rs-tab:hover { background: rgb(var(--color-accent) / 0.2); }
+
+.filter-tab {
+  background: rgba(var(--color-accent) / 0.1);
+  border: 1px solid rgba(var(--color-accent) / 0.2);
+  color: rgb(var(--color-text) / 0.8);
+}
+.filter-tab:hover {
+  background: rgba(var(--color-accent) / 0.2);
+  color: rgb(var(--color-text));
+}
+.filter-tab.active {
+  background: rgb(var(--color-primary));
+  border-color: rgb(var(--color-primary));
+  color: rgb(var(--color-text-secondary));
+}
+.poster-placeholder {
+  background: linear-gradient(135deg, rgba(var(--color-primary) / 0.3), rgba(var(--color-secondary) / 0.15));
+}
+/* Discover rows */
+.discover-row {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* overflow-x:auto silently forces overflow-y to auto as well, which turns
+     every poster row into its own vertical scroll container. A row only ever
+     needs a pixel or two of stray height for the wheel to be captured by it
+     instead of the page, which reads as the section juddering as you scroll
+     past. Rows scroll sideways only. */
+  overflow-y: hidden;
+}
+.discover-row::-webkit-scrollbar {
+  display: none;
+}
+.discover-scroll-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-60%);
+  z-index: 10;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+  background: rgb(var(--color-primary) / 0.85);
+  color: rgb(var(--color-text-secondary));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+  padding: 0;
+}
+.discover-scroll-btn:hover {
+  background: rgb(var(--color-primary));
+}
+.discover-scroll-btn.left { left: -0.5rem; }
+.discover-scroll-btn.right { right: -0.5rem; }
+.discover-row-wrapper:hover .discover-scroll-btn {
+  opacity: 1;
+}
+/* An arrow that cannot scroll anywhere is a promise the row does not keep, so
+   it is removed rather than dimmed - the row is already at that end, and there
+   is nothing for a disabled-looking control to explain. */
+.discover-scroll-btn[disabled] {
+  display: none;
+}
+/* The server marks <html data-rs-empty> when the cached request-status
+   snapshot has nothing waiting (or could not be built), so the section is
+   collapsed from the first paint instead of being hidden after it loads,
+   which moved everything below it up (O2). RS.load drops the mark if rows
+   have appeared since. */
+html[data-rs-empty] #rsSection { display: none; }
+</style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <!-- ws:sidebar -->
-<!-- Toast notification container -->
-<div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 <!-- Main Content Area -->
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
 <!-- ws:header -->
@@ -173,10 +361,10 @@
   <div class="flex flex-wrap items-center gap-3 mb-3">
     <span class="material-symbols-outlined text-steel-blue">pending_actions</span>
     <h3 class="text-lg font-bold text-frosted-blue">Request Status</h3>
-    <span id="rsCount" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-steel-blue/20 text-steel-blue"></span>
-    <span id="rsFresh" class="ml-auto text-[11px] text-steel-blue/60"></span>
+    <span id="rsCount" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-steel-blue/20 text-frosted-blue"></span>
+    <span id="rsFresh" class="ml-auto text-[11px] text-frosted-blue/60"></span>
   </div>
-  <p class="text-xs text-steel-blue/80 mb-3">
+  <p class="text-xs text-frosted-blue/70 mb-3">
     Everything that&rsquo;s been asked for and isn&rsquo;t on the server yet, and why.
     Once something arrives it drops off this list.
   </p>
@@ -186,7 +374,7 @@
     <div class="relative flex-1 min-w-[200px]">
       <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-lg">search</span>
       <input id="rsSearch" type="text" placeholder="Search titles…"
-        class="w-full pl-10 pr-3 py-2 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"/>
+        class="w-full pl-10 pr-3 py-2 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/60 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"/>
     </div>
     <select id="rsFilterStatus" class="rs-select"><option value="">All statuses</option></select>
     <select id="rsFilterType" class="rs-select">
@@ -220,14 +408,14 @@
 <div id="searchBar" class="relative w-full">
 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-xl">search</span>
 <input id="searchInput" type="text" placeholder="Search movies, TV shows and books..."
-  class="w-full pl-10 pr-4 py-2.5 bg-cornflower-ocean/25 backdrop-blur-xl border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm shadow-lg shadow-black/30"/>
+  class="w-full pl-10 pr-4 py-2.5 bg-cornflower-ocean/25 backdrop-blur-xl border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/60 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm shadow-lg shadow-black/30"/>
 </div>
 </div>
-<div class="space-y-1.5 mb-4 text-[11px] leading-relaxed text-steel-blue/80">
+<div class="space-y-1.5 mb-4 text-[11px] leading-relaxed text-frosted-blue/70">
 <p><strong class="text-steel-blue">Requests</strong> are processed automatically and should be available within an hour, though there is no guarantee the content is available.</p>
 </div>
 <div class="flex items-center gap-3 mb-4 pb-3 border-b border-steel-blue/30">
-<span class="material-symbols-outlined text-primary">manage_search</span>
+<span class="material-symbols-outlined text-steel-blue">manage_search</span>
 <h3 class="text-lg font-bold text-frosted-blue">Search Results</h3>
 <span id="searchResultCount" class="text-sm text-steel-blue font-medium"></span>
 </div>
@@ -257,7 +445,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 <!-- Right column: Existing Requests -->
 <div class="w-full lg:w-1/2 min-w-0 rounded-xl glass-card p-4 lg:p-5">
 <div class="flex items-center gap-3 mb-4 pb-3 border-b border-steel-blue/30">
-<span class="material-symbols-outlined text-primary">shopping_cart</span>
+<span class="material-symbols-outlined text-steel-blue">shopping_cart</span>
 <h3 class="text-lg font-bold text-frosted-blue">Recent Requests</h3>
 <span id="requestsTotalCount" class="text-sm text-steel-blue font-medium"></span>
 </div>
@@ -294,14 +482,14 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 </div>
 <!-- Media Detail Modal -->
 <div id="mediaModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4">
-  <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeMediaModal()"></div>
+  <div class="absolute inset-0 ws-scrim backdrop-blur-sm" onclick="closeMediaModal()"></div>
   <div class="relative z-10 glass-card rounded-2xl w-full max-w-lg overflow-hidden">
     <button onclick="closeMediaModal()" class="absolute top-3 right-3 z-10 text-steel-blue hover:text-frosted-blue transition-colors">
       <span class="material-symbols-outlined">close</span>
     </button>
     <div class="flex gap-4 p-5">
       <div class="w-28 shrink-0">
-        <div class="aspect-[2/3] rounded-lg overflow-hidden bg-black/40 relative">
+        <div class="aspect-[2/3] rounded-lg overflow-hidden bg-frosted-blue/[0.04] relative">
           <img id="modalPoster" src="" alt="" class="absolute inset-0 w-full h-full object-cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/>
           <div class="absolute inset-0 items-center justify-center poster-placeholder" style="display:none">
             <span class="material-symbols-outlined text-4xl text-steel-blue/40">movie</span>
@@ -313,9 +501,9 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
         <div class="flex items-center flex-wrap gap-2 mb-3">
           <span id="modalYear" class="text-steel-blue text-sm"></span>
           <span id="modalTypeBadge" class="text-[9px] font-bold px-1.5 py-0.5 rounded"></span>
-          <span id="modalRating" class="text-[11px] text-steel-blue/80 font-medium"></span>
+          <span id="modalRating" class="text-[11px] text-frosted-blue/70 font-medium"></span>
         </div>
-        <p id="modalOverview" class="text-steel-blue/80 text-xs leading-relaxed line-clamp-4 mb-4"></p>
+        <p id="modalOverview" class="text-frosted-blue/70 text-xs leading-relaxed line-clamp-4 mb-4"></p>
         <div id="modalActionArea"></div>
       </div>
     </div>
@@ -323,194 +511,11 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 </div>
 </main>
 
-<style>
-/* ---- Request Status grid ------------------------------------------------
-   A data grid that still has to read well to someone checking on one film.
-   Columns auto-fit (table-layout:auto + min-widths) rather than being fixed,
-   the header and the title column stay pinned while the rest scrolls, and the
-   scroll container carries edge shadows so it is obvious there is more to the
-   right rather than looking cut off. Below lg the extra columns are dropped
-   and a tapped row reveals them, so nothing is ever hidden off-screen on a
-   phone. */
-.rs-scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
-  scroll-behavior: smooth;
-  scroll-snap-type: y proximity;
-  -webkit-overflow-scrolling: touch;
-  position: relative;
-  scrollbar-width: thin;
-  scrollbar-color: rgb(var(--color-accent) / 0.4) transparent;
-}
-/* Only once capped does the body scroll vertically; below five rows it sits at
-   its natural height with no scrollbar at all. */
-.rs-scroll.rs-capped { overflow-y: auto; }
-.rs-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
-.rs-scroll::-webkit-scrollbar-track { background: transparent; }
-.rs-scroll::-webkit-scrollbar-thumb {
-  background: rgb(var(--color-accent) / 0.35);
-  border-radius: 4px;
-}
-.rs-scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--color-accent) / 0.6); }
-/* Fades that appear only when there is actually more table that way. */
-.rs-scroll.rs-more-right::after,
-.rs-scroll.rs-more-left::before {
-  content: ''; position: sticky; top: 0; height: 100%;
-  width: 28px; display: block; pointer-events: none; z-index: 3;
-}
-.rs-scroll.rs-more-right::after {
-  float: right; margin-left: -28px;
-  background: linear-gradient(to left, rgb(var(--color-background)), transparent);
-}
-.rs-scroll.rs-more-left::before {
-  float: left; margin-right: -28px;
-  background: linear-gradient(to right, rgb(var(--color-background)), transparent);
-}
-.rs-grid { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; }
-.rs-th {
-  position: sticky; top: 0; z-index: 2;
-  background: rgb(var(--color-primary) / 0.12);
-  backdrop-filter: blur(8px);
-  text-align: left; white-space: nowrap;
-  padding: 0.6rem 0.9rem;
-  border-bottom: 1px solid rgb(var(--color-accent) / 0.25);
-  font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-  color: rgb(var(--color-accent));
-}
-.rs-sort {
-  display: inline-flex; align-items: center; gap: 0.3rem;
-  color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer;
-}
-.rs-sort:hover { color: rgb(var(--color-primary)); }
-.rs-resizer {
-  position: absolute; top: 0; right: 0; width: 7px; height: 100%;
-  cursor: col-resize; user-select: none;
-}
-.rs-resizer:hover { background: rgb(var(--color-primary) / 0.4); }
-.rs-th { position: sticky; }
-.rs-th, .rs-td { position: relative; }
-body.rs-resizing { cursor: col-resize; user-select: none; }
-.rs-td {
-  padding: 0.65rem 0.9rem; font-size: 0.875rem; vertical-align: top;
-  border-bottom: 1px solid rgb(var(--color-accent) / 0.1);
-}
-.rs-row:hover .rs-td { background: rgb(var(--color-text) / 0.04); }
-/* The title column stays put while the rest scrolls — without it a wide grid
-   loses the only thing identifying each row. */
-@media (min-width: 1024px) {
-  .rs-th.rs-sticky, .rs-td.rs-sticky {
-    position: sticky; left: 0; z-index: 1;
-    background: rgb(var(--color-background));
-    box-shadow: 1px 0 0 rgb(var(--color-accent) / 0.15);
-  }
-  .rs-th.rs-sticky { z-index: 3; background: rgb(var(--color-primary) / 0.12); }
-  .rs-row:hover .rs-td.rs-sticky { background: rgb(var(--color-background)); }
-  .rs-only-sm { display: none; }
-  .rs-only-sm-row { display: none; }
-}
-@media (max-width: 1023px) {
-  .rs-hide-sm { display: none; }
-  .rs-row { cursor: pointer; }
-  .rs-detail .rs-td { background: rgb(var(--color-primary) / 0.06); }
-}
-.rs-chip {
-  display: inline-block; white-space: nowrap;
-  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
-  padding: 0.2rem 0.5rem; border-radius: 9999px;
-}
-.rs-chip-ready { background: rgb(var(--color-primary) / 0.22); color: rgb(var(--color-primary)); }
-.rs-chip-go    { background: rgb(var(--color-text) / 0.14);    color: rgb(var(--color-text)); }
-.rs-chip-wait  { background: rgb(var(--color-accent) / 0.18);  color: rgb(var(--color-accent)); }
-.rs-chip-stuck { background: rgb(var(--color-secondary) / 0.3); color: rgb(var(--color-text)); }
-.rs-chip-dead  { background: rgb(var(--color-accent) / 0.12);  color: rgb(var(--color-accent) / 0.75); }
-.rs-select {
-  background: rgb(0 0 0 / 0.4);
-  border: 1px solid rgb(var(--color-accent) / 0.2);
-  border-radius: 0.5rem; padding: 0.5rem 0.75rem;
-  font-size: 0.8125rem; color: rgb(var(--color-text));
-}
-.rs-select:focus { outline: none; border-color: rgb(var(--color-primary) / 0.6); }
-.rs-tab {
-  background: rgb(var(--color-accent) / 0.1);
-  color: rgb(var(--color-accent));
-  border: 1px solid transparent;
-}
-.rs-tab.active {
-  background: rgb(var(--color-primary) / 0.2);
-  color: rgb(var(--color-primary));
-  border-color: rgb(var(--color-primary) / 0.3);
-}
-.rs-tab:hover { background: rgb(var(--color-accent) / 0.2); }
-
-.filter-tab {
-  background: rgba(var(--color-accent) / 0.1);
-  border: 1px solid rgba(var(--color-accent) / 0.2);
-  color: rgb(var(--color-accent));
-}
-.filter-tab:hover {
-  background: rgba(var(--color-accent) / 0.2);
-  color: rgb(var(--color-text));
-}
-.filter-tab.active {
-  background: rgb(var(--color-primary));
-  border-color: rgb(var(--color-primary));
-  color: rgb(var(--color-background));
-}
-.poster-placeholder {
-  background: linear-gradient(135deg, rgba(var(--color-primary) / 0.3), rgba(var(--color-secondary) / 0.15));
-}
-/* Discover rows */
-.discover-row {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  /* overflow-x:auto silently forces overflow-y to auto as well, which turns
-     every poster row into its own vertical scroll container. A row only ever
-     needs a pixel or two of stray height for the wheel to be captured by it
-     instead of the page, which reads as the section juddering as you scroll
-     past. Rows scroll sideways only. */
-  overflow-y: hidden;
-}
-.discover-row::-webkit-scrollbar {
-  display: none;
-}
-.discover-scroll-btn {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-60%);
-  z-index: 10;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 9999px;
-  background: rgb(var(--color-primary) / 0.85);
-  color: rgb(var(--color-background));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s;
-  padding: 0;
-}
-.discover-scroll-btn:hover {
-  background: rgb(var(--color-primary));
-}
-.discover-scroll-btn.left { left: -0.5rem; }
-.discover-scroll-btn.right { right: -0.5rem; }
-.discover-row-wrapper:hover .discover-scroll-btn {
-  opacity: 1;
-}
-/* An arrow that cannot scroll anywhere is a promise the row does not keep, so
-   it is removed rather than dimmed - the row is already at that end, and there
-   is nothing for a disabled-looking control to explain. */
-.discover-scroll-btn[disabled] {
-  display: none;
-}
-</style>
 
 <script src="/static/js/auth.js?v=1"></script>
 <script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
+<script src="/static/js/ui.js?v=1"></script>
 <script>
 // Discover row definitions.
 //
@@ -737,7 +742,7 @@ var RS = (function () {
                (c.key === 'title' ? ' rs-sticky' : '') + '" style="min-width:' + c.min + 'px">' +
         '<button type="button" class="rs-sort" data-sort="' + c.key + '">' +
           escapeHtml(c.label) +
-          '<span class="material-symbols-outlined text-[14px] ' + (active ? 'text-primary' : 'opacity-40') + '">' + arrow + '</span>' +
+          '<span class="material-symbols-outlined text-[14px] ' + (active ? 'text-frosted-blue' : 'opacity-40') + '">' + arrow + '</span>' +
         '</button>' +
         '<span class="rs-resizer" data-resize="' + c.key + '"></span>' +
       '</th>';
@@ -771,11 +776,11 @@ var RS = (function () {
         '<tr class="rs-row" data-id="' + escapeHtml(id) + '">' +
           '<td class="rs-td rs-sticky">' +
             '<div class="flex items-center gap-2 min-w-0">' +
-              '<span class="material-symbols-outlined text-steel-blue/50 text-[18px] shrink-0 rs-only-sm">' +
+              '<span class="material-symbols-outlined text-frosted-blue/60 text-[18px] shrink-0 rs-only-sm">' +
                 (open ? 'expand_less' : 'expand_more') + '</span>' +
               '<div class="min-w-0">' +
                 '<span class="font-bold text-frosted-blue break-words">' + escapeHtml(cellValue(r, 'title')) + '</span>' +
-                (r.year ? ' <span class="text-steel-blue/60 text-xs">' + escapeHtml(String(r.year)) + '</span>' : '') +
+                (r.year ? ' <span class="text-frosted-blue/60 text-xs">' + escapeHtml(String(r.year)) + '</span>' : '') +
                 (scope ? '<span class="block text-[10px] uppercase tracking-wider text-steel-blue">' + escapeHtml(scope) + '</span>' : '') +
               '</div>' +
             '</div>' +
@@ -926,6 +931,8 @@ var RS = (function () {
       if (_snapshot.error) { document.getElementById('rsSection').classList.add('hidden'); return; }
       _rows = _snapshot.items || [];
       if (!_rows.length) { document.getElementById('rsSection').classList.add('hidden'); return; }
+      // Rows since the page was rendered: the server's collapse no longer holds.
+      document.documentElement.removeAttribute('data-rs-empty');
 
       var mins = Math.floor((Date.now() - new Date(_snapshot.generated_at).getTime()) / 60000);
       document.getElementById('rsFresh').textContent =
@@ -1004,7 +1011,7 @@ function buildDiscoverSection() {
     var html =
       '<div class="mb-6">' +
         '<div class="flex items-center gap-2 mb-3">' +
-          '<span class="material-symbols-outlined text-primary text-xl">' + row.icon + '</span>' +
+          '<span class="material-symbols-outlined text-steel-blue text-xl">' + row.icon + '</span>' +
           '<h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">' + escapeHtml(row.label) + '</h2>' +
         '</div>' +
         '<div class="discover-row-wrapper relative">' +
@@ -1075,7 +1082,7 @@ function renderDiscoverRow(rowId, items) {
   var row = document.getElementById(rowId);
   if (!row) return;
   if (!items || items.length === 0) {
-    row.innerHTML = '<p class="text-steel-blue/50 text-xs py-4 px-2 italic">Nothing to show</p>';
+    row.innerHTML = '<p class="text-frosted-blue/60 text-xs py-4 px-2 italic">Nothing to show</p>';
     updateDiscoverArrows(row);
     return;
   }
@@ -1099,7 +1106,7 @@ function renderDiscoverRow(rowId, items) {
 function renderDiscoverRowError(rowId) {
   var row = document.getElementById(rowId);
   if (!row) return;
-  row.innerHTML = '<p class="text-steel-blue/50 text-xs py-4 px-2 italic">Could not load</p>';
+  row.innerHTML = '<p class="text-frosted-blue/60 text-xs py-4 px-2 italic">Could not load</p>';
   // A failed row has nothing to scroll, so it should not offer to.
   updateDiscoverArrows(row);
 }
@@ -1161,10 +1168,10 @@ function buildDiscoverCard(item) {
   var dotHtml = '';
   if (status) {
     var dotColor = 'bg-steel-blue';
-    if (status === 'available') dotColor = 'bg-green-500';
-    else if (status === 'processing' || status === 'approved') dotColor = 'bg-blue-500';
-    else if (status === 'partially_available') dotColor = 'bg-yellow-500';
-    dotHtml = '<div class="absolute top-2 left-2 w-2.5 h-2.5 rounded-full ' + dotColor + ' ring-2 ring-black/60"></div>';
+    if (status === 'available') dotColor = 'bg-status-ok';
+    else if (status === 'processing' || status === 'approved') dotColor = 'bg-primary';
+    else if (status === 'partially_available') dotColor = 'bg-status-warn';
+    dotHtml = '<div class="absolute top-2 left-2 w-2.5 h-2.5 rounded-full ' + dotColor + ' ring-2 ring-background-dark/60"></div>';
   }
 
   var posterHtml;
@@ -1187,7 +1194,7 @@ function buildDiscoverCard(item) {
     '<div class="shrink-0 w-28 rounded-xl overflow-hidden glass-card ws-lift cursor-pointer group">' +
       '<div class="aspect-[2/3] relative overflow-hidden">' +
         posterHtml +
-        '<div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>' +
+        '<div class="absolute inset-0 bg-gradient-to-t from-background-dark/60 via-transparent to-transparent"></div>' +
         dotHtml +
       '</div>' +
       '<div class="p-1.5">' +
@@ -1336,9 +1343,9 @@ async function performSearch(query) {
         console.error('Search error:', error);
         grid.textContent = '';
         var errDiv = document.createElement('div');
-        errDiv.className = 'text-center text-red-400 py-8 col-span-full';
+        errDiv.className = 'text-center text-frosted-blue/70 py-8 col-span-full';
         var errIcon = document.createElement('span');
-        errIcon.className = 'material-symbols-outlined text-4xl mb-2 block';
+        errIcon.className = 'material-symbols-outlined text-4xl mb-2 block text-status-err-text';
         errIcon.textContent = 'error';
         var errP = document.createElement('p');
         errP.textContent = 'Error searching. Is Seerr configured?';
@@ -1434,7 +1441,7 @@ function buildSearchCard(item) {
     return '<div class="glass-card rounded-xl overflow-hidden group flex flex-col">' +
         '<div class="aspect-[2/3] relative overflow-hidden">' +
             posterHtml +
-            '<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>' +
+            '<div class="absolute inset-0 bg-gradient-to-t from-background-dark via-transparent to-transparent"></div>' +
         '</div>' +
         '<div class="p-3 flex flex-col gap-2 flex-1">' +
             '<div class="flex-1">' +
@@ -1928,25 +1935,30 @@ function moveSearchBar(position) {
     _searchMoveRaf = requestAnimationFrame(frame);
 }
 
-// Labels come from the shared vocabulary in shell.js (WS.requestStatus), so the
-// home page's Recent Requests says the same words for the same state.
+// Labels and tones come from the shared vocabulary in shell.js
+// (WS.requestStatus), so the home page's Recent Requests says the same words
+// in the same colours for the same state: finished reads on a primary tint,
+// things in motion in the text colour, not-yet-started on the accent, and a
+// request that will not happen dimmed rather than alarming. Theme colours
+// only; each tone keeps its 1px border so the block's box never changes.
+var STATUS_TONE_CLASSES = {
+    ready: {bg: 'bg-primary/30',      text: 'text-frosted-blue',    border: 'border-primary/40'},
+    go:    {bg: 'bg-frosted-blue/15', text: 'text-frosted-blue',    border: 'border-frosted-blue/20'},
+    wait:  {bg: 'bg-steel-blue/20',   text: 'text-frosted-blue/80', border: 'border-steel-blue/30'},
+    dead:  {bg: 'bg-steel-blue/10',   text: 'text-frosted-blue/70', border: 'border-steel-blue/20'}
+};
+
 function getStatusPresentation(status, mediaType, item) {
+    var known = WS.requestStatus(status);
+    var tone = STATUS_TONE_CLASSES[known.tone] || STATUS_TONE_CLASSES.wait;
+    var p = {bg: tone.bg, text: tone.text, border: tone.border, label: known.label};
     switch (status) {
         case 'available':
         case 'completed':
-            return {bg: 'bg-green-500/15', text: 'text-green-400', border: 'border-green-500/30', label: WS.requestStatus(status).label};
-
-        case 'partially_available':
-            // A count beats any adjective: "48 of 62 Episodes" tells someone
-            // exactly what they are getting, where "Partial" tells them
-            // nothing. Falls back to words when the count is unavailable.
-            return {
-                bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30',
-                label: (item && item.episodes_total)
-                    ? item.episodes_available + ' of ' + item.episodes_total + ' Episodes'
-                    : WS.requestStatus(status).label,
-                selfDescribing: !!(item && item.episodes_total)
-            };
+        case 'approved':
+        case 'pending':
+        case 'declined':
+            return p;
 
         case 'processing':
         case 'downloading':
@@ -1955,22 +1967,22 @@ function getStatusPresentation(status, mediaType, item) {
             // indexers, waiting on an upgrade, or stalled with no release
             // found at all. Claiming a download is in progress sets an
             // expectation nothing here can actually verify.
-            return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: WS.requestStatus(status).label};
+            return p;
 
-        case 'approved':
-            return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: WS.requestStatus(status).label};
-
-        case 'pending':
-            return {bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30', label: WS.requestStatus(status).label};
-
-        case 'declined':
-            return {bg: 'bg-red-500/15', text: 'text-red-400', border: 'border-red-500/30', label: WS.requestStatus(status).label};
+        case 'partially_available':
+            // A count beats any adjective: "48 of 62 Episodes" tells someone
+            // exactly what they are getting, where "Partial" tells them
+            // nothing. Falls back to words when the count is unavailable.
+            if (item && item.episodes_total) {
+                p.label = item.episodes_available + ' of ' + item.episodes_total + ' Episodes';
+                p.selfDescribing = true;
+            }
+            return p;
 
         default:
-            return {
-                bg: 'bg-steel-blue/20', text: 'text-steel-blue', border: 'border-steel-blue/30',
-                label: status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown'
-            };
+            p = {bg: STATUS_TONE_CLASSES.wait.bg, text: STATUS_TONE_CLASSES.wait.text, border: STATUS_TONE_CLASSES.wait.border};
+            p.label = status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown';
+            return p;
     }
 }
 
@@ -2203,7 +2215,7 @@ function buildRequestCard(req) {
     return '<div class="glass-card rounded-xl overflow-hidden group" data-status="' + status + '">' +
         '<div class="aspect-[2/3] relative overflow-hidden">' +
             posterHtml +
-            '<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>' +
+            '<div class="absolute inset-0 bg-gradient-to-t from-background-dark via-transparent to-transparent"></div>' +
         '</div>' +
         // Status sits below the artwork rather than over it. As an overlay it
         // read as a watermark stamped across the cover, and it obscured the
@@ -2214,7 +2226,7 @@ function buildRequestCard(req) {
                 getStatusBadge(status, mediaType) +
             '</div>' +
             '<p class="text-frosted-blue text-sm font-bold leading-tight line-clamp-2">' + title + '</p>' +
-            (requestedDate ? '<p class="text-[10px] text-steel-blue/60 font-medium uppercase">' + requestedDate + '</p>' : '') +
+            (requestedDate ? '<p class="text-[10px] text-frosted-blue/60 font-medium uppercase">' + requestedDate + '</p>' : '') +
         '</div>' +
     '</div>';
 }
@@ -2309,31 +2321,9 @@ function requestFromModal(buttonEl) {
 
 // ---- Toast Notifications ----
 
+// The site's one toast (ui.js): theme colours, a status light for the tone.
 function showToast(message, type) {
-    var container = document.getElementById('toastContainer');
-    var toast = document.createElement('div');
-    var bgColor = type === 'success' ? 'bg-green-500/90' : 'bg-red-500/90';
-    var icon = type === 'success' ? 'check_circle' : 'error';
-
-    toast.className = 'pointer-events-auto flex items-center gap-2 px-4 py-3 rounded-lg ' + bgColor + ' text-bright text-sm font-medium shadow-lg backdrop-blur-sm transform translate-x-full transition-transform duration-300';
-    toast.innerHTML = '<span class="material-symbols-outlined text-sm">' + icon + '</span>' + escapeHtml(message);
-
-    container.appendChild(toast);
-
-    // Animate in
-    requestAnimationFrame(function() {
-        toast.classList.remove('translate-x-full');
-        toast.classList.add('translate-x-0');
-    });
-
-    // Animate out after 10 seconds
-    setTimeout(function() {
-        toast.classList.remove('translate-x-0');
-        toast.classList.add('translate-x-full');
-        setTimeout(function() {
-            if (toast.parentNode) toast.parentNode.removeChild(toast);
-        }, 300);
-    }, 10000);
+    WSUI.toast(message, type === 'success' ? 'ok' : 'err');
 }
 
 // ---- Poster Fallbacks ----
