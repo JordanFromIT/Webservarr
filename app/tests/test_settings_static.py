@@ -306,6 +306,17 @@ class KitApi(unittest.TestCase):
         api = function_body(kit_code(), "makeApi")
         self.assertRegex(api, r"\bapi\.saved = function \((\w+)\) \{ return baseline\(\1\); \};")
 
+    def test_tabs_read_saved_values_through_the_kit(self):
+        # One copy of "the saved value, else the default": the tabs call
+        # api.saved rather than keeping their own wrapper over WSSettings.values.
+        for name in ("pages.js", "signin.js"):
+            with self.subTest(tab=name):
+                code = js_code_only((STATIC / "js" / "settings" / name).read_text(encoding="utf-8"))
+                self.assertNotRegex(code, r"\bfunction saved\(")
+                self.assertNotRegex(code, r"(?<![.\w])saved\b")          # every use goes through api.
+                self.assertNotIn("WSSettings.values", code)
+                self.assertRegex(code, r"\bapi\.saved\(")
+
     def test_secret_inputs_carry_password_manager_hints(self):
         # R66 / R79 (f): an API key is not a password. Beside
         # autocomplete="new-password", the secret input tells 1Password,
