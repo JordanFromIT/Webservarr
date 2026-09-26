@@ -119,7 +119,7 @@
         <span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-steel-blue text-[18px]">search</span>
         <input id="searchInput" type="search" placeholder="Search by title or author…" autocomplete="off"
                class="bg-baltic-blue/10 border border-steel-blue/30 rounded-xl pl-8 pr-3 py-2 text-sm text-frosted-blue
-                      placeholder:text-steel-blue/60 focus:outline-none focus:ring-2 focus:ring-steel-blue w-48 sm:w-64"/>
+                      placeholder:text-frosted-blue/60 focus:outline-none focus:ring-2 focus:ring-steel-blue w-48 sm:w-64"/>
       </div>
     </div>
 
@@ -320,9 +320,9 @@
     btn.type = 'button';
     btn.title = 'More options';
     btn.setAttribute('aria-label', 'More options for ' + (series.name || 'this book'));
-    btn.className = 'card-menu-btn grid place-items-center w-7 h-7 rounded-full bg-black/70 text-frosted-blue ' +
+    btn.className = 'card-menu-btn grid place-items-center w-7 h-7 rounded-full bg-background-dark/70 text-frosted-blue ' +
                      'border border-steel-blue/40 opacity-0 group-hover:opacity-100 focus:opacity-100 ' +
-                     'transition-opacity hover:bg-black hover:text-white';
+                     'transition-opacity hover:bg-background-dark';
     btn.innerHTML = '<span class="material-symbols-outlined text-[16px] leading-none">more_vert</span>';
 
     var dropdown = document.createElement('div');
@@ -1274,7 +1274,7 @@
 
 <!-- Book detail sheet. Opens on clicking a cover, the way a film does on Plex:
      what the book is and whether you want it, before committing to reading it. -->
-<div id="bookDetail" class="hidden fixed inset-0 z-[65] items-center justify-center p-4 bg-black/75" role="dialog" aria-modal="true" aria-labelledby="bdTitle">
+<div id="bookDetail" class="hidden fixed inset-0 z-[65] items-center justify-center p-4 ws-scrim" role="dialog" aria-modal="true" aria-labelledby="bdTitle">
   <div class="glass-card rounded-2xl w-full max-w-3xl max-h-[88vh] overflow-y-auto custom-scrollbar">
     <div class="flex flex-col sm:flex-row gap-5 p-5 sm:p-6">
 

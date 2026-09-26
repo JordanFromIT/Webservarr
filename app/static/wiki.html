@@ -158,7 +158,7 @@ var WikiView = (function () {
 
   function pageHeader(titleText, subtitleText, backHref, backText) {
     var head = el('div', 'mb-6');
-    var back = el('a', 'inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors mb-3');
+    var back = el('a', 'inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors mb-3');
     back.href = backHref || '/';
     back.appendChild(icon('chevron_left', 'text-sm'));
     back.appendChild(document.createTextNode(backText || 'Back to home'));
@@ -200,7 +200,7 @@ var WikiView = (function () {
     var bar = el('div', 'flex flex-wrap justify-end gap-2 mb-4');
     function button(glyph, label, handler, primary) {
       var btn = el('button', primary
-        ? 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 text-primary border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all'
+        ? 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 text-frosted-blue border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all'
         : 'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-frosted-blue/70 border border-frosted-blue/10 text-sm font-bold hover:text-frosted-blue hover:bg-frosted-blue/[0.06] transition-all disabled:opacity-50 disabled:cursor-not-allowed');
       btn.type = 'button';
       btn.appendChild(icon(glyph, 'text-base'));
@@ -241,7 +241,7 @@ var WikiView = (function () {
     });
 
     var top = el('div', 'flex items-center gap-3');
-    top.appendChild(icon(cat.icon || 'folder', 'text-steel-blue group-hover:text-primary transition-colors'));
+    top.appendChild(icon(cat.icon || 'folder', 'text-steel-blue group-hover:text-frosted-blue transition-colors'));
     top.appendChild(el('h2', 'font-bold text-frosted-blue', cat.name));
     a.appendChild(top);
 
@@ -265,7 +265,7 @@ var WikiView = (function () {
     titleRow.appendChild(el('span', 'font-bold text-frosted-blue', page.title));
     if (!page.published) {
       titleRow.appendChild(el('span',
-        'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-steel-blue',
+        'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-frosted-blue/80',
         'Draft'));
     }
     col.appendChild(titleRow);
@@ -471,12 +471,12 @@ var WikiView = (function () {
       }
       if (item.matched_in === 'body') {
         row.appendChild(el('span',
-          'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-steel-blue',
+          'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-frosted-blue/80',
           'in body'));
       }
       if (!item.published) {
         row.appendChild(el('span',
-          'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-steel-blue',
+          'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-frosted-blue/80',
           'Draft'));
       }
       a.appendChild(row);
@@ -507,7 +507,7 @@ var WikiView = (function () {
     var ul = el('ul', 'space-y-1.5 border-l border-steel-blue/30 pl-3');
     items.forEach(function (it) {
       var li = el('li', it.level === 3 ? 'pl-3' : '');
-      var a = el('a', 'text-steel-blue hover:text-primary transition-colors block', it.text);
+      var a = el('a', 'text-steel-blue hover:text-frosted-blue transition-colors block', it.text);
       a.href = '#' + it.id;
       li.appendChild(a);
       ul.appendChild(li);
@@ -545,7 +545,7 @@ var WikiView = (function () {
     var backText = page.category_name ? 'Back to ' + page.category_name : 'Back to the wiki';
 
     var head = el('div', 'mb-6');
-    var back = el('a', 'inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors mb-3');
+    var back = el('a', 'inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors mb-3');
     back.href = backHref;
     back.appendChild(icon('chevron_left', 'text-sm'));
     back.appendChild(document.createTextNode(backText));
@@ -557,7 +557,7 @@ var WikiView = (function () {
     h1Row.appendChild(el('h1', 'text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight', page.title));
     if (!page.published) {
       h1Row.appendChild(el('span',
-        'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-steel-blue',
+        'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-frosted-blue/80',
         'Draft'));
     }
     titleCol.appendChild(h1Row);
@@ -567,7 +567,7 @@ var WikiView = (function () {
 
     if (isAdmin()) {
       var editBtn = el('button',
-        'shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 text-primary ' +
+        'shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 text-frosted-blue ' +
         'border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all');
       editBtn.type = 'button';
       editBtn.appendChild(icon('edit', 'text-base'));

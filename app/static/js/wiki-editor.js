@@ -133,9 +133,9 @@ var WikiEditor = (function () {
 
   var INPUT_CLS = 'w-full px-3 py-2 rounded-lg bg-background-dark border border-steel-blue/40 ' +
                   'text-frosted-blue placeholder:text-steel-blue focus:border-primary focus:ring-0 transition-colors';
-  var BTN_PRIMARY = 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-background-dark ' +
+  var BTN_PRIMARY = 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-bright ' +
                     'text-sm font-bold hover:opacity-90 transition-all';
-  var BTN_GHOST = 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 text-primary ' +
+  var BTN_GHOST = 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 text-frosted-blue ' +
                   'border border-primary/30 text-sm font-bold hover:bg-primary/20 transition-all';
   var BTN_QUIET = 'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-steel-blue ' +
                   'text-sm font-bold hover:text-frosted-blue transition-colors';
@@ -382,7 +382,7 @@ var WikiEditor = (function () {
       ['code', 'Code block', function () { wrapSelection('\n```\n', '\n```\n', 'code'); }]
     ];
     buttons.forEach(function (b) {
-      var btn = el('button', 'p-2 rounded text-steel-blue hover:text-primary hover:bg-primary/10 transition-colors');
+      var btn = el('button', 'p-2 rounded text-steel-blue hover:text-frosted-blue hover:bg-primary/10 transition-colors');
       btn.type = 'button';
       btn.title = b[1];
       btn.setAttribute('aria-label', b[1]);
@@ -501,7 +501,7 @@ var WikiEditor = (function () {
     window.scrollTo(0, 0);
 
     var head = el('div', 'mb-6');
-    var backBtn = el('button', 'inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-primary transition-colors mb-3');
+    var backBtn = el('button', 'inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors mb-3');
     backBtn.type = 'button';
     backBtn.appendChild(icon('chevron_left', 'text-sm'));
     backBtn.appendChild(document.createTextNode(_slug ? 'Back to the page' : 'Back to the wiki'));
@@ -689,7 +689,7 @@ var WikiEditor = (function () {
       : 'Not saved yet.';
     statusRow.appendChild(statusEl);
 
-    var reauth = el('a', 'hidden text-sm font-bold text-primary underline', 'Open sign-in');
+    var reauth = el('a', 'hidden text-sm font-bold text-frosted-blue underline', 'Open sign-in');
     reauth.id = 'wikiEditReauth';
     reauth.href = '/login';
     reauth.target = '_blank';
