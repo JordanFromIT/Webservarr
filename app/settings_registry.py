@@ -253,25 +253,7 @@ def _build() -> List[SettingDef]:
         d.append(_int(f"notifications.poll_interval_{name}", "60",
                       f"Seconds between {label} notification checks", 30, 3600))
 
-    # ---- Retired by the redesign (decision 2 in the plan) ----
-    # Folded into one switch per page and one Requests item: no longer seeded
-    # or read by the branding builder. Their rows are left alone, and the
-    # settings API still accepts them while the old Settings page sends them.
-    retired = {"deprecated": True, "seed": False}
-    d += [
-        _bool("features.show_requests", "false", "Old: show the Seerr embed page", public=True, **retired),
-        _bool("features.show_tickets", "true", "Old: Tickets feature flag", public=True, **retired),
-        _bool("features.show_books", "true", "Old: eBooks feature flag", public=True, **retired),
-        _text("sidebar.label_requests_embed", "Requests (Embed)", "Old: Seerr embed label", public=True,
-              max_length=40, allow_empty=False, **retired),
-        _text("sidebar.sublabel_requests_embed", "Request through Seerr", "Old: Seerr embed sublabel",
-              public=True, max_length=60, **retired),
-        _bool("sidebar.enabled_requests_embed", "true", "Old: Seerr embed switch", public=True, **retired),
-        _bool("sidebar.new_requests_embed", "false", "Old: Seerr embed New! flag", public=True, **retired),
-        _icon("icon.nav_requests_embed", "download", "Old: Seerr embed icon", public=True, **retired),
-        # Never read by app/integrations/uptime_kuma.py (the status page API is public).
-        _secret("integration.uptime_kuma.api_key", "Old: unused Uptime Kuma API key", deprecated=True, seed=False),
-    ]
+    # Keys retired in v1.11: features.show_*, the *requests_embed keys and integration.uptime_kuma.api_key. Their rows may remain in old databases; nothing reads them.
     return d
 
 

@@ -3,9 +3,7 @@ Admin settings API, driven by the settings registry (app/settings_registry.py).
 
 Every write is validated against the registry before anything is stored. A
 save with any invalid value is rejected as a whole (422, per-key messages)
-so the database never holds half a form. Mounted before app.routers.admin so
-its fixed paths (/settings/export, /settings/shell) win over the older
-/settings/{key} route.
+so the database never holds half a form.
 """
 
 import hashlib
@@ -43,22 +41,6 @@ _SIGN_IN_KEYS = (
 LOCKOUT_MESSAGE = ("Keep at least one sign-in method on and set up, "
                    "or nobody (including you) will be able to sign in.")
 SAVE_FAILED_MESSAGE = "Couldn't save the settings right now. Nothing was changed; please try again."
-
-# The legacy list endpoint returns every row, so it keeps the old
-# term-based masking that also covers internal secrets (system.secret_key,
-# the VAPID private key). Removed with the legacy shape in the switch-over.
-LEGACY_SENSITIVE_TERMS = ("api_key", "token", "secret", "password", "private_key")
-
-
-def mask_any(key: str, value: Optional[str]) -> str:
-    """Mask a stored row for an admin response: by the registry for settings,
-    by key terms for internal rows the registry doesn't describe."""
-    if get_def(key) is not None:
-        return mask(key, value)
-    if value and any(t in key.lower() for t in LEGACY_SENSITIVE_TERMS):
-        return MASK
-    return "" if value is None else value
-
 
 class SettingItem(BaseModel):
     key: str
@@ -185,8 +167,8 @@ def apply_writes(db: Session, writes: Dict[str, str]) -> Dict[str, str]:
 
 
 def validation_error(errors: Dict[str, str]) -> JSONResponse:
-    """422 with every per-key message. `detail` repeats the first one, because
-    the old settings page (live until the switch-over) shows only `detail`."""
+    """422 with every per-key message. `detail` repeats the first one, for a
+    caller that shows a single message."""
     return JSONResponse(status_code=422,
                         content={"detail": next(iter(errors.values())), "errors": errors})
 
@@ -199,14 +181,8 @@ async def list_settings(
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """SettingsView (view=registry) or, until the switch-over, the legacy row list."""
-    if view != "registry":
-        return [
-            {"key": row.key, "value": mask_any(row.key, row.value), "description": row.description}
-            for row in db.query(Setting).all()
-            if not is_user_data(row.key)     # per-user rows never reach Settings
-        ]
-
+    """SettingsView. `view` is accepted and ignored: the page asks for
+    view=registry, which was once one of two shapes."""
     effective = effective_values(db)
     values = {k: mask(k, v) for k, v in effective.items()}
     meta = {d.key: meta_for(d) for d in active_defs()}
@@ -268,8 +244,9 @@ def plan_import(db: Session, data: Any) -> Tuple[List[dict], List[str], Dict[str
     lockout guard runs only when a sign-in key changes). A value equal to
     what the install holds now is not a write: if today's rules reject it
     (stored before they existed) it is a warning, not an error, so a file
-    always imports back onto the install it came from. Secrets and retired
-    keys are ignored; per-user, internal and unknown keys are errors."""
+    always imports back onto the install it came from. Secrets (and any key
+    marked deprecated) are ignored; per-user, internal and unknown keys,
+    the keys retired in v1.11 among them, are errors."""
     if (not isinstance(data, dict) or data.get("format") != EXPORT_FORMAT
             or not isinstance(data.get("settings"), dict)):
         return [], [], {}, {"_file": "This isn't a WebServarr settings file"}
