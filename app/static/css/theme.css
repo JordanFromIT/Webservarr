@@ -486,6 +486,31 @@ main            { view-transition-name: ws-content; }
   .ws-dialog > .ws-dialog-box { animation: none; }
 }
 
+/* ---- Hover lift and press ----
+ *
+ * One class for a card or a button that answers the pointer: hover raises it
+ * a pixel under a soft shadow, a press dips it. Transform and shadow only, so
+ * nothing around it moves and no skeleton's geometry is touched. The hover
+ * half applies only where a pointer can hover, so a tap never leaves a card
+ * raised; the press works on touch. The transition list also names the
+ * colour properties Tailwind's transition-* classes animate on the same
+ * elements, since this shorthand replaces theirs. A disabled button stays put.
+ */
+.ws-lift {
+  transition: transform 150ms ease-out, box-shadow 150ms ease-out, background-color 150ms ease-out,
+    border-color 150ms ease-out, color 150ms ease-out, opacity 150ms ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ws-lift:hover { transform: translateY(-1px); box-shadow: 0 6px 14px -8px rgb(var(--color-background) / .9); }
+}
+.ws-lift:active { transform: translateY(0) scale(.985); transition-duration: 80ms; }
+.ws-lift:disabled, .ws-lift[aria-disabled="true"] { transform: none; box-shadow: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-lift { transition: none; }
+  .ws-lift:hover, .ws-lift:active { transform: none; }
+}
+
 /* ---- Skeletons ----
  *
  * The shape of what is coming, in the theme's own text colour, at the size

@@ -286,7 +286,10 @@
 
       function buildCard(id) {
         var c = CARDS[id];
-        var root = el('section', 'scroll-mt-6 rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] ' +
+        // ws-lift while collapsed only: a closed card answers the pointer like
+        // a card; an open one is a form, and a form should not rise under the
+        // hand that is filling it in.
+        var root = el('section', 'ws-lift scroll-mt-6 rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04] ' +
           'focus:outline-none');
         root.id = 'integration-card-' + id;
         root.tabIndex = -1;
@@ -360,6 +363,7 @@
 
         function expand(open) {
           head.setAttribute('aria-expanded', open ? 'true' : 'false');
+          root.classList.toggle('ws-lift', !open);
           body.classList.toggle('hidden', !open);
           chev.style.transform = open ? 'rotate(180deg)' : '';
         }

@@ -1184,7 +1184,7 @@ function buildDiscoverCard(item) {
   }
 
   return (
-    '<div class="shrink-0 w-28 rounded-xl overflow-hidden glass-card cursor-pointer group">' +
+    '<div class="shrink-0 w-28 rounded-xl overflow-hidden glass-card ws-lift cursor-pointer group">' +
       '<div class="aspect-[2/3] relative overflow-hidden">' +
         posterHtml +
         '<div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>' +
@@ -1430,7 +1430,7 @@ function buildSearchCard(item) {
     // No type pill on the card: the media type is carried by the action itself
     // ("Request eBook"), which states it where the decision is made and keeps
     // the card free of a floating label.
-    return '<div class="glass-card rounded-xl overflow-hidden group flex flex-col">' +
+    return '<div class="glass-card ws-lift rounded-xl overflow-hidden group flex flex-col">' +
         '<div class="aspect-[2/3] relative overflow-hidden">' +
             posterHtml +
             '<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>' +
@@ -2199,7 +2199,7 @@ function buildRequestCard(req) {
         posterHtml = '<div class="absolute inset-0 flex items-center justify-center poster-placeholder"><span class="material-symbols-outlined text-4xl text-steel-blue/40">' + mediaTypeIcon(mediaType) + '</span></div>';
     }
 
-    return '<div class="glass-card rounded-xl overflow-hidden group" data-status="' + status + '">' +
+    return '<div class="glass-card ws-lift rounded-xl overflow-hidden group" data-status="' + status + '">' +
         '<div class="aspect-[2/3] relative overflow-hidden">' +
             posterHtml +
             '<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>' +

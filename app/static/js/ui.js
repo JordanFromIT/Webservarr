@@ -7,7 +7,9 @@
  *
  * Class strings are literal so Tailwind compiles them (app/static/js is in
  * the content globs). Text colours are theme colours only; a toast's tone is
- * a status light beside the text, never the text itself.
+ * a status light beside the text, never the text itself. The primary, ghost
+ * and danger buttons carry ws-lift (theme.css): a pixel of lift on hover and
+ * a dip on press; the quiet text button does not.
  */
 (function () {
   'use strict';
@@ -21,18 +23,18 @@
     error: 'text-[13px] font-semibold text-frosted-blue mt-1.5 flex items-center gap-1.5',
     // The widest a field, or a grid of fields, runs: a card description's width.
     fieldWidth: 'max-w-2xl',
-    btnPrimary: 'inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-primary text-bright ' +
+    btnPrimary: 'ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-primary text-bright ' +
       'text-sm font-semibold hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 ' +
       'focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors ' +
       'disabled:opacity-50 disabled:cursor-not-allowed',
-    btnGhost: 'inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] ' +
+    btnGhost: 'ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] ' +
       'text-frosted-blue text-sm font-semibold hover:bg-frosted-blue/10 focus-visible:outline ' +
       'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors ' +
       'disabled:opacity-50 disabled:cursor-not-allowed',
     btnQuiet: 'inline-flex items-center justify-center gap-2 px-3 py-2 rounded-[10px] text-frosted-blue/70 ' +
       'text-sm font-semibold hover:text-frosted-blue hover:bg-frosted-blue/[0.06] focus-visible:outline ' +
       'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors',
-    btnDanger: 'inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] ' +
+    btnDanger: 'ws-lift inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] bg-frosted-blue/[0.06] ' +
       'text-frosted-blue text-sm font-semibold ring-1 ring-inset ring-[rgb(var(--ws-status-err))] ' +
       'hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ' +
       'focus-visible:outline-primary transition-colors'
