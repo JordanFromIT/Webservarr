@@ -354,21 +354,31 @@
     var hamburger = document.getElementById('hamburgerBtn');
     var closeBtn = document.getElementById('drawerCloseBtn');
 
+    // The overlay's transition (theme.css) holds it displayed while it and the
+    // panel fade out; a browser without allow-discrete would hide both at
+    // once, so there a timer hides the overlay when the panel has left. The
+    // timer is cancelled by a reopen, or by another close, so a stale one can
+    // never hide a drawer that was opened again in the meantime. Reduced
+    // motion has nothing to wait for and hides at once whatever the support.
+    var discrete = !!(window.CSS && CSS.supports && CSS.supports('transition-behavior', 'allow-discrete'));
+    var hideTimer = null;
+    function cancelHide() {
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = null;
+    }
     function openDrawer() {
+      cancelHide();
       overlay.classList.remove('hidden');
       void panel.offsetHeight;   // reflow before the transform transitions
       panel.classList.remove('-translate-x-full');
       panel.classList.add('translate-x-0');
     }
-    // The overlay's transition (theme.css) holds it displayed while it and the
-    // panel fade out; a browser without allow-discrete would hide both at
-    // once, so there the timer hides the overlay when the panel has left.
-    var discrete = !!(window.CSS && CSS.supports && CSS.supports('transition-behavior', 'allow-discrete'));
     function closeDrawer() {
+      cancelHide();
       panel.classList.remove('translate-x-0');
       panel.classList.add('-translate-x-full');
-      if (discrete) overlay.classList.add('hidden');
-      else setTimeout(function () { overlay.classList.add('hidden'); }, 160);
+      if (discrete || reducedMotion()) overlay.classList.add('hidden');
+      else hideTimer = setTimeout(function () { hideTimer = null; overlay.classList.add('hidden'); }, 160);
     }
     if (overlay && panel) {
       if (hamburger) hamburger.addEventListener('click', openDrawer);

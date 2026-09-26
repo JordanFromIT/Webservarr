@@ -506,6 +506,13 @@ main            { view-transition-name: ws-content; }
 }
 .ws-lift:active { transform: translateY(0) scale(.985); transition-duration: 80ms; }
 .ws-lift:disabled, .ws-lift[aria-disabled="true"] { transform: none; box-shadow: none; }
+/* A poster row being pulled with the mouse (WS.dragScroll marks it
+   .ws-dragging) keeps the mouse button down for the whole gesture, which
+   would hold the card under the pointer dipped, and drags it under other
+   cards, which would lift them one by one. Neither is a press or a hover, so
+   the row's cards sit still. Same specificity as the hover and press rules
+   and written after them, so it wins. */
+.ws-dragging .ws-lift, .ws-dragging.ws-lift { transform: none; box-shadow: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .ws-lift { transition: none; }

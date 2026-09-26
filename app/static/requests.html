@@ -1420,7 +1420,8 @@ function buildSearchCard(item) {
         // renderSearchPage, so a provider id like "gr:3634639" can never break
         // out of a JS string in an inline onclick (HTML-escaping doesn't stop
         // JS-context breakout). Behaviour is identical to the old onclick.
-        stdHtml = '<button data-request-type="' + escapeHtml(mediaType) + '" data-request-id="' + escapeHtml(String(mediaId)) + '" class="w-full py-2 px-1 rounded-lg border border-transparent bg-primary hover:bg-primary/80 text-bright text-[11px] font-bold transition-all">Request <span class="' + mediaTypeNounColor(mediaType) + '">' + typeBadge + '</span></button>';
+        // ws-lift on the button, not the card: the button is what is clicked.
+        stdHtml = '<button data-request-type="' + escapeHtml(mediaType) + '" data-request-id="' + escapeHtml(String(mediaId)) + '" class="ws-lift w-full py-2 px-1 rounded-lg border border-transparent bg-primary hover:bg-primary/80 text-bright text-[11px] font-bold transition-all">Request <span class="' + mediaTypeNounColor(mediaType) + '">' + typeBadge + '</span></button>';
     } else {
         // Same rectangle as the button, so the card keeps its shape. The type
         // is carried here too, since there is no button to state it.
@@ -1430,7 +1431,7 @@ function buildSearchCard(item) {
     // No type pill on the card: the media type is carried by the action itself
     // ("Request eBook"), which states it where the decision is made and keeps
     // the card free of a floating label.
-    return '<div class="glass-card ws-lift rounded-xl overflow-hidden group flex flex-col">' +
+    return '<div class="glass-card rounded-xl overflow-hidden group flex flex-col">' +
         '<div class="aspect-[2/3] relative overflow-hidden">' +
             posterHtml +
             '<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>' +
@@ -2199,7 +2200,7 @@ function buildRequestCard(req) {
         posterHtml = '<div class="absolute inset-0 flex items-center justify-center poster-placeholder"><span class="material-symbols-outlined text-4xl text-steel-blue/40">' + mediaTypeIcon(mediaType) + '</span></div>';
     }
 
-    return '<div class="glass-card ws-lift rounded-xl overflow-hidden group" data-status="' + status + '">' +
+    return '<div class="glass-card rounded-xl overflow-hidden group" data-status="' + status + '">' +
         '<div class="aspect-[2/3] relative overflow-hidden">' +
             posterHtml +
             '<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>' +
