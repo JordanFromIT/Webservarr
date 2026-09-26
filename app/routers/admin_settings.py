@@ -43,6 +43,13 @@ LOCKOUT_MESSAGE = ("Keep at least one sign-in method on and set up, "
                    "or nobody (including you) will be able to sign in.")
 SAVE_FAILED_MESSAGE = "Couldn't save the settings right now. Nothing was changed; please try again."
 
+
+def reenter_message(cred_key: str) -> str:
+    """What a new address says when its saved secret wasn't entered again."""
+    word = {"integration.plex.token": "token",
+            "integration.authentik.client_secret": "client secret"}.get(cred_key, "key")
+    return f"Enter the {word} again for the new address"
+
 class SettingItem(BaseModel):
     key: str
     value: str
@@ -107,6 +114,20 @@ def plan_writes(db: Session, items: List[Tuple[str, str]]) -> Tuple[Dict[str, st
             errors[key] = message
             continue
         writes[key] = value
+
+    # A saved secret goes only to the address it was saved with. A new
+    # address (not merely a different spelling of the old one) keeps a saved
+    # secret only if this save enters it again or clears it; otherwise the
+    # next check or poll would send it to the new host.
+    supplied = {k for k, v in items if v != MASK}
+    current: Optional[Dict[str, str]] = None
+    for url_key, cred_key in integration_config.ADDRESS_CREDENTIALS.items():
+        if url_key not in writes or cred_key in supplied or not writes[url_key]:
+            continue
+        if current is None:
+            current = effective_values(db)
+        if current.get(cred_key) and not integration_config.same_address(writes[url_key], current.get(url_key)):
+            errors[url_key] = reenter_message(cred_key)
 
     if not errors:
         touched = [k for k in seen if k in _SIGN_IN_KEYS]
@@ -246,8 +267,9 @@ def plan_import(db: Session, data: Any) -> Tuple[List[dict], List[str], Dict[str
     what the install holds now is not a write: if today's rules reject it
     (stored before they existed) it is a warning, not an error, so a file
     always imports back onto the install it came from. Secrets (and any key
-    marked deprecated) are ignored; per-user, internal and unknown keys,
-    the keys retired in v1.11 among them, are errors."""
+    marked deprecated) are ignored, and a saved secret whose address the file
+    changes is cleared; per-user, internal and unknown keys, the keys retired
+    in v1.11 among them, are errors."""
     if (not isinstance(data, dict) or data.get("format") != EXPORT_FORMAT
             or not isinstance(data.get("settings"), dict)):
         return [], [], {}, {"_file": "This isn't a WebServarr settings file"}
@@ -284,11 +306,30 @@ def plan_import(db: Session, data: Any) -> Tuple[List[dict], List[str], Dict[str
             continue
         items.append((key, value))
 
+    # A file never carries secrets, so a new address can't bring one with it:
+    # the saved secret is cleared rather than sent to the new host, and the
+    # preview says so (the diff token covers it like any other change).
+    planned = dict(items)
+    cleared: List[str] = []
+    for url_key, cred_key in integration_config.ADDRESS_CREDENTIALS.items():
+        new_url = planned.get(url_key)
+        if (isinstance(new_url, str) and new_url and current.get(cred_key)
+                and not integration_config.same_address(new_url, current.get(url_key))):
+            items.append((cred_key, ""))
+            cleared.append(cred_key)
+
     writes, write_errors = plan_writes(db, items)
     errors.update(write_errors)
     if errors:
         return [], sorted(ignored), {}, errors
-    changes = [{"key": k, "old": current.get(k, get_def(k).default), "new": writes[k]} for k in sorted(writes)]
+    changes = []
+    for k in sorted(writes):
+        # A cleared secret is the only secret an import writes (its new value
+        # is ""); its old value is shown masked, never as stored.
+        change = {"key": k, "old": mask(k, current.get(k, get_def(k).default)), "new": writes[k]}
+        if k in cleared:
+            change["note"] = f"{get_def(k).description} will be cleared (its address changed)"
+        changes.append(change)
     return changes, sorted(ignored), warnings, {}
 
 

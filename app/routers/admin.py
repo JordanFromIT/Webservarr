@@ -11,7 +11,6 @@ from pydantic import BaseModel
 from typing import Literal, Optional, Set
 
 from datetime import datetime, timedelta
-from urllib.parse import urlsplit
 
 from passlib.hash import bcrypt
 
@@ -21,6 +20,7 @@ from app.database import get_db
 from app.limiter import limiter
 from app.models import Setting, Notification, PushSubscription, User
 from app.dependencies import require_admin
+from app.integrations.config import same_address
 from app.routers.admin_settings import effective_values
 from app.services.integration_health import credential_key, probe_one
 from app.services.push import dispatch_push, send_push_to_users
@@ -128,20 +128,6 @@ async def update_account(
             logger.error("Failed to revoke sessions after password change: %s", str(e))
 
     return {"success": True, "message": "Account updated successfully", "updated": changes}
-
-
-def same_address(a: Optional[str], b: Optional[str]) -> bool:
-    """True when two integration addresses name the same place: compared
-    trimmed, without a trailing slash, with scheme and host in any case."""
-    def norm(u: Optional[str]):
-        u = (u or "").strip().rstrip("/")
-        try:
-            parts = urlsplit(u)
-        except ValueError:
-            return None
-        return (parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment)
-    na, nb = norm(a), norm(b)
-    return na is not None and na == nb
 
 
 @router.post("/test-connection")

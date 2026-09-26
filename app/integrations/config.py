@@ -15,6 +15,7 @@ older version stored instead of quietly testing a cleaned-up copy.
 """
 
 from typing import Dict, Iterable, Mapping, Optional
+from urllib.parse import urlsplit
 
 from app.database import SessionLocal
 from app.models import Setting
@@ -30,14 +31,25 @@ CREDENTIAL_KEYS: Dict[str, str] = {
     "netdata": "integration.netdata.api_key",
 }
 
+
+def url_key(service: str) -> str:
+    return f"integration.{service}.url"
+
+
+# Each address and the saved secret that is sent to it (NYT has a fixed
+# address; Authentik's client secret goes to the Authentik address). A saved
+# secret only ever goes to the address it was saved with: Settings refuses a
+# new address unless the secret is entered again in the same save, and an
+# import, which never carries secrets, clears it.
+ADDRESS_CREDENTIALS: Dict[str, str] = {
+    **{url_key(service): key for service, key in CREDENTIAL_KEYS.items() if service != "nyt"},
+    "integration.authentik.url": "integration.authentik.client_secret",
+}
+
 KUMA_SLUG_KEY = "integration.uptime_kuma.slug"
 # The registry default for the slug ("default", Uptime Kuma's own default
 # status page); an empty or missing row means this page.
 DEFAULT_KUMA_SLUG = REGISTRY[KUMA_SLUG_KEY].default
-
-
-def url_key(service: str) -> str:
-    return f"integration.{service}.url"
 
 
 def read(keys: Iterable[str]) -> Dict[str, Optional[str]]:
@@ -50,6 +62,20 @@ def read(keys: Iterable[str]) -> Dict[str, Optional[str]]:
     finally:
         db.close()
     return {k: found.get(k) for k in keys}
+
+
+def same_address(a: Optional[str], b: Optional[str]) -> bool:
+    """True when two integration addresses name the same place: compared
+    trimmed, without a trailing slash, with scheme and host in any case."""
+    def norm(u: Optional[str]):
+        u = (u or "").strip().rstrip("/")
+        try:
+            parts = urlsplit(u)
+        except ValueError:
+            return None
+        return (parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment)
+    na, nb = norm(a), norm(b)
+    return na is not None and na == nb
 
 
 def base_url(service: str, values: Mapping[str, Optional[str]]) -> Optional[str]:
