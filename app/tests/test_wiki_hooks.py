@@ -590,5 +590,47 @@ class WikiEditorHelp(unittest.TestCase):
         self.assertRegex(save, r"if \(!res\.ok\) setBusy\(s, false\);\s*(?://[^\n]*\n\s*)*if \(_session !== s\) return;")
 
 
+class WikiEditorDialogs(unittest.TestCase):
+    """The editor asks and tells through the site's own dialog and toast
+    (window.WSUI, from ui.js), never the browser's confirm/alert, and every
+    label names its field."""
+
+    def test_no_native_dialogs(self):
+        from app.tests.test_settings_static import NATIVE_DIALOG
+        self.assertIsNone(NATIVE_DIALOG.search(js_code_only(editor_js())))
+        wiki = (STATIC / "wiki.html").read_text(encoding="utf-8")
+        self.assertLess(wiki.index("/static/js/ui.js?v="), wiki.index("/static/js/wiki-editor.js?v="))
+
+    def test_delete_asks_in_page_and_checks_again_after(self):
+        code = js_code_only(editor_js())
+        remove = function_body(code, "remove")
+        self.assertRegex(remove, r"var ok = await window\.WSUI\.confirm\(\{")
+        self.assertIn("danger: true", remove)
+        # The answer comes later: the delete only starts if this editor is
+        # still the one showing and nothing else is writing from it.
+        self.assertRegex(remove, r"if \(!ok \|\| _session !== s \|\| s\.busy\) return;\s*setBusy\(s, true\);")
+
+    def test_a_page_that_will_not_load_is_a_toast(self):
+        opened = function_body(js_code_only(editor_js()), "open")
+        self.assertRegex(opened, r"window\.WSUI\.toast\(\s*'\s*', 'err'\);\s*return;")
+
+    def test_restoring_a_draft_asks_in_page(self):
+        opened = function_body(js_code_only(editor_js()), "open")
+        self.assertRegex(opened, r"useDraft = await window\.WSUI\.confirm\(\{")
+        # While the question was up the reader may have gone elsewhere; the
+        # editor is then not drawn over the new view.
+        self.assertRegex(opened, r"var here = location\.href;")
+        self.assertRegex(opened, r"if \(location\.href !== here\) return;")
+
+    def test_every_label_names_its_field(self):
+        code = js_code_only(editor_js())
+        field = function_body(code, "field")
+        self.assertRegex(field, r"label\.htmlFor = control\.id;")
+        self.assertIn("contentLabel.htmlFor = 'wikiEditContent';".replace("'wikiEditContent'", "'               '"), code)
+        # Every control handed to field() has an id for its label to name.
+        for name in ("title", "slug", "summary", "cat", "sort"):
+            self.assertRegex(code, r"\b" + name + r"\.id = '")
+
+
 if __name__ == "__main__":
     unittest.main()

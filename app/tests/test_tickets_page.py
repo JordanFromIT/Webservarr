@@ -177,5 +177,19 @@ class Mutations(unittest.TestCase):
                     check(self, html.replace(original, broken))
 
 
+class TicketDeleteDialog(unittest.TestCase):
+    """Deleting a ticket asks with the site's own dialog (WSUI.confirm from
+    ui.js, loaded before the page script), never the browser's confirm()."""
+
+    def test_the_page(self):
+        from app.tests.test_settings_static import NATIVE_DIALOG
+        html = page()
+        code = code_of(html)
+        self.assertIsNone(NATIVE_DIALOG.search(code))
+        self.assertIn('<script src="/static/js/ui.js?v=', html)
+        self.assertLess(html.index('/static/js/ui.js?v='), html.index("<script>\n"))
+        self.assertRegex(code, r"window\.WSUI\.confirm\(\{[^}]*danger: true[^}]*\}\)\.then\(function \(ok\) \{\s*if \(!ok\) return;")
+
+
 if __name__ == "__main__":
     unittest.main()
