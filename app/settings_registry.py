@@ -166,7 +166,9 @@ def _build() -> List[SettingDef]:
         _bool("features.show_plex_auth", "false", "Allow Plex sign-in", public=True),
         _bool("features.show_authentik_auth", "false", "Allow Authentik sign-in", public=True),
         _url("integration.authentik.url", "", "Authentik address", ssrf_check=True),
-        _text("integration.authentik.client_id", "", "Authentik client ID", max_length=200),
+        # No spaces around it: a client ID of spaces would count as set up for sign-in.
+        _text("integration.authentik.client_id", "", "Authentik client ID", max_length=200,
+              pattern=r"\S(?:.*\S)?", pattern_hint="Remove the spaces at the start or end"),
         _secret("integration.authentik.client_secret", "Authentik client secret"),
         _text("integration.authentik.app_slug", "", "Authentik application slug (used for sign-out)",
               max_length=100, pattern=_TOKEN, pattern_hint=_TOKEN_HINT),
@@ -429,6 +431,9 @@ def validate_value(key: str, value: str) -> Optional[str]:
         return None if value in ("true", "false") else "Must be on or off"
     if value == "":
         return None if d.allow_empty else "This can't be empty"
+    if not d.allow_empty and not value.strip():
+        # Spaces alone are no value: a blank nav label, no font.
+        return "This can't be empty"
     if d.secret and value != value.strip():
         # Tokens and keys never start or end with a space, and a client can't
         # send one that does (httpx refuses the header), so a pasted extra
