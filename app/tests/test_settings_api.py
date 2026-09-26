@@ -187,8 +187,11 @@ class BulkSave(SettingsApiBase):
         self.assertIsNone(helpers.get(self.db, "branding.tagline"))
 
     def test_mask_means_unchanged_for_secrets_only(self):
+        # The address is the saved one (spelled with a trailing slash): a new
+        # address would need the token entered again (test_address_credentials).
+        helpers.put(self.db, "integration.plex.url", "http://192.168.1.9:32400")
         helpers.put(self.db, "integration.plex.token", "real-token")
-        r = self.save(("integration.plex.token", reg.MASK), ("integration.plex.url", "http://192.168.1.9:32400"))
+        r = self.save(("integration.plex.token", reg.MASK), ("integration.plex.url", "http://192.168.1.9:32400/"))
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(helpers.get(self.db, "integration.plex.token"), "real-token")
         self.assertNotIn("integration.plex.token", r.json()["saved"])
