@@ -46,10 +46,10 @@ def get_or_create_setup_token() -> str:
 
     The token is stored in the settings table (SETUP_TOKEN_KEY) so every worker
     process validates against the SAME value. A module global alone gave each of
-    the 2 workers its own token, 403-ing ~half of submissions (L11). The key
-    contains "token", so the admin settings API masks it; it is never served to
-    a client and is deleted when setup completes. The module global still acts as
-    a per-process cache.
+    the 2 workers its own token, 403-ing ~half of submissions (L11). The key is
+    not in the settings registry, so the admin settings API and export never
+    list it; it is never served to a client and is deleted when setup completes.
+    The module global still acts as a per-process cache.
     """
     global _setup_token
     if is_setup_completed():
