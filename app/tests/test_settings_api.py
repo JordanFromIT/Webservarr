@@ -107,6 +107,16 @@ class RegistryView(SettingsApiBase):
         body = self.client.get("/api/admin/settings?view=registry").json()
         self.assertEqual(body["page_order"], reg.DEFAULT_PAGE_ORDER)
 
+    def test_view_carries_the_address_credential_pairs(self):
+        # R136: the kit clears a message on either half of a pair when the
+        # other is edited, from this map rather than a copy of its own.
+        from app.integrations.config import ADDRESS_CREDENTIALS
+        body = self.client.get("/api/admin/settings?view=registry").json()
+        self.assertEqual(body["address_credentials"], ADDRESS_CREDENTIALS)
+        self.assertEqual(body["address_credentials"]["integration.sonarr.url"], "integration.sonarr.api_key")
+        self.assertEqual(body["address_credentials"]["integration.authentik.url"],
+                         "integration.authentik.client_secret")
+
     def test_per_user_rows_never_listed(self):
         helpers.put(self.db, USER_KEY, "false")
         for url in ("/api/admin/settings?view=registry", "/api/admin/settings"):

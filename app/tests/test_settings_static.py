@@ -475,6 +475,18 @@ class KavitaAddressConfirm(unittest.TestCase):
 
 
 class KitApi(unittest.TestCase):
+    def test_editing_either_half_of_a_pair_clears_its_message(self):
+        # R136: "Enter the key again for the new address" sits on the address;
+        # typing the key again (or changing the address) clears it.
+        kit = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        stage = kit[kit.index("    function stage(key, value, fromControl) {"):kit.index("    api.get = function")]
+        self.assertIn("var partner = pairedWith(key);", stage)
+        self.assertIn("if (partner && t.bindings[partner]) showError(t.bindings[partner], null);", stage)
+        paired = kit[kit.index("  function pairedWith(key) {"):kit.index("  function makeApi(t) {")]
+        self.assertIn("view('address_credentials')", paired)
+        self.assertIn("if (hasOwn(pairs, key)) return pairs[key];", paired)
+        self.assertIn("if (pairs[url] === key) found = url;", paired)
+
     def test_ui_js_public_api(self):
         js = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
         for name in ("el", "icon", "toast", "confirm", "cls"):
