@@ -49,6 +49,9 @@
         var v = parseInt(localStorage.getItem('webservarr_library_shelves'), 10);
         if (v >= 0 && v <= 3) n = v;
       } catch (e) { /* private mode: one slot */ }
+      // Back from a Kavita sign-in that failed (kavita-connect.js): the page
+      // shows that message and loads no shelves, so it reserves none.
+      if (/[?&]kavita=error(&|$)/.test(location.search)) n = 0;
       var box = document.getElementById('shelves'), slot = box.firstElementChild;
       if (!n) { box.removeChild(slot); return; }
       for (var i = 1; i < n; i++) box.appendChild(slot.cloneNode(true));
