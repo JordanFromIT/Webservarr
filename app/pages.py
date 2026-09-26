@@ -687,14 +687,20 @@ _SETUP_KEYS = (
 
 
 def settings_setup() -> dict:
-    """{connection: set up?} for the Settings skeleton; all False if the database is unavailable."""
+    """{connection: set up?} for the Settings skeleton, plus push_reason: the
+    line the Notifications tab's push status will show when push can't send
+    (a fixed server message, the same rule as GET /api/admin/notifications/status),
+    or None when it can. All False / None if the database is unavailable."""
     values = {}
+    push_reason = None
     db = None
     try:
         from app.models import Setting
+        from app.services import push
 
         db = SessionLocal()
         values = {r.key: r.value for r in db.query(Setting).filter(Setting.key.in_(_SETUP_KEYS)).all()}
+        push_reason = push.status_reason(db)
     except Exception:  # pragma: no cover - defensive
         logger.warning("Could not read setup flags for the Settings page", exc_info=True)
     finally:
@@ -713,6 +719,7 @@ def settings_setup() -> dict:
         "kavita": has("integration.kavita.url"),
         "authentik_url": has("integration.authentik.url"),
         "authentik_secret": has("integration.authentik.client_secret"),
+        "push_reason": push_reason,
     }
 
 
