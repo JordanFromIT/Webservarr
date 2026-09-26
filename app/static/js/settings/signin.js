@@ -4,7 +4,8 @@
  *
  * The server refuses a save that leaves no usable method (422, lockout guard;
  * its message lands on the switch). This tab also asks before a save turns
- * off, or breaks the setup of, the method the admin is signed in with.
+ * off, or breaks the setup of, the method the admin is signed in with: the
+ * rule and the question are settings/signin-rule.js, shared with Integrations.
  *
  * The account form talks to /api/admin/account on its own and never goes
  * through the kit: its passwords are never staged, stored, logged or shown,
@@ -14,14 +15,13 @@
   'use strict';
 
   var el = WSSettings.el, icon = WSSettings.icon, cls = WSSettings.cls;
-  // WS.user.auth_method -> the switch for that method.
-  var FLAGS = { simple: 'features.show_simple_auth', plex: 'features.show_plex_auth',
-                oidc: 'features.show_authentik_auth' };
+  // Which methods work: the one rule, shared with Integrations.
+  var RULE = WSSettings.ownSignIn;
+  var FLAGS = RULE.FLAGS, setUp = RULE.setUp, usable = RULE.usable;
   // The keys on this tab a save can take a method away with.
   var OWN_KEYS = { simple: ['features.show_simple_auth'], plex: ['features.show_plex_auth'],
                    oidc: ['features.show_authentik_auth', 'integration.authentik.url',
                           'integration.authentik.client_id'] };
-  var NAMES = { simple: 'your username and password', plex: 'Plex', oidc: 'Authentik' };
   // Every key on this tab that decides whether a method works.
   var METHOD_KEYS = ['features.show_simple_auth', 'features.show_plex_auth', 'features.show_authentik_auth',
                      'integration.authentik.url', 'integration.authentik.client_id'];
@@ -42,26 +42,6 @@
     busy: 'That was a lot of tries in a row. Wait a minute, then try again.',
     unconfirmed: 'Couldn’t confirm the account was updated. Try signing in with the new details.'
   };
-
-  // ---- Which methods work ----
-
-  function hasOwn(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
-
-  // Set up enough for the sign-in page to offer it (the server's rule; it
-  // decides, this only shapes a warning and a hint). read: api.saved or api.get.
-  function setUp(method, read) {
-    if (method === 'plex') return !!read('integration.plex.url') && read('integration.plex.token') === WSSettings.MASK;
-    if (method === 'oidc') return !!read('integration.authentik.url') && !!read('integration.authentik.client_id');
-    return true;
-  }
-
-  function usable(method, read) { return read(FLAGS[method]) === 'true' && setUp(method, read); }
-
-  // How this session signed in, when it is one of the three.
-  function sessionMethod() {
-    var user = (window.WS && WS.user) || {};
-    return hasOwn(FLAGS, user.auth_method) ? user.auth_method : null;
-  }
 
   // ---- Pieces ----
 
@@ -331,21 +311,7 @@
       // Before a save that would stop the admin's own method working: ask.
       // "Keep it on" puts that method's keys back and saves nothing, so the
       // rest of the changes stay for another look.
-      api.beforeSave(function (keys) {
-        var mine = sessionMethod();
-        if (!mine) return true;
-        var touched = OWN_KEYS[mine].filter(function (k) { return keys.indexOf(k) >= 0; });
-        if (!touched.length || !usable(mine, api.saved) || usable(mine, api.get)) return true;
-        return WSSettings.confirm({
-          title: 'Turn off the way you signed in?',
-          body: 'You signed in with ' + NAMES[mine] + '. After this change it won’t work, so next time ' +
-            'you’ll need another way to sign in. You stay signed in for now.',
-          confirmLabel: 'Turn it off', cancelLabel: 'Keep it on', danger: true
-        }).then(function (ok) {
-          if (!ok) touched.forEach(function (k) { api.set(k, api.saved(k)); });
-          return ok;
-        });
-      });
+      WSSettings.ownSignIn.guard(api, OWN_KEYS);
     }
   });
 })();

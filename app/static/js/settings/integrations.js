@@ -442,6 +442,9 @@
       if (window.WS && WS.poll) {
         WS.poll(function () { Object.keys(cards).forEach(function (id) { if (health[id]) paint(id); }); }, 30000);
       }
+      // Signed in with Plex: ask before a save clears or changes the Plex
+      // address or token, the way the Sign-in tab asks about its own switches.
+      WSSettings.ownSignIn.guard(api, { plex: ['integration.plex.url', 'integration.plex.token'] }, { askOnChange: true });
       // Not returned: the tab shows at once and the lights fill in.
       refresh();
     }
