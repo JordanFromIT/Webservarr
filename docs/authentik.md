@@ -206,7 +206,7 @@ After completing the setup:
 
 **"Sign in with Plex (via Authentik)" button not appearing**
 
-All four settings (URL, Client ID, Client Secret, App Slug) must be saved in Settings > Sign-in (the Authentik card). Verify none are blank.
+All four settings (Authentik address, Client ID, Client secret, Application slug) must be saved in Settings > Sign-in (the Authentik card). Verify none are blank.
 
 **Redirect URI mismatch error**
 
