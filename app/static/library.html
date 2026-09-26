@@ -682,12 +682,21 @@
   // SHELF_TIMEOUT, and the shelves swap in once: when every shelf has
   // answered, or at SHELF_DEADLINE, whichever comes first, so one slow or hung
   // shelf never holds back the others. A shelf that answers after the swap
-  // goes in below the others, so the shelves already showing stay put.
+  // takes its own place in SHELVES order, whatever order the late ones come in.
   var SHELF_DEADLINE = 3000, SHELF_TIMEOUT = 8000;
 
   function loadShelves() {
     var answered = false, swapped = false, stopped = false, box = el('shelves');
     var results = [];   // in SHELVES order: {id, n, section}, or null for a shelf with nothing to show
+    // Too late for the swap: before the first shelf showing that comes later
+    // in SHELVES, else at the end.
+    function placeLate(i, section) {
+      for (var j = i + 1; j < SHELVES.length; j++) {
+        var next = results[j] && results[j].section;
+        if (next && next.parentNode === box) { box.insertBefore(section, next); return; }
+      }
+      box.appendChild(section);
+    }
     var requests = SHELVES.map(function (shelf, i) {
       var ctl = typeof AbortController === 'function' ? new AbortController() : null;
       var timer = setTimeout(function () { if (ctl) ctl.abort(); }, SHELF_TIMEOUT);
@@ -697,7 +706,7 @@
           clearTimeout(timer);
           var section = renderShelf(shelf, items);
           results[i] = section ? { id: shelf.id, n: Math.min(items.length, 8), section: section } : null;
-          if (swapped && section && !stopped) box.appendChild(section);   // too late for the swap
+          if (swapped && section && !stopped) placeLate(i, section);
         })
         .catch(function (err) {
           clearTimeout(timer);
