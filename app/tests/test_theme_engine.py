@@ -278,5 +278,63 @@ class OneScrim(unittest.TestCase):
         self.assertNotRegex(NOTIF_JS, r"_modal\.style\.backgroundColor")
 
 
+
+PAGE = (
+    '<!DOCTYPE html><html class="dark" lang="en"><head><meta charset="utf-8"/>'
+    '<title>WebServarr - Control Center</title>'
+    '<script src="/static/js/theme-loader.js?v=1"></script>'
+    '<link href="/static/css/app.css?v=1" rel="stylesheet"/>'
+    '<link href="/static/css/theme.css?v=1" rel="stylesheet"/>'
+    '<style>.page-own { color: rgb(var(--color-text)); }</style></head>'
+    '<body><main><p>hi</p></main></body></html>'
+)
+
+
+def render(b, name="index"):
+    return pages.render_html(PAGE, name=name, branding=b, user=None, version="9.9.9",
+                             base_url="https://example.test", path="/", flags={})
+
+
+@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+class CustomCssComesLast(unittest.TestCase):
+    """M15: custom CSS used to be injected by theme-loader.js while <head> was
+    still parsing, before app.css, theme.css and the page's own styles, so an
+    ordinary rule never won. The server now writes it as the last thing in
+    <head>, with every "<" as its CSS escape so it can't close its element."""
+
+    def test_it_is_the_last_thing_in_head(self):
+        out = render(payload({"theme.custom_css": ".text-frosted-blue { color: red; }"}))
+        head = out.split("</head>")[0]
+        style = '<style id="webservarr-custom-css">.text-frosted-blue { color: red; }</style>'
+        self.assertEqual(out.count('id="webservarr-custom-css"'), 1)
+        self.assertTrue(head.rstrip().endswith(style), head[-200:])
+        for earlier in ('href="/static/css/app.css', 'href="/static/css/theme.css', '<style>.page-own',
+                        '<style id="ws-theme">', 'id="ws-font"'):
+            self.assertLess(head.index(earlier), head.index(style), earlier)
+
+    def test_it_cannot_close_its_element(self):
+        css = "/* </style><script>alert(1)</script> */ a::after { content: \"<\"; } </STYLE ><b>"
+        out = render(payload({"theme.custom_css": css}))
+        m = re.search(r'<style id="webservarr-custom-css">(.*?)</style>', out, re.S)
+        self.assertIsNotNone(m)
+        self.assertNotIn("<", m.group(1))
+        self.assertIn("\\3C /style>", m.group(1))
+        self.assertIn('content: "\\3C "', m.group(1))
+        self.assertNotIn("<script>alert", out)
+        self.assertNotIn("<b>", out)
+
+    def test_no_custom_css_no_element(self):
+        for css in ("", "   \n"):
+            self.assertNotIn("webservarr-custom-css", render(payload({"theme.custom_css": css})))
+
+    def test_the_loader_injects_it_only_on_the_fallback_path(self):
+        # The page already carries it; on the /api/branding fallback there is
+        # no server copy, so the loader adds it (after everything, by then).
+        self.assertTrue(live_matches(LOADER, r"applyTheme\(inline\.branding \|\| \{\}, true\)"))
+        self.assertTrue(live_matches(LOADER, r"if \(data\.custom_css && !fromPage\)"))
+        self.assertTrue(live_matches(LOADER, r"\.then\(function \(data\) \{ applyTheme\(data, false\); \}\)"))
+        self.assertTrue(live_matches(LOADER, r"el\.textContent = data\.custom_css"))
+
+
 if __name__ == "__main__":
     unittest.main()
