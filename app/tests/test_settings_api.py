@@ -410,11 +410,14 @@ class RemovedRoutes(SettingsApiBase):
     )
 
     def _check(self):
+        # A stored row, so the old single-key GET would have found something.
+        helpers.put(self.db, "branding.app_name", "Kept")
         for method, url, body in self.REMOVED:
             with self.subTest(method=method, url=url):
                 r = self.client.request(method, url, json=body)
                 self.assertIn(r.status_code, (404, 405), r.text)
-        self.assertIsNone(helpers.get(self.db, "branding.app_name"))
+                self.assertNotIn("Kept", r.text)
+        self.assertEqual(helpers.get(self.db, "branding.app_name"), "Kept")
         self.assertIsNone(helpers.get(self.db, "monitor.7.enabled"))
         self.assertIsNone(helpers.get(self.db, "monitor.7.icon"))
 
