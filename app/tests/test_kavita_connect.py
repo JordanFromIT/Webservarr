@@ -585,7 +585,7 @@ MUTATIONS = [
      '<span class="material-symbols-outlined text-4xl text-steel-blue/60" aria-hidden="true">link_off</span>',
      '<span class="material-symbols-outlined text-4xl text-steel-blue/60">link_off</span>', check_library),
     ("library: shelves go on asking", "library",
-     "            if (err && err.message === 'reconnecting') throw err;\n", "", check_library),
+     "          if (err && err.message === 'reconnecting') throw err;\n", "", check_library),
     ("library: no guard for a missing helper", "library",
      "var connectFailed = !!(window.WSKavita && window.WSKavita.arrivedFromFailedConnect());",
      "var connectFailed = window.WSKavita.arrivedFromFailedConnect();", check_library),
@@ -663,3 +663,31 @@ class LibraryShelvesAndGuide(unittest.TestCase):
         tpl = re.search(r'<template id="shelfSlot">(.*?)</template>', self.html, re.S).group(1)
         self.assertEqual(tpl.count('<p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p>'), 8)
         self.assertTrue(live_matches(self.js, r"'<p class=\"mt-2 text-sm text-frosted-blue leading-snug line-clamp-2 min-h-\[2\.75em\]\">'"))
+
+
+class LibraryShelvesDontWaitForEachOther(unittest.TestCase):
+    """Polish A R126: one hung shelf can't hold back the others. The shelves
+    are asked for together, each request gives up, and the swap happens when
+    all have answered or at a deadline, whichever is first."""
+
+    def setUp(self):
+        self.js = inline_js(page("library"))
+        self.shelves = body_of(self, self.js, "loadShelves")
+
+    def test_asked_for_together_not_one_after_another(self):
+        self.assertTrue(live_matches(self.shelves, r"var requests = SHELVES\.map\(function \(shelf, i\) \{"))
+        self.assertFalse(live_matches(self.shelves, r"\.reduce\("), "the shelves are chained again")
+        self.assertEqual(len(re.findall(r"load: function \(signal\) \{", self.js)), 3)
+        self.assertEqual(len(re.findall(r"signal: signal\s*\}\);", self.js)), 3)
+
+    def test_each_request_gives_up_and_the_swap_has_a_deadline(self):
+        self.assertTrue(live_matches(self.js, r"var SHELF_DEADLINE = 3000, SHELF_TIMEOUT = 8000;"))
+        self.assertTrue(live_matches(self.shelves, r"setTimeout\(function \(\) \{ if \(ctl\) ctl\.abort\(\); \}, SHELF_TIMEOUT\)"))
+        self.assertTrue(live_matches(self.shelves, r"shelf\.load\(ctl \? ctl\.signal : undefined\)"))
+        self.assertTrue(live_matches(self.shelves, r"setTimeout\(done, SHELF_DEADLINE\)"))
+        self.assertTrue(live_matches(self.shelves, r"Promise\.race\(\[settled, deadline\]\)"))
+        # A failed or timed-out shelf drops out; a late one goes in below.
+        self.assertTrue(live_matches(self.shelves, r"results\[i\] = null;"))
+        self.assertTrue(live_matches(self.shelves, r"if \(swapped && section && !stopped\) box\.appendChild\(section\);"))
+        # Nothing goes in once Kavita has said no.
+        self.assertTrue(live_matches(self.shelves, r"if \(stopped\) return;"))
