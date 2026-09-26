@@ -44,6 +44,20 @@ body {
   font-family: var(--font-display);
 }
 
+/* An icon is one glyph, one em wide. Until the icon font arrives, its name
+ * ("notifications") is laid out as a word in the fallback font (display=block
+ * hides it but keeps its width), then snaps to one glyph and pulls everything
+ * beside it across: the header, the sidebar labels, the phone's top bar.
+ * Holding the glyph's box from the first paint keeps them still. :where()
+ * keeps this at zero specificity, so a size utility (size-11, w-8) still wins;
+ * a block icon spans its line, so its width moves nothing and is left alone.
+ * overflow: clip (not hidden) leaves an inline icon's baseline where it was. */
+:where(.material-symbols-outlined:not(.block)) {
+  width: 1em;
+  overflow: clip;
+  flex-shrink: 0;
+}
+
 /* ---- Media Type Accents ----
  *
  * Defined here rather than in each page's tailwind.config so a media type has
