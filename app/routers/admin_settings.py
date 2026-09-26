@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings as app_settings
 from app.database import get_db
+from app.integrations import config as integration_config
 from app.dependencies import require_admin
 from app.limiter import limiter
 from app.models import Setting
@@ -271,6 +272,11 @@ def plan_import(db: Session, data: Any) -> Tuple[List[dict], List[str], Dict[str
         if not isinstance(value, str):
             errors[key] = "Must be text"
             continue
+        if key == integration_config.KUMA_SLUG_KEY and not value.strip():
+            # An older install's page could save an empty slug, which the
+            # client reads as the default page (kuma_slug()); Settings no
+            # longer stores one, so the file's empty slug means that page.
+            value = integration_config.DEFAULT_KUMA_SLUG
         if value == current.get(key, d.default):
             message = validate_value(key, value)
             if message:
