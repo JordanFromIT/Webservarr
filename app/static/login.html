@@ -68,7 +68,22 @@
       background-size: cover;
       background-position: center;
       transition: opacity 1.5s ease-in-out;
-      will-change: opacity;
+      will-change: opacity, transform;
+      /* A slow drift behind the card: over 32s the art grows to 1.07 and eases
+         a little left and down, then drifts back. The pan is tied to the scale
+         (both leave zero together), so no edge is ever uncovered: at full
+         scale 3.5% of the art lies past each edge and the pan moves it barely
+         1%. Both slides run the same clock, so a crossfade meets the next
+         picture at the same size. Transform only: the compositor owns it and
+         the main thread stays idle. The card's glass is untouched. */
+      animation: login-drift 32s ease-in-out infinite alternate;
+    }
+    @keyframes login-drift {
+      from { transform: scale(1) translate(0, 0); }
+      to   { transform: scale(1.07) translate(-1%, 0.6%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .backdrop-slide { animation: none; }
     }
     /* Prevent flash of the wrong auth method on load: keep the login form
        invisible (space reserved, so no layout shift) until JS has applied the
