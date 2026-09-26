@@ -623,3 +623,43 @@ class Mutations(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LibraryShelvesAndGuide(unittest.TestCase):
+    """Polish A fix round 1 on the eBooks page: the shelves swap in at once
+    into slots reserved per person, and Try again reaches the guide."""
+
+    def setUp(self):
+        self.html = page("library")
+        self.js = inline_js(self.html)
+
+    def test_try_again_goes_the_way_the_first_load_did(self):
+        self.assertTrue(live_matches(self.js, r"el\('retryBtn'\)\.addEventListener\('click', function \(\) \{ "
+                                              r"Promise\.all\(\[loadPage\(\), loadShelves\(\)\]\)\.then\(startGuide\); \}\);"))
+        self.assertTrue(live_matches(self.js, r"Promise\.all\(\[loadShelves\(\), loadPage\(\)\]\)\.then\(startGuide\);"))
+        guide = body_of(self, self.js, "startGuide")
+        self.assertTrue(live_matches(guide, r"\['loadingState', 'unavailableState', 'connectState'\]"))
+
+    def test_the_shelves_arrive_in_one_write(self):
+        shelves = body_of(self, self.js, "loadShelves")
+        self.assertEqual(len(live_matches(shelves, r"\bbox\.replaceChildren\.apply\(box, ")), 1)
+        render = body_of(self, self.js, "renderShelf")
+        self.assertFalse(live_matches(render, r"appendChild\(section\)|replaceChild\(|el\('shelves'\)"),
+                         "a shelf still goes in on its own")
+        self.assertTrue(live_matches(render, r"return section;"))
+
+    def test_the_slots_are_the_shelves_this_person_had(self):
+        # The plan is per person, and each slot carries its shelf's own title
+        # and as many covers as the shelf held.
+        titles = dict(re.findall(r"id: '(\w+)', title: '([^']+)'", self.js))
+        self.assertEqual(set(titles), {"bookshelf", "recent", "toprated"})
+        m = re.search(r"var TITLES = \{ (.*?) \};", self.js)
+        self.assertEqual(dict(re.findall(r"(\w+): '([^']+)'", m.group(1))), titles)
+        self.assertEqual(len(live_matches(self.js, r"'webservarr_library_shelves:' \+")), 2)   # read by the slots, written by loadShelves
+        self.assertEqual(len(live_matches(self.js, r"var SHELF_PLAN_KEY = 'webservarr_library_shelves:' \+")), 1)
+        self.assertTrue(live_matches(self.js, r"while \(row\.children\.length > s\[1\]\) row\.removeChild\(row\.lastElementChild\);"))
+        self.assertTrue(live_matches(self.js, r"var plan = \[\['recent', 8\]\];"))
+        # A slot's covers are the real card's shape, titles included.
+        tpl = re.search(r'<template id="shelfSlot">(.*?)</template>', self.html, re.S).group(1)
+        self.assertEqual(tpl.count('<p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p>'), 8)
+        self.assertTrue(live_matches(self.js, r"'<p class=\"mt-2 text-sm text-frosted-blue leading-snug line-clamp-2 min-h-\[2\.75em\]\">'"))
