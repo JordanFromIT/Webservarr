@@ -10,6 +10,10 @@
  * toggle with it), so a second click can never act on a list the first one is
  * about to change. A write that lands hands onChanged a focus hint and the
  * page draws a fresh panel in its place; a write that fails re-enables this one.
+ *
+ * While an Edit or Add form is open, everything outside that form is disabled
+ * too (the toggle included): any other write would redraw the panel and throw
+ * away what the admin has typed. Cancel, or a save that lands, ends it.
  */
 var WikiCategories = (function () {
   'use strict';
@@ -104,6 +108,7 @@ var WikiCategories = (function () {
     });
     var locks = (opts.lock || []).filter(Boolean);
     var busy = false;
+    var formOpen = null;   // the open Edit or Add form, if any
     var buttons = {};   // slug -> {up, down, edit}, for the focus hint
 
     var root = el('section', 'mb-8 rounded-2xl border border-frosted-blue/10 bg-frosted-blue/[0.04]');
@@ -125,15 +130,34 @@ var WikiCategories = (function () {
     var addSlot = el('div');
     root.appendChild(addSlot);
 
-    // Every control in the panel, and the locked ones outside it. A button
-    // that is off for good (the first row's "up") says so with data-fixed.
+    // Every control in the panel, and the locked ones outside it, from the
+    // two gates: a write in flight turns everything off; an open form turns
+    // off everything outside it. A button that is off for good (the first
+    // row's "up") says so with data-fixed. Real `disabled`, so it is announced.
+    function sync() {
+      root.setAttribute('aria-busy', busy ? 'true' : 'false');
+      Array.prototype.forEach.call(root.querySelectorAll('button, input'), function (n) {
+        n.disabled = busy || n.hasAttribute('data-fixed') || (formOpen !== null && !formOpen.contains(n));
+      });
+      locks.forEach(function (n) { n.disabled = busy || formOpen !== null; });
+    }
+
     function setBusy(on) {
       busy = on;
-      root.setAttribute('aria-busy', on ? 'true' : 'false');
-      Array.prototype.forEach.call(root.querySelectorAll('button, input'), function (n) {
-        n.disabled = on || n.hasAttribute('data-fixed');
-      });
-      locks.forEach(function (n) { n.disabled = on; });
+      sync();
+    }
+
+    function showForm(slot, f) {
+      slot.replaceChildren(f);
+      formOpen = f;
+      sync();
+    }
+
+    function closeForm(slot, restore) {
+      if (restore) slot.replaceChildren(restore);
+      else slot.replaceChildren();
+      formOpen = null;
+      sync();
     }
 
     // The one way into a write: refuses while another is in flight.
@@ -158,7 +182,7 @@ var WikiCategories = (function () {
       cats.forEach(function (c, i) { if (c.slug === slug) from = i; });
       var to = from + delta;
       if (from < 0 || to < 0 || to >= cats.length) return;
-      if (!begin()) return;
+      if (formOpen || !begin()) return;
       // The new order is worked out on a copy: this panel's list only changes
       // by being redrawn from what the server says.
       var order = cats.slice();
@@ -211,8 +235,8 @@ var WikiCategories = (function () {
       own.down = btn('arrow_downward', 'Move ' + cat.name + ' down', function () { move(cat.slug, 1); },
         index === cats.length - 1);
       own.edit = btn('edit', 'Edit ' + cat.name, function () {
-        if (busy) return;
-        li.replaceChildren(form(cat, function (values) {
+        if (busy || formOpen) return;
+        showForm(li, form(cat, function (values) {
           if (!begin()) return Promise.resolve(null);
           var payload = body(cat);
           payload.name = values.name;
@@ -226,12 +250,12 @@ var WikiCategories = (function () {
             return null;
           });
         }, function () {
-          li.replaceChildren(line);
+          closeForm(li, line);
           own.edit.focus();
         }));
       });
       btn('delete', 'Delete ' + cat.name, function () {
-        if (busy) return;
+        if (busy || formOpen) return;
         var n = cat.page_count + (cat.draft_count || 0);
         UI.confirm({
           title: 'Delete “' + cat.name + '”?',
@@ -258,8 +282,8 @@ var WikiCategories = (function () {
     cats.forEach(function (c, i) { list.appendChild(row(c, i)); });
 
     addBtn.addEventListener('click', function () {
-      if (busy) return;
-      addSlot.replaceChildren(form(null, function (values) {
+      if (busy || formOpen) return;
+      showForm(addSlot, form(null, function (values) {
         if (!begin()) return Promise.resolve(null);
         values.sort_order = cats.length ? cats[cats.length - 1].sort_order + 10 : 0;
         return send('POST', '/api/wiki/categories', values).then(function (res) {
@@ -269,7 +293,7 @@ var WikiCategories = (function () {
           return null;
         });
       }, function () {
-        addSlot.replaceChildren();
+        closeForm(addSlot);
         addBtn.focus();
       }));
     });
