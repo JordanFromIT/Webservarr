@@ -13,7 +13,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.limiter import limiter
 from app.models import Notification, PushSubscription, Setting
-from app.utils import identity_email, is_safe_push_endpoint
+from app.utils import identity_email, is_safe_push_endpoint, utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ async def list_notifications(
             "body": n.body,
             "reference_id": n.reference_id,
             "read": n.read,
-            "created_at": n.created_at.isoformat() if n.created_at else None,
+            "created_at": utc_iso(n.created_at),
         }
         for n in rows
     ]

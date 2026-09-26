@@ -22,7 +22,7 @@ from app.dependencies import get_current_user, require_admin
 from app.limiter import limiter
 from app.models import Setting, Ticket, TicketComment
 from app.settings_registry import switch_is_off
-from app.utils import identity_email, validate_image_magic
+from app.utils import identity_email, utc_iso, validate_image_magic
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +143,8 @@ def _ticket_to_dict(ticket: Ticket, is_admin: bool, current_username: str, comme
         "priority": ticket.priority,
         "is_public": ticket.is_public,
         "image_path": ticket.image_path,
-        "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
-        "updated_at": ticket.updated_at.isoformat() if ticket.updated_at else None,
+        "created_at": utc_iso(ticket.created_at),
+        "updated_at": utc_iso(ticket.updated_at),
     }
 
     # Privacy: non-admin users never see other users' creator info
@@ -171,7 +171,7 @@ def _comment_to_dict(comment: TicketComment, is_admin: bool, current_username: s
         "is_admin": comment.is_admin,
         "message": comment.message,
         "image_path": comment.image_path,
-        "created_at": comment.created_at.isoformat() if comment.created_at else None,
+        "created_at": utc_iso(comment.created_at),
     }
 
     # Privacy: non-admin sees "Admin" label on admin comments, no author info on others' comments
