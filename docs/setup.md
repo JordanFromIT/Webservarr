@@ -136,6 +136,8 @@ Back up these directories regularly:
 tar czf webservarr-backup-$(date +%Y%m%d).tar.gz data/ uploads/ .env
 ```
 
+Backing up settings: Settings > General > Backup exports every setting except passwords, tokens and API keys to a JSON file, and imports one after showing exactly what will change.
+
 ## Advanced: Authentik OIDC Setup
 
 For admins who run multiple services and want centralized authentication using Plex as the identity source, WebServarr supports login through [Authentik](https://goauthentik.io/). This requires a separate Authentik instance -- see the **[Authentik Setup Guide](authentik.md)** for how to configure it for WebServarr.
@@ -194,9 +196,9 @@ APP_SCHEME=https
 
 ### Admin Account
 
-The admin account is created during the setup wizard with your chosen credentials. To change your password or username later, go to **Settings > System > Admin Account** (only visible for simple-auth users).
+The admin account is created during the setup wizard with your chosen credentials. To change your password or username later, go to **Settings > Sign-in > Local admin account** (shown while username & password sign-in is on, and editable only when you signed in with that username and password).
 
-To disable simple auth once Plex OAuth or Authentik OIDC is configured, set `features.show_simple_auth` to `false` in Settings > System.
+To disable simple auth once Plex OAuth or Authentik OIDC is configured, turn off Username & password in Settings > Sign-in (the lockout guard keeps one method on).
 
 ### Rate Limiting
 
@@ -287,7 +289,7 @@ docker compose exec webservarr supervisorctl status
 
 ### Plex OAuth not working
 
-- Verify Plex integration is configured in Settings > Integrations > Plex
+- Verify Plex integration is configured in Settings > Integrations (the Plex card)
 - Check that the Plex URL is reachable from the WebServarr container
 - Check logs: `docker compose logs webservarr | grep -i plex`
 

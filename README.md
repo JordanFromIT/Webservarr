@@ -76,15 +76,15 @@ Navigate to **Settings > Integrations** to connect your services:
 | **Sonarr** | URL + API key | Upcoming TV episode releases on calendar |
 | **Netdata** | URL | CPU, RAM, and network gauges on the homepage |
 
-Each integration has a **Test Connection** button to verify your credentials before saving.
+Each integration card has a **Test** button to verify your credentials before saving.
 
 ### Authentication
 
-WebServarr supports three authentication methods, configurable in **Settings > System > Authentication**:
+WebServarr supports three authentication methods, configurable in **Settings > Sign-in**:
 
 1. **Local Auth** (default) -- Username and password login against the local database. Enabled out of the box. Can be disabled once another auth method is configured.
 
-2. **Direct Plex OAuth** -- Users sign in with their Plex account. Same PIN-based flow used by Seerr and Tautulli. Enable in Settings > System > Authentication after configuring Plex integration.
+2. **Direct Plex OAuth** -- Users sign in with their Plex account. Same PIN-based flow used by Seerr and Tautulli. Enable in Settings > Sign-in after configuring the Plex card in Settings > Integrations.
 
 3. **Authentik OIDC** -- Plex login through an Authentik identity provider. Best for admins who run multiple services and want centralized SSO. See [docs/authentik.md](docs/authentik.md) for setup instructions.
 

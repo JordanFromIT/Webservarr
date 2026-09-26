@@ -11,7 +11,7 @@ When a user signs in with their Plex account through Authentik, Authentik create
 - **Audit logging** -- see who logged in, when, and to which service
 - **Granular access control** -- restrict which Plex users can access which services
 
-**If you just want users to sign in with Plex for WebServarr only**, use direct Plex OAuth instead. It requires no additional infrastructure and is configured entirely in Settings > Integrations > Plex.
+**If you just want users to sign in with Plex for WebServarr only**, use direct Plex OAuth instead. It requires no additional infrastructure and is configured entirely in Settings > Integrations (the Plex card).
 
 ## Prerequisites
 
@@ -162,18 +162,18 @@ return {"plex_token": connection.plex_token if connection else ""}
 ### Step 6: Configure WebServarr
 
 1. Log in to WebServarr as admin
-2. Go to **Settings > System > Authentication**
-3. Enable the **Authentik OIDC** toggle
+2. Go to **Settings > Sign-in**
+3. In the **Authentik** card, turn on **Allow sign-in with Authentik**
 4. Fill in the fields:
 
 | Field | Value |
 |-------|-------|
-| Authentik URL | Your Authentik base URL (e.g., `https://auth.example.com`) |
+| Authentik address | Your Authentik base URL (e.g., `https://auth.example.com`) |
 | Client ID | From the OAuth2 provider detail page (Step 4) |
-| Client Secret | From the OAuth2 provider detail page (Step 4) |
-| App Slug | The application slug from Step 5 (e.g., `webservarr`) |
+| Client secret | From the OAuth2 provider detail page (Step 4) |
+| Application slug | The application slug from Step 5 (e.g., `webservarr`) |
 
-5. Click **Save**
+5. Click **Save** in the save bar
 
 The **"Sign in with Plex (via Authentik)"** button will now appear on the login page.
 
@@ -181,9 +181,9 @@ The **"Sign in with Plex (via Authentik)"** button will now appear on the login 
 
 WebServarr determines admin status by comparing the logged-in user's email against the Plex server owner's email. If your Plex account email differs from what Authentik reports, set it explicitly:
 
-1. Go to **Settings > System > Admin Account**
-2. Set **Admin Email** to the email address associated with your Plex account
-3. Click **Save**
+1. Go to **Settings > Sign-in > Admin access**
+2. Set **Admin email** to the email address associated with your Plex account
+3. Click **Save** in the save bar
 
 ---
 
@@ -206,7 +206,7 @@ After completing the setup:
 
 **"Sign in with Plex (via Authentik)" button not appearing**
 
-All four settings (URL, Client ID, Client Secret, App Slug) must be saved in Settings > System > Authentication. Verify none are blank.
+All four settings (URL, Client ID, Client Secret, App Slug) must be saved in Settings > Sign-in (the Authentik card). Verify none are blank.
 
 **Redirect URI mismatch error**
 
@@ -214,7 +214,7 @@ The redirect URI in the Authentik OAuth2 provider must exactly match `https://yo
 
 **Plex popup blocked on mobile**
 
-Authentik opens a Plex popup window during login. Some mobile browsers block popups by default. For mobile users, direct Plex OAuth (no Authentik) is the recommended auth method -- configure it in Settings > Integrations > Plex.
+Authentik opens a Plex popup window during login. Some mobile browsers block popups by default. For mobile users, direct Plex OAuth (no Authentik) is the recommended auth method -- configure it in Settings > Integrations (the Plex card).
 
 **Logout does not return to the WebServarr login page**
 
@@ -226,7 +226,7 @@ WebServarr checks admin status by comparing the logged-in user's email against:
 1. The `system.admin_email` setting (if configured)
 2. The Plex server owner's email (fetched via the Plex API using the configured token)
 
-If neither matches, the user will not have admin access. Set your email explicitly in Settings > System > Admin Account > Admin Email.
+If neither matches, the user will not have admin access. Set your email explicitly in Settings > Sign-in > Admin access > Admin email.
 
 **Plex token not available after login (no avatar, no Seerr SSO)**
 
@@ -286,7 +286,7 @@ Point the hostname `auth.example.com` to `http://localhost:9000` in your tunnel 
 
 To disconnect Authentik from WebServarr:
 
-1. In WebServarr, go to **Settings > System > Authentication** and disable the **Authentik OIDC** toggle
+1. In WebServarr, go to **Settings > Sign-in** and turn off **Allow sign-in with Authentik** in the Authentik card
 2. Users who were logged in via Authentik will need to log in again using another method (simple auth or direct Plex OAuth)
 
 To remove the Authentik instance itself, refer to the [Authentik documentation](https://docs.goauthentik.io/).

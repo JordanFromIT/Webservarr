@@ -376,7 +376,8 @@ app.include_router(oidc_auth.router, prefix="/auth", tags=["OIDC Authentication"
 app.include_router(plex_auth.router, prefix="/auth", tags=["Plex Authentication"])
 app.include_router(news.router, prefix="/api/news", tags=["News"])
 app.include_router(status.router, prefix="/api/status", tags=["Status"])
-# Before admin.router: its fixed /settings/... paths must win over /settings/{key}.
+# The three admin routers share /api/admin. Their paths do not overlap, so
+# order is not load-bearing; keep it that way (no catch-all like /settings/{key}).
 app.include_router(admin_settings.router, prefix="/api/admin", tags=["Admin settings"])
 app.include_router(admin_integrations.router, prefix="/api/admin", tags=["Admin integrations"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
