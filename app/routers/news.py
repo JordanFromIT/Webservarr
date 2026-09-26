@@ -4,7 +4,7 @@ News API routes - CRUD operations for news posts
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from typing import List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy import or_
@@ -14,6 +14,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, get_current_user_optional, require_admin
 from app.limiter import limiter
 from app.models import NewsPost
+from app.utils import utc_iso
 
 router = APIRouter()
 
@@ -55,6 +56,11 @@ class NewsPostResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @field_serializer("created_at", "updated_at", "published_at")
+    def _utc(self, value: Optional[datetime]) -> Optional[str]:
+        # Stored as naive UTC; sent with a Z so a browser doesn't read local time.
+        return utc_iso(value)
 
 
 def _serialize_news_post(post: NewsPost, include_content: bool) -> dict:

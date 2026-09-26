@@ -2,7 +2,24 @@
 
 import ipaddress
 import socket
+from datetime import datetime, timezone
+from typing import Optional
 from urllib.parse import urlparse, urlsplit
+
+
+# --- Timestamps ---
+
+def utc_iso(value: Optional[datetime]) -> Optional[str]:
+    """A stored timestamp as ISO 8601 UTC with a Z, or None.
+
+    The database keeps naive UTC (SQLite CURRENT_TIMESTAMP, datetime.utcnow()).
+    Sent without a zone, a browser reads the time as its own local time, so
+    west of UTC everything looks hours off. An aware value is converted."""
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.isoformat(timespec="milliseconds") + "Z"
 
 
 # --- Account identity ---

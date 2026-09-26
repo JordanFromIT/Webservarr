@@ -27,7 +27,7 @@ from app.dependencies import get_current_user, require_admin
 from app.limiter import limiter
 from app.models import Setting, WikiCategory, WikiPage
 from app.settings_registry import REGISTRY, validate_value
-from app.utils import validate_image_magic
+from app.utils import utc_iso, validate_image_magic
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -221,7 +221,7 @@ def _page_brief(page: WikiPage, cat: Optional[WikiCategory]) -> dict:
         "sort_order": page.sort_order,
         "published": page.published,
         "is_example": page.is_example,
-        "updated_at": stamp.isoformat() if stamp else None,
+        "updated_at": utc_iso(stamp),
     }
 
 
@@ -417,7 +417,7 @@ async def get_page(
         "content": page.content,
         "content_html": page.content_html,
         "author_name": page.author_name,
-        "created_at": page.created_at.isoformat() if page.created_at else None,
+        "created_at": utc_iso(page.created_at),
         "siblings": siblings,
     })
     if is_admin(current_user):
