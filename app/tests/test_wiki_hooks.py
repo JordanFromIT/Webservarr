@@ -377,16 +377,13 @@ class ConcurrentHookWrites(unittest.TestCase):
         self.assertEqual([getattr(r, "status_code", r) for r in (r1, r2)], [204, 200])
         self.assertEqual(self.hooks(), ("page-b", "", ""))
 
-    def test_an_edit_racing_a_delete_answers_404(self):
-        # The edit reads the page, then the delete commits before the edit
-        # takes the lock: the edit answers 404 (not a bare 500) and moves no
-        # link; the delete clears the page's own.
+    def edit_while_deleted(self, body):
+        """The edit reads the page, then a delete commits before the edit takes
+        the write lock (the hunter's ordering). Returns (edit, delete) responses."""
         import sys
         import threading
 
         import app.routers.wiki as wiki
-        self.seed(["dpage"])
-        self.set_hooks(tickets="dpage")
         real = wiki._claim_hook_rows
         parked, deleted = threading.Event(), threading.Event()
 
@@ -401,8 +398,10 @@ class ConcurrentHookWrites(unittest.TestCase):
         out = {}
 
         def edit():
-            out["edit"] = self.client.put("/api/wiki/pages/dpage", json={
-                "title": "dpage renamed", "content": "new body", "published": True, "help_on": ["issues"]})
+            try:
+                out["edit"] = self.client.put("/api/wiki/pages/dpage", json=body)
+            except Exception as exc:  # a 500 re-raised by the TestClient
+                out["edit"] = exc
 
         def delete():
             parked.wait(5)
@@ -414,8 +413,28 @@ class ConcurrentHookWrites(unittest.TestCase):
                 t.start()
             for t in threads:
                 t.join(15)
-        self.assertEqual(out["delete"].status_code, 204)
-        self.assertEqual((out["edit"].status_code, out["edit"].json()), (404, {"detail": "That page was deleted."}))
+        return out["edit"], out["delete"]
+
+    def test_an_edit_racing_a_delete_answers_404(self):
+        # Not a bare 500, and no link moved; the delete cleared the page's own.
+        self.seed(["dpage"])
+        self.set_hooks(tickets="dpage")
+        edit, delete = self.edit_while_deleted({"title": "dpage renamed", "content": "new body", "published": True,
+                                                "help_on": ["issues"]})
+        self.assertEqual(delete.status_code, 204)
+        self.assertEqual(getattr(edit, "status_code", edit), 404)
+        self.assertEqual(edit.json(), {"detail": "That page was deleted."})
+        self.assertEqual(self.hooks(), ("", "", ""))
+
+    def test_an_edit_that_changes_only_links_racing_a_delete_moves_no_link(self):
+        # Same ordering, but the edit changes no page field: no UPDATE of the
+        # page is sent, so nothing fails at commit. Only the check made under
+        # the lock stops a link being pointed at the deleted page.
+        self.seed(["dpage"])
+        edit, delete = self.edit_while_deleted({"title": "dpage", "slug": "dpage", "content": "x", "published": True,
+                                                "help_on": ["issues"]})
+        self.assertEqual(delete.status_code, 204)
+        self.assertEqual(getattr(edit, "status_code", edit), 404)
         self.assertEqual(self.hooks(), ("", "", ""))
 
     def test_a_missing_row_cannot_collide(self):
