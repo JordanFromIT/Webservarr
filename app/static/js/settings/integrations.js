@@ -119,14 +119,58 @@
 
   function setText(node, text) { if (node.textContent !== text) node.textContent = text; }
 
-  // The server's same_address(): trimmed, without trailing slashes, with the
-  // scheme and host in any case.
-  function sameAddress(a, b) {
-    function norm(u) {
-      var m = /^([a-z][a-z0-9+.-]*:)?(\/\/[^\/?#]*)?([\s\S]*)$/i.exec(String(u || '').trim().replace(/\/+$/, ''));
-      return (m[1] || '').toLowerCase() + (m[2] || '').toLowerCase() + m[3];
+  // The server's same_address() (app/integrations/config.py), exactly: the
+  // address trimmed and without trailing slashes, split the way Python's
+  // urlsplit splits it, then scheme and host compared in any case and the
+  // rest as written. Deliberately not new URL(): it also drops default ports
+  // and rewrites IPv6 and paths, which the server does not, so it would call
+  // two addresses the same that the server treats as a move. An address the
+  // server can't split is never the same as anything. The shared cases in
+  // app/tests/same_address_vectors.json hold the two to each other.
+  // Python's str.strip() whitespace (not quite JavaScript's trim()).
+  var PY_SPACE = '[\\t\\n\\x0b\\x0c\\r\\x1c-\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]';
+  var PY_STRIP = new RegExp('^' + PY_SPACE + '+|' + PY_SPACE + '+$', 'g');
+
+  function splitAddress(u) {
+    // same_address: strip(), rstrip('/'); then urlsplit: leading C0 controls
+    // and spaces go, and tabs and newlines anywhere.
+    u = String(u == null ? '' : u).replace(PY_STRIP, '').replace(/\/+$/, '')
+      .replace(/^[\x00-\x20]+/, '').replace(/[\t\r\n]/g, '');
+    var scheme = '', netloc = '', query = '', fragment = '';
+    var i = u.indexOf(':');
+    if (i > 0 && /^[A-Za-z][A-Za-z0-9+.-]*$/.test(u.slice(0, i))) {
+      scheme = u.slice(0, i).toLowerCase();
+      u = u.slice(i + 1);
     }
-    return norm(a) === norm(b);
+    if (u.slice(0, 2) === '//') {
+      var end = u.length;
+      '/?#'.split('').forEach(function (c) {
+        var at = u.indexOf(c, 2);
+        if (at >= 0 && at < end) end = at;
+      });
+      netloc = u.slice(2, end);
+      u = u.slice(end);
+      var open = netloc.indexOf('[') >= 0, close = netloc.indexOf(']') >= 0;
+      if (open !== close) return null;
+      if (open && !bracketedHostOk(netloc.split('[')[1].split(']')[0])) return null;
+    }
+    var hash = u.indexOf('#');
+    if (hash >= 0) { fragment = u.slice(hash + 1); u = u.slice(0, hash); }
+    var q = u.indexOf('?');
+    if (q >= 0) { query = u.slice(q + 1); u = u.slice(0, q); }
+    return [scheme, netloc.toLowerCase(), u, query, fragment];
+  }
+
+  // What urlsplit accepts inside [ ]: an IPv6 address or an IPvFuture literal.
+  function bracketedHostOk(h) {
+    if (/^v/.test(h)) return /^v[a-fA-F0-9]+\.[a-zA-Z0-9._~\-+!$&'()*,;=:]+$/.test(h);
+    if (h.indexOf(':') < 0) return false;
+    try { new URL('http://[' + h + ']/'); return true; } catch (e) { return false; }
+  }
+
+  function sameAddress(a, b) {
+    var na = splitAddress(a), nb = splitAddress(b);
+    return na !== null && nb !== null && na.join('\u0000') === nb.join('\u0000');
   }
 
   WSSettings.registerTab('integrations', {

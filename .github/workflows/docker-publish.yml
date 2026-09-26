@@ -71,8 +71,22 @@ jobs:
             exit 1
           fi
 
+  # Front-end checks that need JavaScript, which the Python image has none of:
+  # the Integrations tab's sameAddress() against the server's shared cases.
+  js-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run the JavaScript checks
+        run: node app/tests/js/same_address.mjs
+
   build-and-push:
-    needs: test
+    needs: [test, js-checks]
     # Unchanged triggers: only v* tags and manual dispatch build an image.
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
