@@ -33,10 +33,10 @@ class RedisIsolation(unittest.TestCase):
         self.assertTrue(str(limiter._storage_uri).endswith(f"/{TEST_REDIS_DB}"), limiter._storage_uri)
 
     def test_the_url_rewrite(self):
-        from app.tests import test_redis_url
-        self.assertEqual(test_redis_url("redis://localhost:6379/0"), "redis://localhost:6379/15")
-        self.assertEqual(test_redis_url("redis://localhost:6379"), "redis://localhost:6379/15")
-        self.assertEqual(test_redis_url("redis://:pw@redis:6379/3?socket_timeout=2"),
+        from app.tests import isolated_redis_url
+        self.assertEqual(isolated_redis_url("redis://localhost:6379/0"), "redis://localhost:6379/15")
+        self.assertEqual(isolated_redis_url("redis://localhost:6379"), "redis://localhost:6379/15")
+        self.assertEqual(isolated_redis_url("redis://:pw@redis:6379/3?socket_timeout=2"),
                          "redis://:pw@redis:6379/15?socket_timeout=2")
 
 
