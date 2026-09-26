@@ -271,7 +271,7 @@
           '<span class="shrink-0 text-[10px] text-steel-blue font-bold uppercase">' + escapeHtml(dateLabel(created)) + '</span>' +
         '</div>' +
         '<p class="text-xs text-frosted-blue/70 mt-0.5">By ' + escapeHtml(post.author_name || 'Unknown') + '</p>' +
-        '<p class="text-sm text-frosted-blue/60 mt-1 line-clamp-2 min-h-10">' + escapeHtml(excerpt(post.content_html, 180)) + '</p>' +
+        '<p class="text-sm text-frosted-blue/70 mt-1 line-clamp-2 min-h-10">' + escapeHtml(excerpt(post.content_html, 180)) + '</p>' +
         '<div class="' + bodyClasses + ' hidden" data-news-body style="white-space:pre-line">' + post.content_html + '</div>' +
         (isAdmin
           ? '<div class="mt-2 -ml-2 flex flex-wrap gap-1">' +

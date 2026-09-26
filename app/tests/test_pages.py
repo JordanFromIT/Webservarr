@@ -751,7 +751,7 @@ class NewsCardsHoldTheirSkeleton(unittest.TestCase):
                 self.assertIn(titles[name], page)
                 # Fix round 2: an open card (pinned, new, or after Read more) has no title gap.
                 self.assertIn("if (title) title.classList.toggle('min-h-12', !nowOpen);", page)
-                self.assertIn("'<p class=\"text-sm text-frosted-blue/60 mt-1 line-clamp-2 min-h-10\">'", page)
+                self.assertIn("'<p class=\"text-sm text-frosted-blue/70 mt-1 line-clamp-2 min-h-10\">'", page)
                 self.assertEqual(page.count('<p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p>'), cards)
                 self.assertEqual(page.count('<p class="text-sm mt-1 min-h-10">&nbsp;</p>'), cards)
                 self.assertNotIn("<br", page[page.index('<div class="skel rounded-xl p-4'):page.index('<div class="skel rounded-xl p-4') + 600])

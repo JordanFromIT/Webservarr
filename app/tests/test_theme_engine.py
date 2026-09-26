@@ -216,7 +216,7 @@ class DerivedStatusText(unittest.TestCase):
     they keep the state's hue and still clear 4.5:1 on the operator's own
     background, light or dark. The pure status colours stay for marks."""
 
-    MIX = "color-mix(in srgb, rgb(var(--ws-status-{s})) 50%, rgb(var(--color-text)))"
+    MIX = "color-mix(in srgb, rgb(var(--ws-status-{s})) 40%, rgb(var(--color-text)))"
 
     def supports_block(self) -> str:
         m = re.search(r"@supports \(color: color-mix\(in srgb, red 50%, blue\)\) \{\s*"

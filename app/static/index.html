@@ -110,15 +110,15 @@
 <div class="flex items-center text-[11px] text-frosted-blue space-x-0.5">
 <span class="material-symbols-outlined text-[11px]">arrow_upward</span>
 <span id="netUpText">0.0</span>
-<span id="netUpUnit" class="text-frosted-blue/60">Mbps</span>
+<span id="netUpUnit" class="text-frosted-blue/70">Mbps</span>
 </div>
 <div class="flex items-center text-[11px] text-frosted-blue space-x-0.5 mt-0.5">
 <span class="material-symbols-outlined text-[11px]">arrow_downward</span>
 <span id="netDownText">0.0</span>
-<span id="netDownUnit" class="text-frosted-blue/60">Mbps</span>
+<span id="netDownUnit" class="text-frosted-blue/70">Mbps</span>
 </div>
 </div>
-<span id="netGaugeDetail" class="min-h-[1.5em] text-[9px] text-frosted-blue/60 mt-0.5"></span>
+<span id="netGaugeDetail" class="min-h-[1.5em] text-[9px] text-frosted-blue/70 mt-0.5"></span>
 </div>
 </div>
 </div>
@@ -366,7 +366,7 @@ function renderNewsCard(post, expanded) {
 
     var body = open
         ? '<div class="' + bodyClasses + '" style="white-space:pre-line">' + post.content_html + '</div>'
-        : '<p class="text-sm text-frosted-blue/60 mt-1 line-clamp-2 min-h-10">' + escapeHtml(excerpt) + '</p>' +
+        : '<p class="text-sm text-frosted-blue/70 mt-1 line-clamp-2 min-h-10">' + escapeHtml(excerpt) + '</p>' +
           '<div class="' + bodyClasses + ' hidden" data-news-body style="white-space:pre-line">' + post.content_html + '</div>';
 
     var toggle = open
