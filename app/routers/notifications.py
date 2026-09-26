@@ -5,6 +5,7 @@ Notification API routes - User notifications, preferences, and push subscription
 import hashlib
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -297,6 +298,11 @@ async def push_subscribe(
     # A push endpoint is one browser profile. If another account subscribed it
     # earlier (a shared computer), that account's notifications must stop
     # arriving here now that someone else is signed in on it.
+    #
+    # Kept as this transaction's first statement: it is a write, so SQLite
+    # takes its write lock here (even when it deletes nothing), and a
+    # subscribe on the other worker waits until this one commits. Everything
+    # below is decided under that lock (R135).
     db.query(PushSubscription).filter(
         PushSubscription.endpoint == body.endpoint,
         PushSubscription.user_email != email,
@@ -313,15 +319,21 @@ async def push_subscribe(
         existing.p256dh = body.keys.p256dh
         existing.auth = body.keys.auth
     else:
-        # At the device cap, the oldest go to make room for this one.
-        mine = (
-            db.query(PushSubscription)
-            .filter(PushSubscription.user_email == email)
+        # At the device cap, the oldest go to make room for this one. One
+        # statement, in this transaction, right before the insert: it keeps
+        # the account's newest MAX_PUSH_DEVICES - 1 as the table holds them at
+        # that moment, rather than acting on rows read earlier, so two new
+        # devices at once can't both prune to 19 and both insert.
+        newest = (
+            select(PushSubscription.id)
+            .where(PushSubscription.user_email == email)
             .order_by(PushSubscription.created_at.desc(), PushSubscription.id.desc())
-            .all()
+            .limit(MAX_PUSH_DEVICES - 1)
         )
-        for old in mine[MAX_PUSH_DEVICES - 1:]:
-            db.delete(old)
+        db.query(PushSubscription).filter(
+            PushSubscription.user_email == email,
+            PushSubscription.id.not_in(newest),
+        ).delete(synchronize_session=False)
         db.add(PushSubscription(
             user_email=email,
             endpoint=body.endpoint,
