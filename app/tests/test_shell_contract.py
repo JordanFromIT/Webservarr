@@ -362,10 +362,14 @@ class ShellContract(unittest.TestCase):
     def test_no_instance_specific_strings(self):
         files = (list(STATIC.glob("*.html")) + list((STATIC / "partials").glob("*.html"))
                  + list((STATIC / "js").glob("*.js")) + list((STATIC / "js" / "settings").glob("*.js")))
+        # The message names the string by index only: assertNotIn would print
+        # the string and the whole file, and CI logs are public.
         for p in files:
             t = p.read_text(encoding="utf-8")
-            for bad in FORBIDDEN_STRINGS:
-                self.assertNotIn(bad, t, p.name)
+            for i, bad in enumerate(FORBIDDEN_STRINGS):
+                self.assertFalse(
+                    bad in t,
+                    f"instance-specific string #{i} (from WEBSERVARR_FORBIDDEN_STRINGS) found in {p.name}")
         # Generic guard: every shipped page carries the template's own name.
         for p in STATIC.glob("*.html"):
             m = re.search(r"<title>(.*?)</title>", p.read_text(encoding="utf-8"), re.S)
