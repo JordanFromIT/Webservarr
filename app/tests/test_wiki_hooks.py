@@ -95,7 +95,7 @@ class WikiHooks(unittest.TestCase):
         b = self.page("B")
         data = self.client.get(f"/api/wiki/pages/{b}").json()
         self.assertEqual(data["help_on"], [])
-        self.assertEqual(data["help_holders"]["tickets"], "A")
+        self.assertEqual(data["help_holders"]["tickets"], {"title": "A", "slug": "a"})
         self.assertIsNone(data["help_holders"]["issues"])
         self.assertEqual(self.client.get(f"/api/wiki/pages/{a}").json()["help_on"], ["tickets"])
         helpers.reset_overrides()
@@ -122,6 +122,29 @@ class WikiHooks(unittest.TestCase):
         data = self.client.get(f"/api/wiki/pages/{a}").json()
         self.assertEqual(data["help_on"], ["tickets", "playback"])
         self.assertEqual(data["help_holders"], {"tickets": None, "issues": None, "playback": None})
+
+    def test_holders_are_told_apart_by_address(self):
+        # Titles are not unique; the editor keys a holder on its slug.
+        self.page("FAQ", slug="faq")
+        self.page("FAQ", ["tickets"], slug="faq-2")
+        p = self.page("P")
+        self.assertEqual(self.client.get(f"/api/wiki/pages/{p}").json()["help_holders"],
+                         {"tickets": {"title": "FAQ", "slug": "faq-2"}, "issues": None, "playback": None})
+
+    def test_a_stale_row_at_commit_answers_404(self):
+        # Backstop for an edit racing a delete: if the UPDATE finds its row
+        # gone at commit, the answer is a plain 404, and nothing moved.
+        from sqlalchemy.orm import Session as OrmSession
+        from sqlalchemy.orm.exc import StaleDataError
+        a = self.page("A", ["tickets"])
+
+        def stale(session):
+            raise StaleDataError("UPDATE statement on table 'wiki_pages' expected to update 1 row(s); 0 were matched.")
+        with mock.patch.object(OrmSession, "commit", stale):
+            r = self.client.put(f"/api/wiki/pages/{a}", json={"title": "A", "content": "y", "published": True,
+                                                              "help_on": ["issues"]})
+        self.assertEqual((r.status_code, r.json()), (404, {"detail": "That page was deleted."}))
+        self.assertEqual(self.hooks(), (a, "", ""))
 
     def test_a_client_slug_reaches_the_hook_normalised(self):
         # The editor sends whatever is in the Address box. Create and update
@@ -354,6 +377,47 @@ class ConcurrentHookWrites(unittest.TestCase):
         self.assertEqual([getattr(r, "status_code", r) for r in (r1, r2)], [204, 200])
         self.assertEqual(self.hooks(), ("page-b", "", ""))
 
+    def test_an_edit_racing_a_delete_answers_404(self):
+        # The edit reads the page, then the delete commits before the edit
+        # takes the lock: the edit answers 404 (not a bare 500) and moves no
+        # link; the delete clears the page's own.
+        import sys
+        import threading
+
+        import app.routers.wiki as wiki
+        self.seed(["dpage"])
+        self.set_hooks(tickets="dpage")
+        real = wiki._claim_hook_rows
+        parked, deleted = threading.Event(), threading.Event()
+
+        def claim(db):
+            frame = sys._getframe(1)
+            while frame is not None and frame.f_code.co_name not in ("update_page", "delete_page"):
+                frame = frame.f_back
+            if frame is not None and frame.f_code.co_name == "update_page":
+                parked.set()
+                deleted.wait(5)
+            return real(db)
+        out = {}
+
+        def edit():
+            out["edit"] = self.client.put("/api/wiki/pages/dpage", json={
+                "title": "dpage renamed", "content": "new body", "published": True, "help_on": ["issues"]})
+
+        def delete():
+            parked.wait(5)
+            out["delete"] = self.client.delete("/api/wiki/pages/dpage")
+            deleted.set()
+        with mock.patch.object(wiki, "_claim_hook_rows", claim):
+            threads = [threading.Thread(target=edit), threading.Thread(target=delete)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(15)
+        self.assertEqual(out["delete"].status_code, 204)
+        self.assertEqual((out["edit"].status_code, out["edit"].json()), (404, {"detail": "That page was deleted."}))
+        self.assertEqual(self.hooks(), ("", "", ""))
+
     def test_a_missing_row_cannot_collide(self):
         # Rows are seeded at startup, but a missing one must not turn two
         # concurrent first claims into a primary-key clash and a 500.
@@ -385,7 +449,7 @@ class WikiEditorHelp(unittest.TestCase):
     def test_holder_titles_go_in_as_text(self):
         src = editor_js()
         self.assertEqual(len(live_matches(
-            src, r"line\.appendChild\(el\('span', '[^']*', '\(now on “' \+ holders\[h\[0\]\] \+ '” — ticking moves it here\)'\)\);")), 1)
+            src, r"line\.appendChild\(el\('span', '[^']*', '\(now on “' \+ holders\[h\[0\]\]\.title \+ '” — ticking moves it here\)'\)\);")), 1)
         # el() writes its text with textContent; the only innerHTML is the
         # server-sanitised preview.
         self.assertIn("if (text !== undefined && text !== null) n.textContent = text;", js_code_only(src))
@@ -416,7 +480,19 @@ class WikiEditorHelp(unittest.TestCase):
                      r"initial = Object\.assign\(\{\}, f, \{ help_on: on \}\);",
                      r"if \(dropped\) status\('Your unsaved change to the help links was left out: that link has changed since\.'\);"):
             self.assertEqual(len(live_matches(src, line)), 1, line)
-        self.assertIn("fields.help_seen = Object.assign({}, s.helpSeen);", function_body(js_code_only(src), "mirror"))
+        self.assertIn("fields.help_state = Object.assign({}, s.helpSeen);", function_body(js_code_only(src), "mirror"))
+        # Only help_state drafts replay: help_base (round 0) and help_seen
+        # (keyed on titles) never do.
+        self.assertIn("var f = draft.fields, then = f.help_state;", opened)
+        self.assertNotRegex(js_code_only(src), r"\bf\.help_(?:seen|base)\b")
+
+    def test_holders_are_keyed_on_their_address(self):
+        # Two pages can share a title, so a holder is compared by slug; the
+        # title is only shown.
+        src = editor_js()
+        self.assertEqual(len(live_matches(
+            src, r"seen\[n\] = helpBase\.indexOf\(n\) >= 0 \? 'self' : \(holders\[n\] \? 'page:' \+ holders\[n\]\.slug : ''\);")), 1)
+        self.assertNotRegex(js_code_only(src), r"holders\[n\]\.title|'other:'")
 
     def test_mirror_timers_and_guards(self):
         # (a) a landed save or delete cancels the pending mirror, so no draft
@@ -442,8 +518,8 @@ class WikiEditorHelp(unittest.TestCase):
         code = js_code_only(src)
         holders = function_body(code, "helpHolders")
         self.assertIn("var hooks = (window.WEBSERVARR_THEME && window.WEBSERVARR_THEME.wiki_hooks) || {};", holders)
-        self.assertIn("if (page) out[n] = (page.help_holders || {})[n] || null;", holders)
-        self.assertIn("else out[n] = hooks[n] && hooks[n].title ? hooks[n].title : null;", holders)
+        self.assertIn("var n = h[0], held = page ? (page.help_holders || {})[n] : hooks[n];", holders)
+        self.assertIn("out[n] = held && held.slug ? { slug: held.slug, title: held.title || held.slug } : null;", holders)
         self.assertIn("var holders = _session.holders;", function_body(code, "render"))
         # No extra request: the same five fetches as before (save, remove, page,
         # categories, image upload).
@@ -456,6 +532,16 @@ class WikiEditorHelp(unittest.TestCase):
                          r"else if \(mine\) hooks\[n\] = null;")
         self.assertEqual(len(live_matches(src, r"'A link to this page appears above that form once the page is published\. "
                                                r"Only one page can be linked in each place\.'")), 1)
+
+    def test_a_deleted_page_says_so(self):
+        # An edit that answers 404 (the page was deleted meanwhile) gets a
+        # plain message, keeps the text and draft, and gives the controls back.
+        src = editor_js()
+        save = function_body(js_code_only(src), "save")
+        self.assertRegex(save, r"if \(!res\.ok\) setBusy\(s, false\);")
+        self.assertLess(save.index("if (res.status === 404) {"), save.index("if (!res.ok) {"))
+        self.assertEqual(len(live_matches(src, r"'This page was deleted while you were editing, so it can’t be saved\. "
+                                               r"Your text is still here — copy it before you leave\.'")), 1)
 
     def test_every_write_clears_the_page_cache(self):
         code = js_code_only(editor_js())
