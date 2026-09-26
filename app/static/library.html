@@ -40,9 +40,11 @@
        user, from localStorage; Recently Added with eight books on a first
        visit): for each, a slot built like renderShelf's section, with the
        shelf's own title as a tint and as many covers as it held, so the rows
-       wrap as the real ones will. loadShelves swaps every shelf in at once
-       when they have all answered, so the grid below moves at most once, and
-       not at all when the shelves are the ones reserved. -->
+       wrap as the real ones will. loadShelves asks for the shelves together
+       and swaps them in at once when they have all answered (or after a few
+       seconds, so a hung shelf can't hold the others back), so the grid below
+       moves at most once, and not at all when the shelves are the ones
+       reserved. -->
   <div id="shelves" class="space-y-8"></div>
   <template id="shelfSlot"><section aria-hidden="true"><div class="flex items-center gap-3 mb-4"><span class="material-symbols-outlined invisible">book</span><h3 class="text-xl font-bold text-frosted-blue"><span class="skel-text" data-shelf-title></span></h3></div><div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8 gap-4" data-shelf-row><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p></div></div></section></template>
   <script>
@@ -587,19 +589,19 @@
     {
       id: 'bookshelf', title: 'Your Bookshelf', icon: 'book_ribbon',
       dismissible: true,
-      load: function () {
+      load: function (signal) {
         return kavita('/api/Series/on-deck?pageNumber=1&pageSize=8', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: filterBody()
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: filterBody(), signal: signal
         });
       }
     },
     {
       id: 'recent', title: 'Recently Added', icon: 'new_releases',
-      load: function () {
+      load: function (signal) {
         return kavita('/api/Series/all-v2?pageNumber=1&pageSize=8', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           // sortField 2 = Created
-          body: filterBody({ sortOptions: { sortField: 2, isAscending: false } })
+          body: filterBody({ sortOptions: { sortField: 2, isAscending: false } }), signal: signal
         });
       }
     },
@@ -608,11 +610,11 @@
       // Meaningful only once books have been rated; until then the ordering is
       // effectively arbitrary, so the shelf hides itself when nothing is rated.
       requiresRatings: true,
-      load: function () {
+      load: function (signal) {
         return kavita('/api/Series/all-v2?pageNumber=1&pageSize=8', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           // sortField 8 = AverageRating
-          body: filterBody({ sortOptions: { sortField: 8, isAscending: false } })
+          body: filterBody({ sortOptions: { sortField: 8, isAscending: false } }), signal: signal
         });
       }
     }
@@ -676,38 +678,53 @@
   // Per person: what the next visit's skeleton reserves (see the script by #shelves).
   var SHELF_PLAN_KEY = 'webservarr_library_shelves:' + (((window.WS_DATA || {}).user || {}).username || '');
 
+  // The shelves are asked for together. Each request gives up after
+  // SHELF_TIMEOUT, and the shelves swap in once: when every shelf has
+  // answered, or at SHELF_DEADLINE, whichever comes first, so one slow or hung
+  // shelf never holds back the others. A shelf that answers after the swap
+  // goes in below the others, so the shelves already showing stay put.
+  var SHELF_DEADLINE = 3000, SHELF_TIMEOUT = 8000;
+
   function loadShelves() {
-    var answered = false, built = [];
-    // Sequential so the shelves always come in a stable order.
-    return SHELVES.reduce(function (chain, shelf) {
-      return chain.then(function () {
-        return shelf.load()
-          .then(function (r) { if (r.ok) answered = true; return r.ok ? r.json() : []; })
-          .then(function (items) {
-            var section = renderShelf(shelf, items);
-            if (section) built.push({ id: shelf.id, n: Math.min(items.length, 8), section: section });
-          })
-          .catch(function (err) {
-            // Kavita said no and the page now shows why: the remaining
-            // shelves would only ask again, so stop the chain here.
-            if (err && err.message === 'reconnecting') throw err;
-            /* any other failure: a shelf is a convenience; never block the library */
-          });
+    var answered = false, swapped = false, stopped = false, box = el('shelves');
+    var results = [];   // in SHELVES order: {id, n, section}, or null for a shelf with nothing to show
+    var requests = SHELVES.map(function (shelf, i) {
+      var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctl) ctl.abort(); }, SHELF_TIMEOUT);
+      return shelf.load(ctl ? ctl.signal : undefined)
+        .then(function (r) { if (r.ok) answered = true; return r.ok ? r.json() : []; })
+        .then(function (items) {
+          clearTimeout(timer);
+          var section = renderShelf(shelf, items);
+          results[i] = section ? { id: shelf.id, n: Math.min(items.length, 8), section: section } : null;
+          if (swapped && section && !stopped) box.appendChild(section);   // too late for the swap
+        })
+        .catch(function (err) {
+          clearTimeout(timer);
+          // Kavita said no and the page now shows why: nothing goes into a
+          // page that is leaving for the sign-in or showing that message.
+          if (err && err.message === 'reconnecting') throw err;
+          /* any other failure, or a shelf that timed out: it drops out; a shelf is a convenience */
+          results[i] = null;
+        });
+    });
+    var settled = Promise.all(requests).then(function () { return true; })
+      .catch(function () { stopped = true; return false; /* stopped on 'reconnecting'; see above */ });
+    var deadline = new Promise(function (done) { setTimeout(done, SHELF_DEADLINE); });
+    return Promise.race([settled, deadline]).then(function () {
+      if (stopped) return;
+      // One write: the slots go and every shelf that has come arrives together.
+      swapped = true;
+      box.replaceChildren.apply(box, results.filter(Boolean).map(function (b) { return b.section; }));
+      // Kept for the next visit's skeleton once every shelf has had its say,
+      // and only from a run Kavita answered.
+      settled.then(function (finished) {
+        if (!finished || !answered) return;
+        try {
+          localStorage.setItem(SHELF_PLAN_KEY, JSON.stringify(results.filter(Boolean).map(function (b) { return [b.id, b.n]; })));
+        } catch (e) { /* private mode */ }
       });
-    }, Promise.resolve()).then(function () { return true; })
-      .catch(function () { return false; /* stopped on 'reconnecting'; see above */ })
-      .then(function (finished) {
-        if (!finished) return;   // leaving for the sign-in, or showing why not
-        // One write: the slots go and every shelf arrives together.
-        var box = el('shelves');
-        box.replaceChildren.apply(box, built.map(function (b) { return b.section; }));
-        // Kept for the next visit's skeleton, but only from a run Kavita answered.
-        if (answered) {
-          try {
-            localStorage.setItem(SHELF_PLAN_KEY, JSON.stringify(built.map(function (b) { return [b.id, b.n]; })));
-          } catch (e) { /* private mode */ }
-        }
-      });
+    });
   }
 
   function showUnavailable(err) {
