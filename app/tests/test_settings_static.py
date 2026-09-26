@@ -715,6 +715,7 @@ class AppearanceTab(unittest.TestCase):
 
 
 SIGNIN = STATIC / "js" / "settings" / "signin.js"
+SIGNIN_RULE = STATIC / "js" / "settings" / "signin-rule.js"
 
 
 def signin_function(name: str, code: bool = True) -> str:
@@ -732,33 +733,39 @@ class SignInTab(unittest.TestCase):
     """The Sign-in tab's security rules that can be read from the code (R62)."""
 
     def test_mask_comes_from_the_kit(self):
-        # A saved Plex token reads as the server's mask, which the kit
-        # re-exports. No copy of it here: compared live, never a string.
-        src = SIGNIN.read_text(encoding="utf-8")
-        code = js_code_only(src)
-        self.assertNotIn("***masked***", src)
-        self.assertTrue(live_matches(src, r"\('integration\.plex\.token'\)\s*===\s*WSSettings\.MASK\b"),
-                        "the Plex token isn't compared with WSSettings.MASK")
-        self.assertNotRegex(code, r"\bMASK\s*[:=]\s*['\"`]")
+        # No copy of the server's mask in the sign-in code: Plex counts as set
+        # up with an address and any token (the saved one reads as the mask,
+        # a typed one replaces it), as the server's lockout guard reads it.
+        for f in (SIGNIN, SIGNIN_RULE):
+            with self.subTest(file=f.name):
+                src = f.read_text(encoding="utf-8")
+                self.assertNotIn("***masked***", src)
+                self.assertNotRegex(js_code_only(src), r"\bMASK\s*[:=]\s*['\"`]")
+        self.assertTrue(live_matches(SIGNIN_RULE.read_text(encoding="utf-8"),
+                                     r"!!read\('integration\.plex\.url'\) && !!read\('integration\.plex\.token'\)"))
 
     def test_own_method_warning_asks_with_the_kit_dialog_before_saving(self):
         # Turning off the method this session signed in with asks first, in
-        # the kit's dialog, from a beforeSave hook: its answer decides the save.
-        code = js_code_only(SIGNIN.read_text(encoding="utf-8"))
+        # the kit's dialog, from a beforeSave hook: its answer decides the
+        # save. The hook lives once, in signin-rule.js's guard().
+        code = js_code_only(SIGNIN_RULE.read_text(encoding="utf-8"))
         hooks = list(re.finditer(r"api\.beforeSave\(function \((\w+)\) \{", code))
         self.assertEqual(len(hooks), 1, "one beforeSave hook")
         hook = hooks[0]
         body = code[hook.end() - 1:matching_brace(code, hook.end() - 1) + 1]
         self.assertRegex(body, r"\bsessionMethod\(\)")
-        self.assertRegex(signin_function("sessionMethod"), r"\bWS\.user\b[\s\S]*\.auth_method\b")
+        self.assertRegex(function_body(code, "sessionMethod"), r"\bWS\.user\b[\s\S]*\.auth_method\b")
         # Only when a key of that method is in the batch being saved.
         self.assertRegex(body, rf"\b{hook.group(1)}\.indexOf\(")
-        ask = re.search(r"return WSSettings\.confirm\(\{([^{}]*)\}\)\.then\(function \((\w+)\) \{", body)
-        self.assertIsNotNone(ask, "the warning isn't the kit's dialog, or its answer is ignored")
-        self.assertNotIn("alert", ask.group(1))          # a real choice
-        self.assertIn("cancelLabel", ask.group(1))
-        answer = body[ask.end() - 1:matching_brace(body, ask.end() - 1) + 1]
-        self.assertRegex(answer, rf"return {ask.group(2)};")
+        asks = re.findall(r"\{\s*title: [^{}]*\}", body)
+        self.assertEqual(len(asks), 2, "the two questions: turning off, and changing")
+        for ask in asks:
+            self.assertNotIn("alert", ask)          # a real choice
+            self.assertIn("cancelLabel", ask)
+        answer = re.search(r"return WSSettings\.confirm\(ask\)\.then\(function \((\w+)\) \{", body)
+        self.assertIsNotNone(answer, "the warning isn't the kit's dialog, or its answer is ignored")
+        rest = body[answer.end() - 1:matching_brace(body, answer.end() - 1) + 1]
+        self.assertRegex(rest, rf"return {answer.group(1)};")
 
     def test_password_fields_are_the_browsers_and_never_the_kits(self):
         src = SIGNIN.read_text(encoding="utf-8")
