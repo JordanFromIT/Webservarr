@@ -35,8 +35,25 @@
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8">
 
 
-  <!-- Discovery shelves: continue reading, recently added, top rated -->
-  <div id="shelves" class="space-y-8"></div>
+  <!-- Discovery shelves: continue reading, recently added, top rated.
+       Each shelf lands in a skeleton slot built like renderShelf's section:
+       the heading line, then one row of covers (as many as the row holds at
+       each width) with a two-line title under each. The script below keeps
+       as many slots as there were shelves last time (one on a first visit);
+       loadShelves fills them in order and drops any left over. -->
+  <div id="shelves" class="space-y-8"><section data-shelf-skel aria-hidden="true"><div class="flex items-center gap-3 mb-4"><div class="skel h-5 w-44"></div><span class="text-xl">&nbsp;</span></div><div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8 gap-4"><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div class="hidden sm:block"><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div class="hidden md:block"><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div class="hidden md:block"><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div class="hidden xl:block"><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div><div class="hidden xl:block"><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div></div></section></div>
+  <script>
+    (function () {
+      var n = 1;
+      try {
+        var v = parseInt(localStorage.getItem('webservarr_library_shelves'), 10);
+        if (v >= 0 && v <= 3) n = v;
+      } catch (e) { /* private mode: one slot */ }
+      var box = document.getElementById('shelves'), slot = box.firstElementChild;
+      if (!n) { box.removeChild(slot); return; }
+      for (var i = 1; i < n; i++) box.appendChild(slot.cloneNode(true));
+    })();
+  </script>
 
   <!-- Library -->
   <section>
@@ -87,16 +104,18 @@
     </div>
 
     <!-- States -->
+    <!-- A skeleton book is bookCard's card with nothing in it: the cover and
+         two lines of title, so the first row lands in place. -->
     <div id="loadingState" aria-busy="true">
       <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-8 gap-4" aria-hidden="true">
-        <div class="skel skel-poster"></div>
-        <div class="skel skel-poster"></div>
-        <div class="skel skel-poster"></div>
-        <div class="skel skel-poster"></div>
-        <div class="skel skel-poster"></div>
-        <div class="skel skel-poster"></div>
-        <div class="skel skel-poster"></div>
-        <div class="skel skel-poster"></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
+        <div><div class="skel book-cover rounded-xl"></div><p class="mt-2 text-sm leading-snug invisible">&nbsp;<br>&nbsp;</p></div>
       </div>
     </div>
 
@@ -462,7 +481,7 @@
 
   function loadPage() {
     show('loadingState');
-    kavita('/api/Series/all-v2?pageNumber=' + state.page + '&pageSize=' + PAGE_SIZE, {
+    return kavita('/api/Series/all-v2?pageNumber=' + state.page + '&pageSize=' + PAGE_SIZE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: filterBody()
@@ -602,7 +621,11 @@
     });
     section.appendChild(head);
     section.appendChild(row);
-    el('shelves').appendChild(section);
+    // Into the first skeleton slot still waiting, so nothing below moves;
+    // after the others when there are more shelves than slots.
+    var slot = el('shelves').querySelector('[data-shelf-skel]');
+    if (slot) el('shelves').replaceChild(section, slot);
+    else el('shelves').appendChild(section);
   }
 
   /**
@@ -633,13 +656,19 @@
       });
   }
 
+  var SHELF_COUNT_KEY = 'webservarr_library_shelves';
+
   function loadShelves() {
-    el('shelves').innerHTML = '';
+    // Shelves from an earlier load go; the skeleton slots stay to be filled.
+    Array.prototype.forEach.call(el('shelves').querySelectorAll('section:not([data-shelf-skel])'), function (s) {
+      s.parentNode.removeChild(s);
+    });
+    var answered = false;
     // Sequential so the shelves always render in a stable order.
     return SHELVES.reduce(function (chain, shelf) {
       return chain.then(function () {
         return shelf.load()
-          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (r) { if (r.ok) answered = true; return r.ok ? r.json() : []; })
           .then(function (items) { renderShelf(shelf, items); })
           .catch(function (err) {
             // Kavita said no and the page now shows why: the remaining
@@ -648,7 +677,18 @@
             /* any other failure: a shelf is a convenience; never block the library */
           });
       });
-    }, Promise.resolve()).catch(function () { /* stopped on 'reconnecting'; see above */ });
+    }, Promise.resolve()).then(function () { return true; })
+      .catch(function () { return false; /* stopped on 'reconnecting'; see above */ })
+      .then(function (finished) {
+        // Slots nobody filled go. The count is kept for the next visit's
+        // skeleton, but only from a run Kavita actually answered.
+        Array.prototype.forEach.call(el('shelves').querySelectorAll('[data-shelf-skel]'), function (s) {
+          s.parentNode.removeChild(s);
+        });
+        if (finished && answered) {
+          try { localStorage.setItem(SHELF_COUNT_KEY, String(el('shelves').children.length)); } catch (e) { /* private mode */ }
+        }
+      });
   }
 
   function showUnavailable(err) {
@@ -1083,9 +1123,19 @@
       showConnectProblem();
       return;
     }
-    loadShelves();
-    loadPage();
+    Promise.all([loadShelves(), loadPage()]).then(startGuide);
   });
+
+  // The first-visit guide starts once the shelves and the first page have
+  // landed, so its spotlights sit on real covers, and never over a library
+  // that couldn't load: the connect or unavailable message is not a page to
+  // tour. The help button still runs it on request.
+  function startGuide() {
+    var failed = ['loadingState', 'unavailableState', 'connectState'].some(function (id) {
+      return !el(id).classList.contains('hidden');
+    });
+    if (!failed && window.ebooksTour) window.ebooksTour.maybeStart();
+  }
 })();
 
 /* ---- eBooks guide (coach marks) ----
@@ -1153,14 +1203,13 @@
   ];
 
   function wire() {
-    WebServarrTour.init({
+    window.ebooksTour = WebServarrTour.init({
       seenKey: 'webservarr_ebooks_guide_seen',
       steps: STEPS,
       helpBtn: 'helpBtn',
-      autoStart: true,
-      // Wait for the shelves and grid to render, so the spotlight has real
-      // geometry to sit on rather than empty placeholders.
-      startDelay: 1200
+      // Started by the page (startGuide) once the shelves and the grid have
+      // rendered, and only when the library actually loaded.
+      autoStart: false
     });
   }
 
