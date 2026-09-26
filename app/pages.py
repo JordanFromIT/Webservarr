@@ -58,8 +58,8 @@ _NAV_HREF = PAGE_ADDRESSES
 _NAV_EXTRA = {
     # The pending-requests count rides on the one Requests item.
     "requests": {"badge": "requestsBadge"},
-    # eBooks only exists while Kavita is configured (features.show_books).
-    "library": {"feature": "show_books"},
+    # eBooks only exists while Kavita is configured (features.ebooks_configured).
+    "library": {"feature": "ebooks_configured"},
     "settings": {"admin_only": True},
 }
 NAV_ITEMS = [
