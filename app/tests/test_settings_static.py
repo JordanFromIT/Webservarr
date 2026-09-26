@@ -127,18 +127,21 @@ class Frame(unittest.TestCase):
             self.assertIn(token, css)
 
     def test_not_set_up_light_uses_the_off_token(self):
-        # R16 / R79 (c): G7's --ws-status-off is the accent. Integrations'
-        # "not set up" light is its own class drawn from it (an empty ring, so
-        # it can't pass for a live status whatever the accent is), while
-        # .ws-light-unconfigured - also the info toast's tone - stays the
-        # filled neutral dot it always was.
+        # R16 / R79 (c): Integrations' "not set up" light is its own class
+        # drawn from --ws-status-off (an empty ring, so it can't pass for a
+        # live status), while .ws-light-unconfigured - also the info toast's
+        # tone - stays the filled neutral dot it always was. L5: the token is
+        # the text colour, not the accent, so a red or yellow accent can't
+        # make "off" read as an error or as pending; the ring at .45 stays
+        # neutral in every theme.
         css = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
         root = re.search(r":root \{([^}]*--ws-status-ok[^}]*)\}", css)
         self.assertIsNotNone(root)
-        self.assertRegex(root.group(1), r"--ws-status-off:\s*var\(--color-accent\);")
+        self.assertRegex(root.group(1), r"--ws-status-off:\s*var\(--color-text\);")
+        self.assertNotIn("--color-accent", root.group(1))
         off = re.findall(r"\.ws-light-off \{([^}]*)\}", css)
         self.assertEqual(len(off), 1, "one .ws-light-off rule")
-        self.assertIn("var(--ws-status-off)", off[0])
+        self.assertIn("rgb(var(--ws-status-off) / .45)", off[0])
         self.assertRegex(off[0], r"background:\s*transparent")
         unconf = re.findall(r"\.ws-light-unconfigured \{([^}]*)\}", css)
         self.assertEqual(unconf, [" background: rgb(var(--color-text) / .25); "], "the toast tone stays a filled dot")
