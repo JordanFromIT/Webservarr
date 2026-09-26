@@ -155,6 +155,18 @@ class SoftOpenClose(unittest.TestCase):
         self.assertTrue(live_matches(SHELL_JS, r"hideTimer = setTimeout\("))
         self.assertTrue(live_matches(SHELL_JS, r"clearTimeout\(hideTimer\)"))
         self.assertTrue(live_matches(SHELL_JS, r"if \(discrete \|\| reducedMotion\(\)\) overlay\.classList\.add\('hidden'\);"))
+        # cancelHide clears the pending timer before it forgets it: nulling
+        # the handle first would leave that timer running, unreachable, to
+        # hide a reopened drawer.
+        m = live_matches(SHELL_JS, r"function cancelHide\(\) \{")
+        self.assertTrue(m, "cancelHide")
+        body = SHELL_JS[m[0].end():matching_brace(SHELL_JS, m[0].end() - 1)]
+        clear = live_matches(body, r"clearTimeout\(hideTimer\)")
+        forget = live_matches(body, r"\bhideTimer = null\b")
+        self.assertTrue(clear, "cancelHide must clear the timer")
+        self.assertTrue(forget, "cancelHide must drop the handle")
+        self.assertLess(clear[0].start(), forget[0].start(),
+                        "cancelHide nulls hideTimer before clearing it")
         for fn in ("openDrawer", "closeDrawer"):
             m = live_matches(SHELL_JS, rf"function {fn}\(\) \{{")
             self.assertTrue(m, fn)
