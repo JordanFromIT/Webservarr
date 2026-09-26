@@ -633,7 +633,9 @@ html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
   --ws-status-ok: var(--color-status-ok);
   --ws-status-warn: var(--color-status-warn);
   --ws-status-err: var(--color-status-err);
-  --ws-status-off: var(--color-accent);
+  /* "Off" (not set up) is neutral: the text colour, drawn faint, so it never
+     reads as an error or as pending whatever the accent is (L5). */
+  --ws-status-off: var(--color-text);
 }
 
 /* The renderer stamps data-admin on <html> for admins, so admin-only
@@ -702,10 +704,10 @@ html[data-settings-tab="notifications"] [data-settings-panel="notifications"] { 
 .ws-light-error { background: rgb(var(--ws-status-err)); }
 .ws-light-unconfigured { background: rgb(var(--color-text) / .25); }
 /* Settings > Integrations "not set up": an empty ring, so "off" reads from the
-   shape and not from a hue (the accent is a brand colour and, filled, would
-   look like a live status). Its own class: ws-light-unconfigured is also the
-   info toast's tone and stays a filled dot. */
-.ws-light-off { background: transparent; box-shadow: inset 0 0 0 2px rgb(var(--ws-status-off) / .6); }
+   shape and not from a hue. Drawn in the text colour at .45: faint, neutral,
+   and still visible (about 3.8:1 on the shipped card). Its own class:
+   ws-light-unconfigured is also the info toast's tone and stays a filled dot. */
+.ws-light-off { background: transparent; box-shadow: inset 0 0 0 2px rgb(var(--ws-status-off) / .45); }
 .ws-light-checking { background: rgb(var(--color-text) / .25); animation: ws-pulse 1.2s ease-in-out infinite; }
 @keyframes ws-pulse { 50% { opacity: .35; } }
 
