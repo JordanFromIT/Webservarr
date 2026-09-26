@@ -124,6 +124,8 @@ class RegistryView(SettingsApiBase):
         helpers.put(self.db, "integration.plex.token", "real-token")
         helpers.put(self.db, "system.secret_key", "never-shown")
         helpers.put(self.db, "features.show_tickets", "false")      # a retired key's leftover row
+        from app.routers.setup import SETUP_TOKEN_KEY
+        helpers.put(self.db, SETUP_TOKEN_KEY, "setup-token-value")
         r = self.client.get("/api/admin/settings")
         self.assertEqual(r.status_code, 200)
         body = r.json()
@@ -132,6 +134,8 @@ class RegistryView(SettingsApiBase):
         self.assertNotIn("features.show_tickets", body["values"])
         self.assertNotIn("real-token", r.text)
         self.assertNotIn("never-shown", r.text)
+        self.assertNotIn(SETUP_TOKEN_KEY, body["values"])
+        self.assertNotIn("setup-token-value", r.text)
 
 
 class BulkSave(SettingsApiBase):
