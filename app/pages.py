@@ -133,14 +133,15 @@ def custom_css_style(branding: dict) -> str:
 
     Written as the last thing in <head> (see _inject_head), after app.css,
     theme.css and the page's own styles, so an ordinary rule wins at equal
-    specificity. A style element ends at the first "</style", so every "<" is
-    written as its CSS escape: outside a string a "<" is not valid CSS, and
-    inside one "\\3C " is the same character. The #ws-data copy is escaped
-    for JSON, as before."""
+    specificity. A <style> is raw text that ends only at "</style" (any
+    case), so every "</" is written "<\\/": to CSS the same two characters
+    (a backslash before "/" just means "/"), and it can't end the element.
+    A bare "<" is left alone: media and container range queries need it.
+    The #ws-data copy is escaped for JSON, as before."""
     css = branding.get("custom_css")
     if not isinstance(css, str) or not css.strip():
         return ""
-    return '<style id="webservarr-custom-css">' + css.replace("<", "\\3C ") + "</style>"
+    return '<style id="webservarr-custom-css">' + css.replace("</", "<\\/") + "</style>"
 
 
 def font_links(branding: dict) -> str:
