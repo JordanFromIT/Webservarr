@@ -946,6 +946,11 @@
     }
     window.addEventListener('popstate', fromHistory);
     window.addEventListener('hashchange', fromHistory);
+    // The nav's speculation rules can prerender /settings (no hash) and the
+    // browser may then show it for /settings#sign-in: the kit booted on
+    // General and activation fires no hashchange, so route from the hash now.
+    // Nothing can be staged before the page was shown, so no guard asks.
+    document.addEventListener('prerenderingchange', fromHistory);
 
     var scroller = document.getElementById('settingsTabScroller');
     var left = document.getElementById('settingsTabHintLeft');
