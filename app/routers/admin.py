@@ -4,11 +4,8 @@ Admin API routes - Service management, settings, etc.
 
 import logging
 import os
-import re
 import uuid
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, UploadFile, File, status
-from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Literal, Optional, Set
@@ -23,35 +20,18 @@ from app.database import get_db
 from app.limiter import limiter
 from app.models import Setting, Notification, PushSubscription, User
 from app.dependencies import require_admin
-from app.routers.admin_settings import (
-    apply_writes, effective_values, mask_any, plan_writes, validation_error,
-)
+from app.routers.admin_settings import effective_values
 from app.services.integration_health import credential_key, probe_one
 from app.services.push import dispatch_push, send_push_to_users
-from app.settings_registry import MASK as MASK_SENTINEL, is_user_data, mask, validate_value
+from app.settings_registry import MASK as MASK_SENTINEL, validate_value
 from app.utils import identity_email, validate_image_magic
 
 logger = logging.getLogger(__name__)
-
-CONTAINER_NAME = os.environ.get("CONTAINER_NAME", "webservarr")
 
 router = APIRouter()
 
 
 # Pydantic schemas
-class SettingCreate(BaseModel):
-    """Schema for creating/updating a setting."""
-    key: str
-    value: str
-    description: Optional[str] = None
-
-
-class MonitorPreferences(BaseModel):
-    """Schema for updating monitor display preferences."""
-    enabled: Optional[bool] = None
-    icon: Optional[str] = None
-
-
 class TestConnectionRequest(BaseModel):
     """Test an integration with the values on screen (saved or not)."""
     service: Literal["plex", "uptime_kuma", "seerr", "netdata", "sonarr", "radarr", "kavita", "chaptarr", "nyt"]
@@ -147,98 +127,6 @@ async def update_account(
             logger.error("Failed to revoke sessions after password change: %s", str(e))
 
     return {"success": True, "message": "Account updated successfully", "updated": changes}
-
-
-# --- Monitor Preferences ---
-
-@router.put("/monitors/{monitor_id}")
-@limiter.limit("30/minute")
-async def update_monitor_preferences(
-    request: Request,
-    monitor_id: int,
-    prefs: MonitorPreferences,
-    current_user: dict = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Update display preferences for an Uptime Kuma monitor. Requires admin."""
-    updated = {}
-    if prefs.enabled is not None:
-        key = f"monitor.{monitor_id}.enabled"
-        row = db.query(Setting).filter(Setting.key == key).first()
-        if row:
-            row.value = str(prefs.enabled).lower()
-        else:
-            db.add(Setting(key=key, value=str(prefs.enabled).lower()))
-        updated["enabled"] = prefs.enabled
-
-    if prefs.icon is not None:
-        if prefs.icon and (len(prefs.icon) > 200 or not re.match(r'^[a-zA-Z0-9\-_/.:]+$', prefs.icon)):
-            raise HTTPException(status_code=400, detail="Invalid icon value")
-        key = f"monitor.{monitor_id}.icon"
-        row = db.query(Setting).filter(Setting.key == key).first()
-        if row:
-            row.value = prefs.icon
-        else:
-            db.add(Setting(key=key, value=prefs.icon))
-        updated["icon"] = prefs.icon
-
-    db.commit()
-    return {"monitor_id": monitor_id, **updated}
-
-
-@router.get("/settings/{key}")
-async def get_setting(
-    key: str,
-    current_user: dict = Depends(require_admin),
-    db: Session = Depends(get_db)
-):
-    """
-    Get a setting by key.
-    Requires admin authentication.
-    """
-    # Per-user rows (notification preferences) are not settings.
-    setting = None if is_user_data(key) else db.query(Setting).filter(Setting.key == key).first()
-
-    if not setting:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Setting not found"
-        )
-
-    # Mask secrets — this endpoint previously returned the raw value, bypassing
-    # the masking applied by the list endpoint.
-    return {
-        "key": setting.key,
-        "value": mask_any(setting.key, setting.value),
-        "description": setting.description,
-    }
-
-
-@router.put("/settings")
-@limiter.limit("30/minute")
-async def update_setting(
-    request: Request,
-    setting_data: SettingCreate,
-    current_user: dict = Depends(require_admin),
-    db: Session = Depends(get_db)
-):
-    """
-    Create or update one setting, with the same registry validation and
-    lockout guard as the bulk save (422 with per-key errors; nothing written).
-    Validation runs in a worker thread, as in the bulk save: checking an
-    address can resolve a hostname with a blocking lookup.
-    Requires admin authentication.
-    """
-    writes, errors = await run_in_threadpool(plan_writes, db, [(setting_data.key, setting_data.value)])
-    errors = errors or apply_writes(db, writes)
-    if errors:
-        return validation_error(errors)
-    row = db.query(Setting).filter(Setting.key == setting_data.key).first()
-    return {
-        "key": setting_data.key,
-        "value": mask(setting_data.key, row.value if row else ""),
-        "description": row.description if row else None,
-    }
 
 
 @router.post("/test-connection")
@@ -457,58 +345,3 @@ async def notifications_status(
         "last_push": await push.read_last_push(),
     }
 
-
-# --- Container Management ---
-
-@router.post("/restart-container")
-@limiter.limit("30/minute")
-async def restart_container(
-    request: Request,
-    current_user: dict = Depends(require_admin),
-):
-    """
-    Restart the application container via Docker API.
-    Requires admin. The response may not arrive since the container restarts.
-    """
-    import threading
-
-    def _do_restart():
-        import time
-        time.sleep(1)  # Brief delay so the HTTP response can be sent
-        try:
-            import docker
-            client = docker.from_env()
-            container = client.containers.get(CONTAINER_NAME)
-            container.restart(timeout=10)
-        except Exception as e:
-            logger.error("Container restart failed: %s", str(e))
-
-    threading.Thread(target=_do_restart, daemon=True).start()
-    return {"success": True, "message": "Container restart initiated. Page will reload shortly."}
-
-
-@router.post("/shutdown-container")
-@limiter.limit("30/minute")
-async def shutdown_container(
-    request: Request,
-    current_user: dict = Depends(require_admin),
-):
-    """
-    Stop the application container via Docker API.
-    Requires admin. The dashboard will go offline.
-    """
-    import threading
-
-    def _do_stop():
-        import time
-        time.sleep(1)  # Brief delay so the HTTP response can be sent
-        try:
-            import docker
-            client = docker.from_env()
-            container = client.containers.get(CONTAINER_NAME)
-            container.stop(timeout=10)
-        except Exception as e:
-            logger.error("Container shutdown failed: %s", str(e))
-
-    threading.Thread(target=_do_stop, daemon=True).start()
-    return {"success": True, "message": "Container shutdown initiated. The dashboard will go offline."}
