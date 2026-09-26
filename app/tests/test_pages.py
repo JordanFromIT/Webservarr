@@ -306,6 +306,9 @@ class ShellRendering(unittest.TestCase):
         self.assertIn('--font-display:"Spline Sans",sans-serif', out)
         self.assertIn('<link id="ws-font" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spline+Sans', out)
         self.assertIn('rel="preconnect" href="https://fonts.gstatic.com" crossorigin', out)
+        # optional, never swap: a swap re-lays out the page when the font lands.
+        self.assertRegex(out, r'<link id="ws-font" rel="stylesheet" href="[^"]*&amp;display=optional"')
+        self.assertNotIn("display=swap", out)
         data = data_of(out)
         self.assertEqual(data["user"]["username"], "root")
         self.assertIs(data["user"]["is_admin"], True)

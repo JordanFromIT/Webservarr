@@ -143,12 +143,22 @@ def theme_style(branding: dict) -> str:
 
 
 def font_links(branding: dict) -> str:
-    """The display font, loaded statically with preconnects (no runtime injection)."""
+    """
+    The display font, loaded statically with preconnects (no runtime injection).
+
+    display=optional, not swap: each page is a new document, and with swap its
+    first frame paints in the fallback font whenever the (cached) font file
+    hasn't been read back yet, then re-lays out every line in the real one -
+    titles rewrap, tabs change width, buttons hop. optional gives the font a
+    short wait, which a cached file always makes, and otherwise keeps the
+    fallback for that page instead of swapping. A first-ever visit may show
+    the fallback once; every page after that has the font from its first frame.
+    """
     family = _safe_font(branding.get("font"))
     href = (
         "https://fonts.googleapis.com/css2?family="
         + urllib.parse.quote_plus(family)
-        + ":wght@300;400;500;600;700&display=swap"
+        + ":wght@300;400;500;600;700&display=optional"
     )
     return (
         '<link rel="preconnect" href="https://fonts.googleapis.com">'

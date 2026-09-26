@@ -86,7 +86,7 @@
         link.id = fontId;
         link.rel = 'stylesheet';
         link.href = 'https://fonts.googleapis.com/css2?family=' +
-          encodeURIComponent(data.font) + ':wght@300;400;500;600;700&display=swap';
+          encodeURIComponent(data.font) + ':wght@300;400;500;600;700&display=optional';
         document.head.appendChild(link);
       }
     }
