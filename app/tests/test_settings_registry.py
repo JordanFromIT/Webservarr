@@ -542,5 +542,18 @@ class DerivedDefaults(unittest.TestCase):
         finally:
             db.close()
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class ModuleDocstring(unittest.TestCase):
+    def test_describes_what_is_still_outside_the_registry(self):
+        doc = reg.__doc__
+        # The old Settings page is gone (v1.11); nothing "carries its own fallbacks until replaced".
+        self.assertNotIn("old Settings page", doc)
+        self.assertNotIn("until it is replaced", doc)
+        # The Uptime Kuma slug fallback now comes from the registry itself.
+        self.assertNotIn("the Uptime Kuma slug", doc)
+        from app.integrations import config
+        self.assertEqual(config.DEFAULT_KUMA_SLUG, reg.REGISTRY["integration.uptime_kuma.slug"].default)
+
+
 if __name__ == "__main__":
     unittest.main()
