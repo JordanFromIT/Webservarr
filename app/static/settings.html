@@ -70,26 +70,43 @@
     </script>
 
     <section id="panel-general" data-settings-panel="general" role="tabpanel" aria-labelledby="tab-general">
-      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
-      <div class="skel h-[72px] mb-5" aria-hidden="true"></div>
-      <div class="skel h-[72px] mb-5" aria-hidden="true"></div>
-      <div class="skel h-40" aria-hidden="true"></div>
+      <!-- The tab's own shape, measured at 390, 640, 768 and 1440 (phone
+           first): Your site's two fields (their help wraps to two lines on a
+           phone), the Logo row (stacked on a phone, side by side from sm)
+           and Backup's buttons and note. -->
+      <div aria-hidden="true">
+        <div class="mb-12">
+          <div class="h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-28 mb-3"></div><div class="skel h-4 w-80 max-w-full"></div></div>
+          <div class="space-y-6 max-w-2xl"><div class="skel h-[116.1px] sm:h-[96.6px]"></div><div class="skel h-[116.1px] sm:h-[96.6px]"></div></div>
+        </div>
+        <div class="mb-12">
+          <div class="h-[79px] sm:h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-20 mb-3"></div><div class="skel h-4 w-96 max-w-full"></div></div>
+          <div class="h-[352.6px] sm:h-[236.6px] md:h-[192.6px]">
+            <div class="flex flex-col sm:flex-row gap-5"><div class="skel w-full sm:w-48 h-24 shrink-0 rounded-2xl"></div><div class="flex-1 space-y-4"><div class="skel h-11 w-80 max-w-full"></div><div class="skel h-4 w-72 max-w-full"></div></div></div>
+          </div>
+        </div>
+        <div>
+          <div class="h-[79px] mb-5 pt-1"><div class="skel h-5 w-24 mb-3"></div><div class="skel h-4 w-[34rem] max-w-full"></div></div>
+          <div class="space-y-6"><div class="skel h-11 w-80 max-w-full"></div><div class="h-[39px] sm:h-[19.5px] flex items-center"><div class="skel h-3 w-96 max-w-full"></div></div></div>
+        </div>
+      </div>
     </section>
     <section id="panel-pages" data-settings-panel="pages" role="tabpanel" aria-labelledby="tab-pages">
-      <!-- The tab's own shape: the Pages heading and its description, the
-           column heads on a wide screen, then the eight page rows. -->
+      <!-- The tab's own shape: the Pages heading and its description (three
+           lines on a phone, two from sm), the column heads on a wide screen,
+           then the eight page rows. -->
       <div aria-hidden="true">
-        <div class="h-[124px] lg:h-[79px] mb-5 pt-1">
+        <div class="h-[124px] sm:h-[79px] mb-5 pt-1">
           <div class="skel h-5 w-24 mb-4"></div>
           <div class="skel h-4 w-[40rem] max-w-full mb-2"></div>
           <div class="skel h-4 w-80 max-w-full"></div>
         </div>
-        <div class="h-1 lg:h-[52px]"></div>
+        <div class="h-1 lg:h-[51.5px]"></div>
         <div class="space-y-2">
-          <div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div><div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div>
-          <div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div><div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div>
-          <div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div><div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div>
-          <div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div><div class="skel rounded-2xl h-[177px] lg:h-[71px]"></div>
+          <div class="skel rounded-2xl h-[176.8px] lg:h-[71.2px]"></div><div class="skel rounded-2xl h-[176.8px] lg:h-[71.2px]"></div>
+          <div class="skel rounded-2xl h-[176.8px] lg:h-[71.2px]"></div><div class="skel rounded-2xl h-[176.8px] lg:h-[71.2px]"></div>
+          <div class="skel rounded-2xl h-[176.8px] lg:h-[71.2px]"></div><div class="skel rounded-2xl h-[176.8px] lg:h-[71.2px]"></div>
+          <div class="skel rounded-2xl h-[176.8px] lg:h-[71.2px]"></div><div class="skel rounded-2xl h-[176.8px] lg:h-[71.2px]"></div>
         </div>
       </div>
     </section>
@@ -98,31 +115,69 @@
            wide screen the 320px preview card beside them. -->
       <div class="lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-10" aria-hidden="true">
         <div class="min-w-0">
-          <div class="h-[57px] mb-5 pt-1">
+          <div class="h-[79px] sm:h-[56.5px] mb-5 pt-1">
             <div class="skel h-5 w-32 mb-3"></div>
             <div class="skel h-4 w-96 max-w-full"></div>
           </div>
-          <div class="grid sm:grid-cols-2 gap-5">
-            <div class="skel h-[97px]"></div><div class="skel h-[97px]"></div>
-            <div class="skel h-[97px]"></div><div class="skel h-[97px]"></div>
-            <div class="skel h-[97px]"></div><div class="skel h-[97px]"></div>
+          <div class="grid sm:grid-cols-2 gap-5 max-w-2xl">
+            <div class="skel h-[96.6px]"></div><div class="skel h-[96.6px]"></div>
+            <div class="skel h-[96.6px]"></div><div class="skel h-[96.6px]"></div>
+            <div class="skel h-[96.6px]"></div><div class="skel h-[96.6px]"></div>
           </div>
         </div>
-        <div class="hidden lg:block"><div class="skel h-[350px] rounded-2xl"></div></div>
+        <div class="hidden lg:block"><div class="skel h-[349.6px] rounded-2xl"></div></div>
       </div>
     </section>
     <section id="panel-sign-in" data-settings-panel="sign-in" role="tabpanel" aria-labelledby="tab-sign-in">
-      <div class="skel skel-line w-40 mb-6" aria-hidden="true"></div>
-      <div class="skel skel-card mb-4" aria-hidden="true"></div>
-      <div class="skel skel-card mb-4" aria-hidden="true"></div>
-      <div class="skel skel-card" aria-hidden="true"></div>
+      <!-- The tab's own shape: the three method cards and Admin access, at
+           the heights measured at 390, 640, 768 and 1440 (phone first). The
+           Authentik card holds its fields and the Username & password card
+           its account part only in some setups; the script below picks the
+           right one from the page's own data before the first paint, as the
+           tab itself will. -->
+      <div aria-hidden="true">
+        <div class="mb-12">
+          <div class="h-[79px] md:h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-36 mb-3"></div><div class="skel h-4 w-[36rem] max-w-full"></div></div>
+          <div class="space-y-6">
+            <div class="skel rounded-2xl h-[126.6px]"></div>
+            <div class="skel rounded-2xl h-[126.6px]" data-skel-when="ak-bare"></div>
+            <div class="skel rounded-2xl h-[510.9px] sm:h-[334.3px]" data-skel-when="ak-fields" hidden></div>
+            <div class="skel rounded-2xl h-[147.6px] sm:h-[126.6px]" data-skel-when="simple-bare"></div>
+            <div class="skel rounded-2xl h-[214.6px] sm:h-[174.1px]" data-skel-when="simple-line" hidden></div>
+            <div class="skel rounded-2xl h-[602.5px] sm:h-[407.3px]" data-skel-when="simple-full" hidden></div>
+          </div>
+        </div>
+        <div>
+          <div class="h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-32 mb-3"></div><div class="skel h-4 w-48 max-w-full"></div></div>
+          <div class="skel h-[116.1px] md:h-[96.6px] max-w-2xl"></div>
+        </div>
+      </div>
+      <script>
+        // The same rules as signin.js, read from the page's data: Authentik's
+        // fields show when it is on and set up, and the account part shows
+        // when username-and-password sign-in is on (the full form only to an
+        // admin signed in that way). A setup the data can't tell apart (a
+        // switch off with an address kept) reads as the plain card.
+        (function () {
+          var d = window.WS_DATA || {}, m = (d.branding || {}).auth_methods || {}, u = d.user || {};
+          var show = {
+            'ak-bare': !m.authentik, 'ak-fields': !!m.authentik,
+            'simple-bare': !m.simple,
+            'simple-line': !!m.simple && u.auth_method !== 'simple',
+            'simple-full': !!m.simple && u.auth_method === 'simple'
+          };
+          Array.prototype.forEach.call(document.querySelectorAll('#panel-sign-in [data-skel-when]'), function (n) {
+            n.hidden = !show[n.getAttribute('data-skel-when')];
+          });
+        })();
+      </script>
     </section>
     <section id="panel-integrations" data-settings-panel="integrations" role="tabpanel" aria-labelledby="tab-integrations">
       <!-- The tab's own shape: the intro line, then all five groups, each a
            heading and its collapsed cards (taller on a phone, where the
            longer descriptions wrap). -->
       <div aria-hidden="true">
-        <div class="h-[45px] md:h-[22.5px] mb-8 pt-1"><div class="skel h-4 w-[36rem] max-w-full"></div></div>
+        <div class="h-[45px] sm:h-[22.5px] mb-8 pt-1"><div class="skel h-4 w-[36rem] max-w-full"></div></div>
         <div class="mb-12">
           <div class="h-[30px] mb-5 flex items-center"><div class="skel h-5 w-36"></div></div>
           <div class="skel rounded-2xl h-[122px] sm:h-[102.6px]"></div>
@@ -158,12 +213,12 @@
     <section id="panel-notifications" data-settings-panel="notifications" role="tabpanel" aria-labelledby="tab-notifications">
       <!-- The tab's own shape: its three cards, each a heading block and a
            body at the measured heights (phone first, then wider: each
-           description is two lines on a phone and one from md, the test-push
+           description is two lines on a phone and one from sm, the test-push
            help fits one line from sm, where the four check fields also go
            two to a row). -->
       <div aria-hidden="true">
         <div class="mb-12">
-          <div class="h-[79px] md:h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-48 mb-3"></div><div class="skel h-4 w-[34rem] max-w-full"></div></div>
+          <div class="h-[79px] sm:h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-48 mb-3"></div><div class="skel h-4 w-[34rem] max-w-full"></div></div>
           <div class="h-[193px] sm:h-[173.5px]">
             <div class="space-y-2">
               <div class="h-6 flex items-center"><div class="skel h-4 w-60 max-w-full"></div></div>
@@ -174,7 +229,7 @@
           </div>
         </div>
         <div class="mb-12">
-          <div class="h-[79px] md:h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-56 mb-3"></div><div class="skel h-4 w-[36rem] max-w-full"></div></div>
+          <div class="h-[79px] sm:h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-56 mb-3"></div><div class="skel h-4 w-[36rem] max-w-full"></div></div>
           <div class="h-[288.6px] max-w-2xl">
             <div class="skel h-[70px]"></div>
             <div class="skel h-[126px] mt-6"></div>
@@ -182,7 +237,7 @@
           </div>
         </div>
         <div>
-          <div class="h-[79px] md:h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-44 mb-3"></div><div class="skel h-4 w-[28rem] max-w-full"></div></div>
+          <div class="h-[79px] sm:h-[56.5px] mb-5 pt-1"><div class="skel h-5 w-44 mb-3"></div><div class="skel h-4 w-[28rem] max-w-full"></div></div>
           <div class="grid sm:grid-cols-2 gap-5 max-w-2xl">
             <div class="skel h-[96.6px]"></div><div class="skel h-[96.6px]"></div>
             <div class="skel h-[96.6px]"></div><div class="skel h-[96.6px]"></div>
