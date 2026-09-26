@@ -6,8 +6,10 @@ one chain (registry -> branding payload -> the page's #ws-theme and #ws-data
 Run inside the container:
     python -m unittest discover -s /app/app/tests -t /app -v
 """
+import json
 import re
 import unittest
+from unittest import mock
 
 from app.tests.test_motion import css_rule, top_level
 from app.tests.test_shell_contract import STATIC, js_code_only, live_matches
@@ -20,7 +22,18 @@ UI_JS = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
 NOTIF_JS = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
 SIDEBAR = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
 KIT = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
-TAILWIND = (STATIC.parents[1] / "tailwind.config.js").read_text(encoding="utf-8")
+FRAME = (STATIC / "settings.html").read_text(encoding="utf-8")
+VECTORS = json.loads((STATIC.parent / "tests" / "contrast_vectors.json").read_text(encoding="utf-8"))
+
+
+def repo_file(test: unittest.TestCase, *parts: str) -> str:
+    """A file at the repo root (a checkout, and /app in CI, which copies the
+    whole checkout). The dev container mounts only app/, so there the check
+    is skipped rather than failed."""
+    path = STATIC.parents[1].joinpath(*parts)
+    if not path.is_file():
+        test.skipTest(f"{'/'.join(parts)} is not in this tree (the dev container mounts only app/)")
+    return path.read_text(encoding="utf-8")
 
 # The status colours (R138): one setting per state drives the dot, the ring and
 # the words. Defaults suit the shipped dark background.
@@ -163,7 +176,8 @@ class StatusColoursAreSettings(unittest.TestCase):
 
     def test_tailwind_names_them(self):
         for state in ("ok", "warn", "err"):
-            self.assertIn(f'"status-{state}": "rgb(var(--color-status-{state}) / <alpha-value>)"', TAILWIND)
+            self.assertIn(f'"status-{state}": "rgb(var(--color-status-{state}) / <alpha-value>)"',
+                          repo_file(self, "tailwind.config.js"))
 
     def test_appearance_has_a_status_group(self):
         self.assertTrue(live_matches(APPEARANCE, r"WSSettings\.card\('Status colours'"))
@@ -371,6 +385,134 @@ class SettingsShowsTheColourInUse(unittest.TestCase):
         self.assertNotIn("stage(", set_fn)
         # Typing a new value is the fix: the note goes.
         self.assertTrue(live_matches(ctl, r"stale\.classList\.add\('hidden'\)"))
+
+
+
+def _lin(c: int) -> float:
+    c = c / 255
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def wcag(a: str, b: str) -> float:
+    """WCAG 2 contrast of two #rrggbb colours: the reference appearance.js is held to."""
+    def lum(h):
+        r, g, bl = (int(h[i:i + 2], 16) for i in (1, 3, 5))
+        return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(bl)
+    x, y = lum(a), lum(b)
+    return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+
+
+def tinted(fg: str, bg: str, alpha: float) -> str:
+    f = [int(fg[i:i + 2], 16) for i in (1, 3, 5)]
+    g = [int(bg[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join("%02X" % round(f[k] * alpha + g[k] * (1 - alpha)) for k in range(3))
+
+
+class ContrastGuard(unittest.TestCase):
+    """M14: Appearance measures the pairs that matter as colours change and
+    says plainly when one is hard to read; saving text that is very hard to
+    read on the background asks first, and never refuses."""
+
+    def test_the_shared_vectors_are_right(self):
+        # appearance.js is checked against these by app/tests/js/contrast.mjs.
+        self.assertGreaterEqual(len(VECTORS["cases"]), 15)
+        for c in VECTORS["cases"]:
+            self.assertAlmostEqual(wcag(c["fg"], c["bg"]), c["ratio"], places=3, msg=c["why"])
+        for t in VECTORS["tints"]:
+            self.assertEqual(tinted(t["fg"], t["bg"], t["alpha"]), t["tint"])
+            self.assertAlmostEqual(wcag(t["fg"], t["tint"]), t["ratio"], places=3)
+        # The shipped palette passes everything it is checked for.
+        self.assertGreater(wcag("#BEEEF4", "#000000"), 7)
+        self.assertGreater(wcag("#FFFFFF", "#125793"), 4.5)
+
+    def test_ci_runs_the_js_check(self):
+        self.assertIn("node app/tests/js/contrast.mjs", repo_file(self, ".github", "workflows", "docker-publish.yml"))
+
+    def test_the_pairs_and_their_thresholds(self):
+        for fg, bg, minimum in (("text", "background", "4.5"), ("text_secondary", "background", "4.5"),
+                                ("text_secondary", "primary", "4.5"), ("new_flag", "background", "3")):
+            self.assertRegex(APPEARANCE, rf"fg: 'theme\.color_{fg}', bg: 'theme\.color_{bg}',[^}}]*min: {minimum}\b",
+                             (fg, bg))
+        for key in ("media_movie", "media_tv", "media_book"):
+            self.assertRegex(APPEARANCE, rf"fg: 'theme\.color_{key}', bg: 'theme\.color_background', badge: true,[^}}]*min: 4\.5")
+        for key in ("status_ok", "status_warn", "status_err"):
+            self.assertRegex(APPEARANCE, rf"fg: 'theme\.color_{key}', bg: 'theme\.color_background',[^}}]*min: 4\.5")
+
+    def test_it_measures_the_colour_in_use(self):
+        # A stored value that isn't a colour is measured as the default the site uses (L8).
+        self.assertTrue(live_matches(APPEARANCE, r"function inUse\(api, key\)"))
+        self.assertTrue(live_matches(APPEARANCE, r"WSSettings\.metaFor\(key\)"))
+
+    def test_saving_very_hard_to_read_text_asks_first(self):
+        self.assertTrue(live_matches(APPEARANCE, r"api\.beforeSave\(function \(keys\) \{"))
+        self.assertTrue(live_matches(APPEARANCE, r"if \(ratio >= 3\) return true;"))
+        self.assertIn("This makes text hard to read. Save anyway?", APPEARANCE)
+        self.assertIn("/settings?theme=safe#appearance", APPEARANCE)
+        self.assertRegex(APPEARANCE, r"confirmLabel: 'Save anyway', cancelLabel: 'Keep editing'")
+
+
+@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+class SafeColours(unittest.TestCase):
+    """M14's way back from an unreadable theme: /settings?theme=safe (admins
+    only; Settings is admin-only anyway) renders Settings in the shipped
+    colours and font, without the custom CSS, and says so. Nothing is saved
+    or changed by visiting it."""
+
+    def test_the_render_uses_the_shipped_theme(self):
+        b = payload({"theme.color_text": "#3A3A3A", "theme.color_background": "#3A3A3A",
+                     "theme.font": "Libre Barcode 39", "theme.custom_css": "body { display: none; }"})
+        out = pages.render_html(PAGE, name="settings", branding=pages.safe_theme_branding(b), user=None,
+                                version="9.9.9", base_url="https://example.test", path="/settings",
+                                flags={"safe_theme": True})
+        self.assertIn("--color-text:190 238 244", out)
+        self.assertIn("--color-background:0 0 0", out)
+        self.assertIn('--font-display:"Spline Sans"', out)
+        self.assertNotIn("webservarr-custom-css", out)
+        self.assertRegex(out, r"<html[^>]* data-safe-theme")
+        # The saved custom CSS is still in the data block: the Appearance
+        # skeleton opens the Custom CSS section by it, as the tab does.
+        self.assertEqual(json.loads(re.search(r'id="ws-data" type="application/json">(.*?)</script>', out).group(1)
+                                    .replace("\\u003c", "<"))["branding"]["custom_css"], "body { display: none; }")
+
+    def test_the_route(self):
+        from app.tests.test_page_gating import ADMIN_SESSION, MEMBER_SESSION, PageRoutesBase
+
+        class Routes(PageRoutesBase):
+            def runTest(self):
+                pass
+        r = Routes()
+        r.setUp()
+        try:
+            saved = {"theme.color_primary": "#FF00FF", "theme.custom_css": "a { color: red; }"}
+            with mock.patch.object(pages, "STATIC_DIR", str(STATIC)):
+                safe = r.get("/settings?theme=safe", ADMIN_SESSION, saved)
+                plain = r.get("/settings", ADMIN_SESSION, saved)
+                member = r.get("/settings?theme=safe", MEMBER_SESSION, saved)
+        finally:
+            r.tearDown()
+        self.assertEqual(safe.status_code, 200)
+        self.assertIn("--color-primary:18 87 147", safe.text)
+        self.assertNotIn("webservarr-custom-css", safe.text)
+        self.assertIn("data-safe-theme", safe.text)
+        self.assertIn("--color-primary:255 0 255", plain.text)
+        self.assertIn('<style id="webservarr-custom-css">', plain.text)
+        self.assertNotRegex(plain.text, r"<html[^>]* data-safe-theme")
+        self.assertEqual(member.status_code, 302)
+
+    def test_the_page_says_so_and_offers_the_way_out(self):
+        notice = re.search(r'<div id="safeThemeNotice"[^>]*>(.*?)</div>', FRAME, re.S)
+        self.assertIsNotNone(notice)
+        self.assertIn('href="/settings#appearance"', notice.group(1))
+        self.assertIn("html:not([data-safe-theme]) #safeThemeNotice { display: none; }", THEME)
+
+    def test_the_preview_stays_in_its_card_in_safe_colours(self):
+        # In safe colours the page must stay readable, so a colour being
+        # edited restyles only the preview cards, not the page.
+        ctl = kit_color_control()
+        self.assertTrue(live_matches(KIT, r"var SAFE = document\.documentElement\.hasAttribute\('data-safe-theme'\);"))
+        self.assertTrue(live_matches(ctl, r"if \(SAFE\) \{ scopedPreview\(o\.cssVar, v\); return; \}"))
+        self.assertTrue(live_matches(APPEARANCE, r"box\.setAttribute\('data-ws-theme-preview', ''\)"))
+        self.assertIn("[data-ws-theme-preview]", THEME)
 
 
 if __name__ == "__main__":
