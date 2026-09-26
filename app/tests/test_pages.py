@@ -732,3 +732,19 @@ class SettingsSetupFlags(unittest.TestCase):
         self.assertEqual(got, {"plex": False, "seerr": True, "chaptarr": False, "sonarr": False, "radarr": False,
                                "kavita": False, "authentik_url": False, "authentik_secret": True})
         session.close.assert_called_once()
+
+
+class NewsCardsHoldTheirSkeleton(unittest.TestCase):
+    """Polish A fix round 1: a short post keeps two lines of excerpt (and two
+    title lines on a phone), so it is the height of its skeleton card on the
+    home page and the archive."""
+
+    def test_renderers_and_skeletons_agree(self):
+        for name, tag, cards in (("index.html", "h4", 2), ("news.html", "h2", 3)):
+            with self.subTest(name):
+                page = static_text(name)
+                self.assertIn(f"'<{tag} class=\"font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0\">'", page)
+                self.assertIn("'<p class=\"text-sm text-frosted-blue/60 mt-1 line-clamp-2 min-h-10\">'", page)
+                self.assertEqual(page.count('<p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p>'), cards)
+                self.assertEqual(page.count('<p class="text-sm mt-1 min-h-10">&nbsp;</p>'), cards)
+                self.assertNotIn("<br", page[page.index('<div class="skel rounded-xl p-4'):page.index('<div class="skel rounded-xl p-4') + 600])
