@@ -1823,6 +1823,20 @@ class SwitchOver(unittest.TestCase):
         self.assertIn("caches.keys()", js_code_only(body))
         self.assertTrue(live_matches(body, r"'ws-pages-'"), "activate must match the ws-pages- prefix")
 
+    def test_activated_prerender_routes_from_the_hash(self):
+        # R113: the Settings nav link can prerender /settings (no hash) and the
+        # browser may activate it for /settings#sign-in. The kit booted on
+        # General then, and activation fires no hashchange, so it re-routes
+        # from the hash on prerenderingchange, through the same no-op-when-
+        # current path as back/forward.
+        raw = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        self.assertEqual(len(live_matches(raw, r"document\.addEventListener\('prerenderingchange', fromHistory\)")), 1)
+        body = function_body(kit_code(), "wireTabs")
+        blank = " " * len("prerenderingchange")
+        self.assertIn(f"document.addEventListener('{blank}', fromHistory)", body)
+        self.assertRegex(body, r"function fromHistory\(\) \{\s*var id = tabFromHash\(\);\s*"
+                               r"if \(id !== S\.current\) show\(id, '\s+'\);\s*\}")
+
 
 if __name__ == "__main__":
     unittest.main()
