@@ -153,11 +153,15 @@
 
   <div id="newsEditor" class="hidden mb-6"></div>
 
-  <!-- Post list -->
+  <!-- Post list. Each skeleton card is renderCard's card with nothing in it:
+       the same border and padding, a one-line title, the byline, a two-line
+       excerpt, the admins' Edit/Pin/Delete row (ws-admin-only, so it is there
+       only when the real one will be) and Read more. So a card lands on its
+       skeleton without anything inside moving. Change one, change both. -->
   <div id="newsArchive" class="grid gap-3" data-arrive="posts">
-    <div class="skel skel-card" aria-hidden="true"></div>
-    <div class="skel skel-card" aria-hidden="true"></div>
-    <div class="skel skel-card" aria-hidden="true"></div>
+    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1">&nbsp;<br>&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1">&nbsp;<br>&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1">&nbsp;<br>&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
   </div>
 
   <!-- Pagination -->
@@ -228,6 +232,7 @@
   }
 
   // Same card shape as the homepage so a post is recognisable in both places.
+  // The skeleton cards in #newsArchive copy this card's geometry.
   // Archive cards start collapsed regardless of age — this is a list to scan,
   // not a feed to read straight through.
   function renderCard(post) {
