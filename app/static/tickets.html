@@ -13,12 +13,10 @@
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <!-- ws:sidebar -->
 
-<!-- Toast notification container -->
-<div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none"></div>
 
 <!-- Create Ticket Modal -->
 <div id="createModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4" onclick="if(event.target===this)closeCreateModal()">
-<div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+<div class="absolute inset-0 ws-scrim backdrop-blur-sm"></div>
 <div class="relative w-full max-w-md rounded-xl glass-card p-5">
 <button onclick="closeCreateModal()" class="absolute top-3 right-3 text-steel-blue hover:text-bright transition-colors">
 <span class="material-symbols-outlined">close</span>
@@ -28,30 +26,30 @@
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Title</label>
 <input id="createTitle" type="text" maxlength="200" placeholder="What do you need help with?"
-  class="w-full px-3 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"/>
+  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/60 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"/>
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Category</label>
 <select id="createCategory"
-  class="w-full px-3 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3">
+  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3">
 <option value="media_request">Media Request</option>
 <option value="playback_issue">Playback Issue</option>
 <option value="account_issue">Account Issue</option>
 <option value="feature_suggestion">Feature Suggestion</option>
 <option value="other">Other</option>
 </select>
-<p id="playbackRedirectHint" class="hidden text-xs text-steel-blue bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3">
+<p id="playbackRedirectHint" class="hidden text-xs text-frosted-blue/80 bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3">
 <span class="material-symbols-outlined text-[14px] align-text-bottom mr-1">info</span>
-If this is about one specific movie or show, <a href="/issues" class="text-primary hover:underline font-semibold">Issues</a> gets it to the right place faster.
+If this is about one specific movie or show, <a href="/issues" class="text-frosted-blue underline hover:no-underline font-semibold">Issues</a> gets it to the right place faster.
 </p>
 <div id="wikiHookPlayback" class="hidden mb-3"></div>
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Description</label>
 <textarea id="createDescription" rows="4" placeholder="Give us the details — what you tried, what happened, and which device you were on."
-  class="w-full px-3 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"></textarea>
+  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/60 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"></textarea>
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Screenshot (optional)</label>
 <input id="createImage" type="file" accept="image/png,image/jpeg,image/webp"
-  class="w-full text-sm text-steel-blue file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-primary/20 file:text-primary hover:file:bg-primary/30 transition-all mb-4"/>
+  class="w-full text-sm text-steel-blue file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-primary/20 file:text-frosted-blue hover:file:bg-primary/30 transition-all mb-4"/>
 
 <button onclick="submitNewTicket()" id="createSubmitBtn" class="w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed">
 Send to support
@@ -61,7 +59,7 @@ Send to support
 
 <!-- Ticket Detail Modal -->
 <div id="detailModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4" onclick="if(event.target===this)closeDetailModal()">
-<div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+<div class="absolute inset-0 ws-scrim backdrop-blur-sm"></div>
 <div class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl glass-card p-5 custom-scrollbar">
 <button onclick="closeDetailModal()" class="absolute top-3 right-3 text-steel-blue hover:text-bright transition-colors z-10">
 <span class="material-symbols-outlined">close</span>
@@ -76,7 +74,7 @@ Send to support
 </div>
 
 <!-- Image Lightbox -->
-<div id="lightbox" class="fixed inset-0 z-[60] hidden items-center justify-center bg-black/90 cursor-pointer" onclick="closeLightbox()">
+<div id="lightbox" class="fixed inset-0 z-[60] hidden items-center justify-center bg-background-dark/90 cursor-pointer" onclick="closeLightbox()">
 <img id="lightboxImg" src="" class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"/>
 </div>
 
@@ -94,15 +92,15 @@ Send to support
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Total</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-amber-400" id="statOpen"><span class="skel skel-num" aria-hidden="true"></span></p>
+<p class="text-2xl font-bold text-frosted-blue" id="statOpen"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Open</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-blue-400" id="statInProgress"><span class="skel skel-num" aria-hidden="true"></span></p>
+<p class="text-2xl font-bold text-frosted-blue" id="statInProgress"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">In Progress</p>
 </div>
 <div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-green-500" id="statResolved"><span class="skel skel-num" aria-hidden="true"></span></p>
+<p class="text-2xl font-bold text-frosted-blue" id="statResolved"><span class="skel skel-num" aria-hidden="true"></span></p>
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1">Resolved</p>
 </div>
 </div>
@@ -113,7 +111,7 @@ Send to support
 <h1 class="text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight">Tickets</h1>
 <p class="text-sm text-steel-blue mt-1">
 Questions, account trouble, requests, or anything that isn&rsquo;t about one specific title.
-For a problem with a particular movie or show, use <a href="/issues" class="text-primary hover:underline font-semibold">Issues</a>.
+For a problem with a particular movie or show, use <a href="/issues" class="text-frosted-blue underline hover:no-underline font-semibold">Issues</a>.
 </p>
 </div>
 
@@ -154,11 +152,11 @@ For a problem with a particular movie or show, use <a href="/issues" class="text
 
 <!-- Pagination -->
 <div id="pagination" class="hidden flex items-center justify-center gap-4 mt-6">
-<button onclick="prevPage()" id="prevBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-bright hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
+<button onclick="prevPage()" id="prevBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
 <span class="material-symbols-outlined text-sm align-middle">chevron_left</span> Prev
 </button>
 <span id="pageInfo" class="text-sm text-steel-blue font-bold"></span>
-<button onclick="nextPage()" id="nextBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-bright hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
+<button onclick="nextPage()" id="nextBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
 Next <span class="material-symbols-outlined text-sm align-middle">chevron_right</span>
 </button>
 </div>
@@ -203,24 +201,29 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
     feature_suggestion: 'Feature',
     other: 'Other'
   };
+  // Theme colours only. The category is a neutral chip (its words say which);
+  // the status uses the request tones the home and requests pages use
+  // (resolved on a primary tint, in progress in the text colour, open on the
+  // accent, closed dimmed); and only high and urgent priority, the ones that
+  // need attention, take a status colour.
   var CATEGORY_COLORS = {
-    media_request: 'bg-purple-500/20 text-purple-400',
-    playback_issue: 'bg-red-500/20 text-red-400',
-    account_issue: 'bg-blue-500/20 text-blue-400',
-    feature_suggestion: 'bg-green-500/20 text-green-400',
-    other: 'bg-steel-blue/20 text-steel-blue'
+    media_request: 'bg-frosted-blue/10 text-frosted-blue',
+    playback_issue: 'bg-frosted-blue/10 text-frosted-blue',
+    account_issue: 'bg-frosted-blue/10 text-frosted-blue',
+    feature_suggestion: 'bg-frosted-blue/10 text-frosted-blue',
+    other: 'bg-frosted-blue/10 text-frosted-blue'
   };
   var STATUS_COLORS = {
-    open: 'bg-amber-500/20 text-amber-400',
-    in_progress: 'bg-blue-500/20 text-blue-400',
-    resolved: 'bg-green-500/20 text-green-400',
-    closed: 'bg-steel-blue/20 text-steel-blue'
+    open: 'bg-steel-blue/20 text-frosted-blue/80',
+    in_progress: 'bg-frosted-blue/15 text-frosted-blue',
+    resolved: 'bg-primary/30 text-frosted-blue',
+    closed: 'bg-steel-blue/10 text-frosted-blue/70'
   };
   var PRIORITY_COLORS = {
-    low: 'bg-green-500/20 text-green-400',
-    medium: 'bg-amber-500/20 text-amber-400',
-    high: 'bg-orange-500/20 text-orange-400',
-    urgent: 'bg-red-500/20 text-red-400'
+    low: 'bg-frosted-blue/10 text-frosted-blue/80',
+    medium: 'bg-frosted-blue/10 text-frosted-blue',
+    high: 'bg-status-warn/10 text-status-warn-text',
+    urgent: 'bg-status-err/10 text-status-err-text'
   };
 
   // ---- Helpers ----
@@ -244,21 +247,9 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
     return new Date(isoString).toLocaleDateString();
   }
 
+  // The site's one toast (ui.js): theme colours, a status light for the tone.
   function showToast(message, type) {
-    var container = document.getElementById('toastContainer');
-    var toast = createEl('div', 'pointer-events-auto px-4 py-3 rounded-xl text-sm font-bold shadow-xl backdrop-blur-md border transition-all transform translate-x-full');
-    if (type === 'error') {
-      toast.className += ' bg-red-500/20 border-red-500/30 text-red-400';
-    } else {
-      toast.className += ' bg-green-500/20 border-green-500/30 text-green-400';
-    }
-    toast.textContent = message;
-    container.appendChild(toast);
-    requestAnimationFrame(function() { toast.classList.remove('translate-x-full'); });
-    setTimeout(function() {
-      toast.classList.add('translate-x-full');
-      setTimeout(function() { toast.remove(); }, 300);
-    }, 10000);
+    WSUI.toast(message, type === 'error' ? 'err' : 'ok');
   }
 
   // ---- Filter tabs ----
@@ -352,7 +343,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
     sendBtn.disabled = true;
     var prev = sendBtn.previousElementSibling;
     if (prev && prev.hasAttribute('data-off-notice')) return;
-    var notice = createEl('p', 'text-xs text-steel-blue bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3', OFF_NOTICE);
+    var notice = createEl('p', 'text-xs text-frosted-blue/80 bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3', OFF_NOTICE);
     notice.setAttribute('data-off-notice', '');
     notice.setAttribute('role', 'status');
     sendBtn.parentNode.insertBefore(notice, sendBtn);
@@ -472,7 +463,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
       // Bottom row: description snippet + time
       var bottomRow = createEl('div', 'flex items-center justify-between gap-3');
       var descSnippet = createEl('p', 'text-xs text-steel-blue truncate flex-1', ticket.description);
-      var timeEl = createEl('span', 'text-[10px] text-steel-blue/60 shrink-0', timeAgo(ticket.created_at));
+      var timeEl = createEl('span', 'text-[10px] text-frosted-blue/60 shrink-0', timeAgo(ticket.created_at));
       bottomRow.appendChild(descSnippet);
       bottomRow.appendChild(timeEl);
       card.appendChild(bottomRow);
@@ -578,7 +569,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
       badgeRow.appendChild(priBadge);
     }
     if (ticket.is_public) {
-      badgeRow.appendChild(createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-primary/20 text-primary', 'Public'));
+      badgeRow.appendChild(createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-primary/20 text-frosted-blue', 'Public'));
     }
     content.appendChild(badgeRow);
 
@@ -601,7 +592,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
       // Status dropdown
       var statusSelect = document.createElement('select');
-      statusSelect.className = 'px-2 py-1.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue text-xs focus:outline-none focus:ring-1 focus:ring-primary/30';
+      statusSelect.className = 'px-2 py-1.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue text-xs focus:outline-none focus:ring-1 focus:ring-primary/30';
       ['open', 'in_progress', 'resolved', 'closed'].forEach(function(s) {
         var opt = document.createElement('option');
         opt.value = s;
@@ -612,7 +603,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
       // Priority dropdown
       var prioritySelect = document.createElement('select');
-      prioritySelect.className = 'px-2 py-1.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue text-xs focus:outline-none focus:ring-1 focus:ring-primary/30';
+      prioritySelect.className = 'px-2 py-1.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue text-xs focus:outline-none focus:ring-1 focus:ring-primary/30';
       var noneOpt = document.createElement('option');
       noneOpt.value = '';
       noneOpt.textContent = 'No Priority';
@@ -631,7 +622,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
       var pubCheck = document.createElement('input');
       pubCheck.type = 'checkbox';
       pubCheck.checked = ticket.is_public;
-      pubCheck.className = 'rounded border-steel-blue/30 bg-black/40 text-primary focus:ring-primary/30';
+      pubCheck.className = 'rounded border-steel-blue/30 bg-frosted-blue/[0.04] text-primary focus:ring-primary/30';
       pubLabel.appendChild(pubCheck);
       pubLabel.appendChild(document.createTextNode('Public'));
 
@@ -657,7 +648,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
       });
 
       // Delete button
-      var delBtn = createEl('button', 'px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-bold transition-all', 'Delete');
+      var delBtn = createEl('button', 'px-3 py-1.5 rounded-lg bg-frosted-blue/[0.06] hover:bg-frosted-blue/10 text-frosted-blue ring-1 ring-inset ring-[rgb(var(--ws-status-err))] text-xs font-bold transition-all', 'Delete');
       delBtn.addEventListener('click', function() {
         window.WSUI.confirm({
           title: 'Delete this ticket?',
@@ -693,7 +684,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
     // Comments list
     if (comments.length === 0) {
-      content.appendChild(createEl('p', 'text-sm text-steel-blue/60 italic mb-4', 'No comments yet'));
+      content.appendChild(createEl('p', 'text-sm text-frosted-blue/60 italic mb-4', 'No comments yet'));
     } else {
       var commentsList = createEl('div', 'space-y-3 mb-4');
       comments.forEach(function(comment) {
@@ -702,9 +693,9 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
         // Author + time
         var cHeader = createEl('div', 'flex items-center justify-between mb-1.5');
         var authorText = comment.is_admin ? 'Admin' : (comment.author_name || 'You');
-        var cAuthor = createEl('span', 'text-xs font-bold ' + (comment.is_admin ? 'text-primary' : 'text-frosted-blue'), authorText);
+        var cAuthor = createEl('span', 'text-xs font-bold ' + 'text-frosted-blue', authorText);
         if (comment.is_admin) {
-          var adminBadge = createEl('span', 'ml-1.5 px-1.5 py-0.5 rounded text-[8px] font-bold bg-primary/20 text-primary uppercase', 'Staff');
+          var adminBadge = createEl('span', 'ml-1.5 px-1.5 py-0.5 rounded text-[8px] font-bold bg-primary/20 text-frosted-blue uppercase', 'Staff');
           var authorWrap = createEl('div', 'flex items-center');
           authorWrap.appendChild(cAuthor);
           authorWrap.appendChild(adminBadge);
@@ -712,7 +703,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
         } else {
           cHeader.appendChild(cAuthor);
         }
-        cHeader.appendChild(createEl('span', 'text-[10px] text-steel-blue/60', timeAgo(comment.created_at)));
+        cHeader.appendChild(createEl('span', 'text-[10px] text-frosted-blue/60', timeAgo(comment.created_at)));
         cDiv.appendChild(cHeader);
 
         // Message
@@ -740,12 +731,12 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
       textarea.id = 'commentInput';
       textarea.placeholder = 'Write a comment...';
       textarea.rows = 3;
-      textarea.className = 'w-full px-3 py-2.5 bg-black/40 border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-steel-blue/60 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-2';
+      textarea.className = 'w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/60 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-2';
 
       var fileInput = document.createElement('input');
       fileInput.type = 'file';
       fileInput.accept = 'image/png,image/jpeg,image/webp';
-      fileInput.className = 'w-full text-sm text-steel-blue file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-primary/20 file:text-primary hover:file:bg-primary/30 transition-all mb-2';
+      fileInput.className = 'w-full text-sm text-steel-blue file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-primary/20 file:text-frosted-blue hover:file:bg-primary/30 transition-all mb-2';
 
       var sendBtn = createEl('button', 'w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed', 'Add Comment');
       sendBtn.id = 'commentSendBtn';
@@ -795,8 +786,8 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
   // ---- Filter tab styles ----
 
   var styleEl = document.createElement('style');
-  styleEl.textContent = '.filter-tab, .cat-filter-tab { background: rgb(var(--color-accent) / 0.1); color: rgb(var(--color-accent)); border: 1px solid transparent; }' +
-    '.filter-tab.active, .cat-filter-tab.active { background: rgb(var(--color-primary) / 0.2); color: rgb(var(--color-primary)); border-color: rgb(var(--color-primary) / 0.3); }' +
+  styleEl.textContent = '.filter-tab, .cat-filter-tab { background: rgb(var(--color-accent) / 0.1); color: rgb(var(--color-text) / 0.8); border: 1px solid transparent; }' +
+    '.filter-tab.active, .cat-filter-tab.active { background: rgb(var(--color-primary) / 0.2); color: rgb(var(--color-text)); border-color: rgb(var(--color-primary) / 0.3); }' +
     '.filter-tab:hover, .cat-filter-tab:hover { background: rgb(var(--color-accent) / 0.2); }';
   document.head.appendChild(styleEl);
 
