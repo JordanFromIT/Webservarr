@@ -2,6 +2,7 @@ name: Build and Publish Docker Image
 
 on:
   push:
+    branches: [dev, main]
     tags: ['v*']
   workflow_dispatch:
 
@@ -10,7 +11,65 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Runs on every trigger. Branch pushes run only this job and push nothing.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    # Same base image as the Dockerfile: the image itself leaves app/tests out
+    # (.dockerignore), so the suite runs on its base with the same packages.
+    container:
+      image: python:3.11-slim
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install redis-server
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends redis-server
+
+      - name: Install Python dependencies
+        run: pip install --no-cache-dir -r requirements.txt
+
+      # The app reads its static files from /app/app/static (app/main.py,
+      # app/pages.py), so lay the checkout out where the image puts it.
+      - name: Lay out the app at /app
+        run: |
+          mkdir -p /app
+          cp -a "$GITHUB_WORKSPACE"/. /app/
+          mkdir -p /app/data/ticket_uploads /app/app/static/uploads
+
+      # Production runs an embedded Redis via supervisord; the suite uses its
+      # database 15 (app/tests/__init__.py).
+      - name: Start Redis
+        run: |
+          redis-server --bind 127.0.0.1 --port 6379 --save "" --appendonly no --daemonize yes
+          for i in $(seq 1 20); do redis-cli ping && break; sleep 0.5; done
+          redis-cli ping
+
+      # Tests skip themselves when the app cannot import or Redis is missing,
+      # so a skip here means a broken environment, not a pass.
+      - name: Run the test suite
+        working-directory: /app
+        env:
+          WEBSERVARR_FORBIDDEN_STRINGS: ${{ secrets.WEBSERVARR_FORBIDDEN_STRINGS }}
+        run: |
+          python -m unittest discover -s /app/app/tests -t /app 2>&1 | tee /tmp/unittest.log
+          if grep -q "skipped=" /tmp/unittest.log; then
+            echo "::error::Tests were skipped; the CI environment is missing something the suite needs."
+            exit 1
+          fi
+
   build-and-push:
+    needs: test
+    # Unchanged triggers: only v* tags and manual dispatch build an image.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
