@@ -236,6 +236,72 @@ html[data-rs-empty] #rsSection { display: none; }
 
 <!-- Discover Section -->
 <div id="discoverSection" class="mb-8"></div>
+<script>
+// Discover row definitions.
+//
+// Most rows come from Seerr's discover endpoints and are named by their
+// endpoint suffix. A row can instead carry an explicit `url` when its source is
+// something else entirely - books come from Open Library by way of Chaptarr,
+// not from Seerr.
+var DISCOVER_ROWS = [
+  { id: 'trendingRow',       endpoint: 'trending',        label: 'Trending',        icon: 'trending_up'   },
+  { id: 'popularMoviesRow',  endpoint: 'popular-movies',  label: 'Popular Movies',  icon: 'movie'         },
+  { id: 'upcomingMoviesRow', endpoint: 'upcoming-movies', label: 'Upcoming Movies', icon: 'upcoming'      },
+  { id: 'popularSeriesRow',  endpoint: 'popular-series',  label: 'Popular Series',  icon: 'live_tv'       },
+  { id: 'upcomingSeriesRow', endpoint: 'upcoming-series', label: 'Upcoming Series', icon: 'calendar_month'},
+  { id: 'trendingBooksRow',  url: '/api/integrations/books-trending',
+                             label: 'Trending Books',  icon: 'menu_book' },
+  { id: 'trendingAudiobooksRow', url: '/api/integrations/audiobooks-trending',
+                             label: 'Trending Audiobooks', icon: 'headphones' },
+];
+
+// The skeleton card is the real card (buildDiscoverCard) with nothing in it:
+// the glass card's 1px border, the poster box, and the badge and title lines
+// at their real sizes, so a row is the same height before and after its data.
+function buildDiscoverSkeletons() {
+  var html = '';
+  for (var i = 0; i < 8; i++) {
+    html +=
+      '<div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true">' +
+        '<div class="aspect-[2/3]"></div>' +
+        '<div class="p-1.5 invisible">' +
+          '<span class="inline-block text-[8px] font-bold px-1 py-0.5 rounded mb-1">Movie</span>' +
+          '<p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p>' +
+        '</div>' +
+      '</div>';
+  }
+  return html;
+}
+
+// Written here, while the page is still being parsed, so the rows and their
+// skeletons are in the first paint: built later (after the page scripts load)
+// they arrived as a block that pushed everything below them down. The labels
+// and icons are the fixed strings above. buildDiscoverSection wires them.
+(function () {
+  var html = '';
+  DISCOVER_ROWS.forEach(function (row) {
+    html +=
+      '<div class="mb-6">' +
+        '<div class="flex items-center gap-2 mb-3">' +
+          '<span class="material-symbols-outlined text-steel-blue text-xl">' + row.icon + '</span>' +
+          '<h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">' + row.label + '</h2>' +
+        '</div>' +
+        '<div class="discover-row-wrapper relative">' +
+          '<button onclick="scrollDiscoverRow(\'' + row.id + '\', -1)" class="discover-scroll-btn left">' +
+            '<span class="material-symbols-outlined text-sm">chevron_left</span>' +
+          '</button>' +
+          '<div id="' + row.id + '" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">' +
+            buildDiscoverSkeletons() +
+          '</div>' +
+          '<button onclick="scrollDiscoverRow(\'' + row.id + '\', 1)" class="discover-scroll-btn right">' +
+            '<span class="material-symbols-outlined text-sm">chevron_right</span>' +
+          '</button>' +
+        '</div>' +
+      '</div>';
+  });
+  document.getElementById('discoverSection').innerHTML = html;
+})();
+</script>
 
 <!-- Library summary. Also the scroll anchor for the search bar's move: the view
      settles with these figures on screen above the search field.
@@ -517,24 +583,6 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 <script src="/static/js/notifications.js?v=3"></script>
 <script src="/static/js/ui.js?v=1"></script>
 <script>
-// Discover row definitions.
-//
-// Most rows come from Seerr's discover endpoints and are named by their
-// endpoint suffix. A row can instead carry an explicit `url` when its source is
-// something else entirely - books come from Open Library by way of Chaptarr,
-// not from Seerr.
-var DISCOVER_ROWS = [
-  { id: 'trendingRow',       endpoint: 'trending',        label: 'Trending',        icon: 'trending_up'   },
-  { id: 'popularMoviesRow',  endpoint: 'popular-movies',  label: 'Popular Movies',  icon: 'movie'         },
-  { id: 'upcomingMoviesRow', endpoint: 'upcoming-movies', label: 'Upcoming Movies', icon: 'upcoming'      },
-  { id: 'popularSeriesRow',  endpoint: 'popular-series',  label: 'Popular Series',  icon: 'live_tv'       },
-  { id: 'upcomingSeriesRow', endpoint: 'upcoming-series', label: 'Upcoming Series', icon: 'calendar_month'},
-  { id: 'trendingBooksRow',  url: '/api/integrations/books-trending',
-                             label: 'Trending Books',  icon: 'menu_book' },
-  { id: 'trendingAudiobooksRow', url: '/api/integrations/audiobooks-trending',
-                             label: 'Trending Audiobooks', icon: 'headphones' },
-];
-
 // State
 var _searchDebounceTimer = null;
 var _currentSearchQuery = '';
@@ -1004,32 +1052,14 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 // ---- Discover Lists ----
 
+// The rows and their skeletons are already in the page (written by the inline
+// script beside #discoverSection, before the first paint); this wires them.
 function buildDiscoverSection() {
-  var section = document.getElementById('discoverSection');
-  if (!section) return;
   DISCOVER_ROWS.forEach(function(row) {
-    var html =
-      '<div class="mb-6">' +
-        '<div class="flex items-center gap-2 mb-3">' +
-          '<span class="material-symbols-outlined text-steel-blue text-xl">' + row.icon + '</span>' +
-          '<h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">' + escapeHtml(row.label) + '</h2>' +
-        '</div>' +
-        '<div class="discover-row-wrapper relative">' +
-          '<button onclick="scrollDiscoverRow(\'' + row.id + '\', -1)" class="discover-scroll-btn left">' +
-            '<span class="material-symbols-outlined text-sm">chevron_left</span>' +
-          '</button>' +
-          '<div id="' + row.id + '" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">' +
-            buildDiscoverSkeletons() +
-          '</div>' +
-          '<button onclick="scrollDiscoverRow(\'' + row.id + '\', 1)" class="discover-scroll-btn right">' +
-            '<span class="material-symbols-outlined text-sm">chevron_right</span>' +
-          '</button>' +
-        '</div>' +
-      '</div>';
-    section.insertAdjacentHTML('beforeend', html);
+    var el = document.getElementById(row.id);
+    if (!el) return;
     // Set the arrows correctly from the outset - the skeleton row starts at its
     // left edge, so the left arrow must not be offered before any data arrives.
-    var el = document.getElementById(row.id);
     wireDiscoverArrows(el);
     updateDiscoverArrows(el);
     // Mouse drag-to-scroll. The row element outlives every render (only its
@@ -1046,18 +1076,6 @@ function buildDiscoverSection() {
       });
     });
   }
-}
-
-function buildDiscoverSkeletons() {
-  var html = '';
-  for (var i = 0; i < 8; i++) {
-    html +=
-      '<div class="shrink-0 w-28 rounded-xl overflow-hidden animate-pulse">' +
-        '<div class="aspect-[2/3] bg-steel-blue/10 rounded-xl"></div>' +
-        '<div class="py-1.5 px-1"><div class="h-2.5 bg-steel-blue/10 rounded w-3/4 mt-1"></div></div>' +
-      '</div>';
-  }
-  return html;
 }
 
 function loadDiscoverLists() {

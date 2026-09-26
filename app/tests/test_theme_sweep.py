@@ -145,6 +145,23 @@ class RequestStatusCollapseMarkup(unittest.TestCase):
         rows = load.index("if (!_rows.length)")
         self.assertGreater(load.index("document.documentElement.removeAttribute('data-rs-empty');"), rows)
 
+    def test_discover_rows_and_skeletons_are_in_the_first_paint(self):
+        # With Request Status collapsed, the discover rows lead the page; built
+        # after the page scripts loaded, they pushed everything below down.
+        written = REQUESTS.index("document.getElementById('discoverSection').innerHTML = html;")
+        self.assertLess(REQUESTS.index('<div id="discoverSection"'), written)
+        self.assertLess(written, REQUESTS.index('<script src="/static/js/auth.js'))
+        # The skeleton card is the real card's box: its border, poster, badge and title lines.
+        skel = re.search(r"function buildDiscoverSkeletons\(\) \{(.*?)\n\}", REQUESTS, re.S).group(1)
+        card = re.search(r"function buildDiscoverCard\(item\) \{(.*?)\n\}", REQUESTS, re.S).group(1)
+        for token in ("shrink-0 w-28 rounded-xl", "aspect-[2/3]", "p-1.5",
+                      "inline-block text-[8px] font-bold px-1 py-0.5 rounded mb-1",
+                      "text-[11px] font-medium leading-tight truncate"):
+            self.assertIn(token, skel, token)
+            self.assertIn(token, card, token)
+        self.assertIn("border border-transparent", skel)   # the glass card's 1px border
+        self.assertIn("glass-card", card)
+
 
 class PageStylesAreInTheHead(unittest.TestCase):
     """Item 13: a page's own <style> sits in <head>, before the custom CSS
