@@ -1796,5 +1796,33 @@ class InPlaceNewsRender(PageRoutesBase):
         self.assertIn("html:not([data-admin]) .ws-admin-only { display: none !important; }", css)
 
 
+class SwitchOver(unittest.TestCase):
+    def test_account_menu_opens_sign_in_and_page_cache_is_bumped(self):
+        for partial in ("shell-header.html", "shell-sidebar.html"):
+            text = (STATIC / "partials" / partial).read_text(encoding="utf-8")
+            self.assertIn('href="/settings#sign-in"', text, partial)
+        sw = (STATIC / "sw.js").read_text(encoding="utf-8")
+        shell = (STATIC / "js" / "shell.js").read_text(encoding="utf-8")
+        self.assertIn("var PAGE_CACHE = 'ws-pages-v2';", sw)
+        self.assertIn("var PAGE_CACHE = 'ws-pages-v2';", shell)
+
+    def test_account_menu_label_is_sentence_case(self):
+        for partial in ("shell-header.html", "shell-sidebar.html"):
+            text = (STATIC / "partials" / partial).read_text(encoding="utf-8")
+            link = re.search(r'<a href="/settings#sign-in"[^>]*>.*?</a>', text, re.S)
+            self.assertIsNotNone(link, partial)
+            self.assertIn("Account settings", link.group(0), partial)
+            self.assertNotIn("Account Settings", text, partial)
+
+    def test_worker_update_drops_every_old_page_cache(self):
+        # R11: a bump only clears what the old name left behind if activate
+        # removes every ws-pages-* cache, not just the name it now carries.
+        sw = (STATIC / "sw.js").read_text(encoding="utf-8")
+        start = sw.index("self.addEventListener('activate'")
+        body = sw[start:matching_brace(sw, sw.index("{", start)) + 1]
+        self.assertIn("caches.keys()", js_code_only(body))
+        self.assertTrue(live_matches(body, r"'ws-pages-'"), "activate must match the ws-pages- prefix")
+
+
 if __name__ == "__main__":
     unittest.main()

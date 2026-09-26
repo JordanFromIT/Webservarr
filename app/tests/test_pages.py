@@ -206,7 +206,7 @@ class ShellRendering(unittest.TestCase):
         self.assertIn('href="/settings"', nav(render(user=ADMIN)))
         self.assertNotIn('href="/settings"', nav(render(user=MEMBER)))
         # The account-menu entry stays in the markup but hidden for members.
-        self.assertRegex(render(user=MEMBER), r'<a href="/settings" class="[^"]*hidden">')
+        self.assertRegex(render(user=MEMBER), r'<a href="/settings#sign-in" class="[^"]*hidden">')
         self.assertIn("data-admin", html_tag(render(user=ADMIN)))
         self.assertNotIn("data-admin", html_tag(render(user=MEMBER)))
         # Version label and the account-settings menu entry hide for members.
