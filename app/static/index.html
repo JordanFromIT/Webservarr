@@ -64,9 +64,9 @@
 <h3 class="text-xl font-bold text-frosted-blue">Service Health</h3>
 <span id="serviceLastChecked" class="text-[10px] text-steel-blue ml-auto"></span>
 </div>
-<!-- Netdata Gauges. The CPU and RAM detail lines hold their one line of
-     height before loadSystemStats fills them (the core count and memory
-     always arrive with the stats), so the centred readings don't hop up. -->
+<!-- Netdata Gauges. Each gauge's detail line holds its one line of height
+     before loadSystemStats fills it, so the centred readings don't hop up
+     when it lands. (With no network label set, that line stays empty.) -->
 <div id="netdataGauges" class="bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 mb-4">
 <div class="flex justify-between items-center">
 <!-- CPU Gauge -->
@@ -118,7 +118,7 @@
 <span id="netDownUnit" class="text-steel-blue/60">Mbps</span>
 </div>
 </div>
-<span id="netGaugeDetail" class="text-[9px] text-steel-blue/60 mt-0.5"></span>
+<span id="netGaugeDetail" class="min-h-[1.5em] text-[9px] text-steel-blue/60 mt-0.5"></span>
 </div>
 </div>
 </div>
