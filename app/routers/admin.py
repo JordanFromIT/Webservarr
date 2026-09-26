@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from typing import Literal, Optional, Set
 
 from datetime import datetime, timedelta
+from urllib.parse import urlsplit
 
 from passlib.hash import bcrypt
 
@@ -129,6 +130,20 @@ async def update_account(
     return {"success": True, "message": "Account updated successfully", "updated": changes}
 
 
+def same_address(a: Optional[str], b: Optional[str]) -> bool:
+    """True when two integration addresses name the same place: compared
+    trimmed, without a trailing slash, with scheme and host in any case."""
+    def norm(u: Optional[str]):
+        u = (u or "").strip().rstrip("/")
+        try:
+            parts = urlsplit(u)
+        except ValueError:
+            return None
+        return (parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment)
+    na, nb = norm(a), norm(b)
+    return na is not None and na == nb
+
+
 @router.post("/test-connection")
 @limiter.limit("20/minute")
 async def test_connection(
@@ -146,14 +161,25 @@ async def test_connection(
     off the event loop, one 5 s deadline. A masked credential means "the one
     already saved"; the browser never holds the real value. The NYT API has a
     fixed address, so only its key is tested.
+
+    The saved credential only ever goes to the saved address. Masking is what
+    keeps stored secrets from an admin session, so a masked (or absent)
+    credential with any other address on screen is not tested: pointing a
+    card at another host would otherwise hand that host the saved token.
     """
     service = payload.service
     values = effective_values(db)
-    if service != "nyt":
-        # As typed, like the credential: the probe tests what Save would store.
-        values[f"integration.{service}.url"] = payload.url or ""
     cred_key = credential_key(service)
-    if cred_key and payload.credentials is not None and payload.credentials != MASK_SENTINEL:
+    saved_credential = payload.credentials is None or payload.credentials == MASK_SENTINEL
+    if service != "nyt":
+        url_key = f"integration.{service}.url"
+        if cred_key and saved_credential and values.get(cred_key) \
+                and not same_address(payload.url, values.get(url_key)):
+            word = "token" if service == "plex" else "key"
+            return {"success": False, "message": f"Enter the {word} again to test a new address", "state": "warn"}
+        # As typed, like the credential: the probe tests what Save would store.
+        values[url_key] = payload.url or ""
+    if cred_key and not saved_credential:
         values[cred_key] = payload.credentials
     if service == "uptime_kuma" and payload.slug is not None:
         if validate_value("integration.uptime_kuma.slug", payload.slug):
