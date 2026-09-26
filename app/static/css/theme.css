@@ -379,6 +379,8 @@ body {
   content: ""; position: absolute; inset: 0; border-radius: 9999px; opacity: 0;
   background: color-mix(in srgb, rgb(var(--ws-pill, var(--ws-status-off))) 75%, rgb(var(--color-text)));
 }
+/* The login page's status badge is a .ws-pill too, with the same live ring. */
+#loginSystemStatus[data-state="ok"] .ws-status-dot::after,
 #systemStatus[data-state="ok"] .ws-status-dot::after { animation: ws-ping 2.8s cubic-bezier(0, 0, .2, 1) infinite; }
 @keyframes ws-ping {
   0%        { transform: scale(1);   opacity: .55; }
@@ -387,6 +389,7 @@ body {
 
 /* The same selector as the rule it stills: a shorter one loses to it. */
 @media (prefers-reduced-motion: reduce) {
+  #loginSystemStatus[data-state="ok"] .ws-status-dot::after,
   #systemStatus[data-state="ok"] .ws-status-dot::after { animation: none; }
 }
 

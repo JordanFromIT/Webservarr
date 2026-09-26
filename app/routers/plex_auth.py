@@ -405,7 +405,22 @@ async def plex_callback_page(request: Request):
     Landing page after Plex auth redirect.
     If opened in a popup: sends postMessage to opener and closes.
     If opened as redirect (no opener): redirects to login page.
+
+    It shows for a moment inside the popup, so it wears the site's theme like
+    every other page: the operator's colours and font inline in <head> (the
+    same #ws-theme / #ws-data the page renderer writes), theme.css, and the
+    custom CSS last. Only public branding is used (no one is signed in yet).
     """
+    from app import pages
+
+    branding, _flags = pages.load_context(False)
+    head = "\n".join([
+        pages.theme_style(branding),
+        pages.font_links(branding),
+        pages.data_block(branding, None, settings.app_version or "dev", "plex-callback"),
+    ])
+    custom_css = pages.custom_css_style(branding)
+
     app_origin = f"{request.url.scheme}://{request.url.netloc}"
     # The origin comes from the (attacker-controllable) Host header and is
     # interpolated into inline JS. JSON-encode it for the JS string context, then
@@ -419,10 +434,22 @@ async def plex_callback_page(request: Request):
     )
 
     html = f"""<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"><title>Plex Auth</title></head>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Signing in</title>
+{head}
+<script src="/static/js/theme-loader.js"></script>
+<link href="/static/css/theme.css" rel="stylesheet">
+<style>
+html, body {{ height: 100%; margin: 0; }}
+body {{ display: flex; align-items: center; justify-content: center; padding: 1rem;
+  background: rgb(var(--color-background)); color: rgb(var(--color-text) / .7);
+  font-size: 15px; text-align: center; }}
+</style>
+{custom_css}
+</head>
 <body>
-<p>Completing authentication...</p>
+<p>Signing you in&hellip;</p>
 <script>
 if (window.opener) {{
     window.opener.postMessage({{type: 'plex-auth-complete'}}, {app_origin_js});

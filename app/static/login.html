@@ -11,7 +11,7 @@
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 <style>
     .cinematic-overlay {
-      background: radial-gradient(circle, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.9) 100%);
+      background: radial-gradient(circle, rgb(var(--color-background) / 0.4) 0%, rgb(var(--color-background) / 0.9) 100%);
     }
     /* Light glass over the rotating artwork. The hues are the search bar's
        (#searchInput on the requests page: the secondary tint and the
@@ -100,7 +100,7 @@
 </div>
 <!-- Cinematic Background Grid (fallback when TMDB slideshow not available) -->
 <div id="staticPosterGrid" class="fixed inset-0 z-0">
-    <div class="absolute inset-0 bg-gradient-to-br from-black via-baltic-blue/20 to-black"></div>
+    <div class="absolute inset-0 bg-gradient-to-br from-background-dark via-baltic-blue/20 to-background-dark"></div>
 </div>
 <!-- Dark Overlay -->
 <div class="fixed inset-0 z-10 cinematic-overlay"></div>
@@ -118,7 +118,7 @@
 <div class="flex flex-col gap-1.5">
 <label class="text-frosted-blue text-sm font-medium px-1">Username</label>
 <div class="relative group">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-primary text-[20px]">person</span>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-frosted-blue text-[20px]">person</span>
 <input id="username" name="username" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="admin" type="text" required/>
 </div>
 </div>
@@ -127,7 +127,7 @@
 <label class="text-frosted-blue text-sm font-medium">Password</label>
 </div>
 <div class="relative group">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-primary text-[20px]">lock</span>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-frosted-blue text-[20px]">lock</span>
 <input id="password" name="password" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="••••••••" type="password" required/>
 </div>
 </div>
@@ -218,9 +218,9 @@ if (window.WEBSERVARR_THEME) applyLoginBranding(window.WEBSERVARR_THEME);
 </main>
 <!-- Footer: System Status -->
 <footer class="relative z-20 p-8 flex items-center justify-center">
-<div id="loginSystemStatus" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-steel-blue/10 border border-steel-blue/30">
-<span class="flex size-2 rounded-full bg-steel-blue"></span>
-<span class="text-steel-blue text-xs font-bold uppercase tracking-widest">Loading...</span>
+<div id="loginSystemStatus" data-state="off" class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border">
+<span class="ws-status-dot" aria-hidden="true"></span>
+<span data-status-text class="ws-pill-label text-frosted-blue text-xs font-bold uppercase tracking-widest">Loading...</span>
 </div>
 </footer>
 
@@ -228,23 +228,19 @@ if (window.WEBSERVARR_THEME) applyLoginBranding(window.WEBSERVARR_THEME);
 // WebServarr - Login Logic
 
 // --- Footer: system status badge ---
+// A .ws-pill like the header's: every colour is in theme.css, keyed on
+// data-state (ok / warn / err; "off" while loading or unavailable). The words
+// stay theme text while all is well and take the status-text colour otherwise.
 (function() {
     var badge = document.getElementById('loginSystemStatus');
     if (!badge) return;
-    function render(dotColor, textColor, label, bgClass) {
-        badge.className = bgClass;
-        while (badge.firstChild) badge.removeChild(badge.firstChild);
-        var dot = document.createElement('span');
-        dot.className = 'flex size-2 rounded-full ' + dotColor;
-        var text = document.createElement('span');
-        text.className = textColor + ' text-xs font-bold uppercase tracking-widest';
+    var text = badge.querySelector('[data-status-text]');
+    function render(state, label) {
+        badge.setAttribute('data-state', state);
         text.textContent = label;
-        badge.appendChild(dot);
-        badge.appendChild(text);
     }
     function showUnavailable() {
-        render('bg-slate-400', 'text-slate-400', 'Status Unavailable',
-            'flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-400/10 border border-slate-400/30');
+        render('off', 'Status Unavailable');
     }
     // Public aggregate endpoint (no auth) — the login page has no session yet.
     fetch('/api/integrations/status-summary').then(function(r) {
@@ -252,14 +248,11 @@ if (window.WEBSERVARR_THEME) applyLoginBranding(window.WEBSERVARR_THEME);
     }).then(function(data) {
         var overall = data && data.status;
         if (overall === 'issues') {
-            render('bg-red-500', 'text-red-500', 'System Issues Detected',
-                'flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/30');
+            render('err', 'System Issues Detected');
         } else if (overall === 'degraded') {
-            render('bg-yellow-500', 'text-yellow-500', 'Degraded Performance',
-                'flex items-center gap-2 px-3 py-1.5 rounded-full bg-yellow-500/10 border border-yellow-500/30');
+            render('warn', 'Degraded Performance');
         } else if (overall === 'online') {
-            render('bg-green-500 animate-pulse', 'text-green-500', 'All Systems Online',
-                'flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/30');
+            render('ok', 'All Systems Online');
         } else {
             showUnavailable();
         }
@@ -272,7 +265,7 @@ function showLoginError(msg) {
     if (!errorDiv) {
         errorDiv = document.createElement('div');
         errorDiv.id = 'loginError';
-        errorDiv.className = 'text-red-400 text-sm text-center mt-2';
+        errorDiv.className = 'text-status-err-text text-sm text-center mt-2';
         var form = document.getElementById('loginForm');
         if (form) form.appendChild(errorDiv);
     }

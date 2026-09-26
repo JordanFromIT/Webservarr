@@ -36,7 +36,7 @@
     }
     .step-circle.inactive {
       background: rgb(var(--color-accent) / 0.2);
-      color: rgb(var(--color-accent) / 0.5);
+      color: rgb(var(--color-text) / 0.6);
     }
     .step-line {
       height: 2px;
@@ -54,9 +54,9 @@
 <body class="bg-background-dark font-display min-h-screen relative flex flex-col overflow-y-auto">
 <!-- Dark Background -->
 <div class="fixed inset-0 z-0">
-    <div class="absolute inset-0 bg-gradient-to-br from-black via-baltic-blue/20 to-black"></div>
+    <div class="absolute inset-0 bg-gradient-to-br from-background-dark via-baltic-blue/20 to-background-dark"></div>
 </div>
-<div class="fixed inset-0 z-10" style="background: radial-gradient(circle, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.9) 100%);"></div>
+<div class="fixed inset-0 z-10" style="background: radial-gradient(circle, rgb(var(--color-background) / 0.4) 0%, rgb(var(--color-background) / 0.9) 100%);"></div>
 <!-- Main Content -->
 <main class="relative z-20 flex-1 flex flex-col items-center justify-center px-4 py-8">
 <div class="w-full max-w-[500px] login-glass-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
@@ -72,7 +72,7 @@
 <!-- Navigation Buttons -->
 <div id="navButtons" class="w-full flex gap-3 mt-6"></div>
 <!-- Error Message -->
-<div id="setupError" class="text-red-400 text-sm text-center mt-3 hidden"></div>
+<div id="setupError" class="text-status-err-text text-sm text-center mt-3 hidden"></div>
 </div>
 </main>
 
@@ -155,7 +155,7 @@
             stepWrapper.appendChild(circle);
             var label = document.createElement('span');
             label.className = 'text-[10px] font-semibold uppercase tracking-wider';
-            label.className += i <= currentStep ? ' text-frosted-blue/80' : ' text-steel-blue/40';
+            label.className += i <= currentStep ? ' text-frosted-blue/80' : ' text-frosted-blue/60';
             label.textContent = labels[i];
             stepWrapper.appendChild(label);
 
@@ -184,14 +184,14 @@
         inputGroup.className = 'relative group';
 
         var icon = document.createElement('span');
-        icon.className = 'material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/40 group-focus-within:text-primary text-[20px]';
+        icon.className = 'material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 group-focus-within:text-frosted-blue text-[20px]';
         icon.textContent = iconName;
         inputGroup.appendChild(icon);
 
         var input = document.createElement('input');
         input.type = type;
         input.id = id;
-        input.className = 'w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/30 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all';
+        input.className = 'w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all';
         input.placeholder = placeholder || '';
         if (value !== undefined) input.value = value;
         inputGroup.appendChild(input);
@@ -199,7 +199,7 @@
         wrapper.appendChild(inputGroup);
 
         var errSpan = document.createElement('span');
-        errSpan.className = 'text-red-400 text-xs px-1 hidden';
+        errSpan.className = 'text-status-err-text text-xs px-1 hidden';
         errSpan.id = id + '-error';
         wrapper.appendChild(errSpan);
 
@@ -262,7 +262,7 @@
         form.appendChild(createField('Confirm Password', 'setup-password-confirm', 'password', 'Re-enter password', 'lock', storedStep1.passwordConfirm));
         form.appendChild(createField('Setup Token', 'setup-token', 'text', 'From the container logs', 'key', storedStep1.token));
         var tokenHint = document.createElement('p');
-        tokenHint.className = 'text-steel-blue/50 text-xs -mt-2';
+        tokenHint.className = 'text-frosted-blue/70 text-xs -mt-2';
         tokenHint.textContent = 'Find this in the container logs: docker compose logs webservarr | grep -i "setup token"';
         form.appendChild(tokenHint);
 
@@ -291,7 +291,7 @@
         inputGroup.className = 'relative group';
 
         var icon = document.createElement('span');
-        icon.className = 'material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/40 group-focus-within:text-primary text-[20px]';
+        icon.className = 'material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 group-focus-within:text-frosted-blue text-[20px]';
         icon.textContent = 'key';
         inputGroup.appendChild(icon);
 
@@ -306,7 +306,7 @@
         // Eye toggle
         var toggleBtn = document.createElement('button');
         toggleBtn.type = 'button';
-        toggleBtn.className = 'absolute right-10 top-1/2 -translate-y-1/2 text-frosted-blue/40 hover:text-frosted-blue transition-colors';
+        toggleBtn.className = 'absolute right-10 top-1/2 -translate-y-1/2 text-frosted-blue/70 hover:text-frosted-blue transition-colors';
         var toggleIcon = document.createElement('span');
         toggleIcon.className = 'material-symbols-outlined text-[20px]';
         toggleIcon.textContent = 'visibility';
@@ -325,7 +325,7 @@
         // Regenerate
         var regenBtn = document.createElement('button');
         regenBtn.type = 'button';
-        regenBtn.className = 'absolute right-3 top-1/2 -translate-y-1/2 text-frosted-blue/40 hover:text-frosted-blue transition-colors';
+        regenBtn.className = 'absolute right-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 hover:text-frosted-blue transition-colors';
         var regenIcon = document.createElement('span');
         regenIcon.className = 'material-symbols-outlined text-[20px]';
         regenIcon.textContent = 'refresh';
@@ -340,7 +340,7 @@
         container.appendChild(fieldWrapper);
 
         var note = document.createElement('p');
-        note.className = 'text-steel-blue/60 text-xs mt-4 px-1 leading-relaxed';
+        note.className = 'text-frosted-blue/70 text-xs mt-4 px-1 leading-relaxed';
         note.textContent = 'Save this key somewhere safe. You\'ll need it if you migrate or restore from backup.';
         container.appendChild(note);
     }
@@ -353,7 +353,7 @@
         container.appendChild(heading);
 
         var subtext = document.createElement('p');
-        subtext.className = 'text-steel-blue/50 text-xs mb-5 text-center';
+        subtext.className = 'text-frosted-blue/70 text-xs mb-5 text-center';
         subtext.textContent = 'You can configure this later in Settings.';
         container.appendChild(subtext);
 
@@ -380,7 +380,7 @@
             var url = document.getElementById('setup-plex-url').value.trim();
             var token = document.getElementById('setup-plex-token').value.trim();
             if (!url || !token) {
-                testResult.className = 'text-xs text-red-400';
+                testResult.className = 'text-xs text-status-err-text';
                 testResult.textContent = 'Enter URL and token first';
                 return;
             }
@@ -397,14 +397,14 @@
                 });
                 var data = await resp.json();
                 if (resp.ok && data.success) {
-                    testResult.className = 'text-xs text-green-400';
+                    testResult.className = 'text-xs text-status-ok-text';
                     testResult.textContent = 'Connection successful!';
                 } else {
-                    testResult.className = 'text-xs text-red-400';
+                    testResult.className = 'text-xs text-status-err-text';
                     testResult.textContent = data.message || data.detail || 'Connection failed';
                 }
             } catch (e) {
-                testResult.className = 'text-xs text-red-400';
+                testResult.className = 'text-xs text-status-err-text';
                 testResult.textContent = 'Connection failed: ' + e.message;
             }
             testBtn.disabled = false;
