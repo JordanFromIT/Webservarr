@@ -634,5 +634,53 @@ class WikiEditorDialogs(unittest.TestCase):
             self.assertRegex(code, r"\b" + name + r"\.id = '")
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class HelpCardsFollowTheWikiSwitch(unittest.TestCase):
+    """A help card links into the Wiki, so a switched-off Wiki shows none:
+    the link would only bounce a member home, and the hidden wiki's page
+    titles would reach them."""
+
+    def setUp(self):
+        from app.models import WikiPage
+        self.Session = helpers.make_sessionmaker()
+        self.db = self.Session()
+        self.db.add(WikiPage(title="How to get help", slug="get-help", content="x", content_html="<p>x</p>",
+                             published=True, author_name="Admin"))
+        self.db.commit()
+        for key in ("wiki.hook_tickets", "wiki.hook_issues", "wiki.hook_playback"):
+            helpers.put(self.db, key, "get-help")
+
+    def tearDown(self):
+        self.db.close()
+
+    def hooks(self):
+        from app.routers.branding import load_branding
+        return load_branding(self.db, True)["wiki_hooks"]
+
+    def test_on_shows_the_cards(self):
+        want = {"slug": "get-help", "title": "How to get help"}
+        self.assertEqual(self.hooks(), {"tickets": want, "issues": want, "playback": want})
+        helpers.put(self.db, "sidebar.enabled_wiki", "true")
+        self.assertEqual(self.hooks()["tickets"], want)
+
+    def test_off_shows_none(self):
+        for off in ("false", " False "):
+            with self.subTest(value=off):
+                helpers.put(self.db, "sidebar.enabled_wiki", off)
+                self.assertEqual(self.hooks(), {"tickets": None, "issues": None, "playback": None})
+
+    def test_off_leaves_no_title_in_the_branding_payload(self):
+        from unittest import mock as _mock
+        helpers.put(self.db, "sidebar.enabled_wiki", "false")
+        with _mock.patch("app.routers.setup.is_setup_completed", return_value=True):
+            client = helpers.api_client(self.Session, helpers.MEMBER)
+            try:
+                r = client.get("/api/branding")
+            finally:
+                helpers.reset_overrides()
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("How to get help", r.text)
+
+
 if __name__ == "__main__":
     unittest.main()
