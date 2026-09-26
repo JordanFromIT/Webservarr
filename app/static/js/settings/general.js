@@ -250,14 +250,36 @@
 
   // ---- Backup ----
 
+  // Values are shown whole, never cut short: a long address is exactly the
+  // kind of change an admin needs to read to the end before importing.
   function shown(v) {
     v = String(v == null ? '' : v);
-    if (v === '') return '(empty)';
-    return v.length > 80 ? v.slice(0, 77) + '…' : v;
+    return v === '' ? '(empty)' : v;
+  }
+
+  function noteOf(c) { return typeof c.note === 'string' ? c.note : ''; }
+
+  // A change the admin should stop and read: an icon and a plain sentence.
+  function flag(text) {
+    var p = el('p', 'mt-1 flex items-start gap-1.5 text-[13px] font-semibold text-frosted-blue');
+    p.appendChild(icon('warning', 'text-[16px] leading-5 shrink-0'));
+    p.appendChild(el('span', null, text));
+    return p;
+  }
+
+  // Custom CSS in full, in a monospace block that scrolls on its own.
+  function cssBlock(label, v) {
+    var wrap = el('div', 'mt-2');
+    wrap.appendChild(el('p', 'text-[12px] text-frosted-blue/45', label));
+    wrap.appendChild(el('pre', 'mt-1 max-h-48 overflow-auto rounded-lg border border-frosted-blue/10 ' +
+      'px-2 py-1.5 font-mono text-[12px] leading-5 text-frosted-blue/70 whitespace-pre-wrap break-all', shown(v)));
+    return wrap;
   }
 
   // The preview: every change (old → new), then the unchanged values today's
-  // rules would refuse, which the import leaves as they are.
+  // rules would refuse, which the import leaves as they are. A saved key the
+  // import clears (its address changed) reads as the server's sentence, and
+  // custom CSS is flagged and shown in full.
   function previewBody(changes, ignored, warnings) {
     var wrap = el('div');
     if (changes.length) {
@@ -265,8 +287,16 @@
       changes.forEach(function (c) {
         var li = el('li', 'px-3 py-2');
         li.appendChild(el('p', 'text-[13px] font-semibold text-frosted-blue', nameOf(c.key)));
-        li.appendChild(el('p', 'text-[13px] text-frosted-blue/70 break-words font-mono',
-          shown(c.old) + '  →  ' + shown(c['new'])));
+        if (noteOf(c)) {
+          li.appendChild(flag(noteOf(c)));
+        } else if (c.key === 'theme.custom_css') {
+          li.appendChild(flag('Changes the site’s custom CSS'));
+          li.appendChild(cssBlock('Now', c.old));
+          li.appendChild(cssBlock('After the import', c['new']));
+        } else {
+          li.appendChild(el('p', 'text-[13px] text-frosted-blue/70 break-all font-mono',
+            shown(c.old) + '  →  ' + shown(c['new'])));
+        }
         list.appendChild(li);
       });
       wrap.appendChild(list);
@@ -286,8 +316,9 @@
       wrap.appendChild(kept);
     }
     if (ignored.length) {
-      wrap.appendChild(el('p', 'mt-3 text-[13px] text-frosted-blue/45',
-        'Passwords and keys in the file were skipped; yours stay as they are.'));
+      wrap.appendChild(el('p', 'mt-3 text-[13px] text-frosted-blue/45', changes.some(noteOf)
+        ? 'Passwords and keys in the file were skipped. Yours stay as they are, apart from any cleared above.'
+        : 'Passwords and keys in the file were skipped; yours stay as they are.'));
     }
     return wrap;
   }
