@@ -47,16 +47,8 @@
 
   function hasOwn(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
 
-  // A key's saved value (the baseline), never a staged one.
-  function saved(key) {
-    var values = WSSettings.values;
-    if (hasOwn(values, key)) return String(values[key]);
-    var m = WSSettings.metaFor(key);
-    return m ? String(m.default) : '';
-  }
-
   // Set up enough for the sign-in page to offer it (the server's rule; it
-  // decides, this only shapes a warning and a hint). read: saved or api.get.
+  // decides, this only shapes a warning and a hint). read: api.saved or api.get.
   function setUp(method, read) {
     if (method === 'plex') return !!read('integration.plex.url') && read('integration.plex.token') === WSSettings.MASK;
     if (method === 'oidc') return !!read('integration.authentik.url') && !!read('integration.authentik.client_id');
@@ -274,7 +266,7 @@
       var plex = methodCard('play_circle', 'Plex', 'People sign in with their Plex account.');
       plex.body.appendChild(api.toggle({ key: 'features.show_plex_auth', label: 'Allow sign-in with Plex' }));
       var plexHint = note('Plex sign-in needs the Plex connection.', 'Set it up in Integrations', openPlexSetup);
-      function syncPlexHint() { plexHint.classList.toggle('hidden', setUp('plex', saved)); }
+      function syncPlexHint() { plexHint.classList.toggle('hidden', setUp('plex', api.saved)); }
       // Integrations may set the connection up while this tab stays mounted.
       document.addEventListener('ws-settings:saved', syncPlexHint);
       syncPlexHint();
@@ -311,7 +303,7 @@
       simple.body.appendChild(account);
       // Follows the saved switch, not a staged one, so the form (and its
       // message) can't vanish mid-use; a save of the switch updates it.
-      function syncSimple() { account.classList.toggle('hidden', saved('features.show_simple_auth') !== 'true'); }
+      function syncSimple() { account.classList.toggle('hidden', api.saved('features.show_simple_auth') !== 'true'); }
       api.onSaved(syncSimple);
       syncSimple();
       intro.body.appendChild(simple.root);
@@ -343,14 +335,14 @@
         var mine = sessionMethod();
         if (!mine) return true;
         var touched = OWN_KEYS[mine].filter(function (k) { return keys.indexOf(k) >= 0; });
-        if (!touched.length || !usable(mine, saved) || usable(mine, api.get)) return true;
+        if (!touched.length || !usable(mine, api.saved) || usable(mine, api.get)) return true;
         return WSSettings.confirm({
           title: 'Turn off the way you signed in?',
           body: 'You signed in with ' + NAMES[mine] + '. After this change it won’t work, so next time ' +
             'you’ll need another way to sign in. You stay signed in for now.',
           confirmLabel: 'Turn it off', cancelLabel: 'Keep it on', danger: true
         }).then(function (ok) {
-          if (!ok) touched.forEach(function (k) { api.set(k, saved(k)); });
+          if (!ok) touched.forEach(function (k) { api.set(k, api.saved(k)); });
           return ok;
         });
       });

@@ -33,14 +33,6 @@
 
   function hasOwn(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
 
-  // A key's saved value (the baseline), never a staged one.
-  function saved(key) {
-    var values = WSSettings.values;
-    if (hasOwn(values, key)) return String(values[key]);
-    var m = WSSettings.metaFor(key);
-    return m ? String(m.default) : '';
-  }
-
   // A page's name as it stands now, else the shipped one from meta.
   function labelOf(api, id) {
     var v = api.get('sidebar.label_' + id);
@@ -70,15 +62,15 @@
 
   // [message, service] when a page can't work yet, else null.
   function needsSetup(id, api) {
-    if (id === 'library' && !saved('integration.kavita.url')) {
+    if (id === 'library' && !api.saved('integration.kavita.url')) {
       return ['eBooks needs Kavita. It stays out of the sidebar until Kavita is set up.', 'kavita'];
     }
     if (id === 'requests') {
-      var seerr = !!saved('integration.seerr.url'), chaptarr = !!saved('integration.chaptarr.url');
+      var seerr = !!api.saved('integration.seerr.url'), chaptarr = !!api.saved('integration.chaptarr.url');
       if (api.get('requests.source') === 'seerr_embed' && !seerr) return ['The Seerr page needs the Seerr connection.', 'seerr'];
       if (!seerr && !chaptarr) return ['Requests needs Seerr for movies and TV, or Chaptarr for books.', 'seerr'];
     }
-    if (id === 'calendar' && !saved('integration.sonarr.url') && !saved('integration.radarr.url')) {
+    if (id === 'calendar' && !api.saved('integration.sonarr.url') && !api.saved('integration.radarr.url')) {
       return ['Calendar needs Sonarr or Radarr.', 'sonarr'];
     }
     return null;
@@ -116,7 +108,7 @@
           return ok;
         });
         if (!monitors.length) {
-          var configured = !!saved('integration.uptime_kuma.url');
+          var configured = !!api.saved('integration.uptime_kuma.url');
           list.replaceChildren(actionNote(configured ? MSG.monitorsEmpty : MSG.monitorsNone,
             configured ? 'Open Integrations' : 'Set it up', function () { openSetup('uptime_kuma'); }));
           return true;
@@ -271,7 +263,7 @@
       // shows. Every order staged here is added when it is made.
       var known = {};
       var savedOrder = start.slice();
-      known[saved(ORDER_KEY)] = savedOrder;
+      known[api.saved(ORDER_KEY)] = savedOrder;
       var shown = savedOrder.slice();
 
       function same(a, b) {
@@ -289,7 +281,7 @@
         var order = [FIRST].concat(middle, [LAST]);
         if (order.length !== shown.length) return;
         // Back to the saved order is the saved text itself: nothing to save.
-        var raw = same(order, savedOrder) ? saved(ORDER_KEY) : JSON.stringify(order);
+        var raw = same(order, savedOrder) ? api.saved(ORDER_KEY) : JSON.stringify(order);
         known[raw] = order;
         api.set(ORDER_KEY, raw);
         if (moved) say(labelOf(api, moved) + ' moved to position ' + (order.indexOf(moved) + 1) +
@@ -554,7 +546,7 @@
       // staged text is the truth), so it just hands back the current value.
       api.track(ORDER_KEY, { get: function () { return api.get(ORDER_KEY); }, set: paint, el: list, errorEl: orderError });
       api.onSaved(function (keys) {
-        if (keys.indexOf(ORDER_KEY) >= 0 && hasOwn(known, saved(ORDER_KEY))) savedOrder = known[saved(ORDER_KEY)];
+        if (keys.indexOf(ORDER_KEY) >= 0 && hasOwn(known, api.saved(ORDER_KEY))) savedOrder = known[api.saved(ORDER_KEY)];
       });
       function refreshWarnings() { start.forEach(function (id) { rows[id]._refreshWarn(); }); }
       api.onChange('requests.source', refreshWarnings);
