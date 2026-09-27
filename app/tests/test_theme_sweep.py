@@ -338,7 +338,8 @@ class RequestStatusCollapseMarkup(unittest.TestCase):
         skel = re.search(r"function buildDiscoverSkeletons\(\) \{(.*?)\n\}", REQUESTS, re.S).group(1)
         card = re.search(r"function buildDiscoverCard\(item\) \{(.*?)\n\}", REQUESTS, re.S).group(1)
         for token in ("shrink-0 w-28 rounded-xl", "aspect-[2/3]", "p-1.5",
-                      "inline-block text-[8px] font-bold px-1 py-0.5 rounded mb-1",
+                      "flex items-center gap-1 min-w-0 mb-1",
+                      "shrink-0 text-[8px] font-bold px-1 py-0.5 rounded",
                       "text-[11px] font-medium leading-tight truncate"):
             self.assertIn(token, skel, token)
             self.assertIn(token, card, token)

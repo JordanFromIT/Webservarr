@@ -14,9 +14,13 @@ Two things worth knowing, both established by testing against the live instance:
 
 2. Search results do not report format availability. `mediaType` comes back as
    "audiobook" for every result, `availableNarrators` is always empty, and the
-   local-ownership fields stay empty even for books already in the library.
-   So results are surfaced simply as "eBook" rather than claiming to know which
-   editions exist.
+   top-level ownership fields (`localBookId`, `hasFiles`, `monitored`) stay
+   empty even for books already in the library. So results are surfaced simply
+   as "eBook" rather than claiming to know which editions exist.
+
+   Where a book stands in the library is carried instead by `localEbookBooks`
+   and `localAudiobookBooks`: the library's own rows for that work, one list
+   per format, each with `monitored` and `hasFiles`. See _format_status.
 """
 
 import asyncio
@@ -78,22 +82,6 @@ def _get_config() -> dict:
 
 def _headers(cfg: dict) -> dict:
     return {"X-Api-Key": cfg["api_key"], "Content-Type": "application/json"}
-
-
-def _is_set_id(value: Any) -> bool:
-    """
-    True when an id field actually identifies something.
-
-    Chaptarr returns numeric ids as strings, so an absent id arrives as the
-    string "0" — and bool("0") is True in Python. Comparing numerically avoids
-    marking every search result as already owned.
-    """
-    if value in (None, "", 0):
-        return False
-    try:
-        return int(value) > 0
-    except (TypeError, ValueError):
-        return True
 
 
 def _plain_text(value: Any) -> str:
@@ -172,10 +160,35 @@ async def _get_cached_book(book_id: str) -> Optional[Dict[str, Any]]:
     return json.loads(raw) if raw else None
 
 
-async def _normalise(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _format_status(local: Any) -> Optional[str]:
+    """
+    Where one format of a book stands in the library, in the words Seerr uses
+    for the same states, so a book card is labelled like a film card.
+
+    `local` is the search result's localEbookBooks or localAudiobookBooks: the
+    library rows for this work in that format. A row with files means it is
+    here ("available"); a monitored row without files means someone asked for
+    it and Chaptarr is looking ("processing", which the page calls Requested).
+    A row that is neither is not a request: adding an author imports every one
+    of their books unmonitored, and most of those were never wanted, so they
+    get no status rather than a claim that they are on the server.
+    """
+    rows = [r for r in local if isinstance(r, dict)] if isinstance(local, list) else []
+    if any(r.get("hasFiles") for r in rows):
+        return "available"
+    if any(r.get("monitored") for r in rows):
+        return "processing"
+    return None
+
+
+async def _normalise(result: Dict[str, Any], fmt: str = "ebook") -> Optional[Dict[str, Any]]:
     """
     Convert a Chaptarr search result into the shape the requests page already
     uses for Seerr items, so book cards render through the same code path.
+
+    `fmt` ("ebook" or "audiobook") picks whose library status the card
+    carries: a book can be on the server as an audiobook and still be
+    requestable as an ebook.
 
     Author-type results are dropped: they are not directly requestable.
     """
@@ -195,9 +208,12 @@ async def _normalise(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if isinstance(release, str) and len(release) >= 4 and release[:4].isdigit():
         year = int(release[:4])
 
-    # Chaptarr does report whether it already tracks the book, even though the
-    # per-edition fields stay empty.
-    owned = _is_set_id(result.get("existingLocalId")) or _is_set_id(book.get("localBookId"))
+    # Not existingLocalId / localBookId: those say only that Chaptarr tracks
+    # the work, and it tracks every book of an author it has added, wanted or
+    # not, so "tracked" read as "available" labelled unrequested books as on
+    # the server. The per-format rows say whether it is wanted and whether it
+    # arrived.
+    local_key = "localAudiobookBooks" if fmt == "audiobook" else "localEbookBooks"
 
     book_id = result.get("foreignId") or book.get("foreignBookId")
     await _cache_book(book_id, book)
@@ -210,7 +226,7 @@ async def _normalise(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "year": year,
         "poster_url": _poster_from(book.get("images")),
         "overview": _plain_text(book.get("overview")),
-        "media_status": "available" if owned else None,
+        "media_status": _format_status(book.get(local_key)),
         "rating": (book.get("ratings") or {}).get("value"),
         "votes": (book.get("ratings") or {}).get("votes") or 0,
     }
@@ -325,9 +341,14 @@ def _match_score(entry: Dict[str, Any], candidate: Dict[str, Any]) -> float:
     return score
 
 
-async def resolve_trending(books: List[Dict[str, Any]], limit: int = 20) -> List[Dict[str, Any]]:
+async def resolve_trending(
+    books: List[Dict[str, Any]], limit: int = 20, fmt: str = "ebook"
+) -> List[Dict[str, Any]]:
     """
     Turn a list of {title, author, cover_id} into requestable book cards.
+
+    `fmt` is the shelf's format, so each card's status is that format's (see
+    _normalise).
 
     A trending shelf is only worth showing if its cards can be acted on, and a
     title from an outside source means nothing to Chaptarr on its own. Each one
@@ -362,7 +383,7 @@ async def resolve_trending(books: List[Dict[str, Any]], limit: int = 20) -> List
 
         candidates = []
         for result in raw if isinstance(raw, list) else []:
-            norm = await _normalise(result)
+            norm = await _normalise(result, fmt)
             if norm and norm["id"]:
                 candidates.append(norm)
         if not candidates:

@@ -371,7 +371,7 @@ async def build_audiobooks_shelf() -> list:
 
     try:
         ranked = await nyt.bestsellers("audiobooks")
-        cards = await chaptarr.resolve_trending(ranked)
+        cards = await chaptarr.resolve_trending(ranked, fmt="audiobook")
     except Exception as exc:  # noqa: BLE001 - a shelf must never break the page
         logger.warning("Trending audiobooks failed: %s", exc)
         return []

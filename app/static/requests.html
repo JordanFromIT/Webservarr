@@ -256,8 +256,10 @@ var DISCOVER_ROWS = [
 ];
 
 // The skeleton card is the real card (buildDiscoverCard) with nothing in it:
-// the glass card's 1px border, the poster box, and the badge and title lines
-// at their real sizes, so a row is the same height before and after its data.
+// the glass card's 1px border, the poster box, and the badge row and title
+// line at their real sizes, so a row is the same height before and after its
+// data. The badge row is a flex row sized by its badge, and a status label is
+// the same size as the badge, so a card with one is no taller than without.
 function buildDiscoverSkeletons() {
   var html = '';
   for (var i = 0; i < 8; i++) {
@@ -265,7 +267,9 @@ function buildDiscoverSkeletons() {
       '<div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true">' +
         '<div class="aspect-[2/3]"></div>' +
         '<div class="p-1.5 invisible">' +
-          '<span class="inline-block text-[8px] font-bold px-1 py-0.5 rounded mb-1">Movie</span>' +
+          '<div class="flex items-center gap-1 min-w-0 mb-1">' +
+            '<span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span>' +
+          '</div>' +
           '<p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p>' +
         '</div>' +
       '</div>';
@@ -1179,6 +1183,25 @@ function mediaTypeIcon(mediaType) {
   return WS.mediaType(mediaType).icon;
 }
 
+/**
+ * Where a discover card's title stands, as a label beside its type badge.
+ *
+ * The words and tones are the site's shared request vocabulary
+ * (WS.requestStatus, styled by STATUS_TONE_CLASSES below), so a card says what
+ * Home's Recent Requests says for the same state. Words rather than a coloured
+ * dot on the poster, which nobody could decode without a key. Nothing is shown
+ * for a title no one has asked for, or for Seerr's "unknown": no label, never
+ * the word "Unknown". Same type size as the badge, so the row keeps its height.
+ */
+function discoverStatusLabel(status) {
+  if (!status || status === 'unknown') return '';
+  var known = WS.requestStatus(status);
+  var tone = STATUS_TONE_CLASSES[known.tone] || STATUS_TONE_CLASSES.wait;
+  return '<span data-discover-status title="' + escapeHtml(known.label) + '" ' +
+    'class="min-w-0 truncate text-[8px] font-bold px-1 py-0.5 rounded ' + tone.bg + ' ' + tone.text + '">' +
+    escapeHtml(known.label) + '</span>';
+}
+
 function buildDiscoverCard(item) {
   var title = escapeHtml(item.title || 'Unknown');
   var mediaType = item.media_type || 'movie';
@@ -1186,16 +1209,7 @@ function buildDiscoverCard(item) {
   var typeBadgeColor = mediaTypeBadgeColor(mediaType);
   var posterUrl = item.poster_url || '';
   var status = item.media_status ? item.media_status.toLowerCase() : null;
-
-  // Colored dot overlay indicating request/availability status
-  var dotHtml = '';
-  if (status) {
-    var dotColor = 'bg-steel-blue';
-    if (status === 'available') dotColor = 'bg-status-ok';
-    else if (status === 'processing' || status === 'approved') dotColor = 'bg-primary';
-    else if (status === 'partially_available') dotColor = 'bg-status-warn';
-    dotHtml = '<div class="absolute top-2 left-2 w-2.5 h-2.5 rounded-full ' + dotColor + ' ring-2 ring-background-dark/60"></div>';
-  }
+  var statusHtml = discoverStatusLabel(status);
 
   var posterHtml;
   if (posterUrl) {
@@ -1218,10 +1232,14 @@ function buildDiscoverCard(item) {
       '<div class="aspect-[2/3] relative overflow-hidden">' +
         posterHtml +
         '<div class="absolute inset-0 bg-gradient-to-t from-background-dark/60 via-transparent to-transparent"></div>' +
-        dotHtml +
       '</div>' +
       '<div class="p-1.5">' +
-        '<span class="inline-block text-[8px] font-bold px-1 py-0.5 rounded mb-1 ' + typeBadgeColor + '">' + typeBadge + '</span>' +
+        // One row that never wraps: the type keeps its width and the status
+        // gives way, ending in an ellipsis on the longest label.
+        '<div class="flex items-center gap-1 min-w-0 mb-1">' +
+          '<span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
+          statusHtml +
+        '</div>' +
         '<p class="text-frosted-blue text-[11px] font-medium leading-tight truncate">' + title + '</p>' +
       '</div>' +
     '</div>'
