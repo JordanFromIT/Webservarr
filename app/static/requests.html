@@ -276,7 +276,9 @@ function buildDiscoverSkeletons() {
 // Written here, while the page is still being parsed, so the rows and their
 // skeletons are in the first paint: built later (after the page scripts load)
 // they arrived as a block that pushed everything below them down. The labels
-// and icons are the fixed strings above. buildDiscoverSection wires them.
+// and icons are the fixed strings above. No inline handlers: scrollDiscoverRow
+// is defined in the page script further down, so buildDiscoverSection wires
+// the arrows once it exists, and until then they do nothing.
 (function () {
   var html = '';
   DISCOVER_ROWS.forEach(function (row) {
@@ -287,13 +289,13 @@ function buildDiscoverSkeletons() {
           '<h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">' + row.label + '</h2>' +
         '</div>' +
         '<div class="discover-row-wrapper relative">' +
-          '<button onclick="scrollDiscoverRow(\'' + row.id + '\', -1)" class="discover-scroll-btn left">' +
+          '<button type="button" class="discover-scroll-btn left" aria-label="Scroll left">' +
             '<span class="material-symbols-outlined text-sm">chevron_left</span>' +
           '</button>' +
           '<div id="' + row.id + '" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">' +
             buildDiscoverSkeletons() +
           '</div>' +
-          '<button onclick="scrollDiscoverRow(\'' + row.id + '\', 1)" class="discover-scroll-btn right">' +
+          '<button type="button" class="discover-scroll-btn right" aria-label="Scroll right">' +
             '<span class="material-symbols-outlined text-sm">chevron_right</span>' +
           '</button>' +
         '</div>' +
@@ -1062,6 +1064,9 @@ function buildDiscoverSection() {
     // left edge, so the left arrow must not be offered before any data arrives.
     wireDiscoverArrows(el);
     updateDiscoverArrows(el);
+    var wrap = el.parentElement;
+    wrap.querySelector('.discover-scroll-btn.left').addEventListener('click', function () { scrollDiscoverRow(row.id, -1); });
+    wrap.querySelector('.discover-scroll-btn.right').addEventListener('click', function () { scrollDiscoverRow(row.id, 1); });
     // Mouse drag-to-scroll. The row element outlives every render (only its
     // contents are replaced), so wiring it once here covers the fetched cards.
     WS.dragScroll(el);
