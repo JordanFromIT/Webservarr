@@ -533,7 +533,11 @@ class TicketSendsSurviveAReopen(unittest.TestCase):
     def test_success_clears_only_the_sent_comment(self):
         ok = self.comment_send()
         ok = ok[ok.index(".then(function() {"):ok.index(".catch(")]
-        self.assertIn("if (_commentDrafts[ticket.id] === sent) delete _commentDrafts[ticket.id];", ok)
+        # R172: compared trimmed on both sides, as posted, so a stray space typed
+        # during the send doesn't keep the draft and offer a second send.
+        self.assertIn("var msg = textarea.value.trim();", self.comment_send())
+        self.assertIn("if ((_commentDrafts[ticket.id] || '').trim() === msg) delete _commentDrafts[ticket.id];", ok)
+        self.assertNotIn("var sent", self.comment_send())
         self.assertIn("if (detailShowing(ticket.id)) openDetailModal(ticket.id);", ok)
 
     def test_a_late_new_ticket_success_leaves_a_newer_draft(self):
@@ -544,6 +548,48 @@ class TicketSendsSurviveAReopen(unittest.TestCase):
         self.assertLess(guard, ok.index("closeCreateModal();"))
         self.assertIn("document.getElementById('createDescription').value.trim() === description", ok)
         self.assertIn("showToast('Ticket submitted!', 'success');", ok)
+
+
+class IssueCommentSendsSurviveAReopen(unittest.TestCase):
+    """R173: the ticket pattern (R160, R165, R172) on issue comments. Each
+    issue keeps its unsent comment across a close and reopen; a detail rebuilt
+    while its post is on the way waits for it (no second send); the settle
+    re-enables the box on screen for that issue; a success clears the draft
+    only if its trimmed text is what was sent."""
+
+    def add_comment(self):
+        start = ISSUES.index("async function addComment(issueId) {")
+        return ISSUES[start:ISSUES.index("\n}\n", start)]
+
+    def test_drafts_are_kept_per_issue(self):
+        self.assertIn("var _commentDrafts = {};", ISSUES)
+        render = ISSUES[ISSUES.index("function renderIssueDetail(issue) {"):ISSUES.index("function setCommentBtn(")]
+        self.assertIn("textarea.value = _commentDrafts[issue.id] || '';", render)
+        self.assertIn("_commentDrafts[issue.id] = textarea.value;", render)
+
+    def test_a_rebuilt_box_waits_for_the_pending_post(self):
+        self.assertIn("var _commentSending = {};", ISSUES)
+        render = ISSUES[ISSUES.index("function renderIssueDetail(issue) {"):ISSUES.index("function setCommentBtn(")]
+        self.assertIn('data-issue-id="\' + escapeHtml(String(issue.id)) + \'"', render)
+        self.assertRegex(render, r"hasOwnProperty\.call\(_commentSending, issue\.id\)\) \{\s*"
+                                 r"setCommentBtn\(document\.getElementById\('addCommentBtn'\), true\);")
+        btn = ISSUES[ISSUES.index("function setCommentBtn("):ISSUES.index("async function addComment(")]
+        self.assertIn("btn.disabled = sending;", btn)
+        self.assertIn("btn.textContent = sending ? 'Sending...' : 'Add Comment';", btn)
+
+    def test_the_send_is_guarded_and_settles(self):
+        send = self.add_comment()
+        self.assertTrue(send.split("\n")[1].strip().startswith(
+            "if (Object.prototype.hasOwnProperty.call(_commentSending, issueId)) return;"))
+        self.assertIn("_commentSending[issueId] = message;", send)
+        ok = send[send.index("var resp = await fetch("):send.index("} catch (error) {")]
+        self.assertIn("if ((_commentDrafts[issueId] || '').trim() === message) delete _commentDrafts[issueId];", ok)
+        self.assertIn("if (issueShowing(issueId)) viewIssue(issueId);", ok)
+        failed = send[send.index("} catch (error) {"):send.index("} finally {")]
+        self.assertNotIn("commentMessage", failed)                      # the text stays
+        settle = send[send.index("} finally {"):]
+        self.assertIn("delete _commentSending[issueId];", settle)
+        self.assertIn("live.getAttribute('data-issue-id') === String(issueId)) setCommentBtn(live, false);", settle)
 
 
 class EscapeWaitsForTheInputMethod(unittest.TestCase):

@@ -620,7 +620,22 @@ function setTypeFilter(filter) {
 
 // ---- Issue Detail Modal ----
 
+// Unsent comments, by issue id, for this visit: the detail is rebuilt on every
+// open, so closing it must not throw away what was typed. Cleared once the
+// comment is posted.
+var _commentDrafts = {};
+// Comments on their way, by issue id (the text sent). A detail rebuilt for
+// that issue meanwhile (closed and reopened) waits for it instead of offering
+// a second send.
+var _commentSending = {};
+var _detailIssueId = null;
+
+function issueShowing(issueId) {
+    return !document.getElementById('issueModal').classList.contains('hidden') && _detailIssueId === String(issueId);
+}
+
 async function viewIssue(issueId) {
+    _detailIssueId = String(issueId);
     var modal = document.getElementById('issueModal');
     var content = document.getElementById('modalContent');
     modal.classList.remove('hidden');
@@ -682,21 +697,36 @@ function renderIssueDetail(issue) {
         // Add comment form
         '<div class="border-t border-steel-blue/20 pt-4">' +
             '<textarea id="commentMessage" placeholder="Add a comment..." class="w-full p-3 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm resize-none h-20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"></textarea>' +
-            '<button id="addCommentBtn" onclick="addComment(' + issue.id + ')" class="w-full py-2 mt-2 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all">Add Comment</button>' +
+            '<button id="addCommentBtn" data-issue-id="' + escapeHtml(String(issue.id)) + '" onclick="addComment(' + issue.id + ')" class="w-full py-2 mt-2 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all">Add Comment</button>' +
         '</div>';
+
+    var textarea = document.getElementById('commentMessage');
+    textarea.value = _commentDrafts[issue.id] || '';
+    textarea.addEventListener('input', function() {
+        if (textarea.value) _commentDrafts[issue.id] = textarea.value;
+        else delete _commentDrafts[issue.id];
+    });
+    if (Object.prototype.hasOwnProperty.call(_commentSending, issue.id)) {
+        setCommentBtn(document.getElementById('addCommentBtn'), true);
+    }
+}
+
+function setCommentBtn(btn, sending) {
+    btn.disabled = sending;
+    btn.textContent = sending ? 'Sending...' : 'Add Comment';
+    btn.classList.toggle('opacity-60', sending);
 }
 
 async function addComment(issueId) {
+    if (Object.prototype.hasOwnProperty.call(_commentSending, issueId)) return;
     var message = document.getElementById('commentMessage').value.trim();
     if (!message) {
         showToast('Please enter a comment', 'error');
         return;
     }
 
-    var btn = document.getElementById('addCommentBtn');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span>';
-    btn.classList.add('opacity-60');
+    setCommentBtn(document.getElementById('addCommentBtn'), true);
+    _commentSending[issueId] = message;
 
     try {
         var resp = await fetch('/api/integrations/issues/' + issueId + '/comment', {
@@ -709,15 +739,20 @@ async function addComment(issueId) {
             throw new Error(err.detail || 'Failed to add comment');
         }
 
+        // Newer text typed meanwhile stays; only the sent text is cleared,
+        // compared trimmed as it was posted (a stray space is not new text).
+        if ((_commentDrafts[issueId] || '').trim() === message) delete _commentDrafts[issueId];
         showToast('Comment added!', 'success');
-        // Reload the issue detail
-        viewIssue(issueId);
+        // Reload the issue detail, unless it was closed or another one opened
+        if (issueShowing(issueId)) viewIssue(issueId);
 
     } catch (error) {
         showToast(error.message, 'error');
-        btn.disabled = false;
-        btn.textContent = 'Add Comment';
-        btn.classList.remove('opacity-60');
+    } finally {
+        delete _commentSending[issueId];
+        // The box on screen for this issue may be a rebuilt one.
+        var live = document.getElementById('addCommentBtn');
+        if (live && live.getAttribute('data-issue-id') === String(issueId)) setCommentBtn(live, false);
     }
 }
 

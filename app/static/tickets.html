@@ -784,7 +784,6 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
         if (Object.prototype.hasOwnProperty.call(_commentSending, ticket.id)) return;
         var msg = textarea.value.trim();
         if (!msg) { showToast('Comment cannot be empty', 'error'); return; }
-        var sent = textarea.value;
 
         var formData = new FormData();
         formData.append('message', msg);
@@ -798,8 +797,9 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
         postTicketForm('/api/tickets/' + ticket.id + '/comments', formData, sendBtn)
           .then(function() {
-            // Newer text typed meanwhile stays; only the sent text is cleared.
-            if (_commentDrafts[ticket.id] === sent) delete _commentDrafts[ticket.id];
+            // Newer text typed meanwhile stays; only the sent text is cleared,
+            // compared trimmed as it was posted (a stray space is not new text).
+            if ((_commentDrafts[ticket.id] || '').trim() === msg) delete _commentDrafts[ticket.id];
             showToast('Comment added', 'success');
             if (detailShowing(ticket.id)) openDetailModal(ticket.id); // Refresh detail
           })
