@@ -471,13 +471,20 @@ function installTone(win, player) {
   };
   setHeight();
   audio.addEventListener('loadedmetadata', setHeight);
-  // Autoplay with sound needs a gesture first; muted autoplay does not.
+  // Autoplay needs the tab to have had a click or key press first (a fresh
+  // load often has none): then the tone starts on the first one.
+  function onGesture() {
+    doc.removeEventListener('pointerdown', onGesture, true);
+    doc.removeEventListener('keydown', onGesture, true);
+    audio.play().catch(function (e) { console.warn('[ws-debug] the test tone could not start', e); });
+  }
   const p = audio.play();
   if (p && p.catch) {
     p.catch(function () {
-      audio.muted = true;
-      return audio.play();
-    }).catch(function (e) { console.warn('[ws-debug] the test tone could not start', e); });
+      console.info('[ws-debug] the test tone starts on the first click or key press');
+      doc.addEventListener('pointerdown', onGesture, true);
+      doc.addEventListener('keydown', onGesture, true);
+    });
   }
   state.el = audio;
   return state;
