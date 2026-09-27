@@ -180,6 +180,13 @@ def _build() -> List[SettingDef]:
         _color("theme.color_status_err", "#F87171", "Colour for things that are down"),
         # The sidebar's New! flag: its gradient, outline and glow are all shades of this.
         _color("theme.color_new_flag", "#FFD60A", "Colour of the New! flag in the sidebar"),
+        # Home's CPU, RAM and network gauges. Off (the default), their rings
+        # take the theme's accent; on, each takes its own colour below (the
+        # rings' original cyan, purple and orange).
+        _bool("theme.gauges_colourful", "false", "Give the Home gauges their own colours", public=True),
+        _color("theme.color_gauge_cpu", "#06B6D4", "Colour of the CPU gauge (with colourful gauges on)"),
+        _color("theme.color_gauge_ram", "#A855F7", "Colour of the RAM gauge (with colourful gauges on)"),
+        _color("theme.color_gauge_net", "#F97316", "Colour of the network gauge (with colourful gauges on)"),
         _text("theme.font", "Spline Sans", "Google Font family name", public=True, allow_empty=False,
               max_length=60, pattern=r"[A-Za-z0-9 \-]{1,60}", pattern_hint="Use a Google Font family name"),
         _text("theme.custom_css", "", "Custom CSS added to every page", public=True, max_length=20000),
@@ -346,6 +353,11 @@ def switch_is_off(value: Optional[str]) -> bool:
 # #ws-theme and theme-loader.js all follow this, so a colour added here
 # reaches every page without a second list to update.
 COLOR_KEYS: Tuple[str, ...] = tuple(x.key[len("theme.color_"):] for x in _DEFS if x.type == "color")
+
+# Home's gauges ("cpu", "ram", "net"): each ring paints --ws-gauge-<id>, which
+# the page renderer and theme-loader.js point at the accent, or at the gauge's
+# own colour (--color-gauge-<id>) while theme.gauges_colourful is on.
+GAUGE_IDS: Tuple[str, ...] = ("cpu", "ram", "net")
 
 
 def public_defaults() -> Dict[str, str]:

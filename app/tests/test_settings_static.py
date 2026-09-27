@@ -416,6 +416,7 @@ class Skeletons(unittest.TestCase):
                      "'account-full': !!f.show_simple_auth && u.auth_method === 'simple',",
                      "'account-line': !!f.show_simple_auth && u.auth_method !== 'simple',",
                      "'css-open': !!b.custom_css,",
+                     "'gauges-on': !!b.gauges_colourful,",
                      "'push-ready': !s.push_reason,",
                      "'push-reason': !!s.push_reason",
                      "if (s.push_reason) document.querySelector('[data-skel-when=\"push-reason\"] .skel-text').textContent = s.push_reason;",
@@ -426,7 +427,7 @@ class Skeletons(unittest.TestCase):
             self.assertIn(rule, script)
         # Every state's parts exist, and each page note is needsSetup()'s own words.
         for key in ("plex-hint", "ak-fields-saved", "ak-fields-input", "account-full", "account-line",
-                    "all-off", "css-open", "push-ready", "push-reason"):
+                    "all-off", "css-open", "gauges-on", "push-ready", "push-reason"):
             self.assertIn(f'data-skel-when="{key}"', h, key)
         pages = (STATIC / "js" / "settings" / "pages.js").read_text(encoding="utf-8")
         for key, text in (("kavita", "eBooks needs Kavita. It stays out of the sidebar until Kavita is set up."),

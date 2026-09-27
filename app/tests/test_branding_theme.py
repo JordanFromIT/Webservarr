@@ -29,7 +29,8 @@ except Exception:  # pragma: no cover - the laptop has no FastAPI
     HAVE_APP = False
 
 COLOR_KEYS = ("primary", "secondary", "accent", "text", "text_secondary", "background",
-              "media_movie", "media_tv", "media_book", "status_ok", "status_warn", "status_err", "new_flag")
+              "media_movie", "media_tv", "media_book", "status_ok", "status_warn", "status_err", "new_flag",
+              "gauge_cpu", "gauge_ram", "gauge_net")
 BAD_FONTS = ('Weird"Font', "Foo\\Bar", "not;a font", "Evil\"; @import url(x)", "a" * 61, "", "   ",
              "Font\nName", "Roboto</style>")
 BAD_COLORS = ("#12", "red", "#12345G", "125793", "#1257930", "#125793\n", " #125793", "rgb(1,2,3)", "")

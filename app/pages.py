@@ -33,7 +33,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.config import settings
 from app.database import SessionLocal
 from app.settings_registry import (
-    COLOR_KEYS, PAGE_ADDRESSES, PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order, safe_color, safe_font,
+    COLOR_KEYS, GAUGE_IDS, PAGE_ADDRESSES, PAGE_DEFAULTS, SIDEBAR_PAGE_IDS, normalize_page_order, safe_color,
+    safe_font,
 )
 from app.settings_registry import REGISTRY as _REGISTRY
 from app.utils import identity_email, safe_http_url, same_origin_path
@@ -124,6 +125,11 @@ def theme_style(branding: dict) -> str:
         hexv = safe_color("theme.color_" + key, colors.get(key))
         decls.append(f"--color-{var}:{_rgb(hexv)}")
         decls.append(f"--hex-{var}:{hexv}")
+    # Home's gauge rings: the accent, or with colourful gauges on their own
+    # colours. Decided here, so the first paint is already right.
+    colourful = branding.get("gauges_colourful") is True
+    for g in GAUGE_IDS:
+        decls.append(f"--ws-gauge-{g}:var(--color-{'gauge-' + g if colourful else 'accent'})")
     decls.append(f'--font-display:"{_safe_font(branding.get("font"))}",sans-serif')
     return '<style id="ws-theme">:root{' + ";".join(decls) + "}</style>"
 
@@ -516,7 +522,9 @@ def safe_theme_branding(branding: dict) -> dict:
     """The branding payload with the shipped colours and font: Settings in
     safe colours (/settings?theme=safe), the way back from a theme that made
     it unreadable. The custom CSS stays in the payload (the Appearance
-    skeleton reads it) but the page doesn't apply it (render_html)."""
+    skeleton reads it) but the page doesn't apply it (render_html). So does
+    gauges_colourful, which the skeleton shows the gauge pickers by; the
+    gauge colours it would pick are the shipped ones too."""
     return dict(branding, colors=dict(_DEFAULT_COLORS), font=DEFAULT_FONT)
 
 

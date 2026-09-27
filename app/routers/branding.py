@@ -159,6 +159,10 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         # Every registry colour, in its order (COLOR_KEYS): the palette, the
         # media type accents and the status colours.
         "colors": {key: safe_color("theme.color_" + key, get("theme.color_" + key)) for key in COLOR_KEYS},
+        # Whether Home's gauges wear their own colours (colors.gauge_*) or the
+        # accent. The page renderer and theme-loader.js pick the rings' colour
+        # from it, and the Appearance skeleton shows the gauge pickers by it.
+        "gauges_colourful": get("theme.gauges_colourful") == "true",
         "font": safe_font(get("theme.font")),
         "custom_css": get("theme.custom_css"),
         "features": {

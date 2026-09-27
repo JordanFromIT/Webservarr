@@ -37,6 +37,11 @@ module.exports = {
         "status-ok-text": "var(--ws-status-ok-text)",
         "status-warn-text": "var(--ws-status-warn-text)",
         "status-err-text": "var(--ws-status-err-text)",
+        // Home's gauge rings: the accent, or with colourful gauges on (Settings >
+        // Appearance) each gauge's own colour (theme.css --ws-gauge-*).
+        "gauge-cpu": "rgb(var(--ws-gauge-cpu) / <alpha-value>)",
+        "gauge-ram": "rgb(var(--ws-gauge-ram) / <alpha-value>)",
+        "gauge-net": "rgb(var(--ws-gauge-net) / <alpha-value>)",
       },
       fontFamily: {
         "display": ["var(--font-display)", "sans-serif"],

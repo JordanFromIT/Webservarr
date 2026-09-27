@@ -37,6 +37,16 @@
      entry is a true yellow-gold, and the eBook amber turns orange under a glow. */
   --color-new-flag: 255 214 10;
 
+  /* Home's gauges (Settings > Appearance > Home gauges). Each ring paints
+     --ws-gauge-*: the accent by default, or its own --color-gauge-* colour
+     while colourful gauges are on (the server's #ws-theme picks which). */
+  --color-gauge-cpu: 6 182 212;
+  --color-gauge-ram: 168 85 247;
+  --color-gauge-net: 249 115 22;
+  --ws-gauge-cpu: var(--color-accent);
+  --ws-gauge-ram: var(--color-accent);
+  --ws-gauge-net: var(--color-accent);
+
   --hex-primary: #125793;
   --hex-secondary: #2C6DA1;
   --hex-accent: #4684B0;
@@ -51,6 +61,9 @@
   --hex-status-warn: #FBBF24;
   --hex-status-err: #F87171;
   --hex-new-flag: #FFD60A;
+  --hex-gauge-cpu: #06B6D4;
+  --hex-gauge-ram: #A855F7;
+  --hex-gauge-net: #F97316;
 
   --font-display: "Spline Sans", sans-serif;
 }

@@ -51,6 +51,13 @@
       root.style.setProperty('--hex-' + name, hex);
     });
 
+    // Home's gauge rings (--ws-gauge-*): the accent, or with colourful gauges
+    // on their own colours, as the server's #ws-theme picks them.
+    ['cpu', 'ram', 'net'].forEach(function (g) {
+      root.style.setProperty('--ws-gauge-' + g,
+        data.gauges_colourful === true ? 'var(--color-gauge-' + g + ')' : 'var(--color-accent)');
+    });
+
     // Favicon follows the configured logo, so a rebranded install is branded
     // in the browser tab too. The pages ship a static icon link as well.
     if (data.logo_url) {

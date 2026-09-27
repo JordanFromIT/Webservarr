@@ -1,6 +1,6 @@
 /**
- * Settings > Appearance: colours (with a live preview), status colours, font,
- * custom CSS.
+ * Settings > Appearance: colours (with a live preview), Home's gauge colours,
+ * status colours, font, custom CSS.
  *
  * Contrast guard: as colours change, the pairs the site leans on (PAIRS) are
  * measured with WCAG 2's formula and any that fall short get a plain warning
@@ -44,13 +44,23 @@
     ['theme.color_status_warn', 'Degraded', 'status-warn'],
     ['theme.color_status_err', 'Offline', 'status-err']
   ];
+  // Home's CPU, RAM and network gauges: the accent unless Colourful gauges is
+  // on, then each its own colour. Rings, not words, so the contrast guard
+  // (text, and the New! flag's lettering) doesn't measure them.
+  var GAUGES_ON = 'theme.gauges_colourful';
+  var GAUGES = [
+    ['theme.color_gauge_cpu', 'CPU', 'gauge-cpu'],
+    ['theme.color_gauge_ram', 'RAM', 'gauge-ram'],
+    ['theme.color_gauge_net', 'Network', 'gauge-net']
+  ];
   // Choices offered in the list; any Google Font name can be typed instead.
   var FONTS = ['Spline Sans', 'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat', 'Poppins', 'Nunito',
     'Raleway', 'Source Sans 3', 'Ubuntu', 'Outfit', 'Space Grotesk', 'DM Sans', 'Manrope', 'Plus Jakarta Sans',
     'Sora', 'Lexend', 'Figtree', 'Work Sans', 'Jost', 'Albert Sans', 'Barlow', 'Red Hat Display', 'Rubik',
     'Nunito Sans', 'Cabin', 'Karla', 'Quicksand', 'Exo 2'];
   var KEYS = COLORS.map(function (c) { return c[0]; })
-    .concat(MEDIA.map(function (m) { return m[0]; }), [NEW_FLAG[0]], STATUS.map(function (x) { return x[0]; }),
+    .concat(MEDIA.map(function (m) { return m[0]; }), [NEW_FLAG[0]], [GAUGES_ON],
+      GAUGES.map(function (g) { return g[0]; }), STATUS.map(function (x) { return x[0]; }),
       ['theme.font', 'theme.custom_css']);
   var OTHER = '__other__';
   var TYPING_DELAY = 600;       // ms after the last keystroke before a typed name is fetched
@@ -402,6 +412,25 @@
       fgrid.appendChild(colourField(api, { key: NEW_FLAG[0], label: NEW_FLAG[1], cssVar: NEW_FLAG[2], help: NEW_FLAG[3] }));
       media.body.appendChild(fgrid);
       form.appendChild(media.root);
+
+      var gauges = WSSettings.card('Home gauges');
+      gauges.body.appendChild(api.toggle({ key: GAUGES_ON, label: 'Colourful gauges',
+        help: 'Give the CPU, RAM and network gauges their own colours instead of your theme colour.' }));
+      var ggrid = el('div', 'grid sm:grid-cols-3 gap-5 ' + cls.fieldWidth);
+      GAUGES.forEach(function (g) { ggrid.appendChild(api.color({ key: g[0], label: g[1], cssVar: g[2] })); });
+      gauges.body.appendChild(ggrid);
+      // The pickers show while the switch is on, and never hide while one
+      // holds a change (a refused save lands there) or has focus.
+      function syncGauges() {
+        var dirty = api.dirtyKeys();
+        var open = api.get(GAUGES_ON) === 'true' || ggrid.contains(document.activeElement) ||
+          GAUGES.some(function (g) { return dirty.indexOf(g[0]) >= 0; });
+        ggrid.classList.toggle('hidden', !open);
+      }
+      [GAUGES_ON].concat(GAUGES.map(function (g) { return g[0]; }))
+        .forEach(function (k) { api.onChange(k, syncGauges); });
+      syncGauges();
+      form.appendChild(gauges.root);
 
       var status = WSSettings.card('Status colours', 'The dots and words that show whether your services are working. The words take the colour only when something is wrong.');
       var sgrid = el('div', 'grid sm:grid-cols-3 gap-5 ' + cls.fieldWidth);
