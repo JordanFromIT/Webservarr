@@ -432,12 +432,31 @@ class LoginDrift(unittest.TestCase):
 
     def test_no_new_timers_drive_the_move(self):
         # The rotation interval and the Plex PIN poll; the message clear, the
-        # Plex retry and the form-reveal failsafe. Nothing animates from JS.
+        # Plex retry, the form-reveal failsafe and the preload bound (pinned
+        # below). Nothing animates from JS.
         code = js_code_only(LOGIN)
         self.assertEqual(code.count("setInterval("), 2)
-        self.assertEqual(code.count("setTimeout("), 3)
+        self.assertEqual(code.count("setTimeout("), 4)
         self.assertNotIn("requestAnimationFrame", code)
         self.assertNotIn(".animate(", code)
+
+    def test_a_preload_that_never_settles_releases_the_flight_after_30s(self):
+        # An image request that fires neither onload nor onerror would hold
+        # the single flight for the rest of the page, so each preload is
+        # bounded: one timer inside preload, cleared on either outcome, that
+        # drops the handlers and rejects, so the usual catch/finally releases
+        # the flight. 30s, because loads of 11-25s still deserve to show.
+        m = live_matches(LOGIN, r"function preload\(url\) \{")
+        self.assertEqual(len(m), 1)
+        end = matching_brace(LOGIN, m[0].end() - 1)
+        body = LOGIN[m[0].end():end]
+        armed = live_matches(body, r"var timer = setTimeout\(function\(\) \{\s*img\.onload = img\.onerror = null;\s*reject\(\);\s*\}, 30000\);")
+        self.assertEqual(len(armed), 1)
+        self.assertTrue(live_matches(body, r"img\.onload = function\(\) \{ clearTimeout\(timer\); resolve\(url\); \};"))
+        self.assertTrue(live_matches(body, r"img\.onerror = function\(\) \{ clearTimeout\(timer\); reject\(\); \};"))
+        self.assertLess(armed[0].start(), live_matches(body, r"img\.src = url;")[0].start())
+        # It is the only timer beyond the ones the page always had.
+        self.assertEqual(js_code_only(LOGIN[:m[0].start()] + LOGIN[end:]).count("setTimeout("), 3)
 
     def test_the_card_glass_and_the_form_reveal_are_untouched(self):
         glass = css_rule(LOGIN, ".login-glass-card")

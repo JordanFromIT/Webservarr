@@ -366,12 +366,22 @@ document.addEventListener('DOMContentLoaded', async function() {
             var currentIndex = 0;
             var activeSlide = 'A';
 
-            // Preload an image and return a promise
+            // Preload an image and return a promise. Bounded: a request that
+            // never settles (a stalled connection, a captive portal, a proxy
+            // that buffers forever) would otherwise hold the rotation's
+            // single flight for the rest of the page. 30s is longer than any
+            // load that still deserves to be shown. After the timeout the
+            // handlers are dropped, so a late onload does nothing; the
+            // promise has already settled either way.
             function preload(url) {
                 return new Promise(function(resolve, reject) {
                     var img = new Image();
-                    img.onload = function() { resolve(url); };
-                    img.onerror = function() { reject(); };
+                    var timer = setTimeout(function() {
+                        img.onload = img.onerror = null;
+                        reject();
+                    }, 30000);
+                    img.onload = function() { clearTimeout(timer); resolve(url); };
+                    img.onerror = function() { clearTimeout(timer); reject(); };
                     img.src = url;
                 });
             }
