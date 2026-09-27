@@ -7,9 +7,11 @@
  * 2026-09-27-soft-navigation-design.md, sections 4 and 5.
  *
  * Loaded once, from the sidebar partial, on every shell page. A page is
- * converted when the server rendered #wsPage[data-ws-module]; on a page that
- * is not, the router mounts nothing and writes no history, and every link it
- * takes ends in a full navigation because decide() says "hard" for it.
+ * converted when the server rendered #wsPage[data-ws-module]. On a page that
+ * is not, the router mounts nothing, writes no history and prefetches
+ * nothing, and every link it takes goes straight to a full navigation (after
+ * ws:before-hard-nav), without fetching it first. From a converted page, an
+ * unconverted target also ends in a full navigation: decide() says "hard".
  *
  * Pure rules (importable by Node, no DOM at import time):
  *   qualifies(href, baseHref, attrs)  does the router take this link click (5.1)
@@ -193,6 +195,9 @@ function start() {
   }
 
   function prefetch(a) {
+    // From an unconverted page every click is a full navigation (see go()),
+    // so a prefetched copy would never be used.
+    if (!current) return;
     const conn = navigator.connection;
     if (conn && conn.saveData) return;
     const href = a.getAttribute('href');
@@ -369,7 +374,7 @@ function start() {
 
   // Content may still be growing just after mount; try for a few frames.
   function restoreScroll(y) {
-    if (!y) return;
+    y = y || 0;
     let frames = 0;
     (function step() {
       const el = scroller();
@@ -518,6 +523,7 @@ function start() {
     const was = current;
     if (!was) return;
     was.left = true;
+    was.claim = null;          // a left page claims nothing, even mid-swap
     was.controller.abort();
     if (was.cleanup) {
       const fn = was.cleanup;
@@ -573,17 +579,18 @@ function start() {
         else entry.cleanup = ret;
       }
     } catch (e) {
+      // Left before mount finished: an aborted fetch (or anything else the
+      // abort set off) is the page going away, not a failure.
+      if (entry.left || signal.aborted) return;
       console.error('[router] ' + moduleUrl + ': mount failed', e);
-      if (!entry.left) {
-        // Stop whatever the half-mounted page started; the error state gets a
-        // signal of its own.
-        entry.controller.abort();
-        entry.claim = null;
-        entry.controller = new AbortController();
-        api.current = { url: entry.url, module: moduleUrl, controller: entry.controller };
-        if (entry.cleanup) { runCleanup(entry.cleanup); entry.cleanup = null; }
-        mountError(root, entry);
-      }
+      // Stop whatever the half-mounted page started; the error state gets a
+      // signal of its own.
+      entry.controller.abort();
+      entry.claim = null;
+      entry.controller = new AbortController();
+      api.current = { url: entry.url, module: moduleUrl, controller: entry.controller };
+      if (entry.cleanup) { runCleanup(entry.cleanup); entry.cleanup = null; }
+      mountError(root, entry);
     }
     if (!entry.left) {
       window.dispatchEvent(new CustomEvent('ws:page-mounted', {
@@ -602,9 +609,18 @@ function start() {
     const ctl = fetchCtl = new AbortController();
     const target = new URL(href, location.href);
 
+    // Soft navigation starts only from a converted page (one the router has
+    // mounted). Leaving an unconverted page must unload it: its inline
+    // scripts' timers and listeners would otherwise outlive it. No fetch.
+    if (!current) {
+      fetchCtl = null;
+      await hardNavigate(target.href, token);
+      return;
+    }
+
     // A mounted page may claim an in-page URL (the wiki, spec section 6):
     // the router then only records history.
-    if (current && current.claim) {
+    if (!current.left && current.claim) {
       let claimed = false;
       try { claimed = current.claim(new URL(target.href)) === true; } catch (e) { console.error(e); }
       if (claimed) {
@@ -721,8 +737,10 @@ function start() {
       else history.pushState(st, '', dest.href);
     }
 
-    // 8. A new page starts at the top; Back and Forward restore after mount.
-    if (!opts.pop) scrollToStart();
+    // 8. Every page starts at the top, so none shows the last page's offset
+    //    (on phones the document itself scrolls); Back and Forward then
+    //    restore the saved position, 0 included, after mount.
+    scrollToStart();
 
     // 9. Focus and the announcement.
     const root = document.getElementById('wsPage');
@@ -731,7 +749,7 @@ function start() {
 
     // 10. Mount.
     const mounted = mountPage(mod, moduleUrl, dest).then(function () {
-      if (opts.pop) restoreScroll(opts.scrollY || 0);
+      if (opts.pop) restoreScroll(opts.scrollY);
       else scrollToHash(dest);
     });
     return { mounted: mounted };
