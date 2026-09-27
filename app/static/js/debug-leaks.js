@@ -19,13 +19,18 @@
  *
  * How an item is tied to a page (the leak checker's one judgement), in order:
  *   1. a stack frame in /static/js/pages/<name>.js makes it that page's;
- *   2. else, inside a callback a page created (a listener, a timer or
- *      interval callback, a .then on a page's fetch, at any depth), it is
- *      that page instance's, even when the callback fires after the page
- *      was left: ownership rides the callback, not the clock;
- *   3. else a stack made only of shell scripts makes it the shell's, never a
- *      page's (the router's own prefetch, WS.poll set up by the shell...);
- *   4. else it belongs to whichever page is mounted (page helper scripts).
+ *   2. else, inside a callback a page registered (a listener, a timer or
+ *      interval callback, a requestAnimationFrame callback, a .then / .catch
+ *      / .finally, which also covers Promise.all / allSettled / race / any),
+ *      it is that page instance's, even when the callback fires after the
+ *      page was left: ownership rides the callback, not the clock;
+ *   3. else a stack made only of shell scripts, or with none of the site's
+ *      frames (console, DevTools, an extension), is nobody's page;
+ *   4. else no page can be named (a page helper after a native await, say):
+ *      it is listed at once as page 'unattributed' with its stack, never
+ *      charged to whichever page happens to be mounted. A soak fails on any
+ *      that runs after a page has left. (Before the first page mounts, as on
+ *      an unconverted page, nothing is listed.)
  * A page's item is alive after leave when: a listener not removed, not fired
  * (once), whose own signal is not aborted, and not on an aborted AbortSignal;
  * a timer that neither fired nor was cleared; an interval not cleared; a fetch
@@ -34,12 +39,15 @@
  *
  * Wrapping changes no behaviour a page can see: same return values, same this
  * and arguments, options passed through. To carry ownership, a page's
- * listeners, timer and interval callbacks are registered through a wrapper
- * (removeEventListener with the page's own function still removes it; adding
- * the same function twice still adds it once), and a page's fetch returns a
- * promise that settles as the real one does, one tick later, whose .then /
- * .catch / .finally carry the owner on. Not carried: await continuations,
- * requestAnimationFrame, observers, WebSocket/EventSource, on* properties.
+ * listeners, timer, interval and frame callbacks are registered through a
+ * wrapper (removeEventListener with the page's own function still removes it;
+ * adding the same function twice still adds it once), Promise.prototype.then
+ * wraps the callbacks it is given when a page registers them, and a page's
+ * fetch returns a promise that settles as the real one does, one tick later.
+ * The one known gap: a native await continuation does not go through .then,
+ * so it is not carried (the soak result's note says so for testers). Not
+ * tracked as leaks: requestAnimationFrame, observers, WebSocket/EventSource,
+ * on* properties.
  *
  * Pure parts (importable by Node, no DOM at import time): pageNameOf,
  * ownerOf, createTracker (given a global-like object), runSoak (given deps).
@@ -51,6 +59,9 @@ const PAGE_RE = /\/static\/js\/pages\/([^/]+)\.js$/;
 const FRAME_RE = /([a-z][\w+.-]*:\/\/[^\s()]+?):\d+(?::\d+)?/i;
 const SHELL_IDS = ['desktopSidebar', 'appHeader', 'mobileTopBar', 'wsPlayer'];
 const INTERLEAVE_EVERY = 5;
+const SOAK_NOTE = 'Ownership is carried through .then/.catch/.finally, Promise.all/allSettled/race/any, ' +
+  'timers, intervals, listeners and requestAnimationFrame, but not through a native await: work after ' +
+  'an await in a page helper script (a stack with no pages/*.js frame) shows as "unattributed".';
 
 /* "news" for .../static/js/pages/news.js?v=1 */
 export function pageNameOf(url) {
@@ -58,26 +69,31 @@ export function pageNameOf(url) {
   return path.slice(path.lastIndexOf('/') + 1).replace(/\.js$/, '');
 }
 
-function framesOf(stack) {
+// The site's own frames: not ours (debug-leaks.js), and, when origin is
+// given, not another origin's (a browser extension's content script).
+function framesOf(stack, origin) {
   const out = [];
   String(stack || '').split('\n').forEach(function (line) {
     const m = FRAME_RE.exec(line);
     if (!m) return;
+    if (origin && m[1].indexOf(origin + '/') !== 0) return;
     const path = m[1].replace(/^[a-z][\w+.-]*:\/\/[^/]*/i, '').split(/[?#]/)[0];
     out.push({ line: line, path: path, file: path.slice(path.lastIndexOf('/') + 1) });
   });
   return out.filter(function (f) { return f.file !== SELF_FILE; });
 }
 
-/* { page: name|null, shell } for a creation stack (rules in the header). */
-export function ownerOf(stack, shellFiles) {
+/* { page: name|null, shell } for a creation stack (rules in the header).
+   shell is also true for a stack with none of the site's frames at all: code
+   typed in the console, DevTools, an extension. That is nobody's page. */
+export function ownerOf(stack, shellFiles, origin) {
   const shell = shellFiles || SHELL_FILES;
-  const frames = framesOf(stack);
+  const frames = framesOf(stack, origin);
   for (const f of frames) {
     const m = PAGE_RE.exec(f.path);
     if (m) return { page: m[1], shell: false };
   }
-  return { page: null, shell: frames.length > 0 && frames.every(function (f) { return shell.indexOf(f.file) !== -1; }) };
+  return { page: null, shell: frames.every(function (f) { return shell.indexOf(f.file) !== -1; }) };
 }
 
 // The stack as it reads in a report: no "Error" line, none of our own frames.
@@ -104,10 +120,13 @@ function describe(t, g) {
    g.setInterval, their clears, and g.fetch. opts.stack() returns the creation
    stack (tests pass a fake). Returns the tracker; uninstall() puts the
    originals back. */
+const UNATTRIBUTED = { name: 'unattributed', session: null };
+
 export function createTracker(g, opts) {
   opts = opts || {};
   const shellFiles = opts.shellFiles || SHELL_FILES;
   const stackNow = opts.stack || function () { return new Error().stack || ''; };
+  const origin = opts.origin || null;
   const proto = g.EventTarget.prototype;
   const orig = {
     add: proto.addEventListener, remove: proto.removeEventListener,
@@ -121,6 +140,7 @@ export function createTracker(g, opts) {
 
   let session = null;               // { name, items: Set, closed } of the mounted page
   let ambient = null;               // the owner of the callback running now, if a page's
+  let everStarted = false;          // a page has been mounted in this document
   const left = new Set();           // names of pages started and since left
   const outbox = [];                // leaks for the next stop()
   const reports = [];               // every leak so far
@@ -135,19 +155,31 @@ export function createTracker(g, opts) {
   }
 
   /* Who owns what is being created now (rules 1-4 in the header). Returns
-     null for the shell and for anything while no page is mounted, else
-     { owner: { name, session }, stack, session } for the mounted page
-     instance, or { owner, stack, late: true } for one that is not. */
+     null for the shell (and for anything before the first page mounts),
+     { owner, stack, session } for the mounted page instance, { owner, stack,
+     late: true } for a page instance that is not mounted, or { owner:
+     UNATTRIBUTED, stack, unattributed: true } when no page can be named. */
   function attribute() {
     const stack = stackNow();
-    const o = ownerOf(stack, shellFiles);
+    const o = ownerOf(stack, shellFiles, origin);
     let owner;
     if (o.page) owner = session && session.name === o.page ? { name: o.page, session: session } : { name: o.page, session: null };
     else if (ambient) owner = ambient;
-    else if (o.shell || !session) return null;
-    else owner = { name: session.name, session: session };
+    else if (o.shell || !everStarted) return null;
+    else return { owner: UNATTRIBUTED, stack: stack, unattributed: true };
     if (owner.session && owner.session === session) return { owner: owner, stack: stack, session: session };
     return { owner: owner, stack: stack, late: true };
+  }
+
+  // Work no page can be named for: listed at once, never charged to a page.
+  function unattributedItem(kind, a, detail) {
+    const item = {
+      kind: kind, page: UNATTRIBUTED.name, stack: cleanStack(a.stack), unattributed: true,
+      afterLeave: left.size > 0,
+      detail: detail + ' (no page could be named for it: see the stack)'
+    };
+    report(item);
+    return item;
   }
 
   // Runs fn with owner as the ambient owner, for whatever it creates.
@@ -249,9 +281,10 @@ export function createTracker(g, opts) {
     } catch (e) { plan = null; }
     if (!plan) return orig.add.apply(this, arguments);
 
-    const a = plan.a;
+    const a = plan.a && !plan.a.unattributed ? plan.a : null;
     const rec = { kind: 'listener', type: plan.t, signal: plan.signal, target: weak(target), dead: false };
     const entry = { type: plan.t, listener: listener, capture: plan.capture, rec: rec, wrapper: null, options: options };
+    if (plan.a && plan.a.unattributed) unattributedItem('listener', plan.a, plan.t + ' on ' + describe(target, g));
     let ret;
     if (a) {
       const owner = a.owner;
@@ -314,6 +347,10 @@ export function createTracker(g, opts) {
     if (!a) return orig.setTimeout.apply(this, arguments);
     const args = Array.prototype.slice.call(arguments);
     const detail = 'setTimeout ' + (ms || 0) + ' ms';
+    if (a.unattributed) {
+      unattributedItem('timer', a, detail);
+      return orig.setTimeout.apply(this, arguments);
+    }
     if (a.late) {
       lateItem('timer', a, detail);
       args[0] = bind(a.owner, fn);
@@ -334,10 +371,14 @@ export function createTracker(g, opts) {
   g.setInterval = function setInterval(fn, ms) {
     const a = typeof fn === 'function' ? attribute() : null;
     if (!a) return orig.setInterval.apply(this, arguments);
+    const detail = 'setInterval ' + (ms || 0) + ' ms';
+    if (a.unattributed) {
+      unattributedItem('interval', a, detail);
+      return orig.setInterval.apply(this, arguments);
+    }
     const args = Array.prototype.slice.call(arguments);
     args[0] = bind(a.owner, fn);
     const id = orig.setInterval.apply(this, args);
-    const detail = 'setInterval ' + (ms || 0) + ' ms';
     if (a.late) { lateItem('interval', a, detail); return id; }
     timers.set(id, track('interval', a, { dead: false, detail: detail, id: id }));
     return id;
@@ -351,11 +392,47 @@ export function createTracker(g, opts) {
   g.clearTimeout = function clearTimeout(id) { noteClear(id); return orig.clearTimeout.apply(this, arguments); };
   g.clearInterval = function clearInterval(id) { noteClear(id); return orig.clearInterval.apply(this, arguments); };
 
+  // ---- Promises and frames ----
+  //
+  // Every .then (and so .catch, .finally, and the continuations of
+  // Promise.all / allSettled / race / any, which register through .then)
+  // runs its callbacks with the owner of the code that registered them, as
+  // does a requestAnimationFrame callback. The one gap: a native await
+  // continuation does not go through .then, so it is not carried.
+  const PromiseCtor = g.Promise || Promise;
+  const nativeThen = PromiseCtor.prototype.then;
+  orig.then = nativeThen;
+  orig.raf = g.requestAnimationFrame;
+
+  function ownerNow() {
+    if (ambient) return ambient;
+    const a = attribute();
+    return a && !a.unattributed ? a.owner : null;
+  }
+
+  PromiseCtor.prototype.then = function then(onOk, onErr) {
+    const owner = (typeof onOk === 'function' || typeof onErr === 'function') ? ownerNow() : null;
+    if (!owner) return nativeThen.apply(this, arguments);
+    return nativeThen.call(this,
+      typeof onOk === 'function' ? bind(owner, onOk) : onOk,
+      typeof onErr === 'function' ? bind(owner, onErr) : onErr);
+  };
+
+  if (typeof orig.raf === 'function') {
+    g.requestAnimationFrame = function requestAnimationFrame(fn) {
+      const owner = typeof fn === 'function' ? ownerNow() : null;
+      if (!owner) return orig.raf.apply(this, arguments);
+      const args = Array.prototype.slice.call(arguments);
+      args[0] = bind(owner, fn);
+      return orig.raf.apply(this, args);
+    };
+  }
+
   // ---- fetch ----
   //
   // A page's fetch promise, and every promise its .then / .catch / .finally
-  // make, run their callbacks with the page as owner.
-  const nativeThen = g.Promise ? g.Promise.prototype.then : Promise.prototype.then;
+  // make, run their callbacks with the fetching page as owner, even when the
+  // .then is registered from code no page can be named for.
   function carry(p, owner) {
     Object.defineProperty(p, 'then', {
       configurable: true, writable: true, enumerable: false,
@@ -374,6 +451,10 @@ export function createTracker(g, opts) {
       const p = orig.fetch.apply(this, arguments);
       if (!a) return p;
       const url = typeof input === 'string' ? input : (input && (input.url || input.href)) || String(input);
+      if (a.unattributed) {
+        unattributedItem('fetch', a, 'fetch ' + url);
+        return p;
+      }
       if (a.late) {
         if (wasLeft(a.owner)) afterLeave += 1;
         lateItem('fetch', a, 'fetch ' + url);
@@ -416,6 +497,7 @@ export function createTracker(g, opts) {
       name = String(name);
       left.delete(name);
       session = { name: name, items: new Set(), closed: false };
+      everStarted = true;
     },
     stop: function () {
       if (session) close(session);
@@ -453,6 +535,8 @@ export function createTracker(g, opts) {
       g.setInterval = orig.setInterval;
       g.clearInterval = orig.clearInterval;
       if (orig.fetch) g.fetch = orig.fetch;
+      PromiseCtor.prototype.then = orig.then;
+      if (orig.raf) g.requestAnimationFrame = orig.raf;
     }
   };
 }
@@ -461,7 +545,9 @@ export function createTracker(g, opts) {
    the router. Every fifth round each trip starts a navigation and at once
    another, and only the second may end mounted. Resolves
    { navigations, leaks, heapDelta, listenerDelta, requestsAfterLeave,
-     interruptions, tonePlaying, interleaved, failures }.
+     interruptions, tonePlaying, interleaved, failures, note }.
+   Work no page could be named for ('unattributed' in leaks) that ran after
+   a page had left is also a failure: it is never silent.
    deps: navigate(url), currentUrl(), mounts (array the ws:page-mounted URLs
    are pushed to), isConverted(url), samePage(a, b), tracker, heap(),
    interruptions(), tonePlaying(), sleep(ms).
@@ -531,16 +617,23 @@ export async function runSoak(deps, urls, rounds, opts) {
 
   await deps.sleep(settle);
   const heap = deps.heap();
+  const leaks = deps.tracker.reports.slice(base.reports);
+  leaks.forEach(function (item) {
+    if (item.unattributed && item.afterLeave) {
+      failures.push({ round: null, url: null, reason: 'unattributed ' + item.kind + ' after a page left: ' + item.detail, stack: item.stack });
+    }
+  });
   return {
     navigations: navigations,
-    leaks: deps.tracker.reports.slice(base.reports),
+    leaks: leaks,
     heapDelta: heap === null || base.heap === null ? null : heap - base.heap,
     listenerDelta: deps.tracker.liveListeners() - base.listeners,
     requestsAfterLeave: deps.tracker.requestsAfterLeave - base.afterLeave,
     interruptions: deps.interruptions() - base.interruptions,
     tonePlaying: deps.tonePlaying ? deps.tonePlaying() : null,
     interleaved: interleaved,
-    failures: failures
+    failures: failures,
+    note: SOAK_NOTE
   };
 }
 
@@ -636,7 +729,7 @@ export function install(win, opts) {
   let tracker = null;
   if (flags.indexOf('leaks') !== -1) {
     if (typeof Error.stackTraceLimit === 'number' && Error.stackTraceLimit < 50) Error.stackTraceLimit = 50;
-    tracker = createTracker(win, {});
+    tracker = createTracker(win, { origin: win.location.origin });
     const origFetch = tracker.orig.fetch;
     debug.leaks = {
       start: function (page) { tracker.start(page); },

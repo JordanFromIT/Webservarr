@@ -77,7 +77,11 @@ const stack = (...urls) => 'Error\n' + urls.map((u, i) => `    at f${i} (${u}:${
 check('pageNameOf', dbg.pageNameOf(PAGE) === 'news' && dbg.pageNameOf('/static/js/pages/_debug-throw.js') === '_debug-throw');
 check('owner: page frame below shell frames', eq(dbg.ownerOf(stack(SELF, SHELL, PAGE, ROUTER)), { page: 'news', shell: false }));
 check('owner: shell only', eq(dbg.ownerOf(stack(SELF, ROUTER, SHELL)), { page: null, shell: true }));
-check('owner: the debug module itself is not shell', eq(dbg.ownerOf(stack(SELF)), { page: null, shell: false }));
+check('owner: no site frame at all (console, DevTools) is nobody\'s page', eq(dbg.ownerOf(stack(SELF)), { page: null, shell: true }));
+check('owner: another origin\'s frames (an extension) are ignored',
+  eq(dbg.ownerOf(stack('chrome-extension://abc/content.js', SHELL), null, 'https://host.example'), { page: null, shell: true }) &&
+  eq(dbg.ownerOf(stack('chrome-extension://abc/content.js'), null, 'https://host.example'), { page: null, shell: true }) &&
+  eq(dbg.ownerOf(stack(HELPER), null, 'https://host.example'), { page: null, shell: false }));
 check('owner: a page helper is not shell', eq(dbg.ownerOf(stack(SELF, HELPER, SHELL)), { page: null, shell: false }));
 check('owner: Firefox frames', eq(dbg.ownerOf(`f@${SHELL}:1:2\nmount@${PAGE}:3:4`), { page: 'news', shell: false }));
 check('owner: async frames', eq(dbg.ownerOf(`Error\n    at x (${SHELL}:1:1)\n    at async mount (${PAGE}:3:4)`),
@@ -90,10 +94,13 @@ check('owner: async frames', eq(dbg.ownerOf(`Error\n    at x (${SHELL}:1:1)\n   
 class Target extends EventTarget {}
 class Node2 extends EventTarget { constructor() { super(); this.isConnected = true; } }
 const ORIG_ADD = EventTarget.prototype.addEventListener;
+const ORIG_THEN = Promise.prototype.then;
 const ORIG_REMOVE = EventTarget.prototype.removeEventListener;
 let fetchResolve = [];
 const g = {
-  EventTarget, AbortSignal,
+  EventTarget, AbortSignal, Promise,
+  requestAnimationFrame: (cb) => setTimeout(() => cb(performance.now()), 1),
+  cancelAnimationFrame: (id) => clearTimeout(id),
   setTimeout, clearTimeout, setInterval, clearInterval,
   fetch: function (url) {
     return new Promise((resolve, reject) => fetchResolve.push({ url, resolve, reject }));
@@ -198,14 +205,14 @@ tr.stop();                                           // drop anything the checks
   g.clearTimeout(id);
 }
 
-// No stack frame at all names a page, but the page is mounted: it is the page's.
+// A helper the page calls from mount has the page's frame below it: the page's.
 {
   tr.start('news');
-  nowStack = stack(SELF, HELPER);
+  nowStack = stack(SELF, HELPER, PAGE);
   const t = new Target();
   t.addEventListener('x', () => {});
   const out = tr.stop();
-  check('a helper script\'s listener belongs to the mounted page', out.length === 1 && out[0].page === 'news', out);
+  check('a helper called by the page: its listener is the page\'s', out.length === 1 && out[0].page === 'news', out);
 }
 
 // A page that goes on working after it was left: counted, and reported late.
@@ -322,7 +329,7 @@ tr.stop();                                           // drop anything the checks
 // page was left, from a stack that names no page, is still that page's.
 {
   const later = [];
-  nowStack = stack(SELF, HELPER);                     // news calls a helper
+  nowStack = stack(SELF, HELPER, PAGE);               // news calls a helper
   tr.start('news');
   const before = tr.requestsAfterLeave;
   let fired;
@@ -355,6 +362,114 @@ tr.stop();                                           // drop anything the checks
     eq(wikiOut.map((i) => i.kind).sort(), ['fetch', 'fetch', 'timer', 'timer', 'timer']), wikiOut.map((i) => i.kind));
   check('L2: requestsAfterLeave counts both late fetches', tr.requestsAfterLeave === before + 2, tr.requestsAfterLeave - before);
   later.forEach((id) => g.clearTimeout(id));
+}
+
+// Round 2: Promise aggregates. news fetches twice and joins them from mount;
+// the join's callback runs after news left, from a stack naming no page.
+for (const agg of ['all', 'allSettled', 'race', 'any']) {
+  tr.stop();
+  nowStack = stack(SELF, HELPER, PAGE);
+  tr.start('news');
+  const before = tr.requestsAfterLeave;
+  fetchResolve = [];
+  const f1 = g.fetch('/api/a');
+  const f2 = g.fetch('/api/b');
+  let fired;
+  const ran = new Promise((r) => { fired = r; });
+  Promise[agg]([f1, f2]).then(() => {
+    g.fetch('/api/after-' + agg).catch(() => {});
+    fired();
+  });
+  tr.stop();                                          // news left (its two fetches are its leaks)
+  nowStack = stack(SELF, OTHER);
+  tr.start('wiki');
+  nowStack = stack(SELF, HELPER);
+  fetchResolve[0].resolve('A');
+  fetchResolve[1].resolve('B');
+  await ran;
+  nowStack = stack(SELF, OTHER);
+  const out = tr.stop();
+  check('Promise.' + agg + ': the joined callback\'s fetch is news\'s, late',
+    out.length === 1 && out[0].page === 'news' && out[0].late && out[0].kind === 'fetch', out);
+  check('Promise.' + agg + ': counted in requestsAfterLeave', tr.requestsAfterLeave === before + 1, tr.requestsAfterLeave - before);
+}
+
+// Round 2: a plain promise chain and .catch / .finally registered by the page.
+{
+  tr.stop();
+  nowStack = stack(SELF, HELPER, PAGE);
+  tr.start('news');
+  let go;
+  const gate = new Promise((r) => { go = r; });
+  let done;
+  const ran = new Promise((r) => { done = r; });
+  gate.then(() => { throw new Error('x'); }).catch(() => { g.fetch('/api/caught').catch(() => {}); })
+    .finally(() => { g.fetch('/api/finally').catch(() => {}); done(); });
+  tr.stop();
+  nowStack = stack(SELF, OTHER);
+  tr.start('wiki');
+  nowStack = stack(SELF, HELPER);
+  go();
+  await ran;
+  nowStack = stack(SELF, OTHER);
+  const out = tr.stop();
+  check('then/catch/finally carry the page', out.length === 2 && out.every((i) => i.page === 'news' && i.late), out);
+}
+
+// Round 2: requestAnimationFrame carries the page.
+{
+  tr.stop();
+  nowStack = stack(SELF, HELPER, PAGE);
+  tr.start('news');
+  let done;
+  const ran = new Promise((r) => { done = r; });
+  const id = g.requestAnimationFrame(function (ts) {
+    g.fetch('/api/frame').catch(() => {});
+    done(typeof ts);
+  });
+  check('rAF returns the real id', typeof id === 'number' || (id && typeof id.hasRef === 'function'));
+  tr.stop();
+  nowStack = stack(SELF, OTHER);
+  tr.start('wiki');
+  nowStack = stack(SELF, HELPER);
+  const tsType = await ran;
+  nowStack = stack(SELF, OTHER);
+  const out = tr.stop();
+  check('rAF: the frame callback\'s fetch is news\'s, late', tsType === 'number' && out.length === 1 && out[0].page === 'news' && out[0].late, out);
+}
+
+// Round 2: work no page can be named for is 'unattributed', never another page's.
+{
+  tr.stop();
+  nowStack = stack(SELF, PAGE);
+  tr.start('news');
+  tr.stop();
+  nowStack = stack(SELF, OTHER);
+  tr.start('wiki');
+  const before = tr.requestsAfterLeave;
+  nowStack = stack(SELF, HELPER);                     // e.g. after a native await in a helper
+  g.fetch('/api/who').catch(() => {});
+  const t = g.setTimeout(() => {}, 60000);
+  new Target().addEventListener('z', () => {});
+  nowStack = stack(SELF, OTHER);
+  const out = tr.stop();
+  check('unknown owner: listed as unattributed, with its stack',
+    out.length === 3 && out.every((i) => i.page === 'unattributed' && i.unattributed && i.afterLeave && /news-editor\.js/.test(i.stack)), out);
+  check('unknown owner: never charged to wiki or news', out.every((i) => i.page !== 'wiki' && i.page !== 'news'));
+  check('unknown owner: not a request after leave of any page', tr.requestsAfterLeave === before);
+  g.clearTimeout(t);
+}
+
+// Before any page has mounted, nothing is unattributed (an unconverted page).
+{
+  const g3 = { EventTarget: class extends EventTarget {}, AbortSignal, setTimeout, clearTimeout, setInterval, clearInterval,
+    fetch: () => new Promise(() => {}) };
+  const tr3 = dbg.createTracker(g3, { stack: () => stack(SELF, HELPER) });
+  g3.fetch('/x');
+  const id = g3.setTimeout(() => {}, 60000);
+  check('no page mounted yet: inline and helper work is not listed', tr3.stop().length === 0);
+  g3.clearTimeout(id);
+  tr3.uninstall();
 }
 
 // A callback of the shell stays the shell's even while a page is mounted.
@@ -408,6 +523,7 @@ tr.stop();                                           // drop anything the checks
 
 tr.uninstall();
 check('uninstall restores the originals', g.setTimeout === setTimeout && g.clearInterval === clearInterval &&
+  Promise.prototype.then === ORIG_THEN &&
   EventTarget.prototype.addEventListener === ORIG_ADD && EventTarget.prototype.removeEventListener === ORIG_REMOVE);
 
 // ---- The soak: schedule and result ----
@@ -451,7 +567,8 @@ function fakeDeps(router, extra) {
   check('soak: interleaved every fifth round', res.interleaved === 4, res.interleaved);
   check('soak: ends back on the page', router.url === '/news');
   check('soak: result shape', eq(Object.keys(res).sort(),
-    ['failures', 'heapDelta', 'interleaved', 'interruptions', 'leaks', 'listenerDelta', 'navigations', 'requestsAfterLeave', 'tonePlaying'].sort()), Object.keys(res));
+    ['failures', 'heapDelta', 'interleaved', 'interruptions', 'leaks', 'listenerDelta', 'navigations', 'note', 'requestsAfterLeave', 'tonePlaying'].sort()), Object.keys(res));
+  check('soak: the note names the await gap for testers', /await/.test(res.note) && /unattributed/.test(res.note));
   check('soak: clean run', res.failures.length === 0 && res.leaks.length === 0 && res.listenerDelta === 0 &&
     res.requestsAfterLeave === 0 && res.interruptions === 0 && typeof res.heapDelta === 'number', res);
   // Round 5 on [/news, /, /wiki]: from /news, / then at once /wiki (and the reverse).
@@ -487,6 +604,18 @@ function fakeDeps(router, extra) {
   const res = await dbg.runSoak(deps, ['/news', '/'], 3);
   check('soak: counts only what happened during the soak', res.leaks.length === 3 && res.requestsAfterLeave === 3 &&
     res.listenerDelta === 3 && res.interruptions === 3 && res.heapDelta === null, res);
+}
+
+{
+  const router = fakeRouter();
+  const deps = fakeDeps(router);
+  deps.navigate = (u) => router.navigate(u).then(() => {
+    if (u === '/') deps.tracker.reports.push({ kind: 'fetch', page: 'unattributed', unattributed: true, afterLeave: true, detail: 'fetch /x', stack: 'at h (x.js:1:1)' });
+  });
+  const res = await dbg.runSoak(deps, ['/news', '/'], 2);
+  check('soak: unattributed work after a leave is listed and fails the soak',
+    res.leaks.filter((i) => i.page === 'unattributed').length === 2 &&
+    res.failures.length === 2 && res.failures.every((f) => /unattributed/.test(f.reason) && f.stack), res.failures);
 }
 
 {
