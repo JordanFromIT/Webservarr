@@ -109,12 +109,14 @@ module if the page has one, and torn down on leave.
 
 ### 4.3 Shared scripts
 
-`theme-loader.js`, `auth.js`, `shell.js`, `ui.js`, `notifications.js` and `tour.js` load once with
-the shell and are never re-run. Page modules use them through `window.WS` and their existing
-globals. Page-only helpers that exist today as separate files (`news-editor.js`,
-`wiki-editor.js`, `wiki-categories.js`, `wiki-hook.js`, `kavita-connect.js`, the
-`js/settings/*` modules) are imported by the page module; ES module caching makes the second
-import free.
+`theme-loader.js`, `auth.js`, `shell.js`, `ui.js` and `notifications.js` load once with the shell
+and are never re-run. Page modules use them through `window.WS` and their existing globals.
+Page-only helpers that exist today as separate classic scripts (`news-editor.js`,
+`wiki-editor.js`, `wiki-categories.js`, `wiki-hook.js`, `kavita-connect.js`, `tour.js`, the
+`js/settings/*` files) stay classic scripts, marked `data-ws-page-script` in the page. The router
+loads each one once, the first time a page needs it, and the helper only defines functions at load
+time; the page module calls its init from `mount` with `ctx`. They are not ES-module imports
+because the server's `?v=` cache stamping only reaches URLs in the HTML, not import specifiers.
 
 ### 4.4 Page styles
 
