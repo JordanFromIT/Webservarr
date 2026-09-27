@@ -528,6 +528,10 @@ body { padding-bottom: var(--ws-player-h); }
 /* <html data-shell="hidden">: the page has the whole screen (the reader, a
    full-screen view). The player stays: it is not part of the chrome. The
    drawer needs no rule: only the hidden mobile bar's button opens it. */
+/* The mobile scroll hint sits above a visible player (bottom-6 plus the
+   player's height; 0px while it is hidden, so nothing moves). */
+#scrollDownHint { bottom: calc(1.5rem + var(--ws-player-h)); }
+
 html[data-shell="hidden"] #desktopSidebar,
 html[data-shell="hidden"] #appHeader,
 html[data-shell="hidden"] #mobileTopBar { display: none; }
@@ -850,7 +854,7 @@ html[data-settings-tab="notifications"] [data-settings-panel="notifications"] { 
 .ws-savebar { transition: transform 200ms ease-out, opacity 200ms ease-out; }
 .ws-savebar.is-hidden { transform: translateY(calc(100% + 1.5rem)); opacity: 0; pointer-events: none; }
 /* The mobile scroll hint stays; it moves up while the save bar covers the bottom edge. */
-body.ws-savebar-open #scrollDownHint { bottom: 6rem; }
+body.ws-savebar-open #scrollDownHint { bottom: calc(6rem + var(--ws-player-h)); }
 
 @media (prefers-reduced-motion: reduce) {
   .ws-panel-in, .ws-light-checking { animation: none; }

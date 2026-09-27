@@ -11,13 +11,16 @@
  *   WS.data / WS.user / WS.page   the #ws-data block, parsed by theme-loader.js
  *   WS.ready(fn)                  after DOMContentLoaded (or now)
  *   WS.whenActive(fn)             now, or when a prerendered page is shown
- *   WS.poll(fn, ms) -> stop()     visibility-aware interval, starts when active
+ *   WS.poll(fn, ms, signal) -> stop()
+ *                                 visibility-aware interval, starts when active;
+ *                                 an optional AbortSignal removes its listeners
  *   WS.serviceStatus()            deduplicated /api/integrations/service-status
  *   WS.setHTML(el, html)          innerHTML only when the string changed
  *   WS.wireNav()                  bind per-link behaviour to nav links not yet wired
  *   WS.clearPageCache()           drop prefetched and prerendered pages (sign-out, a settings save)
  *   WS.dropCache(prefix)          forget this user's swr copies whose key starts with prefix
  *   WS.arrive(key, write)         reveal sections top-down, in document order
+ *   WS.arriveReset()              start the order again for a newly mounted page (router.js)
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
  *   WS.dragScroll(el)             mouse drag-to-scroll for a sideways row
  *   WS.dragScroll.stop(el)        end that row's momentum glide (before scrolling it)
@@ -25,6 +28,10 @@
  *                                 soft open and close of a .ws-pop panel (theme.css)
  *   WS.mediaType(type)            { label, icon, accent } for movie/tv/book/audiobook
  *   WS.requestStatus(status)      { label, tone } for a Seerr-style request status
+ *   WS.closeChrome()              close the drawer and every open header menu (before a page swap)
+ *   WS.router                     the soft navigation router, once router.js has loaded
+ *                                 (a module, from the sidebar partial); null before and
+ *                                 on a page without the shell
  *
  * Usage:
  *   <script src="/static/js/auth.js"></script>
@@ -87,20 +94,28 @@
 
   /* setInterval that starts only when the page is on screen, skips ticks in a
      background tab, refreshes when the tab comes back, and refreshes a page
-     restored from the back/forward cache. Returns a stop() function. */
-  function poll(fn, ms) {
+     restored from the back/forward cache. Returns a stop() function.
+     signal (optional): a soft-navigated page's AbortSignal. Its abort stops
+     the interval and removes the listeners, so nothing outlives the page. */
+  function poll(fn, ms, signal) {
     var timer = null;
+    var stopped = false;
+    var opts = signal ? { signal: signal } : undefined;
     function tick() { if (!document.hidden) fn(); }
+    function stop() { stopped = true; if (timer) clearInterval(timer); timer = null; }
+    if (signal && signal.aborted) return stop;
     whenActive(function () {
+      if (stopped) return;
       // Prerendered a while ago: the data is stale the moment it is seen.
       if (performance.now() - initAt > 10000) fn();
       timer = setInterval(tick, ms);
     });
     document.addEventListener('visibilitychange', function () {
       if (!document.hidden && timer) fn();
-    });
-    window.addEventListener('pageshow', function (e) { if (e.persisted && timer) fn(); });
-    return function stop() { if (timer) clearInterval(timer); timer = null; };
+    }, opts);
+    window.addEventListener('pageshow', function (e) { if (e.persisted && timer) fn(); }, opts);
+    if (signal) signal.addEventListener('abort', stop, { once: true });
+    return stop;
   }
 
   // ---- DOM helpers ----
@@ -127,17 +142,21 @@
   // already arrived run at once with no animation - polls use the same path.
   var arr = { order: [], done: {}, queue: {}, gate: false, last: 0, painted: false };
 
+  // Also runs for each page the router mounts (WS.arriveReset): the new
+  // page's sections start their order afresh, and a timer from the page
+  // before is ignored (each run is a generation of its own).
   function arriveInit() {
-    arr.order = Array.prototype.map.call(document.querySelectorAll('[data-arrive]'), function (el) {
+    var run = arr = { order: [], done: {}, queue: {}, gate: false, last: 0, painted: false };
+    run.order = Array.prototype.map.call(document.querySelectorAll('[data-arrive]'), function (el) {
       return el.getAttribute('data-arrive');
     });
     // Ordering is only worth a short wait. Answers that land within this
     // window reveal top-down; anything slower reveals as it comes, so one
     // slow integration never holds the page.
-    setTimeout(function () { arr.gate = true; arriveFlush(); }, 300);
+    setTimeout(function () { if (arr !== run) return; run.gate = true; arriveFlush(); }, 300);
     // Content that is in place before the first frame (a revisit painting
     // from cache) must not fade in - it was never absent.
-    requestAnimationFrame(function () { requestAnimationFrame(function () { arr.painted = true; }); });
+    requestAnimationFrame(function () { requestAnimationFrame(function () { run.painted = true; }); });
   }
 
   function arrive(key, write) {
@@ -286,6 +305,7 @@
   function clearPageCache() {
     // What was prefetched is gone, so the next hover must fetch again.
     prefetchedAt = {};
+    if (window.WS && WS.router && WS.router.clearPrefetch) WS.router.clearPrefetch();
     refreshSpeculation();
     try { if (window.caches) caches.delete(PAGE_CACHE); } catch (e) { /* ignore */ }
     try {
@@ -378,6 +398,17 @@
 
   // ---- Chrome wiring: drawer, menus, logout ----
 
+  // Set by wireChrome: closes the drawer if it is open.
+  var drawerCloser = null;
+
+  /* Before the router swaps a page: a full load used to close these by
+     itself. The header menus (and the bell, notifications.js) each close on
+     a ws:menu-open for any menu but their own; detail null is no menu. */
+  function closeChrome() {
+    if (drawerCloser) drawerCloser();
+    document.dispatchEvent(new CustomEvent('ws:menu-open', { detail: null }));
+  }
+
   function wireChrome() {
     var overlay = document.getElementById('drawerOverlay');
     var panel = document.getElementById('drawerPanel');
@@ -413,6 +444,7 @@
       else hideTimer = setTimeout(function () { hideTimer = null; overlay.classList.add('hidden'); }, 160);
     }
     if (overlay && panel) {
+      drawerCloser = function () { if (overlay.classList.contains('is-open')) closeDrawer(); };
       if (hamburger) hamburger.addEventListener('click', openDrawer);
       if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
       overlay.addEventListener('click', function (e) { if (e.target === overlay) closeDrawer(); });
@@ -439,11 +471,14 @@
       });
     });
 
+    // Sign-out goes through the router when it is there, so ws:before-hard-nav
+    // handlers (a player saving its position) run first.
     document.querySelectorAll('#logoutBtn, [data-logout]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         clearCache();
         clearPageCache();
-        window.location.href = '/auth/logout';
+        if (window.WS && WS.router && WS.router.hardNavigate) WS.router.hardNavigate('/auth/logout');
+        else window.location.href = '/auth/logout';
       });
     });
   }
@@ -703,6 +738,7 @@
     poll: poll,
     setHTML: setHTML,
     arrive: arrive,
+    arriveReset: arriveInit,
     swr: swr,
     getJSON: getJSON,
     serviceStatus: serviceStatus,
@@ -715,7 +751,9 @@
     popClose: popClose,
     popIsOpen: popIsOpen,
     mediaType: mediaType,
-    requestStatus: requestStatus
+    requestStatus: requestStatus,
+    closeChrome: closeChrome,
+    router: null
   };
 
   ready(function () {

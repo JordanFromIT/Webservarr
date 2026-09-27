@@ -13,6 +13,7 @@ module.exports = {
     "./app/static/partials/*.html",
     "./app/static/js/*.js",
     "./app/static/js/settings/*.js",
+    "./app/static/js/pages/*.js",
     "./app/pages.py",
   ],
   darkMode: "class",

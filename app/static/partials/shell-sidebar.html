@@ -89,3 +89,7 @@
   "prefetch":  [{"where": {"selector_matches": "#desktopNav a, #drawerNav a"}, "eagerness": "moderate"}]
 }
 </script>
+
+<!-- Soft navigation (router.js). A module runs after the page is parsed, so
+     shell.js (a classic script at the end of every page) has made window.WS. -->
+<script type="module" src="/static/js/router.js?v=1"></script>

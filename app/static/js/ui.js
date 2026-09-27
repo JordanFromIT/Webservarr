@@ -64,8 +64,14 @@
   // Status colour only on deviation: an error's words, never a success's.
   var TONE_TEXT = { ok: 'text-frosted-blue', err: 'text-status-err-text', info: 'text-frosted-blue' };
   var toastBox = null;
+  var ACTION_BTN = 'shrink-0 -my-1 ml-1 px-3 py-1.5 rounded-lg bg-frosted-blue/[0.08] text-frosted-blue text-xs ' +
+    'font-bold hover:bg-frosted-blue/15 focus-visible:outline focus-visible:outline-2 ' +
+    'focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors';
 
-  function toast(message, tone) {
+  // opts.action: { label, run } adds one button (Retry after a page failed to
+  // open, router.js). Pressing it closes the toast, then runs run(). A toast
+  // with a button stays 4 s longer, so there is time to reach it.
+  function toast(message, tone, opts) {
     tone = TONE_LIGHT[tone] ? tone : 'info';
     var fresh = !toastBox || !toastBox.parentNode;
     if (fresh) {
@@ -82,17 +88,28 @@
     if (tone === 'err') t.setAttribute('role', 'alert');
     t.appendChild(el('span', 'ws-light ' + TONE_LIGHT[tone]));
     t.appendChild(el('span', 'min-w-0', message));
+    var action = opts && opts.action && opts.action.label ? opts.action : null;
+    function remove() { if (t.parentNode) t.parentNode.removeChild(t); }
+    if (action) {
+      var btn = el('button', ACTION_BTN, action.label);
+      btn.type = 'button';
+      btn.addEventListener('click', function () {
+        remove();
+        if (typeof action.run === 'function') action.run();
+      });
+      t.appendChild(btn);
+    }
     var box = toastBox;
     // A live region created in the same moment as its content is often not
     // announced, so the first toast lands a beat after its region exists.
     if (fresh) setTimeout(function () { box.appendChild(t); }, 50);
     else box.appendChild(t);
     setTimeout(function () {
-      if (reducedMotion()) { if (t.parentNode) t.parentNode.removeChild(t); return; }
+      if (reducedMotion()) { remove(); return; }
       t.style.transition = 'opacity 200ms ease-out';
       t.style.opacity = '0';
-      setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 220);
-    }, tone === 'err' ? 6000 : 4000);
+      setTimeout(remove, 220);
+    }, (tone === 'err' ? 6000 : 4000) + (action ? 4000 : 0));
   }
 
   // ---- Dialog ----
