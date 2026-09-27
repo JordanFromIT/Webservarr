@@ -1,9 +1,10 @@
 """
 The shell's motion touches: small, composite-only, and off under reduced motion.
 
-Five touches (soft open/close of menus, the bell panel, the drawer and the
-WSUI dialog; the sidebar highlight gliding between pages; a pixel of lift on
-cards and buttons; the login artwork's slow drift; the live status pill).
+Four touches (soft open/close of menus, the bell panel, the drawer and the
+WSUI dialog; a pixel of lift on cards and buttons; the login artwork's slow
+drift; the live status pill). The sidebar highlight no longer glides: the
+active item switches instantly (NavHighlight pins that).
 Each check pins the code a touch needs, so a cleanup that drops a guard,
 brings a timer back, or puts a palette class on the status pill fails here.
 
@@ -202,15 +203,31 @@ class SoftOpenClose(unittest.TestCase):
 
 
 class NavHighlight(unittest.TestCase):
-    def test_desktop_highlight_is_named_and_the_drawer_copy_is_not(self):
-        self.assertIn("view-transition-name: ws-nav-active",
-                      css_rule(THEME, '#desktopNav a[aria-current="page"]'))
-        self.assertNotRegex(THEME, r"#drawerNav[^{]*\{[^}]*view-transition-name")
-        group = css_rule(THEME, "::view-transition-group(ws-nav-active)")
-        self.assertRegex(group, r"animation-duration:\s*2[0-5]\dms")
-        # One image glides; nothing crossfades or doubles.
-        self.assertIn("display: none", css_rule(THEME, "::view-transition-old(ws-nav-active)"))
-        self.assertIn("animation: none", css_rule(THEME, "::view-transition-new(ws-nav-active)"))
+    """The active nav item switches instantly, as it always did: the sliding
+    highlight was removed at the owner's request (it read as the old page's
+    button moving into the new one's place, and felt laggy). Only the shell
+    itself carries a transition name, which keeps it stationary."""
+
+    SHELL_NAMES = {"#desktopSidebar": "ws-sidebar", "#appHeader": "ws-header",
+                   "#mobileTopBar": "ws-topbar", "main": "ws-content",
+                   ".ws-login-card": "ws-login-card"}
+
+    def test_only_the_shell_and_the_login_card_carry_a_transition_name(self):
+        named = {sel.strip(): name for sel, name in
+                 re.findall(r"([^{}]+)\{\s*view-transition-name:\s*([\w-]+);\s*\}", top_level(THEME))}
+        self.assertEqual(named, self.SHELL_NAMES)
+
+    def test_no_nav_item_carries_a_transition_name(self):
+        css = re.sub(r"/\*.*?\*/", "", THEME, flags=re.S)
+        self.assertNotRegex(css, r"(?i)nav[^{}]*\{[^}]*view-transition-name")
+        self.assertNotIn("ws-nav-active", THEME)
+        for markup in (SIDEBAR, HEADER, SHELL_JS):
+            self.assertNotIn("view-transition", markup)
+            self.assertNotIn("viewTransition", markup)
+
+    def test_the_shell_stays_stationary_across_pages(self):
+        self.assertIn("@view-transition { navigation: auto; }", THEME)
+        self.assertIn("view-transition-name: ws-sidebar", css_rule(THEME, "#desktopSidebar"))
 
     def test_cross_document_transitions_stay_off_under_reduced_motion(self):
         self.assertTrue(any("@view-transition { navigation: none; }" in b for b in reduced_blocks(THEME)))
