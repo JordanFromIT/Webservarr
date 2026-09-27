@@ -277,6 +277,8 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     const user = await checkAuth();
     if (!user) return;
+    _streamsPreview = new URLSearchParams(location.search).get('preview') === 'streams' &&
+        user.is_admin === true && document.documentElement.hasAttribute('data-admin');
 
     if (sectionOn('news')) loadNews();
     if (sectionOn('services')) { loadServices(); loadSystemStats(); }
@@ -496,6 +498,7 @@ var _streamsPerPage = 6;
 // Load active streams from Plex integration
 let _lastStreams = null; // Cache to prevent flicker on transient API failures
 async function loadActiveStreams() {
+    if (_streamsPreview) { renderActiveStreams(sampleStreams()); return; }
     return WS.swr('streams', function () { return WS.getJSON('/api/integrations/active-streams'); }, renderActiveStreams, {
         maxAge: 60 * 1000,
         onError: function (error) {
@@ -508,6 +511,45 @@ async function loadActiveStreams() {
             });
         }
     });
+}
+
+// Admin-only preview, /?preview=streams: three sample streams through the
+// same renderer as real ones, so the card can be looked at with nothing
+// playing. Set in the DOMContentLoaded handler only when the server marked the
+// page for an admin (data-admin on <html>) and the session user is an admin; a
+// member's URL flag does nothing. While it is on, loadActiveStreams (and so the
+// 30s poll) renders the samples and never fetches, so nothing overwrites them.
+var _streamsPreview = false;
+var _sampleStreams = null;
+
+// Sample artwork: a data: SVG drawn from the theme's own colours (a background
+// image can't read CSS variables), never a real poster.
+function sampleArtwork(from, to) {
+    var css = getComputedStyle(document.documentElement);
+    function tone(name) { return 'rgb(' + css.getPropertyValue(name).trim().split(/\s+/).join(',') + ')'; }
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice">' +
+        '<defs><radialGradient id="g" cx="30%" cy="25%" r="90%">' +
+        '<stop offset="0" stop-color="' + tone(from) + '"/><stop offset="1" stop-color="' + tone(to) + '"/>' +
+        '</radialGradient></defs><rect width="160" height="90" fill="url(#g)"/>' +
+        '<circle cx="122" cy="28" r="34" fill="' + tone('--color-text') + '" fill-opacity=".14"/>' +
+        '<circle cx="36" cy="80" r="46" fill="' + tone('--color-background') + '" fill-opacity=".35"/></svg>';
+    return 'data:image/svg+xml,' + encodeURIComponent(svg);
+}
+
+// Generic titles only: this file ships with the template.
+function sampleStreams() {
+    if (!_sampleStreams) {
+        _sampleStreams = [
+            { session_id: 'sample-1', title: 'Sample Movie', year: 2026, decision: 'Direct Play', progress: 35,
+              thumb_url: sampleArtwork('--color-secondary', '--color-primary') },
+            { session_id: 'sample-2', title: 'Sample Show', episode_info: 'S1 E2', decision: 'Transcode', progress: 70,
+              source_quality: '4K', source_height: 2160, stream_quality: '1080p', stream_height: 1080,
+              thumb_url: sampleArtwork('--color-accent', '--color-background') },
+            { session_id: 'sample-3', title: 'Sample Movie Without Artwork', year: 2025, decision: 'Direct Stream', progress: 5,
+              thumb_url: '' }
+        ];
+    }
+    return _sampleStreams;
 }
 
 // A Direct Play card with nothing in it: the shape the skeleton row in
@@ -579,21 +621,22 @@ function renderActiveStreams(streams) {
                 displayTitle = `${title} (${year})`;
             }
 
-            // Transcode warning or play type label
+            // Transcode warning or play type label. Owner exception to R140
+            // (owner request): these words keep the pure status colours, not the -text mixes.
             let playTypeHtml;
             if (isTranscode) {
                 const detailId = `detail-${sessionId || Math.random().toString(36).slice(2)}`;
                 playTypeHtml = `
                     <div>
-                        <span class="text-status-warn-text text-[11px] font-bold">Warning: Not playing at full quality!</span>
-                        <button onclick="document.getElementById('${detailId}').classList.toggle('hidden')" class="text-frosted-blue/70 hover:text-frosted-blue text-[10px] underline cursor-pointer block mt-0.5">More info</button>
-                        <div id="${detailId}" class="hidden mt-1.5 text-[10px] text-frosted-blue/70 leading-relaxed">
+                        <span class="text-status-warn text-[11px] font-bold">Warning: Not playing at full quality!</span>
+                        <button onclick="document.getElementById('${detailId}').classList.toggle('hidden')" class="text-status-warn/70 hover:text-status-warn text-[10px] underline cursor-pointer block mt-0.5">More info</button>
+                        <div id="${detailId}" class="hidden mt-1.5 text-[10px] text-status-warn/80 leading-relaxed">
                             <p>Source file is ${sourceHeight ? sourceHeight + 'p' : escapeHtml(sourceQuality)} but you're streaming at ${streamHeight ? streamHeight + 'p' : escapeHtml(streamQuality)}${sourceQuality === streamQuality ? ' (if these values are the same it means it\'s a lower bitrate)' : ''}</p>
                             <p class="mt-1">Transcoding gives you a lower quality experience, change your Plex app quality setting to "Original" for the best experience.</p>
                         </div>
                     </div>`;
             } else {
-                playTypeHtml = `<span class="text-frosted-blue/70 text-xs font-bold">${escapeHtml(decision)} (Full Quality)</span>`;
+                playTypeHtml = `<span class="text-status-ok text-xs font-bold">${escapeHtml(decision)} (Full Quality)</span>`;
             }
 
             const bgStyle = thumbUrl
@@ -605,6 +648,7 @@ function renderActiveStreams(streams) {
                     <div class="aspect-video relative overflow-hidden">
                         <div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110" style="${bgStyle}"></div>
                         <div class="absolute inset-0 bg-gradient-to-t from-background-dark via-transparent to-transparent"></div>
+                        ${_streamsPreview ? '<span class="absolute top-3 left-3 px-2 py-0.5 rounded-full bg-background-dark/70 text-frosted-blue text-[10px] font-bold uppercase tracking-wider">Sample</span>' : ''}
                         <div class="absolute bottom-4 left-4 right-4">
                             <h4 class="text-lg font-bold text-frosted-blue">${displayTitle}</h4>
                         </div>

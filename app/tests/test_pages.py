@@ -15,7 +15,7 @@ from unittest import mock
 from app import pages
 from app.pages import NAV_ITEMS, PAGE_NAV, asset_stamp, render_html
 from app.routers.branding import build_branding
-from app.tests.test_shell_contract import js_code_only, live_matches, matching_brace
+from app.tests.test_shell_contract import FORBIDDEN_STRINGS, js_code_only, live_matches, matching_brace
 
 def setUpModule():
     # The partials live next to the pages; resolve them relative to this file
@@ -755,3 +755,67 @@ class NewsCardsHoldTheirSkeleton(unittest.TestCase):
                 self.assertEqual(page.count('<p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p>'), cards)
                 self.assertEqual(page.count('<p class="text-sm mt-1 min-h-10">&nbsp;</p>'), cards)
                 self.assertNotIn("<br", page[page.index('<div class="skel rounded-xl p-4'):page.index('<div class="skel rounded-xl p-4') + 600])
+
+
+class StreamsPreview(unittest.TestCase):
+    """Owner request: /?preview=streams shows admins three sample streams on
+    Home, through the same renderer as real ones, and nobody else anything."""
+
+    def setUp(self):
+        self.page = static_text("index.html")
+        self.code = js_code_only(self.page)
+
+    def body_of(self, signature):
+        start = self.page.index(signature)
+        code_start = len(js_code_only(self.page[:start]))
+        open_brace = self.code.index("{", code_start)
+        return self.page[start:start + (matching_brace(self.code, open_brace) - code_start) + 1]
+
+    def test_the_flag_needs_the_url_the_session_admin_and_the_server_mark(self):
+        gate = ("_streamsPreview = new URLSearchParams(location.search).get('preview') === 'streams' &&\n"
+                "        user.is_admin === true && document.documentElement.hasAttribute('data-admin');")
+        self.assertEqual(self.page.count(gate), 1)
+        self.assertEqual(len(live_matches(self.page, r"_streamsPreview = ")), 2)   # the false default and the gate
+        self.assertEqual(len(live_matches(self.page, r"var _streamsPreview = false;")), 1)
+        # Set after the user is known, so a member's session never turns it on.
+        self.assertLess(self.page.index("const user = await checkAuth();"), self.page.index(gate))
+
+    def test_the_server_marks_only_admins(self):
+        self.assertIn(" data-admin", html_tag(render(user=ADMIN)))
+        self.assertNotIn("data-admin", html_tag(render(user=MEMBER)))
+        self.assertNotIn("data-admin", html_tag(render(user=None)))
+
+    def test_samples_go_through_the_real_renderer_and_the_poll_never_fetches(self):
+        loader = self.body_of("async function loadActiveStreams()")
+        self.assertTrue(loader.split("\n")[1].strip().startswith(
+            "if (_streamsPreview) { renderActiveStreams(sampleStreams()); return; }"), loader)
+        self.assertLess(loader.index("_streamsPreview"), loader.index("/api/integrations/active-streams"))
+        # The sample label only shows while the preview is on, laid over the artwork.
+        self.assertIn("${_streamsPreview ? '<span class=\"absolute top-3 left-3 ", self.page)
+
+    def test_three_samples_direct_play_transcode_and_no_artwork(self):
+        samples = self.body_of("function sampleStreams()")
+        self.assertEqual(samples.count("session_id: 'sample-"), 3)
+        self.assertEqual(re.findall(r"decision: '([^']+)'", samples), ["Direct Play", "Transcode", "Direct Stream"])
+        self.assertEqual(re.findall(r"progress: (\d+)", samples), ["35", "70", "5"])
+        self.assertIn("thumb_url: ''", samples)
+        self.assertEqual(re.findall(r"title: '([^']+)'", samples),
+                         ["Sample Movie", "Sample Show", "Sample Movie Without Artwork"])
+
+    def test_sample_data_holds_no_instance_strings_or_real_urls(self):
+        block = self.page[self.page.index("var _streamsPreview = false;"):self.page.index("// A Direct Play card with nothing in it:")]
+        self.assertNotIn("https:", block)
+        self.assertNotIn("/api/", block)
+        self.assertNotIn("/library/", block)          # no Plex artwork path
+        self.assertIn("'data:image/svg+xml,'", block)
+        for i, bad in enumerate(FORBIDDEN_STRINGS):
+            self.assertNotIn(bad.lower(), block.lower(), f"instance-specific string #{i}")
+
+    def test_card_words_use_the_pure_status_colours(self):
+        card = self.body_of("function renderActiveStreams(streams)")
+        for cls in ('text-status-ok text-xs font-bold', 'text-status-warn text-[11px] font-bold',
+                    'text-status-warn/70 hover:text-status-warn', 'text-status-warn/80'):
+            self.assertIn(cls, card)
+        self.assertNotIn("status-ok-text", card)
+        self.assertNotIn("status-warn-text", card)
+
