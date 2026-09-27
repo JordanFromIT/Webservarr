@@ -5,6 +5,7 @@ one included) reads correctly site-wide.
 Run inside the container:
     python -m unittest discover -s /app/app/tests -t /app -v
 """
+import pathlib
 import re
 import unittest
 from unittest import mock
@@ -40,8 +41,19 @@ TEXT_PALETTE = re.compile(r"(?<![\w-])(" + _VARIANTS + r"(?:text|placeholder)-(?
 SURFACE_PALETTE = re.compile(r"(?<![\w-])(" + _VARIANTS + r"(?:bg|border(?:-[trblxy])?|ring|ring-offset|from|via|to|fill|"
                              r"stroke|outline|divide|decoration|caret|accent)-(?:" + PALETTE_NAMES +
                              r")(?:-\d{2,3})?(?:/(?:\d+|\[[\d.]+\]))?)(?![\w-])")
-ARBITRARY_HEX = re.compile(r"(?<![\w-])(" + _VARIANTS + r"(?:text|placeholder|bg|border|ring|from|via|to|fill|stroke|"
-                           r"outline|decoration|shadow)-\[#[0-9a-fA-F]{3,8}\])")
+# Arbitrary values on a colour utility: a hex, an rgb()/hsl() literal (one
+# built on a theme variable, rgb(var(--...)), is fine) or a named colour.
+NAMED_COLOURS = ("red|green|blue|white|black|gray|grey|yellow|orange|purple|pink|brown|cyan|magenta|lime|navy|"
+                 "teal|maroon|olive|silver|gold|aqua|fuchsia|indigo|violet")
+ARBITRARY_COLOUR = re.compile(r"(?<![\w-])(" + _VARIANTS + r"(?:text|placeholder|bg|border(?:-[trblxy])?|ring|ring-offset|"
+                              r"from|via|to|fill|stroke|outline|decoration|shadow|divide|caret|accent)-\[(?:color:)?"
+                              r"(?:#[0-9a-fA-F]{3,8}|(?:rgba?|hsla?)\((?!\s*var\()[^\]]*\)|(?:" + NAMED_COLOURS + r"))\])")
+# A raw colour literal anywhere in markup, page styles, scripts or a router's
+# HTML: a hex, or rgb()/hsl() with numbers in it. A theme variable wrapped in
+# rgb() is not a literal, nor is a hex that is only var()'s fallback.
+# theme.css is not swept: the engine's own defaults live there.
+RAW_COLOUR = re.compile(r"(?<![\w&#/-])(#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![\w-])"
+                        r"|\b(?:rgba?|hsla?)\(\s*[\d.][^)]*\))")
 
 # The only sanctioned exceptions (audit M10): the Plex sign-in buttons wear
 # Plex's own brand colours. Each entry is (file, class, a snippet that marks
@@ -56,9 +68,41 @@ M10_ALLOWED = {
 }
 
 
+# Raw colour literals that are allowed, each by (file, a snippet marking the
+# line, why). Anything else raw fails.
+RAW_ALLOWED = {
+    ("login.html", 'id="plexLoginBtn"', "M10: Plex's brand colours on its sign-in button"),
+    ("login.html", 'id="authentikLoginBtn"', "M10: Plex's brand colours on its sign-in button"),
+    ("reader.html", "light: { bg:", "M10: a reading mode the reader picks for themselves"),
+    ("reader.html", "sepia: { bg:", "M10: a reading mode the reader picks for themselves"),
+    ("reader.html", "dark:  { bg:", "M10: a reading mode the reader picks for themselves"),
+    ("reader.html", "black: { bg:", "M10: a reading mode the reader picks for themselves"),
+    ("reader.html", "True #000 so OLED", "a comment explaining the black reading mode"),
+    ("reader.html", "getPropertyValue('--hex-background') ||", "the shipped default when the theme variable is missing"),
+    ("reader.html", "getPropertyValue('--hex-text') ||", "the shipped default when the theme variable is missing"),
+    ("theme-loader.js", 'e.g. "#125793"', "a comment showing the hex-to-triplet conversion"),
+    ("requests.html", "measured against the button's #125793 fill", "a comment about measured contrast"),
+    ("pages.py", "'#125793' -> '18 87 147'", "a docstring showing the hex-to-triplet conversion"),
+}
+
+
 def swept_files():
     files = sorted(set(STATIC.glob("**/*.html")) | set((STATIC / "js").glob("**/*.js")))
-    return files + [STATIC.parent / "pages.py"]
+    routers = [p for p in sorted((STATIC.parent / "routers").glob("*.py")) if "HTMLResponse" in p.read_text(encoding="utf-8")]
+    return files + [STATIC.parent / "pages.py"] + routers
+
+
+def raw_hits():
+    hits = []
+    for path in swept_files():
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for m in RAW_COLOUR.finditer(line):
+                if re.search(r"var\(--[\w-]+,\s*$", line[:m.start()]):
+                    continue
+                if any(path.name == f and mark in line for f, mark, _why in RAW_ALLOWED):
+                    continue
+                hits.append(f"{path.relative_to(STATIC.parent)}:{n}: {m.group(1)}")
+    return hits
 
 
 def palette_hits(pattern):
@@ -113,6 +157,27 @@ class PlexPopupPageIsThemed(unittest.TestCase):
         self.assertIn("window.location.href = '/login?plex_auth=complete';", body)
         self.assertNotIn("webservarr-custom-css", body)   # none saved, none written
 
+    def test_the_handoff_never_waits_on_a_stylesheet(self):
+        # R148: a pending stylesheet holds back every classic script after it,
+        # so the hand-back script comes before all of them, needs no body
+        # element, and the page loads no web font at all.
+        body = self.fetch({"theme.custom_css": "p { color: inherit; }"}).text
+        handoff = body.index("window.opener.postMessage(")
+        head = body.split("</head>", 1)[0]
+        self.assertLess(handoff, len(head), "the hand-back script is in <head>")
+        for later in ('rel="stylesheet"', "<script src=", "<style", 'id="webservarr-custom-css"'):
+            for m in re.finditer(re.escape(later), body):
+                self.assertLess(handoff, m.start(), later)
+        self.assertNotIn("fonts.googleapis.com", body)
+        self.assertNotIn("fonts.gstatic.com", body)
+        self.assertNotIn("getElementById", body[:handoff + 400])
+
+    def test_it_is_rate_limited(self):
+        from app.routers import plex_auth
+        src = pathlib.Path(plex_auth.__file__).read_text(encoding="utf-8")
+        self.assertRegex(src, r'@router\.get\("/plex-callback-page"\)\n@limiter\.limit\("60/minute"\)\n'
+                              r'async def plex_callback_page\(request: Request\)')
+
 
 @unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
 class RequestStatusNeverMovesThePage(PageRoutesBase):
@@ -145,6 +210,14 @@ class RequestStatusCollapseMarkup(unittest.TestCase):
         rows = load.index("if (!_rows.length)")
         self.assertGreater(load.index("document.documentElement.removeAttribute('data-rs-empty');"), rows)
 
+    def test_the_early_discover_markup_has_no_inline_handlers(self):
+        # R151: scrollDiscoverRow is defined in the last script, so an inline
+        # onclick baked in before it threw a ReferenceError on an early click.
+        self.assertNotIn('onclick="scrollDiscoverRow', REQUESTS)
+        wire = re.search(r"function buildDiscoverSection\(\) \{(.*?)\n\}", REQUESTS, re.S).group(1)
+        self.assertIn("addEventListener('click', function () { scrollDiscoverRow(row.id, -1); })", wire)
+        self.assertIn("addEventListener('click', function () { scrollDiscoverRow(row.id, 1); })", wire)
+
     def test_discover_rows_and_skeletons_are_in_the_first_paint(self):
         # With Request Status collapsed, the discover rows lead the page; built
         # after the page scripts loaded, they pushed everything below down.
@@ -173,6 +246,76 @@ class PageStylesAreInTheHead(unittest.TestCase):
             self.assertIn("<style>", head, name)
             self.assertNotIn("<style", body, name)
 
+
+
+# Bright text is the colour for words on a solid Primary fill. Anywhere else a
+# light theme turns it white on white. These uses sit on Primary without
+# naming bg-primary on the same line; every other use must name it.
+BRIGHT_ON_PRIMARY = {
+    ("tour.js", 'id="tourIcon"', "the tour bubble (.tour-bubble, Primary at .96)"),
+    ("tour.js", 'id="tourTitle"', "the tour bubble"),
+    ("tour.js", 'id="tourSkip"', "the tour bubble"),
+    ("tour.js", 'id="tourBody"', "the tour bubble"),
+    ("tour.js", 'id="tourBack"', "the tour bubble"),
+    ("pages.py", 'subcls="text-bright/80" if active', "the active nav pill (_LINK_ACTIVE, bg-primary)"),
+    ("pages.py", "text-bright font-bold text-3xl", "the logo-fallback tile (size-14 bg-primary)"),
+    ("pages.py", "text-bright text-xl", "the phone bar's logo-fallback tile (size-8 bg-primary)"),
+}
+BRIGHT = re.compile(r"(?<![\w-])(?:[\w:-]+:)?text-bright(?:/\d+)?(?![\w-])")
+ON_PRIMARY = re.compile(r"(?<![\w/-])bg-primary(?![\w/-])")
+
+
+class BrightTextOnlyOnPrimary(unittest.TestCase):
+    """R153: Bright text (text-bright, hover:text-bright) only on a Primary
+    fill; close buttons, pagers and sheets use the theme text colour."""
+
+    def test_every_bright_use_is_on_primary(self):
+        stray = []
+        for path in swept_files():
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if not BRIGHT.search(line) or ON_PRIMARY.search(line):
+                    continue
+                if any(path.name == f and mark in line for f, mark, _where in BRIGHT_ON_PRIMARY):
+                    continue
+                stray.append(f"{path.relative_to(STATIC.parent)}:{n}")
+        self.assertEqual(stray, [])
+
+    def test_the_modal_close_buttons(self):
+        tickets = (STATIC / "tickets.html").read_text(encoding="utf-8")
+        calendar = (STATIC / "calendar.html").read_text(encoding="utf-8")
+        for page, call in ((ISSUES, 'onclick="closeModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
+                           (tickets, 'onclick="closeCreateModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
+                           (tickets, 'onclick="closeDetailModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
+                           (calendar, 'id="closePanelBtn" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue')):
+            self.assertIn(call, page)
+
+
+class BackdropClosesTheModal(unittest.TestCase):
+    """R154: the scrim covers the whole wrapper, so it is the scrim that
+    closes the modal (a click on the wrapper itself can never happen)."""
+
+    def test_the_scrim_closes(self):
+        tickets = (STATIC / "tickets.html").read_text(encoding="utf-8")
+        for page, modal, close in ((ISSUES, "issueModal", "closeModal()"), (tickets, "createModal", "closeCreateModal()"),
+                                   (tickets, "detailModal", "closeDetailModal()")):
+            m = re.search(r'<div id="' + modal + r'" class="([^"]*)"( onclick="[^"]*")?>\n<div class="absolute inset-0 ws-scrim '
+                          r'backdrop-blur-sm" onclick="' + re.escape(close) + r'"></div>', page)
+            self.assertIsNotNone(m, modal)
+            self.assertIsNone(m.group(2), modal + ": the wrapper's own handler could never fire")
+
+
+class HomeAndEbooksDetails(unittest.TestCase):
+    """R150: small Home and eBooks fixes."""
+
+    def test_them(self):
+        home = (STATIC / "index.html").read_text(encoding="utf-8")
+        clamp = "${Math.min(100, Math.max(0, Math.round(progress) || 0))}%"
+        self.assertEqual(home.count(clamp), 2)          # the label and the bar
+        self.assertNotIn("${Math.round(progress)}%", home)
+        self.assertNotIn("generateStatusBars", home)
+        library = (STATIC / "library.html").read_text(encoding="utf-8")
+        self.assertIn("placeholder:text-frosted-blue/70", library)
+        self.assertNotIn("placeholder:text-frosted-blue/60", library)
 
 
 class FormControlsFollowTheTheme(unittest.TestCase):
@@ -210,7 +353,8 @@ class NoPaletteColours(unittest.TestCase):
 
     def test_the_scan_sees_the_whole_site(self):
         names = {p.name for p in swept_files()}
-        for must in ("index.html", "login.html", "shell-sidebar.html", "notifications.js", "kit.js", "pages.py"):
+        for must in ("index.html", "login.html", "shell-sidebar.html", "notifications.js", "kit.js", "pages.py",
+                     "plex_auth.py", "setup.py"):
             self.assertIn(must, names)
 
     def test_the_patterns_catch_what_they_should(self):
@@ -219,7 +363,16 @@ class NoPaletteColours(unittest.TestCase):
             self.assertRegex(" " + bad + " ", TEXT_PALETTE, bad)
         for bad in ("bg-black/80", "from-black", "to-black", "border-red-500/30", "ring-black/60", "hover:bg-black"):
             self.assertRegex(" " + bad + " ", SURFACE_PALETTE, bad)
-        self.assertRegex(" text-[#ff0000] ", ARBITRARY_HEX)
+        for bad in ("text-[#ff0000]", "bg-[red]", "hover:text-[white]", "bg-[rgb(255,0,0)]", "border-[hsl(0_100%_50%)]",
+                    "text-[color:#123]", "ring-[rgba(0,0,0,.5)]"):
+            self.assertRegex(" " + bad + " ", ARBITRARY_COLOUR, bad)
+        for ok in ("ring-[rgb(var(--ws-status-err))]", "text-[13px]", "bg-frosted-blue/[0.04]", "text-[color:var(--x)]"):
+            self.assertNotRegex(" " + ok + " ", ARBITRARY_COLOUR, ok)
+        for bad in ('style="color: #fff"', "color: rgb(255, 0, 0);", "el.style.background = 'hsl(0, 0%, 0%)'",
+                    "background: rgba(0,0,0,0.4)", "#123456"):
+            self.assertRegex(bad, RAW_COLOUR, bad)
+        for ok in ("rgb(var(--color-text) / .6)", 'href="#"', "&#123;", "#rsSection", "#appHeader"):
+            self.assertNotRegex(ok, RAW_COLOUR, ok)
         for ok in ("text-frosted-blue", "text-status-err-text", "bg-background-dark/80", "text-bright",
                    "from-background-dark", "bg-status-ok/10", "shadow-black/40", "text-media-movie"):
             self.assertNotRegex(" " + ok + " ", TEXT_PALETTE, ok)
@@ -231,8 +384,22 @@ class NoPaletteColours(unittest.TestCase):
     def test_no_palette_surface_or_mark(self):
         self.assertEqual(palette_hits(SURFACE_PALETTE), [])
 
-    def test_no_arbitrary_hex_colour(self):
-        self.assertEqual(palette_hits(ARBITRARY_HEX), [])
+    def test_no_arbitrary_colour_value(self):
+        self.assertEqual(palette_hits(ARBITRARY_COLOUR), [])
+
+    def test_no_raw_colour_literal(self):
+        self.assertEqual(raw_hits(), [])
+
+    def test_a_var_fallback_is_not_a_literal(self):
+        self.assertIsNotNone(RAW_COLOUR.search("var(--hex-text, #BEEEF4)"))   # the pattern sees it...
+        self.assertTrue(re.search(r"var\(--[\w-]+,\s*$", "var(--hex-text, "))  # ...and raw_hits skips it
+
+    def test_every_raw_allowance_is_still_needed(self):
+        for f, mark, why in RAW_ALLOWED:
+            path = next(p for p in swept_files() if p.name == f)
+            line = next((l for l in path.read_text(encoding="utf-8").splitlines() if mark in l), None)
+            self.assertIsNotNone(line, f"{f}: {mark!r} no longer exists ({why})")
+            self.assertRegex(line, RAW_COLOUR, f"{f}: {mark!r} has no raw colour any more ({why})")
 
     def test_the_allowlist_is_only_the_m10_buttons(self):
         login = (STATIC / "login.html").read_text(encoding="utf-8")
