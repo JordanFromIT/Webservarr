@@ -106,7 +106,7 @@ Anything else, use <a href="/tickets" class="text-frosted-blue underline hover:n
 <div class="relative mb-4">
 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-xl">search</span>
 <input id="searchInput" type="text" placeholder="Search for the movie or show..."
-  class="w-full pl-10 pr-4 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/60 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm"/>
+  class="w-full pl-10 pr-4 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm"/>
 </div>
 
 <!-- Search Results (compact list) -->
@@ -155,7 +155,7 @@ Anything else, use <a href="/tickets" class="text-frosted-blue underline hover:n
 <!-- Description -->
 <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-2">Description</p>
 <textarea id="issueMessage" placeholder="Tell us what happened (e.g. 'Audio is out of sync in Season 1, Episode 3')..."
-  class="w-full p-3 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/60 text-sm resize-none h-24 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"></textarea>
+  class="w-full p-3 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm resize-none h-24 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"></textarea>
 
 <!-- Submit -->
 <button id="submitIssueBtn" onclick="submitIssue()" class="w-full py-2.5 mt-3 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all">
@@ -681,7 +681,7 @@ function renderIssueDetail(issue) {
         '</div>' +
         // Add comment form
         '<div class="border-t border-steel-blue/20 pt-4">' +
-            '<textarea id="commentMessage" placeholder="Add a comment..." class="w-full p-3 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/60 text-sm resize-none h-20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"></textarea>' +
+            '<textarea id="commentMessage" placeholder="Add a comment..." class="w-full p-3 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm resize-none h-20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"></textarea>' +
             '<button id="addCommentBtn" onclick="addComment(' + issue.id + ')" class="w-full py-2 mt-2 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all">Add Comment</button>' +
         '</div>';
 }
@@ -720,6 +720,13 @@ async function addComment(issueId) {
         btn.classList.remove('opacity-60');
     }
 }
+
+// Escape closes the issue detail, like every other overlay. A WSUI dialog
+// answers its own Escape first; the check is the belt to that.
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape' || document.querySelector('.ws-dialog')) return;
+    if (!document.getElementById('issueModal').classList.contains('hidden')) closeModal();
+});
 
 function closeModal() {
     document.getElementById('issueModal').classList.add('hidden');

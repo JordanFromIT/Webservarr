@@ -304,6 +304,64 @@ class BackdropClosesTheModal(unittest.TestCase):
             self.assertIsNone(m.group(2), modal + ": the wrapper's own handler could never fire")
 
 
+TICKETS = (STATIC / "tickets.html").read_text(encoding="utf-8")
+
+
+def js_function(src, head):
+    """The body of the function assigned or declared with this head."""
+    start = src.index(head)
+    m = re.compile(r"\n  \};?\n").search(src, start)
+    return src[start:m.end()]
+
+
+class TicketDraftsSurvive(unittest.TestCase):
+    """R160: a tap outside a ticket modal closes it (R154), so it must not
+    throw away what was typed. The new-ticket form keeps its fields until a
+    successful submit, and each ticket keeps its unsent comment."""
+
+    def test_opening_the_form_keeps_the_draft(self):
+        opener = js_function(TICKETS, "window.openCreateModal = function() {")
+        self.assertNotIn(".value = ''", opener)
+        self.assertNotIn("resetCreateForm", opener)
+
+    def test_only_a_successful_submit_clears_it(self):
+        reset = js_function(TICKETS, "function resetCreateForm() {")
+        for field in ("createTitle", "createDescription", "createImage"):
+            self.assertIn(f"document.getElementById('{field}').value = ''", reset)
+        submit = js_function(TICKETS, "window.submitNewTicket = function() {")
+        ok = submit[submit.index(".then(function() {"):submit.index(".catch(")]
+        self.assertIn("resetCreateForm();", ok)
+        self.assertEqual(TICKETS.count("resetCreateForm();"), 1)
+
+    def test_comment_drafts_are_kept_per_ticket(self):
+        self.assertIn("var _commentDrafts = {};", TICKETS)
+        self.assertIn("textarea.value = _commentDrafts[ticket.id] || '';", TICKETS)
+        self.assertIn("_commentDrafts[ticket.id] = textarea.value;", TICKETS)
+        posted = TICKETS[TICKETS.index("postTicketForm('/api/tickets/' + ticket.id + '/comments'"):]
+        ok = posted[posted.index(".then(function() {"):posted.index(".catch(")]
+        self.assertIn("delete _commentDrafts[ticket.id];", ok)
+
+
+class EscapeClosesTheModals(unittest.TestCase):
+    """R161: Escape closes the issue and ticket modals like every other
+    overlay: only the topmost, and never under a WSUI dialog."""
+
+    def test_issues(self):
+        m = re.search(r"document\.addEventListener\('keydown', function\(e\) \{(.*?)\n\}\);", ISSUES, re.S)
+        self.assertIsNotNone(m)
+        self.assertIn("e.key !== 'Escape' || document.querySelector('.ws-dialog')", m.group(1))
+        self.assertIn("closeModal()", m.group(1))
+
+    def test_tickets_topmost_first(self):
+        m = re.search(r"document\.addEventListener\('keydown', function\(e\) \{(.*?)\n  \}\);", TICKETS, re.S)
+        self.assertIsNotNone(m)
+        body = m.group(1)
+        self.assertIn("e.key !== 'Escape' || document.querySelector('.ws-dialog')", body)
+        order = [body.index(c) for c in ("closeLightbox()", "closeDetailModal()", "closeCreateModal()")]
+        self.assertEqual(order, sorted(order))
+        self.assertEqual(body.count("else if"), 2)   # one overlay per key press
+
+
 class HomeAndEbooksDetails(unittest.TestCase):
     """R150: small Home and eBooks fixes."""
 
@@ -338,7 +396,7 @@ class FormControlsFollowTheTheme(unittest.TestCase):
         self.assertIn("--tw-ring-color: rgb(var(--color-primary))", focus)
         self.assertIn("--tw-ring-offset-color: rgb(var(--color-background))", focus)
         self.assertIn("color: rgb(var(--color-primary))", self.rule("input:where([type='checkbox'], [type='radio'])"))
-        self.assertIn("color: rgb(var(--color-text) / .6)", self.rule("input::placeholder, textarea::placeholder"))
+        self.assertIn("color: rgb(var(--color-text) / .7)", self.rule("input::placeholder, textarea::placeholder"))
 
     def test_the_preference_toggles_hide_the_plugin_border(self):
         notif = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")

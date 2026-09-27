@@ -17,7 +17,7 @@
 
   var cls = {
     input: 'w-full rounded-[10px] bg-frosted-blue/[0.04] border border-frosted-blue/10 px-3.5 py-2.5 ' +
-      'text-[15px] text-frosted-blue placeholder:text-frosted-blue/60 focus:outline-none focus:ring-2 ' +
+      'text-[15px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 ' +
       'focus:ring-primary focus:border-transparent transition-colors disabled:opacity-50',
     label: 'block text-[13px] font-semibold text-frosted-blue/70 mb-1.5',
     help: 'text-[13px] text-frosted-blue/60 mt-1.5',

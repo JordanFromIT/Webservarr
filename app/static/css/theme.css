@@ -88,7 +88,7 @@ input:where([type='checkbox'], [type='radio']) {
   color: rgb(var(--color-primary));
   border-color: rgb(var(--color-accent) / .5);
 }
-input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .6); }
+input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); }
 
 /* An icon is one glyph, one em wide. Until the icon font arrives, its name
  * ("notifications") is laid out as a word in the fallback font (display=block

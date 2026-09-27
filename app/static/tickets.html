@@ -26,7 +26,7 @@
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Title</label>
 <input id="createTitle" type="text" maxlength="200" placeholder="What do you need help with?"
-  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/60 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"/>
+  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"/>
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Category</label>
 <select id="createCategory"
@@ -45,7 +45,7 @@ If this is about one specific movie or show, <a href="/issues" class="text-frost
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Description</label>
 <textarea id="createDescription" rows="4" placeholder="Give us the details — what you tried, what happened, and which device you were on."
-  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/60 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"></textarea>
+  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"></textarea>
 
 <label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Screenshot (optional)</label>
 <input id="createImage" type="file" accept="image/png,image/jpeg,image/webp"
@@ -474,13 +474,21 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
   // ---- Create ticket ----
 
+  // A tap outside the card closes it (the scrim), so what was typed stays
+  // until the ticket is actually sent: opening again shows the draft, and only
+  // a successful submit clears the form.
   window.openCreateModal = function() {
     document.getElementById('createModal').classList.remove('hidden');
+  };
+
+  function resetCreateForm() {
     document.getElementById('createTitle').value = '';
     document.getElementById('createDescription').value = '';
-    document.getElementById('createCategory').value = 'media_request';
+    var cat = document.getElementById('createCategory');
+    cat.value = 'media_request';
+    cat.dispatchEvent(new Event('change'));   // the playback hint follows the category
     document.getElementById('createImage').value = '';
-  };
+  }
 
   window.closeCreateModal = function() {
     document.getElementById('createModal').classList.add('hidden');
@@ -511,6 +519,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
     postTicketForm('/api/tickets', formData, btn)
       .then(function() {
+        resetCreateForm();
         closeCreateModal();
         showToast('Ticket submitted!', 'success');
         loadTickets();
@@ -521,6 +530,11 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
   };
 
   // ---- Ticket detail modal ----
+
+  // Unsent comments, by ticket id, for this visit: the comment box is rebuilt
+  // on every open, so a tap outside the card must not throw away what was
+  // typed. Cleared once the comment is posted.
+  var _commentDrafts = {};
 
   window.openDetailModal = function(ticketId) {
     document.getElementById('detailModal').classList.remove('hidden');
@@ -731,7 +745,12 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
       textarea.id = 'commentInput';
       textarea.placeholder = 'Write a comment...';
       textarea.rows = 3;
-      textarea.className = 'w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/60 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-2';
+      textarea.value = _commentDrafts[ticket.id] || '';
+      textarea.addEventListener('input', function() {
+        if (textarea.value) _commentDrafts[ticket.id] = textarea.value;
+        else delete _commentDrafts[ticket.id];
+      });
+      textarea.className = 'w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-2';
 
       var fileInput = document.createElement('input');
       fileInput.type = 'file';
@@ -756,6 +775,7 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
         postTicketForm('/api/tickets/' + ticket.id + '/comments', formData, sendBtn)
           .then(function() {
+            delete _commentDrafts[ticket.id];
             showToast('Comment added', 'success');
             openDetailModal(ticket.id); // Refresh detail
           })
@@ -777,6 +797,18 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
     document.getElementById('lightbox').classList.remove('hidden');
     document.getElementById('lightbox').classList.add('flex');
   };
+
+  // Escape closes the topmost of this page's overlays: the image lightbox,
+  // then the ticket, then the new-ticket form. A WSUI dialog (the delete
+  // confirmation) answers its own Escape first and stops it reaching here;
+  // the check below is the belt to that.
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape' || document.querySelector('.ws-dialog')) return;
+    var shown = function(id) { return !document.getElementById(id).classList.contains('hidden'); };
+    if (shown('lightbox')) closeLightbox();
+    else if (shown('detailModal')) closeDetailModal();
+    else if (shown('createModal')) closeCreateModal();
+  });
 
   window.closeLightbox = function() {
     document.getElementById('lightbox').classList.add('hidden');
