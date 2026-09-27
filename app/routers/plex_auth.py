@@ -400,23 +400,29 @@ async def plex_callback(
 
 
 @router.get("/plex-callback-page")
+@limiter.limit("60/minute")
 async def plex_callback_page(request: Request):
     """
     Landing page after Plex auth redirect.
     If opened in a popup: sends postMessage to opener and closes.
     If opened as redirect (no opener): redirects to login page.
 
-    It shows for a moment inside the popup, so it wears the site's theme like
-    every other page: the operator's colours and font inline in <head> (the
-    same #ws-theme / #ws-data the page renderer writes), theme.css, and the
-    custom CSS last. Only public branding is used (no one is signed in yet).
+    It shows for a moment inside the popup, so it wears the site's colours
+    like every other page: the same #ws-theme / #ws-data the page renderer
+    writes, theme.css, and the custom CSS last. Only public branding is used
+    (no one is signed in yet).
+
+    The hand-back script is the first thing in <head>, ahead of every
+    stylesheet and script: a pending stylesheet holds back the classic scripts
+    after it, so a slow stylesheet host must never be able to keep the popup
+    open. For the same reason the page loads no web font; it is on screen for
+    a moment and the display font's fallback is fine.
     """
     from app import pages
 
     branding, _flags = pages.load_context(False)
     head = "\n".join([
         pages.theme_style(branding),
-        pages.font_links(branding),
         pages.data_block(branding, None, settings.app_version or "dev", "plex-callback"),
     ])
     custom_css = pages.custom_css_style(branding)
@@ -437,6 +443,14 @@ async def plex_callback_page(request: Request):
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Signing in</title>
+<script>
+if (window.opener) {{
+    window.opener.postMessage({{type: 'plex-auth-complete'}}, {app_origin_js});
+    window.close();
+}} else {{
+    window.location.href = '/login?plex_auth=complete';
+}}
+</script>
 {head}
 <script src="/static/js/theme-loader.js"></script>
 <link href="/static/css/theme.css" rel="stylesheet">
@@ -450,14 +464,6 @@ body {{ display: flex; align-items: center; justify-content: center; padding: 1r
 </head>
 <body>
 <p>Signing you in&hellip;</p>
-<script>
-if (window.opener) {{
-    window.opener.postMessage({{type: 'plex-auth-complete'}}, {app_origin_js});
-    window.close();
-}} else {{
-    window.location.href = '/login?plex_auth=complete';
-}}
-</script>
 </body>
 </html>"""
     return HTMLResponse(content=html)
