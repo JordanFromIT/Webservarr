@@ -96,7 +96,10 @@ _CSS_DECL = re.compile(r"(?i)(?:^|[\s;{\"'`(])(?:" + _COLOUR_PROPS + r"|--[\w-]+
 _JS_STYLE = re.compile(r"(?i)\.style\.(?:" + _JS_COLOUR_PROPS + r")\s*=\s*([\"'`])(.*?)\1")
 _SET_PROPERTY = re.compile(r"(?i)setProperty\(\s*([\"'])([\w-]+)\1\s*,\s*([\"'])(.*?)\3")
 _TW_PROPERTY = re.compile(r"(?i)\[(?:" + _COLOUR_PROPS + r"|--[\w-]+):([^\]]*)\]")
-_COLOUR_WORD = re.compile(r"(?i)(?<![A-Za-z0-9-])(" + NAMED_COLOURS + r")(?![A-Za-z0-9-])")
+_COLOUR_WORD = re.compile(r"(?i)(?<![\w-])(" + NAMED_COLOURS + r")(?![\w-])")
+# In a Tailwind arbitrary property `_` stands for a space ([border:1px_solid_red]),
+# except inside url(); everywhere else it is part of a name (dark_red_texture.png).
+_TW_SPACES = re.compile(r"(?i)url\([^)]*\)|_")
 _COLOURISH_PROP = re.compile(r"(?i)^(?:--.*|.*(?:color|background|fill|stroke|shadow|border|outline).*)$")
 
 
@@ -123,14 +126,17 @@ def named_colour_hits(line):
     for m in _SET_PROPERTY.finditer(line):
         if _COLOURISH_PROP.match(m.group(2)):
             spans.append(m.span(4))
-    for m in _TW_PROPERTY.finditer(line):
-        spans.append(m.span(1))
     for m in re.finditer(r"(?i)color-mix\(", line):
         spans.append(_balanced(line, m.end() - 1))
     found = {}
     for a, b in spans:
         for w in _COLOUR_WORD.finditer(line, a, b):
             found[w.start()] = w.group(1)
+    for m in _TW_PROPERTY.finditer(line):
+        a = m.start(1)
+        value = _TW_SPACES.sub(lambda u: " " if u.group(0) == "_" else u.group(0), m.group(1))
+        for w in _COLOUR_WORD.finditer(value):
+            found[a + w.start()] = w.group(1)
     return [found[k] for k in sorted(found)]
 
 
@@ -723,14 +729,18 @@ class NoPaletteColours(unittest.TestCase):
                            ("root.setProperty('--glow', 'gold')", ["gold"]),
                            # Tailwind arbitrary properties
                            ('class="[color:crimson]"', ["crimson"]), ('<b class="p-2 [background:cornflowerblue]">', ["cornflowerblue"]),
-                           ('class="[border:1px_solid_red]"', ["red"]), ('class="[--ring:navy]"', ["navy"])):
+                           ('class="[border:1px_solid_red]"', ["red"]), ('class="[--ring:navy]"', ["navy"]),
+                           ('class="[box-shadow:0_0_4px_gold]"', ["gold"])):
             self.assertEqual(named_colour_hits(bad), words, bad)
         for ok in ("var(--x, #fff)", "requested", "border-radius: 8px", "<p>the red carpet</p>", "color: transparent",
                    "color: currentColor", "color: rgb(var(--color-text) / .7)", "background: linear-gradient(to right, x)",
                    '<span class="text-bright">Red Dawn</span>', "status: 'declined'",
                    "title: 'Orange is the New Black'", "white-space: nowrap", "border-color: transparent",
                    "color: var(--x)", "--color-red-flag: 1", "color-mix(in srgb, rgb(var(--a)) 25%, rgb(var(--b)))",
-                   "setProperty('--color-' + k, rgb)", "class=\"[width:12px]\"", "el.style.width = '10px'"):
+                   "setProperty('--color-' + k, rgb)", "class=\"[width:12px]\"", "el.style.width = '10px'",
+                   # R171: `_` is part of a name outside a Tailwind arbitrary property
+                   "background: url(/static/img/dark_red_texture.png)", "--hero: url(/img/navy_blue.jpg);",
+                   'class="[background:url(/img/dark_red.png)]"'):
             self.assertEqual(named_colour_hits(ok), [], ok)
         # raw_line_hits reports them too
         self.assertEqual(raw_line_hits("x.html", '<p style="color: red; background: color-mix(in srgb, blue 50%, white)">'),
