@@ -612,6 +612,29 @@
     applyToggleStyle(toggleEl, on);
   }
 
+  /** A browser push-service subscribe and the save that follows it can hang
+   *  as well as fail. The Home card has already gone by then (it leaves on
+   *  the grant), so a hang must end in a rejection the failure path can show,
+   *  or the card would never come back. */
+  var SUBSCRIBE_TIMEOUT_MS = 15000;
+  var SAVE_TIMEOUT_MS = 10000;
+
+  /** promise, or a rejection with `reason` after ms. A result that arrives
+   *  after the deadline is dropped quietly: the next page's re-sync saves a
+   *  late subscription, and a retry reuses it. */
+  function withTimeout(promise, ms, reason) {
+    return new Promise(function(resolve, reject) {
+      var timer = setTimeout(function() { reject(new Error(reason)); }, ms);
+      Promise.resolve(promise).then(function(value) {
+        clearTimeout(timer);
+        resolve(value);
+      }, function(err) {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
   /** serviceWorker.ready never rejects; if the worker never activates it just
    *  never resolves, so give up after a while with a reason the UI can show. */
   function swReady() {
@@ -649,7 +672,7 @@
   }
 
   function sendSubscription(subJSON) {
-    return fetch('/api/notifications/push-subscribe', {
+    return withTimeout(fetch('/api/notifications/push-subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -659,7 +682,7 @@
           auth: subJSON.keys.auth
         }
       })
-    }).then(function(resp) {
+    }), SAVE_TIMEOUT_MS, 'save-timeout').then(function(resp) {
       if (resp.ok) return;
       return resp.json().catch(function() { return {}; }).then(function(body) {
         var err = new Error('subscribe-failed');
@@ -702,10 +725,10 @@
       }
       var stale = existing ? existing.unsubscribe() : Promise.resolve();
       return stale.then(function() {
-        return reg.pushManager.subscribe({
+        return withTimeout(reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(vapidKey)
-        });
+        }), SUBSCRIBE_TIMEOUT_MS, 'subscribe-timeout');
       }).then(function(subscription) {
         return { subscription: subscription, created: true };
       });
@@ -932,10 +955,15 @@
   }
 
   /** A failure reported after the card has gone: the site's toast, or, on a
-   *  page without ui.js, the card's own message line. */
+   *  page without ui.js, the card's own message line. Returns false in that
+   *  second case, when the caller must bring the card back for it to be seen. */
   function promptFailure(msg, text) {
-    if (window.WSUI && typeof window.WSUI.toast === 'function') WSUI.toast(text, 'err');
-    else msg.textContent = text;
+    if (window.WSUI && typeof window.WSUI.toast === 'function') {
+      WSUI.toast(text, 'err');
+      return true;
+    }
+    msg.textContent = text;
+    return false;
   }
 
   function initPushPrompt() {
@@ -969,7 +997,13 @@
         if (kind === 'dismissed' || kind === 'noEmail' || kind === 'unconfigured') {
           rememberPromptDismissed(card);
           hidePushPrompt(card);
-          if (gone) promptFailure(msg, PUSH_MESSAGES[kind]);   // it left looking like a yes
+          // It left looking like a yes, so say why. With no toast to say it
+          // in, the card comes back to carry the message, buttons usable.
+          if (gone && !promptFailure(msg, PUSH_MESSAGES[kind])) {
+            setPromptBusy(enableBtn, false);
+            laterBtn.disabled = false;
+            showPushPrompt(card);
+          }
           return;
         }
         console.error('Push subscription error:', err);

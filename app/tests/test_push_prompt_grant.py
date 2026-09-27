@@ -79,6 +79,38 @@ class PushPromptLeavesOnGrant(unittest.TestCase):
         # The toast lives in ui.js, which Home now loads.
         self.assertIn('<script src="/static/js/ui.js?v=1"></script>', read("index"))
 
+    def test_subscribe_and_save_are_time_bounded(self):
+        # R184: the card has gone by the time these run, so a hang must end in
+        # a rejection the failure path can show.
+        self.assertRegex(SRC, r"var SUBSCRIBE_TIMEOUT_MS = 15000;")
+        self.assertRegex(SRC, r"var SAVE_TIMEOUT_MS = 10000;")
+        cur = body_of(SRC, "currentSubscription")
+        self.assertTrue(live_matches(cur, r"\bwithTimeout\(\s*reg\.pushManager\.subscribe\("))
+        self.assertTrue(live_matches(cur, r"\}\),\s*SUBSCRIBE_TIMEOUT_MS\s*,\s*'subscribe-timeout'\)"))
+        send = body_of(SRC, "sendSubscription")
+        self.assertTrue(live_matches(send, r"\bwithTimeout\(\s*fetch\(\s*'/api/notifications/push-subscribe'"))
+        self.assertTrue(live_matches(send, r"\}\),\s*SAVE_TIMEOUT_MS\s*,\s*'save-timeout'\)"))
+        # A timeout rejects with a plain Error, which pushFailureKind reads as
+        # 'failed': the generic branch, so toast, card back, button enabled.
+        helper = body_of(SRC, "withTimeout")
+        self.assertTrue(live_matches(helper, r"setTimeout\(\s*function\s*\(\s*\)\s*\{\s*reject\(\s*new Error\(\s*reason\s*\)\s*\)"))
+        self.assertTrue(live_matches(helper, r"clearTimeout\(\s*timer\s*\)"))
+        kinds = body_of(SRC, "pushFailureKind")
+        self.assertNotIn("subscribe-timeout", kinds)
+        self.assertNotIn("save-timeout", kinds)
+
+    def test_a_refusal_after_the_grant_without_a_toast_shows_the_card(self):
+        # R185: with no ui.js the message goes in the card, so the card must
+        # come back to show it, with its buttons usable.
+        self.assertTrue(live_matches(body_of(SRC, "promptFailure"), r"return false;"))
+        handler = enable_handler()
+        m = live_matches(handler, r"if\s*\(\s*gone\s*&&\s*!promptFailure\(\s*msg\s*,\s*PUSH_MESSAGES\[kind\]\s*\)\s*\)\s*\{")
+        self.assertEqual(len(m), 1)
+        branch = handler[m[0].end():matching_brace(handler, m[0].end() - 1)]
+        for pattern in (r"\bsetPromptBusy\(\s*enableBtn\s*,\s*false\s*\)", r"\blaterBtn\.disabled\s*=\s*false\b",
+                        r"\bshowPushPrompt\(\s*card\s*\)"):
+            self.assertTrue(live_matches(branch, pattern), pattern)
+
     def test_refusals_keep_their_rules(self):
         handler = enable_handler()
         self.assertTrue(live_matches(handler, r"if\s*\(\s*kind\s*===\s*'blocked'\s*\)\s*\{\s*hidePushPrompt\(\s*card\s*\)\s*;\s*return;"))
