@@ -16,6 +16,13 @@
  * Pure rules (importable by Node, no DOM at import time):
  *   qualifies(href, baseHref, attrs)  does the router take this link click (5.1)
  *   decide(requestedUrl, response)    swap, full navigation, or stay (5.2, 5.5)
+ *   debugFlags(search, stored)        which debug tools this tab asked for (7)
+ *
+ * Debug mode (spec 7): ?ws-debug=leaks,throw in the address, kept for the tab
+ * in sessionStorage 'ws.debug' (?ws-debug=off clears it), loads debug-leaks.js
+ * before any page module: the leak checker, the soak, the shell identity check
+ * and a test tone in #wsPlayer. "throw" mounts pages/_debug-throw.js instead
+ * of the next soft navigation's page, once. Without the flag neither loads.
  *
  * In the browser, window.WS.router:
  *   navigate(url, { replace })  soft navigation; resolves once the page is mounted
@@ -88,6 +95,28 @@ export function decide(requestedUrl, response) {
   return { action: 'swap' };
 }
 
+const DEBUG_FLAGS = ['leaks', 'throw'];
+
+function parseFlags(raw) {
+  const asked = String(raw || '').toLowerCase().split(',').map(function (s) { return s.trim(); });
+  return DEBUG_FLAGS.filter(function (f) { return asked.indexOf(f) !== -1; });
+}
+
+/* The debug flags for this document. search: location.search; stored: this
+   tab's sessionStorage 'ws.debug' (or null). The address adds to what is
+   stored; "off" clears it; unknown words are ignored. store: the value to
+   write back, '' to remove it, null to leave it alone. */
+export function debugFlags(search, stored) {
+  const kept = parseFlags(stored);
+  const param = new URLSearchParams(search || '').get('ws-debug');
+  if (param === null || !param.trim()) return { flags: kept, store: null };
+  if (param.trim().toLowerCase() === 'off') return { flags: [], store: '' };
+  const asked = parseFlags(param);
+  if (!asked.length) return { flags: kept, store: null };
+  const both = DEBUG_FLAGS.filter(function (f) { return kept.indexOf(f) !== -1 || asked.indexOf(f) !== -1; });
+  return { flags: both, store: both.join(',') };
+}
+
 // ---------------------------------------------------------------------------
 // Browser
 // ---------------------------------------------------------------------------
@@ -118,6 +147,49 @@ function start() {
     clearPrefetch: clearPrefetch
   };
   WS.router = api;
+
+  // ---- Debug mode (spec 7) ----
+
+  const DEBUG_KEY = 'ws.debug';
+
+  // A file next to this one, with this file's ?v= stamp.
+  function sibling(path) {
+    const self = new URL(import.meta.url);
+    const u = new URL(path, self);
+    u.search = self.search;
+    return u.href;
+  }
+
+  function storeDebug(value) {
+    try {
+      if (value) sessionStorage.setItem(DEBUG_KEY, value);
+      else sessionStorage.removeItem(DEBUG_KEY);
+    } catch (e) { /* private mode: this document only */ }
+  }
+
+  let storedDebug = null;
+  try { storedDebug = sessionStorage.getItem(DEBUG_KEY); } catch (e) { /* none */ }
+  const debugState = debugFlags(location.search, storedDebug);
+  if (debugState.store !== null) storeDebug(debugState.store);
+
+  let debug = null;            // the debug tools' hooks, once loaded
+  let debugReady = null;       // settles when they are (never rejects)
+  if (debugState.flags.length) {
+    debugReady = import(sibling('debug-leaks.js')).then(function (m) {
+      debug = m.install(window, { flags: debugState.flags.slice(), samePage: samePage });
+    }, function (e) {
+      console.error('[router] the debug tools did not load', e);
+    });
+  }
+
+  // "throw": the next soft navigation mounts a module that throws, once.
+  function takeThrow() {
+    const i = debugState.flags.indexOf('throw');
+    if (i === -1) return false;
+    debugState.flags.splice(i, 1);
+    storeDebug(debugState.flags.join(','));
+    return true;
+  }
 
   // ---- Fetching ----
 
@@ -542,6 +614,7 @@ function start() {
     };
     current = entry;
     api.current = { url: entry.url, module: moduleUrl, controller: entry.controller };
+    if (debug) debug.pageStart(moduleUrl);
     const signal = entry.controller.signal;
     if (typeof WS.arriveReset === 'function') WS.arriveReset();
 
@@ -681,7 +754,10 @@ function start() {
 
     const dest = new URL(res.finalUrl || target.href);
     if (!dest.hash && target.hash) dest.hash = target.hash;
-    const moduleUrl = new URL(moduleSrc, dest).href;
+    let moduleUrl = new URL(moduleSrc, dest).href;
+    if (debugReady) await debugReady;
+    if (token !== navToken) return;
+    if (takeThrow()) moduleUrl = sibling('pages/_debug-throw.js');
 
     // 4. The module (and its page helpers) before the DOM is touched, so a
     //    broken module never leaves a blank page.
@@ -726,6 +802,7 @@ function start() {
 
     // 5. Leave the old page.
     leave();
+    if (debug) debug.pageLeft();
 
     // 6. Replace the page, its styles, title, <html> flags, data and nav.
     await inTransition(function () { swapDom(doc, page); });
@@ -800,7 +877,10 @@ function start() {
     try { history.scrollRestoration = 'manual'; } catch (e) { /* ignore */ }
     history.replaceState(Object.assign({}, st, { ws: 1, scrollY: y }), '', location.href);
     const moduleUrl = new URL(firstSrc, location.href).href;
-    import(moduleUrl).then(function (mod) { return mod; }, function (e) {
+    // In debug mode the tools wrap listeners, timers and fetch first.
+    (debugReady || Promise.resolve()).then(function () {
+      return import(moduleUrl);
+    }).then(function (mod) { return mod; }, function (e) {
       console.error('[router] could not load ' + moduleUrl, e);
       return null;
     }).then(function (mod) {

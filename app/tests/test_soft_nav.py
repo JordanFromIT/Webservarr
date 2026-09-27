@@ -146,5 +146,44 @@ class ConvertedPages(unittest.TestCase):
                                      f"{name}: {src} is a page helper without data-ws-page-script")
 
 
+# The debug tools (spec 7): a leak checker that wraps addEventListener, the
+# timers and fetch, and a page module that throws on purpose. Neither may ever
+# load for someone who did not ask for it with ?ws-debug=.
+DEBUG_FILES = ("debug-leaks.js", "_debug-throw.js")
+_STATIC_IMPORT_RE = re.compile(r"""^\s*import\b[^;(]*?['"][^'"]*debug-leaks\.js""", re.M)
+_LITERAL_RE = re.compile(r"""(['"`])([^'"`\n]*debug-leaks\.js[^'"`\n]*)\1""")
+
+
+class DebugTools(unittest.TestCase):
+    def test_debug_code_only_loads_in_debug_mode(self):
+        src = (STATIC / "js" / "router.js").read_text(encoding="utf-8")
+        self.assertIsNone(_STATIC_IMPORT_RE.search(src), "router.js imports debug-leaks.js statically")
+        live = []
+        for m in _LITERAL_RE.finditer(src):
+            q, body = m.group(1), m.group(2)
+            # Inside a comment the stripped source does not end with the blanked literal.
+            if not js_code_only(src[:m.end()]).endswith(q + " " * len(body) + q):
+                continue
+            live.append(m)
+            before = js_code_only(src[:m.start()])
+            self.assertRegex(before, r"\bimport\s*\(\s*(?:[\w.$]+\s*\(\s*)?$",
+                             "debug-leaks.js is named outside a dynamic import(")
+            # ...and that import sits in a block entered only in debug mode.
+            self.assertRegex(before, r"\bif\s*\([^(){}]*\bdebug\w*[^(){}]*\)\s*\{[^{}]*$",
+                             "the debug-leaks.js import is not guarded by the debug check")
+        self.assertEqual(len(live), 1, "router.js should import debug-leaks.js in exactly one place")
+        self.assertTrue((STATIC / "js" / "debug-leaks.js").is_file())
+        self.assertTrue((STATIC / "js" / "pages" / "_debug-throw.js").is_file())
+
+    def test_no_page_or_shell_script_references_the_debug_files(self):
+        files = list(STATIC.glob("*.html")) + list((STATIC / "partials").glob("*.html"))
+        files += [p for p in (STATIC / "js").rglob("*.js")
+                  if p.name not in ("router.js",) + DEBUG_FILES]
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            for name in DEBUG_FILES:
+                self.assertNotIn(name, text, f"{path.relative_to(STATIC)} references {name}")
+
+
 if __name__ == "__main__":
     unittest.main()
