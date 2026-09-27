@@ -494,31 +494,35 @@ main            { view-transition-name: ws-content; }
  *
  * The account menus, the bell panel and the drawer overlay all show and hide
  * through display (Tailwind's .hidden), which cannot transition on its own.
- * transition-behavior: allow-discrete keeps the element displayed until its
- * fade has run, and @starting-style gives the first displayed frame its
- * "from" state, so one class does both directions with no timers. A browser
- * without them (Firefox before 129, Safari before 17.5) shows and hides at
- * once, as before. Close is quicker than open. A closing panel takes no
- * pointer: pointer-events is not in the transition list, so it switches off
- * the moment the close begins, and the drop is small (6px) so the panel
- * never seems to travel.
+ * Each carries two states: the closed one on the element itself (faded, and
+ * for a menu 6px up) and .is-open. shell.js opens in two steps, removing
+ * .hidden and reflowing so the closed state is drawn, then adding .is-open,
+ * so the transition runs from the closed state on every open (WS.popOpen).
+ * The first displayed frame is not left to @starting-style: a browser that
+ * keeps an element's last style across a display transition treats it as
+ * already rendered and skips the starting style, so only the first open ever
+ * animated. On close shell.js drops .is-open and adds .hidden in the same
+ * frame; transition-behavior: allow-discrete keeps the element displayed
+ * until the fade has run, with no timer. A browser without it (Firefox before
+ * 129, Safari before 17.5) still animates the open and hides at once. Close
+ * is quicker than open. A closing panel takes no pointer: pointer-events is
+ * not in the transition list, so it switches off the moment the close
+ * begins, and the drop is small (6px) so the panel never seems to travel.
  */
-.ws-pop { transition: opacity 180ms ease-out, transform 180ms ease-out, display 180ms allow-discrete; }
-.ws-pop.hidden { opacity: 0; transform: translateY(-6px); pointer-events: none; transition-duration: 140ms; }
-@starting-style {
-  .ws-pop { opacity: 0; transform: translateY(-6px); }
+.ws-pop {
+  opacity: 0; transform: translateY(-6px); pointer-events: none;
+  transition: opacity 140ms ease-out, transform 140ms ease-out, display 140ms allow-discrete;
 }
+.ws-pop.is-open { opacity: 1; transform: none; pointer-events: auto; transition-duration: 180ms; }
 
 /* The drawer: its dim overlay fades while the panel slides in from the left
    edge; on close both leave together, a little faster. shell.js adds .hidden
    to the overlay at once and this transition holds it displayed until the
    panel is gone (shell.js keeps a timer only for a browser without
    allow-discrete). */
-#drawerOverlay { transition: opacity 200ms ease-out, display 200ms allow-discrete; }
-#drawerOverlay.hidden { opacity: 0; pointer-events: none; transition-duration: 160ms; }
-@starting-style {
-  #drawerOverlay { opacity: 0; }
-}
+#drawerOverlay { opacity: 0; transition: opacity 160ms ease-out, display 160ms allow-discrete; }
+#drawerOverlay.is-open { opacity: 1; transition-duration: 200ms; }
+#drawerOverlay.hidden { pointer-events: none; }
 #drawerPanel { transition: transform 200ms ease-out; }
 #drawerPanel.-translate-x-full { transition-duration: 160ms; }
 

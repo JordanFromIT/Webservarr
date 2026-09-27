@@ -347,7 +347,7 @@ class ShellContract(unittest.TestCase):
         # the menus close each other through a shared ws:menu-open event: each
         # file must announce an opening, and each listener must close its menu.
         closes = {
-            "shell.js": r"""\.classList\.add\(\s*['"]hidden['"]\s*\)""",
+            "shell.js": r"\bpopClose\(\s*menu\s*\)",
             "notifications.js": r"\bcloseDropdown\(\s*\)",
         }
         for name, close in closes.items():

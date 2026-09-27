@@ -204,7 +204,8 @@
   function buildDropdown() {
     if (_dropdown) return;
 
-    // ws-pop: theme.css fades it open and closed through .hidden.
+    // ws-pop: theme.css fades it open (.is-open) and closed (.hidden); WS.popOpen
+    // and WS.popClose in shell.js switch the classes in the right order.
     _dropdown = createEl('div',
       'ws-pop hidden absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] bg-background-dark/95 border border-steel-blue/30 rounded-xl shadow-xl z-50 flex flex-col'
     );
@@ -360,7 +361,8 @@
     buildDropdown();
     anchorDropdown(bell);
     loadDropdownItems();
-    if (_dropdown) _dropdown.classList.remove('hidden');
+    // Two steps with a reflow between (see WS.popOpen), so every open fades in.
+    if (_dropdown) WS.popOpen(_dropdown);
     _dropdownOpen = true;
     // Close the account menu (see the ws:menu-open note in shell.js).
     document.dispatchEvent(new CustomEvent('ws:menu-open', { detail: _dropdown }));
@@ -371,7 +373,7 @@
   }
 
   function closeDropdown() {
-    if (_dropdown) _dropdown.classList.add('hidden');
+    if (_dropdown) WS.popClose(_dropdown);
     _dropdownOpen = false;
   }
 

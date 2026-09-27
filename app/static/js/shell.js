@@ -21,6 +21,8 @@
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
  *   WS.dragScroll(el)             mouse drag-to-scroll for a sideways row
  *   WS.dragScroll.stop(el)        end that row's momentum glide (before scrolling it)
+ *   WS.popOpen(el) / WS.popClose(el) / WS.popIsOpen(el)
+ *                                 soft open and close of a .ws-pop panel (theme.css)
  *   WS.mediaType(type)            { label, icon, accent } for movie/tv/book/audiobook
  *   WS.requestStatus(status)      { label, tone } for a Seerr-style request status
  *
@@ -346,6 +348,34 @@
     return statusPromise;
   }
 
+  // ---- Soft open and close of a .ws-pop panel (the account menus, the bell) ----
+  //
+  // theme.css writes the panel's closed state on .ws-pop itself and its open
+  // state on .is-open; .hidden (display: none) takes it out of the page. Open
+  // is two steps: take .hidden off and reflow, so the browser has drawn the
+  // closed state, then add .is-open, and the transition runs from the closed
+  // state on every open, not only the first. (Left to @starting-style, a
+  // browser that keeps an element's last style across a display transition
+  // animated the first open only.) Close drops .is-open and adds .hidden in
+  // the same frame: the display transition holds the panel until the fade has
+  // run, and pointer-events is off from the first closing frame. Closing a
+  // closed panel changes nothing, so the document-wide click handlers that
+  // call popClose on every click start no transition.
+  function popOpen(el) {
+    if (!el || popIsOpen(el)) return;
+    el.classList.remove('hidden');
+    void el.offsetWidth;   // reflow: the closed state is drawn before it changes
+    el.classList.add('is-open');
+  }
+  function popClose(el) {
+    if (!el) return;
+    el.classList.remove('is-open');
+    el.classList.add('hidden');
+  }
+  function popIsOpen(el) {
+    return !!el && el.classList.contains('is-open');
+  }
+
   // ---- Chrome wiring: drawer, menus, logout ----
 
   function wireChrome() {
@@ -369,12 +399,14 @@
     function openDrawer() {
       cancelHide();
       overlay.classList.remove('hidden');
-      void panel.offsetHeight;   // reflow before the transform transitions
+      void panel.offsetHeight;   // reflow: the closed state is drawn before it changes
+      overlay.classList.add('is-open');
       panel.classList.remove('-translate-x-full');
       panel.classList.add('translate-x-0');
     }
     function closeDrawer() {
       cancelHide();
+      overlay.classList.remove('is-open');
       panel.classList.remove('translate-x-0');
       panel.classList.add('-translate-x-full');
       if (discrete || reducedMotion()) overlay.classList.add('hidden');
@@ -397,14 +429,13 @@
       if (!btn || !menu) return;
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        menu.classList.toggle('hidden');
-        if (!menu.classList.contains('hidden')) {
-          document.dispatchEvent(new CustomEvent('ws:menu-open', { detail: menu }));
-        }
+        if (popIsOpen(menu)) { popClose(menu); return; }
+        popOpen(menu);
+        document.dispatchEvent(new CustomEvent('ws:menu-open', { detail: menu }));
       });
-      document.addEventListener('click', function () { menu.classList.add('hidden'); });
+      document.addEventListener('click', function () { popClose(menu); });
       document.addEventListener('ws:menu-open', function (e) {
-        if (e.detail !== menu) menu.classList.add('hidden');
+        if (e.detail !== menu) popClose(menu);
       });
     });
 
@@ -680,6 +711,9 @@
     clearPageCache: clearPageCache,
     wireNav: wireNav,
     dragScroll: dragScroll,
+    popOpen: popOpen,
+    popClose: popClose,
+    popIsOpen: popIsOpen,
     mediaType: mediaType,
     requestStatus: requestStatus
   };

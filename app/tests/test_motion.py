@@ -128,22 +128,77 @@ class StatusPill(unittest.TestCase):
         self.assertFalse(live_matches(SHELL_JS, r"\b(?:pill|dot)\.className\s*="))
 
 
+def function_body(js: str, name: str) -> str:
+    """The body of the named function declaration in js."""
+    m = live_matches(js, rf"function {re.escape(name)}\([^)]*\) \{{")
+    assert m, name
+    return js[m[0].end():matching_brace(js, m[0].end() - 1)]
+
+
 class SoftOpenClose(unittest.TestCase):
     def test_menus_and_the_bell_panel_carry_ws_pop_and_hide_through_the_class(self):
         self.assertIn('id="userMenuDropdown" class="ws-pop hidden ', HEADER)
         self.assertIn('id="mobileUserMenuDropdown" class="ws-pop hidden ', SIDEBAR)
         self.assertIn("'ws-pop hidden absolute", NOTIF_JS)
-        self.assertTrue(live_matches(NOTIF_JS, r"""_dropdown\.classList\.add\(\s*['"]hidden['"]\s*\)"""))
-        self.assertTrue(live_matches(NOTIF_JS, r"""_dropdown\.classList\.remove\(\s*['"]hidden['"]\s*\)"""))
+        self.assertTrue(live_matches(NOTIF_JS, r"WS\.popOpen\(_dropdown\)"))
+        self.assertTrue(live_matches(NOTIF_JS, r"WS\.popClose\(_dropdown\)"))
+        self.assertFalse(live_matches(NOTIF_JS, r"_dropdown\.classList\."))
         self.assertFalse(live_matches(NOTIF_JS, r"_dropdown\.style\.display\b"))
 
     def test_ws_pop_fades_through_a_discrete_display_transition(self):
-        self.assertRegex(css_rule(THEME, ".ws-pop"), r"display \d+ms allow-discrete")
-        closed = css_rule(THEME, ".ws-pop.hidden")
+        closed = css_rule(THEME, ".ws-pop")
+        self.assertRegex(closed, r"display \d+ms allow-discrete")
         self.assertIn("pointer-events: none", closed)
         self.assertIn("opacity: 0", closed)
         self.assertRegex(closed, r"transform: translateY\(-\d+px\)")
-        self.assertRegex(THEME, r"@starting-style\s*\{\s*\.ws-pop\s*\{[^}]*opacity: 0")
+        opened = css_rule(THEME, ".ws-pop.is-open")
+        self.assertIn("opacity: 1", opened)
+        self.assertIn("transform: none", opened)
+        self.assertIn("pointer-events: auto", opened)
+        # Open 150-220ms, close 120-160ms: the closed rule's durations are the
+        # close, the open state's transition-duration is the open.
+        for ms in re.findall(r"(\d+)ms", closed):
+            self.assertTrue(120 <= int(ms) <= 160, closed)
+        m = re.search(r"transition-duration: (\d+)ms", opened)
+        self.assertTrue(m and 150 <= int(m.group(1)) <= 220, opened)
+
+    def test_every_open_restarts_from_the_closed_state(self):
+        # A panel whose open was left to @starting-style animated only the
+        # first time in a browser that keeps its last style across a display
+        # transition. Now no open depends on @starting-style: the open path
+        # takes .hidden off, reflows so the closed state is drawn, then adds
+        # .is-open, and close takes .is-open off again so the next open starts
+        # from the closed state.
+        self.assertNotRegex(THEME, r"@starting-style\s*\{[^}]*\.ws-pop\b")
+        self.assertNotRegex(THEME, r"@starting-style\s*\{[^}]*#drawerOverlay\b")
+        body = function_body(SHELL_JS, "popOpen")
+        unhide = live_matches(body, r"el\.classList\.remove\('hidden'\)")
+        reflow = live_matches(body, r"void el\.offset(?:Width|Height)")
+        opened = live_matches(body, r"el\.classList\.add\('is-open'\)")
+        self.assertTrue(unhide and reflow and opened, body)
+        self.assertLess(unhide[0].start(), reflow[0].start(), "reflow after .hidden comes off")
+        self.assertLess(reflow[0].start(), opened[0].start(), ".is-open only after the reflow")
+        body = function_body(SHELL_JS, "popClose")
+        self.assertTrue(live_matches(body, r"el\.classList\.remove\('is-open'\)"))
+        self.assertTrue(live_matches(body, r"el\.classList\.add\('hidden'\)"))
+        # The account menus go through the helpers and never toggle .hidden
+        # themselves; the bell in notifications.js uses the same two.
+        self.assertFalse(live_matches(SHELL_JS, r"menu\.classList\."))
+        self.assertTrue(live_matches(SHELL_JS, r"if \(popIsOpen\(menu\)\) \{ popClose\(menu\); return; \}"))
+        self.assertTrue(live_matches(SHELL_JS, r"popOpen\(menu\);"))
+        self.assertRegex(js_code_only(SHELL_JS), r"popOpen: popOpen,\s*popClose: popClose,\s*popIsOpen: popIsOpen,")
+        # The drawer overlay: the same two states, .is-open added after the
+        # reflow openDrawer already does, and removed on close.
+        self.assertIn("opacity: 0", css_rule(THEME, "#drawerOverlay"))
+        self.assertIn("opacity: 1", css_rule(THEME, "#drawerOverlay.is-open"))
+        body = function_body(SHELL_JS, "openDrawer")
+        unhide = live_matches(body, r"overlay\.classList\.remove\('hidden'\)")
+        reflow = live_matches(body, r"void panel\.offsetHeight")
+        opened = live_matches(body, r"overlay\.classList\.add\('is-open'\)")
+        self.assertTrue(unhide and reflow and opened, body)
+        self.assertLess(unhide[0].start(), reflow[0].start())
+        self.assertLess(reflow[0].start(), opened[0].start())
+        self.assertTrue(live_matches(function_body(SHELL_JS, "closeDrawer"), r"overlay\.classList\.remove\('is-open'\)"))
 
     def test_drawer_overlay_is_hidden_by_the_stylesheet_not_a_timer(self):
         self.assertIn("pointer-events: none", css_rule(THEME, "#drawerOverlay.hidden"))
