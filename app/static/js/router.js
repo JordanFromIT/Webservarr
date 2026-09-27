@@ -289,10 +289,15 @@ function start() {
 
   // ---- Failure (spec 5.5) ----
 
+  // Not every page loads ui.js (the toast). It is fetched while the page is
+  // idle, not when a navigation fails: by then the network may be gone.
   function ensureUI() {
     if (window.WSUI) return Promise.resolve(window.WSUI);
-    // Not every page loads ui.js; the toast is worth one small request.
     return loadScript('/static/js/ui.js').then(function () { return window.WSUI || null; }, function () { return null; });
+  }
+  if (!window.WSUI && document.getElementById('desktopSidebar')) {
+    const later = window.requestIdleCallback || function (fn) { return setTimeout(fn, 1500); };
+    later(function () { ensureUI(); });
   }
 
   function showRetry(href, reason, pop) {
