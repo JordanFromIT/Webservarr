@@ -2360,7 +2360,9 @@ function closeMediaModal() {
 
 function requestFromModal(buttonEl) {
   var mediaType = buttonEl.getAttribute('data-media-type');
-  var mediaId = parseInt(buttonEl.getAttribute('data-media-id'), 10);
+  // Passed through as the string it is: book ids look like "gr:3634639", and
+  // the server turns a film or show's "550" into a number, as for search cards.
+  var mediaId = buttonEl.getAttribute('data-media-id');
   // Reuse existing requestMedia — passes buttonEl so its built-in
   // spinner/success/error handling works inside the modal action area.
   requestMedia(mediaType, mediaId, false, buttonEl);
