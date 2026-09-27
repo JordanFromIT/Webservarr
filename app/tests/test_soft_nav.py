@@ -18,12 +18,23 @@ CONVERTED = []
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
 
+# A page whose module is not named after its file (index.html is Home).
+MODULE_NAMES = {"index": "home"}
+
 _SCRIPT_TAG_RE = re.compile(r"<script\b([^>]*)>", re.I)
 _TAG_RE = re.compile(r"<[a-zA-Z][^>]*>")
+# HTML attribute names are case-insensitive: onClick= runs like onclick=.
+_HANDLER_ATTR_RE = re.compile(r"\son[a-z]+\s*=", re.I)
+_HANDLER_IN_STRING_RE = re.compile(r"""\bon[a-z]+=\\?["']""", re.I)
+_FUNCTION_ARG_RE = re.compile(r"^\s*(?:async\s+)?function\b")
+
+
+def module_name(name: str) -> str:
+    return MODULE_NAMES.get(name, name)
 
 
 def module_path(name: str):
-    return STATIC / "js" / "pages" / f"{name}.js"
+    return STATIC / "js" / "pages" / f"{module_name(name)}.js"
 
 
 def module_source(name: str) -> str:
@@ -35,17 +46,45 @@ def attr(attrs: str, key: str):
     return m.group(1) if m else None
 
 
-def call_args(code: str, open_at: int) -> str:
-    """The text between the ( at open_at and the ) that closes it."""
-    depth = 0
+def call_args(code: str, open_at: int) -> list:
+    """The top-level arguments of the call whose ( is at open_at, in code-only
+    text (strings blanked, so no bracket or comma inside one counts)."""
+    args, depth, start = [], 0, open_at + 1
     for i in range(open_at, len(code)):
-        if code[i] == "(":
+        c = code[i]
+        if c in "([{":
             depth += 1
-        elif code[i] == ")":
+        elif c in ")]}":
             depth -= 1
             if depth == 0:
-                return code[open_at + 1:i]
-    raise AssertionError("unbalanced parentheses")
+                args.append(code[start:i])
+                return args
+        elif c == "," and depth == 1:
+            args.append(code[start:i])
+            start = i + 1
+    raise AssertionError("unbalanced brackets")
+
+
+def is_function(arg: str) -> bool:
+    """A function expression: `function`, or an arrow (=> outside any bracket)."""
+    if _FUNCTION_ARG_RE.match(arg):
+        return True
+    depth = 0
+    for i, c in enumerate(arg):
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == "=" and depth == 0 and arg[i + 1:i + 2] == ">":
+            return True
+    return False
+
+
+def has_own_signal(args: list) -> bool:
+    """signal is written in the call's own arguments: a nested call's options
+    inside the callback's body do not count, nor does a shared options
+    variable (the rule is one visible signal per listener)."""
+    return any(re.search(r"\bsignal\b", a) for a in args if not is_function(a))
 
 
 class ConvertedPages(unittest.TestCase):
@@ -55,7 +94,8 @@ class ConvertedPages(unittest.TestCase):
                 h = read(name)
                 self.assertEqual(h.count('id="wsPage"'), 1)
                 self.assertRegex(
-                    h, r'<div id="wsPage" data-ws-module="/static/js/pages/' + re.escape(name) + r'\.js\?v=1"')
+                    h, r'<div id="wsPage" data-ws-module="/static/js/pages/'
+                       + re.escape(module_name(name)) + r'\.js\?v=1"')
                 self.assertTrue(module_path(name).is_file(), f"{name}: no page module")
 
     def test_converted_pages_have_no_inline_script(self):
@@ -72,9 +112,9 @@ class ConvertedPages(unittest.TestCase):
         for name in CONVERTED:
             with self.subTest(name):
                 for tag in _TAG_RE.findall(read(name)):
-                    self.assertNotRegex(tag, r"\son[a-z]+\s*=", f"{name}: inline handler in {tag[:80]}")
+                    self.assertNotRegex(tag, _HANDLER_ATTR_RE, f"{name}: inline handler in {tag[:80]}")
                 # HTML the module builds, inside a string or template literal.
-                self.assertNotRegex(module_source(name), r"""\bon[a-z]+=\\?["']""", f"{name}.js")
+                self.assertNotRegex(module_source(name), _HANDLER_IN_STRING_RE, f"{module_name(name)}.js")
 
     def test_modules_follow_the_contract(self):
         for name in CONVERTED:
@@ -88,7 +128,9 @@ class ConvertedPages(unittest.TestCase):
                 self.assertRegex(code, r"\bexport\s+(async\s+)?function\s+mount\s*\(")
                 for m in re.finditer(r"\baddEventListener\s*\(", code):
                     args = call_args(code, m.end() - 1)
-                    self.assertIn("signal", args, f"{name}.js: addEventListener without signal")
+                    self.assertTrue(has_own_signal(args),
+                                    f"{module_name(name)}.js: addEventListener without its own signal: "
+                                    f"{code[m.start():m.start() + 80]!r}")
 
     def test_page_helpers_are_declared(self):
         for name in CONVERTED:
