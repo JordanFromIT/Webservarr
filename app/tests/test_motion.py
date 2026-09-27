@@ -289,6 +289,41 @@ class LoginDrift(unittest.TestCase):
         self.assertGreaterEqual(seconds, 12)
         self.assertLessEqual(seconds, 16)
 
+    def test_a_picture_that_overstays_keeps_moving_from_where_the_move_ended(self):
+        # The next preload can run late or fail, and then nothing restarts
+        # the move: a forwards hold would park the picture, fully zoomed.
+        # A second animation takes over when the move ends, delayed by the
+        # move's own duration, from the very state the move ends in.
+        moving = css_rule(LOGIN, ".backdrop-slide.is-moving")
+        m = re.search(r"animation: login-drift (\d+)s linear forwards,\s*"
+                      r"login-drift-on (\d+)s linear (\d+)s infinite;", moving)
+        self.assertTrue(m, moving)
+        self.assertEqual(m.group(3), m.group(1), "the continuation starts when the move ends")
+        self.assertGreaterEqual(int(m.group(2)), 24)
+        self.assertEqual(keyframe_properties(LOGIN, "login-drift-on"), {"transform", "animation-timing-function"})
+        move_end = re.search(r"@keyframes login-drift \{[^}]*\}\s*to\s*\{ transform: ([^;]+); \}", LOGIN)
+        steps = re.search(r"@keyframes login-drift-on \{\s*"
+                          r"0%\s*\{ transform: ([^;]+); animation-timing-function: ([^;]+); \}\s*"
+                          r"50%\s*\{ transform: ([^;]+); animation-timing-function: ease-in-out; \}\s*"
+                          r"100%\s*\{ transform: ([^;]+); \}", LOGIN)
+        self.assertTrue(move_end and steps)
+        # It starts and loops on the move's own end state, so there is no
+        # jump either way, and its first leg leaves at nearly the move's
+        # speed (an ease-in-out from rest would read as a stop): the curve's
+        # first control point gives it about 2.25x the leg's average rate.
+        self.assertEqual(steps.group(1), move_end.group(1))
+        self.assertEqual(steps.group(4), move_end.group(1))
+        self.assertEqual(steps.group(2), "cubic-bezier(0.2, 0.45, 0.5, 1)")
+        # The far end also keeps the pan inside the overhang; the states
+        # interpolate together, so the ends bound the whole drift.
+        far = re.fullmatch(r"scale\((1\.\d+)\) translate\(calc\(var\(--drift-x, 0%\) \* ([\d.]+)\), "
+                           r"calc\(var\(--drift-y, 0%\) \* \2\)\)", steps.group(3))
+        self.assertTrue(far, "login-drift-on's far end is a scale with a scaled-up pan")
+        scale, factor = float(far.group(1)), float(far.group(2))
+        pan = max(abs(float(v)) for v in re.findall(r"--drift-[xy]: (-?[\d.]+)%", LOGIN))
+        self.assertLessEqual(pan * factor / 100 * scale, (scale - 1) / 2)
+        self.assertGreater(scale, 1.14)
+
     def test_four_directions_and_the_pan_never_uncovers_an_edge(self):
         pans = {}
         for name in ("nw", "ne", "sw", "se"):
@@ -350,6 +385,15 @@ class LoginDrift(unittest.TestCase):
         self.assertLess(restart[0].start(), fade_in[0].start())
         self.assertTrue(live_matches(body, r"prev\.style\.opacity = '0';"))
         self.assertFalse(re.search(r"prev\.classList", body))
+        # A preload that lands after a newer tick started is dropped: shown,
+        # it would reset the slide the newer picture is fading in on, in view.
+        seq = live_matches(LOGIN, r"var seq = \+\+rotation;")
+        wait = live_matches(LOGIN, r"await preload\(nextUrl\);")
+        stale = live_matches(LOGIN, r"if \(seq !== rotation\) return;")
+        self.assertTrue(seq and wait and stale)
+        self.assertLess(seq[0].start(), wait[0].start())
+        self.assertLess(wait[0].start(), stale[0].start())
+        self.assertLess(stale[0].start(), live_matches(LOGIN, r"show\(slideB, slideA, nextUrl\);")[0].start())
         # The first picture starts once the slideshow is shown, before it
         # fades in; a lone picture takes the back-and-forth drift instead.
         reveal = live_matches(LOGIN, r"slideshow\.classList\.remove\('hidden'\);")

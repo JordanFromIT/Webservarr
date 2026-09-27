@@ -75,14 +75,24 @@
        at scale 1 and grows about 1% a second toward one of four corners:
        1.115 by the time its fade-out ends at 11.5s, 1.14 at the 14s end.
        Linear, and longer than the picture is on screen, so it never visibly
-       slows or stops, even when the next picture's preload runs late; the
-       outgoing slide keeps its last frame (forwards) through the fade. The
-       pan is tied to the scale (both leave zero together) and at 2% of the
-       box stays well inside the (scale - 1) / 2 overhang, so no edge is ever
-       uncovered. Transform only: the compositor owns it and the main thread
-       stays idle. A single picture (no rotation) drifts back and forth
-       instead (.is-solo). The card's glass is untouched. */
-    .backdrop-slide.is-moving { animation: login-drift 14s linear forwards; }
+       slows while the rotation keeps time. A picture can overstay, though:
+       the next one's preload can run late or fail, and then nothing restarts
+       the move. So the move does not end on a hold. A second animation takes
+       over at 14s, starting exactly where the move ends (login-drift-on's
+       first frame is login-drift's last) and at nearly the same speed (its
+       first leg leaves at about 0.84%/s and eases to a stop at 1.20 over
+       16s), then eases back and loops, until the next successful rotation
+       resets the slide. The outgoing slide is never touched, so it keeps
+       moving through its fade. The pan is tied to the scale (both leave zero
+       together) and stays well inside the (scale - 1) / 2 overhang in both
+       animations, so no edge is ever uncovered. Transform only: the
+       compositor owns it and the main thread stays idle. A single picture
+       (no rotation) drifts back and forth from the start instead (.is-solo).
+       The card's glass is untouched. */
+    .backdrop-slide.is-moving {
+      animation: login-drift 14s linear forwards,
+                 login-drift-on 32s linear 14s infinite;
+    }
     .backdrop-slide.is-solo { animation: login-drift-solo 20s ease-in-out infinite alternate; }
     .backdrop-slide.drift-nw { --drift-x: -2%; --drift-y: -2%; }
     .backdrop-slide.drift-ne { --drift-x: 2%; --drift-y: -2%; }
@@ -91,6 +101,11 @@
     @keyframes login-drift {
       from { transform: scale(1) translate(0, 0); }
       to   { transform: scale(1.14) translate(var(--drift-x, 0%), var(--drift-y, 0%)); }
+    }
+    @keyframes login-drift-on {
+      0%   { transform: scale(1.14) translate(var(--drift-x, 0%), var(--drift-y, 0%)); animation-timing-function: cubic-bezier(0.2, 0.45, 0.5, 1); }
+      50%  { transform: scale(1.20) translate(calc(var(--drift-x, 0%) * 1.5), calc(var(--drift-y, 0%) * 1.5)); animation-timing-function: ease-in-out; }
+      100% { transform: scale(1.14) translate(var(--drift-x, 0%), var(--drift-y, 0%)); }
     }
     @keyframes login-drift-solo {
       from { transform: scale(1) translate(0, 0); }
@@ -401,14 +416,21 @@ document.addEventListener('DOMContentLoaded', async function() {
             currentIndex = 1;
 
             // Rotate every 10 seconds
+            var rotation = 0;
             setInterval(async function() {
                 if (urls.length < 2) return;
                 var nextUrl = urls[currentIndex % urls.length];
                 currentIndex++;
+                var seq = ++rotation;
 
                 try {
                     await preload(nextUrl);
                 } catch(e) { return; }
+                // A preload that lands after the next tick has started is
+                // stale: shown now, it would swap and reset the slide the
+                // newer picture is already fading in on, in full view. Skip
+                // it, as a failed one is skipped.
+                if (seq !== rotation) return;
 
                 if (activeSlide === 'A') {
                     show(slideB, slideA, nextUrl);
