@@ -259,7 +259,9 @@ Per task:
    the code is wrong.
 3. Every proven bug goes back to `ws-coder`; the hunters re-run on the new diff. The task is done
    when a hunt comes back clean.
-4. The orchestrating session reviews the final diff before the next task starts.
+4. The orchestrating session writes no code and reviews no code. Before the next task starts it
+   checks the evidence: tests passed, the last hunt came back clean, and the task's acceptance
+   checks (section 7) were run on the dev instance with results reported.
 
 ## 9. Risks
 
