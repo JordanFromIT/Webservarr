@@ -4,6 +4,7 @@
 // are, not copies; like router.mjs, each module is imported from its source as
 // a data: URL, which also proves neither touches the DOM at import time.
 // Run: node app/tests/js/debug_leaks.mjs (CI job js-checks; npm run test:js).
+import { getEventListeners } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const load = (rel) => import('data:text/javascript;charset=utf-8,' +
   encodeURIComponent(readFileSync(join(here, rel), 'utf8')));
-const { debugFlags } = await load('../../static/js/router.js');
+const { debugFlags, takeFlag } = await load('../../static/js/router.js');
 const dbg = await load('../../static/js/debug-leaks.js');
 
 let failed = 0;
@@ -42,6 +43,25 @@ for (const [search, stored, flags, store, why] of [
 ]) {
   const got = debugFlags(search, stored);
   check('debugFlags, ' + why, eq(got, { flags, store }), got);
+}
+
+// ---- takeFlag: the "throw" gate ----
+
+{
+  const none = [];
+  const leaksOnly = ['leaks'];
+  check('takeFlag: no flags, never taken', takeFlag(none, 'throw') === null && none.length === 0);
+  check('takeFlag: other flags only, never taken, nothing changes',
+    takeFlag(leaksOnly, 'throw') === null && takeFlag(leaksOnly, 'throw') === null && eq(leaksOnly, ['leaks']), leaksOnly);
+  const both = ['leaks', 'throw'];
+  const first = takeFlag(both, 'throw');
+  check('takeFlag: taken once, the rest stored', first === 'leaks' && eq(both, ['leaks']), [first, both]);
+  check('takeFlag: and never again', takeFlag(both, 'throw') === null && eq(both, ['leaks']));
+  const only = ['throw'];
+  const store = takeFlag(only, 'throw');
+  check('takeFlag: the last flag taken clears the stored key', store === '' && only.length === 0, store);
+  check('takeFlag: a reload after it no longer throws', eq(debugFlags('', null), { flags: [], store: null }) &&
+    eq(debugFlags('', 'leaks'), { flags: ['leaks'], store: null }));
 }
 
 // ---- Stack attribution ----
@@ -257,6 +277,133 @@ tr.stop();                                           // drop anything the checks
   check('liveListeners drops aborted ones', tr.liveListeners() === base + 2, tr.liveListeners() - base);
   n.isConnected = false;
   check('liveListeners skips detached nodes', tr.liveListeners() === base);
+}
+
+// L1: a page's once listener is one real listener, and removing it before
+// it fires leaves none behind.
+{
+  tr.stop();                                          // drop the liveListeners block's own items
+  nowStack = stack(SELF, PAGE);
+  tr.start('news');
+  const t = new Target();
+  const h = () => {};
+  t.addEventListener('click', h, { once: true });
+  check('once: exactly one real listener while registered', getEventListeners(t, 'click').length === 1,
+    getEventListeners(t, 'click').length);
+  t.removeEventListener('click', h);
+  check('once removed before it fires: no listener left', getEventListeners(t, 'click').length === 0,
+    getEventListeners(t, 'click').length);
+  let n = 0;
+  t.addEventListener('k', () => { n += 1; }, { once: true });
+  t.dispatchEvent(new Event('k'));
+  t.dispatchEvent(new Event('k'));
+  check('once fired: ran once, nothing left', n === 1 && getEventListeners(t, 'k').length === 0);
+  nowStack = stack(SELF, SHELL);
+  const s = () => {};
+  t.addEventListener('s', s, { once: true });
+  const shellCount = getEventListeners(t, 's').length;
+  t.removeEventListener('s', s);
+  check('a shell once listener: one real listener, none after remove', shellCount === 1 && getEventListeners(t, 's').length === 0);
+  nowStack = stack(SELF, PAGE);
+  // A page's listener added twice is one listener, as without the tracker.
+  let d = 0;
+  const dh = () => { d += 1; };
+  t.addEventListener('dup', dh);
+  t.addEventListener('dup', dh);
+  t.dispatchEvent(new Event('dup'));
+  check('a page listener added twice runs once', d === 1 && getEventListeners(t, 'dup').length === 1);
+  t.removeEventListener('dup', dh);
+  check('and its own function removes it', getEventListeners(t, 'dup').length === 0);
+  const l1 = tr.stop();
+  check('L1 checks leave nothing alive', l1.length === 0, l1);
+}
+
+// L2: ownership rides callbacks. A page helper's work that runs after the
+// page was left, from a stack that names no page, is still that page's.
+{
+  const later = [];
+  nowStack = stack(SELF, HELPER);                     // news calls a helper
+  tr.start('news');
+  const before = tr.requestsAfterLeave;
+  let fired;
+  const ran = new Promise((r) => { fired = r; });
+  g.setTimeout(() => {                                // the helper's debounced work
+    g.fetch('/api/news-later').catch(() => {});
+    later.push(g.setTimeout(() => {}, 60000));
+    fired();
+  }, 20);
+  const doc = new Target();
+  doc.addEventListener('ping', () => { g.fetch('/api/ping').catch(() => {}); });   // no signal
+  fetchResolve = [];
+  const chain = g.fetch('/api/first');
+  chain.then((r) => r).then(() => { later.push(g.setTimeout(() => {}, 60000)); }).catch(() => {});
+  chain.finally(() => { later.push(g.setTimeout(() => {}, 60000)); }).catch(() => {});
+  const newsOut = tr.stop();                          // news left
+  nowStack = stack(SELF, OTHER);
+  tr.start('wiki');
+  nowStack = stack(SELF, HELPER);                     // later callbacks' stacks name no page
+  fetchResolve[0].resolve('R');
+  await ran;
+  doc.dispatchEvent(new Event('ping'));
+  await tick();
+  nowStack = stack(SELF, OTHER);
+  const wikiOut = tr.stop();
+  check('L2: news is charged with its pending timer, listener and fetch at leave',
+    eq(newsOut.map((i) => i.kind).sort(), ['fetch', 'listener', 'timer']) && newsOut.every((i) => i.page === 'news'), newsOut);
+  check('L2: nothing is blamed on wiki', wikiOut.every((i) => i.page === 'news' && i.late), wikiOut);
+  check('L2: the late work is news\'s (2 fetches, 3 timers)',
+    eq(wikiOut.map((i) => i.kind).sort(), ['fetch', 'fetch', 'timer', 'timer', 'timer']), wikiOut.map((i) => i.kind));
+  check('L2: requestsAfterLeave counts both late fetches', tr.requestsAfterLeave === before + 2, tr.requestsAfterLeave - before);
+  later.forEach((id) => g.clearTimeout(id));
+}
+
+// A callback of the shell stays the shell's even while a page is mounted.
+{
+  nowStack = stack(SELF, SHELL);
+  const t = new Target();
+  const sh = () => { g.setTimeout(() => {}, 0); };
+  t.addEventListener('tick', sh);
+  nowStack = stack(SELF, PAGE);
+  tr.start('news');
+  nowStack = stack(SELF, SHELL);
+  t.dispatchEvent(new Event('tick'));
+  nowStack = stack(SELF, PAGE);
+  check('a shell listener firing during a page creates nothing of the page\'s', tr.stop().length === 0);
+  t.removeEventListener('tick', sh);
+}
+
+// T1: a listener released only by its signal (the target is never told, as
+// in a browser) is not alive.
+{
+  class FakeTarget { addEventListener() {} removeEventListener() {} }
+  const g2 = { EventTarget: FakeTarget, AbortSignal, setTimeout, clearTimeout, setInterval, clearInterval };
+  const tr2 = dbg.createTracker(g2, { stack: () => stack(SELF, PAGE) });
+  tr2.start('news');
+  const ctl = new AbortController();
+  new FakeTarget().addEventListener('x', () => {}, { signal: ctl.signal });
+  const kept = new FakeTarget();
+  kept.addEventListener('y', () => {});
+  ctl.abort();
+  const out = tr2.stop();
+  check('T1: the signal alone releases a listener', out.length === 1 && /^y on /.test(out[0].detail), out);
+  tr2.uninstall();
+}
+
+// uninstall: a page listener registered through its wrapper keeps working as itself.
+{
+  nowStack = stack(SELF, PAGE);
+  tr.start('news');
+  const t = new Target();
+  let n = 0;
+  const h = () => { n += 1; };
+  t.addEventListener('u', h);
+  tr.stop();
+  tr.uninstall();
+  t.dispatchEvent(new Event('u'));
+  const listed = getEventListeners(t, 'u');
+  t.removeEventListener('u', h);
+  check('uninstall re-registers a page listener as itself', n === 1 && listed.length === 1 && listed[0] === h &&
+    getEventListeners(t, 'u').length === 0, listed.length);
 }
 
 tr.uninstall();

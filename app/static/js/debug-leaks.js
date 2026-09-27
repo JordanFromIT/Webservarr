@@ -17,24 +17,29 @@
  *                                         #wsPlayer are the nodes of first load
  *   WS.debug.tone                         the 440 Hz test tone in #wsPlayer
  *
- * How an item is tied to a page (the leak checker's one judgement):
- *   - a stack frame in /static/js/pages/<name>.js makes it that page's;
- *   - otherwise a stack made only of shell scripts makes it the shell's, never
- *     a page's (the router's own prefetch, WS.poll set up by the shell...);
- *   - otherwise it belongs to whichever page is mounted (page helper scripts).
+ * How an item is tied to a page (the leak checker's one judgement), in order:
+ *   1. a stack frame in /static/js/pages/<name>.js makes it that page's;
+ *   2. else, inside a callback a page created (a listener, a timer or
+ *      interval callback, a .then on a page's fetch, at any depth), it is
+ *      that page instance's, even when the callback fires after the page
+ *      was left: ownership rides the callback, not the clock;
+ *   3. else a stack made only of shell scripts makes it the shell's, never a
+ *      page's (the router's own prefetch, WS.poll set up by the shell...);
+ *   4. else it belongs to whichever page is mounted (page helper scripts).
  * A page's item is alive after leave when: a listener not removed, not fired
  * (once), whose own signal is not aborted, and not on an aborted AbortSignal;
  * a timer that neither fired nor was cleared; an interval not cleared; a fetch
  * not settled whose signal is not aborted. Anything a page creates after it
- * was left (by its stack) is a leak too, and each such fetch counts in
- * requestsAfterLeave.
+ * was left is a leak too, and each such fetch counts in requestsAfterLeave.
  *
- * Wrapping changes no behaviour: the originals run first with the same this
- * and arguments, and their return values come back. Two differences only:
- * a setTimeout callback runs inside a wrapper (same this and arguments), and
- * fetch returns a promise that settles as the real one does, one tick later.
- * Not tracked: requestAnimationFrame, observers, WebSocket/EventSource, on*
- * properties.
+ * Wrapping changes no behaviour a page can see: same return values, same this
+ * and arguments, options passed through. To carry ownership, a page's
+ * listeners, timer and interval callbacks are registered through a wrapper
+ * (removeEventListener with the page's own function still removes it; adding
+ * the same function twice still adds it once), and a page's fetch returns a
+ * promise that settles as the real one does, one tick later, whose .then /
+ * .catch / .finally carry the owner on. Not carried: await continuations,
+ * requestAnimationFrame, observers, WebSocket/EventSource, on* properties.
  *
  * Pure parts (importable by Node, no DOM at import time): pageNameOf,
  * ownerOf, createTracker (given a global-like object), runSoak (given deps).
@@ -114,13 +119,14 @@ export function createTracker(g, opts) {
     ? function (t) { return new WeakRef(t); }
     : function (t) { return { deref: function () { return t; } }; };
 
-  let session = null;               // { name, items: Set } of the mounted page
-  const left = new Set();           // pages started and since left
+  let session = null;               // { name, items: Set, closed } of the mounted page
+  let ambient = null;               // the owner of the callback running now, if a page's
+  const left = new Set();           // names of pages started and since left
   const outbox = [];                // leaks for the next stop()
   const reports = [];               // every leak so far
   let afterLeave = 0;
-  const listeners = new Set();      // every listener added since install (for liveListeners)
-  const byTarget = new WeakMap();   // target -> [{ type, listener, capture, rec }]
+  const listeners = new Set();      // listener records since install (for liveListeners)
+  const byTarget = new WeakMap();   // target -> [{ type, listener, capture, rec, wrapper, options }]
   const timers = new Map();         // id -> rec, page timers and intervals only
 
   function report(item) {
@@ -128,24 +134,39 @@ export function createTracker(g, opts) {
     outbox.push(item);
   }
 
-  /* Who owns what is being created now: { session, stack }, { late, page,
-     stack } for a page not mounted, or null for the shell and for anything
-     while no page is mounted. */
+  /* Who owns what is being created now (rules 1-4 in the header). Returns
+     null for the shell and for anything while no page is mounted, else
+     { owner: { name, session }, stack, session } for the mounted page
+     instance, or { owner, stack, late: true } for one that is not. */
   function attribute() {
     const stack = stackNow();
     const o = ownerOf(stack, shellFiles);
-    if (o.page) {
-      if (session && session.name === o.page) return { session: session, stack: stack };
-      return { late: true, page: o.page, stack: stack };
-    }
-    if (o.shell || !session) return null;
-    return { session: session, stack: stack };
+    let owner;
+    if (o.page) owner = session && session.name === o.page ? { name: o.page, session: session } : { name: o.page, session: null };
+    else if (ambient) owner = ambient;
+    else if (o.shell || !session) return null;
+    else owner = { name: session.name, session: session };
+    if (owner.session && owner.session === session) return { owner: owner, stack: stack, session: session };
+    return { owner: owner, stack: stack, late: true };
+  }
+
+  // Runs fn with owner as the ambient owner, for whatever it creates.
+  function bind(owner, fn) {
+    return function () {
+      const prev = ambient;
+      ambient = owner;
+      try { return fn.apply(this, arguments); } finally { ambient = prev; }
+    };
+  }
+
+  function wasLeft(owner) {
+    return owner.session ? owner.session.closed : left.has(owner.name);
   }
 
   function lateItem(kind, a, detail) {
     const item = {
-      kind: kind, page: a.page, stack: cleanStack(a.stack), late: true,
-      detail: detail + (left.has(a.page) ? ' (created after the page was left)' : ' (created outside mount)')
+      kind: kind, page: a.owner.name, stack: cleanStack(a.stack), late: true,
+      detail: detail + (wasLeft(a.owner) ? ' (created after the page was left)' : ' (created outside mount)')
     };
     report(item);
     return item;
@@ -176,64 +197,113 @@ export function createTracker(g, opts) {
   }
 
   // ---- Listeners ----
+  //
+  // A page's listener is registered through a wrapper that runs it with the
+  // page as owner and marks a once listener spent. Everyone else's is passed
+  // through untouched. The DOM ignores a second add of the same (type,
+  // function, capture); with a wrapper in between it would not, so the
+  // tracker does it instead.
 
-  function noteAdd(target, type, listener, options) {
-    if (listener == null) return;
-    type = String(type);
-    const obj = options !== null && typeof options === 'object';
-    const capture = obj ? !!options.capture : !!options;
-    const signal = obj && options.signal ? options.signal : null;
-    if (signal && signal.aborted) return;             // the DOM added nothing
-    let list = byTarget.get(target);
-    if (list) {
-      for (let i = list.length - 1; i >= 0; i--) {
-        const e = list[i];
-        if (!listenerLive(e.rec)) { list.splice(i, 1); continue; }
-        if (e.type === type && e.listener === listener && e.capture === capture) return;   // a duplicate: ignored
-      }
-    } else {
-      list = [];
-      byTarget.set(target, list);
-    }
-    const rec = { kind: 'listener', type: type, signal: signal, target: weak(target), dead: false };
-    list.push({ type: type, listener: listener, capture: capture, rec: rec });
-    listeners.add(rec);
-    if (obj && options.once) {
-      // Fires just after the listener, when the DOM has dropped it.
-      orig.add.call(target, type, function () { rec.dead = true; listeners.delete(rec); },
-        { capture: capture, once: true, signal: signal || undefined });
-    }
-    const a = attribute();
-    if (!a) return;
-    const detail = type + ' on ' + describe(target, g);
-    if (a.late) { lateItem('listener', a, detail); return; }
-    track('listener', a, rec).detail = detail;
+  function captureOf(options) {
+    return options !== null && typeof options === 'object' ? !!options.capture : !!options;
   }
 
-  function noteRemove(target, type, listener, options) {
-    const list = byTarget.get(target);
-    if (!list) return;
-    type = String(type);
-    const capture = options !== null && typeof options === 'object' ? !!options.capture : !!options;
-    for (let i = 0; i < list.length; i++) {
+  function liveEntry(list, type, listener, capture) {
+    for (let i = list.length - 1; i >= 0; i--) {
       const e = list[i];
-      if (e.type === type && e.listener === listener && e.capture === capture) {
-        e.rec.dead = true;
-        listeners.delete(e.rec);
-        list.splice(i, 1);
-        return;
-      }
+      if (!listenerLive(e.rec)) { list.splice(i, 1); continue; }
+      if (e.type === type && e.listener === listener && e.capture === capture) return e;
     }
+    return null;
+  }
+
+  function dropEntry(target, e) {
+    e.rec.dead = true;
+    listeners.delete(e.rec);
+    const list = byTarget.get(target);
+    const i = list ? list.indexOf(e) : -1;
+    if (i !== -1) list.splice(i, 1);
   }
 
   proto.addEventListener = function addEventListener(type, listener, options) {
-    const ret = orig.add.apply(this, arguments);
-    try { noteAdd(this == null ? g : this, type, listener, options); } catch (e) { /* bookkeeping only */ }
+    const target = this == null ? g : this;
+    let plan = null;
+    try {
+      if (listener != null && (typeof listener === 'function' || typeof listener === 'object')) {
+        const obj = options !== null && typeof options === 'object';
+        const signal = obj && options.signal ? options.signal : null;
+        if (!(signal && signal.aborted)) {                         // else the DOM adds nothing
+          const t = String(type);
+          const capture = captureOf(options);
+          const list = byTarget.get(target) || [];
+          const dup = liveEntry(list, t, listener, capture);
+          if (dup) {
+            // Already there: the DOM would ignore this add. With a wrapper
+            // registered it would not, so skip the call ourselves.
+            if (dup.wrapper) return undefined;
+          } else {
+            plan = { list: list, t: t, capture: capture, signal: signal, once: obj && !!options.once, a: attribute() };
+          }
+        }
+      }
+    } catch (e) { plan = null; }
+    if (!plan) return orig.add.apply(this, arguments);
+
+    const a = plan.a;
+    const rec = { kind: 'listener', type: plan.t, signal: plan.signal, target: weak(target), dead: false };
+    const entry = { type: plan.t, listener: listener, capture: plan.capture, rec: rec, wrapper: null, options: options };
+    let ret;
+    if (a) {
+      const owner = a.owner;
+      entry.wrapper = function (event) {
+        if (plan.once) dropEntry(target, entry);                  // the DOM has dropped it
+        const prev = ambient;
+        ambient = owner;
+        try {
+          if (typeof listener === 'function') return listener.apply(this, arguments);
+          return listener.handleEvent.apply(listener, arguments);
+        } finally {
+          ambient = prev;
+        }
+      };
+      const args = Array.prototype.slice.call(arguments);
+      args[1] = entry.wrapper;
+      ret = orig.add.apply(this, args);
+      rec.entry = entry;                                          // for uninstall
+    } else {
+      ret = orig.add.apply(this, arguments);
+      // Not a page's: counted for liveListeners, except a once listener,
+      // whose firing an unwrapped listener cannot report.
+      if (plan.once) return ret;
+    }
+    if (!byTarget.has(target)) byTarget.set(target, plan.list);
+    plan.list.push(entry);
+    listeners.add(rec);
+    if (a) {
+      const detail = plan.t + ' on ' + describe(target, g);
+      if (a.late) lateItem('listener', a, detail);
+      else track('listener', a, rec).detail = detail;
+    }
     return ret;
   };
+
   proto.removeEventListener = function removeEventListener(type, listener, options) {
-    const ret = orig.remove.apply(this, arguments);
-    try { noteRemove(this == null ? g : this, type, listener, options); } catch (e) { /* bookkeeping only */ }
+    const target = this == null ? g : this;
+    let e = null;
+    try {
+      const list = byTarget.get(target);
+      if (list) e = liveEntry(list, String(type), listener, captureOf(options));
+    } catch (err) { e = null; }
+    if (!e) return orig.remove.apply(this, arguments);
+    let ret;
+    if (e.wrapper) {
+      const args = Array.prototype.slice.call(arguments);
+      args[1] = e.wrapper;
+      ret = orig.remove.apply(this, args);
+    } else {
+      ret = orig.remove.apply(this, arguments);
+    }
+    dropEntry(target, e);
     return ret;
   };
 
@@ -242,16 +312,19 @@ export function createTracker(g, opts) {
   g.setTimeout = function setTimeout(fn, ms) {
     const a = typeof fn === 'function' ? attribute() : null;
     if (!a) return orig.setTimeout.apply(this, arguments);
-    if (a.late) {
-      lateItem('timer', a, 'setTimeout ' + (ms || 0) + ' ms');
-      return orig.setTimeout.apply(this, arguments);
-    }
-    const rec = track('timer', a, { dead: false, detail: 'setTimeout ' + (ms || 0) + ' ms' });
     const args = Array.prototype.slice.call(arguments);
+    const detail = 'setTimeout ' + (ms || 0) + ' ms';
+    if (a.late) {
+      lateItem('timer', a, detail);
+      args[0] = bind(a.owner, fn);
+      return orig.setTimeout.apply(this, args);
+    }
+    const rec = track('timer', a, { dead: false, detail: detail });
+    const run = bind(a.owner, fn);
     args[0] = function () {
       rec.dead = true;
       timers.delete(rec.id);
-      return fn.apply(this, arguments);
+      return run.apply(this, arguments);
     };
     rec.id = orig.setTimeout.apply(this, args);
     timers.set(rec.id, rec);
@@ -259,13 +332,14 @@ export function createTracker(g, opts) {
   };
 
   g.setInterval = function setInterval(fn, ms) {
-    const id = orig.setInterval.apply(this, arguments);
     const a = typeof fn === 'function' ? attribute() : null;
-    if (!a) return id;
+    if (!a) return orig.setInterval.apply(this, arguments);
+    const args = Array.prototype.slice.call(arguments);
+    args[0] = bind(a.owner, fn);
+    const id = orig.setInterval.apply(this, args);
     const detail = 'setInterval ' + (ms || 0) + ' ms';
     if (a.late) { lateItem('interval', a, detail); return id; }
-    const rec = track('interval', a, { dead: false, detail: detail, id: id });
-    timers.set(id, rec);
+    timers.set(id, track('interval', a, { dead: false, detail: detail, id: id }));
     return id;
   };
 
@@ -278,6 +352,21 @@ export function createTracker(g, opts) {
   g.clearInterval = function clearInterval(id) { noteClear(id); return orig.clearInterval.apply(this, arguments); };
 
   // ---- fetch ----
+  //
+  // A page's fetch promise, and every promise its .then / .catch / .finally
+  // make, run their callbacks with the page as owner.
+  const nativeThen = g.Promise ? g.Promise.prototype.then : Promise.prototype.then;
+  function carry(p, owner) {
+    Object.defineProperty(p, 'then', {
+      configurable: true, writable: true, enumerable: false,
+      value: function then(onOk, onErr) {
+        return carry(nativeThen.call(this,
+          typeof onOk === 'function' ? bind(owner, onOk) : onOk,
+          typeof onErr === 'function' ? bind(owner, onErr) : onErr), owner);
+      }
+    });
+    return p;
+  }
 
   if (typeof orig.fetch === 'function') {
     g.fetch = function fetch(input, init) {
@@ -286,13 +375,15 @@ export function createTracker(g, opts) {
       if (!a) return p;
       const url = typeof input === 'string' ? input : (input && (input.url || input.href)) || String(input);
       if (a.late) {
-        if (left.has(a.page)) afterLeave += 1;
+        if (wasLeft(a.owner)) afterLeave += 1;
         lateItem('fetch', a, 'fetch ' + url);
-        return p;
+        return carry(nativeThen.call(p, function (r) { return r; }), a.owner);
       }
       const signal = init && 'signal' in init ? init.signal : (input && typeof input === 'object' ? input.signal : null);
       const rec = track('fetch', a, { dead: false, signal: signal || null, detail: 'fetch ' + url });
-      return p.then(function (r) { rec.dead = true; return r; }, function (e) { rec.dead = true; throw e; });
+      return carry(nativeThen.call(p,
+        function (r) { rec.dead = true; return r; },
+        function (e) { rec.dead = true; throw e; }), a.owner);
     };
   }
 
@@ -309,7 +400,10 @@ export function createTracker(g, opts) {
       report(item);
     });
     s.items.clear();
+    s.closed = true;
     left.add(s.name);
+    // Released listeners hold their page's closures: let them go.
+    listeners.forEach(function (rec) { if (!rec.target.deref() || !listenerLive(rec)) listeners.delete(rec); });
   }
 
   return {
@@ -321,7 +415,7 @@ export function createTracker(g, opts) {
       if (session) close(session);
       name = String(name);
       left.delete(name);
-      session = { name: name, items: new Set() };
+      session = { name: name, items: new Set(), closed: false };
     },
     stop: function () {
       if (session) close(session);
@@ -340,7 +434,18 @@ export function createTracker(g, opts) {
       });
       return n;
     },
+    /* Puts the originals back (tests). A page listener still registered
+       through its wrapper is re-registered as itself, so it keeps working and
+       removeEventListener with its own function still finds it. */
     uninstall: function () {
+      listeners.forEach(function (rec) {
+        const e = rec.entry;
+        const t = rec.target.deref();
+        if (!e || !e.wrapper || !t || !listenerLive(rec)) return;
+        orig.remove.call(t, e.type, e.wrapper, e.options);
+        orig.add.call(t, e.type, e.listener, e.options);
+      });
+      listeners.clear();
       proto.addEventListener = orig.add;
       proto.removeEventListener = orig.remove;
       g.setTimeout = orig.setTimeout;

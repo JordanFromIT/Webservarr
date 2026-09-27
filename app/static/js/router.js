@@ -117,6 +117,16 @@ export function debugFlags(search, stored) {
   return { flags: both, store: both.join(',') };
 }
 
+/* A one-shot flag ("throw"): when flags holds it, removes it and returns the
+   value to store for the tab ('' to remove the key); otherwise null, and
+   nothing changes. */
+export function takeFlag(flags, name) {
+  const i = flags.indexOf(name);
+  if (i === -1) return null;
+  flags.splice(i, 1);
+  return flags.join(',');
+}
+
 // ---------------------------------------------------------------------------
 // Browser
 // ---------------------------------------------------------------------------
@@ -186,11 +196,11 @@ function start() {
   }
 
   // "throw": the next soft navigation mounts a module that throws, once.
+  // Called only where go() is about to swap, never on a full navigation.
   function takeThrow() {
-    const i = debugState.flags.indexOf('throw');
-    if (i === -1) return false;
-    debugState.flags.splice(i, 1);
-    storeDebug(debugState.flags.join(','));
+    const store = takeFlag(debugState.flags, 'throw');
+    if (store === null) return false;
+    storeDebug(store);
     return true;
   }
 

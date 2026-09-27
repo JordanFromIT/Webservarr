@@ -10,7 +10,7 @@ page to that. The list starts empty: each page's conversion appends its name.
 import re
 import unittest
 
-from app.tests.test_shell_contract import STATIC, js_code_only, read
+from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
 CONVERTED = []
@@ -174,6 +174,28 @@ class DebugTools(unittest.TestCase):
         self.assertEqual(len(live), 1, "router.js should import debug-leaks.js in exactly one place")
         self.assertTrue((STATIC / "js" / "debug-leaks.js").is_file())
         self.assertTrue((STATIC / "js" / "pages" / "_debug-throw.js").is_file())
+
+    def test_throw_is_taken_only_where_a_swap_is_about_to_happen(self):
+        """takeFlag (the gate itself) is covered in app/tests/js/debug_leaks.mjs.
+        Here: the one place go() takes it is after every full-navigation exit
+        (an unconverted page, decide() saying "hard"), and only a true result
+        replaces the module, so a full navigation never spends the flag and no
+        visitor without it ever mounts _debug-throw.js."""
+        code = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+        calls = [m.start() for m in re.finditer(r"\btakeThrow\s*\(", code)
+                 if not code[:m.start()].rstrip().endswith("function")]
+        self.assertEqual(len(calls), 1, "takeThrow() should be called in exactly one place")
+        go = code.index("async function go(")
+        go_end = matching_brace(code, code.index("{", go))
+        at = calls[0]
+        self.assertTrue(go < at < go_end, "takeThrow() is called outside go()")
+        body = code[go:at]
+        for exit_ in ("if (!current)", "if (d.action ===", "await hardNavigate(d.url, token)"):
+            self.assertIn(exit_, body, f"takeThrow() is called before the full-navigation exit {exit_!r}")
+        self.assertRegex(code[at - 40:at + 80], r"if\s*\(\s*takeThrow\(\)\s*\)\s*moduleUrl\s*=",
+                         "only a taken flag may replace the page's module")
+        self.assertRegex(code, r"function takeThrow\(\)\s*\{\s*const store = takeFlag\(",
+                         "takeThrow() must go through the tested takeFlag() gate")
 
     def test_no_page_or_shell_script_references_the_debug_files(self):
         files = list(STATIC.glob("*.html")) + list((STATIC / "partials").glob("*.html"))
