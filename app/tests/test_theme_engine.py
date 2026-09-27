@@ -587,5 +587,142 @@ class SafeColours(unittest.TestCase):
         self.assertIn("[data-ws-theme-preview]", THEME)
 
 
+# Home's gauges (R189): the rings wear the accent unless Colourful gauges is
+# on, then their original colours (v1.10.11's Tailwind cyan, purple, orange).
+GAUGES = {"gauge_cpu": "#06B6D4", "gauge_ram": "#A855F7", "gauge_net": "#F97316"}
+INDEX = (STATIC / "index.html").read_text(encoding="utf-8")
+
+
+@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+class GaugeColours(unittest.TestCase):
+    """A switch and three colours, carried like every theme colour: registry,
+    payload, #ws-theme, the loader, theme.css defaults and Appearance. The
+    server picks the rings' colour at render time, so there is no flash."""
+
+    def ws_theme(self, values=None) -> dict:
+        style = pages.theme_style(payload(values))
+        return declared(re.search(r'<style id="ws-theme">:root\{(.*)\}</style>', style).group(1))
+
+    def test_registry_rows(self):
+        d = REGISTRY["theme.gauges_colourful"]
+        self.assertEqual((d.type, d.default, d.public), ("bool", "false", True))
+        for key, default in GAUGES.items():
+            with self.subTest(key):
+                d = REGISTRY["theme.color_" + key]
+                self.assertEqual((d.type, d.default, d.public, d.allow_empty), ("color", default, True, False))
+                self.assertIsNotNone(settings_registry.validate_value(d.key, "orange"))
+        self.assertEqual(settings_registry.GAUGE_IDS, ("cpu", "ram", "net"))
+
+    def test_they_are_seeded_and_served_as_defaults(self):
+        for key, default in dict(GAUGES, gauges_colourful="false").items():
+            full = ("theme.color_" + key) if key != "gauges_colourful" else "theme." + key
+            self.assertEqual(seed.DEFAULT_SETTINGS[full][0], default, full)
+            self.assertEqual(BRANDING_DEFAULTS[full], default, full)
+
+    def test_the_payload_carries_the_switch_and_safe_colours(self):
+        self.assertIs(payload()["gauges_colourful"], False)
+        self.assertIs(payload({"theme.gauges_colourful": "true"})["gauges_colourful"], True)
+        for odd in ("TRUE", "yes", "1", ""):
+            self.assertIs(payload({"theme.gauges_colourful": odd})["gauges_colourful"], False, odd)
+        colors = payload({"theme.color_gauge_cpu": "#123456", "theme.color_gauge_ram": "purple",
+                          "theme.color_gauge_net": "#F97316;x"})["colors"]
+        self.assertEqual(colors["gauge_cpu"], "#123456")
+        self.assertEqual(colors["gauge_ram"], GAUGES["gauge_ram"])
+        self.assertEqual(colors["gauge_net"], GAUGES["gauge_net"])
+
+    def test_off_the_rings_wear_the_accent(self):
+        # Exactly v1.11.0's look: the rings were text-steel-blue (the accent).
+        got = self.ws_theme({"theme.color_accent": "#336699"})
+        for g in ("cpu", "ram", "net"):
+            self.assertEqual(got["--ws-gauge-" + g], "var(--color-accent)", g)
+            self.assertEqual(got["--color-gauge-" + g], rgb(GAUGES["gauge_" + g]), g)   # still sent as saved
+        self.assertEqual(got["--color-accent"], "51 102 153")
+
+    def test_on_each_ring_wears_its_own_colour(self):
+        got = self.ws_theme({"theme.gauges_colourful": "true", "theme.color_gauge_ram": "#123456"})
+        for g in ("cpu", "ram", "net"):
+            self.assertEqual(got["--ws-gauge-" + g], f"var(--color-gauge-{g})", g)
+        self.assertEqual(got["--color-gauge-cpu"], "6 182 212")
+        self.assertEqual(got["--color-gauge-ram"], "18 52 86")
+        self.assertEqual(got["--hex-gauge-net"], GAUGES["gauge_net"])
+
+    def test_only_the_payloads_own_true_turns_them_on(self):
+        for odd in ("true", 1, None):
+            style = pages.theme_style(dict(payload(), gauges_colourful=odd))
+            self.assertIn("--ws-gauge-cpu:var(--color-accent)", style, odd)
+
+    def test_safe_colours_keep_the_switch_and_ship_the_colours(self):
+        b = payload({"theme.gauges_colourful": "true", "theme.color_gauge_cpu": "#010203",
+                     "theme.color_accent": "#010203"})
+        safe = pages.safe_theme_branding(b)
+        self.assertIs(safe["gauges_colourful"], True)        # the skeleton shows the pickers by it
+        style = pages.theme_style(safe)
+        self.assertNotIn("1 2 3", style)
+        self.assertIn("--color-gauge-cpu:6 182 212", style)
+        self.assertIn("--ws-gauge-cpu:var(--color-gauge-cpu)", style)
+
+    def test_stylesheet_defaults(self):
+        root = declared(blocks(THEME, ":where(:root)")[0])
+        for key, default in GAUGES.items():
+            var = key.replace("_", "-")
+            self.assertEqual(root["--color-" + var], rgb(default), key)
+            self.assertEqual(root["--hex-" + var].upper(), default, key)
+        for g in ("cpu", "ram", "net"):
+            self.assertEqual(root["--ws-gauge-" + g], "var(--color-accent)", g)
+
+    def test_the_loader_picks_as_the_server_does(self):
+        self.assertIn("['cpu', 'ram', 'net'].forEach(function (g) {", LOADER)
+        self.assertTrue(live_matches(
+            LOADER, r"data\.gauges_colourful === true \? 'var\(--color-gauge-' \+ g \+ '\)' : 'var\(--color-accent\)'"))
+        self.assertTrue(live_matches(LOADER, r"setProperty\('--ws-gauge-' \+ g,"))
+
+    def test_tailwind_names_them(self):
+        cfg = repo_file(self, "tailwind.config.js")
+        for g in ("cpu", "ram", "net"):
+            self.assertIn(f'"gauge-{g}": "rgb(var(--ws-gauge-{g}) / <alpha-value>)"', cfg)
+
+    def test_the_rings_use_them(self):
+        for g in ("cpu", "ram", "net"):
+            ring = re.search(rf'<circle id="{g}GaugeCircle" class="([^"]*)"', INDEX)
+            self.assertIsNotNone(ring, g)
+            self.assertEqual(ring.group(1).split()[0], f"text-gauge-{g}", g)
+            self.assertNotIn("steel-blue", ring.group(1), g)
+            # The compiled utility exists (Tailwind emits only literal classes).
+            self.assertIn(f".text-gauge-{g}{{", (STATIC / "css" / "app.css").read_text(encoding="utf-8"))
+
+    def test_appearance_offers_the_switch_and_its_pickers(self):
+        self.assertIn("var GAUGES_ON = 'theme.gauges_colourful';", APPEARANCE)
+        for key, var in (("gauge_cpu", "gauge-cpu"), ("gauge_ram", "gauge-ram"), ("gauge_net", "gauge-net")):
+            self.assertRegex(APPEARANCE, rf"\['theme\.color_{key}', '[^']+', '{var}'\]")
+        self.assertTrue(live_matches(APPEARANCE, r"WSSettings\.card\('Home gauges'\)"))
+        self.assertTrue(live_matches(APPEARANCE, r"api\.toggle\(\{ key: GAUGES_ON, label: 'Colourful gauges',"))
+        self.assertTrue(live_matches(APPEARANCE, r"api\.color\(\{ key: g\[0\], label: g\[1\], cssVar: g\[2\] \}\)"))
+        # The pickers show only while the switch is on (or hold a change).
+        self.assertTrue(live_matches(APPEARANCE, r"var open = api\.get\(GAUGES_ON\) === 'true' \|\|"))
+        self.assertTrue(live_matches(APPEARANCE, r"ggrid\.classList\.toggle\('hidden', !open\);"))
+
+    def test_reset_stages_them_too(self):
+        keys = re.search(r"var KEYS = (.*?);\n", APPEARANCE, re.S).group(1)
+        self.assertIn("[GAUGES_ON]", keys)
+        self.assertIn("GAUGES.map(function (g) { return g[0]; })", keys)
+
+    def test_the_contrast_guard_leaves_the_rings_alone(self):
+        # Rings are non-text marks; the guard measures text (and the New!
+        # flag's lettering at 3:1), so gauges are not among its pairs.
+        pairs = re.search(r"var PAIRS = \[(.*?)\n  \];", APPEARANCE, re.S).group(1)
+        self.assertNotIn("gauge", pairs)
+
+    def test_the_skeleton_has_both_states(self):
+        panel = FRAME[FRAME.index('<section id="panel-appearance"'):]
+        panel = panel[:panel.index("</section>")]
+        card = panel[panel.index('<span class="skel-text">Home gauges</span>'):panel.index(
+            '<span class="skel-text">Status colours</span>')]
+        self.assertIn('<span class="skel-text">Colourful gauges</span>', card)
+        self.assertIn('<span class="skel block w-11 h-6 rounded-full shrink-0"></span>', card)
+        pickers = card[card.index('<div data-skel-when="gauges-on" hidden>'):]
+        self.assertEqual(re.findall(r'<span class="skel-text">([^<]+)</span>', pickers), ["CPU", "RAM", "Network"])
+        self.assertIn('<div class="grid sm:grid-cols-3 gap-5 max-w-2xl">', pickers)
+
+
 if __name__ == "__main__":
     unittest.main()
