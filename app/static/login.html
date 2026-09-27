@@ -69,21 +69,35 @@
       background-position: center;
       transition: opacity 1.5s ease-in-out;
       will-change: opacity, transform;
-      /* A slow drift behind the card: over 32s the art grows to 1.07 and eases
-         a little left and down, then drifts back. The pan is tied to the scale
-         (both leave zero together), so no edge is ever uncovered: at full
-         scale 3.5% of the art lies past each edge and the pan moves it barely
-         1%. Both slides run the same clock, so a crossfade meets the next
-         picture at the same size. Transform only: the compositor owns it and
-         the main thread stays idle. The card's glass is untouched. */
-      animation: login-drift 32s ease-in-out infinite alternate;
     }
+    /* Ken Burns, one move per picture. The script puts .is-moving on a slide
+       just before it fades in (restartDrift below), so every picture starts
+       at scale 1 and grows about 1% a second toward one of four corners:
+       1.115 by the time its fade-out ends at 11.5s, 1.14 at the 14s end.
+       Linear, and longer than the picture is on screen, so it never visibly
+       slows or stops, even when the next picture's preload runs late; the
+       outgoing slide keeps its last frame (forwards) through the fade. The
+       pan is tied to the scale (both leave zero together) and at 2% of the
+       box stays well inside the (scale - 1) / 2 overhang, so no edge is ever
+       uncovered. Transform only: the compositor owns it and the main thread
+       stays idle. A single picture (no rotation) drifts back and forth
+       instead (.is-solo). The card's glass is untouched. */
+    .backdrop-slide.is-moving { animation: login-drift 14s linear forwards; }
+    .backdrop-slide.is-solo { animation: login-drift-solo 20s ease-in-out infinite alternate; }
+    .backdrop-slide.drift-nw { --drift-x: -2%; --drift-y: -2%; }
+    .backdrop-slide.drift-ne { --drift-x: 2%; --drift-y: -2%; }
+    .backdrop-slide.drift-sw { --drift-x: -2%; --drift-y: 2%; }
+    .backdrop-slide.drift-se { --drift-x: 2%; --drift-y: 2%; }
     @keyframes login-drift {
       from { transform: scale(1) translate(0, 0); }
-      to   { transform: scale(1.07) translate(-1%, 0.6%); }
+      to   { transform: scale(1.14) translate(var(--drift-x, 0%), var(--drift-y, 0%)); }
+    }
+    @keyframes login-drift-solo {
+      from { transform: scale(1) translate(0, 0); }
+      to   { transform: scale(1.10) translate(-1%, 0.6%); }
     }
     @media (prefers-reduced-motion: reduce) {
-      .backdrop-slide { animation: none; }
+      .backdrop-slide.is-moving, .backdrop-slide.is-solo { animation: none; }
     }
     /* Prevent flash of the wrong auth method on load: keep the login form
        invisible (space reserved, so no layout shift) until JS has applied the
@@ -347,14 +361,42 @@ document.addEventListener('DOMContentLoaded', async function() {
                 });
             }
 
+            // Ken Burns: each picture gets its own move (the CSS is on
+            // .is-moving). Restarting it means taking the class off, letting
+            // the style settle, and putting it back; the slide is still at
+            // opacity 0 at that moment, so the snap back to scale 1 is never
+            // seen. The direction is one of four corner classes and never
+            // repeats the previous picture's.
+            var DRIFTS = ['drift-nw', 'drift-ne', 'drift-sw', 'drift-se'];
+            var lastDrift = Math.floor(Math.random() * DRIFTS.length);
+            function restartDrift(slide) {
+                lastDrift = (lastDrift + 1 + Math.floor(Math.random() * (DRIFTS.length - 1))) % DRIFTS.length;
+                slide.classList.remove('is-moving', DRIFTS[0], DRIFTS[1], DRIFTS[2], DRIFTS[3]);
+                void slide.offsetWidth; // commit the removal, so the animation starts over
+                slide.classList.add('is-moving', DRIFTS[lastDrift]);
+            }
+
+            // Fade the next picture in on one slide and the current one out
+            // on the other. The move restarts before the fade-in begins; the
+            // outgoing slide is left alone, so it keeps its frame as it goes.
+            function show(next, prev, url) {
+                next.style.backgroundImage = 'url(' + url + ')';
+                restartDrift(next);
+                next.style.opacity = '1';
+                prev.style.opacity = '0';
+            }
+
             // Load first image
             var firstUrl = urls[0];
             await preload(firstUrl);
 
-            // Hide static grid, show slideshow
+            // Hide static grid, show slideshow. The first move starts here,
+            // once the slideshow is visible, not while it was hidden. With
+            // one picture there is no rotation, so it drifts back and forth.
             if (staticGrid) staticGrid.style.display = 'none';
             slideshow.classList.remove('hidden');
             slideA.style.backgroundImage = 'url(' + firstUrl + ')';
+            if (urls.length < 2) slideA.classList.add('is-solo'); else restartDrift(slideA);
             slideA.style.opacity = '1';
             currentIndex = 1;
 
@@ -369,14 +411,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 } catch(e) { return; }
 
                 if (activeSlide === 'A') {
-                    slideB.style.backgroundImage = 'url(' + nextUrl + ')';
-                    slideB.style.opacity = '1';
-                    slideA.style.opacity = '0';
+                    show(slideB, slideA, nextUrl);
                     activeSlide = 'B';
                 } else {
-                    slideA.style.backgroundImage = 'url(' + nextUrl + ')';
-                    slideA.style.opacity = '1';
-                    slideB.style.opacity = '0';
+                    show(slideA, slideB, nextUrl);
                     activeSlide = 'A';
                 }
             }, 10000);

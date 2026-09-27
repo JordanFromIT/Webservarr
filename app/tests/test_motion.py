@@ -268,12 +268,105 @@ class HoverLift(unittest.TestCase):
 
 
 class LoginDrift(unittest.TestCase):
-    def test_backdrop_drifts_on_transform_only(self):
-        slide = css_rule(LOGIN, ".backdrop-slide")
-        self.assertRegex(slide, r"animation: login-drift (?:2[5-9]|3\d|40)s ease-in-out infinite alternate")
+    """Ken Burns on the login artwork: one move per picture, restarted by the
+    script as the picture is about to fade in, about 1% of scale a second so
+    it is seen to move; a lone picture drifts back and forth instead."""
+
+    def test_each_picture_moves_about_one_percent_a_second_on_transform_only(self):
+        # The move is the script's to start (.is-moving), not the slide's own.
+        self.assertNotIn("animation", properties(css_rule(LOGIN, ".backdrop-slide")))
+        moving = css_rule(LOGIN, ".backdrop-slide.is-moving")
+        m = re.search(r"animation: login-drift (\d+)s linear forwards", moving)
+        self.assertTrue(m, moving)
+        seconds = int(m.group(1))
         self.assertEqual(keyframe_properties(LOGIN, "login-drift"), {"transform"})
-        self.assertRegex(LOGIN, r"to\s*\{ transform: scale\(1\.0[6-8]\)")
-        self.assertTrue(stilled(LOGIN, ".backdrop-slide", "animation"))
+        end = re.search(r"to\s*\{ transform: scale\((1\.\d+)\) translate\(var\(--drift-x, 0%\), var\(--drift-y, 0%\)\)", LOGIN)
+        self.assertTrue(end, "login-drift ends at a scale with a per-picture pan")
+        scale = float(end.group(1))
+        # Linear and about 1%/s, and it outlasts the ~11.5s a picture is on
+        # screen (10s interval + 1.5s fade), so it never visibly stops.
+        self.assertAlmostEqual((scale - 1) / seconds, 0.01, delta=0.002)
+        self.assertGreaterEqual(seconds, 12)
+        self.assertLessEqual(seconds, 16)
+
+    def test_four_directions_and_the_pan_never_uncovers_an_edge(self):
+        pans = {}
+        for name in ("nw", "ne", "sw", "se"):
+            rule = css_rule(LOGIN, f".backdrop-slide.drift-{name}")
+            m = re.fullmatch(r"\s*--drift-x: (-?\d+(?:\.\d+)?)%; --drift-y: (-?\d+(?:\.\d+)?)%;\s*", rule)
+            self.assertTrue(m, rule)
+            pans[name] = (float(m.group(1)), float(m.group(2)))
+        # One class per corner: the signs cover all four quadrants.
+        self.assertEqual({(x < 0, y < 0) for x, y in pans.values()},
+                         {(True, True), (False, True), (True, False), (False, False)})
+        # The translate is applied inside the scale, so the picture moves
+        # pan * scale of the box; the overhang past each edge is (scale-1)/2.
+        # Both grow from zero together, so holding at the end holds throughout.
+        scale = float(re.search(r"transform: scale\((1\.\d+)\) translate\(var\(--drift-x", LOGIN).group(1))
+        for x, y in pans.values():
+            for pan in (x, y):
+                self.assertLessEqual(abs(pan) / 100 * scale, (scale - 1) / 2)
+        # A single picture: a slow back-and-forth that is also seen to move.
+        solo = css_rule(LOGIN, ".backdrop-slide.is-solo")
+        self.assertRegex(solo, r"animation: login-drift-solo (?:1[5-9]|2\d)s ease-in-out infinite alternate")
+        self.assertEqual(keyframe_properties(LOGIN, "login-drift-solo"), {"transform"})
+        m = re.search(r"to\s*\{ transform: scale\((1\.\d+)\) translate\((-?[\d.]+)%, (-?[\d.]+)%\)", LOGIN)
+        self.assertTrue(m)
+        solo_scale = float(m.group(1))
+        self.assertGreaterEqual(solo_scale, 1.08)
+        for pan in (float(m.group(2)), float(m.group(3))):
+            self.assertLessEqual(abs(pan) / 100 * solo_scale, (solo_scale - 1) / 2)
+
+    def test_reduced_motion_keeps_the_crossfade_and_drops_every_move(self):
+        # The guard names the moving selectors themselves: a bare
+        # .backdrop-slide has less specificity and would never win.
+        self.assertTrue(stilled(LOGIN, ".backdrop-slide.is-moving", "animation"))
+        self.assertTrue(stilled(LOGIN, ".backdrop-slide.is-solo", "animation"))
+        self.assertIn("transition: opacity 1.5s ease-in-out", css_rule(LOGIN, ".backdrop-slide"))
+
+    def test_the_move_restarts_before_the_incoming_slide_fades_in(self):
+        # restartDrift: class off, a forced reflow, class on, in that order.
+        m = live_matches(LOGIN, r"function restartDrift\(slide\) \{")
+        self.assertTrue(m, "restartDrift")
+        body = LOGIN[m[0].end():matching_brace(LOGIN, m[0].end() - 1)]
+        off = live_matches(body, r"slide\.classList\.remove\('is-moving'")
+        reflow = live_matches(body, r"void slide\.offsetWidth;")
+        on = live_matches(body, r"slide\.classList\.add\('is-moving', DRIFTS\[lastDrift\]\)")
+        self.assertTrue(off and reflow and on)
+        self.assertLess(off[0].start(), reflow[0].start())
+        self.assertLess(reflow[0].start(), on[0].start())
+        # The next direction always differs from the last one.
+        self.assertTrue(live_matches(
+            body, r"lastDrift = \(lastDrift \+ 1 \+ Math\.floor\(Math\.random\(\) \* \(DRIFTS\.length - 1\)\)\) % DRIFTS\.length;"))
+        self.assertTrue(live_matches(LOGIN, r"var DRIFTS = \['drift-nw', 'drift-ne', 'drift-sw', 'drift-se'\];"))
+        # show(): the incoming slide restarts before its opacity goes to 1;
+        # the outgoing slide's classes are left alone.
+        m = live_matches(LOGIN, r"function show\(next, prev, url\) \{")
+        self.assertTrue(m, "show")
+        body = LOGIN[m[0].end():matching_brace(LOGIN, m[0].end() - 1)]
+        restart = live_matches(body, r"restartDrift\(next\);")
+        fade_in = live_matches(body, r"next\.style\.opacity = '1';")
+        self.assertTrue(restart and fade_in)
+        self.assertLess(restart[0].start(), fade_in[0].start())
+        self.assertTrue(live_matches(body, r"prev\.style\.opacity = '0';"))
+        self.assertFalse(re.search(r"prev\.classList", body))
+        # The first picture starts once the slideshow is shown, before it
+        # fades in; a lone picture takes the back-and-forth drift instead.
+        reveal = live_matches(LOGIN, r"slideshow\.classList\.remove\('hidden'\);")
+        first = live_matches(LOGIN, r"if \(urls\.length < 2\) slideA\.classList\.add\('is-solo'\); else restartDrift\(slideA\);")
+        shown = live_matches(LOGIN, r"slideA\.style\.opacity = '1';")
+        self.assertTrue(reveal and first and shown)
+        self.assertLess(reveal[0].start(), first[0].start())
+        self.assertLess(first[0].start(), shown[0].start())
+
+    def test_no_new_timers_drive_the_move(self):
+        # The rotation interval and the Plex PIN poll; the message clear, the
+        # Plex retry and the form-reveal failsafe. Nothing animates from JS.
+        code = js_code_only(LOGIN)
+        self.assertEqual(code.count("setInterval("), 2)
+        self.assertEqual(code.count("setTimeout("), 3)
+        self.assertNotIn("requestAnimationFrame", code)
+        self.assertNotIn(".animate(", code)
 
     def test_the_card_glass_and_the_form_reveal_are_untouched(self):
         glass = css_rule(LOGIN, ".login-glass-card")
