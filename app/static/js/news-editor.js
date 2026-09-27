@@ -5,11 +5,19 @@
  * posts the editor's HTML to /api/news/, which sanitises it (bleach) before it
  * is stored or shown. Links and images are asked for in the shared dialog
  * (WSUI), never in a native browser dialog.
+ *
+ * A page helper for the soft-navigated /news (spec 4.3): loading this file
+ * only defines NewsEditor. The page module calls NewsEditor.init(ctx) from
+ * mount on each visit; every listener, timer and save the editor starts then
+ * ends with that visit's ctx.signal, and nothing of the page is kept after it.
  */
 var NewsEditor = (function () {
   'use strict';
 
-  var UI = window.WSUI, el = UI.el, icon = UI.icon, cls = UI.cls;
+  // Bound by init(), so loading this file reads nothing from the page.
+  var UI = null, el = null, icon = null, cls = null;
+  // The visit init() was given: its signal and ctx.setTimeout.
+  var signal = null, later = null;
   // editor, toolbar and previewing belong to the panel on screen (the toolbar
   // drives them). Which post a save writes, and whom it tells, belongs to the
   // session its panel was opened with (see open), never to module state: a
@@ -86,7 +94,7 @@ var NewsEditor = (function () {
       form.appendChild(box);
       inputs[f[0]] = i;
     });
-    setTimeout(function () { inputs[fields[0][0]].focus(); }, 30);
+    later(function () { inputs[fields[0][0]].focus(); }, 30);
     return UI.confirm({ title: title, body: form, confirmLabel: 'Insert', cancelLabel: 'Cancel' }).then(function (ok) {
       if (!ok) return null;
       var out = {};
@@ -211,7 +219,7 @@ var NewsEditor = (function () {
       if (previewing) return;
       editor.focus();
       document.execCommand('formatBlock', false, '<' + heading.value + '>');
-    });
+    }, { signal: signal });
     toolbar.appendChild(heading);
     TOOLS.forEach(function (t) {
       if (!t) { toolbar.appendChild(el('span', 'w-px h-6 bg-frosted-blue/10 mx-1')); return; }
@@ -221,8 +229,8 @@ var NewsEditor = (function () {
       b.setAttribute('aria-label', t[2]);
       b.title = t[2];
       b.appendChild(icon(t[1], 'text-[20px]'));
-      b.addEventListener('mousedown', function (e) { e.preventDefault(); });   // keep the selection
-      b.addEventListener('click', function () { run(t[0]); });
+      b.addEventListener('mousedown', function (e) { e.preventDefault(); }, { signal: signal });   // keep the selection
+      b.addEventListener('click', function () { run(t[0]); }, { signal: signal });
       toolbar.appendChild(b);
     });
     var pv = el('button', 'ml-auto inline-flex items-center gap-1 p-1.5 rounded-[8px] text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/10');
@@ -230,7 +238,7 @@ var NewsEditor = (function () {
     pv.setAttribute('data-preview', '');
     pv.appendChild(icon('visibility', 'text-[20px]'));
     pv.appendChild(el('span', 'text-[13px] font-semibold', 'Preview'));
-    pv.addEventListener('click', function () { setPreview(!previewing); });
+    pv.addEventListener('click', function () { setPreview(!previewing); }, { signal: signal });
     toolbar.appendChild(pv);
     body.appendChild(toolbar);
 
@@ -252,9 +260,9 @@ var NewsEditor = (function () {
       var k = e.key.toLowerCase();
       var map = { b: 'bold', i: 'italic', u: 'underline' };
       if (map[k]) { e.preventDefault(); document.execCommand(map[k], false, null); paintTools(); }
-    });
-    editor.addEventListener('keyup', paintTools);
-    editor.addEventListener('mouseup', paintTools);
+    }, { signal: signal });
+    editor.addEventListener('keyup', paintTools, { signal: signal });
+    editor.addEventListener('mouseup', paintTools, { signal: signal });
     body.appendChild(editor);
     wrap.appendChild(body);
 
@@ -291,6 +299,7 @@ var NewsEditor = (function () {
 
     function save(published) {
       var s = session;   // the post this panel edits and whom to tell; fixed for this save
+      var sig = signal;  // leaving the page cancels the save, as a full page load did
       if (!title.value.trim()) { UI.toast('Give the post a title.', 'err'); title.focus(); return; }
       if (!box.textContent.trim() && !box.querySelector('img, hr')) {
         UI.toast('Write something in the post first.', 'err');
@@ -303,7 +312,8 @@ var NewsEditor = (function () {
       publish.disabled = draft.disabled = cancel.disabled = true;
       var payload = { title: title.value.trim(), content: box.innerHTML.trim(), published: published, pinned: pin.checked };
       fetch(s.id ? '/api/news/' + s.id : '/api/news/', {
-        method: s.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        method: s.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        signal: sig
       }).then(function (r) {
         if (r.status === 401) { window.location.href = '/login'; return; }
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -312,7 +322,8 @@ var NewsEditor = (function () {
         // clicked while it was in flight still opens.
         if (current === s) hide();
         if (s.onDone) s.onDone();
-      }).catch(function () {
+      }).catch(function (e) {
+        if (e && e.name === 'AbortError') return;   // the page was left: nothing to say
         // "Your text is still here" holds only while this panel is on screen.
         // Once another post's panel replaced it, say which post (the title this
         // save sent, shown as text) and how to get back to it.
@@ -321,14 +332,15 @@ var NewsEditor = (function () {
         else UI.toast('“' + payload.title + '” wasn’t saved. Open it again and retry.', 'err');
       }).then(function () { publish.disabled = draft.disabled = cancel.disabled = false; });
     }
-    publish.addEventListener('click', function () { save(true); });
-    draft.addEventListener('click', function () { save(false); });
-    cancel.addEventListener('click', function () { if (current === session) close(); });
-    setTimeout(function () { title.focus(); }, 30);
+    publish.addEventListener('click', function () { save(true); }, { signal: signal });
+    draft.addEventListener('click', function () { save(false); }, { signal: signal });
+    cancel.addEventListener('click', function () { if (current === session) close(); }, { signal: signal });
+    later(function () { title.focus(); }, 30);
     return wrap;
   }
 
   function open(post, onDone) {
+    if (!signal || signal.aborted) return;   // init() not called for this visit
     host = document.getElementById('newsEditor');
     if (!host) return;
     // One session per open: its post id, its callback and (through build)
@@ -356,5 +368,22 @@ var NewsEditor = (function () {
     hide();
   }
 
-  return { open: open, close: close, generation: function () { return generation; } };
+  // Each visit to /news, from its mount: the shared UI helpers, and the
+  // visit's signal and timer. Leaving the page lets go of the panel's nodes
+  // (they belong to the page that was swapped out) and drops any Edit still
+  // fetching (generation), so a later visit starts clean.
+  function init(ctx) {
+    UI = window.WSUI;
+    el = UI.el; icon = UI.icon; cls = UI.cls;
+    signal = ctx.signal;
+    later = ctx.setTimeout;
+    host = editor = toolbar = current = null;
+    previewing = false;
+    signal.addEventListener('abort', function () {
+      generation += 1;
+      host = editor = toolbar = current = null;
+    }, { once: true });
+  }
+
+  return { init: init, open: open, close: close, generation: function () { return generation; } };
 })();
