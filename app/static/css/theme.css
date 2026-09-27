@@ -526,11 +526,11 @@ body { padding-bottom: var(--ws-player-h); }
 }
 
 /* <html data-shell="hidden">: the page has the whole screen (the reader, a
-   full-screen view). The player stays: it is not part of the chrome. */
+   full-screen view). The player stays: it is not part of the chrome. The
+   drawer needs no rule: only the hidden mobile bar's button opens it. */
 html[data-shell="hidden"] #desktopSidebar,
 html[data-shell="hidden"] #appHeader,
-html[data-shell="hidden"] #mobileTopBar,
-html[data-shell="hidden"] #drawerOverlay { display: none; }
+html[data-shell="hidden"] #mobileTopBar { display: none; }
 
 /* ---- Soft open and close ----
  *
