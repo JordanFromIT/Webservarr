@@ -1706,10 +1706,9 @@ class Route(PageRoutesBase):
 
 
 def news_script() -> str:
-    """The one inline <script> of news.html (raw source)."""
-    blocks = re.findall(r"<script>(.*?)</script>", (STATIC / "news.html").read_text(encoding="utf-8"), re.S)
-    assert len(blocks) == 1, "news.html should carry exactly one inline script"
-    return blocks[0]
+    """News's page module, which holds everything its inline <script> did
+    before soft navigation (raw source)."""
+    return (STATIC / "js" / "pages" / "news.js").read_text(encoding="utf-8")
 
 
 def raw_function(src: str, name: str) -> str:
@@ -1734,7 +1733,7 @@ class InPlaceNews(unittest.TestCase):
         self.assertRegex(home, r'<a[^>]*href="/news"[^>]*class="[^"]*ws-admin-only[^"]*"[^>]*>\s*Manage news')
 
     def test_editor_hygiene(self):
-        for name in ("news-editor.js", "news.html"):
+        for name in ("news-editor.js", "news.html", "pages/news.js"):
             path = STATIC / "js" / name if name.endswith(".js") else STATIC / name
             text = path.read_text(encoding="utf-8")
             self.assertIsNone(NATIVE_DIALOG.search(text), name)
@@ -1859,7 +1858,7 @@ class InPlaceNews(unittest.TestCase):
         self.assertNotRegex(after, r"\b(?:editor|host|onDone)\b(?<!s\.onDone)")
         src = (STATIC / "js" / "news-editor.js").read_text(encoding="utf-8")
         self.assertEqual(len(live_matches(
-            src, r"cancel\.addEventListener\('click', function \(\) \{ if \(current === session\) close\(\); \}\);")), 1)
+            src, r"cancel\.addEventListener\('click', function \(\) \{ if \(current === session\) close\(\); \}, \{ signal: signal \}\);")), 1)
 
     def test_a_failed_save_says_which_post_once_its_panel_is_gone(self):
         # "Your text is still here" is only true while the save's own panel is
@@ -1867,9 +1866,10 @@ class InPlaceNews(unittest.TestCase):
         # (its captured title, as text) and says to open it again.
         src = (STATIC / "js" / "news-editor.js").read_text(encoding="utf-8")
         save = function_body(js_code_only(src), "save")
-        failed = save[save.index(".catch(function () {"):]
+        failed = save[save.index(".catch(function (e) {"):]
         self.assertRegex(failed,
-            r"^\.catch\(function \(\) \{\s*"
+            r"^\.catch\(function \(e\) \{\s*"
+            r"if \(e && e\.name === '[^']*'\) return;\s*"   # AbortError: the page was left
             r"if \(current === s\) UI\.toast\('[^']*', '[^']*'\);\s*"
             r"else if \(!s\.id\) UI\.toast\('[^']*' \+ payload\.title \+ '[^']*', '[^']*'\);\s*"
             r"else UI\.toast\('[^']*' \+ payload\.title \+ '[^']*', '[^']*'\);\s*\}\)")
@@ -1884,9 +1884,9 @@ class InPlaceNews(unittest.TestCase):
         code = js_code_only(news_script())
         self.assertRegex(code, r"\bvar _editClick = 0;")
         also = r"(?: && seen === NewsEditor\.generation\(\))?"   # see test_cancel_drops_an_edit_still_fetching
-        self.assertRegex(code, r"var ticket = \+\+_editClick(?:, seen = NewsEditor\.generation\(\))?;\s*WS\.getJSON\(")
+        self.assertRegex(code, r"var ticket = \+\+_editClick(?:, seen = NewsEditor\.generation\(\))?;\s*getJSON\(")
         self.assertRegex(code, r"\.then\(function \(post\) \{\s*if \(ticket === _editClick" + also + r"\) NewsEditor\.open\(post, newsChanged\);\s*\}\)")
-        self.assertRegex(code, r"\.catch\(function \(\) \{\s*if \(ticket === _editClick" + also + r"\) WSUI\.toast\(")
+        self.assertRegex(code, r"\.catch\(function \(e\) \{\s*if \(isAbort\(e\)\) return;\s*if \(ticket === _editClick" + also + r"\) WSUI\.toast\(")
         self.assertRegex(code, r"_editClick \+= 1;\s*NewsEditor\.open\(null, newsChanged\);")
 
     def test_cancel_drops_an_edit_still_fetching(self):
@@ -1904,17 +1904,17 @@ class InPlaceNews(unittest.TestCase):
         # teardown does not, so an Edit clicked while that save was in flight
         # still opens.
         self.assertEqual(len(live_matches(
-            src, r"cancel\.addEventListener\('click', function \(\) \{ if \(current === session\) close\(\); \}\);")), 1)
+            src, r"cancel\.addEventListener\('click', function \(\) \{ if \(current === session\) close\(\); \}, \{ signal: signal \}\);")), 1)
         self.assertEqual(len(live_matches(src, r"if \(current === s\) hide\(\);")), 1)
         self.assertEqual(len(live_matches(src, r"(?<!function )\bhide\(\);")), 2)
-        self.assertRegex(code, r"return \{ open: open, close: close, generation: function \(\) \{ return generation; \} \};")
-        # news.html reads it at click time, before the fetch, and both the open
-        # and the failure toast require it unchanged, as well as the ticket.
+        self.assertRegex(code, r"return \{ init: init, open: open, close: close, generation: function \(\) \{ return generation; \} \};")
+        # The News page reads it at click time, before the fetch, and both the
+        # open and the failure toast require it unchanged, as well as the ticket.
         page = js_code_only(news_script())
-        self.assertRegex(page, r"var ticket = \+\+_editClick, seen = NewsEditor\.generation\(\);\s*WS\.getJSON\(")
+        self.assertRegex(page, r"var ticket = \+\+_editClick, seen = NewsEditor\.generation\(\);\s*getJSON\(")
         live = r"ticket === _editClick && seen === NewsEditor\.generation\(\)"
         self.assertRegex(page, r"\.then\(function \(post\) \{\s*if \(" + live + r"\) NewsEditor\.open\(post, newsChanged\);\s*\}\)")
-        self.assertRegex(page, r"\.catch\(function \(\) \{\s*if \(" + live + r"\) WSUI\.toast\(")
+        self.assertRegex(page, r"\.catch\(function \(e\) \{\s*if \(isAbort\(e\)\) return;\s*if \(" + live + r"\) WSUI\.toast\(")
         self.assertEqual(len(live_matches(news_script(), live)), 2)
 
     def test_a_page_started_before_a_reload_is_dropped(self):

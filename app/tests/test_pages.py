@@ -804,10 +804,12 @@ class NewsCardsHoldTheirSkeleton(unittest.TestCase):
         for name, tag, cards in (("index.html", "h4", 2), ("news.html", "h2", 3)):
             with self.subTest(name):
                 page = static_text(name)
-                self.assertIn(titles[name], page)
+                # News renders its cards in its page module (soft navigation).
+                cards_js = static_text("js", "pages", "news.js") if name == "news.html" else page
+                self.assertIn(titles[name], cards_js)
                 # Fix round 2: an open card (pinned, new, or after Read more) has no title gap.
-                self.assertIn("if (title) title.classList.toggle('min-h-12', !nowOpen);", page)
-                self.assertIn("'<p class=\"text-sm text-frosted-blue/70 mt-1 line-clamp-2 min-h-10\">'", page)
+                self.assertIn("if (title) title.classList.toggle('min-h-12', !nowOpen);", cards_js)
+                self.assertIn("'<p class=\"text-sm text-frosted-blue/70 mt-1 line-clamp-2 min-h-10\">'", cards_js)
                 self.assertEqual(page.count('<p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p>'), cards)
                 self.assertEqual(page.count('<p class="text-sm mt-1 min-h-10">&nbsp;</p>'), cards)
                 self.assertNotIn("<br", page[page.index('<div class="skel rounded-xl p-4'):page.index('<div class="skel rounded-xl p-4') + 600])

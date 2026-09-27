@@ -115,49 +115,49 @@ function errorState() {
 }
 
 export async function mount(ctx) {
-  const root = ctx.root;
-  const signal = ctx.signal;
-  // Admins see drafts too, and manage every post in place. The server decides
-  // who gets drafts (published_only=false is ignored for anyone else); this
-  // only chooses what to ask for and whether to draw the tools.
-  const isAdmin = !!(ctx.data && ctx.data.user && ctx.data.user.is_admin);
+  var root = ctx.root;
+  var signal = ctx.signal;
 
-  const listEl = root.querySelector('#newsArchive');
-  const moreBtn = root.querySelector('#newsLoadMore');
-  const moreText = root.querySelector('#newsLoadMoreText');
-
-  // This visit's state.
-  let offset = 0;
-  let loading = false;
-  let reloadAfter = false;
+  // This visit's state: every mount starts its own.
+  var _offset = 0;
+  var _loading = false;
+  var _reloadAfter = false;
   // Bumped by every reload(). A page started before the latest reload (a
   // "Load older posts" still in flight when a write landed) is dropped when
   // it answers, so it can never paint the pre-write list.
-  let gen = 0;
+  var _gen = 0;
   // Bumped by every Edit and New post click. Edit fetches the post before the
   // editor opens, so an older click whose answer lands late is ignored: the
   // panel shown is always the one asked for last.
-  let editClick = 0;
+  var _editClick = 0;
+  // Admins see drafts too, and manage every post in place. The server decides
+  // who gets drafts (published_only=false is ignored for anyone else); this
+  // only chooses what to ask for and whether to draw the tools.
+  var isAdmin = !!(ctx.data && ctx.data.user && ctx.data.user.is_admin);
 
-  if (isAdmin && window.NewsEditor) window.NewsEditor.init(ctx);
+  var listEl = root.querySelector('#newsArchive');
+  var moreBtn = root.querySelector('#newsLoadMore');
+  var moreText = root.querySelector('#newsLoadMoreText');
+
+  if (isAdmin && window.NewsEditor) NewsEditor.init(ctx);
 
   // fresh: skip the cached copy and paint the server's answer (after a write).
   async function loadPage(fresh) {
     if (signal.aborted) return;
-    if (loading) {
-      if (fresh === true) reloadAfter = true;   // a write landed mid-load: reload once it ends
+    if (_loading) {
+      if (fresh === true) _reloadAfter = true;   // a write landed mid-load: reload once it ends
       return;
     }
-    loading = true;
+    _loading = true;
     fresh = fresh === true;
     moreText.textContent = 'Loading…';
 
-    const at = offset;
-    const g = gen;
+    var offset = _offset;
+    var gen = _gen;
     // Fetch one past the page size: if it comes back, there is another page.
     // Cheaper than a separate count query and never goes stale against it.
-    const url = '/api/news/?limit=' + (PAGE_SIZE + 1) + '&offset=' + at + (isAdmin ? '&published_only=false' : '');
-    const key = isAdmin ? 'news:archive:admin' : 'news:archive';
+    var url = '/api/news/?limit=' + (PAGE_SIZE + 1) + '&offset=' + offset + (isAdmin ? '&published_only=false' : '');
+    var key = isAdmin ? 'news:archive:admin' : 'news:archive';
 
     function fetcher() {
       return getJSON(url, signal).then(function (posts) {
@@ -167,19 +167,20 @@ export async function mount(ctx) {
     }
 
     function render(posts) {
-      if (signal.aborted || g !== gen) return;
-      const hasMore = posts.length > PAGE_SIZE;
-      const page = posts.slice(0, PAGE_SIZE);
-      const html = page.map(function (p) { return renderCard(p, isAdmin); }).join('');
+      if (gen !== _gen) return;
+      if (signal.aborted) return;   // left: the next page owns the arrival order now
+      var hasMore = posts.length > PAGE_SIZE;
+      var page = posts.slice(0, PAGE_SIZE);
+      var html = page.map(function (post) { return renderCard(post, isAdmin); }).join('');
 
-      if (at === 0) {
+      if (offset === 0) {
         WS.arrive('posts', function () {
           WS.setHTML(listEl, page.length ? html : emptyState());
         });
-        offset = page.length;
+        _offset = page.length;
       } else {
         listEl.insertAdjacentHTML('beforeend', html);
-        offset = at + page.length;
+        _offset = offset + page.length;
       }
 
       moreBtn.classList.toggle('hidden', !hasMore);
@@ -188,24 +189,24 @@ export async function mount(ctx) {
     }
 
     try {
-      if (at === 0) {
+      if (offset === 0) {
         // The first page paints from the last visit at once, then refreshes.
-        const got = await WS.swr(key, fetcher, render, fresh ? { maxAge: 0 } : undefined);
+        var got = await WS.swr(key, fetcher, render, fresh ? { maxAge: 0 } : undefined);
         if (got === null) throw new Error('Request failed');
       } else {
         render(await fetcher());
       }
     } catch (err) {
-      // Left the page (the fetch was aborted), or a newer reload owns the list.
-      if (signal.aborted || isAbort(err) || g !== gen) return;
+      if (gen !== _gen) return;
+      if (signal.aborted || isAbort(err)) return;   // left the page: not an error
       console.error('Error loading news archive:', err);
-      if (at === 0) {
+      if (offset === 0) {
         WS.arrive('posts', function () { WS.setHTML(listEl, errorState()); });
       }
       moreText.textContent = 'Try again';
     } finally {
-      loading = false;
-      if (reloadAfter && !signal.aborted) { reloadAfter = false; reload(); }
+      _loading = false;
+      if (_reloadAfter && !signal.aborted) { _reloadAfter = false; reload(); }
     }
   }
 
@@ -213,8 +214,8 @@ export async function mount(ctx) {
 
   // Back to the first page, fetched fresh (never the cached copy).
   function reload() {
-    gen += 1;
-    offset = 0;
+    _gen += 1;
+    _offset = 0;
     loadPage(true);
   }
 
@@ -240,59 +241,54 @@ export async function mount(ctx) {
     }).then(function () { btn.disabled = false; });
   }
 
-  function editPost(id) {
-    // Opens (or reports a failure) only if this is still the latest Edit
-    // click and nothing opened or dismissed the editor meanwhile.
-    const ticket = ++editClick;
-    const seen = NewsEditor.generation();
-    getJSON('/api/news/' + id, signal).then(function (post) {
-      if (ticket === editClick && seen === NewsEditor.generation()) NewsEditor.open(post, newsChanged);
-    }).catch(function (e) {
-      if (isAbort(e)) return;
-      if (ticket === editClick && seen === NewsEditor.generation()) WSUI.toast('That post couldn’t be opened. Try again.', 'err');
-    });
-  }
-
   function toggleCard(btn) {
-    const card = btn.parentElement;
-    const full = card.querySelector('[data-news-body]');
-    const teaser = card.querySelector('.line-clamp-2');
+    var card = btn.parentElement;
+    var full = card.querySelector('[data-news-body]');
+    var teaser = card.querySelector('.line-clamp-2');
     if (!full) return;
-    const nowOpen = full.classList.toggle('hidden') === false;
+    var nowOpen = full.classList.toggle('hidden') === false;
     if (teaser) teaser.classList.toggle('hidden', nowOpen);
     // The title's two-line room on a phone is for the collapsed card only.
-    const title = card.querySelector('[data-news-title]');
+    var title = card.querySelector('[data-news-title]');
     if (title) title.classList.toggle('min-h-12', !nowOpen);
     btn.querySelector('[data-news-toggle-text]').textContent = nowOpen ? 'Show less' : 'Read more';
     btn.querySelector('[data-news-chevron]').style.transform = nowOpen ? 'rotate(180deg)' : '';
   }
 
-  // One delegated listener for the page: it keeps working for cards appended
-  // by "Load older posts" and for every re-render.
+  // One delegated listener for the page, so it keeps working for cards
+  // appended by "Load older posts" and for every re-render.
   root.addEventListener('click', function (e) {
-    const t = e.target;
+    var t = e.target;
     if (!t || !t.closest) return;
 
-    const toggle = t.closest('[data-news-toggle]');
+    var toggle = t.closest('[data-news-toggle]');
     if (toggle) { toggleCard(toggle); return; }
 
     if (t.closest('#newsLoadMore')) { loadPage(); return; }
 
     if (!isAdmin) return;
     if (t.closest('#newsNewPost')) {
-      editClick += 1;
+      _editClick += 1;
       NewsEditor.open(null, newsChanged);
       return;
     }
 
-    const btn = t.closest('[data-news-action]');
+    var btn = t.closest('[data-news-action]');
     if (!btn) return;
-    const id = parseInt(btn.getAttribute('data-id'), 10);
-    const action = btn.getAttribute('data-news-action');
+    var id = parseInt(btn.getAttribute('data-id'), 10);
+    var action = btn.getAttribute('data-news-action');
     if (action === 'edit') {
-      editPost(id);
+      // Opens (or reports a failure) only if this is still the latest Edit
+      // click and nothing opened or dismissed the editor meanwhile.
+      var ticket = ++_editClick, seen = NewsEditor.generation();
+      getJSON('/api/news/' + id, signal).then(function (post) {
+        if (ticket === _editClick && seen === NewsEditor.generation()) NewsEditor.open(post, newsChanged);
+      }).catch(function (e) {
+        if (isAbort(e)) return;
+        if (ticket === _editClick && seen === NewsEditor.generation()) WSUI.toast('That post couldn’t be opened. Try again.', 'err');
+      });
     } else if (action === 'pin') {
-      const pinned = btn.getAttribute('data-pinned') === '1';
+      var pinned = btn.getAttribute('data-pinned') === '1';
       write(btn, '/api/news/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
                                      body: JSON.stringify({ pinned: !pinned }) },
             pinned ? 'Unpinned.' : 'Pinned to the top.', 'That didn’t work. Try again.');
@@ -305,7 +301,7 @@ export async function mount(ctx) {
     }
   }, { signal: signal });
 
-  // The first page is on screen (from the last visit's copy, or fetched)
-  // before mount resolves, so Back and Forward restore scroll onto it.
+  // The first page is on screen (the last visit's copy, or fetched) before
+  // mount resolves, so Back and Forward restore the scroll onto it.
   await loadPage();
 }
