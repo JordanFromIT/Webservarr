@@ -2,6 +2,16 @@
 Theme T2: every page uses the theme engine, so an operator's theme (a light
 one included) reads correctly site-wide.
 
+The colour scan (NoPaletteColours) reads html, js, pages.py and the routers
+that serve HTML. Accepted limits, by ruling R168:
+- It works line by line, so a CSS declaration or a class string split over
+  several lines is only seen in the parts on each line.
+- Object.assign(el.style, {...}) and other object-literal style writes are
+  not covered; the site writes styles through class names, .style.<prop> =,
+  setProperty(), cssText and style attributes, which are.
+- A numeric URL fragment such as href="#2026" reads as a hex colour and fails
+  loudly (R159); that is left as is.
+
 Run inside the container:
     python -m unittest discover -s /app/app/tests -t /app -v
 """
@@ -65,22 +75,65 @@ NAMED_COLOURS = "|".join(sorted(CSS_COLOUR_NAMES, key=len, reverse=True))
 ARBITRARY_COLOUR = re.compile(r"(?<![\w-])(" + _VARIANTS + r"(?:text|placeholder|bg|border(?:-[trblxy])?|ring|ring-offset|"
                               r"from|via|to|fill|stroke|outline|decoration|shadow|divide|caret|accent)-\[(?:color:)?"
                               r"(?:#[0-9a-fA-F]{3,8}|(?:rgba?|hsla?)\((?!\s*var\()[^\]]*\)|(?i:" + NAMED_COLOURS + r"))\])")
-# A named colour where CSS takes a colour: after a colour property in a style
-# attribute, a page <style> block or a style string in JS (cssText, a style
-# attribute set from script), after .style.<prop> = or setProperty('<prop>',,
-# and inside color-mix(). Anchored on the property, so prose ("the red
-# carpet", "requested", border-radius) never matches.
+# A named colour where CSS takes a colour. Each place a colour can go is
+# found first, then every named colour in it is reported:
+# - the value of a colour property (color, background, border*, outline*,
+#   fill, stroke, caret/accent/decoration colours, shadows) or of any custom
+#   property (--accent-color: tomato), in a style attribute, a page <style>
+#   block or a style string in JS (cssText, setAttribute('style', ...));
+# - the string assigned to .style.<colour prop>, or given to setProperty()
+#   for a colour or custom property;
+# - a Tailwind arbitrary property ([color:crimson], [--x:red]);
+# - the whole of a color-mix(...) call, nested parentheses included.
+# Anchored on those places, so prose ("the red carpet", "requested",
+# white-space, border-radius) never matches.
 _COLOUR_PROPS = (r"color|background(?:-color)?|border(?:-(?:top|right|bottom|left|block|inline)(?:-(?:start|end))?)?(?:-color)?"
                  r"|outline(?:-color)?|fill|stroke|caret-color|accent-color|text-decoration(?:-color)?|column-rule(?:-color)?"
                  r"|box-shadow|text-shadow")
 _JS_COLOUR_PROPS = (r"color|background(?:Color)?|border(?:Top|Right|Bottom|Left)?(?:Color)?|outline(?:Color)?|fill|stroke"
                     r"|caretColor|accentColor|textDecorationColor|boxShadow|textShadow")
-NAMED_CSS_COLOUR = re.compile(
-    r"(?i)(?:(?:^|[\s;{\"'`(])(?:" + _COLOUR_PROPS + r")\s*:\s*[^;\"'`}]*?"
-    r"|\.style\.(?:" + _JS_COLOUR_PROPS + r")\s*=\s*[\"'`][^\"'`]*?"
-    r"|setProperty\(\s*[\"'](?:--)?[\w-]*(?:color|background|fill|stroke|shadow)[\w-]*[\"']\s*,\s*[\"'][^\"']*?"
-    r"|color-mix\([^)]*?)"
-    r"(?<![\w-])(" + NAMED_COLOURS + r")(?![\w-])")
+_CSS_DECL = re.compile(r"(?i)(?:^|[\s;{\"'`(])(?:" + _COLOUR_PROPS + r"|--[\w-]+)\s*:\s*([^;\"'`}]*)")
+_JS_STYLE = re.compile(r"(?i)\.style\.(?:" + _JS_COLOUR_PROPS + r")\s*=\s*([\"'`])(.*?)\1")
+_SET_PROPERTY = re.compile(r"(?i)setProperty\(\s*([\"'])([\w-]+)\1\s*,\s*([\"'])(.*?)\3")
+_TW_PROPERTY = re.compile(r"(?i)\[(?:" + _COLOUR_PROPS + r"|--[\w-]+):([^\]]*)\]")
+_COLOUR_WORD = re.compile(r"(?i)(?<![A-Za-z0-9-])(" + NAMED_COLOURS + r")(?![A-Za-z0-9-])")
+_COLOURISH_PROP = re.compile(r"(?i)^(?:--.*|.*(?:color|background|fill|stroke|shadow|border|outline).*)$")
+
+
+def _balanced(line, open_paren):
+    """The text inside the parentheses that open at open_paren."""
+    depth = 0
+    for i in range(open_paren, len(line)):
+        if line[i] == "(":
+            depth += 1
+        elif line[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return open_paren + 1, i
+    return open_paren + 1, len(line)
+
+
+def named_colour_hits(line):
+    """Every named colour sitting where CSS takes a colour, in line order."""
+    spans = []
+    for m in _CSS_DECL.finditer(line):
+        spans.append(m.span(1))
+    for m in _JS_STYLE.finditer(line):
+        spans.append(m.span(2))
+    for m in _SET_PROPERTY.finditer(line):
+        if _COLOURISH_PROP.match(m.group(2)):
+            spans.append(m.span(4))
+    for m in _TW_PROPERTY.finditer(line):
+        spans.append(m.span(1))
+    for m in re.finditer(r"(?i)color-mix\(", line):
+        spans.append(_balanced(line, m.end() - 1))
+    found = {}
+    for a, b in spans:
+        for w in _COLOUR_WORD.finditer(line, a, b):
+            found[w.start()] = w.group(1)
+    return [found[k] for k in sorted(found)]
+
+
 # A raw colour literal anywhere in markup, page styles, scripts or a router's
 # HTML: a hex, or rgb()/hsl() with numbers in it. A theme variable wrapped in
 # rgb() is not a literal, nor is a hex that is only var()'s fallback.
@@ -143,8 +196,7 @@ def raw_line_hits(name, line):
         if any(name == f and mark in line and lit.lower() == allowed.lower() for f, mark, allowed, _why in RAW_ALLOWED):
             continue
         hits.append(lit)
-    for m in NAMED_CSS_COLOUR.finditer(line):
-        hits.append(m.group(1))
+    hits.extend(named_colour_hits(line))
     return hits
 
 
@@ -609,24 +661,40 @@ class NoPaletteColours(unittest.TestCase):
 
     def test_named_colours_in_css_and_style_scripts(self):
         self.assertEqual(len(CSS_COLOUR_NAMES), 148)
-        for bad, word in (('style="color: red"', "red"), ("el.style.color = 'red'", "red"),
-                          ("setProperty('color','orangered')", "orangered"),
-                          ("cssText = 'color: red; background: white;'", "red"),
-                          ("setAttribute('style','color: red')", "red"),
-                          ("color-mix(in srgb, red 50%, blue)", "red"),
-                          ("  border: 1px solid Crimson;", "Crimson"),
-                          (".x { background-color: rebeccapurple }", "rebeccapurple"),
-                          ('el.style.backgroundColor = "navy"', "navy")):
-            m = NAMED_CSS_COLOUR.search(bad)
-            self.assertIsNotNone(m, bad)
-            self.assertEqual(m.group(1), word, bad)
-        self.assertEqual([m.group(1) for m in NAMED_CSS_COLOUR.finditer("cssText = 'color: red; background: white;'")],
-                         ["red", "white"])
+        for bad, words in (('style="color: red"', ["red"]), ("el.style.color = 'red'", ["red"]),
+                           ("setProperty('color','orangered')", ["orangered"]),
+                           ("cssText = 'color: red; background: white;'", ["red", "white"]),
+                           ("setAttribute('style','color: red')", ["red"]),
+                           ("  border: 1px solid Crimson;", ["Crimson"]),
+                           (".x { background-color: rebeccapurple }", ["rebeccapurple"]),
+                           ('el.style.backgroundColor = "navy"', ["navy"]),
+                           # R168: color-mix across nested parentheses, every colour in it
+                           ("color-mix(in srgb, red 50%, blue)", ["red", "blue"]),
+                           ("color-mix(in srgb, rgb(var(--x)) 25%, black)", ["black"]),
+                           ("background: color-mix(in srgb, rgb(var(--a)) 40%, white)", ["white"]),
+                           # named colours on custom properties
+                           ("--accent-color: tomato;", ["tomato"]), ("  --color-danger: crimson", ["crimson"]),
+                           ("root.setProperty('--glow', 'gold')", ["gold"]),
+                           # Tailwind arbitrary properties
+                           ('class="[color:crimson]"', ["crimson"]), ('<b class="p-2 [background:cornflowerblue]">', ["cornflowerblue"]),
+                           ('class="[border:1px_solid_red]"', ["red"]), ('class="[--ring:navy]"', ["navy"])):
+            self.assertEqual(named_colour_hits(bad), words, bad)
         for ok in ("var(--x, #fff)", "requested", "border-radius: 8px", "<p>the red carpet</p>", "color: transparent",
                    "color: currentColor", "color: rgb(var(--color-text) / .7)", "background: linear-gradient(to right, x)",
                    '<span class="text-bright">Red Dawn</span>', "status: 'declined'",
-                   "title: 'Orange is the New Black'"):
-            self.assertIsNone(NAMED_CSS_COLOUR.search(ok), ok)
+                   "title: 'Orange is the New Black'", "white-space: nowrap", "border-color: transparent",
+                   "color: var(--x)", "--color-red-flag: 1", "color-mix(in srgb, rgb(var(--a)) 25%, rgb(var(--b)))",
+                   "setProperty('--color-' + k, rgb)", "class=\"[width:12px]\"", "el.style.width = '10px'"):
+            self.assertEqual(named_colour_hits(ok), [], ok)
+        # raw_line_hits reports them too
+        self.assertEqual(raw_line_hits("x.html", '<p style="color: red; background: color-mix(in srgb, blue 50%, white)">'),
+                         ["red", "blue", "white"])
+
+    def test_arbitrary_named_colour_values(self):
+        for bad in ("text-[crimson]", "bg-[cornflowerblue]", "hover:text-[RebeccaPurple]", "border-[color:tomato]"):
+            self.assertRegex(" " + bad + " ", ARBITRARY_COLOUR, bad)
+        for ok in ("text-[13px]", "bg-[transparent]", "text-[currentColor]", "text-[color:var(--x)]"):
+            self.assertNotRegex(" " + ok + " ", ARBITRARY_COLOUR, ok)
 
     def test_the_allowlist_is_only_the_m10_buttons(self):
         login = (STATIC / "login.html").read_text(encoding="utf-8")
