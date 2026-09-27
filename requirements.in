@@ -58,7 +58,7 @@ pydantic>=2.9.0
 pydantic-settings>=2.5.0
 
 # Markdown rendering (for news posts)
-markdown==3.8.1
+markdown==3.10.2
 bleach==6.4.0
 
 # HTTP client
@@ -73,9 +73,6 @@ aiohttp>=3.14.3
 
 # Date/time utilities
 python-dateutil==2.8.2
-
-# Docker management
-docker==7.0.0
 
 # Web Push notifications
 pywebpush>=2.0.0
