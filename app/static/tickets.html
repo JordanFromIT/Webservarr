@@ -519,8 +519,13 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
     postTicketForm('/api/tickets', formData, btn)
       .then(function() {
-        resetCreateForm();
-        closeCreateModal();
+        // The form may have been closed, reopened and rewritten while this was
+        // on its way: clear and close it only if it still holds what was sent.
+        if (document.getElementById('createTitle').value.trim() === title &&
+            document.getElementById('createDescription').value.trim() === description) {
+          resetCreateForm();
+          closeCreateModal();
+        }
         showToast('Ticket submitted!', 'success');
         loadTickets();
         loadCounts();
@@ -535,8 +540,18 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
   // on every open, so a tap outside the card must not throw away what was
   // typed. Cleared once the comment is posted.
   var _commentDrafts = {};
+  // Comments on their way, by ticket id (the text sent). A box rebuilt for
+  // that ticket meanwhile (closed and reopened) waits for it instead of
+  // offering a second send.
+  var _commentSending = {};
+  var _detailTicketId = null;
+
+  function detailShowing(ticketId) {
+    return !document.getElementById('detailModal').classList.contains('hidden') && _detailTicketId === String(ticketId);
+  }
 
   window.openDetailModal = function(ticketId) {
+    _detailTicketId = String(ticketId);
     document.getElementById('detailModal').classList.remove('hidden');
     var content = document.getElementById('detailContent');
     // Show loading
@@ -759,10 +774,17 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
       var sendBtn = createEl('button', 'w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed', 'Add Comment');
       sendBtn.id = 'commentSendBtn';
+      sendBtn.setAttribute('data-ticket-id', String(ticket.id));
+      if (Object.prototype.hasOwnProperty.call(_commentSending, ticket.id)) {
+        sendBtn.disabled = true;
+        sendBtn.textContent = 'Sending...';
+      }
       sendBtn.addEventListener('click', function() {
         if (_ticketsOff) return;
+        if (Object.prototype.hasOwnProperty.call(_commentSending, ticket.id)) return;
         var msg = textarea.value.trim();
         if (!msg) { showToast('Comment cannot be empty', 'error'); return; }
+        var sent = textarea.value;
 
         var formData = new FormData();
         formData.append('message', msg);
@@ -772,15 +794,25 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 
         sendBtn.disabled = true;
         sendBtn.textContent = 'Sending...';
+        _commentSending[ticket.id] = msg;
 
         postTicketForm('/api/tickets/' + ticket.id + '/comments', formData, sendBtn)
           .then(function() {
-            delete _commentDrafts[ticket.id];
+            // Newer text typed meanwhile stays; only the sent text is cleared.
+            if (_commentDrafts[ticket.id] === sent) delete _commentDrafts[ticket.id];
             showToast('Comment added', 'success');
-            openDetailModal(ticket.id); // Refresh detail
+            if (detailShowing(ticket.id)) openDetailModal(ticket.id); // Refresh detail
           })
           .catch(function(e) { if (e !== TICKETS_OFF) showToast(e.message, 'error'); })
-          .finally(function() { sendBtn.disabled = _ticketsOff; sendBtn.textContent = 'Add Comment'; });
+          .finally(function() { sendBtn.disabled = _ticketsOff; sendBtn.textContent = 'Add Comment';
+            delete _commentSending[ticket.id];
+            // The box on screen for this ticket may be a rebuilt one.
+            var live = document.getElementById('commentSendBtn');
+            if (live && live !== sendBtn && live.getAttribute('data-ticket-id') === String(ticket.id)) {
+              live.disabled = _ticketsOff;
+              live.textContent = 'Add Comment';
+            }
+          });
       });
 
       formDiv.appendChild(textarea);
@@ -799,11 +831,12 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
   };
 
   // Escape closes the topmost of this page's overlays: the image lightbox,
-  // then the ticket, then the new-ticket form. A WSUI dialog (the delete
-  // confirmation) answers its own Escape first and stops it reaching here;
-  // the check below is the belt to that.
+  // then the ticket, then the new-ticket form. Not while an input method is
+  // composing (Escape then cancels the composition). A WSUI dialog (the
+  // delete confirmation) answers its own Escape first and stops it reaching
+  // here; the check below is the belt to that.
   document.addEventListener('keydown', function(e) {
-    if (e.key !== 'Escape' || document.querySelector('.ws-dialog')) return;
+    if (e.key !== 'Escape' || e.isComposing || document.querySelector('.ws-dialog')) return;
     var shown = function(id) { return !document.getElementById(id).classList.contains('hidden'); };
     if (shown('lightbox')) closeLightbox();
     else if (shown('detailModal')) closeDetailModal();

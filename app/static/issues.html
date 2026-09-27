@@ -721,10 +721,11 @@ async function addComment(issueId) {
     }
 }
 
-// Escape closes the issue detail, like every other overlay. A WSUI dialog
-// answers its own Escape first; the check is the belt to that.
+// Escape closes the issue detail, like every other overlay, but not while an
+// input method is composing. A WSUI dialog answers its own Escape first; the
+// check is the belt to that.
 document.addEventListener('keydown', function(e) {
-    if (e.key !== 'Escape' || document.querySelector('.ws-dialog')) return;
+    if (e.key !== 'Escape' || e.isComposing || document.querySelector('.ws-dialog')) return;
     if (!document.getElementById('issueModal').classList.contains('hidden')) closeModal();
 });
 

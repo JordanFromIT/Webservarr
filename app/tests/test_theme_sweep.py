@@ -441,17 +441,65 @@ class EscapeClosesTheModals(unittest.TestCase):
     def test_issues(self):
         m = re.search(r"document\.addEventListener\('keydown', function\(e\) \{(.*?)\n\}\);", ISSUES, re.S)
         self.assertIsNotNone(m)
-        self.assertIn("e.key !== 'Escape' || document.querySelector('.ws-dialog')", m.group(1))
+        self.assertIn("e.key !== 'Escape' || e.isComposing || document.querySelector('.ws-dialog')", m.group(1))
         self.assertIn("closeModal()", m.group(1))
 
     def test_tickets_topmost_first(self):
         m = re.search(r"document\.addEventListener\('keydown', function\(e\) \{(.*?)\n  \}\);", TICKETS, re.S)
         self.assertIsNotNone(m)
         body = m.group(1)
-        self.assertIn("e.key !== 'Escape' || document.querySelector('.ws-dialog')", body)
+        self.assertIn("e.key !== 'Escape' || e.isComposing || document.querySelector('.ws-dialog')", body)
         order = [body.index(c) for c in ("closeLightbox()", "closeDetailModal()", "closeCreateModal()")]
         self.assertEqual(order, sorted(order))
         self.assertEqual(body.count("else if"), 2)   # one overlay per key press
+
+
+class TicketSendsSurviveAReopen(unittest.TestCase):
+    """R165/R166: a ticket closed and reopened while its send is on the way.
+    A rebuilt comment box waits for the pending post (no second send), and a
+    success clears or closes only what still holds the sent text."""
+
+    def comment_send(self):
+        start = TICKETS.index("sendBtn.addEventListener('click', function() {")
+        return TICKETS[start:TICKETS.index("formDiv.appendChild(textarea);", start)]
+
+    def test_the_comment_send_is_tracked_per_ticket(self):
+        self.assertIn("var _commentSending = {};", TICKETS)
+        render = TICKETS[TICKETS.index("sendBtn.id = 'commentSendBtn';"):TICKETS.index("sendBtn.addEventListener('click'")]
+        self.assertIn("sendBtn.setAttribute('data-ticket-id', String(ticket.id));", render)
+        self.assertRegex(render, r"hasOwnProperty\.call\(_commentSending, ticket\.id\)\) \{\s*sendBtn\.disabled = true;"
+                                 r"\s*sendBtn\.textContent = 'Sending\.\.\.';")
+        send = self.comment_send()
+        self.assertRegex(send, r"if \(_ticketsOff\) return;\s*if \(Object\.prototype\.hasOwnProperty\.call\(_commentSending, "
+                               r"ticket\.id\)\) return;")
+        self.assertIn("_commentSending[ticket.id] = msg;", send)
+        settle = send[send.index(".finally("):]
+        self.assertIn("delete _commentSending[ticket.id];", settle)
+        self.assertIn("live.getAttribute('data-ticket-id') === String(ticket.id)", settle)
+        self.assertIn("live.disabled = _ticketsOff;", settle)
+
+    def test_success_clears_only_the_sent_comment(self):
+        ok = self.comment_send()
+        ok = ok[ok.index(".then(function() {"):ok.index(".catch(")]
+        self.assertIn("if (_commentDrafts[ticket.id] === sent) delete _commentDrafts[ticket.id];", ok)
+        self.assertIn("if (detailShowing(ticket.id)) openDetailModal(ticket.id);", ok)
+
+    def test_a_late_new_ticket_success_leaves_a_newer_draft(self):
+        submit = js_function(TICKETS, "window.submitNewTicket = function() {")
+        ok = submit[submit.index(".then(function() {"):submit.index(".catch(")]
+        guard = ok.index("document.getElementById('createTitle').value.trim() === title")
+        self.assertLess(guard, ok.index("resetCreateForm();"))
+        self.assertLess(guard, ok.index("closeCreateModal();"))
+        self.assertIn("document.getElementById('createDescription').value.trim() === description", ok)
+        self.assertIn("showToast('Ticket submitted!', 'success');", ok)
+
+
+class EscapeWaitsForTheInputMethod(unittest.TestCase):
+    """R167: Escape mid-composition cancels the composition, not the modal."""
+
+    def test_wsui(self):
+        ui = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
+        self.assertIn("if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); d.close(d.dismiss); return; }", ui)
 
 
 class HomeAndEbooksDetails(unittest.TestCase):

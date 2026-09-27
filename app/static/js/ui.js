@@ -112,7 +112,8 @@
   function onKey(e) {
     var d = topDialog();
     if (!d) return;
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); d.close(d.dismiss); return; }
+    // Mid-composition, Escape belongs to the input method, not the dialog.
+    if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); d.close(d.dismiss); return; }
     if (e.key !== 'Tab') return;
     var f = focusables(d.box);
     if (!f.length) { e.preventDefault(); return; }
