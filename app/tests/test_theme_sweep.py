@@ -41,13 +41,46 @@ TEXT_PALETTE = re.compile(r"(?<![\w-])(" + _VARIANTS + r"(?:text|placeholder)-(?
 SURFACE_PALETTE = re.compile(r"(?<![\w-])(" + _VARIANTS + r"(?:bg|border(?:-[trblxy])?|ring|ring-offset|from|via|to|fill|"
                              r"stroke|outline|divide|decoration|caret|accent)-(?:" + PALETTE_NAMES +
                              r")(?:-\d{2,3})?(?:/(?:\d+|\[[\d.]+\]))?)(?![\w-])")
+# The CSS Color 4 named colours (148 keywords). transparent and currentcolor
+# are not colours of their own and stay allowed.
+CSS_COLOUR_NAMES = (
+    "aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood "
+    "cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray "
+    "darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen "
+    "darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue "
+    "firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew "
+    "hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan "
+    "lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray "
+    "lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue "
+    "mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred "
+    "midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid "
+    "palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple "
+    "rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue "
+    "slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white "
+    "whitesmoke yellow yellowgreen"
+).split()
+NAMED_COLOURS = "|".join(sorted(CSS_COLOUR_NAMES, key=len, reverse=True))
 # Arbitrary values on a colour utility: a hex, an rgb()/hsl() literal (one
 # built on a theme variable, rgb(var(--...)), is fine) or a named colour.
-NAMED_COLOURS = ("red|green|blue|white|black|gray|grey|yellow|orange|purple|pink|brown|cyan|magenta|lime|navy|"
-                 "teal|maroon|olive|silver|gold|aqua|fuchsia|indigo|violet")
 ARBITRARY_COLOUR = re.compile(r"(?<![\w-])(" + _VARIANTS + r"(?:text|placeholder|bg|border(?:-[trblxy])?|ring|ring-offset|"
                               r"from|via|to|fill|stroke|outline|decoration|shadow|divide|caret|accent)-\[(?:color:)?"
-                              r"(?:#[0-9a-fA-F]{3,8}|(?:rgba?|hsla?)\((?!\s*var\()[^\]]*\)|(?:" + NAMED_COLOURS + r"))\])")
+                              r"(?:#[0-9a-fA-F]{3,8}|(?:rgba?|hsla?)\((?!\s*var\()[^\]]*\)|(?i:" + NAMED_COLOURS + r"))\])")
+# A named colour where CSS takes a colour: after a colour property in a style
+# attribute, a page <style> block or a style string in JS (cssText, a style
+# attribute set from script), after .style.<prop> = or setProperty('<prop>',,
+# and inside color-mix(). Anchored on the property, so prose ("the red
+# carpet", "requested", border-radius) never matches.
+_COLOUR_PROPS = (r"color|background(?:-color)?|border(?:-(?:top|right|bottom|left|block|inline)(?:-(?:start|end))?)?(?:-color)?"
+                 r"|outline(?:-color)?|fill|stroke|caret-color|accent-color|text-decoration(?:-color)?|column-rule(?:-color)?"
+                 r"|box-shadow|text-shadow")
+_JS_COLOUR_PROPS = (r"color|background(?:Color)?|border(?:Top|Right|Bottom|Left)?(?:Color)?|outline(?:Color)?|fill|stroke"
+                    r"|caretColor|accentColor|textDecorationColor|boxShadow|textShadow")
+NAMED_CSS_COLOUR = re.compile(
+    r"(?i)(?:(?:^|[\s;{\"'`(])(?:" + _COLOUR_PROPS + r")\s*:\s*[^;\"'`}]*?"
+    r"|\.style\.(?:" + _JS_COLOUR_PROPS + r")\s*=\s*[\"'`][^\"'`]*?"
+    r"|setProperty\(\s*[\"'](?:--)?[\w-]*(?:color|background|fill|stroke|shadow)[\w-]*[\"']\s*,\s*[\"'][^\"']*?"
+    r"|color-mix\([^)]*?)"
+    r"(?<![\w-])(" + NAMED_COLOURS + r")(?![\w-])")
 # A raw colour literal anywhere in markup, page styles, scripts or a router's
 # HTML: a hex, or rgb()/hsl() with numbers in it. A theme variable wrapped in
 # rgb() is not a literal, nor is a hex that is only var()'s fallback.
@@ -69,39 +102,58 @@ M10_ALLOWED = {
 
 
 # Raw colour literals that are allowed, each by (file, a snippet marking the
-# line, why). Anything else raw fails.
+# line, the literal itself, why). Only that literal on that line is exempt:
+# a second colour added to an allowed line still fails.
 RAW_ALLOWED = {
-    ("login.html", 'id="plexLoginBtn"', "M10: Plex's brand colours on its sign-in button"),
-    ("login.html", 'id="authentikLoginBtn"', "M10: Plex's brand colours on its sign-in button"),
-    ("reader.html", "light: { bg:", "M10: a reading mode the reader picks for themselves"),
-    ("reader.html", "sepia: { bg:", "M10: a reading mode the reader picks for themselves"),
-    ("reader.html", "dark:  { bg:", "M10: a reading mode the reader picks for themselves"),
-    ("reader.html", "black: { bg:", "M10: a reading mode the reader picks for themselves"),
-    ("reader.html", "True #000 so OLED", "a comment explaining the black reading mode"),
-    ("reader.html", "getPropertyValue('--hex-background') ||", "the shipped default when the theme variable is missing"),
-    ("reader.html", "getPropertyValue('--hex-text') ||", "the shipped default when the theme variable is missing"),
-    ("theme-loader.js", 'e.g. "#125793"', "a comment showing the hex-to-triplet conversion"),
-    ("requests.html", "measured against the button's #125793 fill", "a comment about measured contrast"),
-    ("pages.py", "'#125793' -> '18 87 147'", "a docstring showing the hex-to-triplet conversion"),
+    ("login.html", 'id="plexLoginBtn"', "#E5A00D", "M10: Plex's brand colour on its sign-in button"),
+    ("login.html", 'id="plexLoginBtn"', "#cc8f0c", "M10: Plex's brand colour (hover) on its sign-in button"),
+    ("login.html", 'id="authentikLoginBtn"', "#E5A00D", "M10: Plex's brand colour on its sign-in button"),
+    ("login.html", 'id="authentikLoginBtn"', "#cc8f0c", "M10: Plex's brand colour (hover) on its sign-in button"),
+    ("reader.html", "light: { bg:", "#FBFAF7", "M10: the light reading mode's page"),
+    ("reader.html", "light: { bg:", "#1A1A1A", "M10: the light reading mode's text"),
+    ("reader.html", "sepia: { bg:", "#F4ECD8", "M10: the sepia reading mode's page"),
+    ("reader.html", "sepia: { bg:", "#4A3B28", "M10: the sepia reading mode's text"),
+    ("reader.html", "dark:  { bg:", "#111315", "M10: the dark reading mode's page"),
+    ("reader.html", "dark:  { bg:", "#D6D6D6", "M10: the dark reading mode's text"),
+    ("reader.html", "black: { bg:", "#000000", "M10: the black reading mode's page"),
+    ("reader.html", "black: { bg:", "#C9CCD1", "M10: the black reading mode's text"),
+    ("reader.html", "True #000 so OLED", "#000", "a comment explaining the black reading mode"),
+    ("reader.html", "getPropertyValue('--hex-background') ||", "#000000", "the shipped default if the theme variable is missing"),
+    ("reader.html", "getPropertyValue('--hex-text') ||", "#BEEEF4", "the shipped default if the theme variable is missing"),
+    ("theme-loader.js", 'e.g. "#125793"', "#125793", "a comment showing the hex-to-triplet conversion"),
+    ("requests.html", "measured against the button's #125793 fill", "#125793", "a comment about measured contrast"),
+    ("pages.py", "'#125793' -> '18 87 147'", "#125793", "a docstring showing the hex-to-triplet conversion"),
 }
 
 
 def swept_files():
     files = sorted(set(STATIC.glob("**/*.html")) | set((STATIC / "js").glob("**/*.js")))
-    routers = [p for p in sorted((STATIC.parent / "routers").glob("*.py")) if "HTMLResponse" in p.read_text(encoding="utf-8")]
+    routers = [p for p in sorted((STATIC.parent / "routers").glob("*.py"))
+               if re.search(r"HTMLResponse|text/html", p.read_text(encoding="utf-8"))]
     return files + [STATIC.parent / "pages.py"] + routers
+
+
+def raw_line_hits(name, line):
+    """The raw and named colours on one line that no allowance covers."""
+    hits = []
+    for m in RAW_COLOUR.finditer(line):
+        if re.search(r"var\(--[\w-]+,\s*$", line[:m.start()]):
+            continue
+        lit = m.group(1)
+        if any(name == f and mark in line and lit.lower() == allowed.lower() for f, mark, allowed, _why in RAW_ALLOWED):
+            continue
+        hits.append(lit)
+    for m in NAMED_CSS_COLOUR.finditer(line):
+        hits.append(m.group(1))
+    return hits
 
 
 def raw_hits():
     hits = []
     for path in swept_files():
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            for m in RAW_COLOUR.finditer(line):
-                if re.search(r"var\(--[\w-]+,\s*$", line[:m.start()]):
-                    continue
-                if any(path.name == f and mark in line for f, mark, _why in RAW_ALLOWED):
-                    continue
-                hits.append(f"{path.relative_to(STATIC.parent)}:{n}: {m.group(1)}")
+            for lit in raw_line_hits(path.name, line):
+                hits.append(f"{path.relative_to(STATIC.parent)}:{n}: {lit}")
     return hits
 
 
@@ -262,23 +314,63 @@ BRIGHT_ON_PRIMARY = {
     ("pages.py", "text-bright text-xl", "the phone bar's logo-fallback tile (size-8 bg-primary)"),
 }
 BRIGHT = re.compile(r"(?<![\w-])(?:[\w:-]+:)?text-bright(?:/\d+)?(?![\w-])")
-ON_PRIMARY = re.compile(r"(?<![\w/-])bg-primary(?![\w/-])")
+ON_PRIMARY = re.compile(r"(?<![\w/:-])bg-primary(?![\w/:-])")
+
+
+def class_string(line, pos):
+    """The quoted string a match sits in: from the nearest quote before it to
+    the nearest quote after it (any of " ' `), so one class attribute or one
+    JS class string, however the source splits it across literals."""
+    starts = [line.rfind(q, 0, pos) for q in "\"'`"]
+    ends = [e for e in (line.find(q, pos) for q in "\"'`") if e != -1]
+    return line[max(starts) + 1:(min(ends) if ends else len(line))]
+
+
+def own_tag(line, pos):
+    """The tag the match sits in (from its '<' to its '>'), or the whole line
+    when it is not inside a tag on this line (a Python class variable)."""
+    lt, gt = line.rfind("<", 0, pos), line.find(">", pos)
+    if lt != -1 and gt != -1 and line.rfind(">", 0, pos) < lt:
+        return line[lt:gt + 1]
+    return line
+
+
+def bright_line_hits(name, line):
+    hits = []
+    for m in BRIGHT.finditer(line):
+        if ON_PRIMARY.search(class_string(line, m.start())):
+            continue
+        tag = own_tag(line, m.start())
+        if any(name == f and mark in tag for f, mark, _where in BRIGHT_ON_PRIMARY):
+            continue
+        hits.append(m.group(0))
+    return hits
 
 
 class BrightTextOnlyOnPrimary(unittest.TestCase):
-    """R153: Bright text (text-bright, hover:text-bright) only on a Primary
-    fill; close buttons, pagers and sheets use the theme text colour."""
+    """R153/R158: Bright text (text-bright, hover:text-bright) only on a
+    Primary fill: in the same class string as bg-primary, or in a tag the
+    allowlist names with its Primary surface."""
 
     def test_every_bright_use_is_on_primary(self):
         stray = []
         for path in swept_files():
             for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                if not BRIGHT.search(line) or ON_PRIMARY.search(line):
-                    continue
-                if any(path.name == f and mark in line for f, mark, _where in BRIGHT_ON_PRIMARY):
-                    continue
-                stray.append(f"{path.relative_to(STATIC.parent)}:{n}")
+                for cls in bright_line_hits(path.name, line):
+                    stray.append(f"{path.relative_to(STATIC.parent)}:{n}: {cls}")
         self.assertEqual(stray, [])
+
+    def test_the_check_is_per_class_string(self):
+        self.assertEqual(bright_line_hits("x.html", '<span class="bg-primary">x</span><span class="text-bright">y</span>'),
+                         ["text-bright"])
+        self.assertEqual(bright_line_hits("x.html", '<button class="bg-primary text-bright">Go</button>'), [])
+        self.assertEqual(bright_line_hits("x.js", "createEl('b', 'px-3 bg-primary hover:bg-primary/80 text-bright')"), [])
+        self.assertEqual(bright_line_hits("x.html", '<b class="bg-primary/20 text-bright">z</b>'), ["text-bright"])
+        self.assertEqual(bright_line_hits("x.html", '<a class="hover:text-bright" href="#">z</a>'), ["hover:text-bright"])
+        # An allowlist marker elsewhere on the line doesn't cover a different tag.
+        line = '<span id="tourIcon" class="text-bright">i</span><span class="text-bright">x</span>'
+        self.assertEqual(bright_line_hits("tour.js", line), ["text-bright"])
+        self.assertEqual(bright_line_hits("tour.js", '<span id="tourIcon" class="text-bright">i</span>'), [])
 
     def test_the_modal_close_buttons(self):
         tickets = (STATIC / "tickets.html").read_text(encoding="utf-8")
@@ -453,11 +545,40 @@ class NoPaletteColours(unittest.TestCase):
         self.assertTrue(re.search(r"var\(--[\w-]+,\s*$", "var(--hex-text, "))  # ...and raw_hits skips it
 
     def test_every_raw_allowance_is_still_needed(self):
-        for f, mark, why in RAW_ALLOWED:
+        for f, mark, lit, why in RAW_ALLOWED:
             path = next(p for p in swept_files() if p.name == f)
             line = next((l for l in path.read_text(encoding="utf-8").splitlines() if mark in l), None)
             self.assertIsNotNone(line, f"{f}: {mark!r} no longer exists ({why})")
-            self.assertRegex(line, RAW_COLOUR, f"{f}: {mark!r} has no raw colour any more ({why})")
+            found = [m.group(1).lower() for m in RAW_COLOUR.finditer(line)]
+            self.assertIn(lit.lower(), found, f"{f}: {mark!r} no longer holds {lit} ({why})")
+
+    def test_an_allowance_covers_only_its_own_literal(self):
+        line = '<button id="plexLoginBtn" class="w-full bg-[#E5A00D] hover:bg-[#cc8f0c] text-black">'
+        self.assertEqual(raw_line_hits("login.html", line), [])
+        tampered = line.replace('text-black">', 'text-black" data-x="#ff0000">')
+        self.assertEqual(raw_line_hits("login.html", tampered), ["#ff0000"])
+        self.assertEqual(raw_line_hits("index.html", line), ["#E5A00D", "#cc8f0c"])   # other files: no allowance
+
+    def test_named_colours_in_css_and_style_scripts(self):
+        self.assertEqual(len(CSS_COLOUR_NAMES), 148)
+        for bad, word in (('style="color: red"', "red"), ("el.style.color = 'red'", "red"),
+                          ("setProperty('color','orangered')", "orangered"),
+                          ("cssText = 'color: red; background: white;'", "red"),
+                          ("setAttribute('style','color: red')", "red"),
+                          ("color-mix(in srgb, red 50%, blue)", "red"),
+                          ("  border: 1px solid Crimson;", "Crimson"),
+                          (".x { background-color: rebeccapurple }", "rebeccapurple"),
+                          ('el.style.backgroundColor = "navy"', "navy")):
+            m = NAMED_CSS_COLOUR.search(bad)
+            self.assertIsNotNone(m, bad)
+            self.assertEqual(m.group(1), word, bad)
+        self.assertEqual([m.group(1) for m in NAMED_CSS_COLOUR.finditer("cssText = 'color: red; background: white;'")],
+                         ["red", "white"])
+        for ok in ("var(--x, #fff)", "requested", "border-radius: 8px", "<p>the red carpet</p>", "color: transparent",
+                   "color: currentColor", "color: rgb(var(--color-text) / .7)", "background: linear-gradient(to right, x)",
+                   '<span class="text-bright">Red Dawn</span>', "status: 'declined'",
+                   "title: 'Orange is the New Black'"):
+            self.assertIsNone(NAMED_CSS_COLOUR.search(ok), ok)
 
     def test_the_allowlist_is_only_the_m10_buttons(self):
         login = (STATIC / "login.html").read_text(encoding="utf-8")
