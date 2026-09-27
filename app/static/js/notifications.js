@@ -764,8 +764,12 @@
    * toggle and the Home prompt. Call it straight from a click: the browser
    * only shows its permission prompt in response to a user gesture.
    * Rejects with an error pushFailureKind() can explain.
+   *
+   * onGranted, if given, runs the moment permission is granted, before the
+   * subscribe and the save: those are a push-service round trip and a POST,
+   * which can take seconds, and the Home prompt should not wait on them.
    */
-  function subscribePush() {
+  function subscribePush(onGranted) {
     var vapidKey = (window.WEBSERVARR_THEME || {}).vapid_public_key;
     if (!vapidKey) {
       var unconfigured = new Error('unconfigured');
@@ -779,6 +783,9 @@
         var err = new Error('permission');
         err.permission = permission;
         throw err;
+      }
+      if (onGranted) {
+        try { onGranted(); } catch (e) { console.error(e); }
       }
       return swReady();
     }).then(function(reg) {
@@ -861,8 +868,11 @@
   /** Collapse the card. It follows the user's own tap, so the content moving
    *  up is expected; it still eases rather than snaps. */
   function hidePushPrompt(card) {
+    if (card.hidden || card._pushPromptState === 'hiding') return;
+    clearTimeout(card._pushPromptTimer);
     var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduce) { card.hidden = true; return; }
+    if (reduce) { card.removeAttribute('style'); card._pushPromptState = null; card.hidden = true; return; }
+    card._pushPromptState = 'hiding';
     card.style.overflow = 'hidden';
     card.style.height = card.offsetHeight + 'px';
     void card.offsetHeight;
@@ -871,10 +881,61 @@
     card.style.opacity = '0';
     // Cancels the next section's space-y gap, which goes with the card.
     card.style.marginBottom = '-' + getComputedStyle(card.nextElementSibling || card).marginTop;
-    setTimeout(function() {
+    card._pushPromptTimer = setTimeout(function() {
+      card._pushPromptState = null;
       card.hidden = true;
       card.removeAttribute('style');
     }, 200);
+  }
+
+  /** Bring a collapsed card back: hidePushPrompt run backwards, from wherever
+   *  the collapse had got to. Only after a failure the user needs to see. */
+  function showPushPrompt(card) {
+    var from = card.hidden ? 0 : card.getBoundingClientRect().height;
+    var fromOpacity = card.hidden ? '0' : getComputedStyle(card).opacity;
+    clearTimeout(card._pushPromptTimer);
+    card._pushPromptState = null;
+    card.removeAttribute('style');
+    card.hidden = false;
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) return;
+    var to = card.offsetHeight;
+    // The next section's space-y gap returns with the card, so it is held off
+    // at the start and eased in alongside the height.
+    var gap = getComputedStyle(card.nextElementSibling || card).marginTop;
+    var gapPx = parseFloat(gap) || 0;
+    card._pushPromptState = 'showing';
+    card.style.overflow = 'hidden';
+    card.style.height = from + 'px';
+    card.style.opacity = fromOpacity;
+    card.style.marginBottom = '-' + (to ? gapPx * (1 - from / to) : gapPx) + 'px';
+    void card.offsetHeight;
+    card.style.transition = 'height 200ms ease-out, opacity 200ms ease-out, margin-bottom 200ms ease-out';
+    card.style.height = to + 'px';
+    card.style.opacity = '1';
+    card.style.marginBottom = '0px';
+    card._pushPromptTimer = setTimeout(function() {
+      card._pushPromptState = null;
+      card.removeAttribute('style');
+    }, 200);
+  }
+
+  /** "Turning on..." while the browser asks. Both labels are always laid out
+   *  (one invisible) so the button keeps the wider one's width and nothing
+   *  in the card moves when the words change. */
+  function setPromptBusy(btn, busy) {
+    btn.disabled = busy;
+    var idle = btn.querySelector('[data-push-label-idle]');
+    var working = btn.querySelector('[data-push-label-busy]');
+    if (idle) idle.classList.toggle('invisible', busy);
+    if (working) working.classList.toggle('invisible', !busy);
+  }
+
+  /** A failure reported after the card has gone: the site's toast, or, on a
+   *  page without ui.js, the card's own message line. */
+  function promptFailure(msg, text) {
+    if (window.WSUI && typeof window.WSUI.toast === 'function') WSUI.toast(text, 'err');
+    else msg.textContent = text;
   }
 
   function initPushPrompt() {
@@ -892,25 +953,36 @@
     });
 
     enableBtn.addEventListener('click', function() {
-      enableBtn.disabled = true;
+      setPromptBusy(enableBtn, true);
       laterBtn.disabled = true;
       msg.textContent = '';
-      subscribePush().then(function() {
-        // Confirm in place; with permission granted it won't be offered again.
-        actions.style.display = 'none';   // not .hidden: its flex class wins
-        msg.textContent = "You're all set. We'll let you know on this device.";
-      }, function(err) {
+      var gone = false;   // hidden on the grant, before the subscribe settled
+      subscribePush(function() {
+        // "Allow" is the answer this card asked for, so it goes now. The
+        // subscribe and the save finish behind it; with permission granted
+        // the card is not offered again on a later visit.
+        gone = true;
+        hidePushPrompt(card);
+      }).then(null, function(err) {
         var kind = pushFailureKind(err);
         if (kind === 'blocked') { hidePushPrompt(card); return; }
         if (kind === 'dismissed' || kind === 'noEmail' || kind === 'unconfigured') {
           rememberPromptDismissed(card);
           hidePushPrompt(card);
+          if (gone) promptFailure(msg, PUSH_MESSAGES[kind]);   // it left looking like a yes
           return;
         }
         console.error('Push subscription error:', err);
-        msg.textContent = PUSH_MESSAGES[kind];
-        enableBtn.disabled = false;
+        setPromptBusy(enableBtn, false);
         laterBtn.disabled = false;
+        if (gone) {
+          // The card left on the grant, so the failure is said where it can
+          // be seen and the card returns with its button, ready to retry.
+          promptFailure(msg, PUSH_MESSAGES[kind]);
+          showPushPrompt(card);
+        } else {
+          msg.textContent = PUSH_MESSAGES[kind];
+        }
       });
     });
   }
