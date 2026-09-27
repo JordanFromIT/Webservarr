@@ -73,7 +73,8 @@ jobs:
 
   # Front-end checks that need JavaScript, which the Python image has none of:
   # the Integrations tab's sameAddress() against the server's shared cases,
-  # and the Appearance tab's contrast maths against the Python reference.
+  # the Appearance tab's contrast maths against the Python reference, and the
+  # soft-navigation router's link and response rules (router_vectors.json).
   js-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -87,6 +88,7 @@ jobs:
         run: |
           node app/tests/js/same_address.mjs
           node app/tests/js/contrast.mjs
+          node app/tests/js/router.mjs
 
   build-and-push:
     needs: [test, js-checks]
