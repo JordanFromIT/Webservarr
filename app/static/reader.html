@@ -55,6 +55,11 @@
   #bookContent h2 { font-size: calc(var(--reader-font-size) * 1.5) !important; }
   #bookContent h3 { font-size: calc(var(--reader-font-size) * 1.25) !important; }
   .book-content, .book-content * { color: var(--reader-fg) !important; }
+  /* The page position and the jump total sit on the reading surface itself,
+     so they take the reading colour. Bright text is for primary fills and
+     vanished on the light and sepia reading modes. */
+  .reader-meta { color: var(--reader-fg); opacity: .8; }
+  .reader-meta:hover { opacity: 1; }
   /* Full-page art (covers, maps) should fit the screen instead of forcing a
      long scroll on what is visually a single image. */
   .book-content img {
@@ -255,7 +260,7 @@
      across a novel. -->
 <footer id="readerFooter" class="fixed bottom-0 inset-x-0 z-30 pointer-events-none flex justify-center">
   <button id="pageInfo" type="button"
-          class="pointer-events-auto text-[13px] font-medium text-bright/80 hover:text-bright tabular-nums
+          class="pointer-events-auto reader-meta text-[13px] font-medium tabular-nums
                  px-3 py-1.5 rounded-md hover:bg-baltic-blue/25 transition-colors"
           title="Click to jump to a page" aria-label="Current page. Click to jump to a page."></button>
   <form id="pageJumpForm" class="pointer-events-auto hidden items-center gap-1.5 px-2 py-1">
@@ -264,7 +269,7 @@
                   text-[12px] text-frosted-blue text-center tabular-nums
                   focus:outline-none focus:ring-2 focus:ring-steel-blue"
            aria-label="Go to page"/>
-    <span id="pageJumpTotal" class="text-[13px] text-bright/80 tabular-nums"></span>
+    <span id="pageJumpTotal" class="reader-meta text-[13px] tabular-nums"></span>
   </form>
 </footer>
 

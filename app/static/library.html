@@ -119,7 +119,7 @@
         <span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-steel-blue text-[18px]">search</span>
         <input id="searchInput" type="search" placeholder="Search by title or author…" autocomplete="off"
                class="bg-baltic-blue/10 border border-steel-blue/30 rounded-xl pl-8 pr-3 py-2 text-sm text-frosted-blue
-                      placeholder:text-frosted-blue/60 focus:outline-none focus:ring-2 focus:ring-steel-blue w-48 sm:w-64"/>
+                      placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-steel-blue w-48 sm:w-64"/>
       </div>
     </div>
 
@@ -992,7 +992,7 @@
   function fact(label, value) {
     if (value === null || value === undefined || value === '') return '';
     return '<span><span class="text-frosted-blue/75">' + label + '</span> ' +
-           '<span class="text-bright">' + escapeHtml(String(value)) + '</span></span>';
+           '<span class="text-frosted-blue">' + escapeHtml(String(value)) + '</span></span>';
   }
 
   /** A fact led by an icon instead of a text label - file size, read count. */
@@ -1000,7 +1000,7 @@
     if (value === null || value === undefined || value === '') return '';
     return '<span class="inline-flex items-center gap-1">' +
            '<span class="material-symbols-outlined text-[14px] text-frosted-blue/60">' + icon + '</span>' +
-           '<span class="text-bright">' + escapeHtml(String(value)) + '</span></span>';
+           '<span class="text-frosted-blue">' + escapeHtml(String(value)) + '</span></span>';
   }
 
   function formatBytes(bytes) {
@@ -1090,7 +1090,7 @@
           if (_bdSeries !== series || !rt || !rt.rating) return;
           var stars = '★ ' + rt.rating.toFixed(2);
           var votes = rt.votes ? ' (' + Number(rt.votes).toLocaleString() + ' ratings)' : '';
-          facts.unshift('<span class="text-bright font-semibold">' + stars + '</span>' +
+          facts.unshift('<span class="text-frosted-blue font-semibold">' + stars + '</span>' +
                         '<span class="text-frosted-blue/75">' + votes + ' · ' + escapeHtml(rt.source || '') + '</span>');
           bdEl('bdFacts').innerHTML = facts.join('');
         })
@@ -1316,7 +1316,7 @@
 
         <div id="bdGenres" class="mt-3 flex flex-wrap gap-1.5"></div>
 
-        <p id="bdSummary" class="mt-4 text-sm text-bright leading-relaxed whitespace-pre-line"></p>
+        <p id="bdSummary" class="mt-4 text-sm text-frosted-blue leading-relaxed whitespace-pre-line"></p>
       </div>
     </div>
   </div>

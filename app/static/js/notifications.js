@@ -407,7 +407,7 @@
     // Header
     var header = createEl('div', 'flex items-center justify-between px-6 py-4 border-b border-steel-blue/20');
     var headerTitle = createEl('h3', 'text-lg font-bold text-frosted-blue', 'Notification Preferences');
-    var closeBtn = createEl('button', 'text-steel-blue hover:text-bright transition-colors cursor-pointer');
+    var closeBtn = createEl('button', 'text-steel-blue hover:text-frosted-blue transition-colors cursor-pointer');
     var closeIcon = createEl('span', 'material-symbols-outlined', 'close');
     closeBtn.appendChild(closeIcon);
     closeBtn.addEventListener('click', closePreferencesModal);

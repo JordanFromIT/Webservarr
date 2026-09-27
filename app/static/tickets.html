@@ -15,10 +15,10 @@
 
 
 <!-- Create Ticket Modal -->
-<div id="createModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4" onclick="if(event.target===this)closeCreateModal()">
-<div class="absolute inset-0 ws-scrim backdrop-blur-sm"></div>
+<div id="createModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+<div class="absolute inset-0 ws-scrim backdrop-blur-sm" onclick="closeCreateModal()"></div>
 <div class="relative w-full max-w-md rounded-xl glass-card p-5">
-<button onclick="closeCreateModal()" class="absolute top-3 right-3 text-steel-blue hover:text-bright transition-colors">
+<button onclick="closeCreateModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue transition-colors">
 <span class="material-symbols-outlined">close</span>
 </button>
 <h3 class="text-lg font-bold text-frosted-blue mb-1">Message support</h3>
@@ -58,10 +58,10 @@ Send to support
 </div>
 
 <!-- Ticket Detail Modal -->
-<div id="detailModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4" onclick="if(event.target===this)closeDetailModal()">
-<div class="absolute inset-0 ws-scrim backdrop-blur-sm"></div>
+<div id="detailModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+<div class="absolute inset-0 ws-scrim backdrop-blur-sm" onclick="closeDetailModal()"></div>
 <div class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl glass-card p-5 custom-scrollbar">
-<button onclick="closeDetailModal()" class="absolute top-3 right-3 text-steel-blue hover:text-bright transition-colors z-10">
+<button onclick="closeDetailModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue transition-colors z-10">
 <span class="material-symbols-outlined">close</span>
 </button>
 <div id="detailContent">

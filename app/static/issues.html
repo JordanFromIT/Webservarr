@@ -43,10 +43,10 @@
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <!-- ws:sidebar -->
 <!-- Issue Detail Modal -->
-<div id="issueModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4" onclick="if(event.target===this)closeModal()">
-<div class="absolute inset-0 ws-scrim backdrop-blur-sm"></div>
+<div id="issueModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+<div class="absolute inset-0 ws-scrim backdrop-blur-sm" onclick="closeModal()"></div>
 <div class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl glass-card p-5 custom-scrollbar">
-<button onclick="closeModal()" class="absolute top-3 right-3 text-steel-blue hover:text-bright transition-colors">
+<button onclick="closeModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue transition-colors">
 <span class="material-symbols-outlined">close</span>
 </button>
 <div id="modalContent">
