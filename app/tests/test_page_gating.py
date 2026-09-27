@@ -30,11 +30,17 @@ class PageRoutesBase(unittest.TestCase):
     def setUp(self):
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
+        # Anything a page render still reads straight from the database (the
+        # Settings page's setup flags) reads an empty in-memory one, never the
+        # dev instance's real settings, and works the same in CI.
+        self.db_patch = mock.patch.object(pages, "SessionLocal", helpers.make_sessionmaker())
+        self.db_patch.start()
         helpers.set_rate_limits(False)
         self.client = TestClient(app)
         self.client.cookies.set(settings.session_cookie_name, "test-session")
 
     def tearDown(self):
+        self.db_patch.stop()
         self.setup_patch.stop()
         helpers.set_rate_limits(True)
 

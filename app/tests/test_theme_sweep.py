@@ -235,8 +235,12 @@ class PlexPopupPageIsThemed(unittest.TestCase):
     other page, and still hands the sign-in back to the opener."""
 
     def fetch(self, values):
+        # Setup is marked done like the other route tests: the setup redirect
+        # middleware would otherwise read the settings table, which CI's
+        # fresh checkout has no tables for.
         b = build_branding(values, {}, None, dict(EMPTY_WIKI_HOOKS))
-        with mock.patch.object(pages, "load_context", return_value=(b, {"netdata": False})) as ctx:
+        with mock.patch("app.routers.setup.is_setup_completed", return_value=True), \
+             mock.patch.object(pages, "load_context", return_value=(b, {"netdata": False})) as ctx:
             r = TestClient(app).get("/auth/plex-callback-page")
         ctx.assert_called_once_with(False)   # public branding only
         return r
