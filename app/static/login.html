@@ -415,23 +415,32 @@ document.addEventListener('DOMContentLoaded', async function() {
             slideA.style.opacity = '1';
             currentIndex = 1;
 
-            // Rotate every 10 seconds
-            var rotation = 0;
+            // Rotate every 10 seconds, one preload at a time. A tick that
+            // fires while a preload is still pending does nothing: no index
+            // advance, no second request. So a slow network only slows the
+            // rotation and can never starve it, and a preload that resolves
+            // is the newest by construction, so it is always shown. A failed
+            // one releases the flight and is left behind. A candidate that is
+            // the picture already on screen is skipped: crossfading a picture
+            // onto itself would only reset its move in full view.
+            var shownUrl = firstUrl;
+            var loading = false;
             setInterval(async function() {
-                if (urls.length < 2) return;
+                if (urls.length < 2 || loading) return;
                 var nextUrl = urls[currentIndex % urls.length];
                 currentIndex++;
-                var seq = ++rotation;
+                if (nextUrl === shownUrl) return;
 
+                loading = true;
                 try {
                     await preload(nextUrl);
-                } catch(e) { return; }
-                // A preload that lands after the next tick has started is
-                // stale: shown now, it would swap and reset the slide the
-                // newer picture is already fading in on, in full view. Skip
-                // it, as a failed one is skipped.
-                if (seq !== rotation) return;
+                } catch(e) {
+                    return;
+                } finally {
+                    loading = false;
+                }
 
+                shownUrl = nextUrl;
                 if (activeSlide === 'A') {
                     show(slideB, slideA, nextUrl);
                     activeSlide = 'B';

@@ -385,15 +385,6 @@ class LoginDrift(unittest.TestCase):
         self.assertLess(restart[0].start(), fade_in[0].start())
         self.assertTrue(live_matches(body, r"prev\.style\.opacity = '0';"))
         self.assertFalse(re.search(r"prev\.classList", body))
-        # A preload that lands after a newer tick started is dropped: shown,
-        # it would reset the slide the newer picture is fading in on, in view.
-        seq = live_matches(LOGIN, r"var seq = \+\+rotation;")
-        wait = live_matches(LOGIN, r"await preload\(nextUrl\);")
-        stale = live_matches(LOGIN, r"if \(seq !== rotation\) return;")
-        self.assertTrue(seq and wait and stale)
-        self.assertLess(seq[0].start(), wait[0].start())
-        self.assertLess(wait[0].start(), stale[0].start())
-        self.assertLess(stale[0].start(), live_matches(LOGIN, r"show\(slideB, slideA, nextUrl\);")[0].start())
         # The first picture starts once the slideshow is shown, before it
         # fades in; a lone picture takes the back-and-forth drift instead.
         reveal = live_matches(LOGIN, r"slideshow\.classList\.remove\('hidden'\);")
@@ -402,6 +393,42 @@ class LoginDrift(unittest.TestCase):
         self.assertTrue(reveal and first and shown)
         self.assertLess(reveal[0].start(), first[0].start())
         self.assertLess(first[0].start(), shown[0].start())
+
+    def test_rotation_is_single_flight_and_never_crossfades_a_picture_onto_itself(self):
+        # One preload at a time: a tick during a pending preload does nothing
+        # (no index advance, no second request), so a slow network only slows
+        # the rotation and can never starve it, and a resolved preload is the
+        # newest by construction, so it is always shown. A failed one releases
+        # the flight. A candidate already on screen is skipped. (A sequence
+        # counter that dropped a preload once a newer tick had merely started
+        # starved the rotation whenever every load took over 10s.)
+        m = live_matches(LOGIN, r"setInterval\(async function\(\) \{")
+        self.assertEqual(len(m), 1)
+        body = LOGIN[m[0].end():matching_brace(LOGIN, m[0].end() - 1)]
+        steps = [
+            ("gate", r"if \(urls\.length < 2 \|\| loading\) return;"),
+            ("advance", r"currentIndex\+\+;"),
+            ("same picture", r"if \(nextUrl === shownUrl\) return;"),
+            ("take", r"loading = true;"),
+            ("wait", r"await preload\(nextUrl\);"),
+            ("release", r"\} finally \{\s*loading = false;\s*\}"),
+            ("remember", r"shownUrl = nextUrl;"),
+            ("show", r"show\(slideB, slideA, nextUrl\);"),
+        ]
+        found = {}
+        for name, pattern in steps:
+            hits = live_matches(body, pattern)
+            self.assertEqual(len(hits), 1, name)
+            found[name] = hits[0]
+        starts = [found[name].start() for name, _ in steps]
+        self.assertEqual(starts, sorted(starts), "the steps run in this order")
+        # The flag is the only gate: once the preload resolves nothing turns
+        # the picture away, and no sequence counter exists to drop it.
+        between = js_code_only(body[found["release"].end():found["show"].start()])
+        self.assertNotRegex(between, r"\breturn\b")
+        self.assertNotRegex(js_code_only(LOGIN), r"\b(?:seq|rotation)\b")
+        self.assertTrue(live_matches(LOGIN, r"var shownUrl = firstUrl;"))
+        self.assertTrue(live_matches(LOGIN, r"var loading = false;"))
 
     def test_no_new_timers_drive_the_move(self):
         # The rotation interval and the Plex PIN poll; the message clear, the
