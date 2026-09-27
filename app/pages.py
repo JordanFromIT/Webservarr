@@ -575,8 +575,10 @@ def _inject_head(content: str, branding: dict, user: Optional[dict], version: st
 # and an edit on a bind-mounted dev checkout both invalidate the browser cache
 # exactly once, and nobody has to remember to bump a number. Only local
 # /static/ assets are touched, and only an existing ?v= marker is replaced.
+# A converted page's #wsPage names its module in data-ws-module, which the
+# router imports, so that URL is stamped the same way.
 
-_ASSET_VERSION_RE = re.compile(r'(?P<attr>(?:src|href)="(?P<path>/static/[^"?]+)\?v=)[^"]*"')
+_ASSET_VERSION_RE = re.compile(r'(?P<attr>(?:src|href|data-ws-module)="(?P<path>/static/[^"?]+)\?v=)[^"]*"')
 _stamp_cache: dict = {}
 
 
@@ -644,6 +646,44 @@ def _fill_login_name(out: str, branding: dict) -> str:
     return _LOGIN_NAME_RE.sub(_sub, out, count=1)
 
 
+# ---------------------------------------------------------------------------
+# Soft navigation: page styles and the persistent slots
+# ---------------------------------------------------------------------------
+#
+# A converted page wraps its content in #wsPage; the router swaps only that
+# element, so the page's own <head> styles are tagged for it to swap too.
+# Tagged before _inject_head runs, so the shared styles the server adds
+# (#ws-theme, the operator's custom CSS) are never the page's to remove.
+
+_WS_PAGE_MARK = 'id="wsPage"'
+_HEAD_STYLE_RE = re.compile(r"<style\b", re.IGNORECASE)
+
+# The one player and the one live region on every shell page, outside <main>
+# so a page swap never touches them. The sidebar partial fills its marker
+# before <main>, so they go in just before </body> instead.
+SHELL_SLOTS = (
+    '<div id="wsPlayer" hidden></div>\n'
+    '<div id="wsLive" class="sr-only" aria-live="polite"></div>\n'
+)
+
+
+def _tag_page_styles(content: str) -> str:
+    if _WS_PAGE_MARK not in content:
+        return content
+    head_end = content.lower().find("</head>")
+    if head_end == -1:
+        return content
+    head = _HEAD_STYLE_RE.sub("<style data-ws-page-style", content[:head_end])
+    return head + content[head_end:]
+
+
+def _add_shell_slots(content: str) -> str:
+    at = content.lower().rfind("</body>")
+    if at == -1:
+        return content + SHELL_SLOTS
+    return content[:at] + SHELL_SLOTS + content[at:]
+
+
 def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dict],
                 version: str, base_url: str, path: str, flags: dict) -> str:
     """Pure: turn a static page into the document this user should receive.
@@ -653,10 +693,11 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
     <html data-safe-theme>, which shows its notice and keeps colour previews
     in the preview cards."""
     safe = bool(flags.get("safe_theme"))
-    out = _inject_head(page_html, branding, user, version, name, base_url, path, flags.get("setup"),
-                       custom_css=not safe)
+    out = _inject_head(_tag_page_styles(page_html), branding, user, version, name, base_url, path,
+                       flags.get("setup"), custom_css=not safe)
 
     if SIDEBAR_MARKER in out or HEADER_MARKER in out:
+        out = _add_shell_slots(out)
         values = shell_values(branding, user, version, name)
         out = out.replace(SIDEBAR_MARKER, fill(_partial("shell-sidebar.html"), values), 1)
         header = fill(_partial("shell-header.html"), values)

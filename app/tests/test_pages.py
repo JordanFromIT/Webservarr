@@ -706,6 +706,62 @@ class AssetStamping(unittest.TestCase):
                          "<p>&lt;x&gt;<i>raw</i></p>")
 
 
+class SoftNavServerSide(unittest.TestCase):
+    """Soft navigation, server side (spec 4.1, 4.4): the page wrapper's module
+    URL is cache-stamped like any script, a wrapped page's own head styles are
+    tagged so the router can swap them, and every shell page carries the one
+    persistent player slot and live region outside <main>."""
+
+    WRAPPED = PAGE.replace("</head>", "<style>.x{}</style></head>").replace(
+        "<p>hi</p>", '<div id="wsPage" data-ws-module="/static/js/pages/news.js?v=1"><p>hi</p></div>')
+
+    def test_ws_module_attribute_is_stamped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "js", "pages"))
+            with open(os.path.join(tmp, "js", "pages", "news.js"), "wb") as f:
+                f.write(b"export async function mount(ctx) {}\n")
+            # No shell markers: the partials are not in the temporary tree.
+            page = self.WRAPPED.replace("<!-- ws:sidebar -->", "").replace("<!-- ws:header -->", "")
+            with mock.patch.object(pages, "STATIC_DIR", tmp), mock.patch.object(pages.settings, "app_version", "1.0.0"):
+                out = render(page=page, name="news")
+                stamp = asset_stamp("/static/js/pages/news.js")
+        self.assertRegex(stamp, r"^1\.0\.0-[0-9a-f]{8}$")
+        self.assertIn(f'data-ws-module="/static/js/pages/news.js?v={stamp}"', out)
+        self.assertNotIn('news.js?v=1"', out)
+
+    def test_page_styles_are_tagged_only_on_wrapped_pages(self):
+        b = branding(**{"theme.custom_css": "body{}"})
+        out = render(page=self.WRAPPED, b=b, name="news")
+        self.assertIn("<style data-ws-page-style>.x{}</style>", out)
+        self.assertEqual(out.count("data-ws-page-style"), 1)
+        # The shared styles the server adds are never the page's to swap.
+        self.assertRegex(out, r'<style id="ws-theme">')
+        self.assertIn('<style id="webservarr-custom-css">', out)
+        # Only <head> styles: one in the body stays as written.
+        body_style = self.WRAPPED.replace("<p>hi</p>", "<style>.y{}</style><p>hi</p>")
+        self.assertIn("<style>.y{}</style>", render(page=body_style, name="news"))
+        # A page with no #wsPage is not converted and is left alone.
+        plain = PAGE.replace("</head>", "<style>.x{}</style></head>")
+        self.assertNotIn("data-ws-page-style", render(page=plain, b=b))
+
+    def test_player_slot_and_live_region_once(self):
+        from app.tests.test_shell_contract import SHELL_PAGES, read
+        for name in SHELL_PAGES:
+            with self.subTest(name):
+                out = render(page=read(name), name=name)
+                self.assertEqual(out.count('id="wsPlayer"'), 1)
+                self.assertEqual(out.count('id="wsLive"'), 1)
+                self.assertIn('<div id="wsPlayer" hidden></div>', out)
+                self.assertIn('<div id="wsLive" class="sr-only" aria-live="polite"></div>', out)
+                end_main = out.rindex("</main>")
+                self.assertGreater(out.index('id="wsPlayer"'), end_main)
+                self.assertGreater(out.index('id="wsLive"'), end_main)
+        # Pages without the shell (login, setup) get neither.
+        bare = render(page=PAGE.replace("<!-- ws:sidebar -->", "").replace("<!-- ws:header -->", ""))
+        self.assertNotIn("wsPlayer", bare)
+        self.assertNotIn("wsLive", bare)
+
+
 if __name__ == "__main__":
     unittest.main()
 

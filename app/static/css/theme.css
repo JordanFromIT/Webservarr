@@ -503,6 +503,35 @@ main            { view-transition-name: ws-content; }
   @view-transition { navigation: none; }
 }
 
+/* ---- Persistent player slot ----
+ *
+ * #wsPlayer is on every shell page, outside <main>, so a soft navigation
+ * never replaces it (app/pages.py adds it before </body>). While [hidden] it
+ * is display:none and takes no space; no display is set here, or it would
+ * beat [hidden]. Fixed to the bottom of the viewport, stacked above the page
+ * and the mobile bar (z-40) and below the drawer and the modals (z-50 and
+ * up), which still cover it.
+ *
+ * Whatever shows the player sets --ws-player-h on <html> to its height, and
+ * the page's scrolling area gives up that much at the bottom, so nothing is
+ * ever under the player: below lg the document scrolls, so <body> pads its
+ * bottom; from lg the sidebar and <main> are one screen tall and scroll
+ * inside, so they end that much higher (max-height wins over h-screen).
+ */
+html { --ws-player-h: 0px; }
+#wsPlayer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; }
+body { padding-bottom: var(--ws-player-h); }
+@media (min-width: 1024px) {
+  #desktopSidebar, #desktopSidebar ~ main { max-height: calc(100vh - var(--ws-player-h)); }
+}
+
+/* <html data-shell="hidden">: the page has the whole screen (the reader, a
+   full-screen view). The player stays: it is not part of the chrome. */
+html[data-shell="hidden"] #desktopSidebar,
+html[data-shell="hidden"] #appHeader,
+html[data-shell="hidden"] #mobileTopBar,
+html[data-shell="hidden"] #drawerOverlay { display: none; }
+
 /* ---- Soft open and close ----
  *
  * The account menus, the bell panel and the drawer overlay all show and hide
