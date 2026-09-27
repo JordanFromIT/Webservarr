@@ -618,13 +618,20 @@
    *  or the card would never come back. */
   var SUBSCRIBE_TIMEOUT_MS = 15000;
   var SAVE_TIMEOUT_MS = 10000;
+  // A save that timed out may still have landed (a slow write, not a lost
+  // one), so the server is asked once before calling it a failure.
+  var SAVE_RECHECK_TIMEOUT_MS = 5000;
 
   /** promise, or a rejection with `reason` after ms. A result that arrives
    *  after the deadline is dropped quietly: the next page's re-sync saves a
-   *  late subscription, and a retry reuses it. */
-  function withTimeout(promise, ms, reason) {
+   *  late subscription, and a retry reuses it. onTimeout, if given, runs at
+   *  the deadline (after the rejection), to cancel the work being waited on. */
+  function withTimeout(promise, ms, reason, onTimeout) {
     return new Promise(function(resolve, reject) {
-      var timer = setTimeout(function() { reject(new Error(reason)); }, ms);
+      var timer = setTimeout(function() {
+        reject(new Error(reason));
+        if (onTimeout) onTimeout();
+      }, ms);
       Promise.resolve(promise).then(function(value) {
         clearTimeout(timer);
         resolve(value);
@@ -672,6 +679,10 @@
   }
 
   function sendSubscription(subJSON) {
+    // Aborted at the deadline, so a save given up on is cancelled wherever
+    // the browser still can, rather than landing later for a subscription
+    // the failure path may have just thrown away.
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
     return withTimeout(fetch('/api/notifications/push-subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -681,8 +692,11 @@
           p256dh: subJSON.keys.p256dh,
           auth: subJSON.keys.auth
         }
-      })
-    }), SAVE_TIMEOUT_MS, 'save-timeout').then(function(resp) {
+      }),
+      signal: controller ? controller.signal : undefined
+    }), SAVE_TIMEOUT_MS, 'save-timeout', function() {
+      if (controller) controller.abort();
+    }).then(function(resp) {
       if (resp.ok) return;
       return resp.json().catch(function() { return {}; }).then(function(body) {
         var err = new Error('subscribe-failed');
@@ -815,7 +829,9 @@
       return currentSubscription(reg, vapidKey);
     }).then(function(result) {
       if (result.created) created = result.subscription;
-      return postSubscription(result.subscription);
+      return postSubscription(result.subscription).catch(function(err) {
+        return savedAfterAll(result.subscription, err);
+      });
     }).then(function() {
       markPushSynced();
       setPushOff(false);
@@ -827,6 +843,21 @@
       if (created) created.unsubscribe().catch(function() {});
       throw err;
     });
+  }
+
+  /** After a save timed out: did it land anyway? One status check, itself
+   *  bounded. Resolves when the server has this endpoint (so the attempt is a
+   *  success and nothing is undone); otherwise rethrows the original error,
+   *  including when the check fails or times out. Any other error is
+   *  rethrown untouched. */
+  function savedAfterAll(subscription, err) {
+    if (!err || err.message !== 'save-timeout') return Promise.reject(err);
+    return withTimeout(serverHasSubscription(subscription), SAVE_RECHECK_TIMEOUT_MS, 'recheck-timeout')
+      .then(function(saved) {
+        if (!saved) throw err;
+      }, function() {
+        throw err;
+      });
   }
 
   function enablePush(toggleEl) {

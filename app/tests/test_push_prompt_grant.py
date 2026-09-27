@@ -89,7 +89,7 @@ class PushPromptLeavesOnGrant(unittest.TestCase):
         self.assertTrue(live_matches(cur, r"\}\),\s*SUBSCRIBE_TIMEOUT_MS\s*,\s*'subscribe-timeout'\)"))
         send = body_of(SRC, "sendSubscription")
         self.assertTrue(live_matches(send, r"\bwithTimeout\(\s*fetch\(\s*'/api/notifications/push-subscribe'"))
-        self.assertTrue(live_matches(send, r"\}\),\s*SAVE_TIMEOUT_MS\s*,\s*'save-timeout'\)"))
+        self.assertTrue(live_matches(send, r"\}\),\s*SAVE_TIMEOUT_MS\s*,\s*'save-timeout'\s*,"))
         # A timeout rejects with a plain Error, which pushFailureKind reads as
         # 'failed': the generic branch, so toast, card back, button enabled.
         helper = body_of(SRC, "withTimeout")
@@ -98,6 +98,45 @@ class PushPromptLeavesOnGrant(unittest.TestCase):
         kinds = body_of(SRC, "pushFailureKind")
         self.assertNotIn("subscribe-timeout", kinds)
         self.assertNotIn("save-timeout", kinds)
+
+    def test_a_timed_out_save_is_rechecked_before_it_counts_as_failed(self):
+        # R186: a save that timed out may have landed (a slow write). One
+        # bounded status check decides: saved -> success, nothing undone;
+        # not saved, or the check fails or times out -> the failure path.
+        self.assertRegex(SRC, r"var SAVE_RECHECK_TIMEOUT_MS = 5000;")
+        body = body_of(SRC, "subscribePush")
+        self.assertTrue(live_matches(
+            body, r"return postSubscription\(result\.subscription\)\.catch\(function\s*\(\s*err\s*\)\s*\{\s*"
+                  r"return savedAfterAll\(result\.subscription,\s*err\);\s*\}\);"))
+        # The recheck sits before the success/failure split, so a "saved"
+        # answer reaches markPushSynced/setPushOff(false) and skips the undo.
+        at = live_matches(body, r"\bsavedAfterAll\(")[0].start()
+        self.assertLess(at, live_matches(body, r"\bmarkPushSynced\(\s*\)")[0].start())
+        self.assertLess(at, live_matches(body, r"\bcreated\.unsubscribe\(\s*\)")[0].start())
+        check = body_of(SRC, "savedAfterAll")
+        # Only the save timeout is rechecked; anything else is rethrown as is.
+        self.assertTrue(live_matches(
+            check, r"if\s*\(\s*!err\s*\|\|\s*err\.message\s*!==\s*'save-timeout'\s*\)\s*return Promise\.reject\(\s*err\s*\);"))
+        self.assertTrue(live_matches(
+            check, r"withTimeout\(\s*serverHasSubscription\(\s*subscription\s*\)\s*,\s*SAVE_RECHECK_TIMEOUT_MS\s*,\s*'recheck-timeout'\s*\)"))
+        # Saved -> resolves; not saved -> original error; check failed -> original error.
+        self.assertTrue(live_matches(check, r"\.then\(function\s*\(\s*saved\s*\)\s*\{\s*if\s*\(\s*!saved\s*\)\s*throw err;\s*\}\s*,\s*function\s*\(\s*\)\s*\{\s*throw err;\s*\}\)"))
+
+    def test_the_timed_out_save_is_aborted_at_the_deadline(self):
+        send = body_of(SRC, "sendSubscription")
+        self.assertTrue(live_matches(send, r"\bnew AbortController\(\s*\)"))
+        self.assertTrue(live_matches(send, r"\bsignal:\s*controller\s*\?\s*controller\.signal\s*:\s*undefined"))
+        self.assertTrue(live_matches(
+            send, r"SAVE_TIMEOUT_MS\s*,\s*'save-timeout'\s*,\s*function\s*\(\s*\)\s*\{\s*if\s*\(\s*controller\s*\)\s*controller\.abort\(\s*\);\s*\}"))
+        helper = body_of(SRC, "withTimeout")
+        self.assertRegex(SRC, r"function withTimeout\(promise, ms, reason, onTimeout\)")
+        # At the deadline: reject first (so the abort's own rejection is
+        # dropped), then cancel.
+        self.assertTrue(live_matches(
+            helper, r"reject\(new Error\(reason\)\);\s*if\s*\(\s*onTimeout\s*\)\s*onTimeout\(\s*\);"))
+        # The subscribe keeps its plain bound (no abort to give it).
+        cur = body_of(SRC, "currentSubscription")
+        self.assertTrue(live_matches(cur, r"\}\),\s*SUBSCRIBE_TIMEOUT_MS\s*,\s*'subscribe-timeout'\)"))
 
     def test_a_refusal_after_the_grant_without_a_toast_shows_the_card(self):
         # R185: with no ui.js the message goes in the card, so the card must
