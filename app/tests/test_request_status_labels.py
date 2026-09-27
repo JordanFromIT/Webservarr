@@ -66,6 +66,19 @@ class DiscoverCardStatusLabel(unittest.TestCase):
             r"if\s*\(\s*!status\s*\|\|\s*status\s*===\s*'unknown'\s*\)\s*return\s*''\s*;"))
         self.assertNotIn("Unknown", self.label)
 
+    def test_partly_available_is_short_on_the_card_only(self):
+        # R183: "Partly Available" beside "TV Show" always truncated. The card
+        # shows "Partial"; the title keeps the shared label, and the shared
+        # vocabulary (Home, the search block, the modal) is untouched.
+        self.assertRegex(REQUESTS, r"var DISCOVER_SHORT_LABELS = \{ partially_available: 'Partial' \};")
+        self.assertTrue(live_matches(
+            self.label, r"\bshown\s*=\s*DISCOVER_SHORT_LABELS\[status\]\s*\|\|\s*known\.label\b"))
+        self.assertRegex(self.label, r"title=\"' \+ escapeHtml\(known\.label\) \+")
+        self.assertTrue(live_matches(self.label, r"\bescapeHtml\(\s*shown\s*\)\s*\+\s*'</span>'"))
+        shell = (STATIC / "js" / "shell.js").read_text(encoding="utf-8")
+        self.assertIn("partially_available: { label: 'Partly Available', tone: 'go' }", shell)
+        self.assertNotIn("Partial'", shell)
+
     def test_the_skeleton_card_carries_the_same_row(self):
         skel = body_of(REQUESTS, "buildDiscoverSkeletons")
         for token in ("flex items-center gap-1 min-w-0 mb-1",

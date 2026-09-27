@@ -1193,13 +1193,19 @@ function mediaTypeIcon(mediaType) {
  * for a title no one has asked for, or for Seerr's "unknown": no label, never
  * the word "Unknown". Same type size as the badge, so the row keeps its height.
  */
+// Card-only short words, for labels that cannot fit beside the type badge on
+// a 112px card: "Partly Available" beside "TV Show" always ended "Partly Av…".
+// The full shared label stays in the title, and everywhere else says it whole.
+var DISCOVER_SHORT_LABELS = { partially_available: 'Partial' };
+
 function discoverStatusLabel(status) {
   if (!status || status === 'unknown') return '';
   var known = WS.requestStatus(status);
   var tone = STATUS_TONE_CLASSES[known.tone] || STATUS_TONE_CLASSES.wait;
+  var shown = DISCOVER_SHORT_LABELS[status] || known.label;
   return '<span data-discover-status title="' + escapeHtml(known.label) + '" ' +
     'class="min-w-0 truncate text-[8px] font-bold px-1 py-0.5 rounded ' + tone.bg + ' ' + tone.text + '">' +
-    escapeHtml(known.label) + '</span>';
+    escapeHtml(shown) + '</span>';
 }
 
 function buildDiscoverCard(item) {
