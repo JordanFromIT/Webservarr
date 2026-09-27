@@ -5,6 +5,10 @@
  * needs them (Settings, the news archive, the wiki) looks and behaves the
  * same, and nothing uses the browser's alert/confirm/prompt.
  *
+ * Loaded once by the shell (partials/shell-sidebar.html) on every shell page,
+ * before any page script and before router.js, so no page loads it itself.
+ * It reads nothing from the page at load.
+ *
  * Class strings are literal so Tailwind compiles them (app/static/js is in
  * the content globs). Text colours are theme colours only. A toast's tone is
  * the status light beside the text; an error's words also take the derived
@@ -238,5 +242,16 @@
 
   function isDialogOpen() { return stack.length > 0; }
 
-  window.WSUI = { el: el, icon: icon, toast: toast, confirm: confirm, cls: cls, isDialogOpen: isDialogOpen };
+  // Every open dialog, topmost first, answered as Escape would answer it
+  // (Cancel; OK for a one-button notice). The router calls this before a
+  // soft navigation swaps the page out from under them.
+  function closeDialogs() {
+    while (stack.length) {
+      var d = topDialog();
+      d.close(d.dismiss);
+    }
+  }
+
+  window.WSUI = { el: el, icon: icon, toast: toast, confirm: confirm, cls: cls, isDialogOpen: isDialogOpen,
+                  closeDialogs: closeDialogs };
 })();

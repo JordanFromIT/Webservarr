@@ -9,7 +9,7 @@ text, so after "Allow" the card looked like nothing had happened.
 import re
 import unittest
 
-from app.tests.test_shell_contract import STATIC, live_matches, matching_brace, read
+from app.tests.test_shell_contract import STATIC, assert_ui_js_before, live_matches, matching_brace, read
 
 SRC = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
 
@@ -76,8 +76,8 @@ class PushPromptLeavesOnGrant(unittest.TestCase):
         self.assertTrue(live_matches(before, r"\bsetPromptBusy\(\s*enableBtn\s*,\s*false\s*\)"))
         self.assertTrue(live_matches(before, r"\blaterBtn\.disabled\s*=\s*false\b"))
         self.assertTrue(live_matches(body_of(SRC, "promptFailure"), r"\bWSUI\.toast\(\s*text\s*,\s*'err'\s*\)"))
-        # The toast lives in ui.js, which Home now loads.
-        self.assertIn('<script src="/static/js/ui.js?v=1"></script>', read("index"))
+        # The toast lives in ui.js, which the shell loads on Home as on every shell page.
+        assert_ui_js_before(self, read("index"), "/static/js/notifications.js?v=")
 
     def test_subscribe_and_save_are_time_bounded(self):
         # R184: the card has gone by the time these run, so a hang must end in

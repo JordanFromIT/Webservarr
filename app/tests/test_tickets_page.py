@@ -19,7 +19,7 @@ import re
 import unittest
 from pathlib import Path
 
-from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace
+from app.tests.test_shell_contract import STATIC, assert_ui_js_before, js_code_only, matching_brace
 
 TICKETS_ROUTER = Path(__file__).resolve().parents[1] / "routers" / "tickets.py"
 
@@ -179,15 +179,14 @@ class Mutations(unittest.TestCase):
 
 class TicketDeleteDialog(unittest.TestCase):
     """Deleting a ticket asks with the site's own dialog (WSUI.confirm from
-    ui.js, loaded before the page script), never the browser's confirm()."""
+    ui.js, which the shell loads before the page script), never the browser's confirm()."""
 
     def test_the_page(self):
         from app.tests.test_settings_static import NATIVE_DIALOG
         html = page()
         code = code_of(html)
         self.assertIsNone(NATIVE_DIALOG.search(code))
-        self.assertIn('<script src="/static/js/ui.js?v=', html)
-        self.assertLess(html.index('/static/js/ui.js?v='), html.index("<script>\n"))
+        assert_ui_js_before(self, html, "<script>\n")
         self.assertRegex(code, r"window\.WSUI\.confirm\(\{[^}]*danger: true[^}]*\}\)\.then\(function \(ok\) \{\s*if \(!ok\) return;")
 
 

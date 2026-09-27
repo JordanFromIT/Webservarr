@@ -22,6 +22,7 @@
  *   WS.arrive(key, write)         reveal sections top-down, in document order
  *   WS.arriveReset()              start the order again for a newly mounted page (router.js)
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
+ *   WS.getJSON(url, { signal })   fetch JSON; rejects on non-2xx; signal optional
  *   WS.dragScroll(el)             mouse drag-to-scroll for a sideways row
  *   WS.dragScroll.stop(el)        end that row's momentum glide (before scrolling it)
  *   WS.popOpen(el) / WS.popClose(el) / WS.popIsOpen(el)
@@ -222,9 +223,12 @@
   }
 
   /* fetch() that rejects on a non-2xx status and parses JSON - the shape every
-     loader wants from swr's fetcher. */
-  function getJSON(url) {
-    return fetch(url).then(function (r) {
+     loader wants from swr's fetcher. opts.signal (optional): a soft-navigated
+     page's AbortSignal; leaving the page aborts the request, and the promise
+     rejects with the fetch's own AbortError, which a page treats as silent. */
+  function getJSON(url, opts) {
+    var signal = opts && opts.signal ? opts.signal : undefined;
+    return fetch(url, signal ? { signal: signal } : undefined).then(function (r) {
       // A page can be served from the prefetch cache after the session has
       // ended; the first API answer says so.
       if (r.status === 401) { window.location.href = '/login'; throw new Error('HTTP 401'); }

@@ -90,6 +90,11 @@
 }
 </script>
 
+<!-- The shared toast and dialog (window.WSUI), once for every shell page: it
+     runs here, before any page script and before router.js, and the pages
+     do not load it again. -->
+<script src="/static/js/ui.js?v=1"></script>
+
 <!-- Soft navigation (router.js). A module runs after the page is parsed, so
      shell.js (a classic script at the end of every page) has made window.WS. -->
 <script type="module" src="/static/js/router.js?v=1"></script>

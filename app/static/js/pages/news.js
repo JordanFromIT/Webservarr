@@ -17,16 +17,6 @@ const FRESH_MS = 72 * 60 * 60 * 1000; // matches the homepage's "New" threshold
 
 function isAbort(e) { return !!e && e.name === 'AbortError'; }
 
-// fetch() that rejects on a non-2xx status and parses JSON (WS.getJSON with
-// the page's signal, so leaving the page cancels it).
-function getJSON(url, signal) {
-  return fetch(url, { signal: signal }).then(function (r) {
-    if (r.status === 401) { window.location.href = '/login'; throw new Error('HTTP 401'); }
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return r.json();
-  });
-}
-
 function excerpt(html, limit) {
   const tmp = document.createElement('div');
   tmp.innerHTML = html || '';
@@ -160,7 +150,7 @@ export async function mount(ctx) {
     var key = isAdmin ? 'news:archive:admin' : 'news:archive';
 
     function fetcher() {
-      return getJSON(url, signal).then(function (posts) {
+      return WS.getJSON(url, { signal: signal }).then(function (posts) {
         if (!Array.isArray(posts)) throw new Error('Unexpected response');
         return posts;
       });
@@ -281,7 +271,7 @@ export async function mount(ctx) {
       // Opens (or reports a failure) only if this is still the latest Edit
       // click and nothing opened or dismissed the editor meanwhile.
       var ticket = ++_editClick, seen = NewsEditor.generation();
-      getJSON('/api/news/' + id, signal).then(function (post) {
+      WS.getJSON('/api/news/' + id, { signal: signal }).then(function (post) {
         if (ticket === _editClick && seen === NewsEditor.generation()) NewsEditor.open(post, newsChanged);
       }).catch(function (e) {
         if (isAbort(e)) return;

@@ -77,13 +77,16 @@ export function qualifies(href, baseHref, attrs) {
 /* What to do with a fetched page (spec 5.2 steps 2 and 3, 5.5).
    response: { ok, status, finalUrl, redirected, contentType, hasModule },
    or null for a network error. Returns { action: 'swap' },
-   { action: 'hard', url } or { action: 'stay', reason: 'network'|'server' }.
+   { action: 'hard', url } or { action: 'stay', reason: 'network'|'server'|'busy' }.
+   A 429 (rate limited) is as passing as a 5xx: stay, never load the limit's
+   JSON answer as a page.
    A redirect is judged by where the fetch ended, not by the redirected flag:
    one that lands on the same path and query (a trailing slash dropped) is
    not a redirect. A link's #fragment is carried over, as the browser does. */
 export function decide(requestedUrl, response) {
   if (!response) return { action: 'stay', reason: 'network' };
   if (response.status >= 500) return { action: 'stay', reason: 'server' };
+  if (response.status === 429) return { action: 'stay', reason: 'busy' };
   const req = new URL(requestedUrl);
   const fin = response.finalUrl ? new URL(response.finalUrl, req) : new URL(req.href);
   if (fin.origin !== req.origin || normPath(fin.pathname) !== normPath(req.pathname) || fin.search !== req.search) {
@@ -223,7 +226,7 @@ function start() {
 
   /* The page as decide() and the swap need it. Resolves null on a network
      error; rejects only when aborted. The body is read only for HTML below
-     500: nothing else is ever shown. */
+     500 and not 429: nothing else is ever shown. */
   async function fetchPage(url, signal) {
     let r;
     try {
@@ -234,7 +237,7 @@ function start() {
     }
     const contentType = r.headers.get('content-type') || '';
     let text = null;
-    if (r.status < 500 && /^\s*text\/html\b/i.test(contentType)) {
+    if (r.status < 500 && r.status !== 429 && /^\s*text\/html\b/i.test(contentType)) {
       try {
         text = await r.text();
       } catch (e) {
@@ -379,27 +382,29 @@ function start() {
 
   // ---- Failure (spec 5.5) ----
 
-  // Not every page loads ui.js (the toast). It is fetched while the page is
-  // idle, not when a navigation fails: by then the network may be gone.
-  function ensureUI() {
-    if (window.WSUI) return Promise.resolve(window.WSUI);
-    return loadScript('/static/js/ui.js').then(function () { return window.WSUI || null; }, function () { return null; });
-  }
-  if (!window.WSUI && document.getElementById('desktopSidebar')) {
-    const later = window.requestIdleCallback || function (fn) { return setTimeout(fn, 1500); };
-    later(function () { ensureUI(); });
-  }
+  // The toast is ui.js (window.WSUI), which the shell partial loads on every
+  // shell page before this module runs.
+  const RETRY_WORDS = {
+    network: 'Couldn’t open that page. Check your connection.',
+    busy: 'Couldn’t open that page just now. Try again in a moment.',
+    server: 'Couldn’t open that page. The server had a problem.'
+  };
 
   function showRetry(href, reason, pop) {
-    const msg = reason === 'network'
-      ? 'Couldn’t open that page. Check your connection.'
-      : 'Couldn’t open that page. The server had a problem.';
-    ensureUI().then(function (ui) {
-      if (!ui) { console.error('[router] ' + msg); return; }
-      ui.toast(msg, 'err', {
-        action: { label: 'Retry', run: function () { go(href, { replace: pop }); } }
-      });
+    const msg = RETRY_WORDS[reason] || RETRY_WORDS.server;
+    const ui = window.WSUI;
+    if (!ui) { console.error('[router] ' + msg); return; }
+    ui.toast(msg, 'err', {
+      action: { label: 'Retry', run: function () { go(href, { replace: pop }); } }
     });
+  }
+
+  /* Before the page under them changes: the drawer and the header menus
+     (shell.js), and any open dialog, answered as its Cancel or Escape would
+     be, so no page is left waiting on it (ui.js). */
+  function closeOverlays() {
+    if (typeof WS.closeChrome === 'function') WS.closeChrome();
+    if (window.WSUI && typeof window.WSUI.closeDialogs === 'function') window.WSUI.closeDialogs();
   }
 
   function mountError(root, entry) {
@@ -711,7 +716,7 @@ function start() {
       try { claimed = current.claim(new URL(target.href)) === true; } catch (e) { console.error(e); }
       if (claimed) {
         fetchCtl = null;
-        if (typeof WS.closeChrome === 'function') WS.closeChrome();
+        closeOverlays();
         if (!opts.pop) {
           saveScroll();
           const st = { ws: 1, scrollY: 0 };
@@ -729,7 +734,7 @@ function start() {
     try {
       const pre = takePrefetch(target.href);
       res = pre ? await pre : null;
-      if (!res || res.status >= 500) res = await fetchPage(target.href, ctl.signal);
+      if (!res || res.status >= 500 || res.status === 429) res = await fetchPage(target.href, ctl.signal);
     } catch (e) {
       if (isAbort(e)) return;
       res = null;
@@ -810,7 +815,7 @@ function start() {
   // mounted, and the next navigation can start its own swap meanwhile.
   async function commit(doc, page, dest, mod, moduleUrl, opts) {
     swaps += 1;
-    if (typeof WS.closeChrome === 'function') WS.closeChrome();
+    closeOverlays();
     if (!opts.pop) saveScroll();
 
     // 5. Leave the old page.

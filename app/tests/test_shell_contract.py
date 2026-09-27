@@ -34,6 +34,21 @@ def read(name: str) -> str:
     return (STATIC / f"{name}.html").read_text(encoding="utf-8")
 
 
+UI_JS_TAG = '<script src="/static/js/ui.js?v=1"></script>'
+SIDEBAR_MARKER = "<!-- ws:sidebar -->"
+
+
+def assert_ui_js_before(tc: unittest.TestCase, html: str, later: str) -> None:
+    """window.WSUI (ui.js) is ready before `later` in this page: the shell
+    partial loads it with a plain blocking tag, the partial fills the sidebar
+    marker ahead of `later`, and the page carries no ui.js tag of its own."""
+    partial = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
+    tc.assertEqual(partial.count(UI_JS_TAG), 1)
+    tc.assertNotIn("/static/js/ui.js", html)
+    tc.assertIn(SIDEBAR_MARKER, html)
+    tc.assertLess(html.index(SIDEBAR_MARKER), html.index(later))
+
+
 def js_code_only(src: str) -> str:
     """JavaScript source with comments removed and string contents blanked.
 

@@ -761,6 +761,18 @@ class SoftNavServerSide(unittest.TestCase):
         self.assertNotIn("wsPlayer", bare)
         self.assertNotIn("wsLive", bare)
 
+    def test_ui_js_once_on_every_shell_page_before_its_scripts(self):
+        # The toast and dialog come with the shell: once, ahead of router.js
+        # and of every script the page itself carries.
+        from app.tests.test_shell_contract import SHELL_PAGES, read
+        for name in SHELL_PAGES:
+            with self.subTest(name):
+                out = render(page=read(name), name=name)
+                self.assertEqual(len(re.findall(r'<script src="/static/js/ui\.js\?v=[^"]+"></script>', out)), 1)
+                at = out.index("/static/js/ui.js?v=")
+                self.assertLess(at, out.index("/static/js/router.js?v="))
+                self.assertLess(at, out.index("/static/js/auth.js?v="))
+
 
 if __name__ == "__main__":
     unittest.main()

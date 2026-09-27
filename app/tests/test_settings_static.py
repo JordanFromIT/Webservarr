@@ -32,7 +32,7 @@ TINY_TEXT = re.compile(
     r"text-\[(?:(?:\d|1[01])(?:\.\d+)?px|" + _UNDER_075 + r")\]"
     r"|(?:font-size\s*:|fontSize\s*=)\s*['\"]?\s*(?:(?:\d|1[01])(?:\.\d+)?px\b|" + _UNDER_075 + r")")
 
-from app.tests.test_shell_contract import js_code_only, live_matches, matching_brace
+from app.tests.test_shell_contract import assert_ui_js_before, js_code_only, live_matches, matching_brace
 
 try:
     from fastapi.testclient import TestClient  # noqa: F401
@@ -106,7 +106,7 @@ class Frame(unittest.TestCase):
             self.assertIn(f'<script data-tab="{t}" src="/static/js/settings/{MODULES[t]}?v=1"></script>', h)
         self.assertIn('id="settingsSaveBar"', h)
         self.assertIn('id="settingsModules"', h)
-        self.assertLess(h.index("/static/js/ui.js?v="), h.index("/static/js/settings/kit.js?v="))
+        assert_ui_js_before(self, h, "/static/js/settings/kit.js?v=")
         self.assertLess(h.index("/static/js/auth.js?v="), h.index("/static/js/settings/kit.js?v="))
 
     def test_first_paint_selects_the_tab_from_the_hash(self):
@@ -187,7 +187,6 @@ class Frame(unittest.TestCase):
 class Hygiene(unittest.TestCase):
     def test_referenced_files_exist_or_are_pending(self):
         refs = referenced_js()
-        self.assertIn("js/ui.js", refs)
         self.assertIn("js/settings/kit.js", refs)
         for rel in refs:
             exists = (STATIC / rel).exists()
@@ -1727,7 +1726,7 @@ class InPlaceNews(unittest.TestCase):
         h = (STATIC / "news.html").read_text(encoding="utf-8")
         self.assertRegex(h, r'id="newsNewPost"[^>]*class="[^"]*ws-admin-only')
         self.assertIn('id="newsEditor"', h)
-        self.assertLess(h.index("/static/js/ui.js?v="), h.index("/static/js/news-editor.js?v="))
+        assert_ui_js_before(self, h, "/static/js/news-editor.js?v=")
         self.assertEqual(len(live_matches(news_script(), r"\(isAdmin \? '&published_only=false' : ''\)")), 1)
         home = (STATIC / "index.html").read_text(encoding="utf-8")
         self.assertRegex(home, r'<a[^>]*href="/news"[^>]*class="[^"]*ws-admin-only[^"]*"[^>]*>\s*Manage news')
@@ -1884,7 +1883,7 @@ class InPlaceNews(unittest.TestCase):
         code = js_code_only(news_script())
         self.assertRegex(code, r"\bvar _editClick = 0;")
         also = r"(?: && seen === NewsEditor\.generation\(\))?"   # see test_cancel_drops_an_edit_still_fetching
-        self.assertRegex(code, r"var ticket = \+\+_editClick(?:, seen = NewsEditor\.generation\(\))?;\s*getJSON\(")
+        self.assertRegex(code, r"var ticket = \+\+_editClick(?:, seen = NewsEditor\.generation\(\))?;\s*WS\.getJSON\(")
         self.assertRegex(code, r"\.then\(function \(post\) \{\s*if \(ticket === _editClick" + also + r"\) NewsEditor\.open\(post, newsChanged\);\s*\}\)")
         self.assertRegex(code, r"\.catch\(function \(e\) \{\s*if \(isAbort\(e\)\) return;\s*if \(ticket === _editClick" + also + r"\) WSUI\.toast\(")
         self.assertRegex(code, r"_editClick \+= 1;\s*NewsEditor\.open\(null, newsChanged\);")
@@ -1911,7 +1910,7 @@ class InPlaceNews(unittest.TestCase):
         # The News page reads it at click time, before the fetch, and both the
         # open and the failure toast require it unchanged, as well as the ticket.
         page = js_code_only(news_script())
-        self.assertRegex(page, r"var ticket = \+\+_editClick, seen = NewsEditor\.generation\(\);\s*getJSON\(")
+        self.assertRegex(page, r"var ticket = \+\+_editClick, seen = NewsEditor\.generation\(\);\s*WS\.getJSON\(")
         live = r"ticket === _editClick && seen === NewsEditor\.generation\(\)"
         self.assertRegex(page, r"\.then\(function \(post\) \{\s*if \(" + live + r"\) NewsEditor\.open\(post, newsChanged\);\s*\}\)")
         self.assertRegex(page, r"\.catch\(function \(e\) \{\s*if \(isAbort\(e\)\) return;\s*if \(" + live + r"\) WSUI\.toast\(")
@@ -1964,7 +1963,7 @@ class InPlaceWiki(unittest.TestCase):
     def test_wiki_index_manages_categories(self):
         h = (STATIC / "wiki.html").read_text(encoding="utf-8")
         self.assertIn("/static/js/wiki-categories.js?v=", h)
-        self.assertLess(h.index("/static/js/ui.js?v="), h.index("/static/js/wiki-categories.js?v="))
+        assert_ui_js_before(self, h, "/static/js/wiki-categories.js?v=")
         self.assertIn("Manage categories", h)
         js = (STATIC / "js" / "wiki-categories.js").read_text(encoding="utf-8")
         self.assertIn("/api/wiki/categories", js)

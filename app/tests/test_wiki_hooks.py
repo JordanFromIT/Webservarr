@@ -18,7 +18,7 @@ try:
 except Exception:  # pragma: no cover
     HAVE_APP = False
 
-from app.tests.test_shell_contract import js_code_only, live_matches
+from app.tests.test_shell_contract import assert_ui_js_before, js_code_only, live_matches
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
 
@@ -599,7 +599,7 @@ class WikiEditorDialogs(unittest.TestCase):
         from app.tests.test_settings_static import NATIVE_DIALOG
         self.assertIsNone(NATIVE_DIALOG.search(js_code_only(editor_js())))
         wiki = (STATIC / "wiki.html").read_text(encoding="utf-8")
-        self.assertLess(wiki.index("/static/js/ui.js?v="), wiki.index("/static/js/wiki-editor.js?v="))
+        assert_ui_js_before(self, wiki, "/static/js/wiki-editor.js?v=")
 
     def test_delete_asks_in_page_and_checks_again_after(self):
         code = js_code_only(editor_js())

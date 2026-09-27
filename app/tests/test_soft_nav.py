@@ -10,6 +10,7 @@ page to that. The list starts empty: each page's conversion appends its name.
 import re
 import unittest
 
+from app.tests.test_settings_static import function_body
 from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
@@ -144,6 +145,69 @@ class ConvertedPages(unittest.TestCase):
                         continue
                     self.assertRegex(m.group(1), r"\bdata-ws-page-script\b",
                                      f"{name}: {src} is a page helper without data-ws-page-script")
+
+
+class SharedShellScripts(unittest.TestCase):
+    """ui.js (the toast and dialog) loads once, from the shell, on every shell
+    page; the router closes dialogs before a swap; WS.getJSON takes the page's
+    signal (Task 4 fix round 1: U1, D1, R2)."""
+
+    def partial(self):
+        return (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
+
+    def test_ui_js_loads_once_from_the_shell_before_the_router(self):
+        from app.tests.test_shell_contract import BARE_PAGES, SHELL_PAGES
+        part = self.partial()
+        tags = [m for m in _SCRIPT_TAG_RE.finditer(part) if "/static/js/ui.js" in (attr(m.group(1), "src") or "")]
+        self.assertEqual(len(tags), 1, "the shell partial loads ui.js exactly once")
+        a = tags[0].group(1)
+        # A plain blocking script: page scripts later in <body> read WSUI at load.
+        for word in ("defer", "async", "type"):
+            self.assertIsNone(re.search(rf"\b{word}\b", a), f"ui.js must not be {word}")
+        self.assertLess(tags[0].start(), part.index("/static/js/router.js"))
+        for name in SHELL_PAGES + BARE_PAGES:
+            with self.subTest(name):
+                self.assertNotIn("/static/js/ui.js", read(name), f"{name} loads ui.js itself")
+
+    def test_router_does_not_fetch_ui_js(self):
+        code = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+        src = (STATIC / "js" / "router.js").read_text(encoding="utf-8")
+        self.assertNotIn("ensureUI", code)
+        self.assertNotIn("requestIdleCallback", code)
+        self.assertNotRegex(src, r"""['"`][^'"`]*ui\.js['"`]""")
+
+    def test_dialogs_close_before_the_page_changes(self):
+        ui = js_code_only((STATIC / "js" / "ui.js").read_text(encoding="utf-8"))
+        close_all = function_body(ui, "closeDialogs")
+        self.assertRegex(close_all, r"while \(stack\.length\) \{\s*var d = topDialog\(\);\s*d\.close\(d\.dismiss\);\s*\}")
+        self.assertRegex(ui, r"window\.WSUI = \{[^}]*\bcloseDialogs: closeDialogs\b")
+        code = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+        overlays = function_body(code, "closeOverlays")
+        self.assertIn("WS.closeChrome()", overlays)
+        self.assertIn("window.WSUI.closeDialogs()", overlays)
+        # Before the old page is left (the swap), and before a page claims a URL.
+        commit = function_body(code, "commit")
+        self.assertLess(commit.index("closeOverlays();"), commit.index("leave();"))
+        self.assertEqual(len(re.findall(r"(?<!function )\bcloseOverlays\(\);", code)), 2)
+        # Nothing closes the chrome alone any more: always with the dialogs.
+        self.assertEqual(code.count("WS.closeChrome()"), 1)
+
+    def test_get_json_takes_the_pages_signal(self):
+        shell = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
+        body = function_body(shell, "getJSON")
+        self.assertRegex(shell, r"function getJSON\(url, opts\)")
+        self.assertRegex(body, r"var signal = opts && opts\.signal \? opts\.signal : undefined;")
+        self.assertRegex(body, r"return fetch\(url, signal \? \{ signal: signal \} : undefined\)\.then\(")
+        # Aborts are not swallowed: no catch in getJSON, so the page sees AbortError.
+        self.assertNotIn(".catch(", body)
+        news = js_code_only(module_source("news"))
+        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*\{ signal: signal \}\)", news)), 2)
+        self.assertEqual(len(re.findall(r"\bgetJSON\(", news)), 2, "every News JSON read goes through WS.getJSON")
+
+    def test_a_rate_limited_page_is_never_read_or_reused(self):
+        code = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+        self.assertIn("r.status < 500 && r.status !== 429 &&", function_body(code, "fetchPage"))
+        self.assertIn("if (!res || res.status >= 500 || res.status === 429) res = await fetchPage(", code)
 
 
 # The debug tools (spec 7): a leak checker that wraps addEventListener, the
