@@ -152,11 +152,14 @@ function start() {
 
   const DEBUG_KEY = 'ws.debug';
 
-  // A file next to this one, with this file's ?v= stamp.
+  // A debug file next to this one. Not with this file's ?v= stamp: that is
+  // router.js's own content hash, cached for a year, so a change to the debug
+  // file alone would never arrive. One fresh query per document instead
+  // (debug mode only, so the extra download costs nobody else).
+  const debugLoad = '?t=' + Date.now().toString(36);
   function sibling(path) {
-    const self = new URL(import.meta.url);
-    const u = new URL(path, self);
-    u.search = self.search;
+    const u = new URL(path, import.meta.url);
+    u.search = debugLoad;
     return u.href;
   }
 
