@@ -715,8 +715,8 @@ html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
  * the gap under it is given here and nothing moves when the attribute goes.
  * (With a section off, the stack's flex gap already spaces it.)
  */
-html[data-push-offer] #pushPrompt[hidden] { display: block; }
-html[data-push-offer]:not([data-home-hide]) #pushPrompt[hidden] { margin-bottom: 2rem; }
+html[data-push-offer] #pushPrompt[hidden] { display: block; margin-bottom: 2rem; }
+html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
 
 /* ---- Settings ----
  *

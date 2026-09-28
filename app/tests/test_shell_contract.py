@@ -327,8 +327,8 @@ class ShellContract(unittest.TestCase):
                                                r"document\.documentElement\.setAttribute\('               ', ''\);")
         self.assertIn("'data-push-offer'", loader)
         theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
-        self.assertIn("html[data-push-offer] #pushPrompt[hidden] { display: block; }", theme)
-        self.assertIn("html[data-push-offer]:not([data-home-hide]) #pushPrompt[hidden] { margin-bottom: 2rem; }", theme)
+        self.assertIn("html[data-push-offer] #pushPrompt[hidden] { display: block; margin-bottom: 2rem; }", theme)
+        self.assertIn("html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }", theme)
         # The page module decides again for its visit, before anything it
         # awaits (so before the swapped page is drawn), takes the mark away and
         # has notifications.js wire the card with the visit's signal.

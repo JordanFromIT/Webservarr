@@ -927,7 +927,7 @@ class StreamsPreview(unittest.TestCase):
         self.assertLess(loader.index("_streamsPreview"), loader.index("/api/integrations/active-streams"))
         # The sample label only shows while the preview is on, laid over the artwork.
         self.assertIn("${preview ? '<span class=\"absolute top-3 left-3 ", self.page)
-        self.assertIn("return renderStreamCard(stream, _streamsPreview);", self.body_of("function renderActiveStreams(streams)"))
+        self.assertEqual(len(live_matches(self.page, r"return renderStreamCard\(stream, _streamsPreview\);")), 1)
 
     def test_three_samples_direct_play_transcode_and_no_artwork(self):
         samples = self.body_of("function sampleStreams()")
