@@ -1367,6 +1367,24 @@ class WholeSite(unittest.TestCase):
         self.assertLess(login.index('id="authentikLoginBtn"'), tag)
         self.assertLess(tag, login.index("</main>"))
 
+    def test_the_plex_popup_message_is_only_the_popups(self):
+        # Any window holding an opener reference to the login tab could post
+        # {type:'plex-auth-complete'} and cut a real sign-in short. Only the
+        # popup this page opened, on this origin, is heard (plex-callback.js
+        # posts to window.location.origin), and the check comes before
+        # anything the message does.
+        src = (STATIC / "js" / "login.js").read_text(encoding="utf-8")
+        code = js_code_only(src)
+        start = code.index("window.addEventListener('       ', function handler(e) {")
+        body = code[start:matching_brace(code, code.index("{", start))]
+        guard = "if (e.origin !== window.location.origin || !popup || e.source !== popup) return;"
+        self.assertIn(guard, body)
+        for later in ("removeEventListener(", "popup.close()", "completePlexAuth("):
+            self.assertLess(body.index(guard), body.index(later), later)
+        self.assertIn("var popup = window.open(", code[:start])
+        cb = js_code_only((STATIC / "js" / "plex-callback.js").read_text(encoding="utf-8"))
+        self.assertIn("window.location.origin", cb)
+
     def test_old_navigation_removed(self):
         # The router's own hover prefetch replaces the sidebar's speculation
         # rules and the service worker's page cache (spec 5.4).

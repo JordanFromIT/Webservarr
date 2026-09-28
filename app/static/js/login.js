@@ -376,6 +376,10 @@ document.addEventListener('DOMContentLoaded', async function() {
             } else {
                 var popup = window.open(data.auth_url, 'PlexAuth', 'width=800,height=600');
                 window.addEventListener('message', function handler(e) {
+                    // Only the popup this page opened, back on this origin
+                    // (plex-callback.js posts to it). Another window holding
+                    // a reference to this tab must not cut the sign-in short.
+                    if (e.origin !== window.location.origin || !popup || e.source !== popup) return;
                     if (e.data && e.data.type === 'plex-auth-complete') {
                         window.removeEventListener('message', handler);
                         if (popup && !popup.closed) popup.close();
