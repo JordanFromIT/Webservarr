@@ -24,7 +24,7 @@
  *   WS.arriveReset()              start the order again for a newly mounted page (router.js)
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
  *   WS.getJSON(url, { signal })   fetch JSON; rejects on non-2xx; signal optional
- *   WS.dragScroll(el)             mouse drag-to-scroll for a sideways row
+ *   WS.dragScroll(el, { signal }) mouse drag-to-scroll for a sideways row; signal optional
  *   WS.dragScroll.stop(el)        end that row's momentum glide (before scrolling it)
  *   WS.popOpen(el) / WS.popClose(el) / WS.popIsOpen(el)
  *                                 soft open and close of a .ws-pop panel (theme.css)
@@ -589,7 +589,8 @@
   // Attach it to the scrolling element itself, once. Content can be replaced
   // inside it freely (the listeners live on the row, not the cards), and a
   // second call on the same element is a no-op, so re-renders never stack
-  // handlers.
+  // handlers. opts.signal (optional): a soft-navigated page's AbortSignal;
+  // the row's listeners end with the visit, as the page's own do.
   var DRAG_THRESHOLD = 5;          // px before a press becomes a drag
   var GLIDE_DECAY = 0.92;          // velocity kept per 16 ms frame
   var GLIDE_MIN = 0.02;            // px/ms below which the glide stops
@@ -599,9 +600,17 @@
     return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   }
 
-  function dragScroll(el) {
+  function dragScroll(el, opts) {
     if (!el || el._wsDragScroll) return;
     el._wsDragScroll = true;
+    var signal = opts && opts.signal ? opts.signal : undefined;
+    // The listener options, with the visit's signal when one was given.
+    function on(extra) {
+      var o = {};
+      for (var k in extra) o[k] = extra[k];
+      if (signal) o.signal = signal;
+      return o;
+    }
 
     var press = null;        // { id, x, left } while the button is held
     var dragging = false;
@@ -689,7 +698,7 @@
 
     el.addEventListener('pointerenter', function (e) {
       if (e.pointerType === 'mouse') el.classList.toggle('ws-drag-ready', scrollable());
-    });
+    }, on({}));
 
     el.addEventListener('pointerdown', function (e) {
       if (e.pointerType !== 'mouse') return;
@@ -700,7 +709,7 @@
       velocity = 0;
       lastX = e.clientX;
       lastT = performance.now();
-    });
+    }, on({}));
 
     el.addEventListener('pointermove', function (e) {
       if (!press || e.pointerId !== press.id) return;
@@ -729,14 +738,14 @@
       }
       lastX = e.clientX;
       lastT = now;
-    });
+    }, on({}));
 
-    el.addEventListener('pointerup', function (e) { endDrag(e, true); });
-    el.addEventListener('pointercancel', function (e) { endDrag(e, false); });
+    el.addEventListener('pointerup', function (e) { endDrag(e, true); }, on({}));
+    el.addEventListener('pointercancel', function (e) { endDrag(e, false); }, on({}));
     // Capture can be taken away without a pointerup ever reaching the row. On a
     // normal release this fires after pointerup has already finished the drag,
     // and does nothing.
-    el.addEventListener('lostpointercapture', function (e) { endDrag(e, false); });
+    el.addEventListener('lostpointercapture', function (e) { endDrag(e, false); }, on({}));
 
     // Capture phase on the row runs before any card's own click handler.
     el.addEventListener('click', function (e) {
@@ -744,13 +753,13 @@
       swallowClick = false;
       e.preventDefault();
       e.stopPropagation();
-    }, true);
+    }, on({ capture: true }));
 
     // No ghost image of a poster (or a link) following the cursor.
-    el.addEventListener('dragstart', function (e) { e.preventDefault(); });
+    el.addEventListener('dragstart', function (e) { e.preventDefault(); }, on({}));
 
     // The wheel (or trackpad) takes over from a glide immediately.
-    el.addEventListener('wheel', stopGlide, { passive: true });
+    el.addEventListener('wheel', stopGlide, on({ passive: true }));
 
     // For controls outside the row that scroll it (the chevron buttons are
     // siblings, so the row never sees their press): see dragScroll.stop.
