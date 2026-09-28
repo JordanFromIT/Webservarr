@@ -654,6 +654,11 @@ function start() {
     box.appendChild(text);
     box.appendChild(btn);
     root.replaceChildren(box);
+    // A full-screen view (the reader) hides the shell and brings its own way
+    // back, which this box just replaced: the shell comes back, so the
+    // sidebar, or the phone's menu, is a way out. The next swap sets the
+    // flag again from the page it brings.
+    document.documentElement.removeAttribute('data-shell');
   }
 
   // ---- Scroll ----
