@@ -385,6 +385,7 @@ def check_reader(t, html, js):
             t.assertNotEqual(args[-1], "true", f"{name}: a book load is quiet and would hang on the spinner")
     t.assertEqual(seen, set(READER_FOREGROUND) | set(READER_BACKGROUND), "a classified call went missing")
     background = {"saveProgress": body_of(t, js, "saveProgress"),
+                  "sendProgress": body_of(t, js, "sendProgress"),
                   "restoreProgress": body_of(t, js, "restoreProgress"),
                   "loadTOC": body_of(t, js, "loadTOC"),
                   "bookmark": listener_body(t, js, "bookmarkBtn")}
@@ -399,7 +400,9 @@ def check_reader(t, html, js):
     guard = first(t, save, r"\bif\s*\(\s*!\s*positionKnown\s*\|\|[^)]*\)\s*return\b",
                   "saveProgress writes without a confirmed position")
     t.assertLess(guard, first(t, save, r"\bsendBeacon\(", "no beacon"), "the beacon goes out before the check")
-    t.assertLess(guard, first(t, save, r"\bkavita\(", "no save call"), "the save goes out before the check")
+    t.assertLess(guard, first(t, save, r"\bwriter\.write\(", "no save call"), "the save goes out before the check")
+    # The write itself (one at a time, through the writer) is a background call.
+    t.assertTrue(live_matches(js, r"var writer = progressWriter\(sendProgress\);"))
     sets = live_matches(js, r"\bpositionKnown\s*=\s*true\b")
     t.assertEqual(len(sets), 2, "positionKnown is confirmed somewhere unexpected")
     restore = body_of(t, js, "restoreProgress")
@@ -586,8 +589,8 @@ MUTATIONS = [
     ("reader: Try again is a link", "reader",
      '<button id="errorRetry" type="button"', '<a id="errorRetry" href="/kavita/connect"', check_reader),
     ("reader: progress save takes over on a 401", "reader",
-     "    }, true).then(function (r) {\n      if (r.ok) confirmedPage = page;",
-     "    }).then(function (r) {\n      if (r.ok) confirmedPage = page;", check_reader),
+     "    }, true).then(function (r) {\n      if (!r.ok) lastSaved = -1;",
+     "    }).then(function (r) {\n      if (!r.ok) lastSaved = -1;", check_reader),
     ("reader: bookmark failure takes over", "reader",
      "    }).catch(function () { /* a bookmark is a convenience; reading goes on */ });",
      "    }).catch(function () { showError(CONNECT_TITLE, CONNECT_MESSAGE, true); });", check_reader),

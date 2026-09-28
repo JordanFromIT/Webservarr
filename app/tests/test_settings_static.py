@@ -970,14 +970,14 @@ class AppearanceTab(unittest.TestCase):
         preview = appearance_function("previewFont")
         back = re.search(r"if \(\w+ === pageFont\) \{ revertFont\(\); return; \}", preview)
         self.assertIsNotNone(back, "the page's own font doesn't revert the preview")
-        self.assertLess(preview.index("clearTimeout(fontTimer)"), back.start())
+        self.assertLess(preview.index("cancel(fontTimer)"), back.start())
         self.assertLess(back.start(), preview.index("later("), "the revert waits on the typing delay")
         # First thing after the timer is cleared: no name check stands in front of it.
         first_check = re.search(r"\.test\(|===\s*shownFont|\breturn\b", preview)
         self.assertGreaterEqual(first_check.start(), back.start(), "a name check comes before the revert")
 
         revert = appearance_function("revertFont")
-        self.assertIn("clearTimeout(fontTimer)", revert)
+        self.assertIn("cancel(fontTimer)", revert)
         self.assertRegex(revert, r"\.remove\(\)")
         self.assertRegex(revert, r"style\.setProperty\([^)]*pageFontVar\)")
         self.assertRegex(revert, r"style\.removeProperty\(")

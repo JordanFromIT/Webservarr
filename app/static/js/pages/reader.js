@@ -40,6 +40,50 @@ const THEMES = {
 // One of these at a time, so a stale error never sits above a working page.
 const PANELS = ['loading', 'errorState', 'bookContent'];
 
+/* The reading position's writes to Kavita, one at a time (pure: run by
+ * app/tests/js/reader_progress.mjs).
+ *
+ * Two writes in flight could be answered, and taken by Kavita, in either
+ * order, so the page Kavita holds would be a guess and the leave beacon
+ * could be skipped for a page Kavita no longer has. So a write waits for
+ * the one before it: write(page) sends at once when nothing is in flight,
+ * and otherwise becomes the page waiting its turn (a newer turn replaces
+ * it), sent when the write in flight has answered, unless Kavita then
+ * already holds it. send(page) returns (a promise of) true when Kavita took
+ * the page, false or a rejection when not.
+ *   confirmed    the page Kavita is known to hold, -1 while unknown
+ *   known(page)  Kavita reported the reader there
+ *   sent(page)   the leave beacon carried it (the visit's last write)
+ */
+export function progressWriter(send) {
+  let confirmed = -1;
+  let inFlight = false;
+  let waiting = null;
+
+  function go(page) {
+    inFlight = true;
+    let answer;
+    try { answer = Promise.resolve(send(page)); } catch (e) { answer = Promise.resolve(false); }
+    answer.then(function (ok) { if (ok === true) confirmed = page; }, function () { /* not taken */ })
+      .then(function () {
+        inFlight = false;
+        const next = waiting;
+        waiting = null;
+        if (next !== null && next !== confirmed) go(next);
+      });
+  }
+
+  return {
+    get confirmed() { return confirmed; },
+    known: function (page) { confirmed = page; },
+    sent: function (page) { confirmed = page; waiting = null; },
+    write: function (page) {
+      if (inFlight) waiting = page;
+      else go(page);
+    }
+  };
+}
+
 /* ---- Reader guide (coach marks) ----
  *
  * Same engine as the library tour, in /static/js/tour.js. Started from the boot
@@ -103,11 +147,12 @@ export async function mount(ctx) {
   var current = { page: 0 };
   var saveTimer = 0;
   var lastSaved = -1;
-  // The page Kavita is known to hold for this reader: the one it reported,
-  // or the last write it accepted. The save on leave compares against this,
-  // not lastSaved: a write still in flight when the page is left is aborted
-  // with the visit, so it may never have landed.
-  var confirmedPage = -1;
+  // The writes, one at a time; writer.confirmed is the page Kavita is known
+  // to hold for this reader (the one it reported, or the last write it
+  // took). The save on leave compares against that, not lastSaved: a write
+  // still in flight when the page is left is aborted with the visit, so it
+  // may never have landed.
+  var writer = progressWriter(sendProgress);
   // Whether current.page is a position we may write back to Kavita. False
   // until Kavita told us where this reader is (get-progress answered) or they
   // turned a page themselves. Otherwise a failed lookup, which opens the book
@@ -405,7 +450,7 @@ export async function mount(ctx) {
   // ---- Progress ----
 
   function queueProgress() {
-    clearTimeout(saveTimer);
+    ctx.clearTimeout(saveTimer);
     saveTimer = ctx.setTimeout(saveProgress, SAVE_DEBOUNCE_MS);
   }
 
@@ -415,39 +460,48 @@ export async function mount(ctx) {
    * a beacon: its own request, which neither the visit's aborted signal nor
    * the page unloading stops. It goes whenever Kavita is not known to hold
    * this page already, even if an ordinary write of it is in flight (leaving
-   * aborts that one).
+   * aborts that one). Otherwise the write goes through the writer, one at a
+   * time.
    */
   function saveProgress(useBeacon) {
-    var held = useBeacon ? confirmedPage : lastSaved;
+    var held = useBeacon ? writer.confirmed : lastSaved;
     if (!positionKnown || current.page === held) return;
-    var payload = {
-      libraryId: book.libraryId,
-      seriesId: book.seriesId,
-      volumeId: book.volumeId,
-      chapterId: book.chapterId,
-      pageNum: current.page
-    };
-    var body = JSON.stringify(payload);
     var page = current.page;
     lastSaved = page;
 
     if (useBeacon && navigator.sendBeacon) {
       // Fire-and-forget; same-origin so the session cookie rides along.
       if (navigator.sendBeacon('/kavita/api/Reader/progress',
-        new Blob([body], { type: 'application/json' }))) confirmedPage = page;
+        new Blob([progressBody(page)], { type: 'application/json' }))) writer.sent(page);
       return;
     }
     if (signal.aborted) return;
+    writer.write(page);
+  }
+
+  function progressBody(page) {
+    return JSON.stringify({
+      libraryId: book.libraryId,
+      seriesId: book.seriesId,
+      volumeId: book.volumeId,
+      chapterId: book.chapterId,
+      pageNum: page
+    });
+  }
+
+  /** One write, for the writer: true when Kavita took the page. */
+  function sendProgress(page) {
+    if (signal.aborted) return false;
     // A failed progress write must never interrupt reading: it is a
     // background call, and lastSaved = -1 makes the next save try again.
-    kavita('/api/Reader/progress', {
+    return kavita('/api/Reader/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: body
+      body: progressBody(page)
     }, true).then(function (r) {
-      if (r.ok) confirmedPage = page;
-      else lastSaved = -1;
-    }).catch(function () { lastSaved = -1; });
+      if (!r.ok) lastSaved = -1;
+      return r.ok;
+    }).catch(function () { lastSaved = -1; return false; });
   }
 
   /** Where Kavita has this reader. Rejects when that isn't actually known. */
@@ -473,7 +527,7 @@ export async function mount(ctx) {
       .then(function (page) {
         positionKnown = true;
         lastSaved = page;
-        confirmedPage = page;
+        writer.known(page);
         return page;
       })
       .catch(function (err) { if (quiet(err)) throw err; return 0; });   // position unknown: open at the start, never save it

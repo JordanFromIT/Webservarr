@@ -17,6 +17,7 @@
  *   qualifies(href, baseHref, attrs)  does the router take this link click (5.1)
  *   decide(requestedUrl, response)    swap, full navigation, or stay (5.2, 5.5)
  *   debugFlags(search, stored)        which debug tools this tab asked for (7)
+ *   visitTimers(signal)               a page's ctx.setTimeout / ctx.clearTimeout
  *
  * Debug mode (spec 7): ?ws-debug=leaks,throw in the address, kept for the tab
  * in sessionStorage 'ws.debug' (?ws-debug=off clears it), loads debug-leaks.js
@@ -43,6 +44,9 @@
  * promise takes it too, and resolves to the drawn view's name (or null): the
  * router then sets the title in the site's format and announces it, as a
  * swap does. ctx.setTitle(name) titles the view the page first drew.
+ * ctx.clearTimeout(id) cancels a ctx.setTimeout timer (a debounce re-armed
+ * per keystroke): the visit keeps one abort listener for all its pending
+ * timers, so cancelling one leaves nothing behind on the signal.
  * Events on window:
  *   ws:before-hard-nav  detail { url, waitUntil(promise) }; awaited, 500 ms cap
  *   ws:page-mounted     detail { url, page } after each mount
@@ -122,6 +126,43 @@ export function pageTitle(name, site) {
   const s = String(site == null ? '' : site).trim();
   if (!n) return s;
   return s ? s + ' - ' + n : n;
+}
+
+/* A page's one-off timers, cleared when its visit ends. One abort listener
+   on the signal serves every pending timer (added with the first), and a
+   timer leaves the set when it fires or is cleared, so a debounce re-armed
+   on each keystroke adds nothing that outlives it. set and clear default to
+   the global timer functions at the time of each call (the debug tools wrap
+   them). Returns { setTimeout(fn, ms), clearTimeout(id) }; setTimeout
+   returns 0 and does nothing once the signal has aborted. */
+export function visitTimers(signal, set, clear) {
+  const pending = new Set();
+  let listening = false;
+  const setT = function (fn, ms) { return (set || setTimeout)(fn, ms); };
+  const clearT = function (id) { return (clear || clearTimeout)(id); };
+  function onAbort() {
+    pending.forEach(function (id) { clearT(id); });
+    pending.clear();
+  }
+  return {
+    setTimeout: function (fn, ms) {
+      if (signal.aborted) return 0;
+      if (!listening) {
+        listening = true;
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+      const id = setT(function () {
+        pending.delete(id);
+        fn();
+      }, ms);
+      pending.add(id);
+      return id;
+    },
+    clearTimeout: function (id) {
+      if (!pending.delete(id)) return;
+      clearT(id);
+    }
+  };
 }
 
 const DEBUG_FLAGS = ['leaks', 'throw'];
@@ -639,11 +680,23 @@ function start() {
     else document.getElementById('wsPage').before(copy);
   }
 
+  /* The viewport <meta> as the new page has it: the reader is full-bleed
+     (viewport-fit=cover, for its safe-area padding), the other pages are
+     not. The browser applies a changed content at once. */
+  function syncViewport(doc) {
+    const fresh = doc.querySelector('meta[name="viewport"]');
+    const live = document.querySelector('meta[name="viewport"]');
+    if (!fresh || !live) return;
+    const content = fresh.getAttribute('content') || '';
+    if (live.getAttribute('content') !== content) live.setAttribute('content', content);
+  }
+
   function swapDom(doc, page) {
     const old = document.getElementById('wsPage');
     old.replaceWith(document.importNode(page, true));
     syncPageOffBanner(doc);
     syncStyles(doc);
+    syncViewport(doc);
     document.title = doc.title;
     syncHtmlFlags(doc.documentElement);
     syncData(doc);
@@ -732,6 +785,7 @@ function start() {
     if (debug) debug.pageStart(moduleUrl);
     const signal = entry.controller.signal;
     if (typeof WS.arriveReset === 'function') WS.arriveReset();
+    const timers = visitTimers(signal);
 
     const ctx = {
       root: root,
@@ -744,16 +798,8 @@ function start() {
         signal.addEventListener('abort', stop, { once: true });
         return stop;
       },
-      setTimeout: function (fn, ms) {
-        if (signal.aborted) return 0;
-        const onAbort = function () { clearTimeout(id); };
-        const id = setTimeout(function () {
-          signal.removeEventListener('abort', onAbort);
-          fn();
-        }, ms);
-        signal.addEventListener('abort', onAbort, { once: true });
-        return id;
-      },
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout,
       onNavigate: function (handler) {
         if (!entry.left) entry.claim = typeof handler === 'function' ? handler : null;
       },

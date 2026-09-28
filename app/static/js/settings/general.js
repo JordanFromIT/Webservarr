@@ -14,8 +14,9 @@
   'use strict';
 
   var el = WSSettings.el, icon = WSSettings.icon, cls = WSSettings.cls;
-  // The visit the tab was last mounted in: its signal and ctx.setTimeout.
-  var signal = null, later = null;
+  // The visit the tab was last mounted in: its signal, ctx.setTimeout and
+  // ctx.clearTimeout (a re-armed timer is cancelled through the visit).
+  var signal = null, later = null, cancel = function () {};
   var TAB_KEYS = ['branding.app_name', 'branding.tagline', 'branding.logo_url'];
   var LOGO_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
   var MAX_LOGO_BYTES = 2 * 1024 * 1024;       // upload-logo's own limit
@@ -191,7 +192,7 @@
       settle();
     }, { signal: signal });
     api.onChange('branding.logo_url', function (url) {
-      clearTimeout(typing);
+      cancel(typing);
       // A typed address is previewed once the typing pauses, not per key.
       if (document.activeElement === input) {
         typing = later(function () { paint(api.get('branding.logo_url')); }, 400);
@@ -542,6 +543,7 @@
     mount: function (panel, api, ctx) {
       signal = ctx.signal;
       later = ctx.setTimeout;
+      cancel = ctx.clearTimeout;
       var shared = { uploading: false, changed: function () {} };
       var site = siteCard(api);
       var logo = logoCard(api, shared);

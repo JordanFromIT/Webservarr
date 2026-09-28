@@ -29,8 +29,9 @@
   'use strict';
 
   var el = WSSettings.el, icon = WSSettings.icon, cls = WSSettings.cls;
-  // The visit the tab was last mounted in: its signal and ctx.setTimeout.
-  var signal = null, later = null;
+  // The visit the tab was last mounted in: its signal, ctx.setTimeout and
+  // ctx.clearTimeout (a re-armed timer is cancelled through the visit).
+  var signal = null, later = null, cancel = function () {};
   var COLORS = [
     ['theme.color_primary', 'Primary', 'primary', 'Buttons, the current page and highlights.'],
     ['theme.color_secondary', 'Secondary', 'secondary', 'Supporting surfaces.'],
@@ -185,7 +186,7 @@
   // and any still loading) and --font-display is as it was for that font. A
   // font saved while it was still loading isn't on screen yet: fetch it.
   function revertFont() {
-    clearTimeout(fontTimer);
+    cancel(fontTimer);
     fontSeq += 1;
     document.querySelectorAll('link[data-ws-font-preview]').forEach(function (l) { l.remove(); });
     if (pageFontVar) root.style.setProperty('--font-display', pageFontVar);
@@ -241,7 +242,7 @@
   // valid name after the typing pause (at once when picked from the list);
   // a name the server would refuse changes nothing.
   function previewFont(name, delay) {
-    clearTimeout(fontTimer);
+    cancel(fontTimer);
     fontSeq += 1;
     if (name === pageFont) { revertFont(); return; }
     if (name === shownFont || !fontRe || !fontRe.test(name)) return;
@@ -388,7 +389,7 @@
   // page shows the saved font, as it would after a full load. (A saved font
   // still loading comes with the next full load.) The visit's nodes go.
   function leave() {
-    clearTimeout(fontTimer);
+    cancel(fontTimer);
     fontSeq += 1;
     document.querySelectorAll('link[data-ws-font-preview]').forEach(function (l) { l.remove(); });
     if (pageFontVar) root.style.setProperty('--font-display', pageFontVar);
@@ -402,6 +403,7 @@
     mount: function (panel, api, ctx) {
       signal = ctx.signal;
       later = ctx.setTimeout;
+      cancel = ctx.clearTimeout;
       warnings = {};
       signal.addEventListener('abort', leave, { once: true });
       fontRe = fontGuard();

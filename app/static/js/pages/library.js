@@ -897,7 +897,7 @@ export async function mount(ctx) {
   var searchTimer = 0;
   el('searchInput').addEventListener('input', function (e) {
     var value = e.target.value.trim();
-    clearTimeout(searchTimer);
+    ctx.clearTimeout(searchTimer);
     searchTimer = ctx.setTimeout(function () { runSearch(value); }, 300);
   }, { signal: signal });
 

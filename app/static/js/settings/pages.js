@@ -19,8 +19,9 @@
   'use strict';
 
   var el = WSSettings.el, icon = WSSettings.icon, cls = WSSettings.cls;
-  // The visit the tab was last mounted in: its signal and ctx.setTimeout.
-  var signal = null, later = null;
+  // The visit the tab was last mounted in: its signal, ctx.setTimeout and
+  // ctx.clearTimeout (a re-armed timer is cancelled through the visit).
+  var signal = null, later = null, cancel = function () {};
   var ORDER_KEY = 'pages.order';
   var LOCKED = { home: 'Home is where everyone lands, so it is always on.',
                  settings: 'Settings is always on so you can always get back here.' };
@@ -233,6 +234,7 @@
     mount: function (panel, api, ctx) {
       signal = ctx.signal;
       later = ctx.setTimeout;
+      cancel = ctx.clearTimeout;
       // Normalised by the server (Home first, Settings last, every page once).
       var start = WSSettings.view('page_order');
       var addresses = WSSettings.view('page_addresses');
@@ -249,7 +251,7 @@
       function say(text) {
         // Emptied first, so the same words twice are still read out.
         live.textContent = '';
-        clearTimeout(liveTimer);
+        cancel(liveTimer);
         liveTimer = later(function () { live.textContent = text; }, 60);
       }
 

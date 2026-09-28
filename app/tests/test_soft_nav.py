@@ -697,10 +697,17 @@ class ReaderPage(unittest.TestCase):
         self.assertIn("var leave = function () { saveProgress(true); };", code)
         self.assertEqual(len(re.findall(r"\breturn leave;", code)), 2, "both ways out of mount hand it to the router")
         save = function_body(code, "saveProgress")
-        self.assertIn("var held = useBeacon ? confirmedPage : lastSaved;", save)
+        self.assertIn("var held = useBeacon ? writer.confirmed : lastSaved;", save)
         self.assertLess(save.index("if (!positionKnown || current.page === held) return;"), save.index("sendBeacon("))
-        self.assertIn("if (r.ok) confirmedPage = page;", save)
-        self.assertIn("confirmedPage = page;", function_body(code, "restoreProgress"))
+        self.assertIn("writer.sent(page);", save)
+        self.assertIn("writer.write(page);", save)
+        self.assertIn("writer.known(page);", function_body(code, "restoreProgress"))
+        # One write in flight at a time (fix round 1, R1): the writer is pure,
+        # and app/tests/js/reader_progress.mjs runs it with late, failed and
+        # out-of-order answers.
+        self.assertIn("var writer = progressWriter(sendProgress);", code)
+        self.assertRegex(code, r"export function progressWriter\(send\) \{")
+        self.assertIn("return r.ok;", function_body(code, "sendProgress"))
         # The tab hidden or closed while reading: the same beacon, until the visit ends.
         src = module_source("reader")
         self.assertIn("if (document.visibilityState === 'hidden') saveProgress(true);", src)
@@ -710,6 +717,55 @@ class ReaderPage(unittest.TestCase):
         code = self.code()
         self.assertIn("ctx.setTitle(book.title);", code)
         self.assertNotIn("document.title", code)
+
+
+class FixRound11(unittest.TestCase):
+    """Task 11 fix round 1: the router keeps the viewport <meta> in step (V1);
+    a visit's timers hold one abort listener, and a re-armed timer is
+    cancelled with ctx.clearTimeout (L1); the reader's writes go one at a
+    time (R1)."""
+
+    def router(self):
+        return js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+
+    def test_the_viewport_follows_the_page(self):
+        self.assertIn('<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>',
+                      read("reader"))
+        self.assertNotIn("viewport-fit", read("library"))
+        body = function_body(self.router(), "syncViewport")
+        self.assertIn("if (live.getAttribute('       ') !== content) live.setAttribute('       ', content);", body)
+        swap = function_body(self.router(), "swapDom")
+        self.assertLess(swap.index("old.replaceWith("), swap.index("syncViewport(doc);"))
+
+    def test_a_visit_has_one_timer_listener(self):
+        code = self.router()
+        self.assertRegex(code, r"export function visitTimers\(signal, set, clear\) \{")
+        self.assertIn("const timers = visitTimers(signal);", code)
+        self.assertIn("setTimeout: timers.setTimeout,", code)
+        self.assertIn("clearTimeout: timers.clearTimeout,", code)
+        body = function_body(code, "visitTimers")
+        self.assertEqual(body.count("addEventListener("), 1)
+        self.assertNotIn("removeEventListener", body)
+
+    def test_re_armed_timers_are_cancelled_through_the_visit(self):
+        # A native clearTimeout on a ctx timer leaves its id pending until the
+        # visit ends; every re-armed ctx timer goes through ctx.clearTimeout.
+        self.assertIn("ctx.clearTimeout(searchTimer);", module_source("library"))
+        self.assertIn("ctx.clearTimeout(saveTimer);", module_source("reader"))
+        settings = STATIC / "js" / "settings"
+        for name, timer in (("pages", "liveTimer"), ("general", "typing"), ("appearance", "fontTimer")):
+            src = (settings / f"{name}.js").read_text(encoding="utf-8")
+            self.assertIn("cancel = ctx.clearTimeout;", src, name)
+            self.assertIn(f"cancel({timer});", src, name)
+            self.assertNotIn(f"clearTimeout({timer})", src, name)
+        for p in sorted((STATIC / "js" / "pages").glob("*.js")):
+            code = js_code_only(p.read_text(encoding="utf-8"))
+            self.assertNotRegex(code, r"(?<![.\w])clearTimeout\(", f"{p.name}: a ctx timer cleared natively")
+
+    def test_the_js_checks_run_locally_and_in_ci(self):
+        from app.tests.test_theme_engine import repo_file
+        for parts in (("package.json",), (".github", "workflows", "docker-publish.yml")):
+            self.assertIn("node app/tests/js/reader_progress.mjs", repo_file(self, *parts), "/".join(parts))
 
 
 class TourTeardown(unittest.TestCase):
