@@ -17,6 +17,7 @@
  *   WS.serviceStatus()            deduplicated /api/integrations/service-status
  *   WS.setHTML(el, html)          innerHTML only when the string changed
  *   WS.wireNav()                  bind per-link behaviour to nav links not yet wired
+ *   WS.applyShell(parts)          bring the branded shell and <head> up to date (see below)
  *   WS.clearPageCache()           drop prefetched and prerendered pages (sign-out, a settings save)
  *   WS.dropCache(prefix)          forget this user's swr copies whose key starts with prefix
  *   WS.arrive(key, write)         reveal sections top-down, in document order
@@ -275,6 +276,68 @@
   // stack on links WS.setHTML left in place.
   function wireNav() {
     wirePrefetch();
+  }
+
+  /* The parts of the page the branding decides and a soft navigation never
+     replaces, brought up to date: after a Settings save (settings/kit.js,
+     from GET /api/admin/settings/shell) and on every swap (router.js, from
+     the page it fetched). parts, each optional:
+       nav_html        both navs (server-rendered links), then wireNav()
+       brand_html      the logo and name in the sidebar and drawer
+       bar_brand_html  the phone bar's name or logo
+       branding        the payload: WS.data, and the colours, gauge rings and
+                       font on <html> (theme-loader's WSTheme.apply)
+       theme_css       #ws-theme's rule
+       font_href       #ws-font's stylesheet
+       custom_css      the operator's CSS, last in <head> ('' removes it)
+       favicon         the tab icon
+       title           document.title
+     Markup is the server's own (escaped there), written only when it
+     changed; CSS goes in as text. */
+  function applyShell(parts) {
+    if (!parts) return;
+    if (typeof parts.nav_html === 'string') {
+      ['desktopNav', 'drawerNav'].forEach(function (id) { setHTML(document.getElementById(id), parts.nav_html); });
+      wireNav();
+    }
+    if (typeof parts.brand_html === 'string') {
+      document.querySelectorAll('[data-ws-brand]').forEach(function (n) { setHTML(n, parts.brand_html); });
+    }
+    if (typeof parts.bar_brand_html === 'string') {
+      document.querySelectorAll('[data-ws-bar-brand]').forEach(function (n) { setHTML(n, parts.bar_brand_html); });
+    }
+    if (parts.branding && typeof parts.branding === 'object') {
+      if (window.WS_DATA) window.WS_DATA.branding = parts.branding;
+      if (window.WS && window.WS.data && window.WS.data !== window.WS_DATA) window.WS.data.branding = parts.branding;
+      if (window.WSTheme) window.WSTheme.apply(parts.branding);
+    }
+    if (typeof parts.theme_css === 'string') {
+      var theme = document.getElementById('ws-theme');
+      if (theme && theme.textContent !== parts.theme_css) theme.textContent = parts.theme_css;
+    }
+    if (typeof parts.font_href === 'string') {
+      var font = document.getElementById('ws-font');
+      if (font && font.getAttribute('href') !== parts.font_href) font.setAttribute('href', parts.font_href);
+    }
+    if (typeof parts.custom_css === 'string') {
+      var css = document.getElementById('webservarr-custom-css');
+      if (parts.custom_css) {
+        if (!css) {
+          css = document.createElement('style');
+          css.id = 'webservarr-custom-css';
+        }
+        if (css.textContent !== parts.custom_css) css.textContent = parts.custom_css;
+        // Last in <head>, after every stylesheet, as the server writes it.
+        if (css !== document.head.lastElementChild) document.head.appendChild(css);
+      } else if (css) {
+        css.remove();
+      }
+    }
+    if (typeof parts.favicon === 'string' && parts.favicon) {
+      var icon = document.querySelector('link[rel="icon"]');
+      if (icon && icon.getAttribute('href') !== parts.favicon) icon.setAttribute('href', parts.favicon);
+    }
+    if (typeof parts.title === 'string' && parts.title && document.title !== parts.title) document.title = parts.title;
   }
 
   // Pages the browser prerendered through the speculation rules (shell
@@ -750,6 +813,7 @@
     dropCache: dropCache,
     clearPageCache: clearPageCache,
     wireNav: wireNav,
+    applyShell: applyShell,
     dragScroll: dragScroll,
     popOpen: popOpen,
     popClose: popClose,

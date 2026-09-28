@@ -526,34 +526,57 @@ class KitApi(unittest.TestCase):
         self.assertIn("/api/admin/settings?view=registry", js)
         self.assertIn("/api/admin/settings/bulk", js)
 
-    def test_kit_patches_the_sidebar_after_nav_saves(self):
+    def test_kit_patches_the_shell_after_shell_saves(self):
+        # Soft navigation keeps the shell and <head> of the first page for the
+        # whole visit, so every key they show from is patched in after a save
+        # (Task 5 fix round 1, SH1). The declaration must be live code; the
+        # literal is read from the source right after it.
         src = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
-        for literal in ("'/api/admin/settings/shell'", "'desktopNav'", "'drawerNav'"):
-            self.assertTrue(live_matches(src, re.escape(literal)), literal)
-        # The keys that change the sidebar, exactly (Task 5.2 / R69 d). The
-        # declaration must be live code (a copy in a comment does not count);
-        # js_code_only blanks a regex literal's body, so the live declaration
-        # is found first and the literal read from the source right after it.
-        decls = live_matches(src, r"\bvar NAV_KEYS = (?=/)")
-        self.assertEqual(len(decls), 1, "one live NAV_KEYS declaration")
-        self.assertTrue(src.startswith(r"/^(sidebar\.|icon\.nav_|pages\.order$|integration\.kavita\.url$)/;",
-                                       decls[0].end()), "NAV_KEYS is the ruled pattern")
+        self.assertTrue(live_matches(src, re.escape("'/api/admin/settings/shell'")))
+        decls = live_matches(src, r"\bvar SHELL_KEYS = (?=/)")
+        self.assertEqual(len(decls), 1, "one live SHELL_KEYS declaration")
+        literal = src[decls[0].end():src.index(";", decls[0].end())]
+        self.assertEqual(literal, r"/^(branding\.|icon\.|sidebar\.|pages\.order$|integration\.kavita\.url$|theme\.)/")
         self.assertRegex(function_body(kit_code(), "refreshShell"),
-                         r"if \(keys\.some\(function \((\w+)\) \{ return NAV_KEYS\.test\(\1\); \}\)\) patchShell\(\);")
+                         r"if \(keys\.some\(function \((\w+)\) \{ return SHELL_KEYS\.test\(\1\); \}\)\) patchShell\(\);")
+        # Against the registry: every key the shell or <head> renders from
+        # (app/pages.py shell_fragment) is in, the others are not.
+        try:
+            from app.settings_registry import REGISTRY
+        except ImportError:  # pragma: no cover - the container and CI have the app's dependencies
+            self.skipTest("needs the app's dependencies")
+        pattern = re.compile(literal[1:-1])
+        shell = ("branding.", "theme.", "icon.", "sidebar.")
+        for key in REGISTRY:
+            with self.subTest(key):
+                expected = key.startswith(shell) or key in ("pages.order", "integration.kavita.url")
+                self.assertEqual(bool(pattern.search(key)), expected, key)
 
-    def test_sidebar_patch_uses_diff_writes_and_rewires_the_links(self):
-        # The fragment goes in through WS.setHTML only (the one HTML string the
-        # kit inserts, server-rendered and escaped), and the shell re-binds its
-        # per-link behaviour (hover prefetch) on the new links afterwards.
+    def test_shell_patch_goes_through_apply_shell(self):
+        # One writer for the kit and the router (shell.js WS.applyShell):
+        # server-escaped markup with WS.setHTML, CSS as text, the nav's links
+        # wired again after they are replaced. In safe colours the theme parts
+        # are left out. A failed fetch is quiet: the save already succeeded.
         body = function_body(kit_code(), "patchShell")
         self.assertNotRegex(body, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment")
-        write = re.search(r"\bWS\.setHTML\(document\.getElementById\((\w+)\), data\.nav_html\)", body)
-        self.assertIsNotNone(write, "the navs are written with WS.setHTML")
-        rewire = re.search(r"\bWS\.wireNav\(\)", body)
-        self.assertIsNotNone(rewire, "WS.wireNav() after the patch")
-        self.assertGreater(rewire.start(), write.end(), "wireNav runs after the links are replaced")
-        # A failed fetch is quiet: no toast, the save already succeeded.
+        self.assertIn("WS.applyShell(parts);", body)
+        self.assertRegex(body, r"if \(!SAFE\) \{\s*\['\s+', '\s+', '\s+'\]")
+        self.assertIn("if (!SAFE) {\n        ['theme_css', 'font_href', 'custom_css']",
+                      (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8"))
         self.assertNotIn("toast", body)
+        shell = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
+        apply = function_body(shell, "applyShell")
+        self.assertNotRegex(apply, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment")
+        nav = re.search(r"setHTML\(document\.getElementById\(id\), parts\.nav_html\); \}\);\s*wireNav\(\);", apply)
+        self.assertIsNotNone(nav, "the navs are written with setHTML, then wired")
+        for part in ("brand_html", "bar_brand_html"):
+            self.assertIn(f"setHTML(n, parts.{part})", apply)
+        for text in ("theme.textContent = parts.theme_css", "css.textContent = parts.custom_css"):
+            self.assertIn(text, apply)
+        self.assertIn("window.WSTheme.apply(parts.branding)", apply)
+        self.assertRegex(shell, r"applyShell: applyShell\b")
+        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+        self.assertIn("window.WSTheme = { apply: function (data) { applyTheme(data || {}, true); } };", loader)
 
     def test_every_save_drops_prefetched_pages(self):
         # Pages the service worker prefetched before a save carry the old nav,

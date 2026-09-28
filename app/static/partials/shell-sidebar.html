@@ -5,11 +5,16 @@
   (app/pages.py fills the placeholders), so it is in the document before
   any script runs and is identical on every page. shell.js only wires the
   drawer, menus and logout. Nothing here is constructed by JavaScript.
+
+  The logo and name ([data-ws-brand], from shell-brand.html) and the phone
+  bar's name or logo ([data-ws-bar-brand], from shell-bar-brand.html; its
+  box is display:contents, so the bar lays out as before) are their own
+  partials: GET /api/admin/settings/shell sends them again, filled the same
+  way, and Settings writes them in after a save, as it does the nav.
 -->
 <aside id="desktopSidebar" class="hidden lg:flex w-64 bg-baltic-blue/20 border-r border-steel-blue/30 flex-col h-screen shrink-0">
-  <div class="p-6 flex flex-col items-center">
-    {{{logo_html}}}
-    <h1 class="text-frosted-blue font-bold text-lg leading-none text-center {{app_name_cls}}">{{app_name}}</h1>
+  <div class="p-6 flex flex-col items-center" data-ws-brand>
+{{{brand_html}}}
   </div>
   <nav id="desktopNav" class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1" aria-label="Main">
 {{{nav_links}}}
@@ -23,8 +28,9 @@
   <button id="hamburgerBtn" class="p-2 text-steel-blue hover:text-frosted-blue transition-colors" aria-label="Open menu">
     <span class="material-symbols-outlined">menu</span>
   </button>
-  <span class="text-frosted-blue font-bold text-sm truncate max-w-[40%] {{app_name_cls}}">{{app_name}}</span>
-  {{{bar_logo_html}}}
+  <span class="contents" data-ws-bar-brand>
+{{{bar_brand_html}}}
+  </span>
   <div class="relative flex items-center gap-1 sm:gap-2 min-w-0">
     <button class="relative p-1.5 sm:p-2 text-steel-blue hover:text-frosted-blue transition-colors shrink-0" title="Notifications" aria-label="Notifications">
       <span class="material-symbols-outlined">notifications</span>
@@ -57,9 +63,8 @@
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
-      <div class="flex flex-col items-center">
-        {{{logo_html}}}
-        <h1 class="text-frosted-blue font-bold text-lg leading-none text-center {{app_name_cls}}">{{app_name}}</h1>
+      <div class="flex flex-col items-center" data-ws-brand>
+{{{brand_html}}}
       </div>
     </div>
     <nav id="drawerNav" class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1" aria-label="Main">

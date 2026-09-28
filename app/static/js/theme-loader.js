@@ -7,7 +7,8 @@
  * no flash of the default colours or name on any navigation.
  *
  * Sets window.WS_DATA (the whole block) and window.WEBSERVARR_THEME (the
- * branding part, the name every page script already reads).
+ * branding part, the name every page script already reads), and
+ * window.WSTheme.apply(branding) to apply a newer payload later.
  *
  * A page served some other way has no block; it falls back to one fetch of
  * /api/branding.
@@ -125,6 +126,10 @@
     if (!el) return null;
     try { return JSON.parse(el.textContent); } catch (e) { return null; }
   }
+
+  // Settings applies a saved theme to the page already on screen with this
+  // (settings/kit.js): <html> and the favicon outlive a soft navigation.
+  window.WSTheme = { apply: function (data) { applyTheme(data || {}, true); } };
 
   var inline = readInline();
   if (inline) {

@@ -119,6 +119,12 @@ def _safe_url(value) -> str:
 
 def theme_style(branding: dict) -> str:
     """Inline :root variables so the first paint is already in the operator's colours."""
+    return '<style id="ws-theme">' + theme_css(branding) + "</style>"
+
+
+def theme_css(branding: dict) -> str:
+    """The rule #ws-theme holds (theme_style). Also sent by GET
+    /api/admin/settings/shell, which Settings writes into #ws-theme after a save."""
     colors = branding.get("colors") or {}
     decls = []
     for var, key in _COLOR_VARS:
@@ -131,7 +137,7 @@ def theme_style(branding: dict) -> str:
     for g in GAUGE_IDS:
         decls.append(f"--ws-gauge-{g}:var(--color-{'gauge-' + g if colourful else 'accent'})")
     decls.append(f'--font-display:"{_safe_font(branding.get("font"))}",sans-serif')
-    return '<style id="ws-theme">:root{' + ";".join(decls) + "}</style>"
+    return ":root{" + ";".join(decls) + "}"
 
 
 def custom_css_style(branding: dict) -> str:
@@ -162,16 +168,21 @@ def font_links(branding: dict) -> str:
     fallback for that page instead of swapping. A first-ever visit may show
     the fallback once; every page after that has the font from its first frame.
     """
-    family = _safe_font(branding.get("font"))
-    href = (
-        "https://fonts.googleapis.com/css2?family="
-        + urllib.parse.quote_plus(family)
-        + ":wght@300;400;500;600;700&display=optional"
-    )
+    href = font_href(branding)
     return (
         '<link rel="preconnect" href="https://fonts.googleapis.com">'
         '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
         f'<link id="ws-font" rel="stylesheet" href="{html.escape(href, quote=True)}">'
+    )
+
+
+def font_href(branding: dict) -> str:
+    """The display font's stylesheet address (#ws-font; font_links)."""
+    family = _safe_font(branding.get("font"))
+    return (
+        "https://fonts.googleapis.com/css2?family="
+        + urllib.parse.quote_plus(family)
+        + ":wght@300;400;500;600;700&display=optional"
     )
 
 
@@ -351,15 +362,19 @@ def _partial(filename: str) -> str:
         return f.read()
 
 
-_RAW_RE = re.compile(r"\{\{\{(\w+)\}\}\}")
-_ESC_RE = re.compile(r"\{\{(\w+)\}\}")
+_SLOT_RE = re.compile(r"\{\{\{(\w+)\}\}\}|\{\{(\w+)\}\}")
 
 
 def fill(template: str, values: dict) -> str:
     """Tiny substitution: {{key}} is HTML-escaped, {{{key}}} is inserted raw
-    (only for HTML this module rendered itself). Unknown keys become empty."""
-    template = _RAW_RE.sub(lambda m: str(values.get(m.group(1), "")), template)
-    return _ESC_RE.sub(lambda m: html.escape(str(values.get(m.group(1), "")), quote=True), template)
+    (only for HTML this module rendered itself). Unknown keys become empty.
+    One pass: what a slot inserts is never read for slots itself, so an
+    operator's text that happens to contain "{{user_name}}" stays text."""
+    def slot(m):
+        if m.group(1) is not None:
+            return str(values.get(m.group(1), ""))
+        return html.escape(str(values.get(m.group(2), "")), quote=True)
+    return _SLOT_RE.sub(slot, template)
 
 
 def _site_name(branding: dict) -> str:
@@ -417,12 +432,19 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
         css_url = urllib.parse.quote(avatar, safe="/:?&=%.-_~+@#,;")
         avatar_style = f"background-image:url({css_url});background-size:cover;background-position:center"
 
-    return {
+    brand = {
         # May be empty (Settings > General): the sidebar then shows the logo alone.
         "app_name": site_name,
         "app_name_cls": "" if site_name else "hidden",
         "bar_logo_html": bar_logo_html,
         "logo_html": logo_html,
+    }
+    return {
+        **brand,
+        # The logo and name as the sidebar, the drawer and the phone bar show
+        # them; also sent by GET /api/admin/settings/shell (shell_fragment).
+        "brand_html": fill(_partial("shell-brand.html"), brand).strip(),
+        "bar_brand_html": fill(_partial("shell-bar-brand.html"), brand).strip(),
         "nav_links": render_nav_links(branding, is_admin, PAGE_NAV.get(name)),
         "version": ("v" + version) if version else "",
         "admin_block": "" if is_admin else "hidden",
@@ -528,6 +550,40 @@ def safe_theme_branding(branding: dict) -> dict:
     return dict(branding, colors=dict(_DEFAULT_COLORS), font=DEFAULT_FONT)
 
 
+def page_title(branding: dict, static_title: str) -> str:
+    """The page's <title>: the static file's "WebServarr - Settings" with the
+    brand half swapped for the operator's site name. No name: just the page
+    name, or the tagline for a page without one."""
+    app_name = _site_name(branding)
+    suffix_match = _TITLE_SUFFIX_RE.match(static_title)
+    suffix = suffix_match.group("suffix") if suffix_match else ""
+    if app_name:
+        return f"{app_name} - {suffix}" if suffix else app_name
+    return suffix or (branding.get("tagline") or "").strip()
+
+
+def shell_fragment(branding: dict, is_admin: bool, active_id: Optional[str], static_title: str) -> dict:
+    """Everything a page already on screen shows from the branding and the
+    router never swaps (only #wsPage, the title and <html> flags change on a
+    soft navigation): the nav, the logo and name, the <head> theme, font and
+    custom CSS, the favicon, the page's title, and the payload itself.
+    GET /api/admin/settings/shell sends it; Settings writes it in after a save.
+    Rendered by the same code as every page, so it cannot drift."""
+    values = shell_values(branding, {"is_admin": is_admin}, "", "")
+    custom = branding.get("custom_css")
+    return {
+        "nav_html": render_nav_links(branding, is_admin, active_id),
+        "brand_html": values["brand_html"],
+        "bar_brand_html": values["bar_brand_html"],
+        "theme_css": theme_css(branding),
+        "font_href": font_href(branding),
+        "custom_css": custom if isinstance(custom, str) and custom.strip() else "",
+        "favicon": _safe_url(branding.get("logo_url")) or "/static/webservarr.svg",
+        "title": page_title(branding, static_title),
+        "branding": branding,
+    }
+
+
 def _inject_head(content: str, branding: dict, user: Optional[dict], version: str,
                  name: str, base_url: str, path: str, setup: Optional[dict] = None,
                  custom_css: bool = True) -> str:
@@ -542,14 +598,7 @@ def _inject_head(content: str, branding: dict, user: Optional[dict], version: st
 
     def _rewrite(match):
         inner = match.group(0)[len("<title>"):-len("</title>")]
-        suffix_match = _TITLE_SUFFIX_RE.match(inner)
-        suffix = suffix_match.group("suffix") if suffix_match else ""
-        if app_name:
-            title = f"{app_name} - {suffix}" if suffix else app_name
-        else:
-            # No site name: the tab shows just the page name.
-            title = suffix or bare_title
-        return f"<title>{html.escape(title)}</title>\n{extra}"
+        return f"<title>{html.escape(page_title(branding, inner))}</title>\n{extra}"
 
     content, count = _TITLE_RE.subn(_rewrite, content, count=1)
     if count == 0:

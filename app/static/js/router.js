@@ -572,6 +572,40 @@ function start() {
     });
   }
 
+  /* The branded shell and <head> as the fetched page has them: the logo and
+     name, the phone bar's, the theme (and so the colours, gauge rings and
+     font on <html>), the font stylesheet, the custom CSS and the favicon. A
+     settings save (by this admin, or another) shows on the next page without
+     a reload. Only what differs is written (shell.js WS.applyShell). */
+  function syncShell(doc) {
+    if (typeof WS.applyShell !== 'function') return;
+    const parts = {};
+    const inner = function (root, sel) {
+      const n = root.querySelector(sel);
+      return n ? n.innerHTML.trim() : null;
+    };
+    const brand = inner(doc, '[data-ws-brand]');
+    if (brand !== null && brand !== inner(document, '[data-ws-brand]')) parts.brand_html = brand;
+    const bar = inner(doc, '[data-ws-bar-brand]');
+    if (bar !== null && bar !== inner(document, '[data-ws-bar-brand]')) parts.bar_brand_html = bar;
+    const theme = doc.getElementById('ws-theme');
+    const liveTheme = document.getElementById('ws-theme');
+    if (theme && liveTheme && theme.textContent !== liveTheme.textContent) {
+      parts.theme_css = theme.textContent;
+      if (WS.data && WS.data.branding) parts.branding = WS.data.branding;
+    }
+    const font = doc.getElementById('ws-font');
+    if (font) parts.font_href = font.getAttribute('href');
+    const css = doc.getElementById('webservarr-custom-css');
+    parts.custom_css = css ? css.textContent : '';
+    // The favicon is the logo (theme-loader), or the page's own icon without one.
+    const logo = WS.data && WS.data.branding && WS.data.branding.logo_url;
+    const icon = doc.querySelector('link[rel="icon"]');
+    const fav = typeof logo === 'string' && logo ? logo : (icon ? icon.getAttribute('href') : '');
+    if (fav) parts.favicon = fav;
+    WS.applyShell(parts);
+  }
+
   function swapDom(doc, page) {
     const old = document.getElementById('wsPage');
     old.replaceWith(document.importNode(page, true));
@@ -580,6 +614,7 @@ function start() {
     syncHtmlFlags(doc.documentElement);
     syncData(doc);
     syncNav(doc);
+    syncShell(doc);
   }
 
   async function inTransition(update) {

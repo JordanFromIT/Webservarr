@@ -757,44 +757,73 @@
     return fail(MSG.failed);
   }
 
-  // Saves that change the sidebar: a page's label, sublabel, icon, switch or
-  // New! flag, the page order, and the Kavita address (it decides whether
-  // Library is shown). A name or logo change shows on the next page load.
-  var NAV_KEYS = /^(sidebar\.|icon\.nav_|pages\.order$|integration\.kavita\.url$)/;
+  // Saves that change what the page on screen shows from the branding, which
+  // a soft navigation never replaces (app/pages.py shell_fragment):
+  //   branding.app_name     the sidebar, drawer and phone-bar name; the title
+  //   branding.tagline      the title when there is no name (and link previews)
+  //   branding.logo_url     the sidebar, drawer and phone-bar logo; the favicon
+  //   icon.*                the nav icons, and the logo mark when there is no logo
+  //   sidebar.*, pages.order, integration.kavita.url (Library shows only with it)
+  //                         the nav: labels, sublabels, New! flags, switches, order
+  //   theme.*               colours, gauge rings, font (#ws-theme and <html>),
+  //                         the font stylesheet (#ws-font), custom CSS
+  var SHELL_KEYS = /^(branding\.|icon\.|sidebar\.|pages\.order$|integration\.kavita\.url$|theme\.)/;
   var shellSeq = 0;
 
-  // The sidebar is server-rendered. After a save that changes it, the links
-  // are fetched as every page now renders them and written into both navs
-  // (server-escaped markup: the only HTML the kit inserts this way), then the
-  // shell binds its per-link behaviour to the new links. A failed fetch stays
-  // quiet: the save itself succeeded, and the next page load shows it anyway.
+  // After a save that changes any of it, the shell is fetched as every page
+  // now renders it and written in (shell.js WS.applyShell: server-escaped
+  // markup, CSS as text; the nav's per-link behaviour is bound again). In safe
+  // colours this page keeps the shipped theme; the next full page load shows
+  // the saved one. A failed fetch stays quiet: the save itself succeeded, and
+  // the router brings the same parts in from the next page it opens.
   function patchShell() {
     var WS = window.WS;
-    if (!WS || !WS.setHTML) return;
+    if (!WS || !WS.applyShell) return;
     var seq = ++shellSeq;
-    fetch('/api/admin/settings/shell', { credentials: 'same-origin', signal: signal }).then(function (r) {
+    var sig = signal;
+    fetch('/api/admin/settings/shell', { credentials: 'same-origin', signal: sig }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }).then(function (data) {
       // Two saves in a row: only the answer to the latest one is written.
-      if (seq !== shellSeq || !data || typeof data.nav_html !== 'string') return;
-      ['desktopNav', 'drawerNav'].forEach(function (id) {
-        WS.setHTML(document.getElementById(id), data.nav_html);
+      if (sig.aborted || seq !== shellSeq || !data || typeof data.nav_html !== 'string') return;
+      var parts = {};
+      ['nav_html', 'brand_html', 'bar_brand_html', 'favicon', 'title', 'branding'].forEach(function (k) {
+        if (hasOwn(data, k)) parts[k] = data[k];
       });
-      if (WS.wireNav) WS.wireNav();
+      if (!SAFE) {
+        ['theme_css', 'font_href', 'custom_css'].forEach(function (k) { if (hasOwn(data, k)) parts[k] = data[k]; });
+      } else {
+        delete parts.branding;            // its colours are not this page's
+      }
+      WS.applyShell(parts);
+      repaintStaged();
     }).catch(function (e) {
-      if (window.console && console.debug) console.debug('Sidebar not refreshed after save', e);
+      if (window.console && console.debug) console.debug('Shell not refreshed after save', e);
+    });
+  }
+
+  // The saved theme was just put on <html>: anything still staged (typed while
+  // the save was in flight) shows as its preview again.
+  function repaintStaged() {
+    TABS.forEach(function (id) {
+      var t = S.tabs[id];
+      if (!t) return;
+      Object.keys(t.staged).forEach(function (k) {
+        var b = t.bindings[k];
+        if (b) b.set(current(t, k));
+      });
     });
   }
 
   // After every save that wrote something: pages the service worker
   // prefetched before it carry the old nav, theme or name, so they are
-  // dropped. A nav change is also shown in this page's sidebar at once.
+  // dropped, and a change to the shell shows here at once.
   function refreshShell(keys) {
     var WS = window.WS;
     if (!WS) return;
     if (WS.clearPageCache) WS.clearPageCache();
-    if (keys.some(function (k) { return NAV_KEYS.test(k); })) patchShell();
+    if (keys.some(function (k) { return SHELL_KEYS.test(k); })) patchShell();
   }
 
   function applySaved(t, sent, values) {

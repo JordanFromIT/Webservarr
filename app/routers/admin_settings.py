@@ -409,14 +409,16 @@ async def settings_shell(
     current_user: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """ShellFragment: the sidebar links as they render now, so the Settings page
-    can show a saved label/icon/order/visibility change without a reload. The
-    markup comes from the same renderer as every page, so it cannot drift."""
-    from app.pages import render_nav_links
+    """ShellFragment: what the page already on screen shows from the branding
+    and a soft navigation never replaces (the nav, logo and name, theme, font,
+    custom CSS, favicon, title), as every page renders it now, so Settings can
+    show a saved change at once and for the rest of the visit. Rendered by the
+    same code as every page (app.pages.shell_fragment), so it cannot drift."""
+    from app.pages import shell_fragment
     from app.routers.branding import load_branding
 
     branding = load_branding(db, True)
-    return {"nav_html": render_nav_links(branding, True, "settings")}
+    return shell_fragment(branding, True, "settings", "WebServarr - Settings")
 
 
 @router.post("/settings/import")

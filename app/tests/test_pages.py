@@ -589,6 +589,57 @@ class ShellRendering(unittest.TestCase):
                 self.assertEqual(loader.replace(", ", ","), server.group(1))
 
 
+class ShellFragment(unittest.TestCase):
+    """GET /api/admin/settings/shell (Task 5 fix round 1, SH1): the parts of a
+    page a soft navigation never replaces, rendered by the same code as the
+    page itself, so Settings can show a saved change without a reload."""
+
+    def test_the_fragment_is_what_the_page_renders(self):
+        b = branding(**{"branding.app_name": "My Site", "branding.logo_url": "https://cdn.example.test/l.png",
+                        "theme.custom_css": "a{color:red}", "theme.gauges_colourful": "true"})
+        out = render(b=b, name="settings")
+        frag = pages.shell_fragment(b, True, "settings", "WebServarr - Settings")
+        self.assertEqual(set(frag), {"nav_html", "brand_html", "bar_brand_html", "theme_css", "font_href",
+                                     "custom_css", "favicon", "title", "branding"})
+        # Sidebar, drawer and phone bar carry exactly these fragments.
+        self.assertEqual(out.count(frag["brand_html"]), 2)
+        self.assertIn(frag["bar_brand_html"], out)
+        self.assertEqual(len(re.findall(r"<div [^>]*\bdata-ws-brand>", out)), 2)
+        self.assertEqual(len(re.findall(r'<span class="contents" data-ws-bar-brand>', out)), 1)
+        self.assertIn(frag["nav_html"], out)
+        self.assertIn('<style id="ws-theme">' + frag["theme_css"] + "</style>", out)
+        self.assertIn('id="ws-font" rel="stylesheet" href="' + frag["font_href"].replace("&", "&amp;") + '"', out)
+        self.assertEqual(frag["custom_css"], "a{color:red}")
+        self.assertEqual(frag["favicon"], "https://cdn.example.test/l.png")
+        self.assertIn("<title>" + frag["title"] + "</title>", out)
+        self.assertEqual(frag["title"], "My Site - Settings")
+        self.assertIn("My Site", frag["brand_html"])
+        self.assertIn("--ws-gauge-cpu:var(--color-gauge-cpu)", frag["theme_css"])
+
+    def test_no_name_no_logo(self):
+        b = branding(**{"branding.app_name": "", "branding.logo_url": "", "branding.tagline": "Films"})
+        frag = pages.shell_fragment(b, True, "settings", "WebServarr - Settings")
+        self.assertEqual(frag["title"], "Settings")
+        self.assertEqual(frag["favicon"], "/static/webservarr.svg")
+        self.assertEqual(frag["custom_css"], "")
+        self.assertIn('class="text-frosted-blue font-bold text-sm truncate max-w-[40%] hidden"', frag["bar_brand_html"])
+        self.assertIn('aria-label="Home"', frag["bar_brand_html"])      # the bar's logo mark stands in
+        self.assertEqual(pages.page_title(b, "WebServarr"), "Films")
+
+    def test_the_endpoint_sends_it(self):
+        src = open(os.path.join(os.path.dirname(pages.__file__), "routers", "admin_settings.py"), encoding="utf-8").read()
+        self.assertIn('return shell_fragment(branding, True, "settings", "WebServarr - Settings")', src)
+        page = open(os.path.join(pages.STATIC_DIR, "settings.html"), encoding="utf-8").read()
+        self.assertIn("<title>WebServarr - Settings</title>", page)
+
+    def test_fill_does_not_read_what_it_inserts(self):
+        # An operator's text that looks like a slot stays text.
+        self.assertEqual(pages.fill("{{{a}}}|{{b}}", {"a": "{{b}}", "b": "<x>"}), "{{b}}|&lt;x&gt;")
+        b = branding(**{"branding.app_name": "{{user_name}}"})
+        out = render(b=b)
+        self.assertIn(">{{user_name}}</h1>", out)
+
+
 class NavModel(unittest.TestCase):
     def nav_hrefs(self, out):
         nav = re.search(r'<nav id="desktopNav".*?</nav>', out, re.S).group(0)
