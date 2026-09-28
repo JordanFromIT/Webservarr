@@ -39,6 +39,10 @@ PLEX_TIMEOUT = 5.0
 # a stolen Redis value can't forge the cookie and a stolen cookie without the
 # PIN id is useless.
 PLEX_PIN_COOKIE = "webservarr_plex_pin"
+# One callback at a time per PIN: the claim is taken after the browser binding
+# checks out and before any Plex call, and outlives the three Plex round trips
+# (PLEX_TIMEOUT each) with room to spare. See plex_callback.
+PLEX_PIN_CLAIM_TTL = 60
 
 
 def _hash_pin_nonce(nonce: str) -> str:
@@ -245,42 +249,59 @@ async def plex_callback(
             detail="Unknown or expired PIN. Please start a new login.",
         )
 
-    client_id = _get_plex_client_id(db)
-
-    # Check PIN status on plex.tv
+    # Claim the PIN before any Plex call, atomically. Two callbacks for one
+    # PIN (the login page's popup message and its popup-closed poll, or two
+    # tabs) used to both pass the check above and both create a session: the
+    # PIN was deleted only after two Plex round trips. A second caller now
+    # gets a 409, which the page ignores. The claim is released when the PIN
+    # is not yet authorized (the page polls again) or anything fails before
+    # the PIN is used; once used, the PIN is gone and the claim expires.
+    claim_key = f"plex_pin_claim:{pin_id}"
+    if not await redis.set(claim_key, "1", nx=True, ex=PLEX_PIN_CLAIM_TTL):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This sign-in is already being completed.",
+        )
     try:
-        async with httpx.AsyncClient(timeout=PLEX_TIMEOUT) as client:
-            resp = await client.get(
-                f"https://plex.tv/api/v2/pins/{pin_id}",
-                headers=_plex_headers(client_id),
-            )
-            if resp.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Plex PIN check failed (HTTP {resp.status_code})",
+        client_id = _get_plex_client_id(db)
+
+        # Check PIN status on plex.tv
+        try:
+            async with httpx.AsyncClient(timeout=PLEX_TIMEOUT) as client:
+                resp = await client.get(
+                    f"https://plex.tv/api/v2/pins/{pin_id}",
+                    headers=_plex_headers(client_id),
                 )
+                if resp.status_code != 200:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=f"Plex PIN check failed (HTTP {resp.status_code})",
+                    )
 
-            pin_data = resp.json()
-    except httpx.TimeoutException:
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Plex API timed out",
-        )
-    except HTTPException:
+                pin_data = resp.json()
+        except httpx.TimeoutException:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Plex API timed out",
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("Plex PIN check error: %s", str(e))
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to contact Plex API",
+            )
+
+        auth_token = pin_data.get("authToken")
+        if not auth_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="PIN not yet authorized. Try again.",
+            )
+    except BaseException:
+        await redis.delete(claim_key)
         raise
-    except Exception as e:
-        logger.error("Plex PIN check error: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Failed to contact Plex API",
-        )
-
-    auth_token = pin_data.get("authToken")
-    if not auth_token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="PIN not yet authorized. Try again.",
-        )
 
     # PIN used successfully — clean up
     await redis.delete(pin_key)
