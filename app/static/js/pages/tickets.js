@@ -543,15 +543,22 @@ export async function mount(ctx) {
           confirmLabel: 'Delete ticket', cancelLabel: 'Keep it', danger: true
         }).then(function (ok) {
           if (!ok) return;
+          // 204 No Content on success: nothing to parse. A failure (a ticket
+          // already gone, say) carries the server's detail, which is shown.
           fetch('/api/admin/tickets/' + ticket.id, { method: 'DELETE', signal: signal })
-            .then(function(r) { return r.json(); })
+            .then(function (r) {
+              if (r.ok) return;
+              return r.json().catch(function () { return {}; }).then(function (b) {
+                var e = new Error(b.detail || 'Failed to delete'); e.server = true; throw e;
+              });
+            })
             .then(function() {
               closeDetailModal();
               showToast('Ticket deleted', 'success');
               loadTickets();
               loadCounts();
             })
-            .catch(function(err) { if (!isAbort(err)) showToast('Failed to delete', 'error'); });
+            .catch(function(err) { if (!isAbort(err)) showToast(err.server ? err.message : 'Failed to delete', 'error'); });
         });
       }, { signal: signal });
 

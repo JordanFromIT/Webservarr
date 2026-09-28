@@ -197,5 +197,33 @@ class TicketDeleteDialog(unittest.TestCase):
         self.assertRegex(code, r"window\.WSUI\.confirm\(\{[^}]*danger: true[^}]*\}\)\.then\(function \(ok\) \{\s*if \(!ok\) return;")
 
 
+def listener(src: str, head: str) -> str:
+    """The body of one of the detail's click listeners, as written."""
+    start = src.index(head)
+    return src[start:src.index("}, { signal: signal });", start)]
+
+
+class AdminDelete(unittest.TestCase):
+    """The delete route answers 204 with no body. Parsing that as JSON threw,
+    so the admin saw "Failed to delete" on a ticket that was gone and the
+    modal stayed open. Success is r.ok with nothing parsed; a failure shows
+    the server's own detail."""
+
+    def test_a_204_is_success(self):
+        d = listener(page(), "delBtn.addEventListener('click', function() {")
+        self.assertRegex(d, r"fetch\('/api/admin/tickets/' \+ ticket\.id, \{ method: 'DELETE', signal: signal \}\)\s*"
+                            r"\.then\(function \(r\) \{\s*if \(r\.ok\) return;")
+        ok = d[d.index("if (r.ok) return;"):]
+        ok = ok[ok.index("})\n            .then(function() {"):ok.index(".catch(function(err)")]
+        for step in ("closeDetailModal();", "showToast('Ticket deleted', 'success');", "loadTickets();", "loadCounts();"):
+            self.assertIn(step, ok)
+
+    def test_a_failure_shows_the_servers_detail(self):
+        d = listener(page(), "delBtn.addEventListener('click', function() {")
+        self.assertIn("return r.json().catch(function () { return {}; }).then(function (b) {", d)
+        self.assertIn("var e = new Error(b.detail || 'Failed to delete'); e.server = true; throw e;", d)
+        self.assertIn(".catch(function(err) { if (!isAbort(err)) showToast(err.server ? err.message : 'Failed to delete', 'error'); });", d)
+
+
 if __name__ == "__main__":
     unittest.main()
