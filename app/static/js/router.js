@@ -16,23 +16,36 @@
  * Pure rules (importable by Node, no DOM at import time):
  *   qualifies(href, baseHref, attrs)  does the router take this link click (5.1)
  *   decide(requestedUrl, response)    swap, full navigation, or stay (5.2, 5.5)
- *   debugFlags(search, stored)        which debug tools this tab asked for (7)
+ *   debugFlags(search, stored, admin) which debug tools this tab asked for (7)
  *   visitTimers(signal)               a page's ctx.setTimeout / ctx.clearTimeout
  *
- * Debug mode (spec 7), for admins only: ?ws-debug=leaks,throw in the address, kept for the tab
- * in sessionStorage 'ws.debug' (?ws-debug=off clears it), loads debug-leaks.js
- * before any page module: the leak checker, the soak, the shell identity check
- * and a test tone in #wsPlayer. "throw" mounts pages/_debug-throw.js instead
- * of the next soft navigation's page, once. Without the flag neither loads.
+ * Debug mode (spec 7), for admins only: ?ws-debug=leaks,throw in the
+ * address, kept for the tab in sessionStorage 'ws.debug' (?ws-debug=off
+ * clears it), loads debug-leaks.js before any page module: the leak checker,
+ * the soak, the shell identity check and a test tone in #wsPlayer. "throw"
+ * mounts pages/_debug-throw.js instead of the next soft navigation's page,
+ * once. Without the flag neither loads; anyone else's flag is ignored and
+ * cleared.
+ *
+ * While a navigation loads: the drawer and menus close at once, a thin bar
+ * (#wsProgress) shows after 150 ms, and the same address again waits for it.
+ * A fetched page from another deploy (its #ws-data version, or the stamp on
+ * a shared file or loaded helper, differs) is loaded by full navigation.
+ * History entries carry their place ({ ws: 1, i, scrollY }): a Back held or
+ * refused is undone with history.go(), and no entry is ever relabelled.
+ * A push notification's click arrives as a service-worker message
+ * { type: 'ws-navigate', url } and is navigated like a link.
+ * Runtime cases: app/tests/js/router_runtime.mjs.
  *
  * In the browser, window.WS.router:
  *   navigate(url, { replace })  soft navigation; resolves once the page is mounted
  *   current                     { url, module, controller } of the mounted page
- *   hardNavigate(url)           ws:before-hard-nav, then a full navigation (sign-out)
+ *   hardNavigate(url)           ws:before-hard-nav, then a full navigation (sign-out,
+ *                               a page's own, through shell.js WS.leaveTo)
  *   clearPrefetch()             forget hover-prefetched pages (WS.clearPageCache)
  * A page module's ctx (spec 4.2) adds ctx.beforeLeave(guard): every
  * navigation away from the page (a link, navigate(), Back or Forward) first
- * awaits guard(url, { pop }): false stays (Back's address is put back),
+ * awaits guard(url, { pop }): false stays (Back is stepped back),
  * 'hard' leaves by full navigation, anything else goes on. Settings asks
  * about unsaved changes this way. While it is asked, a further Back or
  * Forward waits (the address stays on the entry asked about). A navigation
@@ -40,8 +53,9 @@
  * ws:nav-stayed, so the page keeps what it holds.
  * ctx.onNavigate(claim, claims): the page draws some URLs itself (the
  * wiki's views). claims(url), optional, says which, and those are never
- * prefetched. Every navigation from it first calls claim(url, { pop, scrollY }); true
- * takes it, and the router only records history (no fetch, no mount). A
+ * prefetched. Every navigation from it first calls claim(url, { pop,
+ * scrollY }); true takes it, and the router only records history (no fetch,
+ * no mount). A
  * promise takes it too, and resolves to the drawn view's name (or null): the
  * router then sets the title in the site's format and announces it, as a
  * swap does. ctx.setTitle(name) titles the view the page first drew.
