@@ -226,6 +226,8 @@ def palette_hits(pattern):
                 hits.append(f"{path.relative_to(STATIC.parent)}:{n}: {cls}")
     return hits
 ISSUES = (STATIC / "issues.html").read_text(encoding="utf-8")
+# The page's script: a soft-navigation page module since the Issues conversion.
+ISSUES_JS = (STATIC / "js" / "pages" / "issues.js").read_text(encoding="utf-8")
 
 
 @unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
@@ -438,7 +440,7 @@ class BrightTextOnlyOnPrimary(unittest.TestCase):
     def test_the_modal_close_buttons(self):
         tickets = (STATIC / "tickets.html").read_text(encoding="utf-8")
         calendar = (STATIC / "calendar.html").read_text(encoding="utf-8")
-        for page, call in ((ISSUES, 'onclick="closeModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
+        for page, call in ((ISSUES, 'data-action="close-modal" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
                            (tickets, 'onclick="closeCreateModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
                            (tickets, 'onclick="closeDetailModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
                            (calendar, 'id="closePanelBtn" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue')):
@@ -451,12 +453,21 @@ class BackdropClosesTheModal(unittest.TestCase):
 
     def test_the_scrim_closes(self):
         tickets = (STATIC / "tickets.html").read_text(encoding="utf-8")
-        for page, modal, close in ((ISSUES, "issueModal", "closeModal()"), (tickets, "createModal", "closeCreateModal()"),
+        for page, modal, close in ((tickets, "createModal", "closeCreateModal()"),
                                    (tickets, "detailModal", "closeDetailModal()")):
             m = re.search(r'<div id="' + modal + r'" class="([^"]*)"( onclick="[^"]*")?>\n<div class="absolute inset-0 ws-scrim '
                           r'backdrop-blur-sm" onclick="' + re.escape(close) + r'"></div>', page)
             self.assertIsNotNone(m, modal)
             self.assertIsNone(m.group(2), modal + ": the wrapper's own handler could never fire")
+
+    def test_the_issue_scrim_closes(self):
+        # A page module: the scrim names its action, the page's one click
+        # listener runs it.
+        m = re.search(r'<div id="issueModal" class="([^"]*)"( data-action="[^"]*")?>\n<div class="absolute inset-0 ws-scrim '
+                      r'backdrop-blur-sm" data-action="close-modal"></div>', ISSUES)
+        self.assertIsNotNone(m)
+        self.assertIsNone(m.group(2), "issueModal: the wrapper's own action could never fire")
+        self.assertIn("case 'close-modal': closeModal(); break;", ISSUES_JS)
 
 
 TICKETS = (STATIC / "tickets.html").read_text(encoding="utf-8")
@@ -502,7 +513,7 @@ class EscapeClosesTheModals(unittest.TestCase):
     overlay: only the topmost, and never under a WSUI dialog."""
 
     def test_issues(self):
-        m = re.search(r"document\.addEventListener\('keydown', function\(e\) \{(.*?)\n\}\);", ISSUES, re.S)
+        m = re.search(r"document\.addEventListener\('keydown', function \(e\) \{(.*?)\n  \}, \{ signal: signal \}\);", ISSUES_JS, re.S)
         self.assertIsNotNone(m)
         self.assertIn("e.key !== 'Escape' || e.isComposing || document.querySelector('.ws-dialog')", m.group(1))
         self.assertIn("closeModal()", m.group(1))
@@ -569,22 +580,31 @@ class IssueCommentSendsSurviveAReopen(unittest.TestCase):
     only if its trimmed text is what was sent."""
 
     def add_comment(self):
-        start = ISSUES.index("async function addComment(issueId) {")
-        return ISSUES[start:ISSUES.index("\n}\n", start)]
+        start = ISSUES_JS.index("async function addComment(issueId) {")
+        return ISSUES_JS[start:ISSUES_JS.index("\n  }\n", start)]
+
+    def render(self):
+        return ISSUES_JS[ISSUES_JS.index("function renderIssueDetail(issue) {"):ISSUES_JS.index("async function addComment(")]
 
     def test_drafts_are_kept_per_issue(self):
-        self.assertIn("var _commentDrafts = {};", ISSUES)
-        render = ISSUES[ISSUES.index("function renderIssueDetail(issue) {"):ISSUES.index("function setCommentBtn(")]
+        self.assertIn("var _commentDrafts = {};", ISSUES_JS)
+        render = self.render()
+        self.assertIn("textarea.setAttribute('data-issue-id', String(issue.id));", render)
         self.assertIn("textarea.value = _commentDrafts[issue.id] || '';", render)
-        self.assertIn("_commentDrafts[issue.id] = textarea.value;", render)
+        # Typing is kept by the page's one input listener, per issue.
+        typed = ISSUES_JS[ISSUES_JS.index("} else if (t.id === 'commentMessage') {"):]
+        typed = typed[:typed.index("}, { signal: signal });")]
+        self.assertIn("var id = t.getAttribute('data-issue-id');", typed)
+        self.assertIn("if (t.value) _commentDrafts[id] = t.value;", typed)
+        self.assertIn("else delete _commentDrafts[id];", typed)
 
     def test_a_rebuilt_box_waits_for_the_pending_post(self):
-        self.assertIn("var _commentSending = {};", ISSUES)
-        render = ISSUES[ISSUES.index("function renderIssueDetail(issue) {"):ISSUES.index("function setCommentBtn(")]
+        self.assertIn("var _commentSending = {};", ISSUES_JS)
+        render = self.render()
         self.assertIn('data-issue-id="\' + escapeHtml(String(issue.id)) + \'"', render)
         self.assertRegex(render, r"hasOwnProperty\.call\(_commentSending, issue\.id\)\) \{\s*"
-                                 r"setCommentBtn\(document\.getElementById\('addCommentBtn'\), true\);")
-        btn = ISSUES[ISSUES.index("function setCommentBtn("):ISSUES.index("async function addComment(")]
+                                 r"setCommentBtn\(\$\('addCommentBtn'\), true\);")
+        btn = ISSUES_JS[ISSUES_JS.index("function setCommentBtn("):ISSUES_JS.index("export async function mount(")]
         self.assertIn("btn.disabled = sending;", btn)
         self.assertIn("btn.textContent = sending ? 'Sending...' : 'Add Comment';", btn)
 
@@ -594,9 +614,11 @@ class IssueCommentSendsSurviveAReopen(unittest.TestCase):
             "if (Object.prototype.hasOwnProperty.call(_commentSending, issueId)) return;"))
         self.assertIn("_commentSending[issueId] = message;", send)
         ok = send[send.index("var resp = await fetch("):send.index("} catch (error) {")]
+        self.assertIn("signal: signal,", ok)
         self.assertIn("if ((_commentDrafts[issueId] || '').trim() === message) delete _commentDrafts[issueId];", ok)
         self.assertIn("if (issueShowing(issueId)) viewIssue(issueId);", ok)
         failed = send[send.index("} catch (error) {"):send.index("} finally {")]
+        self.assertIn("if (signal.aborted || isAbort(error)) return;", failed)   # a left page says nothing
         self.assertNotIn("commentMessage", failed)                      # the text stays
         settle = send[send.index("} finally {"):]
         self.assertIn("delete _commentSending[issueId];", settle)

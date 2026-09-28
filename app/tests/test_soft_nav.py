@@ -14,7 +14,7 @@ from app.tests.test_settings_static import function_body
 from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
-CONVERTED = ["news", "settings", "calendar"]
+CONVERTED = ["news", "settings", "calendar", "issues"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -182,6 +182,50 @@ class CalendarPage(unittest.TestCase):
         self.assertIn("if (prerendered && performance.now() - initAt > 10000) fn();", body)
         self.assertEqual(len(re.findall(r"\bfn\(\);", body)), 4,
                          "the tick, the catch-up read, the tab's return and a back/forward-cache restore")
+
+
+class IssuesPage(unittest.TestCase):
+    """Issues reads, posts and refreshes on the page's signal and poll; its
+    detail modal is inside #wsPage, so a swap takes it away; the wiki pointer
+    helper only defines WikiHook at load and is started from mount."""
+
+    def test_every_request_is_on_the_pages_signal(self):
+        code = js_code_only(module_source("issues"))
+        self.assertEqual(len(re.findall(r"WS\.getJSON\('[^']*', \{ signal: signal \}\)", code)), 2)
+        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 2)
+        fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
+        self.assertEqual(len(fetches), 4, "search, the detail, a new issue and a comment")
+        for at in fetches:
+            self.assertIn("signal: signal", code[at:code.index(");", at)], code[at:at + 60])
+        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 4)
+        self.assertEqual(code.count("if (signal.aborted || isAbort(err)) return;"), 2)
+
+    def test_timers_and_refresh_are_the_pages(self):
+        code = js_code_only(module_source("issues"))
+        self.assertRegex(code, r"ctx\.poll\(function \(\) \{\s*loadIssueCounts\(\);\s*loadIssues\(\);\s*\}, REFRESH_MS\);")
+        self.assertNotRegex(code, r"\bWS\.poll\(")
+        self.assertNotRegex(code, r"(?<![.\w])setTimeout\(", "one-off timers go through ctx.setTimeout")
+        self.assertEqual(code.count("ctx.setTimeout("), 2, "the search wait and the refresh after a new issue")
+        # The first read is the page's own (a poll on screen reads nothing at once).
+        self.assertIn("await Promise.all([loadIssueCounts(), loadIssues()]);", code)
+
+    def test_the_modal_is_inside_the_page(self):
+        h = read("issues")
+        page = h[h.index('<div id="wsPage"'):h.index("</main>")]
+        self.assertEqual(h.count('id="issueModal"'), 1)
+        self.assertIn('id="issueModal"', page)
+
+    def test_wiki_hook_defines_only_and_starts_from_mount(self):
+        src = (STATIC / "js" / "wiki-hook.js").read_text(encoding="utf-8")
+        code = js_code_only(src)
+        # Top level: the WikiHook definition and the unconverted pages' wrapper.
+        self.assertRegex(code, r"^\s*var WikiHook = \(function \(\) \{")
+        self.assertRegex(code, r"return \{ init: init \};\s*\}\)\(\);\s*function initWikiHook\(")
+        self.assertRegex(code, r"function init\(ctx, options\) \{\s*var el = ctx\.root\.querySelector\(")
+        self.assertIn("var branding = ctx && ctx.data && ctx.data.branding;", code)
+        self.assertNotIn("addEventListener", code)
+        self.assertIn("WikiHook.init(ctx, { container: 'wikiHookIssues', hook: 'issues', "
+                      "lead: 'Might this help first?' });", module_source("issues"))
 
 
 class PageOffBanner(unittest.TestCase):
