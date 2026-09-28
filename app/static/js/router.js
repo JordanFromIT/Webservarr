@@ -227,7 +227,7 @@ function start() {
   let busyTimer = 0;
   let retryToast = null;       // the one Retry toast on screen
   const prefetched = new Map();    // URL without hash -> { promise, timer }
-  const scripts = new Map();       // page-helper path (no query) -> load promise
+  const scripts = new Map();       // page-helper path (no query) -> { href, promise }
 
   const api = {
     navigate: function (url, opts) {
@@ -411,7 +411,7 @@ function start() {
   function loadScript(src) {
     const url = new URL(src, location.href);
     const key = url.pathname;
-    if (scripts.has(key)) return scripts.get(key);
+    if (scripts.has(key)) return scripts.get(key).promise;
     const p = new Promise(function (resolve, reject) {
       const el = document.createElement('script');
       el.src = url.href;
@@ -425,13 +425,67 @@ function start() {
       }, { once: true });
       document.body.appendChild(el);
     });
-    scripts.set(key, p);
+    scripts.set(key, { href: url.href, promise: p });
     return p;
   }
 
   async function loadPageScripts(doc) {
     const list = doc.querySelectorAll('script[data-ws-page-script][src]');
     for (const s of Array.prototype.slice.call(list)) await loadScript(s.getAttribute('src'));
+  }
+
+  // ---- A deploy since this document loaded ----
+  //
+  // The shell's scripts and styles load once per document, and a document
+  // can live for days (a tablet on Home, an installed app). Every asset URL
+  // carries its content stamp (?v=, app/pages.py), so a page fetched after
+  // an update names shared files this document does not have. Swapping it in
+  // would run a new page module against the old shell. Instead: a full
+  // navigation, which loads everything new (after ws:before-hard-nav).
+  // The version in #ws-data changes with every release; the stamps also
+  // change on a dev instance, where the version stays the same.
+
+  function dataVersion(root) {
+    const el = root.getElementById('ws-data');
+    if (!el) return null;
+    try {
+      const d = JSON.parse(el.textContent);
+      return d && typeof d.version === 'string' ? d.version : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  const bootVersion = dataVersion(document);
+
+  const SHARED_ASSETS = 'script[src]:not([data-ws-page-script]), link[rel="stylesheet"][href]';
+
+  // Same-origin /static/ files the document names as shared: path -> URL.
+  function sharedAssets(root) {
+    const out = new Map();
+    root.querySelectorAll(SHARED_ASSETS).forEach(function (el) {
+      let u;
+      try { u = new URL(el.getAttribute('src') || el.getAttribute('href'), location.href); } catch (e) { return; }
+      if (u.origin === location.origin && u.pathname.indexOf('/static/') === 0) out.set(u.pathname, u.href);
+    });
+    return out;
+  }
+
+  /* True when the fetched page belongs to another deploy: a different
+     version, a shared file this document also has at another stamp, or a
+     page helper already loaded here at another stamp. */
+  function staleShell(doc) {
+    const v = dataVersion(doc);
+    if (v !== null && bootVersion !== null && v !== bootVersion) return true;
+    const live = sharedAssets(document);
+    for (const [path, href] of sharedAssets(doc)) {
+      if (live.has(path) && live.get(path) !== href) return true;
+    }
+    for (const s of Array.prototype.slice.call(doc.querySelectorAll('script[data-ws-page-script][src]'))) {
+      const u = new URL(s.getAttribute('src'), location.href);
+      const have = scripts.get(u.pathname);
+      if (have && have.href !== u.href) return true;
+    }
+    return false;
   }
 
   // ---- Full navigations (spec 5.6) ----
@@ -458,7 +512,10 @@ function start() {
     }
     if (token !== undefined && token !== navToken) return;
     busyEnd();
-    location.assign(url);
+    // To this very address (Try again after a failed mount): a reload, which
+    // assign() is not when the address carries a #fragment.
+    if (new URL(url, location.href).href === location.href) location.reload();
+    else location.assign(url);
   }
 
   // ---- Feedback while a navigation loads ----
@@ -549,7 +606,9 @@ function start() {
       'bg-frosted-blue/[0.06] text-frosted-blue text-sm font-semibold hover:bg-frosted-blue/10 ' +
       'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary transition-colors';
     btn.textContent = 'Try again';
-    btn.addEventListener('click', function () { go(entry.url, { replace: true }); }, { signal: entry.controller.signal });
+    // A failure that repeats on the same soft path is what a full load
+    // fixes (an update the page module needs, a helper that half loaded).
+    btn.addEventListener('click', function () { hardNavigate(entry.url); }, { signal: entry.controller.signal });
     box.appendChild(icon);
     box.appendChild(text);
     box.appendChild(btn);
@@ -1034,6 +1093,8 @@ function start() {
     });
     // Nothing on this page to swap into: this page is not converted.
     if (d.action === 'swap' && !document.getElementById('wsPage')) d = { action: 'hard', url: target.href };
+    // The site was updated since this document loaded: load it whole.
+    if (d.action === 'swap' && staleShell(doc)) d = { action: 'hard', url: target.href };
 
     if (d.action === 'stay') {
       if (opts.pop && current) {
@@ -1180,7 +1241,8 @@ function start() {
   // ---- First load (spec 5.3) ----
 
   document.querySelectorAll('script[data-ws-page-script][src]').forEach(function (s) {
-    scripts.set(new URL(s.getAttribute('src'), location.href).pathname, Promise.resolve());
+    const u = new URL(s.getAttribute('src'), location.href);
+    scripts.set(u.pathname, { href: u.href, promise: Promise.resolve() });
   });
 
   const firstPage = document.getElementById('wsPage');
