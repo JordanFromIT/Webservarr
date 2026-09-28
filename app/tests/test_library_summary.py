@@ -11,11 +11,10 @@ scripts, no image loads) and only the text is kept, written with textContent.
 import re
 import unittest
 
-from app.tests.test_kavita_connect import inline_js
 from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace
 
-# The page's own inline scripts: markup text would confuse the JS scanner.
-LIBRARY = inline_js((STATIC / "library.html").read_text(encoding="utf-8"))
+# The page's script: a soft-navigation page module since the eBooks conversion.
+LIBRARY = (STATIC / "js" / "pages" / "library.js").read_text(encoding="utf-8")
 
 
 def function_body(src: str, name: str) -> str:

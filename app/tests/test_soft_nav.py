@@ -14,7 +14,7 @@ from app.tests.test_settings_static import function_body
 from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
-CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index"]
+CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index", "library", "reader"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -597,6 +597,142 @@ class HomePage(unittest.TestCase):
         self.assertNotIn("WEBSERVARR_THEME ||", src.replace("window.WEBSERVARR_THEME || {};", ""))
         router = function_body(js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8")), "syncHtmlFlags")
         self.assertIn("if (a.name.indexOf('     ') === 0 && !fresh.hasAttribute(a.name)) root.removeAttribute(a.name);", router)
+
+
+class LibraryPage(unittest.TestCase):
+    """eBooks calls Kavita on the page's signal and times everything with the
+    visit; its detail sheet is inside #wsPage; Read opens the reader through
+    the router; the guide and the sign-in helper start from mount (Task 11)."""
+
+    def code(self):
+        return js_code_only(module_source("library"))
+
+    def test_every_request_is_on_the_pages_signal(self):
+        code = self.code()
+        fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
+        self.assertEqual(len(fetches), 2, "the Kavita proxy call and the rating")
+        kav = function_body(code, "kavita")
+        self.assertIn("if (!options.signal) options.signal = signal;", kav)
+        self.assertIn("fetch(url, { credentials: 'include', signal: signal })", module_source("library"))
+        # A page left mid-request neither reconnects nor explains.
+        self.assertIn("if (!signal.aborted) reconnectKavita();", kav)
+        self.assertRegex(function_body(code, "quiet"), r"return signal\.aborted \|\| isAbort\(err\)")
+
+    def test_timers_are_the_pages(self):
+        code = self.code()
+        self.assertNotRegex(code, r"(?<![.\w])setTimeout\(", "one-off timers go through ctx.setTimeout")
+        self.assertNotRegex(code, r"\bWS\.poll\(")
+
+    def test_the_detail_sheet_is_inside_the_page(self):
+        h = read("library")
+        page = h[h.index('<div id="wsPage"'):h.index("</main>")]
+        self.assertEqual(h.count('id="bookDetail"'), 1)
+        self.assertIn('<div id="bookDetail" class="hidden fixed inset-0 z-[65] ', page)
+        self.assertNotIn("document.body.appendChild", self.code())
+        self.assertNotRegex(self.code(), r"\bdocument\.getElementById\(", "lookups stay inside ctx.root")
+
+    def test_read_opens_the_reader_in_this_document(self):
+        src = module_source("library")
+        self.assertIn("if (window.WS && WS.router && typeof WS.router.navigate === 'function') WS.router.navigate(href);", src)
+
+    def test_a_cover_that_fails_is_hidden_without_an_inline_handler(self):
+        src = module_source("library")
+        self.assertNotIn("onerror", read("library"))
+        self.assertIn("root.addEventListener('error', function (e) {", src)
+        self.assertIn("}, { capture: true, signal: signal });", src)
+
+    def test_the_guide_and_the_helper_start_with_the_visit(self):
+        src = module_source("library")
+        self.assertRegex(src, r"guide = window\.WebServarrTour\.init\(\{[^}]*signal: signal\s*\}\);")
+        self.assertNotIn("window.ebooksTour", src)
+
+
+class ReaderPage(unittest.TestCase):
+    """The reader is a full-screen view in the site's one document: the server
+    marks it data-shell="hidden" (the shell hidden, #wsPlayer kept), its
+    bottom chrome stays clear of the player, its settings go with the page,
+    and its last reading position is saved as it is left, by a request the
+    visit's abort cannot stop (Task 11)."""
+
+    def code(self):
+        return js_code_only(module_source("reader"))
+
+    def test_the_server_marks_the_reader_full_screen(self):
+        pages = (STATIC.parent / "pages.py").read_text(encoding="utf-8")
+        self.assertRegex(pages, r"if name == \"reader\":\n(?:\s*#[^\n]*\n)*\s*attrs \+= ' data-shell=\"hidden\"'")
+        self.assertEqual(pages.count('data-shell="hidden"'), 1)
+
+    def test_the_shell_is_hidden_and_takes_no_focus(self):
+        theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        for sid in ("desktopSidebar", "appHeader", "mobileTopBar", "drawerOverlay", "scrollDownHint", "pageOffBanner"):
+            self.assertRegex(theme, rf'html\[data-shell="hidden"\] #{sid}\b[^{{]*\{{ display: none; \}}', sid)
+        self.assertNotRegex(theme, r'html\[data-shell="hidden"\] #wsPlayer')
+
+    def test_the_bottom_chrome_clears_the_player(self):
+        h = read("reader")
+        head = h[:h.index("</head>")]
+        self.assertIn("#readerFooter, #tocPanel { bottom: var(--ws-player-h); }", head)
+        self.assertRegex(head, r"\.nav-zone \{[^}]*bottom: var\(--ws-player-h\);")
+        self.assertRegex(head, r"#settingsPanel \{\s*top: auto; right: 0; left: 0; bottom: var\(--ws-player-h\);")
+
+    def test_the_settings_go_with_the_page(self):
+        body = function_body(self.code(), "applyPrefs")
+        self.assertIn("var style = root.style;", body)
+        self.assertNotIn("document.documentElement.style", body)
+
+    def test_every_request_is_on_the_pages_signal(self):
+        code = self.code()
+        fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
+        self.assertEqual(len(fetches), 1, "every call goes through kavita()")
+        self.assertIn("options.signal = signal;", function_body(code, "kavita"))
+        self.assertNotRegex(code, r"(?<![.\w])setTimeout\(", "one-off timers go through ctx.setTimeout")
+        self.assertIn("saveTimer = ctx.setTimeout(saveProgress, SAVE_DEBOUNCE_MS);", code)
+
+    def test_the_position_is_saved_on_leaving(self):
+        # The router aborts the visit's signal (and any write in flight) before
+        # the cleanup runs, so the last save is a beacon, made whenever Kavita
+        # is not known to hold this page: not "already sent", which an aborted
+        # write also is.
+        code = self.code()
+        self.assertIn("var leave = function () { saveProgress(true); };", code)
+        self.assertEqual(len(re.findall(r"\breturn leave;", code)), 2, "both ways out of mount hand it to the router")
+        save = function_body(code, "saveProgress")
+        self.assertIn("var held = useBeacon ? confirmedPage : lastSaved;", save)
+        self.assertLess(save.index("if (!positionKnown || current.page === held) return;"), save.index("sendBeacon("))
+        self.assertIn("if (r.ok) confirmedPage = page;", save)
+        self.assertIn("confirmedPage = page;", function_body(code, "restoreProgress"))
+        # The tab hidden or closed while reading: the same beacon, until the visit ends.
+        src = module_source("reader")
+        self.assertIn("if (document.visibilityState === 'hidden') saveProgress(true);", src)
+        self.assertIn("window.addEventListener('pagehide', function () { saveProgress(true); }, { signal: signal });", src)
+
+    def test_it_titles_the_book_through_the_router(self):
+        code = self.code()
+        self.assertIn("ctx.setTitle(book.title);", code)
+        self.assertNotIn("document.title", code)
+
+
+class TourTeardown(unittest.TestCase):
+    """The guide engine (tour.js) is a page helper: it defines at load, and a
+    tour started with a visit's signal ends with it, whole (Task 11)."""
+
+    def test_it_ends_with_the_visit(self):
+        src = (STATIC / "js" / "tour.js").read_text(encoding="utf-8")
+        code = js_code_only(src)
+        abort = re.search(r"signal\.addEventListener\('     ', function \(\) \{", code)
+        self.assertIsNotNone(abort, "no teardown on the visit's signal")
+        body = code[abort.end():matching_brace(code, abort.end() - 1)]
+        for step in ("clearTimeout(startTimer);", "stop();", "layer.remove();"):
+            self.assertIn(step, body, step)
+        self.assertNotIn("finish()", body, "a tour cut short is recorded as seen")
+        self.assertIn("clearTimeout(placeTimer);", function_body(code, "stop"))
+        for listener in (r"window\.addEventListener\('      ', place, signal \? \{ signal: signal \}",
+                         r"window\.addEventListener\('      ', place, signal \? \{ capture: true, signal: signal \}",
+                         r"help\.addEventListener\('     ', start, signal \? \{ signal: signal \}",
+                         r"\}, signal \? \{ capture: true, signal: signal \} : true\);"):
+            self.assertRegex(code, listener)
+        # The top level only defines WebServarrTour.
+        self.assertEqual(re.findall(r"window\.(\w+) =", code), ["WebServarrTour"])
 
 
 class PageOffBanner(unittest.TestCase):

@@ -2,7 +2,7 @@
 
 <html class="dark" lang="en"><head>
 <meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>WebServarr - Reader</title>
 <link rel="icon" href="/static/webservarr.svg"/>
 <script src="/static/js/theme-loader.js?v=1"></script>
@@ -10,8 +10,19 @@
 <link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 <style>
+  /* The reader is a full-screen view inside the site's one document
+     (<html data-shell="hidden">, set by the server: the sidebar, header and
+     phone bar are hidden, #wsPlayer stays). The document scrolls, on every
+     width, as it did when the reader was a page of its own: the shell's
+     one-screen-tall <main> is let go while this page style is on (the router
+     swaps it with the page). */
+  html[data-shell="hidden"] body { overflow: visible; }
+  html[data-shell="hidden"] #desktopSidebar ~ main { height: auto; max-height: none; overflow: visible; }
+
   /* Reader surface. Defaults are seeded from the site theme so a book opens
-     matching the site, then the reader's own theme control takes over. */
+     matching the site, then the reader's own theme control takes over.
+     The reader's own settings are set on #wsPage (pages/reader.js), so they
+     go with the page. */
   :root {
     --reader-bg:   var(--hex-background, #000000);
     --reader-fg:   var(--hex-text, #BEEEF4);
@@ -79,7 +90,7 @@
   .nav-zone {
     position: fixed;
     top: 3.5rem;
-    bottom: 0;
+    bottom: var(--ws-player-h);
     width: 18%;
     min-width: 4.5rem;
     max-width: 14rem;
@@ -133,7 +144,7 @@
     #bookContent { padding-left: 1rem; padding-right: 1rem; }
     /* Settings is a panel on desktop and a bottom sheet on a phone. */
     #settingsPanel {
-      top: auto; right: 0; left: 0; bottom: 0;
+      top: auto; right: 0; left: 0; bottom: var(--ws-player-h);
       width: auto; max-height: 75vh; overflow-y: auto;
       border-radius: 1rem 1rem 0 0;
       padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
@@ -141,8 +152,14 @@
   }
 
   /* Keep the fixed chrome clear of notches and home indicators. */
-  header { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+  #readerBar { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
   #readerFooter { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+  /* The chrome fixed to the bottom ends above #wsPlayer while it shows
+     (--ws-player-h is 0px while it is hidden, so nothing moves then): the
+     page jump, the contents panel and, above, the page-turn edges and the
+     phone's settings sheet. By id, so it beats the bottom-0 utility. */
+  #readerFooter, #tocPanel { bottom: var(--ws-player-h); }
 
   #tocPanel { transition: transform .25s ease; }
   #tocPanel.closed { transform: translateX(-100%); }
@@ -167,11 +184,16 @@
   .toc-link.active { font-weight: 700; }
 </style>
 </head>
-<body class="bg-background-dark text-frosted-blue min-h-screen">
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<!-- ws:sidebar -->
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<!-- ws:header -->
+<!-- The page (spec 4.1), swapped by the router -->
+<div id="wsPage" data-ws-module="/static/js/pages/reader.js?v=1" class="flex-1 flex flex-col">
 
 <!-- Top bar -->
-<header class="fixed top-0 inset-x-0 z-30 h-14 bg-background-dark/95 backdrop-blur border-b border-steel-blue/25 flex items-center gap-2 px-3">
-  <a href="/ebooks" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="Back to eBooks" aria-label="Back to eBooks">
+<header id="readerBar" class="fixed top-0 inset-x-0 z-30 h-14 bg-background-dark/95 backdrop-blur border-b border-steel-blue/25 flex items-center gap-2 px-3">
+  <a id="readerBack" href="/ebooks" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="Back to eBooks" aria-label="Back to eBooks">
     <span class="material-symbols-outlined text-frosted-blue align-middle">arrow_back</span>
   </a>
   <button id="tocBtn" class="p-2 rounded-lg hover:bg-baltic-blue/30" title="Table of contents" aria-label="Table of contents">
@@ -273,574 +295,12 @@
   </form>
 </footer>
 
+</div>
+</main>
+
 <script src="/static/js/auth.js?v=1"></script>
-<script src="/static/js/tour.js?v=5"></script>
-<script src="/static/js/kavita-connect.js?v=1"></script>
-<script>
-(function () {
-  'use strict';
-
-  var PREFS_KEY = 'webservarr_reader_prefs';
-  var SAVE_DEBOUNCE_MS = 5000;
-
-  var book = { seriesId: null, chapterId: null, volumeId: null, libraryId: null, pages: 0, title: '' };
-  var current = { page: 0 };
-  var saveTimer = null;
-  var lastSaved = -1;
-  // Whether current.page is a position we may write back to Kavita. False
-  // until Kavita told us where this reader is (get-progress answered) or they
-  // turned a page themselves. Otherwise a failed lookup, which opens the book
-  // at the start, would overwrite their real place when they leave the page.
-  var positionKnown = false;
-
-  function el(id) { return document.getElementById(id); }
-  function qs(name) { return new URLSearchParams(location.search).get(name); }
-
-  var CONNECT_TITLE = "Couldn't open this book";
-  var CONNECT_MESSAGE = "We couldn't connect you to the eBook library right now. Please try again in a few minutes.";
-
-  /**
-   * Proxy call. A 401 means the Kavita session lapsed.
-   *
-   * For the calls that put the book on screen (the book, its chapter, a page)
-   * that re-runs the handshake - or, when kavita-connect.js says it was just
-   * tried, explains instead of going round again.
-   *
-   * A background call (progress save, bookmark, contents, saved position)
-   * passes background=true: on a 401 it just fails. It never takes over the
-   * page and never leaves it mid-book; a progress write is retried with the
-   * next one.
-   */
-  function kavita(path, options, background) {
-    options = options || {};
-    options.credentials = 'include';
-    return fetch('/kavita' + path, options).then(function (res) {
-      if (res.status === 401) {
-        if (background) throw new Error('unauthorized');
-        reconnectKavita();
-        throw new Error('reconnecting');
-      }
-      return res;
-    });
-  }
-
-  /** Go and sign in to Kavita, or say why not. Without the helper script, explain and stay. */
-  function reconnectKavita() {
-    var helper = window.WSKavita;
-    if (!helper || typeof helper.reconnect !== 'function') {
-      showConnectProblem();
-      return;
-    }
-    helper.reconnect(showConnectProblem);
-  }
-
-  /** The Try again button. Without the helper, a reload is the honest retry. */
-  function retryConnect() {
-    var helper = window.WSKavita;
-    if (!helper || typeof helper.retry !== 'function') {
-      window.location.reload();
-      return;
-    }
-    helper.retry();
-  }
-
-  function showConnectProblem() {
-    showError(CONNECT_TITLE, CONNECT_MESSAGE, retryConnect);
-  }
-
-  // ---- Preferences (local; reading position itself lives in Kavita) ----
-
-  var prefs = { theme: 'site', fontSize: 18, lineHeight: 17, measure: 42, columns: false };
-
-  function loadPrefs() {
-    try {
-      var raw = localStorage.getItem(PREFS_KEY);
-      if (raw) { var p = JSON.parse(raw); for (var k in p) prefs[k] = p[k]; }
-    } catch (e) { /* defaults are fine */ }
-  }
-  function savePrefs() {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) {}
-  }
-
-  var THEMES = {
-    site:  null,                                  // follow the site theme
-    light: { bg: '#FBFAF7', fg: '#1A1A1A' },
-    sepia: { bg: '#F4ECD8', fg: '#4A3B28' },
-    dark:  { bg: '#111315', fg: '#D6D6D6' },
-    // True #000 so OLED pixels switch off entirely. Text is held slightly below
-    // pure white: full-contrast white on black haloes badly on OLED.
-    black: { bg: '#000000', fg: '#C9CCD1' }
-  };
-
-  function applyPrefs() {
-    var root = document.documentElement.style;
-    var t = THEMES[prefs.theme];
-    if (t) {
-      root.setProperty('--reader-bg', t.bg);
-      root.setProperty('--reader-fg', t.fg);
-    } else {
-      // Seed from the site theme so the book opens matching the site.
-      var cs = getComputedStyle(document.documentElement);
-      root.setProperty('--reader-bg', (cs.getPropertyValue('--hex-background') || '#000000').trim());
-      root.setProperty('--reader-fg', (cs.getPropertyValue('--hex-text') || '#BEEEF4').trim());
-    }
-    root.setProperty('--reader-font-size', prefs.fontSize + 'px');
-    root.setProperty('--reader-line-height', (prefs.lineHeight / 10).toString());
-    root.setProperty('--reader-measure', prefs.measure + 'rem');
-    root.setProperty('--reader-columns', prefs.columns ? '2' : '1');
-
-    el('fontSize').value = prefs.fontSize;
-    el('lineHeight').value = prefs.lineHeight;
-    el('measure').value = prefs.measure;
-    el('columns').checked = !!prefs.columns;
-    el('fsVal').textContent = prefs.fontSize + 'px';
-    el('lhVal').textContent = (prefs.lineHeight / 10).toFixed(1);
-    el('mwVal').textContent = prefs.measure + 'rem';
-
-    Array.prototype.forEach.call(el('themeButtons').children, function (b) {
-      b.classList.toggle('bg-baltic-blue/40', b.dataset.theme === prefs.theme);
-    });
-  }
-
-  // ---- Loading ----
-
-  // One of these at a time, so a stale error never sits above a working page.
-  var PANELS = ['loading', 'errorState', 'bookContent'];
-  var activePanel = 'loading';
-
-  function showPanel(which) {
-    activePanel = which;
-    PANELS.forEach(function (id) {
-      el(id).classList.toggle('hidden', id !== which);
-    });
-    // The edge zones sit outside the panels, over everything. Under an error
-    // there is no page to turn, so they go too (and every page key waits).
-    var turning = which !== 'errorState';
-    el('navPrev').hidden = !turning;
-    el('navNext').hidden = !turning;
-  }
-
-  /**
-   * Page turning needs the current page on screen: no error, and nothing still
-   * loading. During boot the saved position is still being looked up, and a
-   * turn then would be saved over it once boot falls back to the first page.
-   * It also keeps one turn from starting on top of another.
-   */
-  function canTurnPage() {
-    return book.chapterId != null && activePanel === 'bookContent';
-  }
-
-  var retryAction = null;
-
-  /** onRetry: what Try again does here (sign in again, or reload the page); none for other errors. */
-  function showError(title, detail, onRetry) {
-    el('errorTitle').textContent = title;
-    el('errorDetail').textContent = detail || '';
-    retryAction = onRetry || null;
-    el('errorRetry').classList.toggle('hidden', !retryAction);
-    showPanel('errorState');
-  }
-
-  function runRetry() {
-    if (retryAction) retryAction();
-  }
-
-  function resolveChapter(seriesId) {
-    return kavita('/api/Series/series-detail?seriesId=' + encodeURIComponent(seriesId))
-      .then(function (r) {
-        if (!r.ok) throw new Error('detail HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function (d) {
-        var keys = ['specials', 'chapters', 'volumes', 'storylineChapters'];
-        for (var i = 0; i < keys.length; i++) {
-          var group = d[keys[i]] || [];
-          for (var j = 0; j < group.length; j++) {
-            var item = group[j];
-            var chapters = item.chapters || [item];
-            for (var k = 0; k < chapters.length; k++) {
-              if (chapters[k].id) {
-                return { chapterId: chapters[k].id, volumeId: chapters[k].volumeId || item.id };
-              }
-            }
-          }
-        }
-        throw new Error('no readable chapter in this series');
-      });
-  }
-
-  function loadTOC() {
-    return kavita('/api/Book/' + book.chapterId + '/chapters', null, true)
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .then(function (nodes) {
-        var list = el('tocList');
-        list.innerHTML = '';
-        function add(items, depth) {
-          (items || []).forEach(function (n) {
-            var a = document.createElement('a');
-            a.href = '#';
-            a.className = 'toc-link block py-1 px-2 rounded hover:bg-baltic-blue/30 text-frosted-blue/90 truncate';
-            a.style.paddingLeft = (8 + depth * 12) + 'px';
-            a.textContent = n.title || 'Untitled';
-            a.dataset.page = n.page;
-            a.addEventListener('click', function (e) {
-              e.preventDefault();
-              goToPage(parseInt(n.page, 10) || 0);
-              toggleTOC(false);
-            });
-            list.appendChild(a);
-            if (n.children && n.children.length) add(n.children, depth + 1);
-          });
-        }
-        add(nodes, 0);
-        if (!list.children.length) {
-          list.innerHTML = '<p class="text-xs text-steel-blue px-2">No contents listed for this book.</p>';
-        }
-      })
-      .catch(function () { /* a missing TOC must not stop reading */ });
-  }
-
-  function renderPage(html) {
-    var container = el('bookContent');
-    // VERBATIM. Kavita's annotation xPaths are relative to .book-content, so
-    // the element tree inside must not be altered.
-    container.innerHTML = html;
-    showPanel('bookContent');
-    window.scrollTo(0, 0);
-  }
-
-  /** The reader's page turns (edges, keys, contents, page jump) come through here. */
-  function goToPage(page, skipSave) {
-    if (!canTurnPage()) return Promise.resolve();
-    return loadPage(page, skipSave);
-  }
-
-  /**
-   * Put a page on screen. Past the page-turn check, so only goToPage, boot's
-   * first page and a failed page's Try again call it: boot runs under the
-   * spinner and Try again under the error, where the check refuses.
-   */
-  function loadPage(page, skipSave) {
-    if (page < 0) page = 0;
-    if (book.pages && page > book.pages - 1) page = book.pages - 1;
-    current.page = page;
-    updateChrome();
-
-    showPanel('loading');
-    el('loadingText').textContent = 'Loading page ' + (page + 1) + '…';
-
-    return kavita('/api/Book/' + book.chapterId + '/book-page?page=' + page)
-      .then(function (r) {
-        if (!r.ok) throw new Error('page HTTP ' + r.status);
-        return r.text();
-      })
-      .then(function (html) {
-        renderPage(html);
-        if (!skipSave) {
-          // The reader chose this page: from here it is theirs to save.
-          positionKnown = true;
-          queueProgress();
-        }
-      })
-      .catch(function (err) {
-        if (err && err.message === 'reconnecting') return;
-        // The arrows are off under an error, so Try again reloads this page
-        // (with the same skipSave: a retry never confirms an unknown position).
-        showError('Couldn’t load this page', String(err.message || err), function () {
-          loadPage(page, skipSave);
-        });
-      });
-  }
-
-  function updateChrome() {
-    el('pageInfo').textContent = book.pages
-      ? (current.page + 1) + ' / ' + book.pages
-      : String(current.page + 1);
-    el('pageJumpTotal').textContent = book.pages ? '/ ' + book.pages : '';
-    el('pageJumpInput').max = book.pages || 1;
-    el('navPrev').disabled = current.page <= 0;
-    el('navNext').disabled = book.pages ? current.page >= book.pages - 1 : false;
-  }
-
-  /** Swap the page readout for an input so a page can be typed directly. */
-  function openPageJump() {
-    var input = el('pageJumpInput');
-    el('pageInfo').classList.add('hidden');
-    el('pageJumpForm').classList.remove('hidden');
-    el('pageJumpForm').classList.add('flex');
-    input.value = current.page + 1;
-    input.focus();
-    input.select();
-  }
-
-  function closePageJump() {
-    el('pageJumpForm').classList.add('hidden');
-    el('pageJumpForm').classList.remove('flex');
-    el('pageInfo').classList.remove('hidden');
-  }
-
-  // ---- Progress ----
-
-  function queueProgress() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveProgress, SAVE_DEBOUNCE_MS);
-  }
-
-  function saveProgress(useBeacon) {
-    if (!positionKnown || current.page === lastSaved) return;
-    var payload = {
-      libraryId: book.libraryId,
-      seriesId: book.seriesId,
-      volumeId: book.volumeId,
-      chapterId: book.chapterId,
-      pageNum: current.page
-    };
-    var body = JSON.stringify(payload);
-    lastSaved = current.page;
-
-    if (useBeacon && navigator.sendBeacon) {
-      // Fire-and-forget on unload; same-origin so the session cookie rides along.
-      navigator.sendBeacon('/kavita/api/Reader/progress',
-        new Blob([body], { type: 'application/json' }));
-      return;
-    }
-    // A failed progress write must never interrupt reading: it is a
-    // background call, and lastSaved = -1 makes the next save try again.
-    kavita('/api/Reader/progress', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body
-    }, true).catch(function () { lastSaved = -1; });
-  }
-
-  /** Where Kavita has this reader. Rejects when that isn't actually known. */
-  function fetchProgress() {
-    return kavita('/api/Reader/get-progress?chapterId=' + book.chapterId, null, true)
-      .then(function (r) {
-        if (!r.ok) throw new Error('progress HTTP ' + r.status);
-        return r.text();
-      })
-      .then(function (text) {
-        // An empty or null body is Kavita's "not started": a known page 0.
-        // Anything unparsable throws, and the position stays unknown.
-        var p = text ? JSON.parse(text) : null;
-        return (p && typeof p.pageNum === 'number') ? p.pageNum : 0;
-      });
-  }
-
-  function restoreProgress() {
-    // One quiet retry before giving up: a lost lookup would otherwise leave
-    // the book at the start with saving switched off.
-    return fetchProgress()
-      .catch(function () { return fetchProgress(); })
-      .then(function (page) {
-        positionKnown = true;
-        lastSaved = page;
-        return page;
-      })
-      .catch(function () { return 0; });   // position unknown: open at the start, never save it
-  }
-
-  // ---- UI wiring ----
-
-  function toggleTOC(force) {
-    var panel = el('tocPanel');
-    var open = typeof force === 'boolean' ? force : panel.classList.contains('closed');
-    panel.classList.toggle('closed', !open);
-  }
-
-  el('tocBtn').addEventListener('click', function () { toggleTOC(); });
-  el('errorRetry').addEventListener('click', runRetry);
-  el('settingsBtn').addEventListener('click', function () {
-    el('settingsPanel').classList.toggle('hidden');
-  });
-
-  el('navPrev').addEventListener('click', function () { goToPage(current.page - 1); });
-  el('navNext').addEventListener('click', function () { goToPage(current.page + 1); });
-
-  el('pageInfo').addEventListener('click', openPageJump);
-
-  el('pageJumpForm').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var n = parseInt(el('pageJumpInput').value, 10);
-    closePageJump();
-    if (!isNaN(n)) goToPage(n - 1);   // the field is 1-based, pages are 0-based
-  });
-
-  el('pageJumpInput').addEventListener('keydown', function (e) {
-    // Stop the reader's own arrow/space shortcuts firing while typing.
-    e.stopPropagation();
-    if (e.key === 'Escape') closePageJump();
-  });
-  el('pageJumpInput').addEventListener('blur', closePageJump);
-
-  el('bookmarkBtn').addEventListener('click', function () {
-    kavita('/api/Reader/bookmark', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        seriesId: book.seriesId, volumeId: book.volumeId,
-        chapterId: book.chapterId, page: current.page
-      })
-    }, true).then(function (r) {
-      el('bookmarkIcon').textContent = r.ok ? 'bookmark_added' : 'bookmark_add';
-      setTimeout(function () { el('bookmarkIcon').textContent = 'bookmark_add'; }, 1800);
-    }).catch(function () { /* a bookmark is a convenience; reading goes on */ });
-  });
-
-  document.addEventListener('keydown', function (e) {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (e.key === 'ArrowRight' || e.key === 'j' || e.key === ' ') {
-      if (!canTurnPage()) return;
-      e.preventDefault();
-      goToPage(current.page + 1);
-    } else if (e.key === 'ArrowLeft' || e.key === 'k') {
-      if (!canTurnPage()) return;
-      e.preventDefault();
-      goToPage(current.page - 1);
-    } else if (e.key === 't') toggleTOC();
-    else if (e.key === 'Escape') { toggleTOC(false); el('settingsPanel').classList.add('hidden'); }
-  });
-
-  function bindPref(id, key, transform) {
-    el(id).addEventListener('input', function (e) {
-      prefs[key] = transform ? transform(e.target) : parseInt(e.target.value, 10);
-      applyPrefs(); savePrefs();
-    });
-  }
-  bindPref('fontSize', 'fontSize');
-  bindPref('lineHeight', 'lineHeight');
-  bindPref('measure', 'measure');
-  bindPref('columns', 'columns', function (t) { return t.checked; });
-
-  Array.prototype.forEach.call(el('themeButtons').children, function (b) {
-    b.addEventListener('click', function () {
-      prefs.theme = b.dataset.theme; applyPrefs(); savePrefs();
-    });
-  });
-
-  // Final write when leaving, so closing the tab never loses the position.
-  document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'hidden') saveProgress(true);
-  });
-  window.addEventListener('pagehide', function () { saveProgress(true); });
-
-  // ---- Boot ----
-
-  document.addEventListener('DOMContentLoaded', function () {
-    loadPrefs();
-    applyPrefs();
-
-    var seriesId = qs('seriesId');
-    if (!seriesId) { showError('No book selected', 'Open a book from the library.'); return; }
-    book.seriesId = parseInt(seriesId, 10);
-
-    checkAuth().then(function () {
-      return resolveChapter(book.seriesId);
-    }).then(function (res) {
-      book.chapterId = res.chapterId;
-      book.volumeId = res.volumeId;
-      return kavita('/api/Book/' + book.chapterId + '/book-info');
-    }).then(function (r) {
-      if (!r.ok) throw new Error('book-info HTTP ' + r.status);
-      return r.json();
-    }).then(function (info) {
-      book.pages = info.pages || 0;
-      book.libraryId = info.libraryId;
-      book.volumeId = info.volumeId || book.volumeId;
-      book.title = info.bookTitle || info.seriesName || 'Reader';
-      el('bookTitle').textContent = book.title;
-      document.title = book.title + ' - Reader';
-      loadTOC();
-      return restoreProgress();
-    }).then(function (page) {
-      return loadPage(page, true);
-    }).then(function () {
-      // Only once there is a rendered page to point at. Starting earlier
-      // spotlights an empty loading spinner.
-      if (window.readerTour) window.readerTour.maybeStart();
-    }).catch(function (err) {
-      if (err && err.message === 'reconnecting') return;
-      showError('Couldn’t open this book', String(err.message || err));
-    });
-  });
-})();
-
-/* ---- Reader guide (coach marks) ----
- *
- * Same engine as the library tour, in /static/js/tour.js. Started from the boot
- * chain above rather than on a timer, because half these steps point at
- * controls that do not settle until the first page is on screen.
- */
-(function () {
-  'use strict';
-
-  var panel = function () { return document.getElementById('settingsPanel'); };
-
-  function openSettings() { panel().classList.remove('hidden'); }
-  function closeSettings() { panel().classList.add('hidden'); }
-
-  var STEPS = [
-    {
-      target: '#navNext',
-      fallback: '#bookContent',
-      icon: 'auto_stories',
-      title: 'Turning pages',
-      body: 'Click either edge of the page to move forward or back, or use the arrow keys. Your place saves itself as you go, so you can close the tab and pick up here on any device.'
-    },
-    {
-      target: '#pageInfo',
-      icon: 'tag',
-      title: 'Where you are',
-      body: 'The counter at the bottom shows the page you are on and how many there are. Click it to type a page number and jump straight there.'
-    },
-    {
-      target: '#tocBtn',
-      icon: 'toc',
-      title: 'Chapters',
-      body: 'Opens the table of contents. The chapter you are in is highlighted, and picking any other one takes you to it.'
-    },
-    {
-      target: '#bookmarkBtn',
-      icon: 'bookmark_add',
-      title: 'Bookmarks',
-      body: 'Marks the current page so you can find it again later. Separate from your reading position, which is always saved anyway.'
-    },
-    {
-      target: '#settingsPanel',
-      fallback: '#settingsBtn',
-      icon: 'text_fields',
-      title: 'Make it comfortable',
-      body: 'Text size, line spacing, how wide the lines run, and two columns if you prefer. The five swatches change the page colour, from black through to paper white. Your choices carry to every book you open.',
-      before: openSettings
-    },
-    {
-      target: 'header a[href="/ebooks"]',
-      icon: 'arrow_back',
-      title: 'When you are done',
-      body: 'The arrow at the top left goes back to the library. Nothing needs saving first, and the book reappears under Your Bookshelf.',
-      before: closeSettings
-    }
-  ];
-
-  function wire() {
-    window.readerTour = WebServarrTour.init({
-      seenKey: 'webservarr_reader_guide_seen',
-      steps: STEPS,
-      helpBtn: 'helpBtn',
-      // Started from the boot chain instead, once a page has rendered.
-      autoStart: false,
-      // Leaving the settings panel hanging open after a skipped tour would look
-      // like a bug.
-      onFinish: closeSettings
-    });
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', wire);
-  } else {
-    wire();
-  }
-})();
-</script>
+<script src="/static/js/shell.js?v=1"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+<script src="/static/js/tour.js?v=5" data-ws-page-script></script>
+<script src="/static/js/kavita-connect.js?v=1" data-ws-page-script></script>
 </body></html>

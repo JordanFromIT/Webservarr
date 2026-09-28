@@ -73,8 +73,7 @@ class OffMeansOff(PageRoutesBase):
         for path, key in self.GATED:
             r = self.get(path, ADMIN_SESSION, {key: "false"})
             self.assertEqual(r.status_code, 200, path)
-            if path != "/reader":          # the reader has no shell to carry a banner
-                self.assertIn(BANNER, r.text, path)
+            self.assertIn(BANNER, r.text, path)
 
     def test_pages_that_are_on_have_no_banner(self):
         for path, _key in self.GATED:

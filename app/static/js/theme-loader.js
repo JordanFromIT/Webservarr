@@ -185,6 +185,51 @@
 })();
 
 /*
+ * The eBooks shelves' reserved space (#shelves, library.html), decided before
+ * the first paint so the grid below never moves when the shelves arrive.
+ *
+ * WSShelfPlan(username, search) is [[shelf id, covers], ...]: the shelves
+ * this person had last visit (localStorage webservarr_library_shelves:<name>,
+ * which pages/library.js writes), Recently Added with eight on a first visit,
+ * and none after a failed Kavita sign-in (?kavita=error: the page shows that
+ * message and loads no shelves). WSShelfMark(plan) writes it on <html> as
+ * data-shelf-<id>="<covers>", which shows that shelf's slot with that many
+ * covers (library.html's page style), and clears any shelf not in it. A full
+ * load of eBooks marks here; the page module marks again on every visit (the
+ * router takes the marks off when the next page is swapped in).
+ */
+(function () {
+  'use strict';
+  var SHELVES = ['bookshelf', 'recent', 'toprated'];
+
+  function plan(username, search) {
+    if (/[?&]kavita=error(&|$)/.test(search || '')) return [];
+    var out = [['recent', 8]];
+    try {
+      var saved = JSON.parse(localStorage.getItem('webservarr_library_shelves:' + (username || '')) || 'null');
+      if (Array.isArray(saved)) {
+        out = saved.filter(function (s) {
+          return Array.isArray(s) && SHELVES.indexOf(s[0]) !== -1 && s[1] >= 1 && s[1] <= 8;
+        });
+      }
+    } catch (e) { /* private mode or an old value: the first-visit shape */ }
+    return out;
+  }
+
+  function mark(p) {
+    var root = document.documentElement;
+    SHELVES.forEach(function (id) { root.removeAttribute('data-shelf-' + id); });
+    (p || []).forEach(function (s) { root.setAttribute('data-shelf-' + s[0], String(Math.round(s[1]))); });
+  }
+
+  window.WSShelfPlan = plan;
+  window.WSShelfMark = mark;
+
+  var data = window.WS_DATA || {};
+  if (data.page === 'library') mark(plan((data.user || {}).username, location.search));
+})();
+
+/*
  * The shell's view-transition names, only while a transition runs.
  *
  * theme.css names the sidebar, header, mobile bar and <main> under

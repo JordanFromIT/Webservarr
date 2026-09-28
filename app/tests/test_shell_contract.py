@@ -12,8 +12,8 @@ from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
 SHELL_PAGES = ["index", "requests", "requests-embed", "issues", "calendar", "tickets",
-               "library", "news", "wiki", "settings"]
-BARE_PAGES = ["login", "setup", "reader"]
+               "library", "news", "wiki", "settings", "reader"]
+BARE_PAGES = ["login", "setup"]
 
 # The repo is a template; an operator's own branding lives in the database,
 # never in these files. Operators can add their own names to the guard without

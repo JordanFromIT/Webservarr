@@ -542,6 +542,13 @@ body { padding-bottom: var(--ws-player-h); }
 html[data-shell="hidden"] #desktopSidebar,
 html[data-shell="hidden"] #appHeader,
 html[data-shell="hidden"] #mobileTopBar { display: none; }
+/* Nothing of the shell shows or takes focus there: not the drawer (closed
+   before every swap anyway), not the phone's scroll hint (the view scrolls a
+   whole book), not an admin's "page is turned off" notice, which the page it
+   belongs to (eBooks) already shows. */
+html[data-shell="hidden"] #drawerOverlay,
+html[data-shell="hidden"] #scrollDownHint,
+html[data-shell="hidden"] #pageOffBanner { display: none; }
 
 /* ---- Soft open and close ----
  *

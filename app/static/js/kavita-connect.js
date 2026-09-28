@@ -14,6 +14,13 @@
  *   - none at all after a sign-in reported failure (/ebooks?kavita=error);
  *   - otherwise the page shows a plain message with a "Try again" button.
  * If storage can't be read, the answer is the message: never a loop.
+ *
+ * A page helper (data-ws-page-script): it loads once per document and only
+ * defines window.WSKavita. Both pages are soft-navigation page modules, so
+ * one document can hold many visits; each module calls init() from mount,
+ * which starts the visit's own "problem showing" and "under way" state. The
+ * trip to /kavita/connect is a full navigation through the router when it is
+ * there (ws:before-hard-nav first, so a player can save its place).
  */
 (function () {
   'use strict';
@@ -22,8 +29,22 @@
   var LAST_TRY_KEY = 'ws:kavita-connect-at';
   var RETRY_WINDOW_MS = 60 * 1000;
 
-  var blocked = false;   // the problem is showing; no automatic attempt this page load
+  var blocked = false;   // the problem is showing; no automatic attempt this visit
   var leaving = false;   // an attempt is under way; later 401s just wait for it
+
+  /** A new visit to eBooks or the reader (the page module's mount). */
+  function init() {
+    blocked = false;
+    leaving = false;
+  }
+
+  /** Off to the sign-in: a full navigation, never a soft one (it leaves the site). */
+  function leave() {
+    leaving = true;
+    var router = window.WS && window.WS.router;
+    if (router && typeof router.hardNavigate === 'function') router.hardNavigate(CONNECT_URL);
+    else window.location.href = CONNECT_URL;
+  }
 
   function triedRecently() {
     try {
@@ -45,9 +66,9 @@
   }
 
   /**
-   * Read once, as the page loads: did the sign-in just fail? If so, drop the
+   * Read once, as the page mounts: did the sign-in just fail? If so, drop the
    * flag from the address (a reload or a shared link should not repeat it)
-   * and make no automatic attempt on this page load.
+   * and make no automatic attempt on this visit.
    */
   function arrivedFromFailedConnect() {
     var params;
@@ -73,16 +94,14 @@
       onProblem();
       return;
     }
-    leaving = true;
-    window.location.href = CONNECT_URL;
+    leave();
   }
 
   /** The "Try again" button. Counts as an attempt, so a still-broken sign-in shows the message again. */
   function retry() {
     markTry();
-    leaving = true;
-    window.location.href = CONNECT_URL;
+    leave();
   }
 
-  window.WSKavita = { reconnect: reconnect, retry: retry, arrivedFromFailedConnect: arrivedFromFailedConnect };
+  window.WSKavita = { init: init, reconnect: reconnect, retry: retry, arrivedFromFailedConnect: arrivedFromFailedConnect };
 })();

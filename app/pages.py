@@ -760,6 +760,11 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
     attrs = f' data-page="{html.escape(name, quote=True)}"'
     if user and user.get("is_admin"):
         attrs += " data-admin"
+    if name == "reader":
+        # A full-screen view: the shell stays in the document (and #wsPlayer
+        # on screen) but its sidebar, header and phone bar are hidden
+        # (theme.css). The router brings the flag in step on every swap.
+        attrs += ' data-shell="hidden"'
     if name == "index":
         off = [sid for sid, on in (branding.get("home_sections") or {}).items() if on is False]
         if off:

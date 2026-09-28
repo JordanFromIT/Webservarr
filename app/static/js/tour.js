@@ -13,12 +13,19 @@
  *     steps: [ { target: '#foo', icon: 'search', title: '…', body: '…' } ],
  *     helpBtn: 'helpBtn',      // optional: re-runs the tour on click
  *     autoStart: true,         // first visit only
- *     startDelay: 1200         // let the page render before measuring
+ *     startDelay: 1200,        // let the page render before measuring
+ *     signal: ctx.signal       // the page's visit: the tour ends with it
  *   });
  *   tour.start();              // or call it yourself once the page is ready
  *
  * A step names its target by selector. `fallback` is used when the primary
  * element is absent or hidden, so a tour never breaks on an empty page.
+ *
+ * Soft navigation: this is a page helper (data-ws-page-script), loaded once
+ * per document; init() is called from the page module's mount with the
+ * visit's signal. When the signal aborts (the page is left) the tour is torn
+ * down whole: its listeners go, its pending timers are cleared, a running
+ * tour ends without being recorded as seen, and the layer leaves <body>.
  *
  * DEVELOPMENT: set localStorage.webservarr_tour_always = '1' (or append
  * ?tour=1) and every tour runs on each visit and never records itself as seen.
@@ -70,8 +77,11 @@
   function create(opts) {
     var STEPS = opts.steps || [];
     var SEEN_KEY = opts.seenKey;
+    var signal = opts.signal || null;
     var step = 0;
     var active = false;
+    var placeTimer = 0;      // render's wait for the scroll to settle
+    var startTimer = 0;      // autoStart's delay
     // False until this run's first placement: the layer stays invisible and
     // untransitioned until then, so the bubble never shows at a stale spot
     // and slides from it.
@@ -221,11 +231,12 @@
       if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       // Let the scroll settle before measuring, or the bubble lands where the
       // target used to be.
-      setTimeout(place, 380);
+      clearTimeout(placeTimer);
+      placeTimer = setTimeout(place, 380);
     }
 
     function start() {
-      if (active || !STEPS.length) return;
+      if (active || !STEPS.length || (signal && signal.aborted)) return;
       active = true;
       step = 0;
       placed = false;
@@ -234,16 +245,23 @@
       layer.style.visibility = 'hidden';
       layer.classList.remove('hidden');
       render();
-      window.addEventListener('resize', place);
-      window.addEventListener('scroll', place, true);
+      window.addEventListener('resize', place, signal ? { signal: signal } : undefined);
+      window.addEventListener('scroll', place, signal ? { capture: true, signal: signal } : true);
+    }
+
+    // Stops a run: the layer hides, the listeners and the pending placement go.
+    function stop() {
+      active = false;
+      clearTimeout(placeTimer);
+      var layer = q('tourLayer');
+      if (layer) layer.classList.add('hidden');
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
     }
 
     function finish() {
       if (!active) return;
-      active = false;
-      q('tourLayer').classList.add('hidden');
-      window.removeEventListener('resize', place);
-      window.removeEventListener('scroll', place, true);
+      stop();
       if (typeof opts.onFinish === 'function') {
         try { opts.onFinish(); } catch (e) { /* cleanup is best effort */ }
       }
@@ -270,15 +288,16 @@
     q('tourBack').onclick = back;
     q('tourSkip').onclick = finish;
 
+    // capture: the reader turns pages on the arrow keys too
     document.addEventListener('keydown', function (e) {
       if (!active) return;
       if (e.key === 'Escape') { finish(); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); next(); }
       else if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); back(); }
-    }, true);   // capture: the reader turns pages on the arrow keys too
+    }, signal ? { capture: true, signal: signal } : true);
 
     var help = typeof opts.helpBtn === 'string' ? q(opts.helpBtn) : opts.helpBtn;
-    if (help) help.addEventListener('click', start);
+    if (help) help.addEventListener('click', start, signal ? { signal: signal } : undefined);
 
     var api = {
       start: start,
@@ -292,15 +311,38 @@
     };
 
     if (opts.autoStart) {
-      setTimeout(api.maybeStart, opts.startDelay || 1200);
+      startTimer = setTimeout(api.maybeStart, opts.startDelay || 1200);
+    }
+
+    // The page is left: end the run (not recorded as seen, it was not
+    // finished), cancel the timers, drop the buttons' handlers and the layer.
+    if (signal) {
+      signal.addEventListener('abort', function () {
+        clearTimeout(startTimer);
+        stop();
+        var layer = q('tourLayer');
+        if (layer) {
+          if (q('tourNext').onclick === next) {
+            q('tourNext').onclick = null;
+            q('tourBack').onclick = null;
+            q('tourSkip').onclick = null;
+          }
+          layer.remove();
+        }
+      }, { once: true });
     }
     return api;
   }
 
   window.WebServarrTour = {
     init: function (opts) {
+      opts = opts || {};
+      if (opts.signal && opts.signal.aborted) {
+        return { start: function () {}, finish: function () {}, isActive: function () { return false; },
+                 hasBeenSeen: function () { return true; }, maybeStart: function () {} };
+      }
       ensureLayer();
-      return create(opts || {});
+      return create(opts);
     }
   };
 })();

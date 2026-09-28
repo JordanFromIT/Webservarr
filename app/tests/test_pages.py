@@ -427,6 +427,16 @@ class ShellRendering(unittest.TestCase):
         self.assertNotIn("data-home-hide", html_tag(render(name="index")))
         self.assertNotIn("data-home-hide", html_tag(render(b=b, name="calendar")))
 
+    def test_only_the_reader_hides_the_shell(self):
+        # A full-screen view: the shell is rendered (so #wsPlayer is there and
+        # the router can swap back out) but marked hidden on <html>.
+        out = render(name="reader")
+        self.assertIn(' data-shell="hidden"', html_tag(out))
+        self.assertIn('id="wsPlayer"', out)
+        self.assertIn('id="desktopSidebar"', out)
+        for name in ("index", "library", "news", "login"):
+            self.assertNotIn("data-shell", html_tag(render(name=name)), name)
+
     def test_index_skips_sections_that_are_off(self):
         self.assertEqual(home_guard_problems(static_text("js", "pages", "home.js")), [])
 
