@@ -183,7 +183,7 @@ def claim_legacy_tickets(db: Session, user: dict) -> int:
     if not identity or identity.startswith("local:"):
         return 0
     is_plex = identity.startswith("plex:")
-    email = _email_key(user.get("email")) if user.get("email_verified") == "true" else ""
+    email = _email_key(user.get("email")) if _email_verified(user) else ""
     username = user.get("username") or ""
     by_username = is_plex and bool(username) and not _is_local_username(db, username)
     unclaimed = Ticket.creator_identity.is_(None)
@@ -236,6 +236,19 @@ def claim_legacy_tickets(db: Session, user: dict) -> int:
     if claimed:
         logger.info("Claimed %d ticket(s) from before account identities", claimed)
     return claimed
+
+
+def _email_verified(user: dict) -> bool:
+    """Whether the sign-in verified this session's email. The sign-in routes
+    hold it as a bool; the session stored in Redis holds "true"/"false"
+    (bytes before decoding). True and "true" in any case count; anything
+    else does not."""
+    value = user.get("email_verified")
+    if value is True:
+        return True
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", "replace")
+    return isinstance(value, str) and value.strip().lower() == "true"
 
 
 def _email_key(value) -> str:
