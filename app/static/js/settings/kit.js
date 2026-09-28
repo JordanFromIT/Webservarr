@@ -64,7 +64,7 @@
   function fresh() {
     return { values: {}, meta: {}, mask: null, view: {}, booted: false, loaded: false, loadFailed: false, current: null,
              tabs: {}, busy: false, saving: false, failed: false, asking: false, leaving: false,
-             pendingFocus: null, leaveAsk: null };
+             pendingFocus: null, leaveAsk: null, approved: false };
   }
   var S = fresh();
   // Each tab module registers once per document (it loads once), so these
@@ -198,8 +198,15 @@
     }).join(';') + '}';
   }
 
+  // The dialog's grid is rebuilt on every keystroke: each build's buttons
+  // stop listening when the next replaces them, and the search box when the
+  // dialog closes or the page is left, not when the visit ends.
   function openIconDialog(currentName, onPick) {
     var picked = currentName || '';
+    var own = new AbortController(), round = null;
+    var sig = signal;
+    function done() { own.abort(); if (round) round.abort(); }
+    sig.addEventListener('abort', done, { once: true, signal: own.signal });
     var body = el('div');
     var search = el('input', cls.input);
     search.type = 'search';
@@ -208,6 +215,9 @@
     var grid = el('div', 'mt-3 grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-[45vh] overflow-y-auto');
     function render() {
       var q = search.value.trim().toLowerCase();
+      if (round) round.abort();
+      round = new AbortController();
+      var buttons = round.signal;
       grid.replaceChildren();
       var names = ICONS.filter(function (n) { return !q || n.indexOf(q) !== -1; });
       if (q && /^[a-z0-9_]{1,64}$/.test(q) && names.indexOf(q) === -1) names.unshift(q);
@@ -219,16 +229,16 @@
         b.setAttribute('aria-label', n);
         b.appendChild(icon(n, 'text-[24px] text-frosted-blue'));
         b.appendChild(el('span', 'text-xs text-frosted-blue/60 truncate w-full text-center', n));
-        b.addEventListener('click', function () { picked = n; render(); }, { signal: signal });
+        b.addEventListener('click', function () { picked = n; render(); }, { signal: buttons });
         grid.appendChild(b);
       });
     }
-    search.addEventListener('input', render, { signal: signal });
+    search.addEventListener('input', render, { signal: own.signal });
     body.appendChild(search);
     body.appendChild(grid);
     render();
-    var sig = signal;
     UI.confirm({ title: 'Choose an icon', body: body, confirmLabel: 'Use this icon' }).then(function (ok) {
+      done();
       if (ok && picked && !sig.aborted) onPick(picked);
     });
     later(function () { search.focus(); }, 30);
@@ -1119,9 +1129,11 @@
   }
 
   // "Leave without saving?", asked once however many ways out are tried
-  // while it is open (a link, then Back). Leave throws the changes away here,
-  // so nothing asks again, beforeunload included, and no colour or font
-  // preview outlives the page.
+  // while it is open (a link, then Back). Leave approves this way out: the
+  // link's click passes, the router's guard and beforeunload stand down. The
+  // changes stay until the page is really left (end() throws them away), so
+  // a navigation that fails and stays (ws:nav-stayed) keeps them, and the
+  // next way out asks again.
   function askLeave() {
     if (S.leaveAsk) return S.leaveAsk;
     var sig = signal;
@@ -1137,7 +1149,7 @@
     }).then(function (ok) {
       if (sig.aborted) return false;
       S.leaveAsk = null;
-      if (ok) discardAll();
+      if (ok) S.approved = true;
       return ok;
     });
     return S.leaveAsk;
@@ -1148,7 +1160,7 @@
   // how.pop: Back or Forward. Held, the router puts this page's address back,
   // and the open tab's hash follows it.
   function canLeave(how) {
-    if (S.leaving || !anyDirty()) return true;
+    if (S.leaving || S.approved || !anyDirty()) return true;
     var sig = signal;
     return askLeave().then(function (ok) {
       if (!ok && how && how.pop && !sig.aborted) later(function () { setHash(S.current, 'replace'); }, 0);
@@ -1162,7 +1174,7 @@
   // tab, a typed address) can only be asked by the browser, via beforeunload.
   function wireLeaveGuard() {
     window.addEventListener('beforeunload', function (e) {
-      if (!S.leaving && anyDirty()) { e.preventDefault(); e.returnValue = ''; }
+      if (!S.leaving && !S.approved && anyDirty()) { e.preventDefault(); e.returnValue = ''; }
     }, { signal: signal });
     document.addEventListener('click', function (e) {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -1172,15 +1184,22 @@
       try { url = new URL(a.href, location.href); } catch (err) { return; }
       if (!/^https?:$/.test(url.protocol)) return;
       if (url.pathname === location.pathname && url.search === location.search && url.hash) return;
-      if (!anyDirty() || S.leaving) return;
+      if (!anyDirty() || S.leaving || S.approved) return;
       e.preventDefault();
       askLeave().then(function (ok) {
         if (!ok) return;
-        // Nothing is staged now, so this click passes: the router takes it,
-        // or the browser follows it, exactly as without the question.
+        // Approved, so this click passes: the router takes it, or the
+        // browser follows it, exactly as without the question.
         if (a.isConnected) a.click();
         else leave(url.href);
       });
+    }, { signal: signal });
+    // A way out that was approved but stayed (the destination failed to
+    // load): the changes are still here, so the next one asks again; the
+    // tab's hash follows the page's address the router put back.
+    window.addEventListener('ws:nav-stayed', function () {
+      S.approved = false;
+      if (onThisPage()) setHash(S.current, 'replace');
     }, { signal: signal });
   }
 

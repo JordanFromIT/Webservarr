@@ -167,7 +167,7 @@
   // <html> is never swapped: the font set on it stays for every page.
   var root = document.documentElement;
   var fontRe = null;            // the registry's pattern, anchored; null means no preview
-  var pageFont = null;          // the saved font: served with the page, or saved since
+  var pageFont = null;          // the saved font: as this visit found it, or saved since
   var baseFont = null;          // the font pageFontVar shows (pageFont, once it has loaded)
   var pageFontVar = '';         // --font-display for baseFont, as the page or promote() set it
   var shownFont = null;         // the font the page shows now
@@ -405,11 +405,13 @@
       warnings = {};
       signal.addEventListener('abort', leave, { once: true });
       fontRe = fontGuard();
-      if (pageFont === null) {
-        pageFont = api.get('theme.font');
-        pageFontVar = root.style.getPropertyValue('--font-display');
-        baseFont = shownFont = pageFont;
-      }
+      // The page's font as it stands on this visit (a save on an earlier visit,
+      // or the shell's refresh after one, may have changed it): mount is run
+      // on every visit and assumes nothing from the last.
+      pageFont = api.get('theme.font');
+      pageFontVar = root.style.getPropertyValue('--font-display');
+      baseFont = shownFont = pageFont;
+      fontSeq += 1;
       // A saved font is the one Discard comes back to from now on.
       api.onSaved(function (keys) {
         if (keys.indexOf('theme.font') < 0) return;

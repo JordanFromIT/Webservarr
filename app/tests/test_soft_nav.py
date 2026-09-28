@@ -224,6 +224,56 @@ class SharedShellScripts(unittest.TestCase):
         self.assertIn("if (!res || res.status >= 500 || res.status === 429) res = await fetchPage(", code)
 
 
+class PageHelpersLoadFirst(unittest.TestCase):
+    """A page module may use its helpers from the first line of mount (Settings'
+    kit, then signin-rule.js, which extends it): every data-ws-page-script is
+    loaded and run, one after another in document order, before the module is
+    imported and mounted, on a soft navigation and on a cold load."""
+
+    def test_a_swap_loads_every_helper_before_the_module(self):
+        code = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+        go = function_body(code, "go")
+        load = go.index("await loadPageScripts(doc);")
+        imp = go.index("mod = await import(moduleUrl);")
+        self.assertLess(load, imp, "helpers load before the module is imported")
+        self.assertLess(imp, go.index("await commit(doc, page, dest, mod, moduleUrl, opts)"),
+                        "and both before the swap that mounts it")
+        helpers = function_body(code, "loadPageScripts")
+        # One at a time, in the page's order: the next waits for the last.
+        self.assertRegex(helpers, r"const list = doc\.querySelectorAll\('[^']*'\);\s*"
+                                  r"for \(const s of Array\.prototype\.slice\.call\(list\)\) await loadScript\(")
+        self.assertIn("script[data-ws-page-script][src]",
+                      (STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+        one = function_body(code, "loadScript")
+        self.assertIn("el.async = false;", one)
+        # Resolved by the element's load event, which fires after it has run.
+        self.assertRegex(one, r"el\.addEventListener\('    ', function \(\) \{ resolve\(\); \}, \{ once: true \}\);")
+
+    def test_a_cold_load_runs_the_helpers_before_the_router(self):
+        # The router is a module (deferred): it runs, and mounts, after every
+        # classic script in the page, so each helper must be a plain one.
+        part = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
+        router = [m.group(1) for m in _SCRIPT_TAG_RE.finditer(part) if "/static/js/router.js" in (attr(m.group(1), "src") or "")]
+        self.assertEqual(len(router), 1)
+        self.assertEqual(attr(router[0], "type"), "module")
+        for name in CONVERTED:
+            with self.subTest(name):
+                h = read(name).split("<template", 1)[0]     # a template's scripts never run on their own
+                for m in _SCRIPT_TAG_RE.finditer(h):
+                    if not re.search(r"\bdata-ws-page-script\b", m.group(1)):
+                        continue
+                    for word in ("async", "defer", "type"):
+                        self.assertIsNone(re.search(rf"\b{word}\b", m.group(1)), f"{name}: helper is {word}")
+
+    def test_settings_declares_its_rule_after_its_kit(self):
+        h = read("settings")
+        kit = '<script src="/static/js/settings/kit.js?v=1" data-ws-page-script></script>'
+        rule = '<script src="/static/js/settings/signin-rule.js?v=1" data-ws-page-script></script>'
+        self.assertEqual((h.count(kit), h.count(rule)), (1, 1))
+        self.assertLess(h.index(kit), h.index(rule), "signin-rule.js extends WSSettings: the kit loads first")
+        self.assertLess(h.index("</template>"), h.index(kit), "both outside the tab modules' template")
+
+
 class LeaveGuard(unittest.TestCase):
     """A page can hold its visitor (Settings with unsaved changes): the router
     awaits ctx.beforeLeave's guard before it leaves the page, for a link,
@@ -262,23 +312,52 @@ class LeaveGuard(unittest.TestCase):
                       r"\s*current\.url = location\.href;\s*if \(history\.state === null\) history\.replaceState\(\{ ws: 1,", code)
         self.assertIsNotNone(m)
 
+    def test_another_back_waits_while_the_guard_is_asked(self):
+        # Back, Back while "Leave without saving?" is open: the second step
+        # neither skips the question (a same-page /settings entry) nor starts
+        # a navigation; the address stays on the entry the question is about.
+        code = self.code()
+        go = function_body(code, "go")
+        self.assertIn("const ask = asking = { url: opts.pop ? target.href : location.href };", go)
+        self.assertRegex(go, r"\} finally \{\s*if \(asking === ask\) asking = null;\s*\}")
+        pop = re.search(r"window\.addEventListener\('\s+', function \(e\) \{\s*const st = e\.state;(.*?)\n  \}\);", code, re.S)
+        self.assertIsNotNone(pop)
+        body = pop.group(1)
+        held = body.index("if (asking) {")
+        self.assertLess(held, body.index("samePage(location.href, current.url)"), "held before the same-page shortcut")
+        self.assertLess(held, body.index("go(location.href"), "and before any navigation")
+        self.assertRegex(body, r"if \(asking\) \{\s*history\.replaceState\(\{ ws: 1, scrollY: 0 \}, '', asking\.url\);\s*return;\s*\}")
+
+    def test_a_stay_after_a_let_through_leave_is_announced(self):
+        code = self.code()
+        stay = re.search(r"if \(d\.action === '    '\) \{(.*?)\n    \}", function_body(code, "go"), re.S)
+        self.assertIsNotNone(stay)
+        self.assertIn("window.dispatchEvent(new CustomEvent('", stay.group(1))
+        self.assertIn("ws:nav-stayed", (STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+
     def test_settings_guards_every_way_out(self):
         page = js_code_only(module_source("settings"))
         self.assertRegex(page, r"ctx\.beforeLeave\(function \(url, how\) \{\s*return Promise\.resolve\(window\.WSSettings\.canLeave\(how\)\)")
         kit = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
         kit_code = js_code_only(kit)
         can = function_body(kit_code, "canLeave")
-        self.assertIn("if (S.leaving || !anyDirty()) return true;", can)
+        self.assertIn("if (S.leaving || S.approved || !anyDirty()) return true;", can)
         self.assertIn("return askLeave()", can)
         # A link asks too (its listener on document runs before the router's
         # on window), then is followed as it would have been.
         self.assertIn("e.preventDefault();\n      askLeave().then(function (ok) {", kit)
         self.assertIn("if (a.isConnected) a.click();", kit)
-        # Yes throws the changes away, so nothing asks twice (beforeunload
-        # included) and no preview outlives the page.
-        self.assertIn("if (ok) discardAll();", function_body(kit_code, "askLeave"))
+        self.assertIn("if (!anyDirty() || S.leaving || S.approved) return;", kit)
+        # Leave approves; it throws nothing away. The changes go only when the
+        # page is really left (end), so a failed destination keeps them, and
+        # the approval ends with that navigation (ws:nav-stayed).
+        ask = function_body(kit_code, "askLeave")
+        self.assertIn("if (ok) S.approved = true;", ask)
+        self.assertNotIn("discardAll", ask)
         self.assertIn("discardAll();", function_body(kit_code, "end"))
         self.assertIn("signal.addEventListener('     ', end, { once: true });", function_body(kit_code, "init"))
+        self.assertRegex(kit, r"window\.addEventListener\('ws:nav-stayed', function \(\) \{\s*S\.approved = false;")
+        self.assertIn("if (!S.leaving && !S.approved && anyDirty())", kit)
 
 
 # The debug tools (spec 7): a leak checker that wraps addEventListener, the

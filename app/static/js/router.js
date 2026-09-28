@@ -33,10 +33,14 @@
  * navigation away from the page (a link, navigate(), Back or Forward) first
  * awaits guard(url, { pop }): false stays (Back's address is put back),
  * 'hard' leaves by full navigation, anything else goes on. Settings asks
- * about unsaved changes this way.
+ * about unsaved changes this way. While it is asked, a further Back or
+ * Forward waits (the address stays on the entry asked about). A navigation
+ * the guard let go that then stays (a failed fetch) dispatches
+ * ws:nav-stayed, so the page keeps what it holds.
  * Events on window:
  *   ws:before-hard-nav  detail { url, waitUntil(promise) }; awaited, 500 ms cap
  *   ws:page-mounted     detail { url, page } after each mount
+ *   ws:nav-stayed       detail { url, reason } a navigation stayed on this page
  */
 
 const EXCLUDED_PREFIXES = ['/auth/', '/api/', '/kavita/', '/static/', '/uploads/'];
@@ -153,6 +157,9 @@ function start() {
   let scrollTimer = 0;
   let hoverTimer = 0;
   let hoverLink = null;
+  // While a page's leave guard is being asked: { url } of the address the
+  // question is about (Back's destination, or the page itself for a link).
+  let asking = null;
   const prefetched = new Map();    // URL without hash -> { promise, timer }
   const scripts = new Map();       // page-helper path (no query) -> load promise
 
@@ -745,11 +752,14 @@ function start() {
     // puts it back, as a failed fetch does below.
     if (!current.left && current.guard) {
       let verdict;
+      const ask = asking = { url: opts.pop ? target.href : location.href };
       try {
         verdict = await current.guard(new URL(target.href), { pop: !!opts.pop });
       } catch (e) {
         console.error('[router] leave guard failed', e);
         verdict = false;
+      } finally {
+        if (asking === ask) asking = null;
       }
       if (token !== navToken) return;
       if (verdict === false) {
@@ -797,6 +807,9 @@ function start() {
         // Back or Forward already moved the address bar; put it back.
         history.replaceState({ ws: 1, scrollY: Math.round(scroller().scrollTop) }, '', current.url);
       }
+      // The page is still here: one whose guard let this navigation go
+      // (Settings, after "Leave without saving") keeps what it holds.
+      window.dispatchEvent(new CustomEvent('ws:nav-stayed', { detail: { url: target.href, reason: d.reason } }));
       showRetry(target.href, d.reason, !!opts.pop);
       return;
     }
@@ -903,7 +916,15 @@ function start() {
   // and the browser's fragment entries carry no ws mark and are left alone.
   window.addEventListener('popstate', function (e) {
     const st = e.state;
-    if (!current || !st || st.ws !== 1) return;
+    if (!current) return;
+    // A page is being asked whether it may be left: Back or Forward pressed
+    // again waits for that answer, on the address the question is about.
+    // (The answer then keeps or restores the page's own address.)
+    if (asking) {
+      history.replaceState({ ws: 1, scrollY: 0 }, '', asking.url);
+      return;
+    }
+    if (!st || st.ws !== 1) return;
     clearTimeout(scrollTimer);
     if (samePage(location.href, current.url)) {
       current.url = location.href;

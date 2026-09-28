@@ -663,6 +663,19 @@ class KitApi(unittest.TestCase):
         # other refusals in show(): the address bar goes back to the tab shown.
         self.assertRegex(kit_code(), r"if\s*\(S\.asking\)\s*\{[^{}]*\bhow\s*===[^{}]*setHash\(\s*from\b")
 
+    def test_the_icon_picker_lets_go_of_each_grid(self):
+        # K1: the grid is rebuilt on every keystroke; each build's buttons stop
+        # listening when the next replaces them, and the search box when the
+        # dialog closes or the page is left.
+        body = function_body(kit_code(), "openIconDialog")
+        self.assertNotIn("{ signal: signal }", body)
+        self.assertRegex(body, r"if \(round\) round\.abort\(\);\s*round = new AbortController\(\);")
+        self.assertIn("}, { signal: buttons });", body)
+        self.assertIn("search.addEventListener('     ', render, { signal: own.signal });", body)
+        self.assertRegex(body, r"function done\(\) \{ own\.abort\(\); if \(round\) round\.abort\(\); \}")
+        self.assertIn("sig.addEventListener('     ', done, { once: true, signal: own.signal });", body)
+        self.assertRegex(body, r"\.then\(function \(ok\) \{\s*done\(\);")
+
     def test_select_keeps_an_unknown_stored_value(self):
         # A stored value outside the options stays selected (a hidden,
         # disabled option) instead of the box showing blank and the first
@@ -981,6 +994,19 @@ class AppearanceTab(unittest.TestCase):
         self.assertRegex(appearance_function("loadFont"), r"if \(name === pageFont\) promote\(link\)")
         # A revert while the saved font isn't on screen yet fetches it.
         self.assertRegex(appearance_function("revertFont"), r"if \(baseFont !== pageFont\) loadFont\(pageFont\);")
+
+    def test_every_visit_reads_the_font_it_finds(self):
+        # Soft navigation (Task 5 fix round 1, AF1): mount runs on every visit
+        # and assumes nothing from the last. The saved font and the page's
+        # --font-display are read again each time, so leaving never puts back
+        # a font from an earlier visit.
+        src = APPEARANCE.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        self.assertNotIn("pageFont === null", code)
+        mount = code[code.index("WSSettings.registerTab("):]
+        for line in (r"pageFont = api\.get\(' {10}'\);", r"pageFontVar = root\.style\.getPropertyValue\(' {14}'\);",
+                     r"baseFont = shownFont = pageFont;"):
+            self.assertRegex(mount, line)
 
     def test_typing_waits_long_enough(self):
         # Half-typed names shouldn't be fetched between keystrokes.
