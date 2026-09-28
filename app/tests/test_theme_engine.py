@@ -581,7 +581,8 @@ class SafeColours(unittest.TestCase):
         # In safe colours the page must stay readable, so a colour being
         # edited restyles only the preview cards, not the page.
         ctl = kit_color_control()
-        self.assertTrue(live_matches(KIT, r"var SAFE = document\.documentElement\.hasAttribute\('data-safe-theme'\);"))
+        # Read on each visit (soft navigation): the kit's init, from the page's flags.
+        self.assertTrue(live_matches(KIT, r"\n    SAFE = document\.documentElement\.hasAttribute\('data-safe-theme'\);"))
         self.assertTrue(live_matches(ctl, r"if \(SAFE\) \{ scopedPreview\(o\.cssVar, v\); return; \}"))
         self.assertTrue(live_matches(APPEARANCE, r"box\.setAttribute\('data-ws-theme-preview', ''\)"))
         self.assertIn("[data-ws-theme-preview]", THEME)

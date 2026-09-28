@@ -18,10 +18,10 @@
  *   WS.debug.tone                         the 440 Hz test tone in #wsPlayer
  *
  * How an item is tied to a page (the leak checker's one judgement), in order:
- *   0. made by ui.js itself (the innermost of the site's frames is ui.js: a
- *      toast's dismiss timers, a dialog's listeners) it is the shell's, even
- *      when a page asked for the toast; any callback in it still runs as the
- *      page's (see SELF_OWNED_FILES);
+ *   0. made by shell code that keeps its own lifetimes (ui.js: a toast's
+ *      dismiss timers, a dialog's listeners; shell.js's wireNav: the
+ *      sidebar links' listeners) it is the shell's, even when a page asked;
+ *      any callback in it still runs as the page's (see SELF_OWNED_FILES);
  *   1. a stack frame in /static/js/pages/<name>.js makes it that page's;
  *   2. else, inside a callback a page registered (a listener, a timer or
  *      interval callback, a requestAnimationFrame callback, a .then / .catch
@@ -58,13 +58,15 @@
  */
 
 export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js', 'auth.js', 'theme-loader.js'];
-// Shell files whose own timers and listeners end by themselves: ui.js's toast
-// dismisses itself, its dialog stops listening when it closes. When one of
-// these makes the call (it is the innermost of the site's frames), the item is
-// the shell's even though a page asked for the toast. Only these: WS.poll
-// (shell.js) and ctx.setTimeout (router.js) run a page's own work, so what
-// they create stays the page's.
-export const SELF_OWNED_FILES = ['ui.js'];
+// Shell code whose timers and listeners live as long as the shell's own UI,
+// not the page that called it: ui.js (a toast dismisses itself, a dialog stops
+// listening when it closes) and shell.js's wireNav (the sidebar's links, which
+// Settings rebinds after a save). 'file' is any of the file's functions,
+// 'file#name' one function. When the call that creates an item comes from
+// one of these, through shell frames only, the item is the shell's even
+// though a page asked. Nothing else: WS.poll (shell.js) and ctx.setTimeout
+// (router.js) run a page's own work, so what they create stays the page's.
+export const SELF_OWNED_FILES = ['ui.js', 'shell.js#wireNav'];
 const SELF_FILE = 'debug-leaks.js';
 const PAGE_RE = /\/static\/js\/pages\/([^/]+)\.js$/;
 const FRAME_RE = /([a-z][\w+.-]*:\/\/[^\s()]+?):\d+(?::\d+)?/i;
@@ -89,7 +91,11 @@ function framesOf(stack, origin) {
     if (!m) return;
     if (origin && m[1].indexOf(origin + '/') !== 0) return;
     const path = m[1].replace(/^[a-z][\w+.-]*:\/\/[^/]*/i, '').split(/[?#]/)[0];
-    out.push({ line: line, path: path, file: path.slice(path.lastIndexOf('/') + 1) });
+    // The function's name: "at Object.wireNav (url)" (Chrome), "wireNav@url"
+    // (Firefox); '' when anonymous.
+    const named = /^\s*at\s+(?:async\s+)?([^\s(]+)\s+\(/.exec(line) || /^([^@\s]*)@/.exec(line);
+    const fn = named ? named[1].slice(named[1].lastIndexOf('.') + 1) : '';
+    out.push({ line: line, path: path, file: path.slice(path.lastIndexOf('/') + 1), fn: fn });
   });
   return out.filter(function (f) { return f.file !== SELF_FILE; });
 }
@@ -107,11 +113,18 @@ export function ownerOf(stack, shellFiles, origin) {
   return { page: null, shell: frames.every(function (f) { return shell.indexOf(f.file) !== -1; }) };
 }
 
-/* True when the call that is creating something was made by one of files
-   (default SELF_OWNED_FILES): it is the innermost of the site's frames. */
-export function madeBySelfOwned(stack, files, origin) {
-  const frames = framesOf(stack, origin);
-  return frames.length > 0 && (files || SELF_OWNED_FILES).indexOf(frames[0].file) !== -1;
+/* True when the call that is creating something was made by one of owned
+   (default SELF_OWNED_FILES; 'file' or 'file#function'): walking out from
+   the innermost of the site's frames through shell files only, one of them
+   is it. */
+export function madeBySelfOwned(stack, owned, origin, shellFiles) {
+  owned = owned || SELF_OWNED_FILES;
+  const shell = shellFiles || SHELL_FILES;
+  for (const f of framesOf(stack, origin)) {
+    if (owned.indexOf(f.file) !== -1 || (f.fn && owned.indexOf(f.file + '#' + f.fn) !== -1)) return true;
+    if (shell.indexOf(f.file) === -1) return false;
+  }
+  return false;
 }
 
 // The stack as it reads in a report: no "Error" line, none of our own frames.
@@ -186,7 +199,7 @@ export function createTracker(g, opts) {
     let owner = null;
     if (o.page) owner = session && session.name === o.page ? { name: o.page, session: session } : { name: o.page, session: null };
     else if (ambient) owner = ambient;
-    if (madeBySelfOwned(stack, selfOwnedFiles, origin)) {
+    if (madeBySelfOwned(stack, selfOwnedFiles, origin, shellFiles)) {
       return owner ? { owner: owner, stack: stack, selfOwned: true } : null;
     }
     if (!owner) {
