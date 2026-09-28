@@ -380,7 +380,8 @@ class HoverLift(unittest.TestCase):
             (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")   # its cards
         news = (STATIC / "news.html").read_text(encoding="utf-8") + \
             (STATIC / "js" / "pages" / "news.js").read_text(encoding="utf-8")   # its cards
-        requests = (STATIC / "requests.html").read_text(encoding="utf-8")
+        requests = (STATIC / "requests.html").read_text(encoding="utf-8") + \
+            (STATIC / "js" / "pages" / "requests.js").read_text(encoding="utf-8")   # its cards
         self.assertNotIn("ws-lift", index)
         self.assertNotIn("ws-lift", news)
         self.assertEqual(len(re.findall(r'class="[^"]*\bws-lift\b', requests)), 2)   # in markup, not in comments

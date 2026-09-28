@@ -20,6 +20,7 @@ import re
 import unittest
 from unittest import mock
 
+from app.tests.test_settings_static import function_body
 from app.tests.test_shell_contract import STATIC
 
 try:
@@ -35,6 +36,8 @@ except Exception:  # pragma: no cover - the laptop has no FastAPI
     ADMIN_SESSION = {}
 
 REQUESTS = (STATIC / "requests.html").read_text(encoding="utf-8")
+# The page's script: a page module since the soft-navigation conversion (Task 12).
+REQUESTS_JS = (STATIC / "js" / "pages" / "requests.js").read_text(encoding="utf-8")
 
 # ---- G1.2: no palette colour on text or surfaces ---------------------------
 #
@@ -180,7 +183,7 @@ RAW_ALLOWED = {
     ("reader.js", "getPropertyValue('--hex-background') ||", "#000000", "the shipped default if the theme variable is missing"),
     ("reader.js", "getPropertyValue('--hex-text') ||", "#BEEEF4", "the shipped default if the theme variable is missing"),
     ("theme-loader.js", 'e.g. "#125793"', "#125793", "a comment showing the hex-to-triplet conversion"),
-    ("requests.html", "measured against the button's #125793 fill", "#125793", "a comment about measured contrast"),
+    ("requests.js", "measured against the button's #125793 fill", "#125793", "a comment about measured contrast"),
     ("pages.py", "'#125793' -> '18 87 147'", "#125793", "a docstring showing the hex-to-triplet conversion"),
 }
 
@@ -322,27 +325,45 @@ class RequestStatusCollapseMarkup(unittest.TestCase):
     def test_the_mark_hides_the_section_and_rows_lift_it(self):
         head = REQUESTS.split("</head>", 1)[0]
         self.assertIn("html[data-rs-empty] #rsSection { display: none; }", head)
-        load = re.search(r"async function load\(user\) \{(.*?)\n  \}\n", REQUESTS, re.S).group(1)
+        # The section's loader lives in the page module (pages/requests.js).
+        load = function_body(REQUESTS_JS, "load")
         rows = load.index("if (!_rows.length)")
         self.assertGreater(load.index("document.documentElement.removeAttribute('data-rs-empty');"), rows)
 
     def test_the_early_discover_markup_has_no_inline_handlers(self):
         # R151: scrollDiscoverRow is defined in the last script, so an inline
         # onclick baked in before it threw a ReferenceError on an early click.
+        # The arrows are markup now, data-actions on the page module's one
+        # click listener, which scrolls the row beside the arrow clicked.
         self.assertNotIn('onclick="scrollDiscoverRow', REQUESTS)
-        wire = re.search(r"function buildDiscoverSection\(\) \{(.*?)\n\}", REQUESTS, re.S).group(1)
-        self.assertIn("addEventListener('click', function () { scrollDiscoverRow(row.id, -1); })", wire)
-        self.assertIn("addEventListener('click', function () { scrollDiscoverRow(row.id, 1); })", wire)
+        section = REQUESTS[REQUESTS.index('<div id="discoverSection"'):REQUESTS.index('<div id="statsRow"')]
+        self.assertNotRegex(section, r"\son[a-z]+\s*=")
+        rows = len(re.findall(r'<div id="\w+" class="discover-row ', section))
+        self.assertEqual(rows, 7)
+        for d in ("-1", "1"):
+            self.assertEqual(section.count(f'data-action="discover-scroll" data-dir="{d}"'), rows, d)
+        click = REQUESTS_JS[REQUESTS_JS.index("case 'discover-scroll': {"):]
+        click = click[:click.index("break;")]
+        self.assertIn("var wrap = el.closest('.discover-row-wrapper');", click)
+        self.assertIn("scrollDiscoverRow(wrap && wrap.querySelector('.discover-row'), "
+                      "Number(el.getAttribute('data-dir')) || 1);", click)
 
     def test_discover_rows_and_skeletons_are_in_the_first_paint(self):
         # With Request Status collapsed, the discover rows lead the page; built
         # after the page scripts loaded, they pushed everything below down.
-        written = REQUESTS.index("document.getElementById('discoverSection').innerHTML = html;")
-        self.assertLess(REQUESTS.index('<div id="discoverSection"'), written)
-        self.assertLess(written, REQUESTS.index('<script src="/static/js/auth.js'))
+        # They are markup (Task 12): no script writes the section, and every
+        # row the module fills is in it with its eight skeleton cards.
+        self.assertNotIn("discoverSection", REQUESTS_JS)
+        section = REQUESTS[REQUESTS.index('<div id="discoverSection"'):REQUESTS.index('<div id="statsRow"')]
+        ids = re.findall(r"\{ id: '(\w+)',", REQUESTS_JS[REQUESTS_JS.index("const DISCOVER_ROWS = ["):])
+        self.assertEqual(len(ids), 7)
+        for rid in ids:
+            at = section.index(f'<div id="{rid}" class="discover-row ')
+            row = section[at:section.index("</div>\n    <button", at)]
+            self.assertEqual(row.count('<div class="skel shrink-0 w-28 '), 8, rid)
         # The skeleton card is the real card's box: its border, poster, badge and title lines.
-        skel = re.search(r"function buildDiscoverSkeletons\(\) \{(.*?)\n\}", REQUESTS, re.S).group(1)
-        card = re.search(r"function buildDiscoverCard\(item\) \{(.*?)\n\}", REQUESTS, re.S).group(1)
+        skel = re.search(r'<div class="skel shrink-0 w-28 [^\n]*', section).group(0)
+        card = re.search(r"function buildDiscoverCard\([^)]*\) \{(.*?)\n\}", REQUESTS_JS, re.S).group(1)
         for token in ("shrink-0 w-28 rounded-xl", "aspect-[2/3]", "p-1.5",
                       "flex items-center gap-1 min-w-0 mb-1",
                       "shrink-0 text-[8px] font-bold px-1 py-0.5 rounded",

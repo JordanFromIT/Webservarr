@@ -14,7 +14,8 @@ from app.tests.test_settings_static import function_body
 from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
-CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index", "library", "reader"]
+CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index", "library", "reader",
+             "requests", "requests-embed"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -753,6 +754,121 @@ class ReaderPage(unittest.TestCase):
         code = self.code()
         self.assertIn("ctx.setTitle(book.title);", code)
         self.assertNotIn("document.title", code)
+
+
+class RequestsPage(unittest.TestCase):
+    """Requests reads, posts and refreshes on the page's signal and poll; its
+    16 inline handlers are data-actions on one click listener and a capturing
+    error listener; the modal is inside #wsPage; the discover rows are markup
+    in the first paint; the Seerr embed signs in from mount (Task 12)."""
+
+    def code(self):
+        return js_code_only(module_source("requests"))
+
+    def test_every_request_is_on_the_pages_signal(self):
+        code = self.code()
+        fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
+        self.assertEqual(len(fetches), 8, "discover, both searches, a request, request status, "
+                                          "the counts, the summary and the recent requests")
+        for at in fetches:
+            self.assertIn("signal: signal", ",".join(call_args(code, at + len("fetch"))), code[at:at + 60])
+        self.assertNotRegex(code, r"\bgetJSON\(")
+        # A page left mid-request says nothing and writes nothing.
+        self.assertEqual(len(re.findall(r"if \(signal\.aborted \|\| isAbort\(\w+\)\) return;", code)), 7,
+                         "request status, discover, search, a request, the counts, the summary, the recent requests")
+
+    def test_timers_and_refresh_are_the_pages(self):
+        code = self.code()
+        self.assertNotRegex(code, r"(?<![.\w])setTimeout\(", "one-off timers go through ctx.setTimeout")
+        self.assertNotRegex(code, r"\bWS\.poll\(")
+        self.assertRegex(code, r"ctx\.poll\(function \(\) \{\s*loadRequestCounts\(\);\s*loadExistingRequests\(\);\s*\}, REFRESH_MS\);")
+        self.assertEqual(len(re.findall(r"\bctx\.poll\(", code)), 1)
+        # The search wait is re-armed per keystroke and cancelled through the visit.
+        self.assertIn("ctx.clearTimeout(searchTimer);", code)
+        self.assertIn("searchTimer = ctx.setTimeout(function () {", code)
+        # The scroll lock's failsafe and its listeners end with the visit.
+        self.assertIn("_scrollLockFailsafe = ctx.setTimeout(unlockScroll, SEARCH_MOVE_DURATION + 2000);", code)
+        for ev in ("wheel", "touchmove"):
+            self.assertIn(f"window.addEventListener('{ev}', swallowScroll, {{ passive: false, signal: signal }});",
+                          module_source("requests"))
+        # A move still in flight when the page is left touches nothing.
+        frame = function_body(code, "frame")
+        self.assertRegex(frame, r"^\s*if \(signal\.aborted\) \{ _searchMoveRaf = null; return; \}")
+        # The first read is the page's own (a poll on screen reads nothing at once).
+        self.assertIn("Promise.all([RS.load(), loadRequestCounts(), loadLibrarySummary(), loadExistingRequests()])", code)
+
+    def test_the_inline_handlers_are_data_actions(self):
+        h = read("requests")
+        self.assertNotRegex(h, r"\son[a-z]+\s*=")
+        src = module_source("requests")
+        for action, n in (("search-prev", 1), ("search-next", 1), ("requests-prev", 1), ("requests-next", 1),
+                          ("filter", 5), ("close-modal", 2), ("discover-scroll", 14)):
+            self.assertEqual(h.count(f'data-action="{action}"'), n, action)
+            self.assertIn(f"case '{action}':", src, action)
+        for action in ("open-media", "request-media", "request-from-modal"):
+            self.assertIn(f'data-action="{action}"', src, action)
+            self.assertIn(f"case '{action}':", src, action)
+        # A poster that fails shows its placeholder: marked data-fallback and
+        # answered by one capturing listener, never an inline handler.
+        self.assertIn('id="modalPoster" src="" alt="" class="absolute inset-0 w-full h-full object-cover" data-fallback/>', h)
+        self.assertIn("'\" data-fallback/>'", src)
+        self.assertIn("root.addEventListener('error', function (e) {", src)
+        self.assertEqual(src.count("}, { capture: true, signal: signal });"), 2)
+
+    def test_the_modal_is_inside_the_page(self):
+        h = read("requests")
+        page = h[h.index('<div id="wsPage"'):h.index("</main>")]
+        self.assertEqual(h.count('id="mediaModal"'), 1)
+        self.assertIn('id="mediaModal"', page)
+        code = self.code()
+        self.assertNotIn("document.body.appendChild", code)
+        # Lookups stay inside the page; the one exception is the shell's phone bar.
+        self.assertEqual(re.findall(r"\bdocument\.getElementById\(", code), ["document.getElementById("])
+        self.assertIn("document.getElementById('mobileTopBar')", module_source("requests"))
+
+    def test_module_state_is_data(self):
+        # Top level: constants and functions; each visit's state lives in mount.
+        src = module_source("requests")
+        self.assertNotRegex(src, r"^(?:let|var) ")
+        for name in ("_searchResults", "_allRequests", "_discoverItems", "_searchBarPosition"):
+            self.assertIn(f"  var {name} = ", src[src.index("export async function mount"):], name)
+
+    def test_the_discover_rows_scroll_with_the_visit(self):
+        src = module_source("requests")
+        self.assertIn("WS.dragScroll(el, { signal: signal });", src)
+        shell = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
+        body = function_body(shell, "dragScroll")
+        adds = re.findall(r"\bel\.addEventListener\(", body)
+        self.assertEqual(len(adds), 9)
+        self.assertEqual(len(re.findall(r"\}?, on\(\{[^)]*\}\)\);", body)), 9, "every row listener takes the signal")
+        self.assertIn("if (signal) o.signal = signal;", body)
+
+    def test_the_status_section_follows_the_server_flag(self):
+        # html[data-rs-empty] is the server's (pages.py), copied onto <html> on
+        # every swap (router syncHtmlFlags); the page only ever lifts it.
+        load = function_body(module_source("requests"), "load")
+        self.assertIn("document.documentElement.removeAttribute('data-rs-empty');", load)
+        self.assertNotIn("setAttribute", load)
+
+    def test_the_embed_signs_in_from_mount_once_on_screen(self):
+        h = read("requests-embed")
+        page = h[h.index('<div id="wsPage"'):h.index("</main>")]
+        self.assertIn('id="iframeContainer"', page)
+        src = module_source("requests-embed")
+        code = js_code_only(src)
+        mount = code[code.index("export async function mount"):]
+        # Nothing at load: the module only defines.
+        self.assertEqual(re.findall(r"^\S.*$", code[:code.index("export async function mount")], re.M),
+                         ["function isAbort(e) { return !!e && e.name === '          '; }"])
+        self.assertIn("await new Promise(function (resolve) { WS.whenActive(resolve); });", mount)
+        self.assertIn("await fetch('/api/integrations/seerr-auth', { method: 'POST', signal: signal });", src)
+        self.assertIn("await fetch('/api/integrations/seerr-url', { signal: signal });", src)
+        self.assertLess(src.index("WS.whenActive(resolve)"), src.index("/api/integrations/seerr-auth"))
+        self.assertEqual(code.count("if (signal.aborted || isAbort(e)) return;"), 2)
+        self.assertIn("container.appendChild(iframe);", src)
+        self.assertNotIn("document.body", code)
+        # The shell's scripts are all on the page, as on every other page.
+        self.assertIn('<script src="/static/js/notifications.js?v=3"></script>', h)
 
 
 class FixRound11(unittest.TestCase):

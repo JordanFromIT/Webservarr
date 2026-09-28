@@ -6,6 +6,10 @@ the poster's data-media-id, so a book or audiobook requested from the Trending
 Books or Trending Audiobooks modal posted bookId "NaN" and failed. The modal now
 passes the attribute through unchanged, as the search cards do, and the Seerr
 route turns a film or show's "550" into the number it expects.
+
+The page's script is the page module pages/requests.js (soft navigation, Task
+12); the modal's button reaches requestFromModal through the page's click
+listener (data-action), not an inline onclick.
 """
 import re
 import unittest
@@ -19,7 +23,7 @@ try:
 except Exception:  # pragma: no cover - the laptop has no FastAPI
     HAVE_APP = False
 
-REQUESTS = (STATIC / "requests.html").read_text(encoding="utf-8")
+REQUESTS = (STATIC / "js" / "pages" / "requests.js").read_text(encoding="utf-8")
 
 
 def body_of(src: str, fn: str) -> str:
@@ -41,6 +45,14 @@ class ModalRequestPassesTheIdThrough(unittest.TestCase):
             self.modal, r"\bmediaId\s*=\s*buttonEl\.getAttribute\(\s*'data-media-id'\s*\)\s*;"))
         self.assertTrue(live_matches(
             self.modal, r"\brequestMedia\(\s*mediaType\s*,\s*mediaId\s*,\s*false\s*,\s*buttonEl\s*\)"))
+
+    def test_the_modal_button_reaches_request_from_modal(self):
+        # Built with the id in data-media-id and handed, as itself, to
+        # requestFromModal by the page's one click listener.
+        open_modal = body_of(REQUESTS, "openMediaModal")
+        self.assertIn('''<button type="button" id="modalRequestBtn" data-action="request-from-modal" ''', open_modal)
+        self.assertIn('''data-media-id="' + escapeHtml(String(item.id)) + '" ''', open_modal)
+        self.assertTrue(live_matches(REQUESTS, r"case 'request-from-modal': requestFromModal\(el\); break;"))
 
     def test_request_media_sends_book_ids_as_strings(self):
         media = body_of(REQUESTS, "requestMedia")

@@ -20,7 +20,10 @@ try:
 except Exception:  # pragma: no cover - the laptop has no FastAPI
     HAVE_APP = False
 
-REQUESTS = (STATIC / "requests.html").read_text(encoding="utf-8")
+# The page's script is the page module since soft navigation (Task 12); the
+# discover rows' skeleton cards are markup in the page.
+REQUESTS = (STATIC / "js" / "pages" / "requests.js").read_text(encoding="utf-8")
+REQUESTS_HTML = (STATIC / "requests.html").read_text(encoding="utf-8")
 
 
 def body_of(src: str, fn: str) -> str:
@@ -70,7 +73,7 @@ class DiscoverCardStatusLabel(unittest.TestCase):
         # R183: "Partly Available" beside "TV Show" always truncated. The card
         # shows "Partial"; the title keeps the shared label, and the shared
         # vocabulary (Home, the search block, the modal) is untouched.
-        self.assertRegex(REQUESTS, r"var DISCOVER_SHORT_LABELS = \{ partially_available: 'Partial' \};")
+        self.assertRegex(REQUESTS, r"const DISCOVER_SHORT_LABELS = \{ partially_available: 'Partial' \};")
         self.assertTrue(live_matches(
             self.label, r"\bshown\s*=\s*DISCOVER_SHORT_LABELS\[status\]\s*\|\|\s*known\.label\b"))
         self.assertRegex(self.label, r"title=\"' \+ escapeHtml\(known\.label\) \+")
@@ -80,7 +83,7 @@ class DiscoverCardStatusLabel(unittest.TestCase):
         self.assertNotIn("Partial'", shell)
 
     def test_the_skeleton_card_carries_the_same_row(self):
-        skel = body_of(REQUESTS, "buildDiscoverSkeletons")
+        skel = re.search(r'<div class="skel shrink-0 w-28 [^\n]*', REQUESTS_HTML).group(0)
         for token in ("flex items-center gap-1 min-w-0 mb-1",
                       "shrink-0 text-[8px] font-bold px-1 py-0.5 rounded",
                       "text-[11px] font-medium leading-tight truncate"):
