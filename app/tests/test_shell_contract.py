@@ -273,14 +273,18 @@ class ShellContract(unittest.TestCase):
 
     def test_notification_fetches_send_a_signed_out_user_to_login(self):
         # A session that ends while the page is open must not read as an
-        # empty inbox: both reads leave for /login on a 401.
+        # empty inbox: both reads leave for /login on a 401, through the
+        # router when there is one (signIn, WS.leaveTo).
         src = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
         for fn in ("fetchUnreadCount", "fetchNotifications"):
             m = re.search(rf"\bfunction {fn}\(\)\s*\{{", src)
             self.assertIsNotNone(m, fn)
             body = src[m.end():matching_brace(src, m.end() - 1)]
-            self.assertTrue(live_matches(body, r"\.status\s*===\s*401\b"), fn)
-            self.assertTrue(live_matches(body, r"""window\.location\.href\s*=\s*['"]/login['"]"""), fn)
+            self.assertTrue(live_matches(body, r"\.status\s*===\s*401\)\s*\{\s*signIn\(\);"), fn)
+        m = re.search(r"\bfunction signIn\(\)\s*\{", src)
+        body = src[m.end():matching_brace(src, m.end() - 1)]
+        self.assertTrue(live_matches(body, r"""WS\.leaveTo\(['"]/login['"]\)"""))
+        self.assertTrue(live_matches(body, r"""else window\.location\.href\s*=\s*['"]/login['"]"""))
 
     def test_preferences_modal_offers_every_server_category(self):
         # A category the server sends but the modal has no toggle for can

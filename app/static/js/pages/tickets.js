@@ -165,7 +165,14 @@ export async function mount(ctx) {
     if (_stopRefresh) { _stopRefresh(); _stopRefresh = null; }
     sendBtn = sendBtn || draftSendButton();
     if (sendBtn) { showOffNotice(sendBtn); return; }
-    window.location.replace('/');
+    goHome();
+  }
+
+  // Home, in place of this entry, as the server's page gate would send them:
+  // a soft navigation, so whatever plays in #wsPlayer plays on.
+  function goHome() {
+    if (window.WS && WS.router && typeof WS.router.navigate === 'function') WS.router.navigate('/', { replace: true });
+    else window.location.replace('/');
   }
 
   // The send button of an open compose surface holding typed text, or null.
@@ -348,7 +355,7 @@ export async function mount(ctx) {
 
   function closeCreateModal() {
     $('createModal').classList.add('hidden');
-    if (_ticketsOff) window.location.replace('/');
+    if (_ticketsOff) goHome();
   }
 
   function submitNewTicket() {
@@ -428,7 +435,7 @@ export async function mount(ctx) {
 
   function closeDetailModal() {
     $('detailModal').classList.add('hidden');
-    if (_ticketsOff) window.location.replace('/');
+    if (_ticketsOff) goHome();
   }
 
   function renderDetailContent(ticket, comments) {

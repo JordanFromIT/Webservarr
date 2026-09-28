@@ -30,6 +30,7 @@
  *   WS.mediaType(type)            { label, icon, accent } for movie/tv/book/audiobook
  *   WS.requestStatus(status)      { label, tone } for a Seerr-style request status
  *   WS.closeChrome()              close the drawer and every open header menu (before a page swap)
+ *   WS.leaveTo(url)               a full navigation the page starts, through the router
  *   WS.router                     the soft navigation router, once router.js has loaded
  *                                 (a module, from the sidebar partial); null before and
  *                                 on a page without the shell
@@ -229,11 +230,20 @@
      loader wants from swr's fetcher. opts.signal (optional): a soft-navigated
      page's AbortSignal; leaving the page aborts the request, and the promise
      rejects with the fetch's own AbortError, which a page treats as silent. */
+  /* A full navigation the page starts itself (a session that ended, a
+     member sent home): through the router when it is there, so
+     ws:before-hard-nav runs first (a player saving its position). */
+  function leaveTo(url) {
+    var WS = window.WS || {};
+    if (WS.router && typeof WS.router.hardNavigate === 'function') WS.router.hardNavigate(url);
+    else window.location.href = url;
+  }
+
   function getJSON(url, opts) {
     var signal = opts && opts.signal ? opts.signal : undefined;
     return fetch(url, signal ? { signal: signal } : undefined).then(function (r) {
       // A page can outlive its session; the first API answer says so.
-      if (r.status === 401) { window.location.href = '/login'; throw new Error('HTTP 401'); }
+      if (r.status === 401) { leaveTo('/login'); throw new Error('HTTP 401'); }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     });
@@ -760,6 +770,7 @@
     mediaType: mediaType,
     requestStatus: requestStatus,
     closeChrome: closeChrome,
+    leaveTo: leaveTo,
     router: null
   };
 

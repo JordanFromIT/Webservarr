@@ -1085,6 +1085,41 @@ class NotificationsGoThroughTheRouter(unittest.TestCase):
         self.assertLess(click.index("client.navigate(targetUrl)"), click.index("openWindow(targetUrl)"))
 
 
+class PageStartedFullNavigations(unittest.TestCase):
+    """A full navigation a page or the shell starts itself (a session that
+    ended, a member sent home) goes through the router, so
+    ws:before-hard-nav runs first and sub-project 2 has one place to save a
+    position (final review M6). Only the fallback for a document without the
+    router assigns location itself."""
+
+    FILES = ["js/shell.js", "js/auth.js", "js/notifications.js", "js/news-editor.js"] + \
+        sorted(str(p.relative_to(STATIC)) for p in (STATIC / "js" / "pages").glob("*.js"))
+    _ASSIGN_RE = re.compile(r"\blocation\.(?:href\s*=(?!=)|replace\(|assign\()")
+
+    def test_every_full_navigation_asks_the_router_first(self):
+        for name in self.FILES:
+            code = js_code_only((STATIC / name).read_text(encoding="utf-8"))
+            with self.subTest(name):
+                for line in code.splitlines():
+                    if not self._ASSIGN_RE.search(line):
+                        continue
+                    self.assertTrue(line.strip().startswith("else "), f"{name}: {line.strip()}")
+
+    def test_the_shell_offers_one_way_out(self):
+        shell = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
+        body = function_body(shell, "leaveTo")
+        self.assertRegex(body, r"if \(WS\.router && typeof WS\.router\.hardNavigate === '        '\) WS\.router\.hardNavigate\(url\);\s*"
+                               r"else window\.location\.href = url;")
+        self.assertIn("leaveTo: leaveTo,", shell)
+
+    def test_tickets_turned_off_goes_home_softly(self):
+        src = module_source("tickets")
+        self.assertNotIn("location.replace('/')", js_code_only(src))
+        self.assertEqual(src.count("goHome();"), 3)
+        self.assertRegex(function_body(js_code_only(src), "goHome"),
+                         r"WS\.router\.navigate\('\s', \{ replace: true \}\);\s*else window\.location\.replace\('\s'\);")
+
+
 class SharedShellScripts(unittest.TestCase):
     """ui.js (the toast and dialog) loads once, from the shell, on every shell
     page; the router closes dialogs before a swap; WS.getJSON takes the page's

@@ -221,7 +221,7 @@ export async function mount(ctx) {
   function write(btn, url, init, okText, errText) {
     btn.disabled = true;
     fetch(url, Object.assign({}, init, { signal: signal })).then(function (r) {
-      if (r.status === 401) { window.location.href = '/login'; return; }
+      if (r.status === 401) { WS.leaveTo('/login'); return; }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       WSUI.toast(okText, 'ok');
       newsChanged();

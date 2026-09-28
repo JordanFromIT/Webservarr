@@ -315,7 +315,7 @@ var NewsEditor = (function () {
         method: s.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         signal: sig
       }).then(function (r) {
-        if (r.status === 401) { window.location.href = '/login'; return; }
+        if (r.status === 401) { WS.leaveTo('/login'); return; }
         if (!r.ok) throw new Error('HTTP ' + r.status);
         UI.toast(published ? 'Published. It’s live on the site.' : 'Draft saved. Only admins can see it.', 'ok');
         // Not close(): this is the save finishing, not a dismissal, so an Edit

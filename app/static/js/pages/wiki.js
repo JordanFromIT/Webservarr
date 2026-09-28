@@ -201,7 +201,7 @@ export async function mount(ctx) {
 
   async function api(path, vs) {
     var res = await fetch(path, { signal: vs });
-    if (res.status === 401) { window.location.href = '/login'; throw new Error('unauthenticated'); }
+    if (res.status === 401) { WS.leaveTo('/login'); throw new Error('unauthenticated'); }
     if (!res.ok) { var e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
     return res.json();
   }

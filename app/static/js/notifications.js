@@ -165,10 +165,15 @@
 
   // A 401 means the session ended while the page stayed open: go to sign-in
   // rather than showing an empty list. Any other failure stays silent.
+  function signIn() {
+    if (window.WS && typeof WS.leaveTo === 'function') WS.leaveTo('/login');
+    else window.location.href = '/login';
+  }
+
   function fetchUnreadCount() {
     return fetch('/api/notifications/unread-count')
       .then(function(r) {
-        if (r.status === 401) { window.location.href = '/login'; return { count: 0 }; }
+        if (r.status === 401) { signIn(); return { count: 0 }; }
         return r.ok ? r.json() : { count: 0 };
       })
       .then(function(data) { return data.count || 0; })
@@ -179,7 +184,7 @@
   function fetchNotifications() {
     return fetch('/api/notifications?limit=20')
       .then(function(r) {
-        if (r.status === 401) { window.location.href = '/login'; return null; }
+        if (r.status === 401) { signIn(); return null; }
         return r.ok ? r.json() : { notifications: [] };
       })
       .then(function(data) { return data ? (data.notifications || []) : null; })

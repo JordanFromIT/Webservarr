@@ -14,10 +14,15 @@
  */
 async function checkAuth(options) {
   options = options || {};
+  // Through the router when the shell has one (shell.js WS.leaveTo).
+  function leave(url) {
+    if (window.WS && typeof window.WS.leaveTo === 'function') window.WS.leaveTo(url);
+    else window.location.href = url;
+  }
   var stamped = window.WS_DATA && window.WS_DATA.user;
   if (stamped) {
     if (options.requireAdmin && !stamped.is_admin) {
-      window.location.href = '/';
+      leave('/');
       return null;
     }
     return stamped;
@@ -26,16 +31,16 @@ async function checkAuth(options) {
     var resp = await fetch('/auth/check-session');
     var data = await resp.json();
     if (!data.authenticated) {
-      window.location.href = '/login';
+      leave('/login');
       return null;
     }
     if (options.requireAdmin && !data.user.is_admin) {
-      window.location.href = '/';
+      leave('/');
       return null;
     }
     return data.user;
   } catch (e) {
-    window.location.href = '/login';
+    leave('/login');
     return null;
   }
 }
@@ -48,7 +53,9 @@ function wireLogout() {
   var btns = document.querySelectorAll('#logoutBtn, [data-logout]');
   btns.forEach(function (btn) {
     btn.addEventListener('click', function () {
-      window.location.href = '/auth/logout';
+      var router = window.WS && window.WS.router;
+      if (router && typeof router.hardNavigate === 'function') router.hardNavigate('/auth/logout');
+      else window.location.href = '/auth/logout';
     });
   });
 }
