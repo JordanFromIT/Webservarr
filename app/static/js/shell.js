@@ -106,10 +106,13 @@
     function tick() { if (!document.hidden) fn(); }
     function stop() { stopped = true; if (timer) clearInterval(timer); timer = null; }
     if (signal && signal.aborted) return stop;
+    var prerendered = !!document.prerendering;
     whenActive(function () {
       if (stopped) return;
       // Prerendered a while ago: the data is stale the moment it is seen.
-      if (performance.now() - initAt > 10000) fn();
+      // A poll started on a page already on screen (a soft-navigated page's
+      // mount, long after this document loaded) has just read its own data.
+      if (prerendered && performance.now() - initAt > 10000) fn();
       timer = setInterval(tick, ms);
     });
     document.addEventListener('visibilitychange', function () {

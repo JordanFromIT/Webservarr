@@ -172,6 +172,17 @@ class CalendarPage(unittest.TestCase):
         self.assertIn("ctx.poll(fetchAndRender, REFRESH_MS);", code)
         self.assertNotRegex(code, r"\bWS\.poll\(")
 
+    def test_a_poll_started_on_screen_reads_nothing_at_once(self):
+        # WS.poll's catch-up read is for a prerendered page shown late. A
+        # soft-navigated page mounts long after the document loaded and has
+        # just read its data: an extra read there doubles every visit's fetch.
+        body = function_body(js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8")), "poll")
+        self.assertIn("var prerendered = !!document.prerendering;", body)
+        self.assertLess(body.index("var prerendered"), body.index("whenActive("))
+        self.assertIn("if (prerendered && performance.now() - initAt > 10000) fn();", body)
+        self.assertEqual(len(re.findall(r"\bfn\(\);", body)), 4,
+                         "the tick, the catch-up read, the tab's return and a back/forward-cache restore")
+
 
 class PageOffBanner(unittest.TestCase):
     """"This page is turned off" (pages.py PAGE_OFF_BANNER) is appended to the
