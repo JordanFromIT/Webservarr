@@ -201,7 +201,9 @@ export async function mount(ctx) {
   function postTicketForm(url, formData, sendBtn) {
     return fetch(url, { method: 'POST', body: formData, signal: signal }).then(function (r) {
       if (r.ok) return r.json();
-      return r.json().then(function (d) {
+      // An error page that is not JSON (a proxy's 413, say) still rejects
+      // with a message, not a parse error.
+      return r.json().catch(function () { return {}; }).then(function (d) {
         if (!_isAdmin && r.status === 403 && d.detail === TICKETS_OFF_DETAIL) {
           ticketsTurnedOff(sendBtn);
           throw TICKETS_OFF;
@@ -525,13 +527,20 @@ export async function mount(ctx) {
           }),
           signal: signal,
         })
-          .then(function(r) { return r.json(); })
+          // Only a 2xx is success: a ticket deleted meanwhile answers 404
+          // {"detail": "Ticket not found"}, and that detail is what shows.
+          .then(function (r) {
+            if (r.ok) return r.json();
+            return r.json().catch(function () { return {}; }).then(function (b) {
+              var e = new Error(b.detail || 'Failed to update'); e.server = true; throw e;
+            });
+          })
           .then(function() {
             showToast('Ticket updated', 'success');
             loadTickets();
             loadCounts();
           })
-          .catch(function(err) { if (!isAbort(err)) showToast('Failed to update', 'error'); });
+          .catch(function(err) { if (!isAbort(err)) showToast(err.server ? err.message : 'Failed to update', 'error'); });
       }, { signal: signal });
 
       // Delete button

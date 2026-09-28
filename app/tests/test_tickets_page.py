@@ -225,5 +225,42 @@ class AdminDelete(unittest.TestCase):
         self.assertIn(".catch(function(err) { if (!isAbort(err)) showToast(err.server ? err.message : 'Failed to delete', 'error'); });", d)
 
 
+class AdminSaveAndEveryFetch(unittest.TestCase):
+    """The admin's Save parsed the answer without looking at its status, so a
+    404 {"detail": "Ticket not found"} ran the success path and said "Ticket
+    updated". Every fetch on the page now checks r.ok before it treats an
+    answer as success, and a failure's body is read defensively (a proxy's
+    HTML error page is not JSON) so the server's detail, when there is one,
+    is what the toast says."""
+
+    def test_save_checks_the_status_first(self):
+        d = listener(page(), "saveBtn.addEventListener('click', function() {")
+        self.assertRegex(d, r"\.then\(function \(r\) \{\s*if \(r\.ok\) return r\.json\(\);")
+        self.assertIn("var e = new Error(b.detail || 'Failed to update'); e.server = true; throw e;", d)
+        ok = d[d.index("if (r.ok) return r.json();"):]
+        ok = ok[ok.index("})\n          .then(function() {"):ok.index(".catch(function(err)")]
+        self.assertIn("showToast('Ticket updated', 'success');", ok)
+        self.assertIn(".catch(function(err) { if (!isAbort(err)) showToast(err.server ? err.message : 'Failed to update', 'error'); });", d)
+
+    def test_every_fetch_checks_r_ok_before_parsing(self):
+        # The page's own fetches: both forms' POST, the admin's save and
+        # delete. (The reads go through WS.getJSON, which rejects on a
+        # non-2xx itself.)
+        code = code_of(page())
+        at = [m.end() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
+        self.assertEqual(len(at), 3)
+        for i in at:
+            first = re.compile(r"\.then\(function\s*\(r\)\s*\{").search(code, i)
+            self.assertIsNotNone(first)
+            self.assertRegex(code[first.end():first.end() + 40], r"^\s*if \(r\.ok\) return\b", code[i - 6:i + 60])
+        self.assertIn("WS.getJSON(url, { signal: signal })", code)
+
+    def test_a_failure_body_that_is_not_json_still_gives_a_message(self):
+        src = page()
+        self.assertEqual(src.count("r.json().catch(function () { return {}; })"), 3)
+        b = src[src.index("function postTicketForm("):src.index("function loadTickets(")]
+        self.assertIn("return r.json().catch(function () { return {}; }).then(function (d) {", b)
+
+
 if __name__ == "__main__":
     unittest.main()
