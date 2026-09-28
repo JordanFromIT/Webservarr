@@ -616,8 +616,8 @@ class LoginDrift(unittest.TestCase):
         glass = css_rule(LOGIN, ".login-glass-card")
         self.assertIn("rgb(var(--color-secondary) / 0.10)", glass)
         self.assertIn("backdrop-filter: blur(4px)", glass)
-        self.assertIn("#loginForm { visibility: hidden; }", LOGIN)
-        self.assertIn("#loginForm.auth-ready { visibility: visible; }", LOGIN)
+        self.assertIn("#loginForm { visibility: hidden; animation: login-fallback-show 0s linear 2.5s forwards; }", LOGIN)
+        self.assertIn("#loginForm.auth-ready { visibility: visible; animation: none; }", LOGIN)
 
 
 if __name__ == "__main__":

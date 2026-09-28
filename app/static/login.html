@@ -107,8 +107,22 @@
     /* Prevent flash of the wrong auth method on load: keep the login form
        invisible (space reserved, so no layout shift) until JS has applied the
        configured auth methods, then reveal via .auth-ready. */
-    #loginForm { visibility: hidden; }
-    #loginForm.auth-ready { visibility: visible; }
+    #loginForm { visibility: hidden; animation: login-fallback-show 0s linear 2.5s forwards; }
+    #loginForm.auth-ready { visibility: visible; animation: none; }
+    /* If login.js never runs (a failed load, a bad deploy), nothing adds
+       .auth-ready and the form would stay hidden for good. So the form shows
+       itself after 2.5 s anyway, and so does a hint to reload. The normal
+       path cancels both: .auth-ready stops the form's animation, and the
+       hint goes the moment login.js runs (<html data-login-js>, its first
+       line) or the form is ready. The hint takes no space until it shows.
+       These are 0 s steps, not motion, so reduced motion keeps them. The
+       form posts (method="post"): without script a submit puts nothing in
+       the address bar. */
+    #loginLoadHint { visibility: hidden; height: 0; overflow: hidden; animation: login-fallback-hint 0s linear 2.5s forwards; }
+    #loginForm.auth-ready ~ #loginLoadHint,
+    html[data-login-js] #loginLoadHint { display: none; }
+    @keyframes login-fallback-show { to { visibility: visible; } }
+    @keyframes login-fallback-hint { to { visibility: visible; height: auto; margin-top: 0.75rem; } }
 </style>
 </head>
 <body class="bg-background-dark font-display min-h-screen relative flex flex-col overflow-y-auto">
@@ -133,7 +147,7 @@
 <h1 id="loginAppName" class="text-frosted-blue text-2xl font-bold mt-4 tracking-tight text-center">WebServarr</h1>
 </div>
 <!-- Login Form -->
-<form id="loginForm" class="w-full space-y-5">
+<form id="loginForm" method="post" class="w-full space-y-5">
 <div class="flex flex-col gap-1.5">
 <label class="text-frosted-blue text-sm font-medium px-1">Username</label>
 <div class="relative group">
@@ -173,6 +187,8 @@
 <span class="text-[10px] font-medium opacity-70">via Authentik</span>
 </button>
 </form>
+<!-- Shown by CSS alone, only when login.js never ran (see #loginLoadHint above). -->
+<p id="loginLoadHint" class="w-full text-status-err-text text-sm text-center" role="status">Sign-in didn’t load. Reload the page.</p>
 </div>
 <script src="/static/js/login.js?v=1"></script>
 </main>

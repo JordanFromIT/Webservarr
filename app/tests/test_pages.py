@@ -576,8 +576,8 @@ class ShellRendering(unittest.TestCase):
         scripts = static_text("js", "login.js")   # the page's script, a file (script-src 'self')
         self.assertNotIn("loginAppName", scripts)
         flat = re.sub(r"\s+", " ", page)
-        self.assertIn("#loginForm { visibility: hidden; }", flat)
-        self.assertIn("#loginForm.auth-ready { visibility: visible; }", flat)
+        self.assertIn("#loginForm { visibility: hidden; animation: login-fallback-show 0s linear 2.5s forwards; }", flat)
+        self.assertIn("#loginForm.auth-ready { visibility: visible; animation: none; }", flat)
         flat_js = re.sub(r"\s+", " ", scripts)
         self.assertIn("if (f) f.classList.add('auth-ready');", flat_js)                  # failsafe
         self.assertIn("if (revealForm) revealForm.classList.add('auth-ready');", flat_js)

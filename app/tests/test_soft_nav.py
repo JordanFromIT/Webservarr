@@ -1385,6 +1385,49 @@ class WholeSite(unittest.TestCase):
         cb = js_code_only((STATIC / "js" / "plex-callback.js").read_text(encoding="utf-8"))
         self.assertIn("window.location.origin", cb)
 
+    def test_the_form_shows_itself_when_the_script_never_runs(self):
+        # login.js is a file now: if it fails to load, nothing adds
+        # .auth-ready. The form then shows itself after 2.5 s by CSS alone,
+        # with a hint to reload; the normal path (.auth-ready, or login.js
+        # having run) cancels both, so nothing changes when the script loads.
+        from app.tests.test_motion import css_rule, keyframe_properties, reduced_blocks
+        login = read("login")
+        head = login.split("</head>", 1)[0]
+        form = css_rule(head, "#loginForm")
+        self.assertIn("visibility: hidden", form)
+        self.assertIn("animation: login-fallback-show 0s linear 2.5s forwards", form)
+        self.assertEqual(keyframe_properties(head, "login-fallback-show"), {"visibility"})
+        ready = css_rule(head, "#loginForm.auth-ready")
+        self.assertIn("visibility: visible", ready)
+        self.assertIn("animation: none", ready)
+        hint = re.search(r"^\s*#loginLoadHint \{([^{}]*)\}", head, re.M).group(1)
+        for decl in ("visibility: hidden", "height: 0", "overflow: hidden",
+                     "animation: login-fallback-hint 0s linear 2.5s forwards"):
+            self.assertIn(decl, hint)
+        self.assertEqual(keyframe_properties(head, "login-fallback-hint"), {"visibility", "height", "margin-top"})
+        gone = css_rule(head, "#loginForm.auth-ready ~ #loginLoadHint,\n    html[data-login-js] #loginLoadHint")
+        self.assertIn("display: none", gone)
+        # A 0 s step, not motion: no reduced-motion block takes it away.
+        for block in reduced_blocks(head):
+            self.assertNotIn("login-fallback", block)
+            self.assertNotIn("#loginForm", block)
+            self.assertNotIn("#loginLoadHint", block)
+        # The hint is static markup, a later sibling of the form (the ~ rule).
+        m = re.search(r'<p id="loginLoadHint"[^>]*>([^<]*)</p>', login)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), "Sign-in didn’t load. Reload the page.")
+        self.assertLess(login.index("</form>"), m.start())
+        self.assertLess(m.start(), login.index('<script src="/static/js/login.js'))
+        # Without script the fields must never land in the address bar.
+        self.assertRegex(login, r'<form id="loginForm" method="post"')
+        # login.js marks the page first thing, before anything that can throw.
+        js = js_code_only((STATIC / "js" / "login.js").read_text(encoding="utf-8"))
+        first = re.search(r"\S.*", js).group(0)
+        blank = " " * len("data-login-js")
+        self.assertEqual(first, f"document.documentElement.setAttribute('{blank}', '');")
+        self.assertIn("document.documentElement.setAttribute('data-login-js', '');",
+                      (STATIC / "js" / "login.js").read_text(encoding="utf-8"))
+
     def test_old_navigation_removed(self):
         # The router's own hover prefetch replaces the sidebar's speculation
         # rules and the service worker's page cache (spec 5.4).

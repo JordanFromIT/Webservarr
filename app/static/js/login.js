@@ -8,6 +8,10 @@
  * is script-src 'self'.
  */
 
+// First, before anything that could throw: this script ran. The page's CSS
+// shows a "Sign-in didn't load" hint after 2.5 s unless it did (login.html).
+document.documentElement.setAttribute('data-login-js', '');
+
 // The logo and the sign-in methods are known before the first paint: the
 // branding is already in window.WEBSERVARR_THEME (theme-loader reads it from
 // the page). Setting them here, as soon as the card is parsed, means the
