@@ -353,17 +353,20 @@ def _close(a: int, b: int) -> bool:
 _DISC_NUMBER = re.compile(r"(?<![a-z])(?:cd|disc|disk|part)[\s._-]*([0-9]+)(?![0-9])", re.IGNORECASE)
 
 
+def _disc_parts(folder: str) -> tuple:
+    """(the folder's last name with each disc, CD or part number replaced by
+    "#", casefolded; those numbers as ints)."""
+    name = folder.rsplit("/", 1)[-1]
+    return _DISC_NUMBER.sub("#", name).casefold(), tuple(int(n) for n in _DISC_NUMBER.findall(name))
+
+
 def _disc_siblings(a: str, b: str) -> bool:
     """True when two folder names differ only by a disc, CD or part number
     ("CD1"/"CD2", "Disc 1"/"Disc 2", "Title - CD3"/"Title - CD4"): the discs
     of one rip, never copies of each other, however alike their lengths
     (audio CDs all run 70-79 minutes, and a rip cut into fixed-length tracks
     matches track for track)."""
-    def split(name):
-        name = name.rsplit("/", 1)[-1]
-        numbers = tuple(int(n) for n in _DISC_NUMBER.findall(name))
-        return _DISC_NUMBER.sub("#", name).casefold(), numbers
-    (rest_a, nums_a), (rest_b, nums_b) = split(a), split(b)
+    (rest_a, nums_a), (rest_b, nums_b) = _disc_parts(a), _disc_parts(b)
     return bool(nums_a) and rest_a == rest_b and nums_a != nums_b
 
 
@@ -395,10 +398,13 @@ def _pick_copy(tracks: list) -> list:
     each restart at track 1 repeats numbers too, so folders only count as
     copies when _same_book says so; one of each set of copies is kept (a
     copy whose track numbers do not repeat, then the longest, then the
-    earliest added). Folders whose names differ only by a disc, CD or part
-    number are never copies (_disc_siblings). Every other folder stays, in
-    natural folder order (CD2 before CD10), then by track number. Without a repeated number every track
-    is kept in track order."""
+    earliest added). A folder whose name differs from another folder's only
+    by a disc, CD or part number (_disc_siblings) belongs to a CD set: it is
+    always kept and never counted as a copy of anything, even though a
+    whole-book copy beside a CD set then plays twice. Kept folders play in
+    order: a CD set by its disc numbers (CD1, Disc2, CD3), other folders in
+    natural order (CD2 before CD10), then by track number. Without a
+    repeated number every track is kept in track order."""
     def order(t):
         return (_int(t.get("index")), _int(t.get("ratingKey")))
 
@@ -418,18 +424,30 @@ def _pick_copy(tracks: list) -> list:
         return (len(set(numbers)) == len(numbers), sum(_track_duration(t) for t in group),
                 -min(_int(t.get("ratingKey")) for t in group))
 
-    # Sets of folders that are copies of each other; one of each set is kept.
+    # A folder with a disc sibling on this disc is part of a CD set: it is
+    # always kept and never joins a set of copies, so no third folder can
+    # stand in for it. The rest are grouped into sets of copies, of which one
+    # each is kept.
     names = sorted(folders, key=_natural)
+    in_sequence = [n for n in names if any(_disc_siblings(n, o) for o in names if o != n)]
     sets = []
-    for name in names:
-        home = next((c for c in sets
-                     if not any(_disc_siblings(name, o) for o in c)
-                     and any(_same_book(folders[name], folders[o]) for o in c)), None)
+    for name in (n for n in names if n not in in_sequence):
+        home = next((c for c in sets if any(_same_book(folders[name], folders[o]) for o in c)), None)
         if home is None:
             sets.append([name])
         else:
             home.append(name)
-    kept = sorted((max(c, key=rank) for c in sets), key=_natural)
+
+    def folder_order(name):
+        # A CD set plays by its disc numbers whatever the keyword (CD1,
+        # Disc2, CD3); any other folder in natural order.
+        if name in in_sequence:
+            parent = name.rsplit("/", 1)[0] if "/" in name else ""
+            rest, numbers = _disc_parts(name)
+            return _natural(f"{parent}/{rest}"), numbers
+        return _natural(name), ()
+
+    kept = sorted(in_sequence + [max(c, key=rank) for c in sets], key=folder_order)
     return [t for name in kept for t in sorted(folders[name], key=order)]
 
 

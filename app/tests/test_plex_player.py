@@ -582,6 +582,25 @@ class Copies(unittest.TestCase):
         cd += [disc_track(20 + i, i, 600_000, "Rip/Book Title (1)") for i in (1, 2, 3)]
         self.assertEqual(len(self.keys(cd)), 3)
 
+    def test_a_cd_set_is_never_absorbed_through_a_third_folder(self):
+        # CD1 totals 4,000,000 ms and "Extra" is one file of 4,000,050 ms:
+        # CD1 must not be dropped as a copy of Extra (or Extra of CD1).
+        tracks = [disc_track(1, 1, 2_000_000, "Rip/CD1"), disc_track(2, 2, 2_000_000, "Rip/CD1"),
+                  disc_track(3, 1, 1_900_000, "Rip/CD2"), disc_track(4, 2, 1_800_000, "Rip/CD2"),
+                  disc_track(999, 1, 4_000_050, "Rip/Extra")]
+        self.assertEqual(self.keys(tracks), ["1", "2", "3", "4", "999"])
+
+    def test_a_mixed_keyword_cd_set_plays_by_disc_number(self):
+        tracks = [disc_track(5, 1, 60_000, "Rip/CD3"), disc_track(6, 2, 61_000, "Rip/CD3"),
+                  disc_track(3, 1, 62_000, "Rip/Disc2"), disc_track(4, 2, 63_000, "Rip/Disc2"),
+                  disc_track(1, 1, 64_000, "Rip/CD1"), disc_track(2, 2, 65_000, "Rip/CD1")]
+        self.assertEqual(self.keys(tracks), ["1", "2", "3", "4", "5", "6"])
+
+    def test_copies_beside_a_cd_set_still_dedupe_among_themselves(self):
+        tracks = [disc_track(1, 1, 100_000, "Rip/CD1"), disc_track(2, 1, 100_000, "Rip/CD2"),
+                  disc_track(3, 1, 500_000, "Rip/Whole"), disc_track(4, 1, 500_500, "Rip/Whole (1)")]
+        self.assertEqual(self.keys(tracks), ["1", "2", "4"])
+
     def test_disc_sibling_names(self):
         for a, b in (("CD1", "CD2"), ("Disc 1", "Disc 2"), ("CD 01", "CD 02"), ("Part 1", "Part 2"),
                      ("Book Title - CD3", "Book Title - CD4"), ("book title - cd9", "Book Title - CD10"),
