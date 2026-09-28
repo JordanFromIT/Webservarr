@@ -18,6 +18,10 @@
  *   WS.debug.tone                         the 440 Hz test tone in #wsPlayer
  *
  * How an item is tied to a page (the leak checker's one judgement), in order:
+ *   0. made by ui.js itself (the innermost of the site's frames is ui.js: a
+ *      toast's dismiss timers, a dialog's listeners) it is the shell's, even
+ *      when a page asked for the toast; any callback in it still runs as the
+ *      page's (see SELF_OWNED_FILES);
  *   1. a stack frame in /static/js/pages/<name>.js makes it that page's;
  *   2. else, inside a callback a page registered (a listener, a timer or
  *      interval callback, a requestAnimationFrame callback, a .then / .catch
@@ -54,6 +58,13 @@
  */
 
 export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js', 'auth.js', 'theme-loader.js'];
+// Shell files whose own timers and listeners end by themselves: ui.js's toast
+// dismisses itself, its dialog stops listening when it closes. When one of
+// these makes the call (it is the innermost of the site's frames), the item is
+// the shell's even though a page asked for the toast. Only these: WS.poll
+// (shell.js) and ctx.setTimeout (router.js) run a page's own work, so what
+// they create stays the page's.
+export const SELF_OWNED_FILES = ['ui.js'];
 const SELF_FILE = 'debug-leaks.js';
 const PAGE_RE = /\/static\/js\/pages\/([^/]+)\.js$/;
 const FRAME_RE = /([a-z][\w+.-]*:\/\/[^\s()]+?):\d+(?::\d+)?/i;
@@ -96,6 +107,13 @@ export function ownerOf(stack, shellFiles, origin) {
   return { page: null, shell: frames.every(function (f) { return shell.indexOf(f.file) !== -1; }) };
 }
 
+/* True when the call that is creating something was made by one of files
+   (default SELF_OWNED_FILES): it is the innermost of the site's frames. */
+export function madeBySelfOwned(stack, files, origin) {
+  const frames = framesOf(stack, origin);
+  return frames.length > 0 && (files || SELF_OWNED_FILES).indexOf(frames[0].file) !== -1;
+}
+
 // The stack as it reads in a report: no "Error" line, none of our own frames.
 function cleanStack(stack) {
   return String(stack || '').split('\n').filter(function (line) {
@@ -125,6 +143,7 @@ const UNATTRIBUTED = { name: 'unattributed', session: null };
 export function createTracker(g, opts) {
   opts = opts || {};
   const shellFiles = opts.shellFiles || SHELL_FILES;
+  const selfOwnedFiles = opts.selfOwnedFiles || SELF_OWNED_FILES;
   const stackNow = opts.stack || function () { return new Error().stack || ''; };
   const origin = opts.origin || null;
   const proto = g.EventTarget.prototype;
@@ -154,19 +173,26 @@ export function createTracker(g, opts) {
     outbox.push(item);
   }
 
-  /* Who owns what is being created now (rules 1-4 in the header). Returns
+  /* Who owns what is being created now (rules 0-4 in the header). Returns
      null for the shell (and for anything before the first page mounts),
      { owner, stack, session } for the mounted page instance, { owner, stack,
-     late: true } for a page instance that is not mounted, or { owner:
+     late: true } for a page instance that is not mounted, { owner, stack,
+     selfOwned: true } for ui.js's own item made while a page is the owner
+     (not tracked; its callbacks run as that page's), or { owner:
      UNATTRIBUTED, stack, unattributed: true } when no page can be named. */
   function attribute() {
     const stack = stackNow();
     const o = ownerOf(stack, shellFiles, origin);
-    let owner;
+    let owner = null;
     if (o.page) owner = session && session.name === o.page ? { name: o.page, session: session } : { name: o.page, session: null };
     else if (ambient) owner = ambient;
-    else if (o.shell || !everStarted) return null;
-    else return { owner: UNATTRIBUTED, stack: stack, unattributed: true };
+    if (madeBySelfOwned(stack, selfOwnedFiles, origin)) {
+      return owner ? { owner: owner, stack: stack, selfOwned: true } : null;
+    }
+    if (!owner) {
+      if (o.shell || !everStarted) return null;
+      return { owner: UNATTRIBUTED, stack: stack, unattributed: true };
+    }
     if (owner.session && owner.session === session) return { owner: owner, stack: stack, session: session };
     return { owner: owner, stack: stack, late: true };
   }
@@ -312,7 +338,8 @@ export function createTracker(g, opts) {
     if (!byTarget.has(target)) byTarget.set(target, plan.list);
     plan.list.push(entry);
     listeners.add(rec);
-    if (a) {
+    // ui.js's own listener: wrapped only so its callback runs as the page's.
+    if (a && !a.selfOwned) {
       const detail = plan.t + ' on ' + describe(target, g);
       if (a.late) lateItem('listener', a, detail);
       else track('listener', a, rec).detail = detail;
@@ -351,6 +378,10 @@ export function createTracker(g, opts) {
       unattributedItem('timer', a, detail);
       return orig.setTimeout.apply(this, arguments);
     }
+    if (a.selfOwned) {
+      args[0] = bind(a.owner, fn);
+      return orig.setTimeout.apply(this, args);
+    }
     if (a.late) {
       lateItem('timer', a, detail);
       args[0] = bind(a.owner, fn);
@@ -379,6 +410,7 @@ export function createTracker(g, opts) {
     const args = Array.prototype.slice.call(arguments);
     args[0] = bind(a.owner, fn);
     const id = orig.setInterval.apply(this, args);
+    if (a.selfOwned) return id;
     if (a.late) { lateItem('interval', a, detail); return id; }
     timers.set(id, track('interval', a, { dead: false, detail: detail, id: id }));
     return id;
@@ -455,6 +487,7 @@ export function createTracker(g, opts) {
         unattributedItem('fetch', a, 'fetch ' + url);
         return p;
       }
+      if (a.selfOwned) return carry(nativeThen.call(p, function (r) { return r; }), a.owner);
       if (a.late) {
         if (wasLeft(a.owner)) afterLeave += 1;
         lateItem('fetch', a, 'fetch ' + url);

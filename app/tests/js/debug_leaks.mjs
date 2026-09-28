@@ -8,6 +8,7 @@ import { getEventListeners } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const load = (rel) => import('data:text/javascript;charset=utf-8,' +
@@ -107,7 +108,15 @@ const g = {
   }
 };
 let nowStack = stack(SELF, PAGE);
-const tr = dbg.createTracker(g, { stack: () => nowStack });
+// nowStack REAL: the real stack, as a browser gives it, without this test
+// file's own frames (in the browser the stack is taken inside debug-leaks.js,
+// whose frames are dropped the same way).
+const REAL = Symbol('real stack');
+const tr = dbg.createTracker(g, {
+  stack: () => (nowStack === REAL
+    ? new Error().stack.split('\n').filter((l) => !l.includes('debug_leaks.mjs')).join('\n')
+    : nowStack)
+});
 
 // Behaviour is unchanged: same return values, same this, options honoured.
 {
@@ -213,6 +222,110 @@ tr.stop();                                           // drop anything the checks
   t.addEventListener('x', () => {});
   const out = tr.stop();
   check('a helper called by the page: its listener is the page\'s', out.length === 1 && out[0].page === 'news', out);
+}
+
+// ui.js's own lifetimes are the shell's, even when a page called it: a toast
+// schedules its dismissal (and its fade) inside ui.js, a dialog listens on
+// document until it closes. Leaving within seconds of a toast is not a leak.
+const UI = 'https://host.example/static/js/ui.js?v=abc';
+{
+  tr.stop();
+  nowStack = stack(SELF, PAGE);
+  tr.start('news');
+  const ctl = new AbortController();
+  const btn = new Target();
+  let fired = null;
+  btn.addEventListener('click', () => {
+    // A helper, from inside the page's own listener, shows a toast.
+    nowStack = stack(SELF, UI, HELPER);
+    fired = g.setTimeout(() => {}, 60000);                          // its dismissal
+    new Target().addEventListener('click', () => {});               // its action button
+  }, { signal: ctl.signal });
+  nowStack = stack(SELF, UI, PAGE);                                 // the page shows one itself
+  const dismiss = g.setTimeout(() => {}, 60000);
+  const doc = new Target();
+  const onKey = () => {};
+  doc.addEventListener('keydown', onKey, true);                     // a dialog, still open
+  nowStack = stack(SELF, PAGE);
+  btn.dispatchEvent(new Event('click'));
+  ctl.abort();
+  const out = tr.stop();
+  check('a toast or dialog the page opened is not its leak', out.length === 0 && fired !== null, out);
+  // After the page left, a helper's toast with no page to name (a native
+  // await continuation) is the shell's too: not listed as unattributed.
+  nowStack = stack(SELF, OTHER);
+  tr.start('wiki');
+  const before = tr.reports.length;
+  nowStack = stack(SELF, UI, HELPER);
+  const late = g.setTimeout(() => {}, 60000);
+  nowStack = stack(SELF, OTHER);
+  const wikiOut = tr.stop();
+  check('a toast after a leave, from code no page can be named for, is nobody\'s',
+    wikiOut.length === 0 && tr.reports.length === before, tr.reports.slice(before));
+  [fired, dismiss, late].forEach((id) => g.clearTimeout(id));
+  doc.removeEventListener('keydown', onKey, true);
+}
+
+// The same with the real ui.js: run under its site address, and a toast
+// shown from a page module's frame, then the page left at once.
+{
+  tr.stop();
+  const made = [];
+  const node = (tag) => ({
+    tagName: tag.toUpperCase(), style: {}, parentNode: null, className: '', textContent: '',
+    setAttribute() {}, appendChild(c) { c.parentNode = this; made.push(c); return c; },
+    removeChild(c) { c.parentNode = null; }
+  });
+  const sandbox = {
+    document: { createElement: node, body: node('body') },
+    matchMedia: () => ({ matches: true }),
+    setTimeout: (...a) => g.setTimeout(...a), clearTimeout: (id) => g.clearTimeout(id)
+  };
+  sandbox.window = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(join(here, '../../static/js/ui.js'), 'utf8'), sandbox,
+    { filename: 'https://host.example/static/js/ui.js' });
+  vm.runInContext('function saved() { WSUI.toast("Saved", "ok"); WSUI.toast("Again", "ok"); }', sandbox,
+    { filename: 'https://host.example/static/js/pages/news.js' });
+  nowStack = REAL;
+  tr.start('news');
+  sandbox.saved();                                   // the first appends after 50 ms; both dismiss in 4 s
+  const out = tr.stop();
+  nowStack = stack(SELF, PAGE);
+  check('the real ui.js: a toast shown just before leaving is not the page\'s leak', out.length === 0, out);
+  await new Promise((r) => setTimeout(r, 80));
+  check('the real ui.js: the toast still appears', made.some((n) => n.textContent === 'Saved'));
+}
+
+// ...but only ui.js's own calls. A page that polls, sets a timer or listens
+// itself, directly or through a helper or a shell helper (WS.poll, the
+// router's ctx.setTimeout), is still charged, as is a helper ui.js calls back.
+{
+  tr.stop();
+  nowStack = stack(SELF, PAGE);
+  tr.start('news');
+  const ctl = new AbortController();
+  const btn = new Target();
+  let viaRouter = null;
+  btn.addEventListener('click', () => {
+    nowStack = stack(SELF, ROUTER, HELPER);                         // ctx.setTimeout from a helper's callback
+    viaRouter = g.setTimeout(() => {}, 60000);
+  }, { signal: ctl.signal });
+  nowStack = stack(SELF, SHELL, HELPER, PAGE);                      // WS.poll, from a helper mount called
+  const poll = g.setInterval(() => {}, 60000);
+  nowStack = stack(SELF, HELPER, UI, PAGE);                         // a helper a toast's action ran
+  const back = g.setTimeout(() => {}, 60000);
+  nowStack = stack(SELF, HELPER, PAGE);
+  new Target().addEventListener('resize', () => {});               // a helper's own listener, no signal
+  nowStack = stack(SELF, PAGE);
+  btn.dispatchEvent(new Event('click'));
+  ctl.abort();
+  const out = tr.stop();
+  const kinds = out.map((i) => i.kind).sort();
+  check('a page\'s own timers, polls and listeners are still its leaks, through helpers and the shell',
+    eq(kinds, ['interval', 'listener', 'timer', 'timer']) && out.every((i) => i.page === 'news'), out);
+  g.clearInterval(poll);
+  [viaRouter, back].forEach((id) => g.clearTimeout(id));
 }
 
 // A page that goes on working after it was left: counted, and reported late.
