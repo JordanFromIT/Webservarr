@@ -62,6 +62,40 @@ def migrate_ticket_creator_email(db: Session) -> None:
             raise
 
 
+def migrate_ticket_identity(db: Session) -> None:
+    """One-time migration: add tickets.creator_identity (indexed) and
+    ticket_comments.author_identity to existing databases.
+
+    Tickets belong to a stable account identity instead of the username.
+    Existing rows keep a null identity until their owner claims them at the
+    next sign-in (tickets.claim_legacy_tickets). Guarded by PRAGMA table_info
+    and idempotent, like migrate_ticket_creator_email; a worker that loses
+    the race to the other one ignores its "duplicate column" error.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    for table, column in (("tickets", "creator_identity"), ("ticket_comments", "author_identity")):
+        columns = {row[1] for row in db.execute(text(f"PRAGMA table_info({table})"))}
+        if not columns or column in columns:
+            continue  # no table yet (create_all makes it with the column) or done
+        try:
+            db.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} VARCHAR(255)"))
+            db.commit()
+            logger.info("Added %s.%s", table, column)
+        except OperationalError as exc:
+            db.rollback()
+            if "duplicate column" not in str(exc).lower():
+                raise
+    if {row[1] for row in db.execute(text("PRAGMA table_info(tickets)"))}:
+        # create_all names the model's index this way; IF NOT EXISTS keeps
+        # a fresh install and a second worker quiet.
+        db.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_tickets_creator_identity ON tickets (creator_identity)"
+        ))
+        db.commit()
+
+
 def migrate_drop_push_username_rows(db: Session) -> None:
     """One-time migration: delete push.user.<hash>.email settings rows.
 

@@ -177,6 +177,12 @@ class Ticket(Base):
     # sent to. Usernames come from separate namespaces (local, Plex, OIDC) and
     # can collide. Null on tickets created before the column existed.
     creator_email = Column(String(255), nullable=True)
+    # The creator's stable account identity, which owns the ticket (see
+    # tickets.account_identity): "plex:<Plex account id>" however a Plex
+    # account signed in, "local:<users.id>", or "oidc:<subject>". Never the
+    # username, which is kept above for display only. Null on tickets created
+    # before the column existed until their owner claims them at sign-in.
+    creator_identity = Column(String(255), nullable=True, index=True)
     image_path = Column(String(300), nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -193,6 +199,8 @@ class TicketComment(Base):
     ticket_id = Column(Integer, nullable=False, index=True)
     author_username = Column(String(100), nullable=False)
     author_name = Column(String(100), nullable=False)
+    # The author's account identity, as Ticket.creator_identity.
+    author_identity = Column(String(255), nullable=True)
     is_admin = Column(Boolean, default=False, nullable=False)
     message = Column(Text, nullable=False)
     image_path = Column(String(300), nullable=True)
