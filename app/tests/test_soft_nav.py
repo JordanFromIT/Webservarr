@@ -408,9 +408,8 @@ class WikiPage(unittest.TestCase):
         self.assertLess(claim.index("if (!opts.pop) saveScroll();"), claim.index("current.claim("))
         self.assertIn("const got = current.claim(new URL(target.href), { pop: !!opts.pop, scrollY: opts.scrollY || 0 });", claim)
         # One history write, and the same URL again replaces.
-        self.assertRegex(claim, r"if \(opts\.replace \|\| target\.href === location\.href\) history\.replaceState\(st, '', target\.href\);\s*"
-                                r"else history\.pushState\(st, '', target\.href\);")
-        self.assertEqual(claim.count("history."), 2)
+        self.assertIn("if (!opts.pop) record(target.href, opts.replace || target.href === location.href);", claim)
+        self.assertEqual(claim.count("history."), 0)
         self.assertIn("window.dispatchEvent(new CustomEvent('", claim)
         self.assertIn("ws:page-claimed", (STATIC / "js" / "router.js").read_text(encoding="utf-8"))
 
@@ -1232,9 +1231,9 @@ class LeaveGuard(unittest.TestCase):
         self.assertIn("if (token !== navToken) return;", after, "a newer navigation wins over an answer")
         stay = re.search(r"if \(verdict === false\) \{(.*?)\n      \}", after, re.S)
         self.assertIsNotNone(stay)
-        # Back or Forward already moved the address bar: a stay puts it back.
-        self.assertIn("if (opts.pop) history.replaceState(", stay.group(1))
-        self.assertIn("current.url);", stay.group(1))
+        # Back or Forward already moved the address bar: a stay steps back
+        # to the page's own entry (final review M1: never relabel one).
+        self.assertIn("if (opts.pop) returnTo(current.i);", stay.group(1))
         self.assertRegex(after, r"if \(verdict === '    '\) \{[^}]*await hardNavigate\(target\.href, token\);")
         self.assertIn("if (verdict === 'hard') {", (STATIC / "js" / "router.js").read_text(encoding="utf-8"))
 
@@ -1248,7 +1247,7 @@ class LeaveGuard(unittest.TestCase):
         # own entries (a state of their own) are left alone.
         code = self.code()
         m = re.search(r"window\.addEventListener\('\s+', function \(\) \{\s*if \(!current \|\| !samePage\(location\.href, current\.url\)\) return;"
-                      r"\s*current\.url = location\.href;\s*if \(history\.state === null\) history\.replaceState\(\{ ws: 1,", code)
+                      r"\s*current\.url = location\.href;\s*if \(history\.state === null\) \{\s*at \+= 1;\s*history\.replaceState\(mark\(", code)
         self.assertIsNotNone(m)
 
     def test_another_back_waits_while_the_guard_is_asked(self):
@@ -1257,7 +1256,7 @@ class LeaveGuard(unittest.TestCase):
         # a navigation; the address stays on the entry the question is about.
         code = self.code()
         go = function_body(code, "visit")
-        self.assertIn("const ask = asking = { url: opts.pop ? target.href : location.href };", go)
+        self.assertIn("const ask = asking = { url: opts.pop ? target.href : location.href, i: opts.pop ? at : current.i };", go)
         self.assertRegex(go, r"\} finally \{\s*if \(asking === ask\) asking = null;\s*\}")
         pop = re.search(r"window\.addEventListener\('\s+', function \(e\) \{\s*const st = e\.state;(.*?)\n  \}\);", code, re.S)
         self.assertIsNotNone(pop)
@@ -1265,7 +1264,8 @@ class LeaveGuard(unittest.TestCase):
         held = body.index("if (asking) {")
         self.assertLess(held, body.index("samePage(location.href, current.url)"), "held before the same-page shortcut")
         self.assertLess(held, body.index("go(location.href"), "and before any navigation")
-        self.assertRegex(body, r"if \(asking\) \{\s*history\.replaceState\(\{ ws: 1, scrollY: 0 \}, '', asking\.url\);\s*return;\s*\}")
+        # Stepped back to that entry with history.go, never relabelled (M1).
+        self.assertRegex(body, r"if \(asking\) \{\s*if \(known\) returnTo\(asking\.i\);")
 
     def test_a_stay_after_a_let_through_leave_is_announced(self):
         code = self.code()

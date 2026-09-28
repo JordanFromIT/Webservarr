@@ -216,9 +216,17 @@ function start() {
   let scrollTimer = 0;
   let hoverTimer = 0;
   let hoverLink = null;
-  // While a page's leave guard is being asked: { url } of the address the
+  // While a page's leave guard is being asked: { url, i } of the entry the
   // question is about (Back's destination, or the page itself for a link).
   let asking = null;
+  // History: every entry this document made carries its place, state
+  // { ws: 1, i, scrollY }. at is the entry the address is on; the mounted
+  // page's own is current.i. A Back or Forward that must not happen (held
+  // while a guard asks, refused, or failed) is undone by stepping back to the
+  // page's entry with history.go(), so no entry is ever relabelled; landing
+  // is the entry that step is expected to arrive on.
+  let at = 0;
+  let landing = null;
   // The navigation a link or navigate() started and has not finished:
   // { href, token, done }. The same address again while it loads is that
   // navigation, not a new one (a second tap on a slow link).
@@ -228,6 +236,32 @@ function start() {
   let retryToast = null;       // the one Retry toast on screen
   const prefetched = new Map();    // URL without hash -> { promise, timer }
   const scripts = new Map();       // page-helper path (no query) -> { href, promise }
+
+  // Every entry pushed in this document is numbered, the page's own
+  // included (Settings' tabs push a copy of the router's state), so the
+  // distance between two entries is always known.
+  const nativePush = history.pushState;
+  history.pushState = function (state, title, url) {
+    at += 1;
+    if (state && typeof state === 'object' && state.ws === 1) state = Object.assign({}, state, { i: at });
+    return nativePush.call(this, state, title, url);
+  };
+
+  // The state for the entry the address is on now.
+  function mark(y) { return { ws: 1, i: at, scrollY: y || 0 }; }
+
+  // A router entry for href: a new one, or this one relabelled (replace).
+  function record(href, replace) {
+    if (replace) history.replaceState(mark(0), '', href);
+    else history.pushState({ ws: 1, scrollY: 0 }, '', href);
+  }
+
+  // Back to entry i without navigating: the step's popstate is ours.
+  function returnTo(i) {
+    if (typeof i !== 'number' || i === at) return;
+    landing = i;
+    history.go(i - at);
+  }
 
   const api = {
     navigate: function (url, opts) {
@@ -570,14 +604,14 @@ function start() {
     server: 'Couldn’t open that page. The server had a problem.'
   };
 
-  function showRetry(href, reason, pop) {
+  function showRetry(reason, again) {
     const msg = RETRY_WORDS[reason] || RETRY_WORDS.server;
     const ui = window.WSUI;
     if (!ui) { console.error('[router] ' + msg); return; }
     // One at a time: a second failed attempt replaces the first's toast.
     if (retryToast) retryToast.remove();
     retryToast = ui.toast(msg, 'err', {
-      action: { label: 'Retry', run: function () { go(href, { replace: pop }); } }
+      action: { label: 'Retry', run: again }
     }) || null;
   }
 
@@ -892,7 +926,7 @@ function start() {
     const root = document.getElementById('wsPage');
     const entry = {
       url: url.href, module: moduleUrl, controller: new AbortController(),
-      cleanup: null, claim: null, guard: null, left: false
+      cleanup: null, claim: null, guard: null, left: false, i: at
     };
     current = entry;
     api.current = { url: entry.url, module: moduleUrl, controller: entry.controller };
@@ -1011,13 +1045,10 @@ function start() {
         fetchCtl = null;
         busyEnd(token);
         closeOverlays();
-        if (!opts.pop) {
-          // The same URL again replaces, as a swap does.
-          const st = { ws: 1, scrollY: 0 };
-          if (opts.replace || target.href === location.href) history.replaceState(st, '', target.href);
-          else history.pushState(st, '', target.href);
-        }
+        // The same URL again replaces, as a swap does.
+        if (!opts.pop) record(target.href, opts.replace || target.href === location.href);
         current.url = target.href;
+        current.i = at;
         api.current = { url: current.url, module: current.module, controller: current.controller };
         window.dispatchEvent(new CustomEvent('ws:page-claimed', { detail: { url: current.url } }));
         // Once drawn, the view's title and announcement, as a swap gives a
@@ -1042,7 +1073,7 @@ function start() {
     if (!current.left && current.guard) {
       busyEnd(token);          // no bar under the question
       let verdict;
-      const ask = asking = { url: opts.pop ? target.href : location.href };
+      const ask = asking = { url: opts.pop ? target.href : location.href, i: opts.pop ? at : current.i };
       try {
         verdict = await current.guard(new URL(target.href), { pop: !!opts.pop });
       } catch (e) {
@@ -1055,7 +1086,7 @@ function start() {
       if (verdict === false) {
         fetchCtl = null;
         busyEnd(token);
-        if (opts.pop) history.replaceState({ ws: 1, scrollY: Math.round(scroller().scrollTop) }, '', current.url);
+        if (opts.pop) returnTo(current.i);
         return;
       }
       if (verdict === 'hard') {
@@ -1097,15 +1128,23 @@ function start() {
     if (d.action === 'swap' && staleShell(doc)) d = { action: 'hard', url: target.href };
 
     if (d.action === 'stay') {
+      // Back or Forward already moved the address bar: step back to the
+      // page's entry. Retry then takes that same step again.
+      let again = function () { go(target.href, {}); };
       if (opts.pop && current) {
-        // Back or Forward already moved the address bar; put it back.
-        history.replaceState({ ws: 1, scrollY: Math.round(scroller().scrollTop) }, '', current.url);
+        const shown = current;
+        const wanted = at;
+        returnTo(shown.i);
+        again = function () {
+          if (current === shown && at === shown.i) history.go(wanted - at);
+          else go(target.href, {});
+        };
       }
       busyEnd(token);
       // The page is still here: one whose guard let this navigation go
       // (Settings, after "Leave without saving") keeps what it holds.
       window.dispatchEvent(new CustomEvent('ws:nav-stayed', { detail: { url: target.href, reason: d.reason } }));
-      showRetry(target.href, d.reason, !!opts.pop);
+      showRetry(d.reason, again);
       return;
     }
     if (d.action === 'hard') {
@@ -1170,11 +1209,7 @@ function start() {
     await inTransition(function () { swapDom(doc, page); });
 
     // 7. History. The same URL again replaces, as a link to it would.
-    if (!opts.pop) {
-      const st = { ws: 1, scrollY: 0 };
-      if (opts.replace || dest.href === location.href) history.replaceState(st, '', dest.href);
-      else history.pushState(st, '', dest.href);
-    }
+    if (!opts.pop) record(dest.href, opts.replace || dest.href === location.href);
 
     // 8. Every page starts at the top, so none shows the last page's offset
     //    (on phones the document itself scrolls); Back and Forward then
@@ -1213,17 +1248,27 @@ function start() {
   window.addEventListener('popstate', function (e) {
     const st = e.state;
     if (!current) return;
+    const known = !!st && st.ws === 1 && typeof st.i === 'number';
+    // The router's own step back (returnTo) has arrived.
+    if (landing !== null) {
+      const was = landing;
+      landing = null;
+      if (known && st.i === was) { at = st.i; return; }
+    }
+    if (known) at = st.i;
     // A page is being asked whether it may be left: Back or Forward pressed
-    // again waits for that answer, on the address the question is about.
-    // (The answer then keeps or restores the page's own address.)
+    // again waits for that answer, on the entry the question is about.
+    // (The answer then keeps the page, or goes on from there.)
     if (asking) {
-      history.replaceState({ ws: 1, scrollY: 0 }, '', asking.url);
+      if (known) returnTo(asking.i);
+      else history.replaceState({ ws: 1, i: asking.i, scrollY: 0 }, '', asking.url);
       return;
     }
     if (!st || st.ws !== 1) return;
     clearTimeout(scrollTimer);
     if (samePage(location.href, current.url)) {
       current.url = location.href;
+      current.i = at;
       return;
     }
     go(location.href, { pop: true, scrollY: st.scrollY || 0 });
@@ -1235,7 +1280,12 @@ function start() {
   window.addEventListener('hashchange', function () {
     if (!current || !samePage(location.href, current.url)) return;
     current.url = location.href;
-    if (history.state === null) history.replaceState({ ws: 1, scrollY: Math.round(scroller().scrollTop) }, '', location.href);
+    // A followed fragment link pushed an entry, past the wrapper above.
+    if (history.state === null) {
+      at += 1;
+      history.replaceState(mark(Math.round(scroller().scrollTop)), '', location.href);
+    }
+    current.i = at;
   });
 
   // A push notification's click (sw.js): the worker asks this tab to open
@@ -1266,8 +1316,10 @@ function start() {
   if (firstSrc) {
     const st = history.state && typeof history.state === 'object' ? history.state : {};
     const y = st.ws === 1 ? (st.scrollY || 0) : 0;
+    // A reload keeps the entry's place; a new document starts counting here.
+    at = st.ws === 1 && typeof st.i === 'number' ? st.i : 0;
     try { history.scrollRestoration = 'manual'; } catch (e) { /* ignore */ }
-    history.replaceState(Object.assign({}, st, { ws: 1, scrollY: y }), '', location.href);
+    history.replaceState(Object.assign({}, st, { ws: 1, i: at, scrollY: y }), '', location.href);
     const moduleUrl = new URL(firstSrc, location.href).href;
     // In debug mode the tools wrap listeners, timers and fetch first.
     (debugReady || Promise.resolve()).then(function () {
