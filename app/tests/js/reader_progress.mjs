@@ -129,6 +129,100 @@ if (typeof progressWriter !== 'function') {
     check('the beacon page is confirmed', w.confirmed === 12, w.confirmed);
   }
 
+  // Fix round 2. A soft-navigation leave: the document keeps running, so the
+  // final save waits for the write in flight and goes after it (keepalive,
+  // not bound to the page), and lands last. Nothing is sent after it.
+  if (typeof progressWriter(() => true).leave !== 'function') {
+    check('the writer has a soft-leave save (leave)', false);
+  } else {
+    {
+      const k = fakeKavita();
+      const w = progressWriter(k.send);
+      w.write(10);
+      const done = w.leave(12);
+      check('the final save waits for the write in flight', JSON.stringify(k.sent) === '[10]', k.sent);
+      k.take(10).answer(true);
+      await tick(); await tick();
+      check('then goes, after it', JSON.stringify(k.sent) === '[10,12]', k.sent);
+      check('never two writes in flight, the final save included', k.most === 1, k.most);
+      k.take(12).answer(true);
+      await done;
+      check('the final save is what Kavita holds', w.confirmed === 12, w.confirmed);
+      w.write(13);
+      check('nothing is sent after the final save', JSON.stringify(k.sent) === '[10,12]', k.sent);
+    }
+    {
+      // The final save's answer comes back; an in-flight write that failed
+      // or was refused changes nothing, and the final save still goes.
+      const k = fakeKavita();
+      const w = progressWriter(k.send);
+      w.write(4);
+      w.write(5);                      // waiting: the final save carries the newest instead
+      w.leave(6);
+      k.take(4).fail();
+      await tick(); await tick();
+      check('a failed write in flight still lets the final save go, and the waiting page is dropped',
+        JSON.stringify(k.sent) === '[4,6]', k.sent);
+    }
+    {
+      // Nothing to save: Kavita already holds the page, nothing in flight.
+      const k = fakeKavita();
+      const w = progressWriter(k.send);
+      w.known(7);
+      await w.leave(7);
+      check('no final save when Kavita holds the page', k.sent.length === 0, k.sent);
+      const k2 = fakeKavita();
+      const w2 = progressWriter(k2.send);
+      w2.known(7);
+      w2.leave(8);
+      await tick(); await tick();
+      check('with nothing in flight the final save goes at once', JSON.stringify(k2.sent) === '[8]', k2.sent);
+    }
+    {
+      // The write in flight turns out to be the page being left on.
+      const k = fakeKavita();
+      const w = progressWriter(k.send);
+      w.write(9);
+      w.leave(9);
+      k.take(9).answer(true);
+      await tick(); await tick(); await tick();
+      check('no final save when the write in flight was the page', JSON.stringify(k.sent) === '[9]', k.sent);
+    }
+  }
+
+  // A hard exit (tab hidden or closed): the beacon carries the newest page
+  // and counts as the newest send. The write in flight answering true
+  // afterwards is older, and is ignored (the case the reviewer reproduced:
+  // write(10) in flight, beacon 12, 10 answers true: confirmed must stay 12).
+  {
+    const k = fakeKavita();
+    const w = progressWriter(k.send);
+    w.write(10);
+    w.sent(12);
+    check('the beacon page is confirmed at once', w.confirmed === 12, w.confirmed);
+    k.take(10).answer(true);
+    await tick(); await tick();
+    check('an older write answering true after the beacon is ignored', w.confirmed === 12, w.confirmed);
+    // Reading goes on (the tab came back): the writer still writes.
+    w.write(13);
+    check('the writer goes on after a beacon', k.sent[k.sent.length - 1] === 13, k.sent);
+  }
+
+  // confirmed moves forward in send order only.
+  {
+    const k = fakeKavita();
+    const w = progressWriter(k.send);
+    w.write(3);
+    w.sent(4);                          // newer send, confirmed 4
+    w.write(5);                         // waits for 3
+    k.take(3).answer(true);             // older: ignored
+    await tick(); await tick();
+    check('a late true from an older write after a newer confirm is ignored', w.confirmed === 4, w.confirmed);
+    k.take(5).answer(true);
+    await tick(); await tick();
+    check('a newer write still confirms', w.confirmed === 5, w.confirmed);
+  }
+
   // send may throw, or answer synchronously: neither jams the writer.
   {
     const w = progressWriter(() => { throw new Error('boom'); });

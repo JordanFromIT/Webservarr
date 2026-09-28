@@ -684,17 +684,22 @@ class ReaderPage(unittest.TestCase):
         code = self.code()
         fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
         self.assertEqual(len(fetches), 1, "every call goes through kavita()")
-        self.assertIn("options.signal = signal;", function_body(code, "kavita"))
+        self.assertIn("if (!('signal' in options)) options.signal = signal;", module_source("reader"))
+        # The one call off the visit's signal: a progress write, which must
+        # outlive the visit so the last save lands after it (fix round 2).
+        self.assertEqual(len(re.findall(r"\bsignal: null,", code)), 1)
+        send = function_body(module_source("reader"), "sendProgress")
+        self.assertIn("signal: null,\n      keepalive: true,", send)
         self.assertNotRegex(code, r"(?<![.\w])setTimeout\(", "one-off timers go through ctx.setTimeout")
         self.assertIn("saveTimer = ctx.setTimeout(saveProgress, SAVE_DEBOUNCE_MS);", code)
 
     def test_the_position_is_saved_on_leaving(self):
-        # The router aborts the visit's signal (and any write in flight) before
-        # the cleanup runs, so the last save is a beacon, made whenever Kavita
-        # is not known to hold this page: not "already sent", which an aborted
-        # write also is.
+        # A soft navigation away: the document keeps running, so the last
+        # save goes through the writer's leave(), after any write in flight
+        # (fix round 2). A hard exit (tab hidden or closed) cannot wait: a
+        # beacon, recorded as the newest send.
         code = self.code()
-        self.assertIn("var leave = function () { saveProgress(true); };", code)
+        self.assertRegex(code, r"var leave = function \(\) \{\s*if \(positionKnown\) writer\.leave\(current\.page\);\s*\};")
         self.assertEqual(len(re.findall(r"\breturn leave;", code)), 2, "both ways out of mount hand it to the router")
         save = function_body(code, "saveProgress")
         self.assertIn("var held = useBeacon ? writer.confirmed : lastSaved;", save)
@@ -708,7 +713,7 @@ class ReaderPage(unittest.TestCase):
         self.assertIn("var writer = progressWriter(sendProgress);", code)
         self.assertRegex(code, r"export function progressWriter\(send\) \{")
         self.assertIn("return r.ok;", function_body(code, "sendProgress"))
-        # The tab hidden or closed while reading: the same beacon, until the visit ends.
+        # The tab hidden or closed while reading: the beacon, until the visit ends.
         src = module_source("reader")
         self.assertIn("if (document.visibilityState === 'hidden') saveProgress(true);", src)
         self.assertIn("window.addEventListener('pagehide', function () { saveProgress(true); }, { signal: signal });", src)

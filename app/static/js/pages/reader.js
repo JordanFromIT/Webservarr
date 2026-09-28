@@ -13,12 +13,12 @@
  *
  * A soft-navigation page (spec 4.2): everything below runs from mount(ctx),
  * each visit has its own state, and every listener, fetch and timer ends with
- * ctx.signal (the key, visibility and pagehide listeners included). Leaving
- * the reader by a soft navigation aborts that signal, and with it any
- * progress write still in flight, before the page's cleanup runs; so the
- * cleanup this mount returns makes the last save as its own request, a
- * beacon, which nothing aborts and which outlives the page. The reading
- * settings are set on #wsPage, so they go with the page.
+ * ctx.signal (the key, visibility and pagehide listeners included), with
+ * one deliberate exception: the progress writes. Each is a keepalive request
+ * off the signal, one at a time (progressWriter), so a write in flight when
+ * the reader is left still lands, and the last save, which the cleanup this
+ * mount returns sends after it, lands last. They touch nothing on the page.
+ * The reading settings are set on #wsPage, so they go with the page.
  */
 
 const PREFS_KEY = 'webservarr_reader_prefs';
@@ -40,46 +40,85 @@ const THEMES = {
 // One of these at a time, so a stale error never sits above a working page.
 const PANELS = ['loading', 'errorState', 'bookContent'];
 
-/* The reading position's writes to Kavita, one at a time (pure: run by
+/* The reading position's writes to Kavita (pure: run by
  * app/tests/js/reader_progress.mjs).
  *
- * Two writes in flight could be answered, and taken by Kavita, in either
- * order, so the page Kavita holds would be a guess and the leave beacon
- * could be skipped for a page Kavita no longer has. So a write waits for
- * the one before it: write(page) sends at once when nothing is in flight,
- * and otherwise becomes the page waiting its turn (a newer turn replaces
- * it), sent when the write in flight has answered, unless Kavita then
- * already holds it. send(page) returns (a promise of) true when Kavita took
- * the page, false or a rejection when not.
- *   confirmed    the page Kavita is known to hold, -1 while unknown
- *   known(page)  Kavita reported the reader there
- *   sent(page)   the leave beacon carried it (the visit's last write)
+ * One write at a time. Two writes in flight could be answered, and taken by
+ * Kavita, in either order, so the page Kavita holds would be a guess. So
+ * write(page) sends at once when nothing is in flight and otherwise becomes
+ * the page waiting its turn (a newer turn replaces it), sent when the write
+ * in flight has answered, unless Kavita then already holds it.
+ *
+ * confirmed moves forward in send order only: an answer confirms its page
+ * only when its write was sent after the one that set confirmed, so a late
+ * "taken" for an older write never sets it back.
+ *
+ * Leaving the reader:
+ *   leave(page)  a soft navigation: the document keeps running, so the last
+ *                save waits for the write in flight and goes after it (send
+ *                makes it a keepalive request the visit's end does not stop),
+ *                and so lands last. Nothing is sent after it. Returns a
+ *                promise that settles when it has answered (or was not needed).
+ *   sent(page)   a hard exit (the tab hidden or closed): there is no time to
+ *                wait, so the caller sends a beacon at once and records it
+ *                here as the newest send. A write still in flight may then
+ *                reach Kavita after the beacon and leave it on the older
+ *                page: a rare race this accepts, and the next visit's first
+ *                turn writes the position again.
+ * send(page) returns (a promise of) true when Kavita took the page, false or
+ * a rejection when not. known(page): Kavita reported the reader there.
  */
 export function progressWriter(send) {
   let confirmed = -1;
-  let inFlight = false;
+  let confirmedAt = 0;   // the send (in order) that set confirmed; 0: none
+  let sends = 0;
+  let inFlight = null;   // the write in flight: settles once it has answered
   let waiting = null;
+  let closed = false;    // left by a soft navigation: nothing more goes
 
-  function go(page) {
-    inFlight = true;
+  function take(at, page, ok) {
+    if (ok === true && at > confirmedAt) {
+      confirmedAt = at;
+      confirmed = page;
+    }
+  }
+
+  function go(page, at) {
     let answer;
     try { answer = Promise.resolve(send(page)); } catch (e) { answer = Promise.resolve(false); }
-    answer.then(function (ok) { if (ok === true) confirmed = page; }, function () { /* not taken */ })
-      .then(function () {
-        inFlight = false;
-        const next = waiting;
-        waiting = null;
-        if (next !== null && next !== confirmed) go(next);
-      });
+    const done = answer.then(function (ok) { take(at, page, ok); }, function () { /* not taken */ });
+    inFlight = done;
+    done.then(function () {
+      if (inFlight === done) inFlight = null;
+      if (closed) return;
+      const next = waiting;
+      waiting = null;
+      if (next !== null && next !== confirmed) go(next, ++sends);
+    });
+    return done;
   }
 
   return {
     get confirmed() { return confirmed; },
-    known: function (page) { confirmed = page; },
-    sent: function (page) { confirmed = page; waiting = null; },
+    known: function (page) { confirmed = page; confirmedAt = sends; },
     write: function (page) {
+      if (closed) return;
       if (inFlight) waiting = page;
-      else go(page);
+      else go(page, ++sends);
+    },
+    sent: function (page) {
+      waiting = null;
+      confirmedAt = ++sends;
+      confirmed = page;
+    },
+    leave: function (page) {
+      closed = true;
+      waiting = null;
+      const at = ++sends;
+      return (inFlight || Promise.resolve()).then(function () {
+        if (page === confirmed) return undefined;
+        return go(page, at);
+      });
     }
   };
 }
@@ -148,10 +187,9 @@ export async function mount(ctx) {
   var saveTimer = 0;
   var lastSaved = -1;
   // The writes, one at a time; writer.confirmed is the page Kavita is known
-  // to hold for this reader (the one it reported, or the last write it
-  // took). The save on leave compares against that, not lastSaved: a write
-  // still in flight when the page is left is aborted with the visit, so it
-  // may never have landed.
+  // to hold for this reader (the one it reported, or the newest write it
+  // took, in send order). The saves on leaving compare against that, not
+  // lastSaved: a page queued or in flight may not have landed.
   var writer = progressWriter(sendProgress);
   // Whether current.page is a position we may write back to Kavita. False
   // until Kavita told us where this reader is (get-progress answered) or they
@@ -178,7 +216,9 @@ export async function mount(ctx) {
   function kavita(path, options, background) {
     options = options || {};
     options.credentials = 'include';
-    options.signal = signal;
+    // The visit's signal, unless the call brings its own (a progress write,
+    // which must outlive the visit: sendProgress).
+    if (!('signal' in options)) options.signal = signal;
     return fetch('/kavita' + path, options).then(function (res) {
       if (res.status === 401) {
         if (background) throw new Error('unauthorized');
@@ -455,13 +495,12 @@ export async function mount(ctx) {
   }
 
   /**
-   * Write the reading position to Kavita. useBeacon: the last write, as the
-   * reader is left (a soft navigation away, the tab hidden or closed). It is
-   * a beacon: its own request, which neither the visit's aborted signal nor
-   * the page unloading stops. It goes whenever Kavita is not known to hold
-   * this page already, even if an ordinary write of it is in flight (leaving
-   * aborts that one). Otherwise the write goes through the writer, one at a
-   * time.
+   * Write the reading position to Kavita, through the writer (one at a
+   * time). useBeacon: a hard exit (the tab hidden or closed), with no time
+   * to wait for a write in flight: a beacon, its own request that the page
+   * unloading does not stop, sent whenever Kavita is not known to hold this
+   * page (see progressWriter for the race that accepts). Leaving by a soft
+   * navigation is leaveReader's.
    */
   function saveProgress(useBeacon) {
     var held = useBeacon ? writer.confirmed : lastSaved;
@@ -489,13 +528,19 @@ export async function mount(ctx) {
     });
   }
 
-  /** One write, for the writer: true when Kavita took the page. */
+  /**
+   * One write, for the writer: true when Kavita took the page. Not on the
+   * visit's signal, and keepalive: a write in flight when the reader is left
+   * finishes (it touches nothing on the page), so the last save, which the
+   * writer sends after it, lands after it. A failed write must never
+   * interrupt reading: it is a background call, and lastSaved = -1 makes the
+   * next save try again.
+   */
   function sendProgress(page) {
-    if (signal.aborted) return false;
-    // A failed progress write must never interrupt reading: it is a
-    // background call, and lastSaved = -1 makes the next save try again.
     return kavita('/api/Reader/progress', {
       method: 'POST',
+      signal: null,
+      keepalive: true,
       headers: { 'Content-Type': 'application/json' },
       body: progressBody(page)
     }, true).then(function (r) {
@@ -614,8 +659,9 @@ export async function mount(ctx) {
     }, { signal: signal });
   });
 
-  // Final write when the tab is hidden or closed, so that never loses the
-  // position. Leaving by a soft navigation is the cleanup's (below).
+  // Final write when the tab is hidden or closed (a hard exit: a beacon, no
+  // waiting), so that never loses the position. Leaving by a soft navigation
+  // is the cleanup's (below).
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') saveProgress(true);
   }, { signal: signal });
@@ -640,10 +686,13 @@ export async function mount(ctx) {
     });
   }
 
-  // Leaving the reader: the last position goes to Kavita. The router runs
-  // this after the visit's signal has aborted (and with it any ordinary
-  // write in flight), so it is a beacon, the page's own request.
-  var leave = function () { saveProgress(true); };
+  // Leaving the reader by a soft navigation: the router runs this after the
+  // visit's signal has aborted, and the document keeps running, so the last
+  // position goes after any write in flight (progressWriter leave), as a
+  // keepalive request, and lands last.
+  var leave = function () {
+    if (positionKnown) writer.leave(current.page);
+  };
 
   var seriesId = ctx.url.searchParams.get('seriesId');
   if (!seriesId) {
