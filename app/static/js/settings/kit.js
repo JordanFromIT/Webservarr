@@ -1187,15 +1187,14 @@
 
   // The router asks before any soft navigation away from Settings (a link,
   // Back or Forward, WS.router.navigate): true to go, or the dialog's answer.
-  // how.pop: Back or Forward. Held, the router puts this page's address back,
-  // and the open tab's hash follows it.
-  function canLeave(how) {
+  // A Back or Forward held here is undone by the router stepping back to this
+  // page's own entry, which already carries the open tab's hash (a tab push
+  // is numbered as this page's). The address is not touched here: the step
+  // lands a task or more later, so a fix-up written first would relabel the
+  // entry being left.
+  function canLeave() {
     if (S.leaving || S.approved || !anyDirty()) return true;
-    var sig = signal;
-    return askLeave().then(function (ok) {
-      if (!ok && how && how.pop && !sig.aborted) later(function () { setHash(S.current, 'replace'); }, 0);
-      return ok;
-    });
+    return askLeave();
   }
 
   // Links ask with the kit's dialog, whether the router takes them or not;

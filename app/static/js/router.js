@@ -32,7 +32,9 @@
  * A fetched page from another deploy (its #ws-data version, or the stamp on
  * a shared file or loaded helper, differs) is loaded by full navigation.
  * History entries carry their place ({ ws: 1, i, scrollY }): a Back held or
- * refused is undone with history.go(), and no entry is ever relabelled.
+ * refused is undone by stepping back to the page's entry (by its Navigation
+ * API key where the browser has one, else history.go()), and no entry is
+ * ever relabelled.
  * A push notification's click arrives as a service-worker message
  * { type: 'ws-navigate', url } and is navigated like a link.
  * Runtime cases: app/tests/js/router_runtime.mjs.
@@ -259,14 +261,42 @@ function start() {
   const prefetched = new Map();    // URL without hash -> { promise, timer }
   const scripts = new Map();       // page-helper path (no query) -> { href, promise }
 
+  // The Navigation API, where the browser has it: each numbered entry's key
+  // (i -> key), so a step back goes to that entry itself. By distance
+  // (history.go) an embed's own steps (the Seerr iframe's) count too, and
+  // the top-level page never hears of them.
+  const nav = window.navigation && typeof window.navigation.traverseTo === 'function' ? window.navigation : null;
+  const keys = new Map();
+  let landingTries = 0;        // extra steps taken toward landing (at most 3)
+
+  // at is the entry the address is on now: remember its key. pushed: a new
+  // entry, so every entry after it is gone.
+  function noteKey(pushed) {
+    if (!nav) return;
+    if (pushed) keys.forEach(function (k, i) { if (i >= at) keys.delete(i); });
+    try {
+      const e = nav.currentEntry;
+      if (e && e.key) keys.set(at, e.key);
+    } catch (e) { /* no entry to name */ }
+  }
+
   // Every entry pushed in this document is numbered, the page's own
   // included (Settings' tabs push a copy of the router's state), so the
-  // distance between two entries is always known.
+  // distance between two entries is always known. The count moves only once
+  // the entry exists: a push that throws made none. A push to the mounted
+  // page's own address (a Settings tab) is where that page now is.
   const nativePush = history.pushState;
   history.pushState = function (state, title, url) {
-    at += 1;
-    if (state && typeof state === 'object' && state.ws === 1) state = Object.assign({}, state, { i: at });
-    return nativePush.call(this, state, title, url);
+    const i = at + 1;
+    if (state && typeof state === 'object' && state.ws === 1) state = Object.assign({}, state, { i: i });
+    const ret = nativePush.call(this, state, title, url);
+    at = i;
+    noteKey(true);
+    if (current && !current.left && samePage(location.href, current.url)) {
+      current.url = location.href;
+      current.i = at;
+    }
+    return ret;
   };
 
   // The state for the entry the address is on now.
@@ -278,11 +308,27 @@ function start() {
     else history.pushState({ ws: 1, scrollY: 0 }, '', href);
   }
 
-  // Back to entry i without navigating: the step's popstate is ours.
+  // A step to entry i: by its key where the browser can, else by distance.
+  function stepTo(i) {
+    const key = nav ? keys.get(i) : null;
+    if (key) {
+      try {
+        const r = nav.traverseTo(key);
+        const lost = function () { if (landing === i) history.go(i - at); };
+        if (r && r.committed) { r.committed.catch(lost); r.finished.catch(function () {}); }
+        return;
+      } catch (e) { /* by distance */ }
+    }
+    history.go(i - at);
+  }
+
+  // Back to entry i without navigating: the step's popstate is ours, and
+  // one that arrives elsewhere (an embed's steps in between) steps again.
   function returnTo(i) {
     if (typeof i !== 'number' || i === at) return;
     landing = i;
-    history.go(i - at);
+    landingTries = 0;
+    stepTo(i);
   }
 
   const api = {
@@ -1054,6 +1100,16 @@ function start() {
   async function visit(href, opts) {
     const token = ++navToken;
     busyToken = token;
+    // However it ends, a throw included, the bar it may have put up goes
+    // (unless a newer navigation has taken it over).
+    try {
+      await steps(href, opts, token);
+    } finally {
+      busyEnd(token);
+    }
+  }
+
+  async function steps(href, opts, token) {
     closeChrome();
     clearTimeout(scrollTimer);
     if (fetchCtl) fetchCtl.abort();
@@ -1179,7 +1235,7 @@ function start() {
         const wanted = at;
         returnTo(shown.i);
         again = function () {
-          if (current === shown && at === shown.i) history.go(wanted - at);
+          if (current === shown && at === shown.i) stepTo(wanted);
           else go(target.href, {});
         };
       }
@@ -1223,7 +1279,7 @@ function start() {
     committing = new Promise(function (r) { release = r; });
     let done;
     try {
-      done = await commit(doc, page, dest, mod, moduleUrl, opts);
+      done = await commit(doc, page, dest, mod, moduleUrl, opts, token);
     } catch (e) {
       console.error('[router] swap failed', e);
       await hardNavigate(dest.href, token);
@@ -1238,7 +1294,9 @@ function start() {
   // Steps 5 to 10. Hands back the mount promise inside an object, so the
   // caller's await ends when the DOM is written, not when the page has
   // mounted, and the next navigation can start its own swap meanwhile.
-  async function commit(doc, page, dest, mod, moduleUrl, opts) {
+  // token: this navigation's, taken before the transition: a click during
+  // the crossfade starts another, which must not inherit this scroll restore.
+  async function commit(doc, page, dest, mod, moduleUrl, opts, token) {
     swaps += 1;
     busyEnd();
     closeOverlays();
@@ -1265,7 +1323,6 @@ function start() {
     announce(document.title);
 
     // 10. Mount.
-    const token = navToken;
     const mounted = mountPage(mod, moduleUrl, dest).then(function () {
       if (opts.pop) restoreScroll(opts.scrollY, token);
       else scrollToHash(dest);
@@ -1293,13 +1350,23 @@ function start() {
     const st = e.state;
     if (!current) return;
     const known = !!st && st.ws === 1 && typeof st.i === 'number';
-    // The router's own step back (returnTo) has arrived.
+    // Where the address is, as the entry itself says.
+    if (known) {
+      at = st.i;
+      noteKey(false);
+    }
+    // The router's own step back (returnTo) has arrived: on its entry, or on
+    // another (an embed's steps were in between), from where it steps again.
     if (landing !== null) {
       const was = landing;
+      if (known && st.i === was) { landing = null; return; }
+      if (known && landingTries < 3) {
+        landingTries += 1;
+        stepTo(was);
+        return;
+      }
       landing = null;
-      if (known && st.i === was) { at = st.i; return; }
     }
-    if (known) at = st.i;
     // A page is being asked whether it may be left: Back or Forward pressed
     // again waits for that answer, on the entry the question is about.
     // (The answer then keeps the page, or goes on from there.)
@@ -1328,6 +1395,7 @@ function start() {
     if (history.state === null) {
       at += 1;
       history.replaceState(mark(Math.round(scroller().scrollTop)), '', location.href);
+      noteKey(true);
     }
     current.i = at;
   });
@@ -1364,6 +1432,7 @@ function start() {
     at = st.ws === 1 && typeof st.i === 'number' ? st.i : 0;
     try { history.scrollRestoration = 'manual'; } catch (e) { /* ignore */ }
     history.replaceState(Object.assign({}, st, { ws: 1, i: at, scrollY: y }), '', location.href);
+    noteKey(false);
     const moduleUrl = new URL(firstSrc, location.href).href;
     const firstToken = navToken;
     // In debug mode the tools wrap listeners, timers and fetch first.

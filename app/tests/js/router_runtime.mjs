@@ -54,6 +54,7 @@ function pageHtml(name, o = {}) {
   const links = PAGES.map((p) => `<a href="/${p}">${p}</a>`).join('') +
     '<a href="/wiki/a">wiki a</a><a href="/wiki/b">wiki b</a>';
   const data = { version: o.version || '1.0', user: o.user || { username: 'sam', is_admin: false }, page: name };
+  const extra = o.extra || '';
   const helper = o.helper ? `<script src="/static/js/tour.js?v=${o.helper}" data-ws-page-script></script>` : '';
   return `<!DOCTYPE html><html data-page="${name}"${name === 'reader' ? ' data-shell="hidden"' : ''}>
 <head><title>Site - ${name}</title>
@@ -61,7 +62,7 @@ function pageHtml(name, o = {}) {
 <script src="/static/js/shell.js?v=${o.shell || 'A'}"></script>
 </head><body>
 <nav id="desktopNav">${PAGES.map((p) => `<a href="/${p}" class="n">${p}</a>`).join('')}</nav>
-<main><div id="wsPage" data-ws-module="${moduleUrl(name)}"><h1>${name}</h1>${links}</div></main>
+<main><div id="wsPage" data-ws-module="${moduleUrl(name)}"><h1>${name}</h1>${links}${extra}</div></main>
 ${helper}
 <script id="ws-data" type="application/json">${JSON.stringify(data)}</script>
 <div id="wsPlayer" hidden></div><div id="wsLive"></div><div id="wsProgress" hidden aria-hidden="true"></div>
@@ -72,42 +73,85 @@ ${helper}
 
 let routerCopy = 0;
 
+// The joint session history. A top-level entry { url, state, key }; an
+// iframe's step { frame: true, of: <the top-level entry it was made on> }
+// shares that entry's address and state, and stepping onto or off it fires
+// no popstate in the top-level window (as in a browser). keys are the
+// Navigation API's; navigation (boot option) is a stand-in for it.
+let entryKeys = 0;
 class FakeHistory {
   constructor(env, url) {
     this.env = env;
-    this.entries = [{ url, state: null }];
+    this.entries = [{ url, state: null, key: 'k' + (++entryKeys) }];
     this.index = 0;
     this.scrollRestoration = 'auto';
     this.steps = [];
   }
-  get state() { return structuredClone(this.entries[this.index].state); }
+  top(j = this.index) { const e = this.entries[j]; return e.frame ? e.of : e; }
+  get state() { return structuredClone(this.top().state); }
   get length() { return this.entries.length; }
   pushState(state, title, url) {
     const u = new URL(url, this.env.loc.href).href;
+    const copy = structuredClone(state);
     this.entries.splice(this.index + 1);
-    this.entries.push({ url: u, state: structuredClone(state) });
+    this.entries.push({ url: u, state: copy, key: 'k' + (++entryKeys) });
     this.index += 1;
     this.env.loc.set(u);
   }
   replaceState(state, title, url) {
     const u = url == null ? this.env.loc.href : new URL(url, this.env.loc.href).href;
-    this.entries[this.index] = { url: u, state: structuredClone(state) };
+    const t = this.top();
+    t.url = u;
+    t.state = structuredClone(state);
     this.env.loc.set(u);
+  }
+  // The embed's own navigation: a step in the joint history the top-level
+  // window never hears about.
+  frameStep() {
+    const t = this.top();
+    this.entries.splice(this.index + 1);
+    this.entries.push({ frame: true, of: t });
+    this.index += 1;
+  }
+  moveTo(i) {
+    const was = this.top();
+    this.index = i;
+    const t = this.top();
+    this.env.loc.set(t.url);
+    if (t === was) return;
+    const ev = new this.env.win.PopStateEvent('popstate', { state: structuredClone(t.state) });
+    this.env.win.dispatchEvent(ev);
   }
   go(delta) {
     this.steps.push(delta);
     setTimeout(() => {
       const i = this.index + delta;
       if (!delta || i < 0 || i >= this.entries.length) return;
-      this.index = i;
-      this.env.loc.set(this.entries[i].url);
-      const ev = new this.env.win.PopStateEvent('popstate', { state: structuredClone(this.entries[i].state) });
-      this.env.win.dispatchEvent(ev);
+      this.moveTo(i);
     }, 0);
   }
   back() { this.go(-1); }
   forward() { this.go(1); }
-  urls() { return this.entries.map((e) => new URL(e.url).pathname); }
+  urls() { return this.entries.map((e) => new URL((e.frame ? e.of : e).url).pathname); }
+  hrefs() { return this.entries.filter((e) => !e.frame).map((e) => e.url.slice(ORIGIN.length)); }
+}
+
+// window.navigation, as far as the router uses it: the current entry's key,
+// and traverseTo(key), which goes to the step that entry was made on.
+class FakeNavigation {
+  constructor(h) { this.h = h; }
+  get currentEntry() { return { key: this.h.top().key }; }
+  traverseTo(key) {
+    const h = this.h;
+    h.steps.push('to ' + key);
+    const j = h.entries.findIndex((e) => !e.frame && e.key === key);
+    if (j === -1) {
+      const no = Promise.reject(new DOMException('no such entry', 'InvalidStateError'));
+      return { committed: no, finished: no };
+    }
+    const done = new Promise((r) => setTimeout(() => { if (j !== h.index) h.moveTo(j); r(); }, 0));
+    return { committed: done, finished: done };
+  }
 }
 
 class FakeLocation {
@@ -144,7 +188,17 @@ async function boot(o = {}) {
   env.win = win;
   env.loc = new FakeLocation(env, ORIGIN + path + (o.search || ''));
   env.history = new FakeHistory(env, env.loc.href);
+  if (o.navigation) win.navigation = new FakeNavigation(env.history);
   const doc = win.document;
+  // A view transition that takes o.transition ms before the update runs.
+  if (o.transition) {
+    env.transitions = 0;
+    doc.startViewTransition = function (update) {
+      env.transitions += 1;
+      const done = new Promise((r) => setTimeout(() => { update(); r(); }, o.transition));
+      return { ready: done, finished: done, updateCallbackDone: done };
+    };
+  }
   const first = new win.DOMParser().parseFromString(pageHtml(path.slice(1), o.page), 'text/html');
   for (const a of first.documentElement.attributes) doc.documentElement.setAttribute(a.name, a.value);
   doc.head.innerHTML = first.head.innerHTML;
@@ -237,7 +291,8 @@ function serve(env, url, init) {
       resolve({
         ok: r.status >= 200 && r.status < 300, status: r.status, url: final, redirected: !!r.finalUrl,
         headers: { get: (k) => (k.toLowerCase() === 'content-type' ? (r.contentType || 'text/html; charset=utf-8') : null) },
-        text: async () => html
+        text: async () => html,
+        json: async () => JSON.parse(html)
       });
     }, r.delay);
     if (signal) signal.addEventListener('abort', () => { clearTimeout(t); abort(); }, { once: true });
@@ -653,6 +708,155 @@ await scenario('M5: a member\'s ?ws-debug is ignored and cleared', async () => {
   click(env, '/calendar');
   await until(() => mounted(env, 'calendar').length === 1);
   check('the next page mounts as itself', mounted(env, 'calendar').length === 1);
+});
+
+// ---- Carried from sub-project 1 (spec 2026-09-28 section 10) ----
+
+// The real Settings kit (settings/kit.js) in this window, mounted by the
+// Settings page as pages/settings.js does, with one tab ("pages") whose api
+// the scenario can stage changes through. Its questions are env.confirms.
+const KIT_SRC = readFileSync(join(here, '../../static/js/settings/kit.js'), 'utf8');
+const SETTINGS_DOM = '<div id="settingsTabs"><a id="tab-general" data-tab="general" href="#general">General</a>' +
+  '<a id="tab-pages" data-tab="pages" href="#pages">Pages</a></div>' +
+  '<div data-settings-panel="general"></div><div data-settings-panel="pages"></div>' +
+  '<div id="settingsSaveBar" hidden></div>';
+function withKit(env) {
+  env.confirms = [];
+  const ui = env.win.WSUI;
+  ui.el = function (tag, cls, text) {
+    const n = env.win.document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  };
+  ui.icon = function (name) { return ui.el('span', 'material-symbols-outlined', name); };
+  ui.cls = { btnGhost: 'ghost', btnPrimary: 'primary' };
+  ui.isDialogOpen = function () { return false; };
+  ui.confirm = function (opts) { return new Promise((answer) => env.confirms.push({ title: opts.title, answer })); };
+  env.routes['/settings'] = { page: { extra: SETTINGS_DOM } };
+  env.routes['/api/admin/settings'] = { contentType: 'application/json', html: '{"mask":"*","values":{},"meta":{}}' };
+  new Function(KIT_SRC)();
+  env.win.WSSettings.registerTab('pages', { mount(panel, api) { env.kitApi = api; } });
+  env.pages.settings = (ctx) => {
+    env.win.WSSettings.init(ctx);
+    ctx.beforeLeave((url, how) => Promise.resolve(env.win.WSSettings.canLeave(how)).then((ok) => ok !== false));
+  };
+}
+
+await scenario('N1 a Settings tab hash never lands on the previous entry during a held Back', async () => {
+  const env = await boot();
+  withKit(env);
+  env.router.navigate('/settings#pages');
+  await until(() => !!env.kitApi);
+  check('Settings opened on its tab', at(env) === '/settings' && env.loc.hash === '#pages', env.loc.href);
+  env.kitApi.set('site.name', 'edited');                // unsaved
+  env.history.back();
+  await until(() => env.confirms.length === 1);
+  check('Back asks first', env.confirms[0].title === 'Leave without saving?', env.confirms.map((c) => c.title));
+  env.confirms[0].answer(false);                     // Keep editing
+  await wait(120);
+  check('the previous entry\'s address is unchanged', env.history.hrefs()[0] === '/news', env.history.hrefs());
+  check('the address is Settings on its tab again', at(env) === '/settings' && env.loc.hash === '#pages', env.loc.href);
+  check('Settings is still shown', mounted(env, 'news').length === 1 && !env.log.includes('abort settings'), env.log);
+});
+
+await scenario('N2 a click during a Back crossfade does not get the old scroll', async () => {
+  const env = await boot({ transition: 50 });
+  env.win.document.scrollingElement.scrollTop = 500;
+  click(env, '/calendar');
+  await until(() => mounted(env, 'calendar').length === 1);
+  check('the position was saved on leaving', env.history.entries[0].state.scrollY === 500, env.history.entries[0].state);
+  env.maxScroll = 0;                      // Back to a page still growing
+  const before = env.transitions;
+  env.history.back();
+  await until(() => env.transitions > before);  // the Back swap's crossfade has begun
+  click(env, '/wiki');
+  await until(() => mounted(env, 'wiki').length === 1);
+  const mark = Date.now();
+  env.maxScroll = 100000;
+  await wait(600);
+  const stale = env.scrollWrites.filter((w) => w.v === 500 && w.at >= mark);
+  check('nothing writes the old offset into the next page', stale.length === 0, stale.length);
+  check('the new page scrolls to 0', env.win.document.scrollingElement.scrollTop === 0,
+    env.win.document.scrollingElement.scrollTop);
+});
+
+await scenario('N3 the entry counter stays right after a throwing pushState, an iframe step and a Settings tab push', async () => {
+  for (const navigation of [true, false]) {
+    const how = navigation ? ' (Navigation API)' : ' (history.go)';
+    const env = await boot({ navigation });
+    guarded(env);
+    let threw = false;
+    try {
+      env.history.pushState({ keep() {} }, '', '/news?cannot-clone');
+    } catch (e) {
+      threw = true;
+    }
+    check('the push threw' + how, threw && env.history.length === 1);
+    click(env, '/wiki');                    // stands in for the Seerr embed's page
+    await until(() => mounted(env, 'wiki').length === 1);
+    env.history.frameStep();                // the embed navigated inside itself
+    click(env, '/settings');
+    await until(() => mounted(env, 'settings').length === 1);
+    env.history.pushState(env.history.state, '', '#pages');   // a tab push, as the kit's setHash does
+    check('every entry numbered by its place' + how,
+      env.history.entries.filter((e) => !e.frame).map((e) => e.state && e.state.i).join() === '0,1,2,3',
+      env.history.entries.filter((e) => !e.frame).map((e) => e.state && e.state.i));
+    // A jump of three joint steps (long-press Back) onto the embed's page, refused.
+    env.history.go(-3);
+    await until(() => env.asked.length === 1);
+    check('asked about the embed\'s page' + how, env.asked[0].url === '/wiki' && env.asked[0].pop === true, env.asked.map((a) => a.url));
+    env.asked[0].answer(false);
+    await wait(120);
+    check('back on the tab that is shown' + how, env.history.index === 4 && env.loc.hash === '#pages',
+      [env.history.index, env.loc.href]);
+    // Then Back twice: the tab's page, then the embed's page.
+    env.history.back();
+    await wait(60);
+    check('Back: Settings without the tab' + how, at(env) === '/settings' && env.loc.hash === '' && env.asked.length === 1,
+      [env.loc.href, env.asked.length]);
+    env.history.back();
+    await until(() => env.asked.length === 2);
+    env.asked[1].answer(true);
+    await until(() => mounted(env, 'wiki').length === 2);
+    check('Back again: the embed\'s page' + how, at(env) === '/wiki' && env.history.index === 2, [at(env), env.history.index]);
+  }
+  // Refused, the step back from the embed's page's own entry: one step by
+  // distance lands on the embed's step, which the top-level window never
+  // hears about. By the entry's key it lands on the page's.
+  const env = await boot({ navigation: true });
+  guarded(env);
+  click(env, '/wiki');
+  await until(() => mounted(env, 'wiki').length === 1);
+  env.history.frameStep();
+  click(env, '/settings');
+  await until(() => mounted(env, 'settings').length === 1);
+  env.history.go(-2);
+  await until(() => env.asked.length === 1);
+  env.asked[0].answer(false);
+  await wait(120);
+  check('over the embed\'s step, back on the page\'s entry', env.history.index === 3 && at(env) === '/settings',
+    [env.history.index, at(env)]);
+});
+
+await scenario('N4 the progress bar clears when visit() throws after it started', async () => {
+  const env = await boot();
+  const bad = '<script src="https://[broken" data-ws-page-script></script>';
+  env.routes['/calendar'] = { delay: 250, html: pageHtml('calendar').replace('</body>', bad + '</body>') };
+  const bar = env.win.document.getElementById('wsProgress');
+  const main = env.win.document.querySelector('main');
+  let error = null;
+  const quiet = console.error;
+  console.error = () => {};
+  const done = env.router.navigate('/calendar').catch((e) => { error = e; });
+  await wait(200);
+  check('the bar shows while it loads', bar.hidden === false);
+  await done;
+  await wait(20);
+  console.error = quiet;
+  check('the navigation threw', !!error, String(error));
+  check('the bar is gone', bar.hidden === true, bar.hidden);
+  check('<main> is not busy', !main.hasAttribute('aria-busy'));
 });
 
 console.log(`${total - failed}/${total} router runtime cases pass`);
