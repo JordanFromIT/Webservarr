@@ -196,9 +196,13 @@
       // What Escape and a backdrop click answer: Cancel, or OK for a one-button notice.
       var entry = { box: box, close: close, dismiss: !!opts.alert };
       var done = false;
+      // The dialog's own listeners end when it closes, not when its nodes are
+      // collected: a page's leak check (soft navigation) sees them gone.
+      var ends = new AbortController();
       function close(result) {
         if (done) return;
         done = true;
+        ends.abort();
         var wasTop = topDialog() === entry;
         stack.splice(stack.indexOf(entry), 1);
         if (!stack.length) {
@@ -233,9 +237,9 @@
       }
       stack.push(entry);
       document.body.appendChild(overlay);
-      overlay.addEventListener('click', function (e) { if (e.target === overlay) close(entry.dismiss); });
-      cancel.addEventListener('click', function () { close(false); });
-      ok.addEventListener('click', function () { close(true); });
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) close(entry.dismiss); }, { signal: ends.signal });
+      cancel.addEventListener('click', function () { close(false); }, { signal: ends.signal });
+      ok.addEventListener('click', function () { close(true); }, { signal: ends.signal });
       (opts.danger && !opts.alert ? cancel : ok).focus();
     });
   }

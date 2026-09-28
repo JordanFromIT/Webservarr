@@ -192,6 +192,20 @@ class SharedShellScripts(unittest.TestCase):
         # Nothing closes the chrome alone any more: always with the dialogs.
         self.assertEqual(code.count("WS.closeChrome()"), 1)
 
+    def test_a_dialogs_listeners_end_when_it_closes(self):
+        # Opened from a page, they are that page's; closed, they must be gone,
+        # or the page's leak check lists them after it is left.
+        ui = js_code_only((STATIC / "js" / "ui.js").read_text(encoding="utf-8"))
+        confirm = function_body(ui, "confirm")
+        self.assertIn("var ends = new AbortController();", confirm)
+        self.assertRegex(function_body(confirm, "close"), r"^\s*if \(done\) return;\s*done = true;\s*ends\.abort\(\);")
+        # document's keydown and focusin serve the whole dialog stack and are
+        # removed when the last dialog closes; the dialog's own three end with it.
+        adds = [n for n in re.findall(r"\b(\w+)\.addEventListener\(", confirm) if n != "document"]
+        self.assertEqual(sorted(adds), ["cancel", "ok", "overlay"])
+        self.assertRegex(function_body(confirm, "close"), r"document\.removeEventListener\('\s*', onKey, true\);")
+        self.assertEqual(len(re.findall(r"\}, \{ signal: ends\.signal \}\);", confirm)), 3)
+
     def test_get_json_takes_the_pages_signal(self):
         shell = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
         body = function_body(shell, "getJSON")
