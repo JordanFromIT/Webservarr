@@ -14,7 +14,7 @@ from app.tests.test_settings_static import function_body
 from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
-CONVERTED = ["news", "settings"]
+CONVERTED = ["news", "settings", "calendar"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -145,6 +145,32 @@ class ConvertedPages(unittest.TestCase):
                         continue
                     self.assertRegex(m.group(1), r"\bdata-ws-page-script\b",
                                      f"{name}: {src} is a page helper without data-ws-page-script")
+
+    def test_converted_pages_have_a_heading_to_focus(self):
+        # After a soft navigation the router moves focus to #wsPage's first h1
+        # (spec 5.2 step 9); a page without one leaves focus on the old link.
+        for name in CONVERTED:
+            with self.subTest(name):
+                h = read(name)
+                self.assertIn("<h1", h[h.index('id="wsPage"'):], f"{name}: no h1 inside #wsPage")
+
+
+class CalendarPage(unittest.TestCase):
+    """Calendar's month data is read on the page's signal and refreshed by the
+    page's own poll, so neither outlives a visit."""
+
+    def test_every_read_is_on_the_pages_signal(self):
+        code = js_code_only(module_source("calendar"))
+        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 1)
+        self.assertEqual(len(re.findall(r"WS\.getJSON\(url, \{ signal: signal \}\)", code)), 1)
+        self.assertNotRegex(code, r"(?<![.\w])fetch\(", "every read goes through WS.getJSON")
+        on_error = code[code.index("onError:"):]
+        self.assertRegex(on_error, r"if \(signal\.aborted \|\| isAbort\(err\)\) return;")
+
+    def test_it_refreshes_through_ctx_poll(self):
+        code = js_code_only(module_source("calendar"))
+        self.assertIn("ctx.poll(fetchAndRender, REFRESH_MS);", code)
+        self.assertNotRegex(code, r"\bWS\.poll\(")
 
 
 class SharedShellScripts(unittest.TestCase):
