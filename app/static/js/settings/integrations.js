@@ -24,7 +24,10 @@
   var CARDS = {
     plex: { name: 'Plex', icon: 'play_circle', purpose: 'Shows what’s playing, and lets people sign in with Plex.',
       url: 'integration.plex.url', placeholder: 'http://192.168.1.10:32400',
-      secret: ['integration.plex.token', 'Plex token', 'In Plex, open any title → Get Info → View XML. The token is the X-Plex-Token part of the address.'] },
+      secret: ['integration.plex.token', 'Plex token', 'In Plex, open any title → Get Info → View XML. The token is the X-Plex-Token part of the address.'],
+      extra: [['integration.plex.audiobook_library', 'Audiobook library',
+        'Turns on the audiobook player. In Plex, open the library: its number follows source= in the address. Leave empty to keep the player off.',
+        'For example 5']] },
     seerr: { name: 'Seerr', icon: 'download', purpose: 'Movie and TV requests, and the artwork on the sign-in page.',
       url: 'integration.seerr.url', placeholder: 'http://192.168.1.10:5055',
       secret: ['integration.seerr.api_key', 'API key', 'In Seerr: Settings → General → API key.'] },
@@ -380,7 +383,9 @@
         var grid = el('div', 'grid sm:grid-cols-2 gap-5 ' + cls.fieldWidth);
         if (c.url) grid.appendChild(api.text({ key: c.url, label: 'Address', inputType: 'url', placeholder: c.placeholder }));
         if (c.secret) grid.appendChild(api.secret({ key: c.secret[0], label: c.secret[1], help: c.secret[2] }));
-        (c.extra || []).forEach(function (x) { grid.appendChild(api.text({ key: x[0], label: x[1], help: x[2] })); });
+        (c.extra || []).forEach(function (x) {
+          grid.appendChild(api.text({ key: x[0], label: x[1], help: x[2], placeholder: x[3] }));
+        });
         body.appendChild(grid);
         if (c.chaptarr) chaptarrFields(body);
         if (c.netdata) netdataFields(body);

@@ -2,6 +2,7 @@
 SQLite database configuration using SQLAlchemy.
 """
 
+import logging
 from typing import Optional
 
 from sqlalchemy import create_engine
@@ -98,5 +99,14 @@ def init_db():
         seed_vapid_keys(db)
         seed_default_news(db)
         seed_wiki_example(db)
+        # The audiobook player's log keeps 180 days. Check-ins prune it at
+        # most once a day after this; the marker row keeps the two workers
+        # from both doing it.
+        from app.services.listening import prune_if_due
+        try:
+            prune_if_due(db)
+        except Exception:
+            db.rollback()
+            logging.getLogger(__name__).exception("Listening log pruning failed at startup")
     finally:
         db.close()

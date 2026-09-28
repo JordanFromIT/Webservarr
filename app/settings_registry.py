@@ -27,7 +27,7 @@ Pair a changed default with a migration in app/seed.py that upgrades rows
 still holding the old value (see migrate_nav_sublabels_v2).
 
 Internal rows (system.secret_key, setup.*, seed.*, migration.*, VAPID keys,
-per-user notify.* preferences) are deliberately absent: they are not operator
+per-user notify.* preferences, the listening log's prune marker) are deliberately absent: they are not operator
 settings and the settings API must never write them.
 """
 
@@ -246,6 +246,12 @@ def _build() -> List[SettingDef]:
     d += [
         _url("integration.plex.url", "", "Plex address", ssrf_check=True, seed=False),
         _secret("integration.plex.token", "Plex token", seed=False),
+        # The Plex library section the audiobook player plays from. Empty turns
+        # the player off. Admin-only (not public): nothing outside the settings
+        # API and the player's own routes reads it.
+        _text("integration.plex.audiobook_library", "", "Plex audiobook library (empty turns the player off)",
+              max_length=9, pattern=r"[0-9]{1,9}",
+              pattern_hint="Enter the library's number from Plex, or leave it empty"),
         _url("integration.seerr.url", "", "Seerr address", ssrf_check=True, seed=False),
         _secret("integration.seerr.api_key", "Seerr API key", seed=False),
         _url("integration.chaptarr.url", "", "Chaptarr address", ssrf_check=True),

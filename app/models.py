@@ -2,7 +2,7 @@
 Database models for WebServarr.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Enum, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Enum, Float, ForeignKey, Index
 from sqlalchemy.sql import func
 from datetime import datetime
 from app.database import Base
@@ -276,3 +276,61 @@ class WikiPage(Base):
 
     def __repr__(self):
         return f"<WikiPage(id={self.id}, slug='{self.slug}')>"
+
+
+# ---- Audiobook player ----
+# Every row is keyed by the listener's account identity (tickets.account_identity,
+# "plex:<id>"), never the username. Queries in app/services/listening.py always
+# filter by the session's identity, so a listener only ever sees their own rows.
+
+class ListeningPosition(Base):
+    """Where one listener is in one book: the last stored check-in."""
+    __tablename__ = "listening_positions"
+
+    # One row per identity and book.
+    identity = Column(String(255), primary_key=True)
+    book_key = Column(String(64), primary_key=True)
+    track_key = Column(String(64), nullable=False)
+    offset_ms = Column(Integer, nullable=False)
+    duration_ms = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, nullable=False)   # naive UTC
+    device = Column(String(80), nullable=False, default="")
+    source = Column(String(10), nullable=False, default="web")   # web, plex, local
+    # The page session that wrote the row and its check-in number: an older
+    # seq from the same page session never overwrites a newer one.
+    psid = Column(String(64), nullable=True)
+    seq = Column(Integer, nullable=True)
+
+    def __repr__(self):
+        return f"<ListeningPosition(identity='{self.identity}', book='{self.book_key}')>"
+
+
+class ListeningLog(Base):
+    """Every stored check-in, for the listening history. Pruned after 180 days."""
+    __tablename__ = "listening_log"
+    __table_args__ = (Index("ix_listening_log_identity_book_at", "identity", "book_key", "at"),)
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    book_key = Column(String(64), nullable=False)
+    track_key = Column(String(64), nullable=False)
+    offset_ms = Column(Integer, nullable=False)
+    device = Column(String(80), nullable=False, default="")
+    event = Column(String(16), nullable=False)   # play, pause, checkin, seek, jump, leave, end
+    at = Column(DateTime, nullable=False)        # naive UTC
+
+    def __repr__(self):
+        return f"<ListeningLog(id={self.id}, event='{self.event}')>"
+
+
+class PlayerPrefs(Base):
+    """One listener's player preferences. No row means the defaults."""
+    __tablename__ = "player_prefs"
+
+    identity = Column(String(255), primary_key=True)
+    skip_s = Column(Integer, nullable=False, default=10)
+    speed = Column(Float, nullable=False, default=1.0)
+    smart_rewind = Column(Boolean, nullable=False, default=True)
+
+    def __repr__(self):
+        return f"<PlayerPrefs(identity='{self.identity}')>"
