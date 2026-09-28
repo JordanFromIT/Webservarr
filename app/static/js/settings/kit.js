@@ -772,7 +772,7 @@
 
   // After a save that changes any of it, the shell is fetched as every page
   // now renders it and written in (shell.js WS.applyShell: server-escaped
-  // markup, CSS as text; the nav's per-link behaviour is bound again). In safe
+  // markup, CSS as text). In safe
   // colours this page keeps the shipped theme; the next full page load shows
   // the saved one. A failed fetch stays quiet: the save itself succeeded, and
   // the router brings the same parts in from the next page it opens.
