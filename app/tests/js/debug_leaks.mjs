@@ -28,7 +28,7 @@ function check(name, ok, info) {
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const tick = () => new Promise((r) => setImmediate(r));
 
-// ---- debugFlags(search, stored) ----
+// ---- debugFlags(search, stored, admin) ----
 
 for (const [search, stored, flags, store, why] of [
   ['', null, [], null, 'no flag anywhere'],
@@ -42,8 +42,23 @@ for (const [search, stored, flags, store, why] of [
   ['?ws-debug=', 'leaks', ['leaks'], null, 'an empty value changes nothing'],
   ['', 'leaks,nonsense', ['leaks'], null, 'unknown stored flags are ignored'],
 ]) {
-  const got = debugFlags(search, stored);
+  const got = debugFlags(search, stored, true);
   check('debugFlags, ' + why, eq(got, { flags, store }), got);
+}
+
+// Only an admin's tab honours them (final review M5): a link with
+// ?ws-debug= sent to anyone else does nothing, and anything this tab had
+// stored is cleared. Not saying who is asking is not an admin.
+for (const [search, stored, admin, store, why] of [
+  ['?ws-debug=leaks', null, false, '', 'a member asking is ignored, and nothing is kept'],
+  ['?ws-debug=throw,leaks', 'leaks', false, '', 'a member with stored flags: they are cleared'],
+  ['', 'leaks', false, '', 'stored flags from an admin before a sign-out do not carry over'],
+  ['', null, false, null, 'a member with nothing asked or stored: nothing written'],
+  ['?ws-debug=leaks', null, undefined, '', 'no answer about the visitor is not an admin'],
+  ['?ws-debug=leaks', null, 'true', '', 'only a real true is an admin'],
+]) {
+  const got = debugFlags(search, stored, admin);
+  check('debugFlags, ' + why, eq(got, { flags: [], store }), got);
 }
 
 // ---- takeFlag: the "throw" gate ----
@@ -61,8 +76,8 @@ for (const [search, stored, flags, store, why] of [
   const only = ['throw'];
   const store = takeFlag(only, 'throw');
   check('takeFlag: the last flag taken clears the stored key', store === '' && only.length === 0, store);
-  check('takeFlag: a reload after it no longer throws', eq(debugFlags('', null), { flags: [], store: null }) &&
-    eq(debugFlags('', 'leaks'), { flags: ['leaks'], store: null }));
+  check('takeFlag: a reload after it no longer throws', eq(debugFlags('', null, true), { flags: [], store: null }) &&
+    eq(debugFlags('', 'leaks', true), { flags: ['leaks'], store: null }));
 }
 
 // ---- Stack attribution ----

@@ -19,7 +19,7 @@
  *   debugFlags(search, stored)        which debug tools this tab asked for (7)
  *   visitTimers(signal)               a page's ctx.setTimeout / ctx.clearTimeout
  *
- * Debug mode (spec 7): ?ws-debug=leaks,throw in the address, kept for the tab
+ * Debug mode (spec 7), for admins only: ?ws-debug=leaks,throw in the address, kept for the tab
  * in sessionStorage 'ws.debug' (?ws-debug=off clears it), loads debug-leaks.js
  * before any page module: the leak checker, the soak, the shell identity check
  * and a test tone in #wsPlayer. "throw" mounts pages/_debug-throw.js instead
@@ -175,10 +175,17 @@ function parseFlags(raw) {
 }
 
 /* The debug flags for this document. search: location.search; stored: this
-   tab's sessionStorage 'ws.debug' (or null). The address adds to what is
-   stored; "off" clears it; unknown words are ignored. store: the value to
-   write back, '' to remove it, null to leave it alone. */
-export function debugFlags(search, stored) {
+   tab's sessionStorage 'ws.debug' (or null); admin: true only when the
+   signed-in visitor is an admin. The address adds to what is stored; "off"
+   clears it; unknown words are ignored. Anyone else gets none, and whatever
+   the tab stored is removed: a ?ws-debug= link sent to a member does
+   nothing. store: the value to write back, '' to remove it, null to leave
+   it alone. */
+export function debugFlags(search, stored, admin) {
+  if (admin !== true) {
+    const asked = new URLSearchParams(search || '').get('ws-debug');
+    return { flags: [], store: stored || asked !== null ? '' : null };
+  }
   const kept = parseFlags(stored);
   const param = new URLSearchParams(search || '').get('ws-debug');
   if (param === null || !param.trim()) return { flags: kept, store: null };
@@ -298,7 +305,9 @@ function start() {
 
   let storedDebug = null;
   try { storedDebug = sessionStorage.getItem(DEBUG_KEY); } catch (e) { /* none */ }
-  const debugState = debugFlags(location.search, storedDebug);
+  // The visitor the server stamped into #ws-data (shell.js WS.user).
+  const visitor = WS.user || (window.WS_DATA && window.WS_DATA.user) || null;
+  const debugState = debugFlags(location.search, storedDebug, !!visitor && visitor.is_admin === true);
   if (debugState.store !== null) storeDebug(debugState.store);
 
   let debug = null;            // the debug tools' hooks, once loaded
