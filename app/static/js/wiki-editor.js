@@ -190,10 +190,12 @@ var WikiEditor = (function () {
     return res.json();
   }
 
-  async function uploadImage(file) {
+  // On the editor view's signal (vs): an editor the admin has left stops
+  // waiting for its image.
+  async function uploadImage(file, vs) {
     var fd = new FormData();
     fd.append('file', file);
-    var res = await fetch('/api/wiki/images', { method: 'POST', body: fd, signal: signal });
+    var res = await fetch('/api/wiki/images', { method: 'POST', body: fd, signal: vs });
     if (!res.ok) {
       var body = await res.json().catch(function () { return {}; });
       throw new Error(typeof body.detail === 'string' ? body.detail : 'Upload failed');
@@ -383,8 +385,15 @@ var WikiEditor = (function () {
 
   // ---------- markdown toolbar ----------
 
+  // Session s's own textarea (the one on screen by default), never a lookup
+  // in the document: an answer for one editor must not land in another's.
+  function textarea(s) {
+    s = s || _session;
+    return s && s.form ? s.form.querySelector('#wikiEditContent') : null;
+  }
+
   function wrapSelection(before, after, placeholder) {
-    var ta = document.getElementById('wikiEditContent');
+    var ta = textarea();
     if (!ta) return;
     var start = ta.selectionStart, end = ta.selectionEnd;
     var selected = ta.value.slice(start, end) || placeholder || '';
@@ -396,8 +405,8 @@ var WikiEditor = (function () {
     mirror();
   }
 
-  function insertAtCaret(text) {
-    var ta = document.getElementById('wikiEditContent');
+  function insertAtCaret(text, s) {
+    var ta = textarea(s);
     if (!ta) return;
     var start = ta.selectionStart;
     ta.value = ta.value.slice(0, start) + text + ta.value.slice(ta.selectionEnd);
@@ -534,6 +543,7 @@ var WikiEditor = (function () {
 
     _session = { slug: _slug, helpBase: helpBase, helpSeen: seenNow, holders: holders, form: null, busy: false };
     _session.restored = useDraft;     // a restored draft is unsaved from the start
+    _session.uploads = 0;             // images still uploading into this form
     render(initial, page);
     if (dropped) status('Your unsaved change to the help links was left out: that link has changed since.');
   }
@@ -644,17 +654,25 @@ var WikiEditor = (function () {
 
     // Drag-drop and paste both upload, because both are how a screenshot arrives.
     ta.addEventListener('dragover', function (e) { e.preventDefault(); }, { signal: vs });
+    // An image belongs to the editor it was dropped or pasted into: it lands
+    // only in that session's form, while that session is the one showing, and
+    // an upload in flight is unsaved work (holds).
     ta.addEventListener('drop', async function (e) {
       var files = e.dataTransfer && e.dataTransfer.files;
       if (!files || !files.length) return;
       e.preventDefault();
+      var s = _session;
       status('Uploading image…');
+      s.uploads += 1;
       try {
-        var md = await uploadImage(files[0]);
-        insertAtCaret('\n' + md + '\n');
+        var md = await uploadImage(files[0], vs);
+        if (vs.aborted || _session !== s) return;
+        insertAtCaret('\n' + md + '\n', s);
         status('Image added.');
       } catch (err) {
-        if (!isAbort(err)) status(err.message, 'bad');
+        if (!isAbort(err) && !vs.aborted && _session === s) status(err.message, 'bad');
+      } finally {
+        s.uploads -= 1;
       }
     }, { signal: vs });
     ta.addEventListener('paste', async function (e) {
@@ -663,13 +681,18 @@ var WikiEditor = (function () {
       for (var i = 0; i < items.length; i++) {
         if (items[i].type && items[i].type.indexOf('image/') === 0) {
           e.preventDefault();
+          var s = _session;
           status('Uploading image…');
+          s.uploads += 1;
           try {
-            var md = await uploadImage(items[i].getAsFile());
-            insertAtCaret('\n' + md + '\n');
+            var md = await uploadImage(items[i].getAsFile(), vs);
+            if (vs.aborted || _session !== s) return;
+            insertAtCaret('\n' + md + '\n', s);
             status('Image added.');
           } catch (err) {
-            if (!isAbort(err)) status(err.message, 'bad');
+            if (!isAbort(err) && !vs.aborted && _session === s) status(err.message, 'bad');
+          } finally {
+            s.uploads -= 1;
           }
           return;
         }
@@ -752,12 +775,12 @@ var WikiEditor = (function () {
   function fingerprint(s) { return JSON.stringify(collect(s)); }
 
   // The editor is on screen with text that is not saved: changed since it
-  // opened, a restored draft, or a save still in flight. Not once the admin
+  // opened, a restored draft, a save or an image upload still in flight. Not once the admin
   // chose to go (closed) or agreed to leave (approved).
   function holds() {
     var s = _session;
     if (!s || !s.form || s.closed || s.approved || !s.form.isConnected) return false;
-    return s.busy || !!s.restored || fingerprint(s) !== s.baseline;
+    return s.busy || s.uploads > 0 || !!s.restored || fingerprint(s) !== s.baseline;
   }
 
   // A pending mirror is written now, so the last keystrokes are in the draft.
@@ -809,9 +832,13 @@ var WikiEditor = (function () {
     host = h;
     _root = null;
     _session = null;
+    // A reload or a closed tab: the last keystrokes reach the draft first
+    // (pagehide as well, for a way out that asks nothing).
     window.addEventListener('beforeunload', function (e) {
+      flush();
       if (holds()) { e.preventDefault(); e.returnValue = ''; }
     }, { signal: signal });
+    window.addEventListener('pagehide', flush, { signal: signal });
     window.addEventListener('ws:nav-stayed', function () {
       if (_session) _session.approved = false;
     }, { signal: signal });

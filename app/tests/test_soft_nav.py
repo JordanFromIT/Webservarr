@@ -306,9 +306,9 @@ class WikiPage(unittest.TestCase):
         claim = code[code.index("ctx.onNavigate(function (url, how) {"):]
         claim = claim[:matching_brace(claim, claim.index("{"))]
         self.assertRegex(claim, r"if \(!isWikiPath\(url\.pathname\)\) return false;\s*"
-                                r"if \(WikiEditor\.holds\(\)\) return false;\s*render\(url, \{")
+                                r"if \(WikiEditor\.holds\(\)\) return false;\s*return render\(url, \{")
         self.assertIn("pop: !!(how && how.pop), scrollY: how && how.scrollY,", claim)
-        self.assertRegex(claim, r"\}\);\s*return true;\s*$")
+        self.assertRegex(claim, r"return render\(url, \{")
 
     def test_its_links_go_through_the_router(self):
         # No click listener of its own: an article, category, back or body
@@ -377,7 +377,7 @@ class WikiPage(unittest.TestCase):
         code = js_code_only(src)
         holds = function_body(code, "holds")
         self.assertIn("if (!s || !s.form || s.closed || s.approved || !s.form.isConnected) return false;", holds)
-        self.assertIn("return s.busy || !!s.restored || fingerprint(s) !== s.baseline;", holds)
+        self.assertIn("return s.busy || s.uploads > 0 || !!s.restored || fingerprint(s) !== s.baseline;", holds)
         self.assertIn("_session.baseline = fingerprint(_session);", function_body(code, "render"))
         can = function_body(code, "canLeave")
         self.assertRegex(can, r"^\s*if \(!holds\(\)\) return true;")
@@ -386,7 +386,7 @@ class WikiPage(unittest.TestCase):
         self.assertRegex(can, r"if \(ok && _session === s\) \{\s*s\.approved = true;\s*flush\(\);\s*\}")
         self.assertNotIn("clearDraft", can)
         init = function_body(code, "init")
-        self.assertRegex(init, r"window\.addEventListener\('\s+', function \(e\) \{\s*if \(holds\(\)\) \{ e\.preventDefault\(\); e\.returnValue = '';")
+        self.assertRegex(init, r"window\.addEventListener\('\s+', function \(e\) \{\s*flush\(\);\s*if \(holds\(\)\) \{ e\.preventDefault\(\); e\.returnValue = '';")
         self.assertIn("'beforeunload'", src)
         self.assertRegex(init, r"window\.addEventListener\('\s+', function \(\) \{\s*if \(_session\) _session\.approved = false;")
         self.assertIn("'ws:nav-stayed'", src)
@@ -405,13 +405,105 @@ class WikiPage(unittest.TestCase):
         claim = go[go.index("if (!current.left && current.claim) {"):go.index("if (!current.left && current.guard) {")]
         # The entry being left keeps its scroll before the page redraws.
         self.assertLess(claim.index("if (!opts.pop) saveScroll();"), claim.index("current.claim("))
-        self.assertIn("current.claim(new URL(target.href), { pop: !!opts.pop, scrollY: opts.scrollY || 0 }) === true;", claim)
+        self.assertIn("const got = current.claim(new URL(target.href), { pop: !!opts.pop, scrollY: opts.scrollY || 0 });", claim)
         # One history write, and the same URL again replaces.
         self.assertRegex(claim, r"if \(opts\.replace \|\| target\.href === location\.href\) history\.replaceState\(st, '', target\.href\);\s*"
                                 r"else history\.pushState\(st, '', target\.href\);")
         self.assertEqual(claim.count("history."), 2)
         self.assertIn("window.dispatchEvent(new CustomEvent('", claim)
         self.assertIn("ws:page-claimed", (STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+
+
+class WikiFixRound1(unittest.TestCase):
+    """Task 9 fix round 1: an image upload belongs to its editor session (E1),
+    a reload keeps the last keystrokes (E2), a late answer never paints over a
+    newer view (W1), a claimed view gets its title and announcement (W2), a
+    scroll restore stops when the view changes (W3), a cold load scrolls to
+    its #fragment (W4)."""
+
+    def editor(self):
+        return js_code_only((STATIC / "js" / "wiki-editor.js").read_text(encoding="utf-8"))
+
+    def test_an_upload_belongs_to_its_session(self):
+        code = self.editor()
+        # The upload runs on the editor view's signal, and inserts only into
+        # the form of the session it started in, while that is still showing.
+        self.assertRegex(function_body(code, "uploadImage"), r"signal: vs \}\);")
+        self.assertIn("function uploadImage(file, vs)", code)
+        for kind in ("drop", "paste"):
+            start = code.index("ta.addEventListener('" + " " * len(kind) + "', async function (e) {")
+            body = code[start:matching_brace(code, code.index("{", start))]
+            with self.subTest(kind):
+                self.assertIn("var s = _session;", body)
+                self.assertIn("await uploadImage(", body)
+                self.assertIn(", vs);", body)
+                self.assertRegex(body, r"if \(vs\.aborted \|\| _session !== s\) return;\s*insertAtCaret\(")
+                self.assertIn("insertAtCaret('\\n' + md + '\\n', s);".replace("'\\n'", "'  '"), body)
+                self.assertIn("s.uploads += 1;", body)
+                self.assertIn("s.uploads -= 1;", body)
+        # The textarea is the session's own, never looked up in the document.
+        self.assertNotIn("document.getElementById('               ')", code)
+        self.assertRegex(function_body(code, "textarea"), r"s = s \|\| _session;\s*return s && s\.form \? s\.form\.querySelector\(")
+        self.assertIn("var ta = textarea(s);", function_body(code, "insertAtCaret"))
+        self.assertIn("var ta = textarea();", function_body(code, "wrapSelection"))
+        # An upload in flight is unsaved work.
+        self.assertIn("return s.busy || s.uploads > 0 || !!s.restored || fingerprint(s) !== s.baseline;",
+                      function_body(code, "holds"))
+        self.assertIn("_session.uploads = 0;", function_body(code, "open"))
+
+    def test_a_reload_keeps_the_last_keystrokes(self):
+        init = function_body(self.editor(), "init")
+        self.assertRegex(init, r"window\.addEventListener\('\s+', function \(e\) \{\s*flush\(\);\s*if \(holds\(\)\)")
+        self.assertRegex(init, r"window\.addEventListener\('\s+', flush, \{ signal: signal \}\);")
+        self.assertIn("'pagehide'", (STATIC / "js" / "wiki-editor.js").read_text(encoding="utf-8"))
+
+    def test_a_late_answer_never_paints_over_a_newer_view(self):
+        code = js_code_only(module_source("wiki"))
+        for name in ("renderCategory", "renderSearch", "renderPage"):
+            with self.subTest(name):
+                body = function_body(code, name)
+                self.assertRegex(body, r"^\s*_gen \+= 1;\s*var gen = _gen;")
+                # After the read, before anything is drawn.
+                after = body[body.index("} catch (e) {"):]
+                after = after[matching_brace(after, after.index("{")):]
+                self.assertRegex(after, r"^\s*\}?\s*if \(gen !== _gen \|\| vs\.aborted\) return;")
+                self.assertRegex(body, r"if \(gen !== _gen \|\| vs\.aborted \|\| isAbort\(e\) \|\| e\.message === '\s+'\) return;")
+
+    def test_a_claimed_view_gets_its_title_and_announcement(self):
+        router = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+        go = function_body(router, "go")
+        claim = go[go.index("if (!current.left && current.claim) {"):go.index("if (!current.left && current.guard) {")]
+        self.assertRegex(claim, r"claimed = got === true \|\| \(!!got && typeof got\.then === '\s{8}'\);")
+        self.assertRegex(claim, r"titled\.then\(function \(name\) \{\s*"
+                                r"if \(entry\.left \|\| current !== entry \|\| entry\.url !== href \|\| typeof name !== '\s{6}' \|\| !name\) return;\s*"
+                                r"document\.title = pageTitle\(name, siteName\(\)\);\s*announce\(document\.title\);")
+        self.assertIn("export function pageTitle(name, site)", router)
+        self.assertIn("setTitle: function (name) {", router)
+        page = js_code_only(module_source("wiki"))
+        on = page[page.index("ctx.onNavigate(function (url, how) {"):]
+        on = on[:matching_brace(on, on.index("{"))]
+        self.assertRegex(on, r"return render\(url, \{")
+        self.assertNotIn("return true;", on)
+        self.assertRegex(page, r"var name = await render\(ctx\.url, \{ first: true, [^;]*\);\s*if \(name && !signal\.aborted\) ctx\.setTitle\(name\);")
+        # render resolves to the drawn view's name, or null once another replaced it.
+        render = function_body(page, "render")
+        self.assertIn("return drawn.then(function (name) {", render)
+        self.assertIn("if (gen !== _gen || signal.aborted) return null;", render)
+        for fn, word in (("renderIndex", "return 'Wiki';"), ("renderPage", "return page.title;"),
+                         ("renderCategory", "return cat ? cat.name : 'Wiki';"), ("renderSearch", "return 'Search';")):
+            self.assertIn(word.replace("'Wiki'", "'    '").replace("'Search'", "'      '"), function_body(page, fn), fn)
+
+    def test_a_scroll_restore_stops_when_the_view_changes(self):
+        page = js_code_only(module_source("wiki"))
+        body = function_body(page, "restoreScroll")
+        self.assertIn("var gen = _gen;", body)
+        self.assertIn("if (signal.aborted || gen !== _gen) return;", body)
+
+    def test_a_cold_load_scrolls_to_its_fragment(self):
+        router = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+        boot = router[router.index("const firstPage = document.getElementById("):]
+        self.assertRegex(boot, r"return mountPage\(mod, moduleUrl, new URL\(location\.href\)\)\.then\(function \(\) \{\s*"
+                               r"restoreScroll\(y\);\s*if \(!y\) scrollToHash\(new URL\(location\.href\)\);")
 
 
 class PageOffBanner(unittest.TestCase):

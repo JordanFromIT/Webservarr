@@ -162,12 +162,13 @@ export async function mount(ctx) {
   }
 
   // Back or Forward: the position that entry saved. The article may still be
-  // growing (images), so try for a few frames.
+  // growing (images), so try for a few frames; never into the next view.
   function restoreScroll(y) {
     y = y || 0;
     var frames = 0;
+    var gen = _gen;
     (function step() {
-      if (signal.aborted) return;
+      if (signal.aborted || gen !== _gen) return;
       var box = scroller(ctx.root);
       box.scrollTop = y;
       if (Math.abs(box.scrollTop - y) > 1 && ++frames < 30) requestAnimationFrame(step);
@@ -369,7 +370,7 @@ export async function mount(ctx) {
       root.appendChild(pageHeader('Wiki', null, '/', 'Back to home'));
       root.appendChild(emptyState('cloud_off', "The wiki didn't load",
         'Reload the page. If it keeps happening, the server may be restarting.'));
-      return;
+      return 'Wiki';
     }
 
     if (gen !== _gen) return;
@@ -408,7 +409,7 @@ export async function mount(ctx) {
       root.appendChild(emptyState('menu_book', 'The wiki is empty',
         isAdmin() ? 'Use New page above to write the first guide.'
                   : 'Nothing has been written here yet.'));
-      return;
+      return 'Wiki';
     }
 
     if (_cats.length) {
@@ -436,12 +437,14 @@ export async function mount(ctx) {
       recent.forEach(function (p) { rlist.appendChild(pageRow(p, true)); });
       root.appendChild(rlist);
     }
+    return 'Wiki';
   }
 
   // ---------- category ----------
 
   async function renderCategory(slug) {
     _gen += 1;
+    var gen = _gen;
     skeleton('index');
     var vs = newView();
     var pages, cats;
@@ -451,13 +454,14 @@ export async function mount(ctx) {
       pages = await api('/api/wiki/pages?category=' + encodeURIComponent(slug) +
                         '&include_drafts=' + (isAdmin() ? 'true' : 'false') + '&limit=200', vs);
     } catch (e) {
-      if (vs.aborted || isAbort(e) || e.message === 'unauthenticated') return;
+      if (gen !== _gen || vs.aborted || isAbort(e) || e.message === 'unauthenticated') return;
       clear();
       root.appendChild(pageHeader('Wiki', null, '/wiki', 'Back to the wiki'));
       root.appendChild(emptyState('folder_off', 'That category doesn’t exist',
         'It may have been renamed or removed.'));
-      return;
+      return 'Wiki';
     }
+    if (gen !== _gen || vs.aborted) return;
 
     var cat = cats.filter(function (c) { return c.slug === slug; })[0];
     clear();
@@ -468,17 +472,19 @@ export async function mount(ctx) {
     if (!pages.length) {
       root.appendChild(emptyState('description', 'No pages here yet',
         isAdmin() ? 'Create one from the wiki index.' : null));
-      return;
+    } else {
+      var list = el('div', 'grid gap-2');
+      pages.forEach(function (p) { list.appendChild(pageRow(p, false)); });
+      root.appendChild(list);
     }
-    var list = el('div', 'grid gap-2');
-    pages.forEach(function (p) { list.appendChild(pageRow(p, false)); });
-    root.appendChild(list);
+    return cat ? cat.name : 'Wiki';
   }
 
   // ---------- search ----------
 
   async function renderSearch(term) {
     _gen += 1;
+    var gen = _gen;
     skeleton('index');
     var vs = newView();
     var results;
@@ -486,9 +492,10 @@ export async function mount(ctx) {
       results = await api('/api/wiki/pages?q=' + encodeURIComponent(term) +
                           '&include_drafts=' + (isAdmin() ? 'true' : 'false') + '&limit=100', vs);
     } catch (e) {
-      if (vs.aborted || isAbort(e) || e.message === 'unauthenticated') return;
+      if (gen !== _gen || vs.aborted || isAbort(e) || e.message === 'unauthenticated') return;
       results = [];
     }
+    if (gen !== _gen || vs.aborted) return;
 
     clear();
     root.appendChild(pageHeader('Search', results.length
@@ -512,7 +519,7 @@ export async function mount(ctx) {
           root.appendChild(g);
         }).catch(function () {});
       }
-      return;
+      return 'Search';
     }
 
     var list = el('div', 'grid gap-2');
@@ -542,19 +549,21 @@ export async function mount(ctx) {
       list.appendChild(a);
     });
     root.appendChild(list);
+    return 'Search';
   }
 
   // ---------- single page ----------
 
   async function renderPage(slug) {
     _gen += 1;
+    var gen = _gen;
     skeleton('page');
     var vs = newView();
     var page;
     try {
       page = await api('/api/wiki/pages/' + encodeURIComponent(slug), vs);
     } catch (e) {
-      if (vs.aborted || isAbort(e) || e.message === 'unauthenticated') return;
+      if (gen !== _gen || vs.aborted || isAbort(e) || e.message === 'unauthenticated') return;
       clear();
       root.appendChild(pageHeader('Wiki', null, '/wiki', 'Back to the wiki'));
       root.appendChild(emptyState('find_in_page', 'That page doesn’t exist',
@@ -567,8 +576,9 @@ export async function mount(ctx) {
         cats.forEach(function (c) { g.appendChild(categoryCard(c)); });
         root.appendChild(g);
       }).catch(function () {});
-      return;
+      return 'Wiki';
     }
+    if (gen !== _gen || vs.aborted) return;
 
     clear();
 
@@ -664,6 +674,7 @@ export async function mount(ctx) {
       more.appendChild(list);
       root.appendChild(more);
     }
+    return page.title;
   }
 
   // ---------- routing ----------
@@ -672,6 +683,8 @@ export async function mount(ctx) {
   // router scrolls it); { pop, scrollY } Back or Forward to a wiki entry;
   // { focus, from } the heading takes focus once drawn, unless the visitor
   // moved it away from `from` meanwhile. A new view starts at the top.
+  // Resolves to the drawn view's name (its title), or null once another view
+  // has replaced it.
   function render(url, how) {
     var s = parse(url);
     _manage = false;
@@ -683,11 +696,12 @@ export async function mount(ctx) {
     else if (s.view === 'category') drawn = renderCategory(s.slug);
     else drawn = renderPage(s.slug);
     var gen = _gen;
-    return drawn.then(function () {
-      if (gen !== _gen || signal.aborted) return;   // another view has replaced it
+    return drawn.then(function (name) {
+      if (gen !== _gen || signal.aborted) return null;   // another view has replaced it
       if (how.pop) restoreScroll(how.scrollY);
       else if (!how.first) scrollToHash(url);
       if (how.focus) focusHeading(how.from);
+      return name || null;
     });
   }
 
@@ -712,21 +726,22 @@ export async function mount(ctx) {
   // editor holds unsaved text asks first.
   ctx.beforeLeave(function () { return WikiEditor.canLeave(); });
 
-  // The wiki's own addresses are drawn here; the router records history.
+  // The wiki's own addresses are drawn here; the router records history,
+  // and titles and announces the view with the name render() resolves to.
   // Not while the editor holds unsaved text: the router then asks the guard
   // above, and on Leave loads the address as a new visit.
   ctx.onNavigate(function (url, how) {
     if (!isWikiPath(url.pathname)) return false;
     if (WikiEditor.holds()) return false;
-    render(url, {
+    return render(url, {
       pop: !!(how && how.pop), scrollY: how && how.scrollY,
       focus: true, from: document.activeElement
     });
-    return true;
   });
 
   // A soft navigation in focused the page's heading (the skeleton's);
   // the drawn view's takes it over. A cold load leaves focus alone.
   var arrivedFocused = ctx.root.contains(document.activeElement);
-  await render(ctx.url, { first: true, focus: arrivedFocused, from: document.activeElement });
+  var name = await render(ctx.url, { first: true, focus: arrivedFocused, from: document.activeElement });
+  if (name && !signal.aborted) ctx.setTitle(name);
 }

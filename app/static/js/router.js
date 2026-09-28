@@ -39,7 +39,10 @@
  * ws:nav-stayed, so the page keeps what it holds.
  * ctx.onNavigate(claim): the page draws some URLs itself (the wiki's views).
  * Every navigation from it first calls claim(url, { pop, scrollY }); true
- * takes it, and the router only records history (no fetch, no mount).
+ * takes it, and the router only records history (no fetch, no mount). A
+ * promise takes it too, and resolves to the drawn view's name (or null): the
+ * router then sets the title in the site's format and announces it, as a
+ * swap does. ctx.setTitle(name) titles the view the page first drew.
  * Events on window:
  *   ws:before-hard-nav  detail { url, waitUntil(promise) }; awaited, 500 ms cap
  *   ws:page-mounted     detail { url, page } after each mount
@@ -109,6 +112,16 @@ export function decide(requestedUrl, response) {
   const html = /^\s*text\/html\b/i.test(response.contentType || '');
   if (!html || !response.hasModule) return { action: 'hard', url: req.href };
   return { action: 'swap' };
+}
+
+/* The title of a view a page drew itself: "<site name> - <view>", as the
+   server's page_title (pages.py) writes a page's; no site name, the view
+   alone; no view name, the site name alone. */
+export function pageTitle(name, site) {
+  const n = String(name == null ? '' : name).trim();
+  const s = String(site == null ? '' : site).trim();
+  if (!n) return s;
+  return s ? s + ' - ' + n : n;
 }
 
 const DEBUG_FLAGS = ['leaks', 'throw'];
@@ -667,6 +680,16 @@ function start() {
     h1.focus({ preventScroll: true });
   }
 
+  // The operator's site name: the branding payload's, else the brand half of
+  // the title the server wrote ("<site> - <page>").
+  function siteName() {
+    const b = WS.data && WS.data.branding;
+    if (b && typeof b.app_name === 'string') return b.app_name.trim();
+    const t = document.title;
+    const i = t.indexOf(' - ');
+    return i === -1 ? '' : t.slice(0, i);
+  }
+
   function announce(title) {
     const live = document.getElementById('wsLive');
     if (!live) return;
@@ -736,6 +759,12 @@ function start() {
       },
       beforeLeave: function (guard) {
         if (!entry.left) entry.guard = typeof guard === 'function' ? guard : null;
+      },
+      // The view the page drew on mount, when it is more than the page (an
+      // article): the title only, the router already announced the page.
+      setTitle: function (name) {
+        if (entry.left || current !== entry || typeof name !== 'string' || !name) return;
+        document.title = pageTitle(name, siteName());
       }
     };
 
@@ -795,8 +824,11 @@ function start() {
     if (!current.left && current.claim) {
       if (!opts.pop) saveScroll();
       let claimed = false;
+      let titled = null;
       try {
-        claimed = current.claim(new URL(target.href), { pop: !!opts.pop, scrollY: opts.scrollY || 0 }) === true;
+        const got = current.claim(new URL(target.href), { pop: !!opts.pop, scrollY: opts.scrollY || 0 });
+        claimed = got === true || (!!got && typeof got.then === 'function');
+        if (claimed && got !== true) titled = got;
       } catch (e) { console.error(e); }
       if (claimed) {
         fetchCtl = null;
@@ -810,6 +842,17 @@ function start() {
         current.url = target.href;
         api.current = { url: current.url, module: current.module, controller: current.controller };
         window.dispatchEvent(new CustomEvent('ws:page-claimed', { detail: { url: current.url } }));
+        // Once drawn, the view's title and announcement, as a swap gives a
+        // page's; not if the visitor has moved on meanwhile.
+        if (titled) {
+          const entry = current;
+          const href = target.href;
+          titled.then(function (name) {
+            if (entry.left || current !== entry || entry.url !== href || typeof name !== 'string' || !name) return;
+            document.title = pageTitle(name, siteName());
+            announce(document.title);
+          }, function (e) { console.error(e); });
+        }
         return;
       }
     }
@@ -1032,7 +1075,12 @@ function start() {
       return null;
     }).then(function (mod) {
       if (swaps) return null;   // a soft navigation already replaced this page
-      return mountPage(mod, moduleUrl, new URL(location.href)).then(function () { restoreScroll(y); });
+      // No saved position (a fresh load): the address's #fragment, once the
+      // page has drawn it.
+      return mountPage(mod, moduleUrl, new URL(location.href)).then(function () {
+        restoreScroll(y);
+        if (!y) scrollToHash(new URL(location.href));
+      });
     });
   }
 }

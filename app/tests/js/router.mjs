@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(join(here, '../../static/js/router.js'), 'utf8');
-const { qualifies, decide } = await import('data:text/javascript;charset=utf-8,' + encodeURIComponent(src));
+const { qualifies, decide, pageTitle } = await import('data:text/javascript;charset=utf-8,' + encodeURIComponent(src));
 
 const vectors = JSON.parse(readFileSync(join(here, '../router_vectors.json'), 'utf8'));
 const ATTRS = { target: null, download: false, hard: false, button: 0, meta: false, ctrl: false, shift: false, alt: false };
@@ -39,6 +39,24 @@ for (const c of vectors.decide) {
     failed += 1;
     console.error(`FAIL decide, ${c.why}: decide(${JSON.stringify(c.requested)}, ...) = ${JSON.stringify(got)}, ` +
                   `expected ${JSON.stringify(c.expect)}`);
+  }
+}
+
+// A title for a view a page drew itself (a claimed navigation, the wiki's
+// articles): the site's format, as pages.py page_title writes the server's.
+for (const [name, site, expect, why] of [
+  ['Nav test A', 'My Server', 'My Server - Nav test A', 'the site name, then the view'],
+  ['Wiki', 'My Server', 'My Server - Wiki', 'the index reads as the page did'],
+  ['Nav test A', '', 'Nav test A', 'no site name: the view alone, no dangling dash'],
+  ['  Spaced  ', '  My Server ', 'My Server - Spaced', 'both trimmed'],
+  ['', 'My Server', 'My Server', 'no view name: the site name alone'],
+  [null, '', '', 'nothing at all']
+]) {
+  total += 1;
+  const got = typeof pageTitle === 'function' ? pageTitle(name, site) : undefined;
+  if (got !== expect) {
+    failed += 1;
+    console.error(`FAIL pageTitle, ${why}: pageTitle(${JSON.stringify(name)}, ${JSON.stringify(site)}) = ${JSON.stringify(got)}, expected ${JSON.stringify(expect)}`);
   }
 }
 
