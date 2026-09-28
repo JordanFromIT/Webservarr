@@ -12,7 +12,8 @@ collide, so a local account named like a Plex user must not see that user's
 private tickets. A Plex account is identified by its Plex account id,
 whichever way it signed in (Plex directly, or Authentik with its Plex
 source), so both sign-ins see the same tickets. A local account is
-identified by its own user id, namespaced so it can never equal a Plex id.
+identified by its own permanent id (users.uid), namespaced so it can never
+equal a Plex id.
 An empty identity owns nothing, so two sessions that both lack one never
 share tickets.
 
@@ -60,10 +61,11 @@ def authentik(username, plex_id, sub="f00dfeed", **extra):
     return user
 
 
-def local(username, user_id, **extra):
-    """A local ("simple") account session."""
+def local(username, uid, **extra):
+    """A local ("simple") account session: account_uid is the account's
+    permanent users.uid (its users.id could be reused after a delete)."""
     user = {"username": username, "name": username, "email": "", "is_admin": "false",
-            "user_id": user_id, "auth_method": "simple"}
+            "user_id": uid, "account_uid": uid, "auth_method": "simple"}
     user.update(extra)
     return user
 

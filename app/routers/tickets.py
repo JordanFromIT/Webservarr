@@ -2,6 +2,7 @@
 Ticket system API routes — user support tickets with admin management.
 """
 
+import json
 import logging
 import mimetypes
 import os
@@ -21,7 +22,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.limiter import limiter
-from app.models import Setting, Ticket, TicketComment
+from app.models import Setting, Ticket, TicketComment, User
+from app.seed import LOCAL_USERNAMES_SNAPSHOT_KEY
 from app.settings_registry import switch_is_off
 from app.utils import identity_email, utc_iso, validate_image_magic
 
@@ -139,18 +141,19 @@ def account_identity(user: dict) -> str:
     Never the username: usernames come from separate namespaces (local
     accounts, Plex, Authentik) and can collide. A Plex account is its plex.tv
     account id however it signed in: a Plex-direct session's user_id is that
-    id, and both Plex paths store it as plex_account_id. A local account is
-    its users.id, and an Authentik identity without a Plex account its OIDC
-    subject; each is namespaced so it can never equal a Plex id. An
-    Authentik session through Plex whose account lookup failed has no
-    identity (it owns nothing) rather than the subject, which would split
-    one person's tickets. Always from the session, never from the request.
+    id, and both Plex paths store it as plex_account_id (sign-in is refused
+    when plex.tv cannot give it). A local account is its permanent users.uid
+    (account_uid; users.id can be reused after a delete), and an Authentik
+    identity without a Plex account its OIDC subject; each is namespaced so
+    it can never equal a Plex id. A session missing its id has no identity
+    and owns nothing. Always from the session, never from the request.
     """
     method = user.get("auth_method") or "simple"
     user_id = str(user.get("user_id") or "")
     plex_id = str(user.get("plex_account_id") or "")
     if method == "simple":
-        return f"local:{user_id}" if user_id else ""
+        uid = str(user.get("account_uid") or "")
+        return f"local:{uid}" if uid else ""
     if method == "plex":
         plex_id = plex_id or user_id
     if plex_id:
@@ -165,30 +168,43 @@ def claim_legacy_tickets(db: Session, user: dict) -> int:
     identity. Called at sign-in by the Plex and Authentik paths, never by a
     local login, and a local identity is refused here too.
 
-    A ticket with no identity is claimed by its creator_email first. The
-    username is used only when the signer is a Plex account and the ticket
-    has no email. The creator's own comments on a claimed ticket come with
-    it, and a Plex account also claims comments by username (comments have
-    no email). Only rows with no identity are touched, so a row is claimed
-    once and keeps that identity. Returns the number of tickets claimed.
+    A ticket with no identity is claimed by its creator_email, and only when
+    the sign-in verified the session's email (email_verified): anyone can
+    assert an address to Authentik. Both sides are trimmed and casefolded
+    (in Python: SQLite's lower() is ASCII-only). The username is used only
+    when the signer is a Plex account, the ticket has no email, and no local
+    account has that username now or had it at the upgrade (the ticket may
+    be theirs). The creator's own comments on a claimed ticket come with it,
+    and a Plex account also claims comments by username under the same
+    rule. Only rows with no identity are touched, so a row is claimed once
+    and keeps that identity. Returns the number of tickets claimed.
     """
     identity = account_identity(user)
     if not identity or identity.startswith("local:"):
         return 0
     is_plex = identity.startswith("plex:")
-    email = identity_email(user.get("email"))
+    email = _email_key(user.get("email")) if user.get("email_verified") == "true" else ""
     username = user.get("username") or ""
+    by_username = is_plex and bool(username) and not _is_local_username(db, username)
     unclaimed = Ticket.creator_identity.is_(None)
     no_email = or_(Ticket.creator_email.is_(None), func.trim(Ticket.creator_email) == "")
 
     claimed = 0
     if email:
-        claimed += (
-            db.query(Ticket)
-            .filter(unclaimed, func.lower(func.trim(Ticket.creator_email)) == email)
-            .update({Ticket.creator_identity: identity}, synchronize_session=False)
-        )
-    if is_plex and username:
+        ids = [
+            ticket_id
+            for ticket_id, creator_email in db.query(Ticket.id, Ticket.creator_email).filter(
+                unclaimed, Ticket.creator_email.isnot(None)
+            )
+            if _email_key(creator_email) == email
+        ]
+        if ids:
+            claimed += (
+                db.query(Ticket)
+                .filter(unclaimed, Ticket.id.in_(ids))
+                .update({Ticket.creator_identity: identity}, synchronize_session=False)
+            )
+    if by_username:
         claimed += (
             db.query(Ticket)
             .filter(unclaimed, no_email, Ticket.creator_username == username)
@@ -210,7 +226,7 @@ def claim_legacy_tickets(db: Session, user: dict) -> int:
             TicketComment.author_username == creator,
             TicketComment.ticket_id.in_(ticket_ids),
         ).update({TicketComment.author_identity: identity}, synchronize_session=False)
-    if is_plex and username:
+    if by_username:
         db.query(TicketComment).filter(
             TicketComment.author_identity.is_(None),
             TicketComment.author_username == username,
@@ -220,6 +236,29 @@ def claim_legacy_tickets(db: Session, user: dict) -> int:
     if claimed:
         logger.info("Claimed %d ticket(s) from before account identities", claimed)
     return claimed
+
+
+def _email_key(value) -> str:
+    """An email for comparison: trimmed and casefolded; "" and "none" are
+    no email (see utils.identity_email)."""
+    if not isinstance(value, str):
+        return ""
+    v = value.strip().casefold()
+    return "" if v in ("", "none") else v
+
+
+def _is_local_username(db: Session, username: str) -> bool:
+    """Whether a local account has this username (case-insensitively), or
+    had it when ticket identities arrived (seed.migrate_local_usernames_snapshot)."""
+    key = username.casefold()
+    if any((name or "").casefold() == key for (name,) in db.query(User.username)):
+        return True
+    row = db.query(Setting).filter(Setting.key == LOCAL_USERNAMES_SNAPSHOT_KEY).first()
+    try:
+        names = json.loads(row.value) if row and row.value else []
+    except ValueError:
+        return True  # unreadable snapshot: do not risk a local namesake's tickets
+    return any(isinstance(n, str) and n.casefold() == key for n in names)
 
 
 def _is_owner(ticket: Ticket, identity: str) -> bool:

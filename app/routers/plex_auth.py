@@ -24,6 +24,8 @@ from app.integrations import seerr
 from app.limiter import limiter
 from app.models import Setting
 from app.routers.auth import (
+    PLEX_ACCOUNT_UNAVAILABLE,
+    _fetch_plex_account,
     _is_plex_server_owner,
     _plex_auth_enabled,
     _user_has_server_access,
@@ -307,33 +309,15 @@ async def plex_callback(
     # PIN used successfully — clean up
     await redis.delete(pin_key)
 
-    # Get user info from Plex
-    try:
-        async with httpx.AsyncClient(timeout=PLEX_TIMEOUT) as client:
-            resp = await client.get(
-                "https://plex.tv/api/v2/user",
-                headers={
-                    **_plex_headers(client_id),
-                    "X-Plex-Token": auth_token,
-                },
-            )
-            if resp.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Failed to fetch Plex user info",
-                )
-
-            user_info = resp.json()
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Plex user info error: %s", str(e))
+    # Get user info from Plex (one retry). The account id owns the account's
+    # tickets, so no id means no session, never one that owns nothing.
+    user_info = await _fetch_plex_account(auth_token, _plex_headers(client_id))
+    plex_user_id = str(user_info.get("id") or "")
+    if not plex_user_id:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Failed to fetch Plex user info",
+            detail=PLEX_ACCOUNT_UNAVAILABLE,
         )
-
-    plex_user_id = str(user_info.get("id") or "")
     username = user_info.get("username", "")
     display_name = user_info.get("title", username)
     email = user_info.get("email", "")
@@ -377,6 +361,9 @@ async def plex_callback(
         "auth_method": "plex",
         "plex_token": auth_token,
         "plex_account_id": plex_user_id,
+        # plex.tv's confirmed flag: tickets filed under this email are
+        # claimed only when it is verified.
+        "email_verified": email_verified,
         "avatar_url": avatar_url,
         "id_token": "",
     }

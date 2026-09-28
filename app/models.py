@@ -7,6 +7,7 @@ from sqlalchemy.sql import func
 from datetime import datetime
 from app.database import Base
 import enum
+import uuid
 
 
 class ServiceStatus(str, enum.Enum):
@@ -103,6 +104,10 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
+    # Permanent account id, never reused: SQLite gives a deleted top row's
+    # id to the next user, so tickets are owned by "local:<uid>", not the id.
+    # Backfilled for existing users by seed.migrate_user_uid.
+    uid = Column(String(36), unique=True, index=True, nullable=True, default=lambda: str(uuid.uuid4()))
     email = Column(String(200), nullable=True)
     display_name = Column(String(100), nullable=False)
     password_hash = Column(String(200), nullable=False)

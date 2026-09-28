@@ -140,6 +140,34 @@ async def _fetch_owner_account(db: Session) -> dict | None:
         return None
 
 
+# A sign-in that holds a Plex token but cannot learn the account id gets this
+# answer instead of a session: the id is what owns the account's tickets.
+PLEX_ACCOUNT_UNAVAILABLE = "Plex didn't respond. Please try again."
+
+
+async def _fetch_plex_account(plex_token: str, headers: dict | None = None) -> dict:
+    """The plex.tv account behind a token (id, email, confirmed, thumb...),
+    trying twice so one dropped request does not cost a sign-in. {} when
+    plex.tv still gives no account with an id. TLS verified."""
+    for attempt in (1, 2):
+        try:
+            async with httpx.AsyncClient(timeout=PLEX_TIMEOUT) as client:
+                resp = await client.get(
+                    "https://plex.tv/api/v2/user",
+                    headers={"Accept": "application/json", **(headers or {}), "X-Plex-Token": plex_token},
+                )
+            if resp.status_code == 200:
+                account = resp.json() or {}
+                if account.get("id"):
+                    return account
+                logger.warning("plex.tv account lookup returned no id (attempt %d)", attempt)
+            else:
+                logger.warning("plex.tv account lookup failed: HTTP %d (attempt %d)", resp.status_code, attempt)
+        except Exception as e:
+            logger.warning("plex.tv account lookup failed (attempt %d): %s", attempt, str(e))
+    return {}
+
+
 async def _fetch_server_identifiers_for_token(
     plex_token: str, base_headers: dict, owned_only: bool = False
 ) -> set:
@@ -418,33 +446,38 @@ async def oidc_callback(request: Request, code: str, state: str, db: Session = D
         userinfo = await client.get_userinfo(access_token)
 
         user_email = userinfo.get("email", "")
-        # OIDC email_verified claim (bool or "true"), used only to gate the
+        # OIDC email_verified claim (bool or "true"). It alone gates the
         # secondary admin-email allowlist in _is_plex_server_owner.
         _ev = userinfo.get("email_verified")
         email_verified = _ev is True or str(_ev).lower() == "true"
 
         plex_token = userinfo.get("plex_token", "")
 
-        # Fetch the Plex account once for BOTH the avatar and the immutable
-        # account id (used for the id-based admin decision, H2).
+        # Fetch the Plex account once for the avatar and the immutable account
+        # id (the id-based admin decision, H2, and the identity that owns the
+        # account's tickets). Without the id there is no session: one that
+        # owned nothing would hide every ticket it created from its creator.
         avatar_url = ""
         plex_user_id = ""
+        plex_email_confirmed = False
         if plex_token:
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as http_client:
-                    plex_resp = await http_client.get(
-                        "https://plex.tv/api/v2/user",
-                        headers={
-                            "Accept": "application/json",
-                            "X-Plex-Token": plex_token,
-                        },
-                    )
-                    if plex_resp.status_code == 200:
-                        _pj = plex_resp.json()
-                        avatar_url = _pj.get("thumb", "")
-                        plex_user_id = str(_pj.get("id", "") or "")
-            except Exception as e:
-                logger.warning("Failed to fetch Plex account during OIDC login: %s", str(e))
+            account = await _fetch_plex_account(plex_token)
+            plex_user_id = str(account.get("id") or "")
+            if not plex_user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=PLEX_ACCOUNT_UNAVAILABLE,
+                )
+            avatar_url = account.get("thumb", "")
+            # plex.tv vouches for the email when the account's confirmed
+            # email is the one Authentik passed on.
+            plex_email = account.get("email")
+            plex_email_confirmed = bool(
+                account.get("confirmed")
+                and isinstance(plex_email, str) and isinstance(user_email, str)
+                and plex_email.strip()
+                and plex_email.strip().casefold() == user_email.strip().casefold()
+            )
 
         # Require Plex server membership when the OIDC identity carries a Plex
         # token (H1b). Sources without a plex_token are gated by Authentik itself.
@@ -476,6 +509,8 @@ async def oidc_callback(request: Request, code: str, state: str, db: Session = D
             # The Plex account id looked up above: the identity that owns
             # this account's tickets, the same one a Plex-direct sign-in has.
             "plex_account_id": plex_user_id,
+            # Tickets filed under this email are claimed only when verified.
+            "email_verified": email_verified or plex_email_confirmed,
             "avatar_url": avatar_url,
         }
 

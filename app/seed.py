@@ -96,6 +96,72 @@ def migrate_ticket_identity(db: Session) -> None:
         db.commit()
 
 
+def migrate_user_uid(db: Session) -> None:
+    """One-time migration: add users.uid (unique) and give every existing
+    user a permanent random one.
+
+    A local account owns its tickets as "local:<uid>". users.id cannot be
+    that identity: the table has no AUTOINCREMENT, so SQLite hands a deleted
+    top row's id to the next user. New users get a uid from the model's
+    default. Idempotent and safe with two workers: the column add ignores
+    "duplicate column", and each backfill only fills a still-empty uid, so a
+    uid the other worker wrote first is never replaced.
+    """
+    import uuid
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    columns = {row[1] for row in db.execute(text("PRAGMA table_info(users)"))}
+    if not columns:
+        return  # no table yet: create_all makes it with the column
+    if "uid" not in columns:
+        try:
+            db.execute(text("ALTER TABLE users ADD COLUMN uid VARCHAR(36)"))
+            db.commit()
+            logger.info("Added users.uid")
+        except OperationalError as exc:
+            db.rollback()
+            if "duplicate column" not in str(exc).lower():
+                raise
+    db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_uid ON users (uid)"))
+    db.commit()
+    missing = [row[0] for row in db.execute(text("SELECT id FROM users WHERE uid IS NULL"))]
+    for user_id in missing:
+        db.execute(
+            text("UPDATE users SET uid = :uid WHERE id = :id AND uid IS NULL"),
+            {"uid": str(uuid.uuid4()), "id": user_id},
+        )
+    if missing:
+        db.commit()
+        logger.info("Gave %d existing user(s) a permanent uid", len(missing))
+
+
+# The local usernames that existed when ticket identities arrived. A Plex
+# account never claims a legacy ticket by a username on this list (or in the
+# users table now): the ticket may be the local account's.
+LOCAL_USERNAMES_SNAPSHOT_KEY = "migration.ticket_local_usernames_v1"
+
+
+def migrate_local_usernames_snapshot(db: Session) -> None:
+    """One-time: record every local username, so a local account renamed or
+    removed after the upgrade still blocks a Plex namesake from claiming its
+    legacy tickets by username (tickets.claim_legacy_tickets). The row is
+    both the marker and the snapshot; the worker that loses the race to
+    write it rolls back."""
+    import json
+    from sqlalchemy.exc import IntegrityError
+
+    if db.query(Setting).filter(Setting.key == LOCAL_USERNAMES_SNAPSHOT_KEY).first():
+        return
+    names = sorted({u for (u,) in db.query(User.username).all() if u})
+    db.add(Setting(key=LOCAL_USERNAMES_SNAPSHOT_KEY, value=json.dumps(names),
+                   description="Local usernames when ticket identities arrived"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # the other worker ran it first
+
+
 def migrate_drop_push_username_rows(db: Session) -> None:
     """One-time migration: delete push.user.<hash>.email settings rows.
 

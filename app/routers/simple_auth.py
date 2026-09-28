@@ -82,6 +82,7 @@ async def simple_login(
     # Build session data
     user_data = {
         "user_id": str(user.id),
+        "account_uid": user.uid or "",
         "username": user.username,
         "display_name": user.display_name,
         "email": user.email or "",

@@ -215,6 +215,11 @@ class SessionManager:
             # The plex.tv account id, looked up at sign-in by both Plex paths
             # (Plex directly, Authentik's Plex source). Tickets are owned by it.
             "plex_account_id": field("plex_account_id"),
+            # A local account's permanent users.uid (its ticket identity).
+            "account_uid": field("account_uid"),
+            # Whether the sign-in vouched for the email. Only a verified email
+            # may claim tickets filed under it; anything but true is "false".
+            "email_verified": "true" if str(user_data.get("email_verified")).lower() == "true" else "false",
             "avatar_url": field("avatar_url"),
             # Creation time for the absolute-lifetime ceiling enforced in
             # get_session. Extra field only — older sessions without it are
