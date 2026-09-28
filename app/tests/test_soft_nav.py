@@ -506,7 +506,7 @@ class WikiFixRound1(unittest.TestCase):
         router = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
         boot = router[router.index("const firstPage = document.getElementById("):]
         self.assertRegex(boot, r"return mountPage\(mod, moduleUrl, new URL\(location\.href\)\)\.then\(function \(\) \{\s*"
-                               r"restoreScroll\(y\);\s*if \(!y\) scrollToHash\(new URL\(location\.href\)\);")
+                               r"restoreScroll\(y, firstToken\);\s*if \(!y\) scrollToHash\(new URL\(location\.href\)\);")
 
 
 class HomePage(unittest.TestCase):

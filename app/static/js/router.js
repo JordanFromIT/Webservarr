@@ -689,10 +689,14 @@ function start() {
   }
 
   // Content may still be growing just after mount; try for a few frames.
-  function restoreScroll(y) {
+  // token: the navigation this belongs to. The loop stops as soon as another
+  // starts: that page is not this one, and on desktop its scroller may be
+  // the same element.
+  function restoreScroll(y, token) {
     y = y || 0;
     let frames = 0;
     (function step() {
+      if (token !== navToken) return;
       const el = scroller();
       el.scrollTop = y;
       if (Math.abs(el.scrollTop - y) > 1 && ++frames < 30) requestAnimationFrame(step);
@@ -1233,8 +1237,9 @@ function start() {
     announce(document.title);
 
     // 10. Mount.
+    const token = navToken;
     const mounted = mountPage(mod, moduleUrl, dest).then(function () {
-      if (opts.pop) restoreScroll(opts.scrollY);
+      if (opts.pop) restoreScroll(opts.scrollY, token);
       else scrollToHash(dest);
     });
     return { mounted: mounted };
@@ -1332,6 +1337,7 @@ function start() {
     try { history.scrollRestoration = 'manual'; } catch (e) { /* ignore */ }
     history.replaceState(Object.assign({}, st, { ws: 1, i: at, scrollY: y }), '', location.href);
     const moduleUrl = new URL(firstSrc, location.href).href;
+    const firstToken = navToken;
     // In debug mode the tools wrap listeners, timers and fetch first.
     (debugReady || Promise.resolve()).then(function () {
       return import(moduleUrl);
@@ -1343,7 +1349,7 @@ function start() {
       // No saved position (a fresh load): the address's #fragment, once the
       // page has drawn it.
       return mountPage(mod, moduleUrl, new URL(location.href)).then(function () {
-        restoreScroll(y);
+        restoreScroll(y, firstToken);
         if (!y) scrollToHash(new URL(location.href));
       });
     });
