@@ -60,6 +60,7 @@ const PREFETCH_KEEP_MS = 30000;      // a prefetched page is used once, within 3
 const HOVER_INTENT_MS = 65;          // a pointer passing over a link fetches nothing
 const HARD_NAV_WAIT_MS = 500;        // cap on ws:before-hard-nav handlers
 const SCROLL_SAVE_MS = 150;          // scroll position written to history after scrolling stops
+const PROGRESS_AFTER_MS = 150;       // a navigation still loading after this shows the progress bar
 
 // "/news/" and "/news" are one page; "/" stays "/".
 function normPath(path) {
@@ -218,6 +219,13 @@ function start() {
   // While a page's leave guard is being asked: { url } of the address the
   // question is about (Back's destination, or the page itself for a link).
   let asking = null;
+  // The navigation a link or navigate() started and has not finished:
+  // { href, token, done }. The same address again while it loads is that
+  // navigation, not a new one (a second tap on a slow link).
+  let inflight = null;
+  let busyToken = 0;           // the navigation the progress bar belongs to
+  let busyTimer = 0;
+  let retryToast = null;       // the one Retry toast on screen
   const prefetched = new Map();    // URL without hash -> { promise, timer }
   const scripts = new Map();       // page-helper path (no query) -> load promise
 
@@ -364,6 +372,8 @@ function start() {
     if (samePage(url.href, location.href)) return;
     const key = withoutHash(url.href);
     if (prefetched.has(key)) return;
+    // Already being loaded (the tap that started it came with a touchstart).
+    if (inflight && inflight.token === navToken && withoutHash(inflight.href) === key) return;
     const entry = {
       promise: fetchPage(url.href, null).catch(function () { return null; }),
       timer: setTimeout(function () {
@@ -447,7 +457,50 @@ function start() {
       ]);
     }
     if (token !== undefined && token !== navToken) return;
+    busyEnd();
     location.assign(url);
+  }
+
+  // ---- Feedback while a navigation loads ----
+  //
+  // The browser shows nothing while the router fetches: after 150 ms a thin
+  // bar (theme.css #wsProgress) says the tap was taken, and <main> is
+  // aria-busy. It belongs to one navigation (busyToken): a newer one takes it
+  // over, and only the navigation it belongs to, or the document leaving,
+  // takes it down.
+
+  function showBusy(on) {
+    const bar = document.getElementById('wsProgress');
+    if (bar) bar.hidden = !on;
+    const main = document.querySelector('main');
+    if (!main) return;
+    if (on) main.setAttribute('aria-busy', 'true');
+    else main.removeAttribute('aria-busy');
+  }
+
+  function busyStart(token) {
+    busyToken = token;
+    if (busyTimer) return;
+    const bar = document.getElementById('wsProgress');
+    if (bar && !bar.hidden) return;
+    busyTimer = setTimeout(function () {
+      busyTimer = 0;
+      showBusy(true);
+    }, PROGRESS_AFTER_MS);
+  }
+
+  // token: the navigation that is done; none: whichever it belongs to.
+  function busyEnd(token) {
+    if (token !== undefined && token !== busyToken) return;
+    clearTimeout(busyTimer);
+    busyTimer = 0;
+    showBusy(false);
+  }
+
+  // The drawer and the header menus close as soon as a link is taken, not
+  // when the new page arrives (shell.js).
+  function closeChrome() {
+    if (typeof WS.closeChrome === 'function') WS.closeChrome();
   }
 
   // ---- Failure (spec 5.5) ----
@@ -464,16 +517,18 @@ function start() {
     const msg = RETRY_WORDS[reason] || RETRY_WORDS.server;
     const ui = window.WSUI;
     if (!ui) { console.error('[router] ' + msg); return; }
-    ui.toast(msg, 'err', {
+    // One at a time: a second failed attempt replaces the first's toast.
+    if (retryToast) retryToast.remove();
+    retryToast = ui.toast(msg, 'err', {
       action: { label: 'Retry', run: function () { go(href, { replace: pop }); } }
-    });
+    }) || null;
   }
 
   /* Before the page under them changes: the drawer and the header menus
      (shell.js), and any open dialog, answered as its Cancel or Escape would
      be, so no page is left waiting on it (ui.js). */
   function closeOverlays() {
-    if (typeof WS.closeChrome === 'function') WS.closeChrome();
+    closeChrome();
     if (window.WSUI && typeof window.WSUI.closeDialogs === 'function') window.WSUI.closeDialogs();
   }
 
@@ -845,9 +900,25 @@ function start() {
 
   // ---- Navigation (spec 5.2) ----
 
-  async function go(href, opts) {
+  /* A navigation, unless it is the one already loading: a link or
+     navigate() to the address in flight (a second tap while the first is
+     still fetching) waits for that one instead of starting over. */
+  function go(href, opts) {
     opts = opts || {};
+    const url = new URL(href, location.href).href;
+    if (!opts.pop && inflight && inflight.token === navToken && inflight.href === url) return inflight.done;
+    const done = visit(url, opts);
+    const entry = { href: url, token: navToken, done: done };
+    if (!opts.pop) inflight = entry;
+    const clear = function () { if (inflight === entry) inflight = null; };
+    done.then(clear, clear);
+    return done;
+  }
+
+  async function visit(href, opts) {
     const token = ++navToken;
+    busyToken = token;
+    closeChrome();
     clearTimeout(scrollTimer);
     if (fetchCtl) fetchCtl.abort();
     const ctl = fetchCtl = new AbortController();
@@ -858,6 +929,7 @@ function start() {
     // scripts' timers and listeners would otherwise outlive it. No fetch.
     if (!current) {
       fetchCtl = null;
+      busyStart(token);
       await hardNavigate(target.href, token);
       return;
     }
@@ -878,6 +950,7 @@ function start() {
       } catch (e) { console.error(e); }
       if (claimed) {
         fetchCtl = null;
+        busyEnd(token);
         closeOverlays();
         if (!opts.pop) {
           // The same URL again replaces, as a swap does.
@@ -908,6 +981,7 @@ function start() {
     // go on. On Back or Forward the address bar has already moved, so a stay
     // puts it back, as a failed fetch does below.
     if (!current.left && current.guard) {
+      busyEnd(token);          // no bar under the question
       let verdict;
       const ask = asking = { url: opts.pop ? target.href : location.href };
       try {
@@ -921,6 +995,7 @@ function start() {
       if (token !== navToken) return;
       if (verdict === false) {
         fetchCtl = null;
+        busyEnd(token);
         if (opts.pop) history.replaceState({ ws: 1, scrollY: Math.round(scroller().scrollTop) }, '', current.url);
         return;
       }
@@ -932,6 +1007,7 @@ function start() {
     }
 
     // 1. The prefetched copy, else a fetch of our own.
+    busyStart(token);
     let res = null;
     try {
       const pre = takePrefetch(target.href);
@@ -964,6 +1040,7 @@ function start() {
         // Back or Forward already moved the address bar; put it back.
         history.replaceState({ ws: 1, scrollY: Math.round(scroller().scrollTop) }, '', current.url);
       }
+      busyEnd(token);
       // The page is still here: one whose guard let this navigation go
       // (Settings, after "Leave without saving") keeps what it holds.
       window.dispatchEvent(new CustomEvent('ws:nav-stayed', { detail: { url: target.href, reason: d.reason } }));
@@ -1020,6 +1097,7 @@ function start() {
   // mounted, and the next navigation can start its own swap meanwhile.
   async function commit(doc, page, dest, mod, moduleUrl, opts) {
     swaps += 1;
+    busyEnd();
     closeOverlays();
     if (!opts.pop) saveScroll();
 

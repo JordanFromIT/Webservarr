@@ -506,6 +506,32 @@ body { padding-bottom: var(--ws-player-h); }
   #desktopSidebar, #desktopSidebar ~ main { max-height: calc(100vh - var(--ws-player-h)); }
 }
 
+/* ---- Navigation progress ----
+ *
+ * A soft navigation has no browser loading indicator. When one is still
+ * loading after 150 ms (router.js), #wsProgress (app/pages.py SHELL_SLOTS)
+ * shows a thin bar across the top of the screen until the new page is in,
+ * the navigation stays or a full navigation takes over. Above everything,
+ * the drawer and the dialogs included, and it takes no clicks. Reduced
+ * motion: a still bar instead of the sweep.
+ */
+#wsProgress {
+  position: fixed; top: 0; left: 0; right: 0; height: 2px;
+  z-index: 120; overflow: hidden; pointer-events: none;
+}
+#wsProgress::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 40%;
+  background: rgb(var(--color-primary));
+  animation: ws-progress 1100ms ease-in-out infinite;
+}
+@keyframes ws-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #wsProgress::before { width: 100%; opacity: .6; animation: none; }
+}
+
 /* <html data-shell="hidden">: the page has the whole screen (the reader, a
    full-screen view). The player stays: it is not part of the chrome. The
    drawer needs no rule: only the hidden mobile bar's button opens it. */

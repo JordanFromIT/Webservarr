@@ -402,7 +402,7 @@ class WikiPage(unittest.TestCase):
 
     def test_router_hands_the_claim_what_it_needs(self):
         code = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
-        go = function_body(code, "go")
+        go = function_body(code, "visit")
         claim = go[go.index("if (!current.left && current.claim) {"):go.index("if (!current.left && current.guard) {")]
         # The entry being left keeps its scroll before the page redraws.
         self.assertLess(claim.index("if (!opts.pop) saveScroll();"), claim.index("current.claim("))
@@ -472,7 +472,7 @@ class WikiFixRound1(unittest.TestCase):
 
     def test_a_claimed_view_gets_its_title_and_announcement(self):
         router = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
-        go = function_body(router, "go")
+        go = function_body(router, "visit")
         claim = go[go.index("if (!current.left && current.claim) {"):go.index("if (!current.left && current.guard) {")]
         self.assertRegex(claim, r"claimed = got === true \|\| \(!!got && typeof got\.then === '\s{8}'\);")
         self.assertRegex(claim, r"titled\.then\(function \(name\) \{\s*"
@@ -1092,14 +1092,17 @@ class SharedShellScripts(unittest.TestCase):
         self.assertRegex(ui, r"window\.WSUI = \{[^}]*\bcloseDialogs: closeDialogs\b")
         code = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
         overlays = function_body(code, "closeOverlays")
-        self.assertIn("WS.closeChrome()", overlays)
+        self.assertIn("closeChrome();", overlays)
         self.assertIn("window.WSUI.closeDialogs()", overlays)
         # Before the old page is left (the swap), and before a page claims a URL.
         commit = function_body(code, "commit")
         self.assertLess(commit.index("closeOverlays();"), commit.index("leave();"))
         self.assertEqual(len(re.findall(r"(?<!function )\bcloseOverlays\(\);", code)), 2)
-        # Nothing closes the chrome alone any more: always with the dialogs.
+        # The drawer and menus close as the navigation starts (final review
+        # I1): one helper, called first thing in visit(). The runtime cases
+        # (router_runtime.mjs) cover the order.
         self.assertEqual(code.count("WS.closeChrome()"), 1)
+        self.assertIn("WS.closeChrome()", function_body(code, "closeChrome"))
 
     def test_a_dialogs_listeners_end_when_it_closes(self):
         # Opened from a page, they are that page's; closed, they must be gone,
@@ -1141,7 +1144,7 @@ class PageHelpersLoadFirst(unittest.TestCase):
 
     def test_a_swap_loads_every_helper_before_the_module(self):
         code = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
-        go = function_body(code, "go")
+        go = function_body(code, "visit")
         load = go.index("await loadPageScripts(doc);")
         imp = go.index("mod = await import(moduleUrl);")
         self.assertLess(load, imp, "helpers load before the module is imported")
@@ -1193,7 +1196,7 @@ class LeaveGuard(unittest.TestCase):
 
     def test_go_asks_the_guard_before_it_fetches(self):
         code = self.code()
-        go = function_body(code, "go")
+        go = function_body(code, "visit")
         ask = go.index("verdict = await current.guard(new URL(target.href), { pop: !!opts.pop });")
         self.assertLess(go.index("if (!current) {"), ask, "an unconverted page has no guard to ask")
         self.assertLess(go.index("current.claim(new URL(target.href), "), ask, "an in-page URL is not a leave")
@@ -1226,7 +1229,7 @@ class LeaveGuard(unittest.TestCase):
         # neither skips the question (a same-page /settings entry) nor starts
         # a navigation; the address stays on the entry the question is about.
         code = self.code()
-        go = function_body(code, "go")
+        go = function_body(code, "visit")
         self.assertIn("const ask = asking = { url: opts.pop ? target.href : location.href };", go)
         self.assertRegex(go, r"\} finally \{\s*if \(asking === ask\) asking = null;\s*\}")
         pop = re.search(r"window\.addEventListener\('\s+', function \(e\) \{\s*const st = e\.state;(.*?)\n  \}\);", code, re.S)
@@ -1239,7 +1242,7 @@ class LeaveGuard(unittest.TestCase):
 
     def test_a_stay_after_a_let_through_leave_is_announced(self):
         code = self.code()
-        stay = re.search(r"if \(d\.action === '    '\) \{(.*?)\n    \}", function_body(code, "go"), re.S)
+        stay = re.search(r"if \(d\.action === '    '\) \{(.*?)\n    \}", function_body(code, "visit"), re.S)
         self.assertIsNotNone(stay)
         self.assertIn("window.dispatchEvent(new CustomEvent('", stay.group(1))
         self.assertIn("ws:nav-stayed", (STATIC / "js" / "router.js").read_text(encoding="utf-8"))
@@ -1308,10 +1311,10 @@ class DebugTools(unittest.TestCase):
         calls = [m.start() for m in re.finditer(r"\btakeThrow\s*\(", code)
                  if not code[:m.start()].rstrip().endswith("function")]
         self.assertEqual(len(calls), 1, "takeThrow() should be called in exactly one place")
-        go = code.index("async function go(")
+        go = code.index("async function visit(")
         go_end = matching_brace(code, code.index("{", go))
         at = calls[0]
-        self.assertTrue(go < at < go_end, "takeThrow() is called outside go()")
+        self.assertTrue(go < at < go_end, "takeThrow() is called outside visit()")
         body = code[go:at]
         for exit_ in ("if (!current)", "if (d.action ===", "await hardNavigate(d.url, token)"):
             self.assertIn(exit_, body, f"takeThrow() is called before the full-navigation exit {exit_!r}")

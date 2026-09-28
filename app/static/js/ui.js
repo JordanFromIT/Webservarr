@@ -74,7 +74,8 @@
 
   // opts.action: { label, run } adds one button (Retry after a page failed to
   // open, router.js). Pressing it closes the toast, then runs run(). A toast
-  // with a button stays 4 s longer, so there is time to reach it.
+  // with a button stays 4 s longer, so there is time to reach it. Returns
+  // { remove() }, which takes it down at once.
   function toast(message, tone, opts) {
     tone = TONE_LIGHT[tone] ? tone : 'info';
     var fresh = !toastBox || !toastBox.parentNode;
@@ -93,7 +94,11 @@
     t.appendChild(el('span', 'ws-light ' + TONE_LIGHT[tone]));
     t.appendChild(el('span', 'min-w-0', message));
     var action = opts && opts.action && opts.action.label ? opts.action : null;
-    function remove() { if (t.parentNode) t.parentNode.removeChild(t); }
+    var gone = false;
+    function remove() {
+      gone = true;
+      if (t.parentNode) t.parentNode.removeChild(t);
+    }
     if (action) {
       var btn = el('button', ACTION_BTN, action.label);
       btn.type = 'button';
@@ -106,7 +111,7 @@
     var box = toastBox;
     // A live region created in the same moment as its content is often not
     // announced, so the first toast lands a beat after its region exists.
-    if (fresh) setTimeout(function () { box.appendChild(t); }, 50);
+    if (fresh) setTimeout(function () { if (!gone) box.appendChild(t); }, 50);
     else box.appendChild(t);
     setTimeout(function () {
       if (reducedMotion()) { remove(); return; }
@@ -114,6 +119,9 @@
       t.style.opacity = '0';
       setTimeout(remove, 220);
     }, (tone === 'err' ? 6000 : 4000) + (action ? 4000 : 0));
+    // The caller may take it down early (the router replaces its Retry
+    // toast rather than stacking one per failed attempt).
+    return { remove: remove };
   }
 
   // ---- Dialog ----

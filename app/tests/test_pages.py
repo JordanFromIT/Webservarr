@@ -850,10 +850,16 @@ class SoftNavServerSide(unittest.TestCase):
                 end_main = out.rindex("</main>")
                 self.assertGreater(out.index('id="wsPlayer"'), end_main)
                 self.assertGreater(out.index('id="wsLive"'), end_main)
-        # Pages without the shell (login, setup) get neither.
+                # The soft navigation's progress bar (router.js): hidden at
+                # rest, outside <main>, never read out (<main> is aria-busy).
+                self.assertEqual(out.count('id="wsProgress"'), 1)
+                self.assertIn('<div id="wsProgress" hidden aria-hidden="true"></div>', out)
+                self.assertGreater(out.index('id="wsProgress"'), end_main)
+        # Pages without the shell (login, setup) get none of them.
         bare = render(page=PAGE.replace("<!-- ws:sidebar -->", "").replace("<!-- ws:header -->", ""))
         self.assertNotIn("wsPlayer", bare)
         self.assertNotIn("wsLive", bare)
+        self.assertNotIn("wsProgress", bare)
 
     def test_ui_js_once_on_every_shell_page_before_its_scripts(self):
         # The toast and dialog come with the shell: once, ahead of router.js

@@ -707,12 +707,15 @@ def _fill_login_name(out: str, branding: dict) -> str:
 _WS_PAGE_MARK = 'id="wsPage"'
 _HEAD_STYLE_RE = re.compile(r"<style\b", re.IGNORECASE)
 
-# The one player and the one live region on every shell page, outside <main>
-# so a page swap never touches them. The sidebar partial fills its marker
-# before <main>, so they go in just before </body> instead.
+# The one player, the one live region and the soft navigation's progress bar
+# on every shell page, outside <main> so a page swap never touches them. The
+# sidebar partial fills its marker before <main>, so they go in just before
+# </body> instead. The bar is hidden at rest; router.js shows it while a
+# navigation is still loading after a moment (theme.css #wsProgress).
 SHELL_SLOTS = (
     '<div id="wsPlayer" hidden></div>\n'
     '<div id="wsLive" class="sr-only" aria-live="polite"></div>\n'
+    '<div id="wsProgress" hidden aria-hidden="true"></div>\n'
 )
 
 
