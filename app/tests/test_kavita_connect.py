@@ -402,7 +402,7 @@ def check_reader(t, html, js):
     t.assertLess(guard, first(t, save, r"\bsendBeacon\(", "no beacon"), "the beacon goes out before the check")
     t.assertLess(guard, first(t, save, r"\bwriter\.write\(", "no save call"), "the save goes out before the check")
     # The write itself (one at a time, through the writer) is a background call.
-    t.assertTrue(live_matches(js, r"var writer = progressWriter\(sendProgress\);"))
+    t.assertTrue(live_matches(js, r"writer = progressWriter\(sendProgress, 'chapter:' \+ book\.chapterId\);"))
     sets = live_matches(js, r"\bpositionKnown\s*=\s*true\b")
     t.assertEqual(len(sets), 2, "positionKnown is confirmed somewhere unexpected")
     restore = body_of(t, js, "restoreProgress")

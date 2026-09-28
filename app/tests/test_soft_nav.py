@@ -702,7 +702,7 @@ class ReaderPage(unittest.TestCase):
         self.assertRegex(code, r"var leave = function \(\) \{\s*if \(positionKnown\) writer\.leave\(current\.page\);\s*\};")
         self.assertEqual(len(re.findall(r"\breturn leave;", code)), 2, "both ways out of mount hand it to the router")
         save = function_body(code, "saveProgress")
-        self.assertIn("var held = useBeacon ? writer.confirmed : lastSaved;", save)
+        self.assertIn("var held = useBeacon ? (writer ? writer.confirmed : -1) : lastSaved;", save)
         self.assertLess(save.index("if (!positionKnown || current.page === held) return;"), save.index("sendBeacon("))
         self.assertIn("writer.sent(page);", save)
         self.assertIn("writer.write(page);", save)
@@ -710,8 +710,18 @@ class ReaderPage(unittest.TestCase):
         # One write in flight at a time (fix round 1, R1): the writer is pure,
         # and app/tests/js/reader_progress.mjs runs it with late, failed and
         # out-of-order answers.
-        self.assertIn("var writer = progressWriter(sendProgress);", code)
-        self.assertRegex(code, r"export function progressWriter\(send\) \{")
+        # One queue per book for the whole document, keyed by the chapter
+        # Kavita keeps the position under (fix round 3): made once the
+        # chapter is known; the saved position is asked for only after every
+        # save already queued for the book has answered.
+        self.assertIn("var writer = null;", code)
+        self.assertEqual(len(re.findall(r"\bwriter = progressWriter\(", code)), 1)
+        self.assertIn("writer = progressWriter(sendProgress, 'chapter:' + book.chapterId);", module_source("reader"))
+        self.assertLess(code.index("book.chapterId = res.chapterId;"), code.index("writer = progressWriter("))
+        self.assertIn("return writer.settled().then(fetchProgress)", function_body(code, "restoreProgress"))
+        src = module_source("reader")
+        self.assertRegex(src, r"export function progressWriter\(send, key\) \{")
+        self.assertIn("const progressQueues = new Map();", src)
         self.assertIn("return r.ok;", function_body(code, "sendProgress"))
         # The tab hidden or closed while reading: the beacon, until the visit ends.
         src = module_source("reader")

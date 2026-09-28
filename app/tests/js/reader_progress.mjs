@@ -25,6 +25,10 @@ function check(what, ok, detail) {
   }
 }
 const tick = () => new Promise((r) => setTimeout(r, 0));
+// The writes are queued per book, for the whole document (every visit's
+// writer for a book shares one queue): each case below uses a book of its own.
+let books = 0;
+const book = () => 'test-book-' + (++books);
 
 // A Kavita whose answers the test hands out, in any order.
 function fakeKavita() {
@@ -52,7 +56,7 @@ if (typeof progressWriter !== 'function') {
   // while 5 is in flight, so the answers cannot cross.
   {
     const k = fakeKavita();
-    const w = progressWriter(k.send);
+    const w = progressWriter(k.send, book());
     w.write(5);
     w.write(6);
     check('a second write waits for the first', JSON.stringify(k.sent) === '[5]', k.sent);
@@ -71,7 +75,7 @@ if (typeof progressWriter !== 'function') {
   // in last of all, and confirmed still ends on the newest page taken.
   {
     const k = fakeKavita();
-    const w = progressWriter(k.send);
+    const w = progressWriter(k.send, book());
     w.write(5);
     w.write(6);
     w.write(7);
@@ -88,7 +92,7 @@ if (typeof progressWriter !== 'function') {
   // and the one waiting still goes.
   {
     const k = fakeKavita();
-    const w = progressWriter(k.send);
+    const w = progressWriter(k.send, book());
     w.known(2);
     w.write(3);
     w.write(4);
@@ -107,7 +111,7 @@ if (typeof progressWriter !== 'function') {
   // its turn comes.
   {
     const k = fakeKavita();
-    const w = progressWriter(k.send);
+    const w = progressWriter(k.send, book());
     w.write(8);
     w.write(8);
     k.take(8).answer(true);
@@ -119,7 +123,7 @@ if (typeof progressWriter !== 'function') {
   // goes after it, and confirmed is that page.
   {
     const k = fakeKavita();
-    const w = progressWriter(k.send);
+    const w = progressWriter(k.send, book());
     w.write(10);
     w.write(11);
     w.sent(12);
@@ -132,12 +136,12 @@ if (typeof progressWriter !== 'function') {
   // Fix round 2. A soft-navigation leave: the document keeps running, so the
   // final save waits for the write in flight and goes after it (keepalive,
   // not bound to the page), and lands last. Nothing is sent after it.
-  if (typeof progressWriter(() => true).leave !== 'function') {
+  if (typeof progressWriter(() => true, book()).leave !== 'function') {
     check('the writer has a soft-leave save (leave)', false);
   } else {
     {
       const k = fakeKavita();
-      const w = progressWriter(k.send);
+      const w = progressWriter(k.send, book());
       w.write(10);
       const done = w.leave(12);
       check('the final save waits for the write in flight', JSON.stringify(k.sent) === '[10]', k.sent);
@@ -155,7 +159,7 @@ if (typeof progressWriter !== 'function') {
       // The final save's answer comes back; an in-flight write that failed
       // or was refused changes nothing, and the final save still goes.
       const k = fakeKavita();
-      const w = progressWriter(k.send);
+      const w = progressWriter(k.send, book());
       w.write(4);
       w.write(5);                      // waiting: the final save carries the newest instead
       w.leave(6);
@@ -167,12 +171,12 @@ if (typeof progressWriter !== 'function') {
     {
       // Nothing to save: Kavita already holds the page, nothing in flight.
       const k = fakeKavita();
-      const w = progressWriter(k.send);
+      const w = progressWriter(k.send, book());
       w.known(7);
       await w.leave(7);
       check('no final save when Kavita holds the page', k.sent.length === 0, k.sent);
       const k2 = fakeKavita();
-      const w2 = progressWriter(k2.send);
+      const w2 = progressWriter(k2.send, book());
       w2.known(7);
       w2.leave(8);
       await tick(); await tick();
@@ -181,7 +185,7 @@ if (typeof progressWriter !== 'function') {
     {
       // The write in flight turns out to be the page being left on.
       const k = fakeKavita();
-      const w = progressWriter(k.send);
+      const w = progressWriter(k.send, book());
       w.write(9);
       w.leave(9);
       k.take(9).answer(true);
@@ -196,7 +200,7 @@ if (typeof progressWriter !== 'function') {
   // write(10) in flight, beacon 12, 10 answers true: confirmed must stay 12).
   {
     const k = fakeKavita();
-    const w = progressWriter(k.send);
+    const w = progressWriter(k.send, book());
     w.write(10);
     w.sent(12);
     check('the beacon page is confirmed at once', w.confirmed === 12, w.confirmed);
@@ -211,7 +215,7 @@ if (typeof progressWriter !== 'function') {
   // confirmed moves forward in send order only.
   {
     const k = fakeKavita();
-    const w = progressWriter(k.send);
+    const w = progressWriter(k.send, book());
     w.write(3);
     w.sent(4);                          // newer send, confirmed 4
     w.write(5);                         // waits for 3
@@ -223,14 +227,112 @@ if (typeof progressWriter !== 'function') {
     check('a newer write still confirms', w.confirmed === 5, w.confirmed);
   }
 
+  // Fix round 3: one queue per book for the whole document, across visits.
+  // The reviewer's probe: visit 1 leaves on page 40 while Kavita is slow
+  // (200 ms); the book is reopened and visit 2 writes page 2, answered in
+  // 5 ms. Visit 2's write waits for visit 1's, and Kavita ends on page 2.
+  {
+    let kavitaHolds = null;
+    const order = [];
+    const slow = (ms) => (page) => new Promise((r) => setTimeout(() => { kavitaHolds = page; order.push(page); r(true); }, ms));
+    const id = book();
+    const w1 = progressWriter(slow(200), id);
+    w1.write(40);
+    w1.leave(40);
+    const w2 = progressWriter(slow(5), id);
+    w2.write(2);
+    await new Promise((r) => setTimeout(r, 400));
+    check('two visits of one book: Kavita ends on the newer visit\'s page', kavitaHolds === 2, { kavitaHolds, order });
+    check('two visits of one book: the older write lands first', order.join() === '40,2', order);
+    check('two visits of one book: confirmed is the newer page', w2.confirmed === 2, w2.confirmed);
+  }
+
+  // The same, with the answers handed out by the test: visit 2's write is
+  // not even sent until visit 1's leave-save has answered.
+  {
+    const k = fakeKavita();
+    const id = book();
+    const w1 = progressWriter(k.send, id);
+    w1.write(30);
+    w1.leave(31);
+    const w2 = progressWriter(k.send, id);
+    w2.write(3);
+    check('a reopened book\'s write waits behind the last visit\'s', JSON.stringify(k.sent) === '[30]', k.sent);
+    k.take(30).answer(true);
+    await tick(); await tick();
+    check('then the last visit\'s leave-save', JSON.stringify(k.sent) === '[30,31]', k.sent);
+    k.take(31).answer(true);
+    await tick(); await tick();
+    check('then the new visit\'s write', JSON.stringify(k.sent) === '[30,31,3]', k.sent);
+    check('never two writes for one book in flight, across visits', k.most === 1, k.most);
+    k.take(3).answer(true);
+    await tick(); await tick();
+    check('confirmed follows the newest send across visits', w2.confirmed === 3, w2.confirmed);
+  }
+
+  // Two books do not wait for each other.
+  {
+    const k = fakeKavita();
+    const a = progressWriter(k.send, book());
+    const b = progressWriter(k.send, book());
+    a.write(1);
+    b.write(9);
+    check('another book\'s write goes at once', JSON.stringify(k.sent) === '[1,9]', k.sent);
+    k.take(1).answer(true);
+    k.take(9).answer(true);
+    await tick(); await tick();
+    check('each book keeps its own confirmed page', a.confirmed === 1 && b.confirmed === 9, [a.confirmed, b.confirmed]);
+  }
+
+  // Reopened while the last visit's leave-save is still pending, then left
+  // again: every save goes in order and the newest lands last. A visit's
+  // settled() is the book's queue running dry (the reader waits for it
+  // before it asks Kavita where the reader is).
+  {
+    const k = fakeKavita();
+    const id = book();
+    const w1 = progressWriter(k.send, id);
+    w1.write(10);
+    w1.leave(12);
+    const w2 = progressWriter(k.send, id);
+    let dry = false;
+    w2.settled().then(() => { dry = true; });
+    w2.leave(15);
+    k.take(10).answer(true);
+    await tick(); await tick();
+    k.take(12).answer(true);
+    await tick(); await tick();
+    check('the reopened visit\'s leave waits its turn', JSON.stringify(k.sent) === '[10,12,15]', k.sent);
+    check('settled waits for every write queued before it', dry === true, dry);
+    k.take(15).answer(true);
+    await tick(); await tick();
+    check('the newest leave is what Kavita holds', w2.confirmed === 15, w2.confirmed);
+  }
+
+  // A hard exit's beacon supersedes a write still waiting its turn in the
+  // book's queue: it is not sent after the beacon.
+  {
+    const k = fakeKavita();
+    const id = book();
+    const w1 = progressWriter(k.send, id);
+    w1.write(20);
+    const w2 = progressWriter(k.send, id);
+    w2.write(21);                     // queued behind 20
+    w2.sent(22);                      // hard exit: the beacon carried 22
+    k.take(20).answer(true);
+    await tick(); await tick(); await tick();
+    check('a write queued before a beacon is not sent after it', JSON.stringify(k.sent) === '[20]', k.sent);
+    check('the beacon page stays confirmed', w2.confirmed === 22, w2.confirmed);
+  }
+
   // send may throw, or answer synchronously: neither jams the writer.
   {
-    const w = progressWriter(() => { throw new Error('boom'); });
+    const w = progressWriter(() => { throw new Error('boom'); }, book());
     w.write(1);
     await tick(); await tick();
     check('a throwing send confirms nothing', w.confirmed === -1, w.confirmed);
     const sent = [];
-    const w2 = progressWriter((p) => { sent.push(p); return p !== 1; });
+    const w2 = progressWriter((p) => { sent.push(p); return p !== 1; }, book());
     w2.write(1);
     w2.write(2);
     await tick(); await tick(); await tick();

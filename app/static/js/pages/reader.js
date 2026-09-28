@@ -40,85 +40,118 @@ const THEMES = {
 // One of these at a time, so a stale error never sits above a working page.
 const PANELS = ['loading', 'errorState', 'bookContent'];
 
-/* The reading position's writes to Kavita (pure: run by
+/* The reading position's writes to Kavita (run by
  * app/tests/js/reader_progress.mjs).
  *
- * One write at a time. Two writes in flight could be answered, and taken by
- * Kavita, in either order, so the page Kavita holds would be a guess. So
- * write(page) sends at once when nothing is in flight and otherwise becomes
- * the page waiting its turn (a newer turn replaces it), sent when the write
- * in flight has answered, unless Kavita then already holds it.
+ * One queue per book for the whole document, shared by every visit's
+ * writer for that book (key: the chapter Kavita keeps the position under):
+ * a write goes when every earlier write for the book, from any visit, has
+ * answered. Two writes in flight could be answered, and taken by Kavita, in
+ * either order, so the page Kavita holds would be a guess; and a book left
+ * while Kavita was slow and then reopened would otherwise have its new
+ * visit's write overtaken by the old visit's last save. The queues hold
+ * data only (page numbers and promises), never the page.
  *
- * confirmed moves forward in send order only: an answer confirms its page
- * only when its write was sent after the one that set confirmed, so a late
- * "taken" for an older write never sets it back.
+ * Within a visit, write(page) queues at once when the visit has nothing
+ * queued or in flight, and otherwise becomes the page waiting its turn (a
+ * newer turn replaces it). A write whose turn comes when Kavita already
+ * holds its page, or after a newer send was confirmed (a beacon), is not
+ * sent.
+ *
+ * confirmed (per book) moves forward in send order only: an answer
+ * confirms its page only when its write was sent after the one that set
+ * confirmed, so a late "taken" for an older write never sets it back.
  *
  * Leaving the reader:
  *   leave(page)  a soft navigation: the document keeps running, so the last
- *                save waits for the write in flight and goes after it (send
- *                makes it a keepalive request the visit's end does not stop),
- *                and so lands last. Nothing is sent after it. Returns a
- *                promise that settles when it has answered (or was not needed).
+ *                save joins the book's queue and goes after everything before
+ *                it (send makes it a keepalive request the visit's end does
+ *                not stop), so it lands last. Nothing more goes from this
+ *                visit. Returns a promise that settles once it has answered
+ *                (or was not needed).
  *   sent(page)   a hard exit (the tab hidden or closed): there is no time to
  *                wait, so the caller sends a beacon at once and records it
- *                here as the newest send. A write still in flight may then
- *                reach Kavita after the beacon and leave it on the older
- *                page: a rare race this accepts, and the next visit's first
- *                turn writes the position again.
+ *                here as the newest send; writes still waiting in the queue
+ *                are then not sent. A write already in flight may reach
+ *                Kavita after the beacon and leave it on the older page: a
+ *                rare race this accepts, and the next visit's first turn
+ *                writes the position again.
  * send(page) returns (a promise of) true when Kavita took the page, false or
  * a rejection when not. known(page): Kavita reported the reader there.
+ * settled(): a promise that settles when every write queued for the book so
+ * far has answered (the reader asks Kavita where it is only after that).
  */
-export function progressWriter(send) {
-  let confirmed = -1;
-  let confirmedAt = 0;   // the send (in order) that set confirmed; 0: none
-  let sends = 0;
-  let inFlight = null;   // the write in flight: settles once it has answered
+const progressQueues = new Map();   // book key -> { confirmed, confirmedAt, sends, queued, tail }
+
+function progressQueue(key) {
+  let q = progressQueues.get(key);
+  if (!q) {
+    q = { confirmed: -1, confirmedAt: 0, sends: 0, queued: 0, tail: Promise.resolve() };
+    progressQueues.set(key, q);
+  }
+  return q;
+}
+
+export function progressWriter(send, key) {
+  const q = progressQueue(String(key));
+  let mine = null;       // this visit's write queued or in flight
   let waiting = null;
   let closed = false;    // left by a soft navigation: nothing more goes
 
   function take(at, page, ok) {
-    if (ok === true && at > confirmedAt) {
-      confirmedAt = at;
-      confirmed = page;
+    if (ok === true && at > q.confirmedAt) {
+      q.confirmedAt = at;
+      q.confirmed = page;
     }
   }
 
-  function go(page, at) {
-    let answer;
-    try { answer = Promise.resolve(send(page)); } catch (e) { answer = Promise.resolve(false); }
-    const done = answer.then(function (ok) { take(at, page, ok); }, function () { /* not taken */ });
-    inFlight = done;
+  // Behind every earlier write for the book (at once when there is none).
+  // at: this send's place in order.
+  function enqueue(page, at) {
+    function run() {
+      if (at < q.confirmedAt || page === q.confirmed) return undefined;
+      let answer;
+      try { answer = Promise.resolve(send(page)); } catch (e) { answer = Promise.resolve(false); }
+      return answer.then(function (ok) { take(at, page, ok); }, function () { /* not taken */ });
+    }
+    const done = (q.queued ? q.tail.then(run) : Promise.resolve(run()))
+      .then(function () { q.queued -= 1; });
+    q.queued += 1;
+    q.tail = done;
+    return done;
+  }
+
+  function go(page) {
+    const done = enqueue(page, ++q.sends);
+    mine = done;
     done.then(function () {
-      if (inFlight === done) inFlight = null;
+      if (mine === done) mine = null;
       if (closed) return;
       const next = waiting;
       waiting = null;
-      if (next !== null && next !== confirmed) go(next, ++sends);
+      if (next !== null && next !== q.confirmed) go(next);
     });
     return done;
   }
 
   return {
-    get confirmed() { return confirmed; },
-    known: function (page) { confirmed = page; confirmedAt = sends; },
+    get confirmed() { return q.confirmed; },
+    known: function (page) { q.confirmed = page; q.confirmedAt = q.sends; },
+    settled: function () { return q.tail; },
     write: function (page) {
       if (closed) return;
-      if (inFlight) waiting = page;
-      else go(page, ++sends);
+      if (mine) waiting = page;
+      else go(page);
     },
     sent: function (page) {
       waiting = null;
-      confirmedAt = ++sends;
-      confirmed = page;
+      q.confirmedAt = ++q.sends;
+      q.confirmed = page;
     },
     leave: function (page) {
       closed = true;
       waiting = null;
-      const at = ++sends;
-      return (inFlight || Promise.resolve()).then(function () {
-        if (page === confirmed) return undefined;
-        return go(page, at);
-      });
+      return enqueue(page, ++q.sends);
     }
   };
 }
@@ -186,11 +219,13 @@ export async function mount(ctx) {
   var current = { page: 0 };
   var saveTimer = 0;
   var lastSaved = -1;
-  // The writes, one at a time; writer.confirmed is the page Kavita is known
-  // to hold for this reader (the one it reported, or the newest write it
-  // took, in send order). The saves on leaving compare against that, not
-  // lastSaved: a page queued or in flight may not have landed.
-  var writer = progressWriter(sendProgress);
+  // The writes, through the book's queue (progressWriter), made once the
+  // chapter is known; writer.confirmed is the page Kavita is known to hold
+  // for this reader (the one it reported, or the newest write it took, in
+  // send order). The saves on leaving compare against that, not lastSaved:
+  // a page queued or in flight may not have landed. Nothing is written
+  // before the position is known, which comes after the writer.
+  var writer = null;
   // Whether current.page is a position we may write back to Kavita. False
   // until Kavita told us where this reader is (get-progress answered) or they
   // turned a page themselves. Otherwise a failed lookup, which opens the book
@@ -503,7 +538,8 @@ export async function mount(ctx) {
    * navigation is leaveReader's.
    */
   function saveProgress(useBeacon) {
-    var held = useBeacon ? writer.confirmed : lastSaved;
+    // No writer before the chapter is known; nothing is known then either.
+    var held = useBeacon ? (writer ? writer.confirmed : -1) : lastSaved;
     if (!positionKnown || current.page === held) return;
     var page = current.page;
     lastSaved = page;
@@ -565,9 +601,11 @@ export async function mount(ctx) {
   }
 
   function restoreProgress() {
-    // One quiet retry before giving up: a lost lookup would otherwise leave
-    // the book at the start with saving switched off.
-    return fetchProgress()
+    // Asked only once every save for this book already on its way (an
+    // earlier visit's, Kavita being slow) has answered, so the answer is the
+    // newest position. One quiet retry before giving up: a lost lookup would
+    // otherwise leave the book at the start with saving switched off.
+    return writer.settled().then(fetchProgress)
       .catch(function (err) { if (quiet(err)) throw err; return fetchProgress(); })
       .then(function (page) {
         positionKnown = true;
@@ -706,6 +744,8 @@ export async function mount(ctx) {
   }).then(function (res) {
     book.chapterId = res.chapterId;
     book.volumeId = res.volumeId;
+    // One queue per chapter, the position's key in Kavita, for every visit.
+    writer = progressWriter(sendProgress, 'chapter:' + book.chapterId);
     return kavita('/api/Book/' + book.chapterId + '/book-info');
   }).then(function (r) {
     if (!r.ok) throw new Error('book-info HTTP ' + r.status);
