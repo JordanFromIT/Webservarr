@@ -73,8 +73,9 @@ jobs:
 
   # Front-end checks that need JavaScript, which the Python image has none of:
   # the Integrations tab's sameAddress() against the server's shared cases,
-  # the Appearance tab's contrast maths against the Python reference, and the
-  # soft-navigation router's link and response rules (router_vectors.json).
+  # the Appearance tab's contrast maths against the Python reference, the
+  # soft-navigation router's link and response rules (router_vectors.json)
+  # and its navigations run in a DOM (router_runtime.mjs).
   js-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -84,11 +85,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Dev-only packages from the lock file: the router's runtime cases run
+      # in happy-dom. Nothing here reaches the image (.dockerignore).
+      - name: Install the dev packages
+        run: npm ci --no-audit --no-fund
+
       - name: Run the JavaScript checks
         run: |
           node app/tests/js/same_address.mjs
           node app/tests/js/contrast.mjs
           node app/tests/js/router.mjs
+          node app/tests/js/router_runtime.mjs
           node app/tests/js/debug_leaks.mjs
           node app/tests/js/view_transition.mjs
           node app/tests/js/service_status.mjs

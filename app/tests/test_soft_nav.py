@@ -957,7 +957,12 @@ class FixRound11(unittest.TestCase):
     def test_the_js_checks_run_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file
         for parts in (("package.json",), (".github", "workflows", "docker-publish.yml")):
-            self.assertIn("node app/tests/js/reader_progress.mjs", repo_file(self, *parts), "/".join(parts))
+            for js in ("reader_progress.mjs", "router_runtime.mjs"):
+                self.assertIn(f"node app/tests/js/{js}", repo_file(self, *parts), "/".join(parts))
+        # The runtime cases need the dev packages: CI installs them first.
+        ci = repo_file(self, ".github", "workflows", "docker-publish.yml")
+        js = ci[ci.index("  js-checks:"):ci.index("  build-and-push:")]
+        self.assertLess(js.index("npm ci"), js.index("node app/tests/js/router_runtime.mjs"))
 
 
 class TourTeardown(unittest.TestCase):
@@ -1253,27 +1258,12 @@ class PageHelpersLoadFirst(unittest.TestCase):
 class LeaveGuard(unittest.TestCase):
     """A page can hold its visitor (Settings with unsaved changes): the router
     awaits ctx.beforeLeave's guard before it leaves the page, for a link,
-    navigate(), Back and Forward (Task 5)."""
+    navigate(), Back and Forward (Task 5). How the router asks, holds Back and
+    stays is run for real in app/tests/js/router_runtime.mjs; what is left
+    here is the pages' side and the lines whose presence is the point."""
 
     def code(self):
         return js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
-
-    def test_go_asks_the_guard_before_it_fetches(self):
-        code = self.code()
-        go = function_body(code, "visit")
-        ask = go.index("verdict = await current.guard(new URL(target.href), { pop: !!opts.pop });")
-        self.assertLess(go.index("if (!current) {"), ask, "an unconverted page has no guard to ask")
-        self.assertLess(go.index("current.claim(new URL(target.href), "), ask, "an in-page URL is not a leave")
-        self.assertLess(ask, go.index("takePrefetch(target.href)"), "asked before any fetch")
-        after = go[ask:go.index("takePrefetch(target.href)")]
-        self.assertIn("if (token !== navToken) return;", after, "a newer navigation wins over an answer")
-        stay = re.search(r"if \(verdict === false\) \{(.*?)\n      \}", after, re.S)
-        self.assertIsNotNone(stay)
-        # Back or Forward already moved the address bar: a stay steps back
-        # to the page's own entry (final review M1: never relabel one).
-        self.assertIn("if (opts.pop) returnTo(current.i);", stay.group(1))
-        self.assertRegex(after, r"if \(verdict === '    '\) \{[^}]*await hardNavigate\(target\.href, token\);")
-        self.assertIn("if (verdict === 'hard') {", (STATIC / "js" / "router.js").read_text(encoding="utf-8"))
 
     def test_a_left_page_asks_nothing(self):
         code = self.code()
@@ -1287,30 +1277,6 @@ class LeaveGuard(unittest.TestCase):
         m = re.search(r"window\.addEventListener\('\s+', function \(\) \{\s*if \(!current \|\| !samePage\(location\.href, current\.url\)\) return;"
                       r"\s*current\.url = location\.href;\s*if \(history\.state === null\) \{\s*at \+= 1;\s*history\.replaceState\(mark\(", code)
         self.assertIsNotNone(m)
-
-    def test_another_back_waits_while_the_guard_is_asked(self):
-        # Back, Back while "Leave without saving?" is open: the second step
-        # neither skips the question (a same-page /settings entry) nor starts
-        # a navigation; the address stays on the entry the question is about.
-        code = self.code()
-        go = function_body(code, "visit")
-        self.assertIn("const ask = asking = { url: opts.pop ? target.href : location.href, i: opts.pop ? at : current.i };", go)
-        self.assertRegex(go, r"\} finally \{\s*if \(asking === ask\) asking = null;\s*\}")
-        pop = re.search(r"window\.addEventListener\('\s+', function \(e\) \{\s*const st = e\.state;(.*?)\n  \}\);", code, re.S)
-        self.assertIsNotNone(pop)
-        body = pop.group(1)
-        held = body.index("if (asking) {")
-        self.assertLess(held, body.index("samePage(location.href, current.url)"), "held before the same-page shortcut")
-        self.assertLess(held, body.index("go(location.href"), "and before any navigation")
-        # Stepped back to that entry with history.go, never relabelled (M1).
-        self.assertRegex(body, r"if \(asking\) \{\s*if \(known\) returnTo\(asking\.i\);")
-
-    def test_a_stay_after_a_let_through_leave_is_announced(self):
-        code = self.code()
-        stay = re.search(r"if \(d\.action === '    '\) \{(.*?)\n    \}", function_body(code, "visit"), re.S)
-        self.assertIsNotNone(stay)
-        self.assertIn("window.dispatchEvent(new CustomEvent('", stay.group(1))
-        self.assertIn("ws:nav-stayed", (STATIC / "js" / "router.js").read_text(encoding="utf-8"))
 
     def test_settings_guards_every_way_out(self):
         page = js_code_only(module_source("settings"))
