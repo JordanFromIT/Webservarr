@@ -310,6 +310,9 @@ class WikiPage(unittest.TestCase):
                                 r"if \(WikiEditor\.holds\(\)\) return false;\s*return render\(url, \{")
         self.assertIn("pop: !!(how && how.pop), scrollY: how && how.scrollY,", claim)
         self.assertRegex(claim, r"return render\(url, \{")
+        # Which addresses it draws, so the router never prefetches them
+        # (final review M2).
+        self.assertRegex(code, r"\}, function \(url\) \{ return isWikiPath\(url\.pathname\); \}\);")
 
     def test_its_links_go_through_the_router(self):
         # No click listener of its own: an article, category, back or body

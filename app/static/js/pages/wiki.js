@@ -730,7 +730,9 @@ export async function mount(ctx) {
   // The wiki's own addresses are drawn here; the router records history,
   // and titles and announces the view with the name render() resolves to.
   // Not while the editor holds unsaved text: the router then asks the guard
-  // above, and on Leave loads the address as a new visit.
+  // above, and on Leave loads the address as a new visit. The second
+  // function says which addresses those are, so the router never prefetches
+  // a page this one draws itself.
   ctx.onNavigate(function (url, how) {
     if (!isWikiPath(url.pathname)) return false;
     if (WikiEditor.holds()) return false;
@@ -738,7 +740,7 @@ export async function mount(ctx) {
       pop: !!(how && how.pop), scrollY: how && how.scrollY,
       focus: true, from: document.activeElement
     });
-  });
+  }, function (url) { return isWikiPath(url.pathname); });
 
   // A soft navigation in focused the page's heading (the skeleton's);
   // the drawn view's takes it over. A cold load leaves focus alone.

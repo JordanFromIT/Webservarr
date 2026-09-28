@@ -38,8 +38,9 @@
  * Forward waits (the address stays on the entry asked about). A navigation
  * the guard let go that then stays (a failed fetch) dispatches
  * ws:nav-stayed, so the page keeps what it holds.
- * ctx.onNavigate(claim): the page draws some URLs itself (the wiki's views).
- * Every navigation from it first calls claim(url, { pop, scrollY }); true
+ * ctx.onNavigate(claim, claims): the page draws some URLs itself (the
+ * wiki's views). claims(url), optional, says which, and those are never
+ * prefetched. Every navigation from it first calls claim(url, { pop, scrollY }); true
  * takes it, and the router only records history (no fetch, no mount). A
  * promise takes it too, and resolves to the drawn view's name (or null): the
  * router then sets the title in the site's format and announces it, as a
@@ -404,6 +405,12 @@ function start() {
     if (!qualifies(href, location.href, attrsOf(a))) return;
     const url = new URL(href, location.href);
     if (samePage(url.href, location.href)) return;
+    // An address the page draws itself (the wiki's) is never fetched. A
+    // page that claims addresses without saying which gets no prefetch.
+    if (current.claim) {
+      if (!current.claims) return;
+      try { if (current.claims(new URL(url.href))) return; } catch (e) { return; }
+    }
     const key = withoutHash(url.href);
     if (prefetched.has(key)) return;
     // Already being loaded (the tap that started it came with a touchstart).
@@ -911,6 +918,7 @@ function start() {
     if (!was) return;
     was.left = true;
     was.claim = null;          // a left page claims nothing, even mid-swap
+    was.claims = null;
     was.guard = null;          // ...and asks nothing
     was.controller.abort();
     if (was.cleanup) {
@@ -926,7 +934,7 @@ function start() {
     const root = document.getElementById('wsPage');
     const entry = {
       url: url.href, module: moduleUrl, controller: new AbortController(),
-      cleanup: null, claim: null, guard: null, left: false, i: at
+      cleanup: null, claim: null, claims: null, guard: null, left: false, i: at
     };
     current = entry;
     api.current = { url: entry.url, module: moduleUrl, controller: entry.controller };
@@ -948,8 +956,10 @@ function start() {
       },
       setTimeout: timers.setTimeout,
       clearTimeout: timers.clearTimeout,
-      onNavigate: function (handler) {
-        if (!entry.left) entry.claim = typeof handler === 'function' ? handler : null;
+      onNavigate: function (handler, claims) {
+        if (entry.left) return;
+        entry.claim = typeof handler === 'function' ? handler : null;
+        entry.claims = entry.claim && typeof claims === 'function' ? claims : null;
       },
       beforeLeave: function (guard) {
         if (!entry.left) entry.guard = typeof guard === 'function' ? guard : null;
@@ -978,6 +988,7 @@ function start() {
       // signal of its own.
       entry.controller.abort();
       entry.claim = null;
+      entry.claims = null;
       entry.guard = null;
       entry.controller = new AbortController();
       api.current = { url: entry.url, module: moduleUrl, controller: entry.controller };
