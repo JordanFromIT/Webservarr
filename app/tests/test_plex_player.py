@@ -124,7 +124,7 @@ TRACKS = {
             track(203, 200, 1, 3, 300_000, "B/Parts")],
     # Two copies in two folders on one disc: a whole file and a longer
     # two-part copy. Only the longer copy is the book.
-    "300": [track(301, 300, 1, 1, 500_000, "B/Copy one", ext="m4b"),
+    "300": [track(301, 300, 1, 1, 509_000, "B/Copy one", ext="m4b"),
             track(302, 300, 1, 1, 260_000, "B/Copy two"), track(303, 300, 1, 2, 250_000, "B/Copy two")],
     # One album, two discs: two books titled from their tracks.
     "400": [track(401, 400, 1, 1, 50_000, "C/Long", title="First Tale, Part 01"),
@@ -180,6 +180,7 @@ class FakePlex:
         self.plextv_down = None       # None, "connect" or an HTTP status
         self.pms_down = None
         self.timeline_down = False
+        self.reject_tokens = set()    # tokens the server answers 401 to
         self.identity = MACHINE
         # Per-token listening state: {token: {track rk: {viewOffset...}}}
         self.state = {}
@@ -219,6 +220,8 @@ class FakePlex:
         if self.pms_down:
             return httpx.Response(self.pms_down, text="down")
         token = request.headers.get("X-Plex-Token", "")
+        if token in self.reject_tokens:
+            return httpx.Response(401, text="unauthorized")
         path = url.path
         q = parse_qs(url.query.decode() if isinstance(url.query, bytes) else url.query)
         if path == "/identity":
@@ -368,6 +371,54 @@ class ServerAccess(BridgeBase):
         self.run_async(pp.server_access(listener(**{pp.SERVER_FIELD: json.dumps(blob)}), session_id=SID))
         self.assertGreater(len(self.plex.calls), n)
 
+    def cached_session(self):
+        self.run_async(pp.server_access(listener(), session_id=SID))
+        blob = self.cached_blob()
+        self.update_session.reset_mock()
+        return listener(**{pp.SERVER_FIELD: json.dumps(blob)})
+
+    def test_force_refetches_and_rewrites_the_cache(self):
+        session = self.cached_session()
+        n = len(self.plex.calls)
+        out = self.run_async(pp.server_access(session, session_id=SID, force=True))
+        self.assertEqual(out["token"], SERVER_TOKEN)
+        self.assertIn("/api/v2/resources", [c.url.path for c in self.plex.calls[n:]])
+        self.assertEqual(self.cached_blob()["token"], SERVER_TOKEN)
+
+    def test_a_401_on_the_cached_token_in_plex_position_drops_the_cache(self):
+        session = self.cached_session()
+        self.plex.reject_tokens = {SERVER_TOKEN}
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.plex_position(session, "200:1", session_id=SID))
+        self.update_session.assert_awaited_once_with(SID, {pp.SERVER_FIELD: ""})
+        self.assertNotIn(pp.SERVER_FIELD, session)
+        # The next call asks plex.tv again.
+        self.plex.reject_tokens = set()
+        n = len(self.plex.calls)
+        self.run_async(pp.server_access(listener(**{pp.SERVER_FIELD: ""}), session_id=SID))
+        self.assertIn("/api/v2/resources", [c.url.path for c in self.plex.calls[n:]])
+
+    def test_a_401_on_the_cached_token_in_timeline_drops_the_cache_and_never_raises(self):
+        session = self.cached_session()
+        self.plex.reject_tokens = {SERVER_TOKEN}
+        self.assertIsNone(self.run_async(pp.timeline(session, "202", "playing", 1, 2, session_id=SID)))
+        self.update_session.assert_awaited_once_with(SID, {pp.SERVER_FIELD: ""})
+        self.assertNotIn(pp.SERVER_FIELD, session)
+
+    def test_a_401_on_the_admin_token_leaves_the_listener_cache(self):
+        session = self.cached_session()
+        self.plex.reject_tokens = {ADMIN_TOKEN}
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.plex_position(session, "200:1", session_id=SID))
+        self.update_session.assert_not_awaited()
+        self.assertIn(pp.SERVER_FIELD, session)
+
+    def test_a_failed_cache_drop_still_never_raises_from_timeline(self):
+        session = self.cached_session()
+        self.plex.reject_tokens = {SERVER_TOKEN}
+        self.update_session.side_effect = ConnectionError("redis down")
+        self.assertIsNone(self.run_async(pp.timeline(session, "202", "playing", 1, 2, session_id=SID)))
+
     def test_a_corrupt_cache_is_refetched(self):
         out = self.run_async(pp.server_access(listener(**{pp.SERVER_FIELD: "{not json"}), session_id=SID))
         self.assertEqual(out["token"], SERVER_TOKEN)
@@ -466,6 +517,63 @@ class Books(BridgeBase):
         with self.assertRaises(pp.PlayerOff):
             self.run_async(pp.list_books())
         self.assertEqual(self.plex.calls, [])
+
+
+def disc_track(rk, index, duration, folder):
+    return {"ratingKey": str(rk), "type": "track", "parentIndex": 1, "index": index, "duration": duration,
+            "Media": [{"Part": [{"key": f"/library/parts/{rk}/1/file.mp3",
+                                 "file": f"/data/Audiobooks/{folder}/{rk}.mp3"}]}]}
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class Copies(unittest.TestCase):
+    def keys(self, tracks):
+        return [t["ratingKey"] for t in pp._discs(tracks)[1]]
+
+    def test_a_multi_cd_rip_that_restarts_numbering_keeps_every_cd_in_order(self):
+        tracks = [disc_track(9, 1, 50_000, "Rip/CD10"),
+                  disc_track(3, 1, 80_000, "Rip/CD2"), disc_track(4, 2, 90_000, "Rip/CD2"),
+                  disc_track(2, 2, 70_000, "Rip/CD1"), disc_track(1, 1, 60_000, "Rip/CD1")]
+        self.assertEqual(self.keys(tracks), ["1", "2", "3", "4", "9"])
+
+    def test_cds_of_matching_length_but_different_tracks_are_not_copies(self):
+        tracks = [disc_track(1, 1, 100_000, "Rip/CD1"), disc_track(2, 2, 200_000, "Rip/CD1"),
+                  disc_track(3, 1, 200_000, "Rip/CD2"), disc_track(4, 2, 100_000, "Rip/CD2")]
+        self.assertEqual(self.keys(tracks), ["1", "2", "3", "4"])
+
+    def test_two_copies_of_the_same_parts_keep_one(self):
+        tracks = [disc_track(1, 1, 100_000, "B/Copy A"), disc_track(2, 2, 200_000, "B/Copy A"),
+                  disc_track(3, 1, 101_000, "B/Copy B"), disc_track(4, 2, 199_500, "B/Copy B")]
+        # The longer copy wins.
+        self.assertEqual(self.keys(tracks), ["3", "4"])
+
+    def test_a_whole_file_and_its_parts_keep_one(self):
+        tracks = [disc_track(1, 1, 300_500, "B/Whole"),
+                  disc_track(2, 1, 100_000, "B/Parts"), disc_track(3, 2, 200_000, "B/Parts")]
+        self.assertEqual(self.keys(tracks), ["1"])
+
+    def test_a_near_copy_with_a_different_track_count_is_kept_whole(self):
+        tracks = [disc_track(1, 1, 100_000, "B/Three"), disc_track(2, 2, 100_000, "B/Three"),
+                  disc_track(3, 3, 100_000, "B/Three"),
+                  disc_track(4, 1, 150_000, "B/Two"), disc_track(5, 2, 150_000, "B/Two")]
+        self.assertEqual(self.keys(tracks), ["1", "2", "3", "4", "5"])
+
+    def test_a_long_copy_with_one_part_cut_differently_still_dedupes(self):
+        # Ten parts; part 7 is 8% longer in the second rip, the rest agree
+        # and the totals stay within 1%.
+        a = [disc_track(i, i, 1_000_000, "B/Rip A") for i in range(1, 11)]
+        b = [disc_track(100 + i, i, 1_080_000 if i == 7 else 1_000_500, "B/Rip B") for i in range(1, 11)]
+        self.assertEqual(len(self.keys(a + b)), 10)
+
+    def test_two_mismatched_parts_in_ten_are_not_copies(self):
+        a = [disc_track(i, i, 1_000_000, "B/Rip A") for i in range(1, 11)]
+        b = [disc_track(100 + i, i, 1_100_000 if i in (3, 7) else 1_000_000, "B/Rip B") for i in range(1, 11)]
+        self.assertEqual(len(self.keys(a + b)), 20)
+
+    def test_durations_outside_tolerance_are_not_copies(self):
+        # 2.5 s apart on a 100 s part: over max(2 s, 1%).
+        tracks = [disc_track(1, 1, 100_000, "B/A"), disc_track(2, 1, 102_500, "B/B")]
+        self.assertEqual(self.keys(tracks), ["1", "2"])
 
 
 class Detail(BridgeBase):
@@ -632,6 +740,13 @@ class Position(BridgeBase):
         reads = [c for c in self.plex.calls if c.url.path == "/library/metadata/200/children"]
         self.assertIn(SERVER_TOKEN, [c.headers["X-Plex-Token"] for c in reads])
         self.assert_no_token_in_urls()
+
+    def test_only_a_later_track_has_state(self):
+        # book_ms is the playhead in book time: every earlier part counts,
+        # whatever Plex says about it, and resume lands on track 3 at 50 s.
+        self.plex.state[SERVER_TOKEN] = {"203": {"viewOffset": 50_000, "lastViewedAt": self.T1}}
+        pos = self.run_async(pp.plex_position(listener(), "200:1", session_id=SID))
+        self.assertEqual((pos["track"], pos["offset_ms"], pos["book_ms"]), ("203", 50_000, 350_000))
 
     def test_a_finished_part_newer_than_an_old_offset_moves_to_the_next_part(self):
         self.plex.state[SERVER_TOKEN] = {

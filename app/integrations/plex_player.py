@@ -71,6 +71,12 @@ class NoServerAccess(PlayerUnavailable):
     chooses to treat it as the listener's own lack of access."""
 
 
+class TokenRejected(PlayerUnavailable):
+    """Plex answered 401 to the token sent. On the listener's server token it
+    means the cached access is stale (revoked share, changed token): the
+    cache is dropped so the next call asks plex.tv again."""
+
+
 class NotInLibrary(Exception):
     """The key is malformed or not in the configured audiobook library (maps to 404)."""
 
@@ -141,6 +147,9 @@ async def _pms_get(client: httpx.AsyncClient, admin: dict, token: str, path: str
         raise PlayerUnavailable("Plex is unavailable") from None
     if resp.status_code == 404:
         return None
+    if resp.status_code == 401:
+        logger.warning("Plex refused the token for %s (HTTP 401)", path)
+        raise TokenRejected("Plex refused the token")
     if resp.status_code != 200:
         logger.warning("Plex returned HTTP %d for %s", resp.status_code, path)
         raise PlayerUnavailable("Plex is unavailable")
@@ -252,14 +261,29 @@ async def _fetch_access(session: dict, admin: dict) -> dict:
     return {"token": token, "uris": uris}
 
 
-async def server_access(session: dict, session_id: Optional[str] = None) -> dict:
+async def forget_access(session: dict, session_id: Optional[str] = None) -> None:
+    """Drop the cached server access from the session (the dict and Redis),
+    so the next server_access asks plex.tv again."""
+    session.pop(SERVER_FIELD, None)
+    if session_id:
+        try:
+            await session_manager.update_session(session_id, {SERVER_FIELD: ""})
+        except Exception as exc:  # noqa: BLE001 - the cache still expires within SERVER_TTL
+            logger.warning("Could not drop the cached Plex server access: %s", type(exc).__name__)
+
+
+async def server_access(session: dict, session_id: Optional[str] = None, force: bool = False) -> dict:
     """The listener's access to the configured server:
     {"token": str, "uris": {"local": [...], "remote": [...]}}.
 
     `session` is the listener's session dict and `session_id` its id: the
     result is written back to the session (field SERVER_FIELD) for SERVER_TTL
     and also set on the dict, so the rest of this request reuses it. Without
-    a session_id nothing is persisted.
+    a session_id nothing is persisted. `force` skips the cache and rewrites
+    it (for a caller that saw the cached token fail, e.g. a stream refused).
+    The cache is also dropped whenever Plex answers 401 to the cached token
+    (plex_position, timeline); the configured server's identity is not
+    re-checked on every request.
 
     Raises NoServerAccess (a PlayerUnavailable) for a session without a Plex
     token or an account the server is not shared with, and PlayerUnavailable
@@ -267,7 +291,7 @@ async def server_access(session: dict, session_id: Optional[str] = None) -> dict
     if not session.get("plex_token"):
         raise NoServerAccess("This session has no Plex token")
     admin = _configured(need_section=False)
-    cached = _cached_access(session, admin)
+    cached = None if force else _cached_access(session, admin)
     if cached:
         return cached
     access = await _fetch_access(session, admin)
@@ -315,16 +339,48 @@ def _track_duration(t: dict) -> int:
     return _int(t.get("duration")) or _int(_part(t).get("duration"))
 
 
+def _natural(text: str) -> tuple:
+    """A sort key that orders "CD2" before "CD10"."""
+    return tuple((0, int(p), "") if p.isdigit() else (1, 0, p.casefold())
+                 for p in re.split(r"([0-9]+)", text) if p)
+
+
+def _close(a: int, b: int) -> bool:
+    """Two durations the same within max(2 s, 1%)."""
+    return abs(a - b) <= max(2000, 0.01 * max(a, b))
+
+
+def _same_book(a: list, b: list) -> bool:
+    """True when two folders' tracks are copies of one book: the same track
+    numbers with durations matching track for track and in total, or one
+    whole file whose length matches the other folder's parts put together.
+
+    One track in ten may differ (a re-rip can cut one part differently: a
+    live library holds two 22-part copies whose 17th parts differ by 3 min
+    while the other 21 agree within 5 s). A short set gets no such slack, so
+    two real CDs with numbering restarting at 1 are never taken for copies."""
+    da = {_int(t.get("index")): _track_duration(t) for t in a}
+    db = {_int(t.get("index")): _track_duration(t) for t in b}
+    if len(a) == len(b) == len(da) == len(db) and set(da) == set(db):
+        misses = sum(not _close(da[i], db[i]) for i in da)
+        return misses <= len(da) // 10 and _close(sum(da.values()), sum(db.values()))
+    if (len(a) == 1) != (len(b) == 1):
+        return _close(sum(_track_duration(t) for t in a), sum(_track_duration(t) for t in b))
+    return False
+
+
 def _pick_copy(tracks: list) -> list:
     """One disc's tracks in play order, with a duplicate copy left out.
 
     Some discs hold the same book twice, from two folders (a whole file and a
     set of parts, or two sets of parts), which shows as repeated track
-    numbers. Playing both would repeat the book, so then the tracks are
-    grouped by folder and one copy is kept: a copy whose track numbers do not
-    repeat, then the longest, then the earliest added. Without a repeated
-    number every track is kept, so a book spread over several folders (CD1,
-    CD2) stays whole."""
+    numbers. Playing both would repeat the book. A multi-CD rip whose folders
+    each restart at track 1 repeats numbers too, so folders only count as
+    copies when _same_book says so; one of each set of copies is kept (a
+    copy whose track numbers do not repeat, then the longest, then the
+    earliest added). Every other folder stays, in natural folder order (CD2
+    before CD10), then by track number. Without a repeated number every track
+    is kept in track order."""
     def order(t):
         return (_int(t.get("index")), _int(t.get("ratingKey")))
 
@@ -338,11 +394,23 @@ def _pick_copy(tracks: list) -> list:
     if len(folders) == 1:
         return sorted(tracks, key=order)
 
-    def rank(group):
-        indexes = [_int(t.get("index")) for t in group]
-        return (len(set(indexes)) == len(indexes), sum(_track_duration(t) for t in group),
+    def rank(folder):
+        group = folders[folder]
+        numbers = [_int(t.get("index")) for t in group]
+        return (len(set(numbers)) == len(numbers), sum(_track_duration(t) for t in group),
                 -min(_int(t.get("ratingKey")) for t in group))
-    return sorted(max(folders.values(), key=rank), key=order)
+
+    # Sets of folders that are copies of each other; one of each set is kept.
+    names = sorted(folders, key=_natural)
+    sets = []
+    for name in names:
+        home = next((c for c in sets if any(_same_book(folders[name], folders[o]) for o in c)), None)
+        if home is None:
+            sets.append([name])
+        else:
+            home.append(name)
+    kept = sorted((max(c, key=rank) for c in sets), key=_natural)
+    return [t for name in kept for t in sorted(folders[name], key=order)]
 
 
 def _discs(tracks: list) -> dict:
@@ -566,14 +634,25 @@ async def plex_position(session: dict, key: str, session_id: Optional[str] = Non
     and lastViewedAt are read with the listener's server token. The most
     recently touched track wins: an offset is a place inside that track, and
     a finished track (viewCount, no offset) puts the place at the start of
-    the next one, or at the end of the book after the last."""
+    the next one, or at the end of the book after the last.
+
+    `book_ms` is that playhead in book time: the durations of every track
+    before it plus the offset, whatever Plex says about those earlier tracks
+    (a listener who only ever played track 3 is at track 3, not track 1).
+    Resume uses `track` and `offset_ms`; `book_ms` is for display and
+    comparison. A 401 on the listener's server token drops the cached access
+    and raises TokenRejected (a PlayerUnavailable)."""
     admin = _configured()
     parse_key(key)
     access = await server_access(session, session_id=session_id)
     async with _pms_client() as client:
         _album_meta, _disc, tracks, _n = await _book(client, admin, key)
         album_key = key.split(":", 1)[0]
-        mine = await _pms_get(client, admin, access["token"], f"/library/metadata/{album_key}/children")
+        try:
+            mine = await _pms_get(client, admin, access["token"], f"/library/metadata/{album_key}/children")
+        except TokenRejected:
+            await forget_access(session, session_id)
+            raise
     state = {str(t.get("ratingKey")): t for t in (mine or {}).get("Metadata") or []}
 
     durations = [_track_duration(t) for t in tracks]
@@ -629,7 +708,10 @@ async def timeline(session: dict, track_key: str, state: str, time_ms: int, dura
                         "identifier": "com.plexapp.plugins.library"},
                 headers={**_client_headers(session), "X-Plex-Token": access["token"]},
             )
-        if resp.status_code != 200:
+        if resp.status_code == 401:
+            logger.warning("Plex timeline refused the server token (HTTP 401); access will be fetched again")
+            await forget_access(session, session_id)
+        elif resp.status_code != 200:
             logger.warning("Plex timeline returned HTTP %d", resp.status_code)
     except (PlayerUnavailable, NotInLibrary) as exc:
         logger.info("Plex timeline skipped: %s", exc)
