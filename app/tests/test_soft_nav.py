@@ -1012,6 +1012,50 @@ class PageOffBanner(unittest.TestCase):
                 self.assertRegex(read(name), r'<!-- ws:header -->(?:\s|<!--.*?-->)*<div id="wsPage"')
 
 
+class OneShellOutsideThePage(unittest.TestCase):
+    """Nothing outside #wsPage is ever swapped: the document keeps what the
+    first page it loaded rendered there for its whole life. So every shell
+    page renders the same thing there. News and Wiki once put the scroller on
+    <main>: arrived at from any other page on a desktop, under that page's
+    overflow-hidden <main>, they could not scroll (final review C1)."""
+
+    def outside(self, name):
+        h = read(name)
+        body = re.search(r"<body\b[^>]*>", h)
+        main = re.compile(r"<main\b[^>]*>").search(h, body.end())
+        between = re.sub(r"<!--.*?-->", "", h[body.end():main.start()], flags=re.S).strip()
+        # After </main>: the shell's scripts, then the page's own helpers.
+        tail = re.sub(r"<!--.*?-->", "", h[h.rindex("</main>"):h.rindex("</body>")], flags=re.S)
+        shared = [m.group(0) for m in _SCRIPT_TAG_RE.finditer(tail)
+                  if not re.search(r"\bdata-ws-page-script\b", m.group(1))]
+        return {"body": body.group(0), "before main": between, "main": main.group(0), "shell scripts": shared}
+
+    def test_every_shell_page_renders_the_same_outside_wspage(self):
+        from app.tests.test_shell_contract import SHELL_PAGES
+        first = self.outside("index")
+        for name in SHELL_PAGES:
+            with self.subTest(name):
+                self.assertEqual(self.outside(name), first)
+
+    def test_a_page_that_scrolls_whole_scrolls_inside_wspage(self):
+        # From lg <main> is one screen tall and hidden overflow; a page that
+        # is one long column scrolls #wsPage itself (router.js and wiki.js
+        # scroller() pick it), phones scroll the document.
+        for name in ("news", "wiki"):
+            with self.subTest(name):
+                tag = re.search(r'<div id="wsPage"[^>]*>', read(name)).group(0)
+                classes = attr(tag, "class").split()
+                for c in ("flex-1", "min-h-0", "lg:overflow-y-auto"):
+                    self.assertIn(c, classes)
+
+    def test_the_header_keeps_its_height(self):
+        # A flex item in <main>'s column: without shrink-0 it gave up height
+        # to a page taller than the screen (64 px down to 41).
+        part = (STATIC / "partials" / "shell-header.html").read_text(encoding="utf-8")
+        tag = re.search(r'<header id="appHeader"[^>]*>', part).group(0)
+        self.assertIn("shrink-0", attr(tag, "class").split())
+
+
 class SharedShellScripts(unittest.TestCase):
     """ui.js (the toast and dialog) loads once, from the shell, on every shell
     page; the router closes dialogs before a swap; WS.getJSON takes the page's

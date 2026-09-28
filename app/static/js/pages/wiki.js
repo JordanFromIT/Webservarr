@@ -114,8 +114,9 @@ function snippetNode(item) {
   return p;
 }
 
-// Phones scroll the document; from lg the page scrolls inside <main>. The
-// same choice the router makes for its own scroll handling.
+// Phones scroll the document; from lg #wsPage scrolls itself (<main> is one
+// screen tall on every page). The same choice the router makes for its own
+// scroll handling.
 function scroller(page) {
   var main = page ? page.closest('main') : null;
   var list = [main, page].concat(page ? Array.prototype.slice.call(page.children) : []);

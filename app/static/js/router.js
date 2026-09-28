@@ -503,8 +503,9 @@ function start() {
 
   // ---- Scroll ----
   //
-  // Phones scroll the document. From lg the page scrolls inside <main> or
-  // inside the page's own content column, whichever has overflow set.
+  // Phones scroll the document. From lg <main> is one screen tall on every
+  // page (it is never swapped), and the page scrolls inside #wsPage or its
+  // own content column, whichever has overflow set.
   function scroller() {
     const page = document.getElementById('wsPage');
     const main = page ? page.closest('main') : null;
