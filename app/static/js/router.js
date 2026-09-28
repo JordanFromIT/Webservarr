@@ -1089,7 +1089,7 @@ function start() {
     opts = opts || {};
     const url = new URL(href, location.href).href;
     if (!opts.pop && inflight && inflight.token === navToken && inflight.href === url) return inflight.done;
-    const done = visit(url, opts);
+    const done = begin(url, opts);
     const entry = { href: url, token: navToken, done: done };
     if (!opts.pop) inflight = entry;
     const clear = function () { if (inflight === entry) inflight = null; };
@@ -1097,19 +1097,20 @@ function start() {
     return done;
   }
 
-  async function visit(href, opts) {
+  // A navigation, numbered (the newest wins). However visit() ends, a throw
+  // included, the bar it may have put up goes, unless a newer navigation has
+  // taken it over.
+  async function begin(href, opts) {
     const token = ++navToken;
     busyToken = token;
-    // However it ends, a throw included, the bar it may have put up goes
-    // (unless a newer navigation has taken it over).
     try {
-      await steps(href, opts, token);
+      await visit(href, opts, token);
     } finally {
       busyEnd(token);
     }
   }
 
-  async function steps(href, opts, token) {
+  async function visit(href, opts, token) {
     closeChrome();
     clearTimeout(scrollTimer);
     if (fetchCtl) fetchCtl.abort();

@@ -1217,7 +1217,7 @@ class PageHelpersLoadFirst(unittest.TestCase):
         load = go.index("await loadPageScripts(doc);")
         imp = go.index("mod = await import(moduleUrl);")
         self.assertLess(load, imp, "helpers load before the module is imported")
-        self.assertLess(imp, go.index("await commit(doc, page, dest, mod, moduleUrl, opts)"),
+        self.assertLess(imp, go.index("await commit(doc, page, dest, mod, moduleUrl, opts, token)"),
                         "and both before the swap that mounts it")
         helpers = function_body(code, "loadPageScripts")
         # One at a time, in the page's order: the next waits for the last.
