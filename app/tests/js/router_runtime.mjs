@@ -876,6 +876,53 @@ await scenario('T1R1 a push while a step back is in flight supersedes it; Back t
   }
 });
 
+await scenario('T1R2 a replace while a step back is in flight supersedes it; address, page and view agree', async () => {
+  for (const navigation of [true, false]) {
+    const how = navigation ? ' (Navigation API)' : ' (history.go)';
+    const env = await boot({ navigation });
+    env.views = [];
+    const quiet = console.error;
+    env.pages.wiki = (ctx) => {
+      env.views.push(ctx.url.pathname);
+      ctx.onNavigate((url) => {
+        if (!url.pathname.startsWith('/wiki/')) return false;
+        env.views.push(url.pathname);
+        return true;
+      });
+    };
+    env.pages.settings = (ctx) => { env.views.push(ctx.url.pathname); };
+    env.pages.news = (ctx) => { env.views.push(ctx.url.pathname); };
+    click(env, '/settings');
+    await until(() => mounted(env, 'settings').length === 1);
+    click(env, '/wiki');
+    await until(() => mounted(env, 'wiki').length === 1);
+    // Back to Settings fails: the router steps back to the wiki's entry, and
+    // before that step lands the page draws another view in place (a replace).
+    env.routes['/settings'] = { status: 500 };
+    env.win.addEventListener('ws:nav-stayed', () => {
+      env.routes['/settings'] = {};
+      env.router.navigate('/wiki/a', { replace: true });
+    }, { once: true });
+    env.history.back();
+    await until(() => env.toasts.length === 1);
+    await wait(120);
+    const agree = () => [at(env), new URL(env.router.current.url).pathname, env.views[env.views.length - 1]];
+    const a = agree();
+    check('once the step lands, the address, current and the view agree' + how, a[0] === a[1] && a[1] === a[2],
+      [a, env.history.index, env.history.urls()]);
+    const index = env.history.index;
+    const steps = env.history.steps.length;
+    env.history.back();
+    await wait(150);
+    const b = agree();
+    check('Back moves one entry' + how, env.history.index === index - 1, [index, env.history.index]);
+    check('and they still agree' + how, b[0] === b[1] && b[1] === b[2], b);
+    check('the router took no step of its own' + how, env.history.steps.slice(steps).join() === '-1',
+      env.history.steps.slice(steps));
+    console.error = quiet;
+  }
+});
+
 await scenario('N4 the progress bar clears when visit() throws after it started', async () => {
   const env = await boot();
   const bad = '<script src="https://[broken" data-ws-page-script></script>';

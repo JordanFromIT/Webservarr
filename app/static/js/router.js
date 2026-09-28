@@ -281,16 +281,21 @@ function start() {
     } catch (e) { /* no entry to name */ }
   }
 
-  // A new entry (a push, or a fragment link the browser followed). A step
-  // back still on its way is superseded: the push has already moved the
-  // address, and the entry that step was heading for may be gone with the
-  // forward entries. Its late settle (or rejection) is ignored, and the next
-  // Back or Forward is the visitor's, one entry.
+  // The router wrote history (a push, a replace, or a fragment link the
+  // browser followed) while a step back was still on its way: that step is
+  // superseded. The write has already put the address where the page is, and
+  // the entry the step was heading for may be relabelled or gone with the
+  // forward entries. Its late settle (or rejection) is ignored: if it lands,
+  // its popstate is an ordinary Back or Forward, one entry.
+  function supersede() {
+    if (landing === null) return;
+    landing = null;
+    landingGen += 1;
+  }
+
+  // A new entry.
   function entryPushed() {
-    if (landing !== null) {
-      landing = null;
-      landingGen += 1;
-    }
+    supersede();
     noteKey(true);
   }
 
@@ -317,9 +322,16 @@ function start() {
   function mark(y) { return { ws: 1, i: at, scrollY: y || 0 }; }
 
   // A router entry for href: a new one, or this one relabelled (replace).
+  // (The router's other replaceState calls never move the page or the
+  // address: saveScroll writes scrollY on the page's own entry, the held
+  // Back's relabel and the first load run only with no step on its way.)
   function record(href, replace) {
-    if (replace) history.replaceState(mark(0), '', href);
-    else history.pushState({ ws: 1, scrollY: 0 }, '', href);
+    if (replace) {
+      history.replaceState(mark(0), '', href);
+      supersede();
+    } else {
+      history.pushState({ ws: 1, scrollY: 0 }, '', href);
+    }
   }
 
   // A step to entry i: by its key where the browser can, else by distance.
@@ -1376,13 +1388,24 @@ function start() {
     // another (an embed's steps were in between), from where it steps again.
     if (landing !== null) {
       const was = landing;
-      if (known && st.i === was) { landing = null; return; }
-      if (known && landingTries < 3) {
+      if (known && st.i === was) {
+        landing = null;
+        // Back on the page's entry: current follows it (its hash included).
+        if (samePage(location.href, current.url)) {
+          current.url = location.href;
+          current.i = at;
+          return;
+        }
+        // Held on the entry a question is about.
+        if (asking) return;
+        // Anything else is not where the page is: an ordinary Back or Forward.
+      } else if (known && landingTries < 3) {
         landingTries += 1;
         stepTo(was);
         return;
+      } else {
+        landing = null;
       }
-      landing = null;
     }
     // A page is being asked whether it may be left: Back or Forward pressed
     // again waits for that answer, on the entry the question is about.
