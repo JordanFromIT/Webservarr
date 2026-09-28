@@ -465,17 +465,22 @@ html.ws-vt #desktopSidebar { view-transition-name: ws-sidebar; }
 html.ws-vt #appHeader      { view-transition-name: ws-header; }
 html.ws-vt #mobileTopBar   { view-transition-name: ws-topbar; }
 html.ws-vt main            { view-transition-name: ws-content; }
+/* The player is fixed over the bottom of <main>: unnamed it would be part of
+   the root snapshot, which paints under <main>'s, and blink on every swap. */
+html.ws-vt #wsPlayer       { view-transition-name: ws-player; }
 
 /* The stationary parts must not be drawn twice: the browser blends the old
    and new snapshots additively (plus-lighter), so a translucent sidebar shown
    in both would flash brighter for the length of the transition. Drop the
    old snapshot and let the new one sit still. */
 ::view-transition-old(ws-sidebar), ::view-transition-old(ws-header),
-::view-transition-old(ws-topbar),  ::view-transition-old(root) {
+::view-transition-old(ws-topbar),  ::view-transition-old(ws-player),
+::view-transition-old(root) {
   display: none;
 }
 ::view-transition-new(ws-sidebar), ::view-transition-new(ws-header),
-::view-transition-new(ws-topbar),  ::view-transition-new(root) {
+::view-transition-new(ws-topbar),  ::view-transition-new(ws-player),
+::view-transition-new(root) {
   animation: none;
   mix-blend-mode: normal;
 }

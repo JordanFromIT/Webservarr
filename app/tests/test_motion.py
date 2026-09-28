@@ -269,7 +269,8 @@ class NavHighlight(unittest.TestCase):
     # The shell's names are scoped to html.ws-vt, which is on only while a
     # transition runs (ShellNamesOnlyDuringATransition below).
     SHELL_NAMES = {"html.ws-vt #desktopSidebar": "ws-sidebar", "html.ws-vt #appHeader": "ws-header",
-                   "html.ws-vt #mobileTopBar": "ws-topbar", "html.ws-vt main": "ws-content"}
+                   "html.ws-vt #mobileTopBar": "ws-topbar", "html.ws-vt main": "ws-content",
+                   "html.ws-vt #wsPlayer": "ws-player"}
 
     def test_only_the_shell_carries_a_transition_name(self):
         named = {sel.strip(): name for sel, name in
@@ -289,6 +290,13 @@ class NavHighlight(unittest.TestCase):
         # The old snapshot of each stationary part is dropped and the new one
         # does not animate: only the content crossfades.
         self.assertRegex(THEME, r"::view-transition-old\(ws-sidebar\)[^{}]*\{\s*display: none;")
+        # The player too: unnamed it was part of the root snapshot, which
+        # paints under <main>'s, so a visible player blinked on every swap
+        # (final review M7). It stays still like the rest of the shell.
+        for sel in ("::view-transition-old(ws-player)", "::view-transition-new(ws-player)"):
+            self.assertIn(sel, THEME)
+        self.assertRegex(THEME, r"::view-transition-old\([^{}]*ws-player\)[^{}]*\{\s*display: none;")
+        self.assertRegex(THEME, r"::view-transition-new\([^{}]*ws-player\)[^{}]*\{\s*animation: none;")
 
     def test_no_cross_document_transition(self):
         # Every shell page is a soft-navigation page; a full navigation (sign
@@ -306,7 +314,7 @@ class ShellNamesOnlyDuringATransition(unittest.TestCase):
     (through theme-loader.js's WSViewTransition) for the length of a soft
     swap's transition. app/tests/js/view_transition.mjs runs the hold/release."""
 
-    SHELL_PARTS = ("#desktopSidebar", "#appHeader", "#mobileTopBar", "main")
+    SHELL_PARTS = ("#desktopSidebar", "#appHeader", "#mobileTopBar", "main", "#wsPlayer")
     LOADER = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
     ROUTER = (STATIC / "js" / "router.js").read_text(encoding="utf-8")
 
