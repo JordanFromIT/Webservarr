@@ -263,8 +263,10 @@ class NavHighlight(unittest.TestCase):
     button moving into the new one's place, and felt laggy). Only the shell
     itself carries a transition name, which keeps it stationary."""
 
-    SHELL_NAMES = {"#desktopSidebar": "ws-sidebar", "#appHeader": "ws-header",
-                   "#mobileTopBar": "ws-topbar", "main": "ws-content",
+    # The shell's names are scoped to html.ws-vt, which is on only while a
+    # transition runs (ShellNamesOnlyDuringATransition below).
+    SHELL_NAMES = {"html.ws-vt #desktopSidebar": "ws-sidebar", "html.ws-vt #appHeader": "ws-header",
+                   "html.ws-vt #mobileTopBar": "ws-topbar", "html.ws-vt main": "ws-content",
                    ".ws-login-card": "ws-login-card"}
 
     def test_only_the_shell_and_the_login_card_carry_a_transition_name(self):
@@ -282,10 +284,78 @@ class NavHighlight(unittest.TestCase):
 
     def test_the_shell_stays_stationary_across_pages(self):
         self.assertIn("@view-transition { navigation: auto; }", THEME)
-        self.assertIn("view-transition-name: ws-sidebar", css_rule(THEME, "#desktopSidebar"))
+        self.assertIn("view-transition-name: ws-sidebar", css_rule(THEME, "html.ws-vt #desktopSidebar"))
 
     def test_cross_document_transitions_stay_off_under_reduced_motion(self):
         self.assertTrue(any("@view-transition { navigation: none; }" in b for b in reduced_blocks(THEME)))
+
+
+class ShellNamesOnlyDuringATransition(unittest.TestCase):
+    """A view-transition-name makes its element a stacking context. Left on
+    <main>, it put every position:fixed page overlay (the Issues and Tickets
+    modals) under the phone's sticky top bar. So the sidebar, header, mobile
+    bar and <main> are named only under html.ws-vt, which theme-loader.js
+    (full navigations) and router.js (soft swaps) set for the length of a
+    transition. app/tests/js/view_transition.mjs runs the hold/release."""
+
+    SHELL_PARTS = ("#desktopSidebar", "#appHeader", "#mobileTopBar", "main")
+    LOADER = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+    ROUTER = (STATIC / "js" / "router.js").read_text(encoding="utf-8")
+
+    def test_no_shell_part_is_named_outside_a_transition(self):
+        css = re.sub(r"/\*.*?\*/", "", THEME, flags=re.S)
+        named = [sel.strip() for sel, _ in
+                 re.findall(r"([^{}]+)\{([^{}]*view-transition-name[^{}]*)\}", css)]
+        for sel in named:
+            for one in (s.strip() for s in sel.split(",")):
+                # The element the rule names: its last compound, minus any
+                # pseudo-class or attribute on it.
+                target = re.split(r"[:\[]", one.split()[-1])[0]
+                if target in self.SHELL_PARTS:
+                    self.assertTrue(one.startswith("html.ws-vt "), f"{one} is named at rest")
+        for part in self.SHELL_PARTS:
+            self.assertIn(f"html.ws-vt {part}", named, part)
+
+    def test_no_page_names_a_shell_part_itself(self):
+        # A page may only take a name away (login's <main>, whose card blur a
+        # name would break); its rule must outrank html.ws-vt main.
+        for f in list(STATIC.glob("*.html")) + list((STATIC / "partials").glob("*.html")):
+            text = f.read_text(encoding="utf-8")
+            with self.subTest(f.name):
+                self.assertIsNone(re.search(r"view-transition-name:(?!\s*none\b)", text), f.name)
+                self.assertIsNone(re.search(r'<html[^>]*class="[^"]*\bws-vt\b', text), f.name)
+
+    def test_login_keeps_its_main_unnamed_during_a_transition(self):
+        self.assertIn("html.ws-vt body > main { view-transition-name: none; }", LOGIN)
+
+    def test_every_page_loads_the_holder_in_head(self):
+        # pagereveal fires before the first frame: its listener must already
+        # be there, so theme-loader.js is a parser-blocking script in <head>.
+        for f in STATIC.glob("*.html"):
+            text = f.read_text(encoding="utf-8")
+            with self.subTest(f.name):
+                head = text.split("</head>", 1)[0]
+                self.assertRegex(head, r'<script src="/static/js/theme-loader\.js\?v=\d+"></script>')
+
+    def test_full_navigations_hold_until_the_transition_settles(self):
+        for event in ("pageswap", "pagereveal"):
+            self.assertTrue(live_matches(self.LOADER, rf"window\.addEventListener\('{event}'"), event)
+        self.assertTrue(live_matches(self.LOADER, r"if \(e\.viewTransition\) holdFor\(e\.viewTransition\)"))
+        self.assertTrue(live_matches(self.LOADER, r"\.finished\)\.then\(release, release\)"))
+        self.assertTrue(live_matches(self.LOADER, r"window\.WSViewTransition = \{ hold: hold \}"))
+
+    def test_a_soft_swap_holds_from_before_the_capture_until_it_settles(self):
+        code = js_code_only(self.ROUTER)
+        start = code.index("async function inTransition(")
+        body = code[start:matching_brace(code, code.index("{", start))]
+        hold = body.index("WSViewTransition.hold()")
+        begin = body.index("document.startViewTransition(update)")
+        self.assertLess(hold, begin, "the names must be on before the old state is captured")
+        self.assertIn("t.finished.then(release, release)", body)
+        catch = body.index("catch (e)")
+        self.assertIn("release();", body[catch:body.index("t.ready")])
+        # The reduced-motion and no-API path runs before any hold.
+        self.assertLess(body.index("reduceMotion()"), hold)
 
 
 class HoverLift(unittest.TestCase):

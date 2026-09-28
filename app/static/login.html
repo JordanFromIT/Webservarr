@@ -43,16 +43,17 @@
                    0 0 5px rgb(var(--color-background) / 0.75),
                    0 0 12px rgb(var(--color-background) / 0.5);
     }
-    /* theme.css names <main> ws-content for the cross-page view transition,
-       and an element with a view-transition-name is a backdrop root: nothing
-       inside it can blur what is painted behind it. The artwork is behind
-       <main>, so the card's blur saw nothing and the art came through sharp.
-       So <main> gives the name up here.
+    /* theme.css names <main> ws-content while a view transition runs
+       (html.ws-vt main), and an element with a view-transition-name is a
+       backdrop root: nothing inside it can blur what is painted behind it.
+       The artwork is behind <main>, so the card's blur saw nothing and the
+       art came through sharp. So <main> gives the name up here, with a
+       selector that outranks theme.css's.
 
        The card fades across navigations under a name of its own, keyed on
        the login-only .ws-login-card class; those rules live in theme.css, not
        here (see there for why). */
-    body > main { view-transition-name: none; }
+    html.ws-vt body > main { view-transition-name: none; }
     /* No backdrop blur means the artwork shows through sharp, which is busy
        behind text. Fall back to a mostly opaque card instead. */
     @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {

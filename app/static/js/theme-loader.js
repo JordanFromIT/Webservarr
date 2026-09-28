@@ -147,3 +147,55 @@
     else run();
   }
 })();
+
+/*
+ * The shell's view-transition names, only while a transition runs.
+ *
+ * theme.css names the sidebar, header, mobile bar and <main> under
+ * html.ws-vt. A named element is a stacking context, so the names cannot stay
+ * on: every position:fixed page overlay would sit under the phone's top bar.
+ *
+ * hold() puts the class on and returns its release; the class comes off when
+ * the last hold is released, so a soft swap that starts while a full
+ * navigation's reveal is still running keeps its names. A full navigation
+ * holds from pageswap (the old document, before its snapshot) and from
+ * pagereveal (the new one, before its first frame) until the transition's
+ * finished promise settles. This script is in <head>, so both listeners are
+ * in place in time. Under reduced motion there is no cross-document
+ * transition (theme.css), so neither event carries one.
+ */
+(function () {
+  'use strict';
+  var root = document.documentElement;
+  var holds = 0;
+
+  function hold() {
+    var released = false;
+    holds += 1;
+    root.classList.add('ws-vt');
+    return function release() {
+      if (released) return;
+      released = true;
+      holds = Math.max(0, holds - 1);
+      if (!holds) root.classList.remove('ws-vt');
+    };
+  }
+
+  function holdFor(transition) {
+    var release = hold();
+    Promise.resolve(transition.finished).then(release, release);
+  }
+
+  window.WSViewTransition = { hold: hold };
+
+  window.addEventListener('pageswap', function (e) {
+    if (e.viewTransition) holdFor(e.viewTransition);
+  });
+  window.addEventListener('pagereveal', function (e) {
+    if (e.viewTransition) { holdFor(e.viewTransition); return; }
+    // A page back from the back/forward cache left in the middle of its
+    // outgoing transition: nothing is running now.
+    holds = 0;
+    root.classList.remove('ws-vt');
+  });
+})();

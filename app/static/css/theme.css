@@ -453,12 +453,19 @@ html:not([data-netdata]) #netdataGauges { display: none; }
  * documents and are byte-identical, so the browser keeps them where they are
  * and only the content crossfades. Firefox ignores this and simply gets the
  * static shell.
+ *
+ * The names apply only while a transition runs (<html class="ws-vt">). A
+ * named element is a stacking context, so a permanent name on <main> would
+ * trap every position:fixed page overlay under the phone's sticky top bar.
+ * theme-loader.js sets the class in pageswap/pagereveal for a full
+ * navigation, router.js around document.startViewTransition for a soft one,
+ * and both take it off when the transition finishes.
  */
 @view-transition { navigation: auto; }
-#desktopSidebar { view-transition-name: ws-sidebar; }
-#appHeader      { view-transition-name: ws-header; }
-#mobileTopBar   { view-transition-name: ws-topbar; }
-main            { view-transition-name: ws-content; }
+html.ws-vt #desktopSidebar { view-transition-name: ws-sidebar; }
+html.ws-vt #appHeader      { view-transition-name: ws-header; }
+html.ws-vt #mobileTopBar   { view-transition-name: ws-topbar; }
+html.ws-vt main            { view-transition-name: ws-content; }
 
 /* The stationary parts must not be drawn twice: the browser blends the old
    and new snapshots additively (plus-lighter), so a translucent sidebar shown

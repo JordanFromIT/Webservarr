@@ -639,15 +639,20 @@ function start() {
       update();
       return;
     }
+    // The shell's transition names are on only while this runs (theme-loader
+    // WSViewTransition): set before the old state is captured, taken off when
+    // the transition settles, whether it finished, was skipped or failed.
+    const release = window.WSViewTransition ? window.WSViewTransition.hold() : function () {};
     let t;
     try {
       t = document.startViewTransition(update);
     } catch (e) {
+      release();
       update();
       return;
     }
     t.ready.catch(function () { /* skipped: the update still ran */ });
-    t.finished.catch(function () { /* as above */ });
+    t.finished.then(release, release);
     await t.updateCallbackDone;
   }
 
