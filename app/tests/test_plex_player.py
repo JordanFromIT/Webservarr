@@ -1,0 +1,670 @@
+"""
+The audiobook player's Plex bridge (app/integrations/plex_player.py).
+
+Plex and plex.tv are stubbed at the httpx layer (httpx.MockTransport), so
+every test drives the real request building and response parsing. The admin
+config and the audiobook library setting are patched, so no test reads the
+dev instance's settings, and the session write-back is a mock, so none
+touches Redis.
+
+A book is "<album ratingKey>:<disc>". The listener's own server access token
+comes from plex.tv resources for the configured server (matched by machine
+identifier) and is cached in the listener's Redis session for 6 hours. No
+token is ever sent in a query string or written to a log line.
+"""
+import asyncio
+import json
+import logging
+import unittest
+from datetime import datetime, timezone
+from unittest import mock
+from urllib.parse import parse_qs, urlsplit
+
+try:
+    import httpx
+    from app.integrations import plex_player as pp
+    # Taken before any test patches httpx.AsyncClient.
+    RealAsyncClient = httpx.AsyncClient
+    HAVE_APP = True
+except Exception:  # pragma: no cover - the laptop has no app dependencies
+    HAVE_APP = False
+
+ADMIN_URL = "http://plex.test:32400"
+ADMIN_TOKEN = "ADMIN-TOKEN-a1b2c3"
+LISTENER_TOKEN = "LISTENER-TOKEN-d4e5f6"
+SERVER_TOKEN = "SERVER-TOKEN-g7h8i9"
+OTHER_SERVER_TOKEN = "OTHER-SERVER-TOKEN-j0k1"
+TOKENS = (ADMIN_TOKEN, LISTENER_TOKEN, SERVER_TOKEN, OTHER_SERVER_TOKEN)
+MACHINE = "machine-abc"
+SECTION = "14"
+SID = "sid-123"
+
+LOCAL_URI = "https://10-0-0-3.hash1.plex.direct:32400"
+REMOTE_URI = "https://203-0-113-9.hash1.plex.direct:32400"
+
+RESOURCES = [
+    {   # another server this listener can see: never chosen
+        "name": "Elsewhere", "clientIdentifier": "machine-other", "provides": "server",
+        "accessToken": OTHER_SERVER_TOKEN,
+        "connections": [{"protocol": "https", "uri": "https://1-1-1-1.other.plex.direct:32400",
+                         "port": 32400, "local": True, "relay": False}],
+    },
+    {   # a player, not a server, carrying the same id: never chosen
+        "name": "Phone", "clientIdentifier": MACHINE, "provides": "player",
+        "accessToken": "PLAYER-TOKEN", "connections": [],
+    },
+    {
+        "name": "Home", "clientIdentifier": MACHINE, "provides": "server",
+        "accessToken": SERVER_TOKEN,
+        "connections": [
+            {"protocol": "https", "uri": LOCAL_URI, "port": 32400, "local": True, "relay": False},
+            {"protocol": "https", "uri": REMOTE_URI + "/", "port": 32400, "local": False, "relay": False},
+            # plain http: excluded
+            {"protocol": "http", "uri": "http://10.0.0.3:32400", "port": 32400, "local": True, "relay": False},
+            # a relay: excluded
+            {"protocol": "https", "uri": "https://relay-1.hash1.plex.direct:8443", "port": 8443,
+             "local": False, "relay": True},
+            # https but not plex.direct: excluded
+            {"protocol": "https", "uri": "https://media.example.com:443", "port": 443,
+             "local": False, "relay": False},
+        ],
+    },
+]
+
+
+def track(rk, album, disc, index, duration, folder, ext="mp3", title=None, **extra):
+    t = {
+        "ratingKey": str(rk), "type": "track", "parentRatingKey": str(album), "parentIndex": disc,
+        "index": index, "duration": duration, "title": title or f"Track {index}",
+        "grandparentTitle": ALBUMS[str(album)]["parentTitle"], "parentTitle": ALBUMS[str(album)]["title"],
+        "thumb": f"/library/metadata/{album}/thumb/1700000000",
+        "Media": [{"Part": [{"key": f"/library/parts/{rk}9/1700000000/file.{ext}",
+                             "file": f"/data/Audiobooks/{folder}/{rk}.{ext}", "duration": duration}]}],
+    }
+    t.update(extra)
+    return t
+
+
+ALBUMS = {
+    "100": {"ratingKey": "100", "type": "album", "title": "Single Book - Read by Nora Reed",
+            "titleSort": "Single Book", "parentTitle": "Ann Author",
+            "thumb": "/library/metadata/100/thumb/1700000000",
+            "Collection": [{"tag": "The Saga - Read by Nora Reed"}]},
+    "200": {"ratingKey": "200", "type": "album", "title": "Parts Book - Read by Pat Voice",
+            "titleSort": "Parts Book", "parentTitle": "Bea Writer",
+            "thumb": "/library/metadata/200/thumb/1700000000"},
+    "300": {"ratingKey": "300", "type": "album", "title": "Copied Book (Narrated by Sam Lee)",
+            "titleSort": "Copied Book", "parentTitle": "Bea Writer",
+            "thumb": "/library/metadata/300/thumb/1700000000"},
+    "400": {"ratingKey": "400", "type": "album", "title": "Long Series - Read by Kim Moss",
+            "titleSort": "Long Series", "parentTitle": "Cal Penn",
+            "thumb": "/library/metadata/400/thumb/1700000000"},
+    "500": {"ratingKey": "500", "type": "album", "title": "Quiet Book",
+            "titleSort": "Quiet Book", "parentTitle": "Ann Author",
+            "thumb": "/library/metadata/500/thumb/1700000000"},
+    "600": {"ratingKey": "600", "type": "album", "title": "Boxed Set",
+            "titleSort": "Boxed Set", "parentTitle": "Cal Penn",
+            "thumb": "/library/metadata/600/thumb/1700000000"},
+}
+# Not in the audiobook library.
+OTHER_ALBUM = {"ratingKey": "900", "type": "album", "title": "Some Music", "parentTitle": "Band"}
+
+TRACKS = {
+    # Single file with three untitled chapters; the last chapter ends before
+    # the file does.
+    "100": [track(101, 100, 1, 1, 1_000_000, "A/Single", ext="m4b", title="Single Book")],
+    # Three parts.
+    "200": [track(201, 200, 1, 1, 100_000, "B/Parts"), track(202, 200, 1, 2, 200_000, "B/Parts"),
+            track(203, 200, 1, 3, 300_000, "B/Parts")],
+    # Two copies in two folders on one disc: a whole file and a longer
+    # two-part copy. Only the longer copy is the book.
+    "300": [track(301, 300, 1, 1, 500_000, "B/Copy one", ext="m4b"),
+            track(302, 300, 1, 1, 260_000, "B/Copy two"), track(303, 300, 1, 2, 250_000, "B/Copy two")],
+    # One album, two discs: two books titled from their tracks.
+    "400": [track(401, 400, 1, 1, 50_000, "C/Long", title="First Tale, Part 01"),
+            track(402, 400, 1, 2, 60_000, "C/Long", title="First Tale, Part 02"),
+            track(411, 400, 2, 1, 70_000, "C/Long2", ext="m4b", title="Second Tale")],
+    # A single file with no chapters at all.
+    "500": [track(501, 500, 1, 1, 90_000, "A/Quiet", title="Quiet Book")],
+    # One book spread over two folders (CD1, CD2) with no repeated track
+    # number: every track stays.
+    "600": [track(601, 600, 1, 1, 10_000, "C/Boxed/CD1"), track(602, 600, 1, 2, 10_000, "C/Boxed/CD1"),
+            track(603, 600, 1, 3, 10_000, "C/Boxed/CD2"), track(604, 600, 1, 4, 10_000, "C/Boxed/CD2")],
+}
+
+CHAPTERS = {
+    "101": [
+        {"index": 1, "startTimeOffset": 0, "endTimeOffset": 300_000},
+        {"index": 2, "startTimeOffset": 300_000, "endTimeOffset": 700_000},
+        {"index": 3, "startTimeOffset": 700_000, "endTimeOffset": 990_000},
+    ],
+    "411": [
+        {"index": 1, "startTimeOffset": 0, "endTimeOffset": 30_000, "tag": "Opening\xa0Credits"},
+        {"index": 2, "startTimeOffset": 30_000, "endTimeOffset": 69_000, "tag": "02"},
+    ],
+}
+
+
+class FakePlex:
+    """Plex Media Server and plex.tv behind one httpx.MockTransport."""
+
+    def __init__(self):
+        self.calls = []
+        self.resources = RESOURCES
+        self.plextv_down = None       # None, "connect" or an HTTP status
+        self.pms_down = None
+        self.timeline_down = False
+        self.identity = MACHINE
+        # Per-token listening state: {token: {track rk: {viewOffset...}}}
+        self.state = {}
+
+    def transport(self):
+        return httpx.MockTransport(self.handle)
+
+    def client_factory(self):
+        real = RealAsyncClient
+
+        def factory(*args, **kwargs):
+            kwargs.pop("verify", None)
+            return real(*args, transport=self.transport(), **kwargs)
+        return factory
+
+    @staticmethod
+    def ok(body):
+        return httpx.Response(200, json=body)
+
+    @staticmethod
+    def mc(**fields):
+        return httpx.Response(200, json={"MediaContainer": fields})
+
+    def handle(self, request):
+        self.calls.append(request)
+        url = request.url
+        if url.host == "plex.tv":
+            if self.plextv_down == "connect":
+                raise httpx.ConnectError("plex.tv unreachable", request=request)
+            if self.plextv_down:
+                return httpx.Response(self.plextv_down, text="down")
+            if url.path == "/api/v2/resources":
+                return self.ok(self.resources)
+            return httpx.Response(404)
+        if self.pms_down == "connect":
+            raise httpx.ConnectError("server unreachable", request=request)
+        if self.pms_down:
+            return httpx.Response(self.pms_down, text="down")
+        token = request.headers.get("X-Plex-Token", "")
+        path = url.path
+        q = parse_qs(url.query.decode() if isinstance(url.query, bytes) else url.query)
+        if path == "/identity":
+            return self.mc(machineIdentifier=self.identity)
+        if path == "/:/timeline":
+            if self.timeline_down:
+                raise httpx.ConnectError("timeline unreachable", request=request)
+            return self.mc()
+        if path == f"/library/sections/{SECTION}/all":
+            if q.get("type") == ["9"]:
+                return self.mc(Metadata=list(ALBUMS.values()), librarySectionID=int(SECTION))
+            if q.get("type") == ["10"]:
+                return self.mc(Metadata=[self._with_state(t, token) for ts in TRACKS.values() for t in ts])
+        parts = path.strip("/").split("/")
+        if parts[:2] == ["library", "metadata"] and len(parts) >= 3:
+            rk = parts[2]
+            if len(parts) == 4 and parts[3] == "children":
+                if rk not in TRACKS:
+                    return httpx.Response(404)
+                return self.mc(Metadata=[self._with_state(t, token) for t in TRACKS[rk]],
+                               librarySectionID=int(SECTION))
+            if len(parts) == 3:
+                if rk in ALBUMS:
+                    return self.mc(Metadata=[ALBUMS[rk]], librarySectionID=int(SECTION))
+                if rk == "900":
+                    return self.mc(Metadata=[OTHER_ALBUM], librarySectionID=5)
+                for ts in TRACKS.values():
+                    for t in ts:
+                        if t["ratingKey"] == rk:
+                            m = dict(t)
+                            if q.get("includeChapters") == ["1"] and rk in CHAPTERS:
+                                m["Chapter"] = CHAPTERS[rk]
+                            return self.mc(Metadata=[m], librarySectionID=int(SECTION))
+                if rk == "901":   # a track of the other section's album
+                    return self.mc(Metadata=[{"ratingKey": "901", "type": "track", "parentRatingKey": "900",
+                                              "parentIndex": 1}], librarySectionID=5)
+                return httpx.Response(404)
+        return httpx.Response(404)
+
+    def _with_state(self, t, token):
+        return {**t, **self.state.get(token, {}).get(t["ratingKey"], {})}
+
+    def paths(self):
+        return [c.url.path for c in self.calls]
+
+
+def listener(**extra):
+    s = {"user_id": "1001", "username": "sam", "auth_method": "plex", "plex_account_id": "1001",
+         "plex_token": LISTENER_TOKEN}
+    s.update(extra)
+    return s
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class BridgeBase(unittest.TestCase):
+    def setUp(self):
+        self.plex = FakePlex()
+        self.update_session = mock.AsyncMock()
+        self.admin = {"url": ADMIN_URL, "token": ADMIN_TOKEN, "section": SECTION}
+        patches = [
+            mock.patch.object(pp.httpx, "AsyncClient", self.plex.client_factory()),
+            mock.patch.object(pp, "_admin", lambda: dict(self.admin)),
+            mock.patch.object(pp.session_manager, "update_session", self.update_session),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def run_async(self, coro):
+        return asyncio.run(coro)
+
+    def cached_blob(self):
+        self.assertTrue(self.update_session.await_args_list, "the session was never written")
+        sid, fields = self.update_session.await_args_list[-1].args
+        self.assertEqual(sid, SID)
+        return json.loads(fields[pp.SERVER_FIELD])
+
+    def assert_no_token_in_urls(self):
+        for c in self.plex.calls:
+            for tok in TOKENS:
+                self.assertNotIn(tok, str(c.url))
+
+
+class ServerAccess(BridgeBase):
+    def test_matches_the_configured_server_by_machine_id(self):
+        out = self.run_async(pp.server_access(listener(), session_id=SID))
+        self.assertEqual(out["token"], SERVER_TOKEN)
+        # /identity asked with the admin token, plex.tv with the listener's own.
+        ident = [c for c in self.plex.calls if c.url.path == "/identity"][0]
+        self.assertEqual(ident.headers["X-Plex-Token"], ADMIN_TOKEN)
+        res = [c for c in self.plex.calls if c.url.host == "plex.tv"][0]
+        self.assertEqual(res.headers["X-Plex-Token"], LISTENER_TOKEN)
+        self.assertTrue(res.headers.get("X-Plex-Client-Identifier"))
+        self.assertEqual(res.headers.get("X-Plex-Product"), "WebServarr")
+        self.assert_no_token_in_urls()
+
+    def test_splits_local_and_remote_keeping_only_https_plex_direct(self):
+        out = self.run_async(pp.server_access(listener(), session_id=SID))
+        self.assertEqual(out["uris"], {"local": [LOCAL_URI], "remote": [REMOTE_URI]})
+
+    def test_caches_in_the_session_for_six_hours(self):
+        session = listener()
+        with mock.patch.object(pp.time, "time", return_value=1_000_000.0):
+            first = self.run_async(pp.server_access(session, session_id=SID))
+        blob = self.cached_blob()
+        self.assertEqual(blob["token"], SERVER_TOKEN)
+        self.assertEqual(blob["at"], 1_000_000)
+        # The next request carries the cached field from Redis: no Plex call.
+        cached_session = listener(**{pp.SERVER_FIELD: json.dumps(blob)})
+        calls_before = len(self.plex.calls)
+        with mock.patch.object(pp.time, "time", return_value=1_000_000.0 + 6 * 3600 - 1):
+            again = self.run_async(pp.server_access(cached_session, session_id=SID))
+        self.assertEqual(again, first)
+        self.assertEqual(len(self.plex.calls), calls_before)
+        self.assertEqual(self.update_session.await_count, 1)
+        # Six hours on, it is fetched again and written back.
+        with mock.patch.object(pp.time, "time", return_value=1_000_000.0 + 6 * 3600 + 1):
+            self.run_async(pp.server_access(cached_session, session_id=SID))
+        self.assertGreater(len(self.plex.calls), calls_before)
+        self.assertEqual(self.update_session.await_count, 2)
+
+    def test_the_passed_session_dict_carries_the_cache_too(self):
+        session = listener()
+        self.run_async(pp.server_access(session, session_id=SID))
+        n = len(self.plex.calls)
+        self.run_async(pp.server_access(session, session_id=SID))
+        self.assertEqual(len(self.plex.calls), n)
+
+    def test_a_cache_from_another_server_address_is_not_used(self):
+        self.run_async(pp.server_access(listener(), session_id=SID))
+        blob = self.cached_blob()
+        self.admin["url"] = "http://other.test:32400"
+        n = len(self.plex.calls)
+        self.run_async(pp.server_access(listener(**{pp.SERVER_FIELD: json.dumps(blob)}), session_id=SID))
+        self.assertGreater(len(self.plex.calls), n)
+
+    def test_a_corrupt_cache_is_refetched(self):
+        out = self.run_async(pp.server_access(listener(**{pp.SERVER_FIELD: "{not json"}), session_id=SID))
+        self.assertEqual(out["token"], SERVER_TOKEN)
+
+    def test_no_plex_token_is_no_server_access(self):
+        with self.assertRaises(pp.NoServerAccess) as ctx:
+            self.run_async(pp.server_access(listener(plex_token=""), session_id=SID))
+        self.assertIsInstance(ctx.exception, pp.PlayerUnavailable)
+        self.assertEqual(self.plex.calls, [])
+
+    def test_server_not_shared_with_the_listener(self):
+        self.plex.resources = [RESOURCES[0]]
+        with self.assertRaises(pp.NoServerAccess):
+            self.run_async(pp.server_access(listener(), session_id=SID))
+        self.update_session.assert_not_awaited()
+
+    def test_plex_tv_down_is_player_unavailable(self):
+        for how in ("connect", 500, 401):
+            with self.subTest(how=how):
+                self.plex.plextv_down = how
+                with self.assertRaises(pp.PlayerUnavailable):
+                    self.run_async(pp.server_access(listener(), session_id=SID))
+        self.update_session.assert_not_awaited()
+
+    def test_server_down_is_player_unavailable(self):
+        self.plex.pms_down = "connect"
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.server_access(listener(), session_id=SID))
+
+    def test_no_usable_connection_is_player_unavailable(self):
+        home = dict(RESOURCES[2], connections=[c for c in RESOURCES[2]["connections"]
+                                               if c["relay"] or c["protocol"] == "http"])
+        self.plex.resources = [home]
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.server_access(listener(), session_id=SID))
+
+    def test_plex_not_configured_is_player_unavailable(self):
+        self.admin["token"] = ""
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.server_access(listener(), session_id=SID))
+
+
+class Books(BridgeBase):
+    def books(self):
+        return {b["key"]: b for b in self.run_async(pp.list_books())}
+
+    def test_list_books_keys_and_shapes(self):
+        books = self.books()
+        self.assertEqual(set(books), {"100:1", "200:1", "300:1", "400:1", "400:2", "500:1", "600:1"})
+        self.assertEqual(books["100:1"]["shape"], "single")
+        self.assertEqual(books["200:1"]["shape"], "parts")
+        self.assertEqual(books["300:1"]["shape"], "parts")
+        self.assertEqual(books["400:2"]["shape"], "single")
+        # Every request used the admin token in its header.
+        for c in self.plex.calls:
+            self.assertEqual(c.headers["X-Plex-Token"], ADMIN_TOKEN)
+        self.assert_no_token_in_urls()
+
+    def test_list_books_fields(self):
+        b = self.books()["100:1"]
+        self.assertEqual(b, {"key": "100:1", "title": "Single Book", "author": "Ann Author",
+                             "series": "The Saga", "narrator": "Nora Reed",
+                             "cover": "/library/metadata/100/thumb/1700000000",
+                             "duration_ms": 1_000_000, "shape": "single"})
+        self.assertEqual(self.books()["200:1"]["duration_ms"], 600_000)
+        self.assertEqual(self.books()["300:1"]["narrator"], "Sam Lee")
+        self.assertEqual(self.books()["300:1"]["title"], "Copied Book")
+        self.assertEqual(self.books()["500:1"]["narrator"], "")
+
+    def test_a_duplicate_copy_on_one_disc_is_not_played_twice(self):
+        b = self.books()["300:1"]
+        self.assertEqual(b["duration_ms"], 510_000)
+        d = self.run_async(pp.book_detail("300:1"))
+        self.assertEqual([t["key"] for t in d["tracks"]], ["302", "303"])
+
+    def test_a_book_over_several_folders_stays_whole(self):
+        d = self.run_async(pp.book_detail("600:1"))
+        self.assertEqual([t["key"] for t in d["tracks"]], ["601", "602", "603", "604"])
+        self.assertEqual(d["duration_ms"], 40_000)
+
+    def test_a_multi_disc_album_titles_each_disc_from_its_tracks(self):
+        books = self.books()
+        self.assertEqual(books["400:1"]["title"], "First Tale")
+        self.assertEqual(books["400:2"]["title"], "Second Tale")
+        self.assertEqual(books["400:1"]["series"], "Long Series")
+        self.assertEqual(books["400:1"]["narrator"], "Kim Moss")
+
+    def test_plex_down_is_player_unavailable(self):
+        self.plex.pms_down = 500
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.list_books())
+
+    def test_player_off(self):
+        self.admin["section"] = ""
+        with self.assertRaises(pp.PlayerOff):
+            self.run_async(pp.list_books())
+        self.assertEqual(self.plex.calls, [])
+
+
+class Detail(BridgeBase):
+    def test_single_file_book_chapters(self):
+        d = self.run_async(pp.book_detail("100:1"))
+        self.assertEqual(d["title"], "Single Book")
+        self.assertEqual(d["author"], "Ann Author")
+        self.assertEqual(d["cover"], "/library/metadata/100/thumb/1700000000")
+        self.assertEqual(d["shape"], "single")
+        self.assertEqual(d["tracks"], [{"key": "101", "part_path": "/library/parts/1019/1700000000/file.m4b",
+                                        "duration_ms": 1_000_000, "index": 1}])
+        self.assertEqual(d["chapters"], [
+            {"index": 1, "label": "Chapter 1 of 3", "start_ms": 0, "end_ms": 300_000, "track": "101"},
+            {"index": 2, "label": "Chapter 2 of 3", "start_ms": 300_000, "end_ms": 700_000, "track": "101"},
+            # The last chapter runs to the end of the file.
+            {"index": 3, "label": "Chapter 3 of 3", "start_ms": 700_000, "end_ms": 1_000_000, "track": "101"},
+        ])
+        chap = [c for c in self.plex.calls if c.url.path == "/library/metadata/101"][0]
+        self.assertIn(b"includeChapters=1", chap.url.query)
+
+    def test_titled_chapters_keep_their_title(self):
+        d = self.run_async(pp.book_detail("400:2"))
+        self.assertEqual([c["label"] for c in d["chapters"]], ["Opening Credits", "Chapter 2 of 2"])
+        self.assertEqual(d["chapters"][-1]["end_ms"], 70_000)
+
+    def test_single_file_without_chapters_is_one_chapter(self):
+        d = self.run_async(pp.book_detail("500:1"))
+        self.assertEqual(d["chapters"], [{"index": 1, "label": "Chapter 1 of 1", "start_ms": 0,
+                                          "end_ms": 90_000, "track": "501"}])
+
+    def test_multi_part_book_parts(self):
+        d = self.run_async(pp.book_detail("200:1"))
+        self.assertEqual(d["shape"], "parts")
+        self.assertEqual([t["key"] for t in d["tracks"]], ["201", "202", "203"])
+        self.assertEqual([t["index"] for t in d["tracks"]], [1, 2, 3])
+        self.assertEqual(d["chapters"], [
+            {"index": 1, "label": "Part 1 of 3", "start_ms": 0, "end_ms": 100_000, "track": "201"},
+            {"index": 2, "label": "Part 2 of 3", "start_ms": 100_000, "end_ms": 300_000, "track": "202"},
+            {"index": 3, "label": "Part 3 of 3", "start_ms": 300_000, "end_ms": 600_000, "track": "203"},
+        ])
+        # Parts need no chapter lookup.
+        self.assertNotIn("/library/metadata/201", self.plex.paths())
+
+    def test_unknown_or_foreign_book_is_not_in_library(self):
+        for key in ("999:1", "900:1", "200:7"):
+            with self.subTest(key=key):
+                with self.assertRaises(pp.NotInLibrary):
+                    self.run_async(pp.book_detail(key))
+
+
+class Membership(BridgeBase):
+    def test_accepts_a_book_in_the_section(self):
+        self.run_async(pp.assert_in_library("200:1"))
+        self.run_async(pp.assert_in_library("200:1", track_key="202"))
+
+    def test_rejects_an_album_from_another_section(self):
+        with self.assertRaises(pp.NotInLibrary):
+            self.run_async(pp.assert_in_library("900:1"))
+
+    def test_rejects_a_missing_album(self):
+        with self.assertRaises(pp.NotInLibrary):
+            self.run_async(pp.assert_in_library("999:1"))
+
+    def test_rejects_a_track_from_another_book(self):
+        for key, track_key in (("200:1", "101"), ("200:1", "901"), ("200:1", "411"), ("200:1", "999"),
+                               ("400:2", "401"), ("400:1", "411")):
+            with self.subTest(key=key, track=track_key):
+                with self.assertRaises(pp.NotInLibrary):
+                    self.run_async(pp.assert_in_library(key, track_key=track_key))
+        self.run_async(pp.assert_in_library("400:2", track_key="411"))
+
+    def test_malformed_keys_are_rejected_before_any_plex_call(self):
+        for key in ("", "200", "200:", ":1", "200:1:3", "abc:1", "200:x", "../200:1", "200:1 ",
+                    "-1:1", "1e3:1", "２００:1", "1" * 30 + ":1", None, 200):
+            with self.subTest(key=key):
+                with self.assertRaises(pp.NotInLibrary):
+                    self.run_async(pp.assert_in_library(key))
+        for track_key in ("", "abc", "20 2", "../202"):
+            with self.subTest(track=track_key):
+                with self.assertRaises(pp.NotInLibrary):
+                    self.run_async(pp.assert_in_library("200:1", track_key=track_key))
+        self.assertEqual(self.plex.calls, [])
+
+    def test_player_off_is_not_in_library(self):
+        self.admin["section"] = ""
+        with self.assertRaises(pp.NotInLibrary):
+            self.run_async(pp.assert_in_library("200:1"))
+        self.assertEqual(self.plex.calls, [])
+
+    def test_plex_down_is_player_unavailable(self):
+        self.plex.pms_down = 503
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.assert_in_library("200:1"))
+
+
+class Position(BridgeBase):
+    T1 = 1_790_000_000   # epoch seconds
+    T2 = 1_790_000_600
+
+    def stamp(self, secs):
+        return datetime.fromtimestamp(secs, timezone.utc).replace(tzinfo=None).isoformat(
+            timespec="milliseconds") + "Z"
+
+    def test_picks_the_in_progress_track_and_sums_finished_parts(self):
+        self.plex.state[SERVER_TOKEN] = {
+            "201": {"viewCount": 1, "lastViewedAt": self.T1},
+            "202": {"viewOffset": 45_000, "lastViewedAt": self.T2},
+        }
+        pos = self.run_async(pp.plex_position(listener(), "200:1", session_id=SID))
+        self.assertEqual(pos["track"], "202")
+        self.assertEqual(pos["offset_ms"], 45_000)
+        self.assertEqual(pos["duration_ms"], 200_000)
+        self.assertEqual(pos["book_ms"], 100_000 + 45_000)
+        self.assertEqual(pos["book_duration_ms"], 600_000)
+        self.assertEqual(pos["updated_at"], self.stamp(self.T2))
+        self.assertRegex(pos["updated_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+        self.assertEqual(pos["source"], "plex")
+        # The per-track state was read with the listener's server token.
+        reads = [c for c in self.plex.calls if c.url.path == "/library/metadata/200/children"]
+        self.assertIn(SERVER_TOKEN, [c.headers["X-Plex-Token"] for c in reads])
+        self.assert_no_token_in_urls()
+
+    def test_a_finished_part_newer_than_an_old_offset_moves_to_the_next_part(self):
+        self.plex.state[SERVER_TOKEN] = {
+            "201": {"viewOffset": 10_000, "lastViewedAt": self.T1},
+            "202": {"viewCount": 1, "lastViewedAt": self.T2},
+        }
+        pos = self.run_async(pp.plex_position(listener(), "200:1", session_id=SID))
+        self.assertEqual((pos["track"], pos["offset_ms"], pos["book_ms"]), ("203", 0, 300_000))
+
+    def test_a_finished_book_sits_at_its_end(self):
+        self.plex.state[SERVER_TOKEN] = {"203": {"viewCount": 2, "lastViewedAt": self.T2}}
+        pos = self.run_async(pp.plex_position(listener(), "200:1", session_id=SID))
+        self.assertEqual((pos["track"], pos["offset_ms"], pos["book_ms"]), ("203", 300_000, 600_000))
+
+    def test_single_file_offset(self):
+        self.plex.state[SERVER_TOKEN] = {"101": {"viewOffset": 654_321, "lastViewedAt": self.T1}}
+        pos = self.run_async(pp.plex_position(listener(), "100:1", session_id=SID))
+        self.assertEqual((pos["track"], pos["offset_ms"], pos["book_ms"]), ("101", 654_321, 654_321))
+
+    def test_nothing_played_is_none(self):
+        self.assertIsNone(self.run_async(pp.plex_position(listener(), "200:1", session_id=SID)))
+
+    def test_another_listeners_state_is_not_read(self):
+        self.plex.state[ADMIN_TOKEN] = {"202": {"viewOffset": 45_000, "lastViewedAt": self.T2}}
+        self.assertIsNone(self.run_async(pp.plex_position(listener(), "200:1", session_id=SID)))
+
+    def test_bad_key_is_not_in_library(self):
+        with self.assertRaises(pp.NotInLibrary):
+            self.run_async(pp.plex_position(listener(), "nope", session_id=SID))
+        self.assertEqual(self.plex.calls, [])
+
+
+class Timeline(BridgeBase):
+    def timeline_calls(self):
+        return [c for c in self.plex.calls if c.url.path == "/:/timeline"]
+
+    def test_sends_the_documented_params_with_the_listeners_server_token(self):
+        self.run_async(pp.timeline(listener(), "202", "playing", 45_000, 200_000, session_id=SID))
+        calls = self.timeline_calls()
+        self.assertEqual(len(calls), 1)
+        c = calls[0]
+        self.assertEqual(c.method, "GET")
+        self.assertEqual(f"{c.url.scheme}://{c.url.host}:{c.url.port}", ADMIN_URL)
+        q = {k: v[0] for k, v in parse_qs(c.url.query.decode()).items()}
+        self.assertEqual(q, {"ratingKey": "202", "key": "/library/metadata/202", "state": "playing",
+                             "time": "45000", "duration": "200000",
+                             "identifier": "com.plexapp.plugins.library"})
+        self.assertEqual(c.headers["X-Plex-Token"], SERVER_TOKEN)
+        self.assertEqual(c.headers["X-Plex-Product"], "WebServarr")
+        self.assertTrue(c.headers["X-Plex-Client-Identifier"].startswith("webservarr-player-"))
+        self.assert_no_token_in_urls()
+
+    def test_client_identifier_is_stable_and_per_listener(self):
+        a = pp.client_identifier(listener())
+        self.assertEqual(a, pp.client_identifier(listener()))
+        self.assertNotEqual(a, pp.client_identifier(listener(plex_account_id="2002")))
+        self.assertNotIn("1001", a)
+
+    def test_time_is_clamped_and_state_checked(self):
+        self.run_async(pp.timeline(listener(), "202", "paused", 999_999, 200_000, session_id=SID))
+        q = parse_qs(self.timeline_calls()[0].url.query.decode())
+        self.assertEqual(q["time"], ["200000"])
+        n = len(self.timeline_calls())
+        self.run_async(pp.timeline(listener(), "202", "rewinding", 1, 2, session_id=SID))
+        self.run_async(pp.timeline(listener(), "../202", "playing", 1, 2, session_id=SID))
+        self.assertEqual(len(self.timeline_calls()), n)
+
+    def test_errors_are_swallowed(self):
+        self.plex.timeline_down = True
+        self.assertIsNone(self.run_async(pp.timeline(listener(), "202", "playing", 1, 2, session_id=SID)))
+        self.assertIsNone(self.run_async(pp.timeline(listener(plex_token=""), "202", "playing", 1, 2)))
+        self.plex.plextv_down = "connect"
+        self.assertIsNone(self.run_async(pp.timeline(listener(), "202", "stopped", 1, 2)))
+
+
+class NoTokenLogged(BridgeBase):
+    def test_no_token_reaches_a_log_line_or_an_error(self):
+        root = logging.getLogger()
+        old_level = root.level
+        root.setLevel(logging.DEBUG)
+        self.addCleanup(root.setLevel, old_level)
+        errors = []
+
+        def attempt(coro):
+            try:
+                self.run_async(coro)
+            except Exception as exc:  # noqa: BLE001 - collected and checked below
+                errors.append(repr(exc) + str(exc) + repr(exc.__cause__) + repr(exc.__context__))
+
+        with self.assertLogs(level="DEBUG") as logs:
+            logging.getLogger(pp.__name__).debug("capture start")
+            attempt(pp.server_access(listener(), session_id=SID))
+            attempt(pp.list_books())
+            attempt(pp.book_detail("100:1"))
+            attempt(pp.plex_position(listener(), "200:1", session_id=SID))
+            attempt(pp.timeline(listener(), "202", "playing", 1, 2, session_id=SID))
+            self.plex.timeline_down = True
+            attempt(pp.timeline(listener(), "202", "playing", 1, 2, session_id=SID))
+            self.plex.plextv_down = 500
+            attempt(pp.server_access(listener(), session_id=SID))
+            self.plex.plextv_down = "connect"
+            attempt(pp.server_access(listener(), session_id=SID))
+            attempt(pp.timeline(listener(), "202", "playing", 1, 2))
+            self.plex.pms_down = "connect"
+            attempt(pp.list_books())
+            attempt(pp.assert_in_library("200:1"))
+            self.plex.pms_down = 500
+            attempt(pp.book_detail("200:1"))
+        self.assertGreater(len(logs.records), 3)
+        self.assertGreater(len(errors), 3)
+        for rec in logs.records:
+            text = rec.getMessage() + (logging.Formatter().formatException(rec.exc_info) if rec.exc_info else "")
+            for tok in TOKENS:
+                self.assertNotIn(tok, text)
+        for text in errors:
+            for tok in TOKENS:
+                self.assertNotIn(tok, text)
+
+
+if __name__ == "__main__":
+    unittest.main()
