@@ -839,6 +839,43 @@ await scenario('N3 the entry counter stays right after a throwing pushState, an 
     [env.history.index, at(env)]);
 });
 
+await scenario('T1R1 a push while a step back is in flight supersedes it; Back then moves one entry at a time', async () => {
+  for (const navigation of [true, false]) {
+    const how = navigation ? ' (Navigation API)' : ' (history.go)';
+    const env = await boot({ navigation });
+    env.pages.wiki = (ctx) => { ctx.onNavigate((url) => url.pathname.startsWith('/wiki/')); };
+    click(env, '/settings');
+    await until(() => mounted(env, 'settings').length === 1);
+    click(env, '/wiki');
+    await until(() => mounted(env, 'wiki').length === 1);
+    // Back to Settings fails: the router steps back to the wiki's entry, and
+    // before that step lands the page takes a claimed link (a push).
+    env.routes['/settings'] = { status: 500 };
+    env.win.addEventListener('ws:nav-stayed', () => {
+      env.routes['/settings'] = {};
+      click(env, '/wiki/a');
+    }, { once: true });
+    env.history.back();
+    await until(() => env.toasts.length === 1);
+    await wait(80);
+    check('on the claimed view' + how, at(env) === '/wiki/a' && env.history.index === 2,
+      [at(env), env.history.index, env.history.urls()]);
+    const steps = env.history.steps.length;
+    env.history.back();
+    await until(() => mounted(env, 'settings').length === 2);
+    await wait(60);
+    check('Back moves one entry: Settings' + how, at(env) === '/settings' && env.history.index === 1,
+      [at(env), env.history.index, env.history.steps]);
+    env.history.back();
+    await until(() => mounted(env, 'news').length === 2);
+    await wait(60);
+    check('Back moves one entry again: News' + how, at(env) === '/news' && env.history.index === 0,
+      [at(env), env.history.index, env.history.steps]);
+    check('the router took no steps of its own' + how, env.history.steps.slice(steps).join() === '-1,-1',
+      env.history.steps.slice(steps));
+  }
+});
+
 await scenario('N4 the progress bar clears when visit() throws after it started', async () => {
   const env = await boot();
   const bad = '<script src="https://[broken" data-ws-page-script></script>';

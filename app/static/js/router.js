@@ -268,6 +268,7 @@ function start() {
   const nav = window.navigation && typeof window.navigation.traverseTo === 'function' ? window.navigation : null;
   const keys = new Map();
   let landingTries = 0;        // extra steps taken toward landing (at most 3)
+  let landingGen = 0;          // which step back a traversal belongs to
 
   // at is the entry the address is on now: remember its key. pushed: a new
   // entry, so every entry after it is gone.
@@ -278,6 +279,19 @@ function start() {
       const e = nav.currentEntry;
       if (e && e.key) keys.set(at, e.key);
     } catch (e) { /* no entry to name */ }
+  }
+
+  // A new entry (a push, or a fragment link the browser followed). A step
+  // back still on its way is superseded: the push has already moved the
+  // address, and the entry that step was heading for may be gone with the
+  // forward entries. Its late settle (or rejection) is ignored, and the next
+  // Back or Forward is the visitor's, one entry.
+  function entryPushed() {
+    if (landing !== null) {
+      landing = null;
+      landingGen += 1;
+    }
+    noteKey(true);
   }
 
   // Every entry pushed in this document is numbered, the page's own
@@ -291,7 +305,7 @@ function start() {
     if (state && typeof state === 'object' && state.ws === 1) state = Object.assign({}, state, { i: i });
     const ret = nativePush.call(this, state, title, url);
     at = i;
-    noteKey(true);
+    entryPushed();
     if (current && !current.left && samePage(location.href, current.url)) {
       current.url = location.href;
       current.i = at;
@@ -314,7 +328,8 @@ function start() {
     if (key) {
       try {
         const r = nav.traverseTo(key);
-        const lost = function () { if (landing === i) history.go(i - at); };
+        const gen = landingGen;
+        const lost = function () { if (landing === i && gen === landingGen) history.go(i - at); };
         if (r && r.committed) { r.committed.catch(lost); r.finished.catch(function () {}); }
         return;
       } catch (e) { /* by distance */ }
@@ -328,6 +343,7 @@ function start() {
     if (typeof i !== 'number' || i === at) return;
     landing = i;
     landingTries = 0;
+    landingGen += 1;
     stepTo(i);
   }
 
@@ -1396,7 +1412,7 @@ function start() {
     if (history.state === null) {
       at += 1;
       history.replaceState(mark(Math.round(scroller().scrollTop)), '', location.href);
-      noteKey(true);
+      entryPushed();
     }
     current.i = at;
   });
