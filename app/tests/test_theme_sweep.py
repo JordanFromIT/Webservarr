@@ -21,7 +21,7 @@ import unittest
 from unittest import mock
 
 from app.tests.test_settings_static import function_body
-from app.tests.test_shell_contract import STATIC
+from app.tests.test_shell_contract import STATIC, js_code_only
 
 try:
     from fastapi.testclient import TestClient
@@ -268,28 +268,48 @@ class PlexPopupPageIsThemed(unittest.TestCase):
                         "the custom CSS is the last thing in <head>")
         self.assertLess(head.index("theme.css"), head.index('id="webservarr-custom-css"'))
 
+    HANDOFF_TAG = '<script src="/static/js/plex-callback.js"></script>'
+
     def test_generic_copy_and_the_handoff_still_work(self):
         body = self.fetch({}).text
         self.assertIn("Signing you in", body)
         self.assertNotIn("Plex Auth", body)
-        self.assertIn("window.opener.postMessage({type: 'plex-auth-complete'}, ", body)
-        self.assertIn("window.location.href = '/login?plex_auth=complete';", body)
+        self.assertIn(self.HANDOFF_TAG, body)
+        js = (STATIC / "js" / "plex-callback.js").read_text(encoding="utf-8")
+        self.assertIn("window.opener.postMessage({ type: 'plex-auth-complete' }, window.location.origin);", js)
+        self.assertIn("window.location.href = '/login?plex_auth=complete';", js)
         self.assertNotIn("webservarr-custom-css", body)   # none saved, none written
+
+    def test_no_inline_script(self):
+        # The CSP is script-src 'self': the hand-back is a file, and the only
+        # script element without a src is the JSON data block.
+        body = self.fetch({"theme.custom_css": "p { color: inherit; }"}).text
+        for m in re.finditer(r"<script\b([^>]*)>", body):
+            attrs = m.group(1)
+            if "src=" in attrs:
+                continue
+            self.assertIn('type="application/json"', attrs, m.group(0))
+        self.assertIn("script-src 'self';", TestClient(app).get("/static/js/plex-callback.js").headers[
+            "content-security-policy"] + ";")
 
     def test_the_handoff_never_waits_on_a_stylesheet(self):
         # R148: a pending stylesheet holds back every classic script after it,
         # so the hand-back script comes before all of them, needs no body
         # element, and the page loads no web font at all.
         body = self.fetch({"theme.custom_css": "p { color: inherit; }"}).text
-        handoff = body.index("window.opener.postMessage(")
+        handoff = body.index(self.HANDOFF_TAG)
         head = body.split("</head>", 1)[0]
         self.assertLess(handoff, len(head), "the hand-back script is in <head>")
-        for later in ('rel="stylesheet"', "<script src=", "<style", 'id="webservarr-custom-css"'):
+        for later in ('rel="stylesheet"', "<style", 'id="webservarr-custom-css"'):
             for m in re.finditer(re.escape(later), body):
                 self.assertLess(handoff, m.start(), later)
+        for m in re.finditer(re.escape("<script"), body):
+            self.assertLessEqual(handoff, m.start(), "the first script")
         self.assertNotIn("fonts.googleapis.com", body)
         self.assertNotIn("fonts.gstatic.com", body)
-        self.assertNotIn("getElementById", body[:handoff + 400])
+        js = js_code_only((STATIC / "js" / "plex-callback.js").read_text(encoding="utf-8"))
+        self.assertNotIn("getElementById", js)
+        self.assertNotIn("document.", js)
 
     def test_it_is_rate_limited(self):
         from app.routers import plex_auth

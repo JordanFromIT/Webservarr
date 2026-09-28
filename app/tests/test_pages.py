@@ -573,13 +573,14 @@ class ShellRendering(unittest.TestCase):
 
     def test_login_script_leaves_the_name_alone_and_keeps_the_reveal(self):
         page = static_text("login.html")
-        scripts = "\n".join(re.findall(r"<script[^>]*>(.*?)</script>", page, re.S))
+        scripts = static_text("js", "login.js")   # the page's script, a file (script-src 'self')
         self.assertNotIn("loginAppName", scripts)
         flat = re.sub(r"\s+", " ", page)
         self.assertIn("#loginForm { visibility: hidden; }", flat)
         self.assertIn("#loginForm.auth-ready { visibility: visible; }", flat)
-        self.assertIn("if (f) f.classList.add('auth-ready');", flat)                  # failsafe
-        self.assertIn("if (revealForm) revealForm.classList.add('auth-ready');", flat)
+        flat_js = re.sub(r"\s+", " ", scripts)
+        self.assertIn("if (f) f.classList.add('auth-ready');", flat_js)                  # failsafe
+        self.assertIn("if (revealForm) revealForm.classList.add('auth-ready');", flat_js)
 
     def test_phone_bar_shows_the_logo_when_there_is_no_name(self):
         def bar(out):

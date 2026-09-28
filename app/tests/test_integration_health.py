@@ -864,12 +864,15 @@ class SetupWizardTest(unittest.TestCase):
 
     def setUp(self):
         import os
-        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "setup.html")
-        with open(path, encoding="utf-8") as f:
+        static = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+        # The wizard's script is a file since the CSP became script-src 'self'.
+        with open(os.path.join(static, "js", "setup.js"), encoding="utf-8") as f:
+            js = f.read()
+        with open(os.path.join(static, "setup.html"), encoding="utf-8") as f:
             html = f.read()
-        start = html.index("testBtn.addEventListener('click'")
-        self.block = html[start:html.index("testBtn.disabled = false", start)]
-        self.html = html
+        start = js.index("testBtn.addEventListener('click'")
+        self.block = js[start:js.index("testBtn.disabled = false", start)]
+        self.html = html + js
 
     def test_uses_the_setup_route_with_the_setup_token(self):
         self.assertIn("fetch('/api/setup/test-connection'", self.block)

@@ -5,7 +5,6 @@ Same flow used by Seerr, Tautulli, and other *arr apps.
 
 import hashlib
 import hmac
-import json
 import logging
 import secrets
 import uuid
@@ -412,11 +411,13 @@ async def plex_callback_page(request: Request):
     writes, theme.css, and the custom CSS last. Only public branding is used
     (no one is signed in yet).
 
-    The hand-back script is the first thing in <head>, ahead of every
-    stylesheet and script: a pending stylesheet holds back the classic scripts
-    after it, so a slow stylesheet host must never be able to keep the popup
-    open. For the same reason the page loads no web font; it is on screen for
-    a moment and the display font's fallback is fine.
+    The hand-back script (static/js/plex-callback.js, a file: the CSP allows
+    no inline script) is the first thing in <head>, ahead of every stylesheet
+    and script: a pending stylesheet holds back the classic scripts after it,
+    so a slow stylesheet host must never be able to keep the popup open. For
+    the same reason the page loads no web font; it is on screen for a moment
+    and the display font's fallback is fine. The script takes the message's
+    target origin from the page's own address, not from the Host header.
     """
     from app import pages
 
@@ -427,30 +428,11 @@ async def plex_callback_page(request: Request):
     ])
     custom_css = pages.custom_css_style(branding)
 
-    app_origin = f"{request.url.scheme}://{request.url.netloc}"
-    # The origin comes from the (attacker-controllable) Host header and is
-    # interpolated into inline JS. JSON-encode it for the JS string context, then
-    # neutralise the sequences that could otherwise break out of the <script>
-    # element (e.g. a Host containing "</script>"). L13.
-    app_origin_js = (
-        json.dumps(app_origin)
-        .replace("<", "\\u003c")
-        .replace(">", "\\u003e")
-        .replace("&", "\\u0026")
-    )
-
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Signing in</title>
-<script>
-if (window.opener) {{
-    window.opener.postMessage({{type: 'plex-auth-complete'}}, {app_origin_js});
-    window.close();
-}} else {{
-    window.location.href = '/login?plex_auth=complete';
-}}
-</script>
+<script src="/static/js/plex-callback.js"></script>
 {head}
 <script src="/static/js/theme-loader.js"></script>
 <link href="/static/css/theme.css" rel="stylesheet">

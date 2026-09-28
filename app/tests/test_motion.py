@@ -18,6 +18,8 @@ from app.tests.test_shell_contract import STATIC, js_code_only, live_matches, ma
 
 THEME = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
 LOGIN = (STATIC / "login.html").read_text(encoding="utf-8")
+# The login page's script, a file since the CSP became script-src 'self'.
+LOGIN_JS = (STATIC / "js" / "login.js").read_text(encoding="utf-8")
 HEADER = (STATIC / "partials" / "shell-header.html").read_text(encoding="utf-8")
 SIDEBAR = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
 SHELL_JS = (STATIC / "js" / "shell.js").read_text(encoding="utf-8")
@@ -506,9 +508,9 @@ class LoginDrift(unittest.TestCase):
 
     def test_the_move_restarts_before_the_incoming_slide_fades_in(self):
         # restartDrift: class off, a forced reflow, class on, in that order.
-        m = live_matches(LOGIN, r"function restartDrift\(slide\) \{")
+        m = live_matches(LOGIN_JS, r"function restartDrift\(slide\) \{")
         self.assertTrue(m, "restartDrift")
-        body = LOGIN[m[0].end():matching_brace(LOGIN, m[0].end() - 1)]
+        body = LOGIN_JS[m[0].end():matching_brace(LOGIN_JS, m[0].end() - 1)]
         off = live_matches(body, r"slide\.classList\.remove\('is-moving'")
         reflow = live_matches(body, r"void slide\.offsetWidth;")
         on = live_matches(body, r"slide\.classList\.add\('is-moving', DRIFTS\[lastDrift\]\)")
@@ -518,12 +520,12 @@ class LoginDrift(unittest.TestCase):
         # The next direction always differs from the last one.
         self.assertTrue(live_matches(
             body, r"lastDrift = \(lastDrift \+ 1 \+ Math\.floor\(Math\.random\(\) \* \(DRIFTS\.length - 1\)\)\) % DRIFTS\.length;"))
-        self.assertTrue(live_matches(LOGIN, r"var DRIFTS = \['drift-nw', 'drift-ne', 'drift-sw', 'drift-se'\];"))
+        self.assertTrue(live_matches(LOGIN_JS, r"var DRIFTS = \['drift-nw', 'drift-ne', 'drift-sw', 'drift-se'\];"))
         # show(): the incoming slide restarts before its opacity goes to 1;
         # the outgoing slide's classes are left alone.
-        m = live_matches(LOGIN, r"function show\(next, prev, url\) \{")
+        m = live_matches(LOGIN_JS, r"function show\(next, prev, url\) \{")
         self.assertTrue(m, "show")
-        body = LOGIN[m[0].end():matching_brace(LOGIN, m[0].end() - 1)]
+        body = LOGIN_JS[m[0].end():matching_brace(LOGIN_JS, m[0].end() - 1)]
         restart = live_matches(body, r"restartDrift\(next\);")
         fade_in = live_matches(body, r"next\.style\.opacity = '1';")
         self.assertTrue(restart and fade_in)
@@ -532,9 +534,9 @@ class LoginDrift(unittest.TestCase):
         self.assertFalse(re.search(r"prev\.classList", body))
         # The first picture starts once the slideshow is shown, before it
         # fades in; a lone picture takes the back-and-forth drift instead.
-        reveal = live_matches(LOGIN, r"slideshow\.classList\.remove\('hidden'\);")
-        first = live_matches(LOGIN, r"if \(urls\.length < 2\) slideA\.classList\.add\('is-solo'\); else restartDrift\(slideA\);")
-        shown = live_matches(LOGIN, r"slideA\.style\.opacity = '1';")
+        reveal = live_matches(LOGIN_JS, r"slideshow\.classList\.remove\('hidden'\);")
+        first = live_matches(LOGIN_JS, r"if \(urls\.length < 2\) slideA\.classList\.add\('is-solo'\); else restartDrift\(slideA\);")
+        shown = live_matches(LOGIN_JS, r"slideA\.style\.opacity = '1';")
         self.assertTrue(reveal and first and shown)
         self.assertLess(reveal[0].start(), first[0].start())
         self.assertLess(first[0].start(), shown[0].start())
@@ -547,9 +549,9 @@ class LoginDrift(unittest.TestCase):
         # the flight. A candidate already on screen is skipped. (A sequence
         # counter that dropped a preload once a newer tick had merely started
         # starved the rotation whenever every load took over 10s.)
-        m = live_matches(LOGIN, r"setInterval\(async function\(\) \{")
+        m = live_matches(LOGIN_JS, r"setInterval\(async function\(\) \{")
         self.assertEqual(len(m), 1)
-        body = LOGIN[m[0].end():matching_brace(LOGIN, m[0].end() - 1)]
+        body = LOGIN_JS[m[0].end():matching_brace(LOGIN_JS, m[0].end() - 1)]
         steps = [
             ("gate", r"if \(urls\.length < 2 \|\| loading\) return;"),
             ("advance", r"currentIndex\+\+;"),
@@ -571,15 +573,15 @@ class LoginDrift(unittest.TestCase):
         # the picture away, and no sequence counter exists to drop it.
         between = js_code_only(body[found["release"].end():found["show"].start()])
         self.assertNotRegex(between, r"\breturn\b")
-        self.assertNotRegex(js_code_only(LOGIN), r"\b(?:seq|rotation)\b")
-        self.assertTrue(live_matches(LOGIN, r"var shownUrl = firstUrl;"))
-        self.assertTrue(live_matches(LOGIN, r"var loading = false;"))
+        self.assertNotRegex(js_code_only(LOGIN_JS), r"\b(?:seq|rotation)\b")
+        self.assertTrue(live_matches(LOGIN_JS, r"var shownUrl = firstUrl;"))
+        self.assertTrue(live_matches(LOGIN_JS, r"var loading = false;"))
 
     def test_no_new_timers_drive_the_move(self):
         # The rotation interval and the Plex PIN poll; the message clear, the
         # Plex retry, the form-reveal failsafe and the preload bound (pinned
         # below). Nothing animates from JS.
-        code = js_code_only(LOGIN)
+        code = js_code_only(LOGIN_JS)
         self.assertEqual(code.count("setInterval("), 2)
         self.assertEqual(code.count("setTimeout("), 4)
         self.assertNotIn("requestAnimationFrame", code)
@@ -591,17 +593,17 @@ class LoginDrift(unittest.TestCase):
         # bounded: one timer inside preload, cleared on either outcome, that
         # drops the handlers and rejects, so the usual catch/finally releases
         # the flight. 30s, because loads of 11-25s still deserve to show.
-        m = live_matches(LOGIN, r"function preload\(url\) \{")
+        m = live_matches(LOGIN_JS, r"function preload\(url\) \{")
         self.assertEqual(len(m), 1)
-        end = matching_brace(LOGIN, m[0].end() - 1)
-        body = LOGIN[m[0].end():end]
+        end = matching_brace(LOGIN_JS, m[0].end() - 1)
+        body = LOGIN_JS[m[0].end():end]
         armed = live_matches(body, r"var timer = setTimeout\(function\(\) \{\s*img\.onload = img\.onerror = null;\s*reject\(\);\s*\}, 30000\);")
         self.assertEqual(len(armed), 1)
         self.assertTrue(live_matches(body, r"img\.onload = function\(\) \{ clearTimeout\(timer\); resolve\(url\); \};"))
         self.assertTrue(live_matches(body, r"img\.onerror = function\(\) \{ clearTimeout\(timer\); reject\(\); \};"))
         self.assertLess(armed[0].start(), live_matches(body, r"img\.src = url;")[0].start())
         # It is the only timer beyond the ones the page always had.
-        self.assertEqual(js_code_only(LOGIN[:m[0].start()] + LOGIN[end:]).count("setTimeout("), 3)
+        self.assertEqual(js_code_only(LOGIN_JS[:m[0].start()] + LOGIN_JS[end:]).count("setTimeout("), 3)
 
     def test_the_card_glass_and_the_form_reveal_are_untouched(self):
         glass = css_rule(LOGIN, ".login-glass-card")
