@@ -816,9 +816,9 @@
     });
   }
 
-  // After every save that wrote something: pages the service worker
-  // prefetched before it carry the old nav, theme or name, so they are
-  // dropped, and a change to the shell shows here at once.
+  // After every save that wrote something: pages the router prefetched
+  // before it carry the old nav, theme or name, so they are dropped, and a
+  // change to the shell shows here at once.
   function refreshShell(keys) {
     var WS = window.WS;
     if (!WS) return;
@@ -1110,9 +1110,10 @@
     }
     window.addEventListener('popstate', fromHistory, { signal: signal });
     window.addEventListener('hashchange', fromHistory, { signal: signal });
-    // The nav's speculation rules can prerender /settings (no hash) and the
-    // browser may then show it for /settings#sign-in: the kit booted on
-    // General and activation fires no hashchange, so route from the hash now.
+    // The browser can prerender /settings (no hash) on its own (Chrome does,
+    // from the address bar) and then show it for /settings#sign-in: the kit
+    // booted on General and activation fires no hashchange, so route from the
+    // hash now.
     // Nothing can be staged before the page was shown, so no guard asks.
     document.addEventListener('prerenderingchange', fromHistory, { signal: signal });
 

@@ -43,17 +43,6 @@
                    0 0 5px rgb(var(--color-background) / 0.75),
                    0 0 12px rgb(var(--color-background) / 0.5);
     }
-    /* theme.css names <main> ws-content while a view transition runs
-       (html.ws-vt main), and an element with a view-transition-name is a
-       backdrop root: nothing inside it can blur what is painted behind it.
-       The artwork is behind <main>, so the card's blur saw nothing and the
-       art came through sharp. So <main> gives the name up here, with a
-       selector that outranks theme.css's.
-
-       The card fades across navigations under a name of its own, keyed on
-       the login-only .ws-login-card class; those rules live in theme.css, not
-       here (see there for why). */
-    html.ws-vt body > main { view-transition-name: none; }
     /* No backdrop blur means the artwork shows through sharp, which is busy
        behind text. Fall back to a mostly opaque card instead. */
     @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -137,7 +126,7 @@
 <!-- Main Content Container -->
 <main class="relative z-20 flex-1 flex flex-col items-center justify-center px-4">
 <!-- Login Card -->
-<div class="w-full max-w-[440px] login-glass-card ws-login-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
+<div class="w-full max-w-[440px] login-glass-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
 <!-- Logo Section -->
 <div class="mb-8 w-full flex flex-col items-center">
 <img id="loginLogo" alt="Logo" class="h-48 w-auto object-contain border-none mb-2 hidden"/>

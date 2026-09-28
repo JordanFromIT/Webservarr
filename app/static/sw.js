@@ -1,28 +1,15 @@
 /**
  * WebServarr — Service Worker
  *
- * 1. Push notifications and notification clicks.
- * 2. Page prefetch: the shell asks for the next page while the pointer is over
- *    its link (shell.js); the document is fetched here and handed to the
- *    navigation that follows, so a click lands on a page already in hand.
- *    Entries are single-use and expire after 30 s, so nothing stale can be
- *    served twice, and the cache is cleared on sign-out.
+ * Push notifications and notification clicks. Nothing else: page prefetch is
+ * the soft-navigation router's (router.js), so the worker keeps no page cache
+ * and handles no fetch.
  */
-
-var PAGE_CACHE = 'ws-pages-v2';
-var PAGE_TTL_MS = 30 * 1000;
-var pending = {};
-// key -> ms the worker itself cached that page. Lives only in worker memory, so
-// page scripts (incl. an XSS) can't forge it. The fetch handler serves a cached
-// page ONLY when its key is in here, which stops an attacker who can write the
-// Cache API from planting a page the worker will replay.
-var prefetched = new Map();
 
 self.addEventListener('install', function () { self.skipWaiting(); });
 self.addEventListener('activate', function (event) {
-  // Drop every prefetch cache a previous worker left, under this name or an
-  // older one (a PAGE_CACHE bump), so a poisoned or stale entry can't survive
-  // a service-worker update.
+  // Drop every page cache an earlier worker kept (ws-pages-*, from before the
+  // router took over prefetch), so none outlives the update.
   event.waitUntil(
     caches.keys().then(function (names) {
       return Promise.all(names.filter(function (name) {
@@ -30,71 +17,6 @@ self.addEventListener('activate', function (event) {
       }).map(function (name) { return caches.delete(name); }));
     }).then(function () { return self.clients.claim(); })
   );
-});
-
-function prefetchPage(key) {
-  if (pending[key]) return pending[key];
-  var p = fetch(key, { credentials: 'same-origin', headers: { 'X-WS-Prefetch': '1' } })
-    .then(function (res) {
-      var type = res.headers.get('content-type') || '';
-      // A redirect means the session is gone (login page); never cache that.
-      if (!res.ok || res.redirected || type.indexOf('text/html') === -1) return null;
-      var cachedAt = Date.now();
-      var headers = new Headers(res.headers);
-      headers.set('X-WS-Cached-At', String(cachedAt));
-      return res.arrayBuffer().then(function (body) {
-        return caches.open(PAGE_CACHE).then(function (cache) {
-          return cache.put(key, new Response(body, { status: 200, headers: headers })).then(function () {
-            prefetched.set(key, cachedAt);   // mark it as worker-prefetched
-          });
-        });
-      });
-    })
-    .catch(function () { return null; })
-    .then(function (v) { delete pending[key]; return v; });
-  pending[key] = p;
-  return p;
-}
-
-self.addEventListener('message', function (event) {
-  var data = event.data || {};
-  if (data.type === 'prefetch' && typeof data.url === 'string') {
-    var u = new URL(data.url, self.location.origin);
-    if (u.origin === self.location.origin && u.pathname.indexOf('/auth/') !== 0) {
-      prefetchPage(u.pathname + u.search);
-    }
-  } else if (data.type === 'clear-pages') {
-    prefetched.clear();
-    event.waitUntil(caches.delete(PAGE_CACHE));
-  }
-});
-
-self.addEventListener('fetch', function (event) {
-  var req = event.request;
-  if (req.method !== 'GET' || req.mode !== 'navigate') return;
-  var url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
-  var key = url.pathname + url.search;
-
-  event.respondWith((async function () {
-    var cache = await caches.open(PAGE_CACHE);
-    if (pending[key]) await pending[key];       // the click beat the prefetch: wait for it
-    // Only replay a page THIS worker prefetched (key present in the in-memory
-    // Map), so a Cache API write from a page script can't be served back.
-    var prefetchedAt = prefetched.get(key);
-    if (prefetchedAt !== undefined) {
-      prefetched.delete(key);                   // single use
-      var hit = await cache.match(key);
-      if (hit) {
-        await cache.delete(key);                // single use
-        var at = Number(hit.headers.get('X-WS-Cached-At') || 0);
-        // Ignore a future timestamp (poisoned), and gate freshness on the
-        // trusted in-worker time so a tampered entry can't extend its own life.
-        if (at <= Date.now() && Date.now() - prefetchedAt < PAGE_TTL_MS) return hit;
-      }
-    }
-    return fetch(req);
-  })());
 });
 
 // The server sends the operator's logo when it is a same-origin path; anything

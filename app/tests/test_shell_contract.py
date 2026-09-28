@@ -49,7 +49,7 @@ def assert_ui_js_before(tc: unittest.TestCase, html: str, later: str) -> None:
     tc.assertLess(html.index(SIDEBAR_MARKER), html.index(later))
 
 
-def js_code_only(src: str) -> str:
+def js_code_only(src: str, keep_strings: bool = False) -> str:
     """JavaScript source with comments removed and string contents blanked.
 
     A small scanner rather than a regex, so a // or /* inside a string (a URL,
@@ -65,6 +65,12 @@ def js_code_only(src: str) -> str:
       starts a regex, whose body - including any quotes, as in /[&<>"']/g -
       is blanked like a string. A / after a name, number or closing bracket
       is division.
+
+    keep_strings: leave string and template text in place instead (comments
+    are still removed, regex bodies still blanked). Character for character
+    the same length as the blanked form, so a position in one is the same
+    position in the other: text that is blank in one and not in the other is
+    inside a string.
     """
     out = []                       # one character per entry
     n = len(src)
@@ -98,7 +104,7 @@ def js_code_only(src: str) -> str:
         while i < n:
             c = src[i]
             if c == "\\":
-                out.extend("  ")
+                out.extend((src[i:i + 2] + " ")[:2] if keep_strings else "  ")
                 i += 2
             elif c == "`":
                 out.append("`")
@@ -110,7 +116,7 @@ def js_code_only(src: str) -> str:
                     out.append("}")
                     i += 1
             else:
-                out.append("\n" if c == "\n" else " ")
+                out.append(c if keep_strings else ("\n" if c == "\n" else " "))
                 i += 1
         return i
 
@@ -129,7 +135,8 @@ def js_code_only(src: str) -> str:
                 j = i + 1
                 while j < n and src[j] != c and src[j] != "\n":
                     j += 2 if src[j] == "\\" else 1
-                out.extend(c + " " * (j - i - 1) + c)
+                body = src[i + 1:j].ljust(j - i - 1) if keep_strings else " " * (j - i - 1)
+                out.extend(c + body + c)
                 i = j + 1
             elif c == "`":
                 i = template(i)
@@ -244,9 +251,8 @@ class ShellContract(unittest.TestCase):
                   "headerUsername", "headerRole", "headerAvatar"):
             self.assertIn(f'id="{i}"', head, i)
         self.assertNotIn("Loading", head)
-        self.assertIn('type="speculationrules"', side)
-        # Prerender/prefetch only nav links, never logout or arbitrary anchors.
-        self.assertNotIn('"href_matches"', side)
+        # The router prefetches on hover; the sidebar carries no rules of its own.
+        self.assertNotIn("speculationrules", side)
 
     def test_notification_dropdown_opens_under_the_tapped_bell(self):
         # Only one bell is visible at a time: below lg the desktop header is
@@ -453,60 +459,23 @@ class ShellContract(unittest.TestCase):
         self.assertIsNotNone(m, "window.WS = { ... } not found")
         block = code[m.end():matching_brace(code, m.end() - 1)]
         for name in ("ready", "whenActive", "poll", "setHTML", "arrive", "swr", "serviceStatus", "clearCache",
-                     "clearPageCache", "wireNav", "dragScroll", "mediaType", "requestStatus"):
+                     "clearPageCache", "dragScroll", "mediaType", "requestStatus"):
             self.assertRegex(block, rf"\b{name}\s*:\s*{name}\b", name)
         # Pages call this to stop a row's momentum glide before scrolling it.
         self.assertIsNotNone(re.search(r"\bdragScroll\.stop\s*=\s*function\b", code),
                              "dragScroll.stop = function ... not defined (outside comments/strings)")
 
-    def test_nav_wiring_can_run_again(self):
-        # The Settings page swaps the nav links after a save and calls
-        # WS.wireNav() (kit.js). Boot goes through the same entry point, and a
-        # link that is already wired is skipped, so listeners never stack when
-        # WS.setHTML left a nav untouched.
+    def test_clearing_the_page_cache_drops_the_routers_prefetch(self):
+        # The router's hover prefetch is the only page cache (the service
+        # worker's and the speculation rules are gone): a save or a sign-out
+        # drops what it holds, and nothing else.
         code = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
-        def body(name):
-            m = re.search(rf"\bfunction {name}\(\)\s*\{{", code)
-            self.assertIsNotNone(m, name)
-            return code[m.end():matching_brace(code, m.end() - 1)]
-        self.assertIn("wirePrefetch();", body("wireNav"))
-        boot = code[code.rindex("ready(function () {"):]
-        self.assertIn("wireNav();", boot)
-        self.assertNotIn("wirePrefetch();", boot)
-        self.assertRegex(body("wirePrefetch"),
-                         r"forEach\(function \((\w+)\) \{\s*if \(\1\._wsWired\) return;\s*\1\._wsWired = true;")
-
-    def test_clearing_the_page_cache_refreshes_speculation_rules(self):
-        # Pages Chrome prerendered through the speculation rules were rendered
-        # before the save (or sign-out) that cleared the page cache. Removing
-        # the rules script discards them; a NEW script with the same rules
-        # re-arms them (a script element never runs twice), inserted on a later
-        # task so Chrome does not fold the removal and the re-add into one
-        # unchanged update. Where the browser has no speculation rules it does
-        # nothing.
-        src = (STATIC / "js" / "shell.js").read_text(encoding="utf-8")
-        code = js_code_only(src)
-        def body(name):
-            m = re.search(rf"\bfunction {name}\(\)\s*\{{", code)
-            self.assertIsNotNone(m, name)
-            return code[m.end():matching_brace(code, m.end() - 1)]
-        from app.tests.test_settings_static import top_level
-        self.assertRegex(top_level(body("clearPageCache")), r"(?:^|[;{}])\s*refreshSpeculation\(\);")
-        spec = body("refreshSpeculation")
-        guard = re.search(r"HTMLScriptElement\.supports\(", spec)
-        self.assertIsNotNone(guard, "support check")
-        self.assertTrue(live_matches(src, r"HTMLScriptElement\.supports\('speculationrules'\)"))
-        removed = re.search(r"\.removeChild\((\w+)\)", spec)
-        self.assertIsNotNone(removed, "the old rules script is removed")
-        self.assertLess(guard.start(), removed.start())
-        later = re.search(r"setTimeout\(function \(\) \{", spec)
-        self.assertIsNotNone(later, "re-added on a later task")
-        self.assertLess(removed.end(), later.start())
-        readd = spec[later.end():matching_brace(spec, later.end() - 1)]
-        made = re.search(r"var (\w+) = document\.createElement\(", readd)
-        self.assertIsNotNone(made, "a new script element")
-        self.assertRegex(readd, rf"\.insertBefore\({made.group(1)}\b")
-        self.assertNotRegex(readd, rf"\.(?:insertBefore|appendChild)\({removed.group(1)}\b")
+        m = re.search(r"\bfunction clearPageCache\(\)\s*\{", code)
+        self.assertIsNotNone(m)
+        body = code[m.end():matching_brace(code, m.end() - 1)]
+        self.assertEqual(body.strip(),
+                         "if (window.WS && WS.router && WS.router.clearPrefetch) WS.router.clearPrefetch();")
+        self.assertNotIn("wireNav", code)
 
     def test_js_code_only_ignores_comments_and_strings(self):
         # Guards the helper the API test relies on.

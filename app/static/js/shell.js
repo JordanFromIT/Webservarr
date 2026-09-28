@@ -10,15 +10,14 @@
  * Exposes window.WS:
  *   WS.data / WS.user / WS.page   the #ws-data block, parsed by theme-loader.js
  *   WS.ready(fn)                  after DOMContentLoaded (or now)
- *   WS.whenActive(fn)             now, or when a prerendered page is shown
+ *   WS.whenActive(fn)             now, or when a page the browser prerendered is shown
  *   WS.poll(fn, ms, signal) -> stop()
  *                                 visibility-aware interval, starts when active;
  *                                 an optional AbortSignal removes its listeners
  *   WS.serviceStatus()            deduplicated /api/integrations/service-status
  *   WS.setHTML(el, html)          innerHTML only when the string changed
- *   WS.wireNav()                  bind per-link behaviour to nav links not yet wired
  *   WS.applyShell(parts)          bring the branded shell and <head> up to date (see below)
- *   WS.clearPageCache()           drop prefetched and prerendered pages (sign-out, a settings save)
+ *   WS.clearPageCache()           drop the router's hover-prefetched pages (sign-out, a save)
  *   WS.dropCache(prefix)          forget this user's swr copies whose key starts with prefix
  *   WS.arrive(key, write)         reveal sections top-down, in document order
  *   WS.arriveReset()              start the order again for a newly mounted page (router.js)
@@ -86,9 +85,9 @@
     else fn();
   }
 
-  /* A page fetched by the speculation rules is rendered before it is shown.
-     Initial data loads may run then (that is what makes the click instant),
-     but timers and side-effect requests wait until the page is on screen. */
+  /* A page the browser prerendered (Chrome does, from the address bar) is
+     rendered before it is shown. Initial data loads may run then, but timers
+     and side-effect requests wait until the page is on screen. */
   function whenActive(fn) {
     if (document.prerendering) document.addEventListener('prerenderingchange', fn, { once: true });
     else fn();
@@ -233,59 +232,18 @@
   function getJSON(url, opts) {
     var signal = opts && opts.signal ? opts.signal : undefined;
     return fetch(url, signal ? { signal: signal } : undefined).then(function (r) {
-      // A page can be served from the prefetch cache after the session has
-      // ended; the first API answer says so.
+      // A page can outlive its session; the first API answer says so.
       if (r.status === 401) { window.location.href = '/login'; throw new Error('HTTP 401'); }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     });
   }
 
-  // ---- Hover prefetch ----
-  //
-  // Speculation rules do the same thing natively, but not every browser
-  // honours them. The service worker (sw.js) fetches the target document while
-  // the pointer is still over the link and hands it to the navigation that
-  // follows, so the click lands on a document already in hand.
-  var PAGE_CACHE = 'ws-pages-v2';
-  var prefetchedAt = {};
-
-  function prefetch(href) {
-    var sw = navigator.serviceWorker && navigator.serviceWorker.controller;
-    if (!sw) return;
-    var now = Date.now();
-    if (prefetchedAt[href] && now - prefetchedAt[href] < 20000) return;
-    prefetchedAt[href] = now;
-    sw.postMessage({ type: 'prefetch', url: href });
-  }
-
-  function wirePrefetch() {
-    if (!('serviceWorker' in navigator)) return;
-    document.querySelectorAll('#desktopNav a, #drawerNav a').forEach(function (a) {
-      if (a._wsWired) return;
-      a._wsWired = true;
-      var href = a.getAttribute('href');
-      if (!href || href === location.pathname) return;
-      var go = function () { prefetch(href); };
-      a.addEventListener('mouseenter', go);
-      a.addEventListener('focus', go);
-      a.addEventListener('touchstart', go, { passive: true });
-    });
-  }
-
-  // Everything the shell binds to a single nav link. The Settings page swaps
-  // the links for freshly rendered ones after a save (settings/kit.js) and
-  // calls this again; a link already wired is skipped, so listeners never
-  // stack on links WS.setHTML left in place.
-  function wireNav() {
-    wirePrefetch();
-  }
-
   /* The parts of the page the branding decides and a soft navigation never
      replaces, brought up to date: after a Settings save (settings/kit.js,
      from GET /api/admin/settings/shell) and on every swap (router.js, from
      the page it fetched). parts, each optional:
-       nav_html        both navs (server-rendered links), then wireNav()
+       nav_html        both navs (server-rendered links)
        brand_html      the logo and name in the sidebar and drawer
        bar_brand_html  the phone bar's name or logo
        branding        the payload: WS.data, and the colours, gauge rings and
@@ -301,7 +259,6 @@
     if (!parts) return;
     if (typeof parts.nav_html === 'string') {
       ['desktopNav', 'drawerNav'].forEach(function (id) { setHTML(document.getElementById(id), parts.nav_html); });
-      wireNav();
     }
     if (typeof parts.brand_html === 'string') {
       document.querySelectorAll('[data-ws-brand]').forEach(function (n) { setHTML(n, parts.brand_html); });
@@ -343,45 +300,10 @@
     if (typeof parts.title === 'string' && parts.title && document.title !== parts.title) document.title = parts.title;
   }
 
-  // Pages the browser prerendered through the speculation rules (shell
-  // partial) were rendered before whatever made the page cache stale, so they
-  // show the old nav, theme or name. Removing the rules script discards what
-  // it started; a new script with the same rules re-arms them (a script
-  // element never runs twice). The copy goes in on a later task: the browser
-  // folds rule changes made in one task into a single update, and a removal
-  // plus an identical re-add in the same task would look like no change and
-  // keep the stale prerender. Nothing to do where the browser has no
-  // speculation rules or the page carries none.
-  function refreshSpeculation() {
-    try {
-      if (!(HTMLScriptElement.supports && HTMLScriptElement.supports('speculationrules'))) return;
-    } catch (e) { return; }
-    document.querySelectorAll('script[type="speculationrules"]').forEach(function (old) {
-      var parent = old.parentNode;
-      var next = old.nextSibling;
-      var rules = old.textContent;
-      var nonce = old.nonce;
-      parent.removeChild(old);
-      setTimeout(function () {
-        var fresh = document.createElement('script');
-        fresh.type = 'speculationrules';
-        if (nonce) fresh.nonce = nonce;
-        fresh.textContent = rules;
-        parent.insertBefore(fresh, next && next.parentNode === parent ? next : null);
-      }, 0);
-    });
-  }
-
+  // A page the router prefetched on hover was fetched before whatever made it
+  // stale (a save, a sign-out); drop it so the next click fetches again.
   function clearPageCache() {
-    // What was prefetched is gone, so the next hover must fetch again.
-    prefetchedAt = {};
     if (window.WS && WS.router && WS.router.clearPrefetch) WS.router.clearPrefetch();
-    refreshSpeculation();
-    try { if (window.caches) caches.delete(PAGE_CACHE); } catch (e) { /* ignore */ }
-    try {
-      var sw = navigator.serviceWorker && navigator.serviceWorker.controller;
-      if (sw) sw.postMessage({ type: 'clear-pages' });
-    } catch (e) { /* ignore */ }
   }
 
   // ---- Status pill ----
@@ -830,7 +752,6 @@
     clearCache: clearCache,
     dropCache: dropCache,
     clearPageCache: clearPageCache,
-    wireNav: wireNav,
     applyShell: applyShell,
     dragScroll: dragScroll,
     popOpen: popOpen,
@@ -847,7 +768,6 @@
     arriveInit();
     wireChrome();
     wireScrollHint();
-    wireNav();
 
     var cached = cacheGet('status');
     if (cached && cached.state) paintStatus(cached.state);

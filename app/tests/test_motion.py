@@ -263,15 +263,15 @@ class NavHighlight(unittest.TestCase):
     """The active nav item switches instantly, as it always did: the sliding
     highlight was removed at the owner's request (it read as the old page's
     button moving into the new one's place, and felt laggy). Only the shell
-    itself carries a transition name, which keeps it stationary."""
+    itself carries a transition name, which keeps it stationary through the
+    router's soft swap."""
 
     # The shell's names are scoped to html.ws-vt, which is on only while a
     # transition runs (ShellNamesOnlyDuringATransition below).
     SHELL_NAMES = {"html.ws-vt #desktopSidebar": "ws-sidebar", "html.ws-vt #appHeader": "ws-header",
-                   "html.ws-vt #mobileTopBar": "ws-topbar", "html.ws-vt main": "ws-content",
-                   ".ws-login-card": "ws-login-card"}
+                   "html.ws-vt #mobileTopBar": "ws-topbar", "html.ws-vt main": "ws-content"}
 
-    def test_only_the_shell_and_the_login_card_carry_a_transition_name(self):
+    def test_only_the_shell_carries_a_transition_name(self):
         named = {sel.strip(): name for sel, name in
                  re.findall(r"([^{}]+)\{\s*view-transition-name:\s*([\w-]+);\s*\}", top_level(THEME))}
         self.assertEqual(named, self.SHELL_NAMES)
@@ -285,20 +285,26 @@ class NavHighlight(unittest.TestCase):
             self.assertNotIn("viewTransition", markup)
 
     def test_the_shell_stays_stationary_across_pages(self):
-        self.assertIn("@view-transition { navigation: auto; }", THEME)
         self.assertIn("view-transition-name: ws-sidebar", css_rule(THEME, "html.ws-vt #desktopSidebar"))
+        # The old snapshot of each stationary part is dropped and the new one
+        # does not animate: only the content crossfades.
+        self.assertRegex(THEME, r"::view-transition-old\(ws-sidebar\)[^{}]*\{\s*display: none;")
 
-    def test_cross_document_transitions_stay_off_under_reduced_motion(self):
-        self.assertTrue(any("@view-transition { navigation: none; }" in b for b in reduced_blocks(THEME)))
+    def test_no_cross_document_transition(self):
+        # Every shell page is a soft-navigation page; a full navigation (sign
+        # in, setup, a fallback) opts into no transition, under any motion
+        # setting. The soft swap's own reduced-motion guard is router.js's
+        # (ShellNamesOnlyDuringATransition below).
+        self.assertNotIn("@view-transition", THEME)
 
 
 class ShellNamesOnlyDuringATransition(unittest.TestCase):
     """A view-transition-name makes its element a stacking context. Left on
     <main>, it put every position:fixed page overlay (the Issues and Tickets
     modals) under the phone's sticky top bar. So the sidebar, header, mobile
-    bar and <main> are named only under html.ws-vt, which theme-loader.js
-    (full navigations) and router.js (soft swaps) set for the length of a
-    transition. app/tests/js/view_transition.mjs runs the hold/release."""
+    bar and <main> are named only under html.ws-vt, which router.js holds
+    (through theme-loader.js's WSViewTransition) for the length of a soft
+    swap's transition. app/tests/js/view_transition.mjs runs the hold/release."""
 
     SHELL_PARTS = ("#desktopSidebar", "#appHeader", "#mobileTopBar", "main")
     LOADER = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
@@ -319,31 +325,32 @@ class ShellNamesOnlyDuringATransition(unittest.TestCase):
             self.assertIn(f"html.ws-vt {part}", named, part)
 
     def test_no_page_names_a_shell_part_itself(self):
-        # A page may only take a name away (login's <main>, whose card blur a
-        # name would break); its rule must outrank html.ws-vt main.
         for f in list(STATIC.glob("*.html")) + list((STATIC / "partials").glob("*.html")):
             text = f.read_text(encoding="utf-8")
             with self.subTest(f.name):
                 self.assertIsNone(re.search(r"view-transition-name:(?!\s*none\b)", text), f.name)
                 self.assertIsNone(re.search(r'<html[^>]*class="[^"]*\bws-vt\b', text), f.name)
 
-    def test_login_keeps_its_main_unnamed_during_a_transition(self):
-        self.assertIn("html.ws-vt body > main { view-transition-name: none; }", LOGIN)
+    def test_login_main_is_never_named(self):
+        # A named <main> is a backdrop root: the card's blur would stop
+        # reaching the artwork behind it. Login has no router, so nothing ever
+        # holds html.ws-vt there, and no rule of its own names anything.
+        self.assertNotIn("router.js", LOGIN)
+        self.assertNotIn("view-transition", LOGIN)
 
     def test_every_page_loads_the_holder_in_head(self):
-        # pagereveal fires before the first frame: its listener must already
-        # be there, so theme-loader.js is a parser-blocking script in <head>.
+        # theme-loader.js (WSViewTransition, and the colours before the first
+        # paint) is a parser-blocking script in <head> on every page.
         for f in STATIC.glob("*.html"):
             text = f.read_text(encoding="utf-8")
             with self.subTest(f.name):
                 head = text.split("</head>", 1)[0]
                 self.assertRegex(head, r'<script src="/static/js/theme-loader\.js\?v=\d+"></script>')
 
-    def test_full_navigations_hold_until_the_transition_settles(self):
+    def test_only_the_router_holds_the_names(self):
+        # No cross-document transition, so no pageswap/pagereveal hold.
         for event in ("pageswap", "pagereveal"):
-            self.assertTrue(live_matches(self.LOADER, rf"window\.addEventListener\('{event}'"), event)
-        self.assertTrue(live_matches(self.LOADER, r"if \(e\.viewTransition\) holdFor\(e\.viewTransition\)"))
-        self.assertTrue(live_matches(self.LOADER, r"\.finished\)\.then\(release, release\)"))
+            self.assertFalse(live_matches(self.LOADER, rf"addEventListener\('{event}'"), event)
         self.assertTrue(live_matches(self.LOADER, r"window\.WSViewTransition = \{ hold: hold \}"))
 
     def test_a_soft_swap_holds_from_before_the_capture_until_it_settles(self):

@@ -297,9 +297,10 @@ const UI = 'https://host.example/static/js/ui.js?v=abc';
   check('the real ui.js: the toast still appears', made.some((n) => n.textContent === 'Saved'));
 }
 
-// The shell's own nav, rebound from a page (Settings patches the sidebar
-// after a save, then calls WS.wireNav): its links belong to the shell, and
-// so do the listeners wireNav gives them. The frames name the functions.
+// A 'file#name' entry is matched on the frame's function name, in both
+// stack formats: Chrome's "at Object.name (url)" and Firefox's "name@url".
+// shell.js#serviceStatus stands in (WS.serviceStatus, called from a page's
+// helper); the item it makes is the shell's, not the page's.
 {
   tr.stop();
   nowStack = stack(SELF, PAGE);
@@ -308,22 +309,22 @@ const UI = 'https://host.example/static/js/ui.js?v=abc';
   const src = new Target();
   const KIT = 'https://host.example/static/js/settings/kit.js?v=abc';
   src.addEventListener('saved', () => {
-    nowStack = ['Error', `    at ${SHELL}:266:9`, `    at Array.forEach (<anonymous>)`, `    at wirePrefetch (${SHELL}:260:62)`,
-      `    at Object.wireNav (${SHELL}:277:5)`, `    at patchShell (${KIT}:774:30)`].join('\n');
+    nowStack = ['Error', `    at ${SHELL}:430:9`, `    at Array.forEach (<anonymous>)`,
+      `    at Object.serviceStatus (${SHELL}:432:21)`, `    at refresh (${KIT}:774:30)`].join('\n');
     new Target().addEventListener('mouseenter', () => {});
-    nowStack = `f@${SHELL}:266:9\nwirePrefetch@${SHELL}:260:62\nwireNav@${SHELL}:277:5\npatchShell@${KIT}:774:30`;   // Firefox
+    nowStack = `f@${SHELL}:430:9\nserviceStatus@${SHELL}:432:21\nrefresh@${KIT}:774:30`;   // Firefox
     new Target().addEventListener('focus', () => {});
   }, { signal: ctl.signal });
   nowStack = stack(SELF, PAGE);
   src.dispatchEvent(new Event('saved'));
   ctl.abort();
   const out = tr.stop();
-  check('the shell\'s nav rebound from a page is not the page\'s leak', out.length === 0, out);
-  // A shell helper that is not wireNav, called the same way, is still the page's.
+  check('a named shell function called from a page is not the page\'s leak', out.length === 0, out);
+  // A shell helper that is not serviceStatus, called the same way, is still the page's.
   tr.start('news');
   nowStack = ['Error', `    at Object.poll (${SHELL}:120:5)`, `    at mount (${KIT}:500:7)`, `    at mount (${PAGE}:40:3)`].join('\n');
   const iv = g.setInterval(() => {}, 60000);
-  nowStack = ['Error', `    at wireNavLater (${SHELL}:1:1)`, `    at mount (${PAGE}:40:3)`].join('\n');
+  nowStack = ['Error', `    at serviceStatusLater (${SHELL}:1:1)`, `    at mount (${PAGE}:40:3)`].join('\n');
   const t2 = g.setTimeout(() => {}, 60000);
   nowStack = stack(SELF, PAGE);
   const out2 = tr.stop();

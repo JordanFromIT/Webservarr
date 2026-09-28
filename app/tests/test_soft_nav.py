@@ -11,7 +11,7 @@ import re
 import unittest
 
 from app.tests.test_settings_static import function_body
-from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace, read
+from app.tests.test_shell_contract import STATIC, js_code_only, live_matches, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
 CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index", "library", "reader",
@@ -107,8 +107,8 @@ class ConvertedPages(unittest.TestCase):
                     attrs = m.group(1)
                     if attr(attrs, "src"):
                         continue
-                    self.assertIn(attr(attrs, "type"), ("application/json", "speculationrules"),
-                                  f"{name}: inline <script{attrs}>")
+                    self.assertEqual(attr(attrs, "type"), "application/json",
+                                     f"{name}: inline <script{attrs}>")
 
     def test_converted_pages_have_no_inline_handlers(self):
         for name in CONVERTED:
@@ -547,7 +547,7 @@ class HomePage(unittest.TestCase):
         self.assertNotIn("statusAt = Date.now()", body)
         self.assertNotRegex(body, r"\bsetTimeout\(")
         leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
-        self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#wireNav', 'shell.js#serviceStatus'];", leaks)
+        self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus'];", leaks)
 
     def test_the_clock_test_runs_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file
@@ -1284,6 +1284,122 @@ class DebugTools(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             for name in DEBUG_FILES:
                 self.assertNotIn(name, text, f"{path.relative_to(STATIC)} references {name}")
+
+
+# Any HTML event-handler attribute (onclick=, onError=, ...) and any
+# javascript: URL: both run script from markup, which script-src 'self' refuses.
+_HANDLER_TEXT_RE = re.compile(r"\bon[a-z]+\s*=", re.I)
+_JS_URL_RE = re.compile(r"javascript:", re.I)
+
+
+def html_files():
+    return sorted(list(STATIC.glob("*.html")) + list((STATIC / "partials").glob("*.html")))
+
+
+def js_files():
+    return sorted((STATIC / "js").rglob("*.js"))
+
+
+def string_matches(src: str, pattern) -> list:
+    """Matches of pattern that lie inside a JS string or template literal
+    (comments and regex literals excluded): the same text is present with the
+    strings kept and blank with them blanked."""
+    kept = js_code_only(src, keep_strings=True)
+    blank = js_code_only(src)
+    assert len(kept) == len(blank)
+    return [m.group(0) for m in pattern.finditer(kept) if not blank[m.start():m.end()].strip()]
+
+
+class WholeSite(unittest.TestCase):
+    """Task 13, the end state (spec 6 item 11, 7): the CSP is script-src
+    'self', so no page may carry an inline script, an inline handler or a
+    javascript: URL, including markup a script builds; and the mechanisms soft
+    navigation replaced are gone."""
+
+    def test_no_inline_script_anywhere(self):
+        # Every page, including login and setup, and the shell partials.
+        for path in html_files():
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path.name):
+                for m in _SCRIPT_TAG_RE.finditer(text):
+                    attrs = m.group(1)
+                    if attr(attrs, "src"):
+                        continue
+                    self.assertEqual(attr(attrs, "type"), "application/json",
+                                     f"{path.name}: inline <script{attrs}>")
+                for tag in _TAG_RE.findall(text):
+                    self.assertNotRegex(tag, _HANDLER_ATTR_RE, f"{path.name}: inline handler in {tag[:80]}")
+                    self.assertNotRegex(tag, _JS_URL_RE, f"{path.name}: javascript: URL in {tag[:80]}")
+        # HTML any script builds, in a string or a template literal.
+        for path in js_files():
+            src = path.read_text(encoding="utf-8")
+            with self.subTest(str(path.relative_to(STATIC))):
+                self.assertEqual(string_matches(src, _HANDLER_TEXT_RE), [])
+                self.assertEqual(string_matches(src, _JS_URL_RE), [])
+
+    def test_the_string_scan_sees_strings_only(self):
+        src = ("el.onclick = f; // onclick=\"x\"\n/* href=\"javascript:\" */ var r = /on[a-z]+=/;\n"
+               "var a = '<b onclick=\"x\">'; var b = `<img onerror=${h}>`; var c = \"javascript:void 0\";")
+        self.assertEqual(string_matches(src, _HANDLER_TEXT_RE), ["onclick=", "onerror="])
+        self.assertEqual(string_matches(src, _JS_URL_RE), ["javascript:"])
+
+    def test_the_data_block_is_json(self):
+        try:
+            from app import pages
+        except ImportError:  # pragma: no cover - the laptop has no FastAPI
+            self.skipTest("app.pages needs the container's dependencies")
+        block = pages.data_block({}, None, "dev", "news")
+        self.assertTrue(block.startswith('<script id="ws-data" type="application/json">'), block[:80])
+
+    def test_login_and_setup_scripts_are_files(self):
+        # They stay full-page documents (never router pages): their scripts
+        # moved out of the markup, nothing else about them changed.
+        for name in ("login", "setup"):
+            with self.subTest(name):
+                h = read(name)
+                self.assertNotIn('id="wsPage"', h)
+                self.assertIn(f'<script src="/static/js/{name}.js?v=1"></script>', h)
+                self.assertTrue((STATIC / "js" / f"{name}.js").is_file())
+        # The login card's branding is applied as soon as the card is parsed,
+        # before the first paint: the script is in <main>, after the card.
+        login = read("login")
+        tag = login.index('<script src="/static/js/login.js?v=1"></script>')
+        self.assertLess(login.index('id="authentikLoginBtn"'), tag)
+        self.assertLess(tag, login.index("</main>"))
+
+    def test_old_navigation_removed(self):
+        # The router's own hover prefetch replaces the sidebar's speculation
+        # rules and the service worker's page cache (spec 5.4).
+        for path in html_files():
+            with self.subTest(path.name):
+                self.assertNotIn("speculationrules", path.read_text(encoding="utf-8"))
+        # Cross-document view transitions: no page opts in. The router's own
+        # same-document transition keeps the shell's names under html.ws-vt.
+        theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        self.assertNotIn("@view-transition", theme)
+        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+        self.assertNotRegex(loader, r"addEventListener\('page(swap|reveal)'")
+        self.assertRegex(js_code_only(loader), r"window\.WSViewTransition = \{ hold: hold \}")
+        # The service worker keeps push and drops the page cache: no cache
+        # writes, no fetch or message handling. activate still deletes any
+        # ws-pages-* cache a previous worker left.
+        sw_src = (STATIC / "sw.js").read_text(encoding="utf-8")
+        sw = js_code_only(sw_src)
+        for gone in ("caches.open(", ".put(", "respondWith(", "PAGE_CACHE", "prefetched"):
+            self.assertNotIn(gone, sw, gone)
+        self.assertNotRegex(sw_src, r"addEventListener\('(fetch|message)'")
+        for kept in ("install", "activate", "push", "notificationclick"):
+            self.assertRegex(sw_src, rf"self\.addEventListener\('{kept}'", kept)
+        start = sw_src.index("self.addEventListener('activate'")
+        activate = sw_src[start:matching_brace(sw_src, sw_src.index("{", start)) + 1]
+        self.assertIn("'ws-pages-'", activate)
+        self.assertIn("caches.delete(", activate)
+        self.assertEqual(len(live_matches(sw_src, r"'ws-pages-'")), 1, "only the activate cleanup names the old cache")
+        # The shell no longer talks to a page cache or speculation rules.
+        shell = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
+        for gone in ("PAGE_CACHE", "postMessage", "refreshSpeculation", "wirePrefetch", "wireNav",
+                     "caches."):
+            self.assertNotIn(gone, shell, gone)
 
 
 if __name__ == "__main__":

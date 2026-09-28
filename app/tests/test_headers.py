@@ -43,6 +43,15 @@ class StaticHeaders(unittest.TestCase):
         self.assertEqual(r.headers["x-content-type-options"], "nosniff")
         self.assertNotIn("cdn.tailwindcss.com", r.headers["content-security-policy"])
 
+    def test_csp_script_src_is_self_only(self):
+        # Soft navigation's end state (spec 7): no page carries an inline
+        # script or handler, so script-src is exactly 'self'. No
+        # 'unsafe-inline', no 'unsafe-eval', no nonce, no other host.
+        r = self.client.get("/static/css/theme.css?v=1")
+        directives = [d.strip() for d in r.headers["content-security-policy"].split(";")]
+        script = [d for d in directives if d.split(" ", 1)[0] == "script-src"]
+        self.assertEqual(script, ["script-src 'self'"])
+
 
 if __name__ == "__main__":
     unittest.main()

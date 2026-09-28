@@ -1,5 +1,5 @@
-// The shell's view-transition names are on only while a transition runs
-// (theme-loader.js WSViewTransition, theme.css html.ws-vt). A named <main> is
+// The shell's view-transition names are on only while the router's soft swap
+// runs (theme-loader.js WSViewTransition, theme.css html.ws-vt). A named <main> is
 // a stacking context, so a name left on would put every fixed page overlay
 // under the phone's top bar. Runs theme-loader.js as it is, in a bare context
 // with just enough of a window and document for it to load.
@@ -17,14 +17,6 @@ let total = 0;
 function check(name, ok) {
   total += 1;
   if (!ok) { failed += 1; console.error('FAIL ' + name); }
-}
-const tick = () => new Promise((r) => setImmediate(r));
-
-function deferred() {
-  let resolve, reject;
-  const promise = new Promise((a, b) => { resolve = a; reject = b; });
-  promise.catch(() => {});
-  return { promise, resolve, reject };
 }
 
 function load() {
@@ -52,8 +44,7 @@ function load() {
   const ctx = { window, document, Promise, Math, JSON, fetch: () => new Promise(() => {}) };
   vm.createContext(ctx);
   vm.runInContext(src, ctx);
-  const fire = (type, e) => (listeners[type] || []).forEach((fn) => fn(e));
-  return { on: () => classes.has('ws-vt'), fire, api: window.WSViewTransition, listeners };
+  return { on: () => classes.has('ws-vt'), api: window.WSViewTransition, listeners };
 }
 
 // ---- nothing named at rest ----
@@ -61,8 +52,9 @@ function load() {
   const t = load();
   check('the names are off after the script loads', !t.on());
   check('hold() is exposed for the router', typeof (t.api && t.api.hold) === 'function');
-  check('pageswap and pagereveal are both listened for',
-    (t.listeners.pageswap || []).length === 1 && (t.listeners.pagereveal || []).length === 1);
+  // Full navigations have no cross-document transition to hold for.
+  check('pageswap and pagereveal are not listened for',
+    !(t.listeners.pageswap || []).length && !(t.listeners.pagereveal || []).length);
 }
 
 // ---- a soft swap: hold, release ----
@@ -88,68 +80,6 @@ function load() {
   check('one of two holds released: still on', t.on());
   b();
   check('both released: off', !t.on());
-}
-
-// ---- a full navigation: the new document ----
-{
-  const t = load();
-  const finished = deferred();
-  t.fire('pagereveal', { viewTransition: { finished: finished.promise } });
-  check('pagereveal with a transition turns the names on', t.on());
-  finished.resolve();
-  await tick();
-  check('...and its finish turns them off', !t.on());
-}
-
-// ---- a full navigation that is skipped or fails still clears ----
-{
-  const t = load();
-  const finished = deferred();
-  t.fire('pagereveal', { viewTransition: { finished: finished.promise } });
-  finished.reject(new Error('aborted'));
-  await tick();
-  check('a rejected finish turns them off too', !t.on());
-}
-
-// ---- the old document ----
-{
-  const t = load();
-  const finished = deferred();
-  t.fire('pageswap', { viewTransition: { finished: finished.promise } });
-  check('pageswap with a transition turns the names on before the snapshot', t.on());
-  finished.resolve();
-  await tick();
-  check('...and its finish turns them off (a page kept in the back/forward cache)', !t.on());
-}
-
-// ---- no transition, no names ----
-{
-  const t = load();
-  t.fire('pageswap', { viewTransition: null });
-  t.fire('pagereveal', { viewTransition: null });
-  check('no transition (reduced motion, Firefox, first load): the names stay off', !t.on());
-}
-
-// ---- a page restored mid-transition from the back/forward cache ----
-{
-  const t = load();
-  t.fire('pageswap', { viewTransition: { finished: new Promise(() => {}) } });
-  check('left mid-transition: on', t.on());
-  t.fire('pagereveal', { viewTransition: null });
-  check('restored with no transition running: off', !t.on());
-}
-
-// ---- a soft swap that starts while a full navigation's reveal is running ----
-{
-  const t = load();
-  const reveal = deferred();
-  t.fire('pagereveal', { viewTransition: { finished: reveal.promise } });
-  const release = t.api.hold();
-  reveal.resolve();   // startViewTransition skips the running one
-  await tick();
-  check('the reveal ending does not take the soft swap\'s names', t.on());
-  release();
-  check('the soft swap ending does', !t.on());
 }
 
 console.log(`${total - failed}/${total} view-transition cases pass`);

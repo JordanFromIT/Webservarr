@@ -85,16 +85,6 @@
   <span class="material-symbols-outlined text-steel-blue text-4xl animate-bounce motion-reduce:animate-none">arrow_downward</span>
 </div>
 
-<!-- The next page is fetched, and where the browser allows it rendered, while
-     the pointer is still over the link. Only nav links qualify: never
-     /auth/logout (a GET with side effects), the reader, or API URLs. -->
-<script type="speculationrules">
-{
-  "prerender": [{"where": {"selector_matches": "#desktopNav a, #drawerNav a"}, "eagerness": "moderate"}],
-  "prefetch":  [{"where": {"selector_matches": "#desktopNav a, #drawerNav a"}, "eagerness": "moderate"}]
-}
-</script>
-
 <!-- The shared toast and dialog (window.WSUI), once for every shell page: it
      runs here, before any page script and before router.js, and the pages
      do not load it again. -->

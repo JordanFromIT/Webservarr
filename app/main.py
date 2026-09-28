@@ -306,7 +306,9 @@ async def add_security_headers(request: Request, call_next):
 
     csp_directives = [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline'",
+        # No inline script, inline handler or javascript: URL anywhere
+        # (test_soft_nav WholeSite), so nothing needs 'unsafe-inline'.
+        "script-src 'self'",
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data: https:",

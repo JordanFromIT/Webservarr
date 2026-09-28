@@ -594,10 +594,10 @@ function start() {
     });
   }
 
-  /* The active link: the nav links stay the same nodes (the shell's listeners
-     live on them), and take the new page's classes and aria-current. A badge
-     is left alone; notifications.js owns it. A nav whose links changed (a
-     settings save) is replaced whole and wired again. */
+  /* The active link: the nav links stay the same nodes (focus and hover stay
+     on them), and take the new page's classes and aria-current. A badge is
+     left alone; notifications.js owns it. A nav whose links changed (a
+     settings save) is replaced whole. */
   function syncNav(doc) {
     ['desktopNav', 'drawerNav'].forEach(function (id) {
       const live = document.getElementById(id);
@@ -610,7 +610,6 @@ function start() {
       };
       if (hrefs(liveLinks) !== hrefs(freshLinks)) {
         live.innerHTML = fresh.innerHTML;
-        if (typeof WS.wireNav === 'function') WS.wireNav();
         return;
       }
       for (let i = 0; i < liveLinks.length; i++) {

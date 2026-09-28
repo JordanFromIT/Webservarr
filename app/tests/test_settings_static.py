@@ -567,8 +567,8 @@ class KitApi(unittest.TestCase):
         shell = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
         apply = function_body(shell, "applyShell")
         self.assertNotRegex(apply, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment")
-        nav = re.search(r"setHTML\(document\.getElementById\(id\), parts\.nav_html\); \}\);\s*wireNav\(\);", apply)
-        self.assertIsNotNone(nav, "the navs are written with setHTML, then wired")
+        nav = re.search(r"setHTML\(document\.getElementById\(id\), parts\.nav_html\); \}\);", apply)
+        self.assertIsNotNone(nav, "the navs are written with setHTML")
         for part in ("brand_html", "bar_brand_html"):
             self.assertIn(f"setHTML(n, parts.{part})", apply)
         for text in ("theme.textContent = parts.theme_css", "css.textContent = parts.custom_css"):
@@ -2185,14 +2185,12 @@ class InPlaceNewsRender(PageRoutesBase):
 
 
 class SwitchOver(unittest.TestCase):
-    def test_account_menu_opens_sign_in_and_page_cache_is_bumped(self):
+    def test_account_menu_opens_sign_in(self):
+        # The page cache this once bumped is gone (Task 13); the activate
+        # cleanup below still clears any a previous worker left.
         for partial in ("shell-header.html", "shell-sidebar.html"):
             text = (STATIC / "partials" / partial).read_text(encoding="utf-8")
             self.assertIn('href="/settings#sign-in"', text, partial)
-        sw = (STATIC / "sw.js").read_text(encoding="utf-8")
-        shell = (STATIC / "js" / "shell.js").read_text(encoding="utf-8")
-        self.assertIn("var PAGE_CACHE = 'ws-pages-v2';", sw)
-        self.assertIn("var PAGE_CACHE = 'ws-pages-v2';", shell)
 
     def test_account_menu_label_is_sentence_case(self):
         for partial in ("shell-header.html", "shell-sidebar.html"):
@@ -2212,8 +2210,9 @@ class SwitchOver(unittest.TestCase):
         self.assertTrue(live_matches(body, r"'ws-pages-'"), "activate must match the ws-pages- prefix")
 
     def test_activated_prerender_routes_from_the_hash(self):
-        # R113: the Settings nav link can prerender /settings (no hash) and the
-        # browser may activate it for /settings#sign-in. The kit booted on
+        # R113: the browser can prerender /settings (no hash) on its own (the
+        # nav's speculation rules are gone, but Chrome's address bar still
+        # does) and may activate it for /settings#sign-in. The kit booted on
         # General then, and activation fires no hashchange, so it re-routes
         # from the hash on prerenderingchange, through the same no-op-when-
         # current path as back/forward.
