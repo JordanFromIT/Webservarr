@@ -70,9 +70,10 @@ function hungKavita() {
 
 // A Kavita whose answers the test hands out, in any order.
 function fakeKavita() {
-  const k = { sent: [], open: [], most: 0, inFlight: 0 };
-  k.send = function (page) {
+  const k = { sent: [], signals: [], open: [], most: 0, inFlight: 0 };
+  k.send = function (page, signal) {
     k.sent.push(page);
+    k.signals.push(signal);
     k.inFlight += 1;
     k.most = Math.max(k.most, k.inFlight);
     return new Promise((resolve, reject) => {
@@ -441,6 +442,128 @@ if (typeof progressWriter !== 'function') {
     (answers.shift() || (() => {}))(true);
     await flush();
     check('confirmed follows the newest send after a timeout', w2.confirmed === 3, w2.confirmed);
+  }
+
+  // Fix round 5 (Q3): the soft-leave save is the visit's last word, and
+  // nothing retries it, so the deadline never aborts it. At the deadline the
+  // queue stops waiting for it (later writes and a reopen go on), but the
+  // request itself runs to completion, and its late answer still confirms
+  // when no newer send has been confirmed.
+  {
+    // Kavita is slow, not gone: the leave-save answers at 20 s.
+    const clock = fakeClock();
+    const k = fakeKavita();
+    const id = book();
+    const w1 = progressWriter(k.send, id, clock);
+    w1.known(3);
+    const done = w1.leave(9);
+    const w2 = progressWriter(k.send, id, clock);   // the book reopened meanwhile; it writes nothing
+    let dry = false;
+    w2.settled().then(() => { dry = true; });
+    await clock.advance(DEADLINE - 1);
+    check('the queue waits for a slow leave-save until the deadline', dry === false);
+    await clock.advance(1);
+    check('at the deadline the queue stops waiting for the leave-save', dry === true);
+    check('the leave-save is not aborted at the deadline', !!k.signals[0] && k.signals[0].aborted === false,
+      k.signals[0] && k.signals[0].aborted);
+    let answered = false;
+    done.then(() => { answered = true; });
+    await flush();
+    check('leave() settles when the queue stops waiting', answered === true);
+    await clock.advance(5000);                         // 20 s
+    check('the slow leave-save is still not aborted at 20 s', k.signals[0].aborted === false);
+    k.take(9).answer(true);
+    await flush();
+    check('a leave-save answering at 20 s confirms its page when nothing newer was sent', w2.confirmed === 9, w2.confirmed);
+    check('a slow leave-save leaves no timer behind', clock.pending === 0, clock.pending);
+    w2.leave(null);
+  }
+  {
+    // The reader's reopen: restore asks Kavita after RESTORE_WAIT_MS (known()
+    // with the old page, the leave-save not yet taken). The leave-save then
+    // lands late: Kavita holds its page, so confirmed says so.
+    const clock = fakeClock();
+    const k = fakeKavita();
+    const id = book();
+    progressWriter(k.send, id, clock).leave(9);
+    const w2 = progressWriter(k.send, id, clock);
+    let restored = false;
+    w2.settled(RESTORE, clock).then(() => { restored = true; });
+    await clock.advance(RESTORE);
+    check('a reopen restores after the cap while the leave-save is slow', restored === true);
+    w2.known(3);
+    await clock.advance(20000 - RESTORE);
+    k.take(9).answer(true);
+    await flush();
+    check('a late leave-save taken after the reopen\'s lookup confirms its page', w2.confirmed === 9, w2.confirmed);
+    w2.leave(9);
+    await flush();
+    check('so leaving on that page sends nothing more', JSON.stringify(k.sent) === '[9]', k.sent);
+  }
+  {
+    // A slow leave-save, a reopen and a new write: the new write goes at the
+    // deadline without the leave-save being aborted, and a later write
+    // already confirmed wins over the leave-save's later answer.
+    const clock = fakeClock();
+    const k = fakeKavita();
+    const id = book();
+    const w1 = progressWriter(k.send, id, clock);
+    w1.leave(9);
+    const w2 = progressWriter(k.send, id, clock);
+    w2.settled(RESTORE, clock);
+    await clock.advance(RESTORE);
+    w2.known(3);
+    await clock.advance(5000);                         // 10 s: the reader turns a page
+    w2.write(4);
+    check('a new write waits behind the slow leave-save', JSON.stringify(k.sent) === '[9]', k.sent);
+    await clock.advance(DEADLINE - 10000 - 1);
+    check('still waiting just before the deadline', JSON.stringify(k.sent) === '[9]', k.sent);
+    await clock.advance(1);
+    check('at the deadline the new write goes', JSON.stringify(k.sent) === '[9,4]', k.sent);
+    check('and the leave-save is not aborted', k.signals[0].aborted === false);
+    k.take(4).answer(true);
+    await flush();
+    check('the newer write confirms', w2.confirmed === 4, w2.confirmed);
+    await clock.advance(5000);                         // 20 s
+    k.take(9).answer(true);
+    await flush();
+    check('the leave-save answering later does not set confirmed back', w2.confirmed === 4, w2.confirmed);
+    check('the newer write\'s deadline was cleared', clock.pending === 0, clock.pending);
+    w2.leave(null);
+  }
+  {
+    // The same, but the leave-save answers before the newer write does:
+    // confirmed goes to the leave page, then on to the newer write.
+    const clock = fakeClock();
+    const k = fakeKavita();
+    const id = book();
+    progressWriter(k.send, id, clock).leave(9);
+    const w2 = progressWriter(k.send, id, clock);
+    w2.write(4);
+    await clock.advance(DEADLINE);
+    check('the new write went at the deadline', JSON.stringify(k.sent) === '[9,4]', k.sent);
+    k.take(9).answer(true);
+    await flush();
+    check('a late leave-save with an older write still out confirms', w2.confirmed === 9, w2.confirmed);
+    k.take(4).answer(true);
+    await flush();
+    check('then the newer write confirms over it', w2.confirmed === 4, w2.confirmed);
+    w2.leave(null);
+  }
+  {
+    // An ordinary write keeps its deadline: a hung write before the leave is
+    // aborted at 15 s, the leave-save behind it never is.
+    const clock = fakeClock();
+    const h = hungKavita();
+    const w = progressWriter(h.send, book(), clock);
+    w.write(5);
+    w.leave(6);
+    await clock.advance(DEADLINE);
+    check('an ordinary hung write is still aborted at the deadline', !!h.signals[0] && h.signals[0].aborted === true);
+    check('the leave-save goes after it', JSON.stringify(h.sent) === '[5,6]', h.sent);
+    await clock.advance(DEADLINE * 3);
+    check('the hung leave-save is never aborted', !!h.signals[1] && h.signals[1].aborted === false);
+    check('and holds no timer once the queue stopped waiting', clock.pending === 0, clock.pending);
   }
 
   // restoreProgress waits for the book's queue at most RESTORE_WAIT_MS

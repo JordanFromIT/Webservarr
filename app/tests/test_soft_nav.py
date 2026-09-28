@@ -699,7 +699,12 @@ class ReaderPage(unittest.TestCase):
         # the visit as the write does, on the writer's clock (the window).
         writer = function_body(code, "progressWriter")
         self.assertEqual(len(re.findall(r"\btimers\.setTimeout\(", code)), 1)
-        self.assertIn("timer = timers.setTimeout(function () { deadline.abort(); resolve(TIMED_OUT); }, WRITE_DEADLINE_MS);", writer)
+        # The soft-leave save is never aborted by it (fix round 5): the queue
+        # only stops waiting, and its answer still counts when it comes.
+        self.assertIn("timer = timers.setTimeout(function () { if (!last) deadline.abort(); resolve(TIMED_OUT); }, WRITE_DEADLINE_MS);", writer)
+        self.assertIn("if (last) answer.then(function (ok) { take(at, page, ok); });", writer)
+        self.assertIn("return enqueue(page, ++q.sends, true);", writer)
+        self.assertEqual(len(re.findall(r"\benqueue\(", writer)), 3, "the definition, go() and leave()")
         self.assertIn("const timers = clock || globalThis;", writer)
         self.assertIn("const deadline = new AbortController();", writer)
 

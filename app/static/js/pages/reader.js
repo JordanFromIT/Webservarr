@@ -68,8 +68,8 @@ const PANELS = ['loading', 'errorState', 'bookContent'];
  *                save joins the book's queue and goes after everything before
  *                it (send makes it a keepalive request the visit's end does
  *                not stop), so it lands last. Nothing more goes from this
- *                visit. Returns a promise that settles once it has answered
- *                (or was not needed).
+ *                visit. Returns a promise that settles once it has answered,
+ *                was not needed, or reached its deadline (below).
  *   sent(page)   a hard exit (the tab hidden or closed): there is no time to
  *                wait, so the caller sends a beacon at once and records it
  *                here as the newest send; writes still waiting in the queue
@@ -92,6 +92,19 @@ const PANELS = ['loading', 'errorState', 'bookContent'];
  * beacon's; the next turn writes the position again. The deadline's timer
  * is the clock's (the page's own window by default: it must outlive the
  * visit, as the write does), and is cleared when the write answers.
+ *
+ * The soft-leave save is the exception: it is the visit's last word and
+ * nothing retries it, so a Kavita that is slow rather than gone must still
+ * get it. Its deadline is never aborted. At the deadline the queue stops
+ * waiting for it (later writes and a reopen's lookup go on, and leave()'s
+ * promise settles), but the request runs to completion, and its answer,
+ * whenever it comes, confirms its page in send order: only when no newer
+ * send has been confirmed. The accepted residual: a leave-save still in
+ * flight after the deadline may be taken by Kavita after a newer write
+ * (a reopened visit's) and leave Kavita on the older page; the next turn
+ * writes the position again. If the book's entry has left progressQueues
+ * by the time it answers, the answer goes to the old entry and a new
+ * writer, which starts from Kavita's own report, never sees it.
  *
  * settled(ms, timers): a promise that settles when every write queued for
  * the book so far has answered, or after ms on timers (the visit's ctx), if
@@ -136,28 +149,35 @@ export function progressWriter(send, key, clock) {
   let closed = false;    // left: nothing more goes, and the writer lets go of the queue
   q.writers += 1;
 
+  // A tie is known() recording Kavita's report while this write was out:
+  // Kavita taking the write came after that report, so the write wins. Sends
+  // are numbered one each, so no other tie exists.
   function take(at, page, ok) {
-    if (ok === true && at > q.confirmedAt) {
+    if (ok === true && at >= q.confirmedAt) {
       q.confirmedAt = at;
       q.confirmed = page;
     }
   }
 
   // Behind every earlier write for the book (at once when there is none).
-  // at: this send's place in order.
-  function enqueue(page, at) {
+  // at: this send's place in order. last: the soft-leave save, which the
+  // deadline never aborts (the queue only stops waiting for it).
+  function enqueue(page, at, last) {
     function run() {
       if (at < q.confirmedAt || page === q.confirmed) return undefined;
       const deadline = new AbortController();
       let timer = 0;
       const late = new Promise(function (resolve) {
-        timer = timers.setTimeout(function () { deadline.abort(); resolve(TIMED_OUT); }, WRITE_DEADLINE_MS);
+        timer = timers.setTimeout(function () { if (!last) deadline.abort(); resolve(TIMED_OUT); }, WRITE_DEADLINE_MS);
       });
       let answer;
       try { answer = Promise.resolve(send(page, deadline.signal)); } catch (e) { answer = Promise.resolve(false); }
-      return Promise.race([answer.then(null, function () { return false; }), late]).then(function (ok) {
+      answer = answer.then(null, function () { return false; });
+      // The leave-save's answer counts whenever it comes, in send order.
+      if (last) answer.then(function (ok) { take(at, page, ok); });
+      return Promise.race([answer, late]).then(function (ok) {
         timers.clearTimeout(timer);
-        if (ok !== TIMED_OUT) take(at, page, ok);   // past the deadline: unknown, not taken
+        if (ok !== TIMED_OUT && !last) take(at, page, ok);   // past the deadline: unknown, not taken
       });
     }
     const done = (q.queued ? q.tail.then(run) : Promise.resolve(run()))
@@ -211,7 +231,7 @@ export function progressWriter(send, key, clock) {
         releaseQueue(book, q);
         return Promise.resolve();
       }
-      return enqueue(page, ++q.sends);
+      return enqueue(page, ++q.sends, true);
     }
   };
 }
@@ -629,7 +649,8 @@ export async function mount(ctx) {
    * visit's signal, and keepalive: a write in flight when the reader is left
    * finishes (it touches nothing on the page), so the last save, which the
    * writer sends after it, lands after it. Its own signal is the writer's
-   * deadline for this write alone (progressWriter). A failed write must never
+   * deadline for this write alone, never aborted for the soft-leave save
+   * (progressWriter). A failed write must never
    * interrupt reading: it is a background call, and lastSaved = -1 makes the
    * next save try again.
    */
