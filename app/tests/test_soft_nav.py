@@ -1056,6 +1056,33 @@ class OneShellOutsideThePage(unittest.TestCase):
         self.assertIn("shrink-0", attr(tag, "class").split())
 
 
+class NotificationsGoThroughTheRouter(unittest.TestCase):
+    """The bell's items and a push notification's click move the visitor
+    between pages like any link: a soft navigation, so whatever plays in
+    #wsPlayer keeps playing (final review I3). The router's side of the
+    worker's message runs in app/tests/js/router_runtime.mjs."""
+
+    def test_a_bell_item_navigates_softly(self):
+        src = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
+        start = src.index("var targetUrl = CATEGORY_URLS[n.category] || '/';")
+        after = src[start:start + 400]
+        self.assertRegex(after, r"if \(window\.WS && WS\.router && typeof WS\.router\.navigate === 'function'\) "
+                                r"WS\.router\.navigate\(targetUrl\);\s*else window\.location\.href = targetUrl;")
+
+    def test_a_push_click_asks_an_open_tab_first(self):
+        src = (STATIC / "sw.js").read_text(encoding="utf-8")
+        code = js_code_only(src)
+        start = code.index("function(event) {\n  event.notification.close();")
+        click = code[start:matching_brace(code, code.index("{", start)) + 1]
+        # The open tab is asked to navigate itself, and answers on a port;
+        # only a tab that does not answer is navigated by the worker, and a
+        # new window opens only when no tab is open.
+        self.assertIn("new MessageChannel()", click)
+        self.assertIn("postMessage({ type: 'ws-navigate', url: targetUrl }, [channel.port2])", src)
+        self.assertLess(click.index("postMessage("), click.index("client.navigate(targetUrl)"))
+        self.assertLess(click.index("client.navigate(targetUrl)"), click.index("openWindow(targetUrl)"))
+
+
 class SharedShellScripts(unittest.TestCase):
     """ui.js (the toast and dialog) loads once, from the shell, on every shell
     page; the router closes dialogs before a swap; WS.getJSON takes the page's

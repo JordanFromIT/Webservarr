@@ -1238,6 +1238,22 @@ function start() {
     if (history.state === null) history.replaceState({ ws: 1, scrollY: Math.round(scroller().scrollTop) }, '', location.href);
   });
 
+  // A push notification's click (sw.js): the worker asks this tab to open
+  // the address itself, and loads it in the tab only if nobody answers.
+  // Only an address a link could take here (same origin, a page); the
+  // answer goes back on the port the worker sent.
+  if (navigator.serviceWorker && typeof navigator.serviceWorker.addEventListener === 'function') {
+    navigator.serviceWorker.addEventListener('message', function (e) {
+      const d = e.data;
+      if (!d || d.type !== 'ws-navigate' || typeof d.url !== 'string') return;
+      if (!qualifies(d.url, location.href, {})) return;
+      const url = new URL(d.url, location.href);
+      if (e.ports && e.ports[0]) e.ports[0].postMessage({ ok: true });
+      go(url.href, {});
+    });
+    if (typeof navigator.serviceWorker.startMessages === 'function') navigator.serviceWorker.startMessages();
+  }
+
   // ---- First load (spec 5.3) ----
 
   document.querySelectorAll('script[data-ws-page-script][src]').forEach(function (s) {

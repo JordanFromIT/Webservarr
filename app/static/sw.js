@@ -78,6 +78,9 @@ self.addEventListener('push', function(event) {
   );
 });
 
+// How long an open tab has to say it took a notification's address itself.
+var NAVIGATE_ANSWER_MS = 1500;
+
 self.addEventListener('notificationclick', function(event) {
   event.notification.close();
 
@@ -99,16 +102,33 @@ self.addEventListener('notificationclick', function(event) {
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
-      // Try to focus an existing tab at the same origin
+      // An open tab of the site, the focused one first.
+      var client = null;
       for (var i = 0; i < clientList.length; i++) {
-        var client = clientList[i];
-        if (client.url.indexOf(self.location.origin) === 0 && 'focus' in client) {
-          client.focus();
-          client.navigate(targetUrl);
-          return;
-        }
+        var c = clientList[i];
+        if (c.url.indexOf(self.location.origin) !== 0 || !('focus' in c)) continue;
+        if (!client || (c.focused && !client.focused)) client = c;
       }
-      // No existing tab found — open a new one
+      if (client) {
+        var focused = client.focus();
+        // The tab moves itself (router.js): a soft navigation, so whatever
+        // plays there keeps playing. A tab without the router (sign-in, an
+        // older page) does not answer; the worker then loads the address in
+        // it, as it always did.
+        return new Promise(function(resolve) {
+          var channel = new MessageChannel();
+          var timer = setTimeout(function() { resolve(false); }, NAVIGATE_ANSWER_MS);
+          channel.port1.onmessage = function(e) {
+            clearTimeout(timer);
+            resolve(!!(e.data && e.data.ok));
+          };
+          client.postMessage({ type: 'ws-navigate', url: targetUrl }, [channel.port2]);
+        }).then(function(taken) {
+          if (taken || !('navigate' in client)) return focused;
+          return client.navigate(targetUrl);
+        });
+      }
+      // No tab open: a new one.
       if (self.clients.openWindow) {
         return self.clients.openWindow(targetUrl);
       }

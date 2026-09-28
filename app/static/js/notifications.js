@@ -341,7 +341,9 @@
       }
       closeDropdown();
       var targetUrl = CATEGORY_URLS[n.category] || '/';
-      window.location.href = targetUrl;
+      // Like any link: a soft navigation, so what plays in #wsPlayer plays on.
+      if (window.WS && WS.router && typeof WS.router.navigate === 'function') WS.router.navigate(targetUrl);
+      else window.location.href = targetUrl;
     });
 
     return item;
