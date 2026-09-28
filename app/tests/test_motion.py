@@ -376,7 +376,8 @@ class HoverLift(unittest.TestCase):
         # requests discover poster is itself the click target and keeps it,
         # the search card's own Request button takes it, and so do a collapsed
         # integration card (its header button fills it) and the WSUI buttons.
-        index = (STATIC / "index.html").read_text(encoding="utf-8")
+        index = (STATIC / "index.html").read_text(encoding="utf-8") + \
+            (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")   # its cards
         news = (STATIC / "news.html").read_text(encoding="utf-8") + \
             (STATIC / "js" / "pages" / "news.js").read_text(encoding="utf-8")   # its cards
         requests = (STATIC / "requests.html").read_text(encoding="utf-8")

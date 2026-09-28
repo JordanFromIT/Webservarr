@@ -2005,7 +2005,9 @@ class InPlaceNews(unittest.TestCase):
         self.assertNotIn("hidden", view_all.group(1).split())
         row = home[home.index('<section data-arrive="news">'):home.index('id="newsViewAll"')]
         self.assertIn('<div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">', row)
-        script = "\n".join(re.findall(r"<script>(.*?)</script>", home, re.S))
+        # Home renders its news in its page module (soft navigation).
+        script = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")
+        self.assertNotIn("<script>", home)
         body = function_body(js_code_only(script), "renderNews")
         self.assertNotIn("classList.add(", body)
         self.assertEqual(len(live_matches(script, r"viewAll\.classList\.remove\('invisible'\);")), 1)

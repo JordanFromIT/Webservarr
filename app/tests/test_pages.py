@@ -74,16 +74,16 @@ HOME_LOADERS = {
 
 
 def home_guard_problems(page: str) -> list:
-    """What is wrong with how index.html's DOMContentLoaded handler gates loads.
+    """What is wrong with how Home's page module (pages/home.js) gates loads
+    in mount(ctx).
 
     Works on live code only (js_code_only / live_matches), so neither a
     comment nor a string can stand in for a guard or a call. Raw-source
     positions are mapped into the code-only text by measuring the code-only
-    form of the source before them."""
-    raw = next((s for s in re.findall(r"<script>(.*?)</script>", page, re.S)
-                if "DOMContentLoaded" in s), None)
-    if raw is None:
-        return ["no inline script with a DOMContentLoaded handler"]
+    form of the source before them. Calls inside a named function that mount
+    declares (a loader, the stream pager) are that function's business, not
+    the page's load order, and are not checked."""
+    raw = page
     code = js_code_only(raw)
 
     def at(p):
@@ -94,18 +94,29 @@ def home_guard_problems(page: str) -> list:
         return found[0] if len(found) == 1 else None
 
     problems = []
-    start = only(r"addEventListener\('DOMContentLoaded', async function\s*\(\)\s*\{")
+    start = only(r"export async function mount\(ctx\)\s*\{")
     if start is None:
-        return ["the DOMContentLoaded handler is not live code"]
+        return ["mount(ctx) is not live code"]
     h_open = at(start.end()) - 1
     h_close = matching_brace(code, h_open)
 
     def in_handler(c):
         return h_open < c < h_close
 
-    # sectionOn reads the payload and treats anything but false as on; the
-    # sections that are off are marked arrived before the wait on checkAuth.
-    for pattern in (r"var homeSections = \(window\.WEBSERVARR_THEME \|\| \{\}\)\.home_sections \|\| \{\};",
+    decls = []
+    for m in live_matches(raw, r"\bfunction\s+\w+\s*\([^)]*\)\s*\{"):
+        o = at(m.end()) - 1
+        if in_handler(o):
+            decls.append((at(m.start()), matching_brace(code, o)))
+
+    def in_decl(c):
+        return any(a <= c <= b for a, b in decls)
+
+    # sectionOn reads the page's own payload and treats anything but false as
+    # on; the sections that are off are marked arrived before the wait on
+    # checkAuth.
+    for pattern in (r"var branding = \(ctx\.data && ctx\.data\.branding\) \|\| window\.WEBSERVARR_THEME \|\| \{\};",
+                    r"var homeSections = branding\.home_sections \|\| \{\};",
                     r"function sectionOn\(id\) \{ return homeSections\[id\] !== false; \}"):
         if only(pattern) is None:
             problems.append("missing live: " + pattern)
@@ -125,9 +136,9 @@ def home_guard_problems(page: str) -> list:
         inside = [g for g in guards if g[1] <= c <= g[2]]
         return min(inside, key=lambda g: g[2] - g[1])[0] if inside else None
 
-    # WS.poll(..., interval) spans inside the handler.
+    # ctx.poll(..., interval) spans inside the handler.
     polls = []
-    for m in live_matches(raw, r"WS\.poll\("):
+    for m in live_matches(raw, r"ctx\.poll\("):
         o = at(m.end()) - 1
         if not in_handler(o):
             continue
@@ -145,7 +156,7 @@ def home_guard_problems(page: str) -> list:
     seen = set()
     for m in live_matches(raw, r"\b(" + "|".join(HOME_LOADERS) + r")\b(?=\s*[(,])"):
         c = at(m.start())
-        if not in_handler(c):
+        if not in_handler(c) or in_decl(c):
             continue
         name = m.group(1)
         want, got = HOME_LOADERS[name], guard_of(c)
@@ -400,12 +411,12 @@ class ShellRendering(unittest.TestCase):
         self.assertNotIn("data-home-hide", html_tag(render(b=b, name="calendar")))
 
     def test_index_skips_sections_that_are_off(self):
-        self.assertEqual(home_guard_problems(static_text("index.html")), [])
+        self.assertEqual(home_guard_problems(static_text("js", "pages", "home.js")), [])
 
     def test_home_guard_check_rejects_unguarded_loads(self):
         # Each mutation still passes a plain substring check for "sectionOn(";
         # the live-code check must not.
-        page = static_text("index.html")
+        page = static_text("js", "pages", "home.js")
         guard = r"if \(sectionOn\('\w+'\)\) "
         self.assertTrue(re.search(guard, page), "the guards this test mutates are gone")
         reverted = re.sub(guard, "", page)                  # every call unconditional
@@ -418,7 +429,9 @@ class ShellRendering(unittest.TestCase):
                 self.assertTrue(any(p.startswith(loader + " guarded by None") for p in problems),
                                 (name, loader, problems))
             self.assertIn("a 1 s poll runs outside the sectionOn('services') block", problems, name)
-        badge = page.replace("loadRequestCount();   //", "if (sectionOn('requests')) loadRequestCount();   //", 1)
+        self.assertEqual(page.count("first.push(loadRequestCount());   //"), 1)
+        badge = page.replace("first.push(loadRequestCount());   //",
+                             "if (sectionOn('requests')) first.push(loadRequestCount());   //", 1)
         self.assertIn("loadRequestCount guarded by 'requests', expected None", home_guard_problems(badge))
 
     def test_home_section_css_is_scoped_to_the_hide_attribute(self):
@@ -868,8 +881,8 @@ class NewsCardsHoldTheirSkeleton(unittest.TestCase):
         for name, tag, cards in (("index.html", "h4", 2), ("news.html", "h2", 3)):
             with self.subTest(name):
                 page = static_text(name)
-                # News renders its cards in its page module (soft navigation).
-                cards_js = static_text("js", "pages", "news.js") if name == "news.html" else page
+                # Each renders its cards in its page module (soft navigation).
+                cards_js = static_text("js", "pages", "news.js" if name == "news.html" else "home.js")
                 self.assertIn(titles[name], cards_js)
                 # Fix round 2: an open card (pinned, new, or after Read more) has no title gap.
                 self.assertIn("if (title) title.classList.toggle('min-h-12', !nowOpen);", cards_js)
@@ -884,7 +897,7 @@ class StreamsPreview(unittest.TestCase):
     Home, through the same renderer as real ones, and nobody else anything."""
 
     def setUp(self):
-        self.page = static_text("index.html")
+        self.page = static_text("js", "pages", "home.js")   # Home's page module
         self.code = js_code_only(self.page)
 
     def body_of(self, signature):
@@ -894,7 +907,7 @@ class StreamsPreview(unittest.TestCase):
         return self.page[start:start + (matching_brace(self.code, open_brace) - code_start) + 1]
 
     def test_the_flag_needs_the_url_the_session_admin_and_the_server_mark(self):
-        gate = ("_streamsPreview = new URLSearchParams(location.search).get('preview') === 'streams' &&\n"
+        gate = ("_streamsPreview = ctx.url.searchParams.get('preview') === 'streams' &&\n"
                 "        user.is_admin === true && document.documentElement.hasAttribute('data-admin');")
         self.assertEqual(self.page.count(gate), 1)
         self.assertEqual(len(live_matches(self.page, r"_streamsPreview = ")), 2)   # the false default and the gate
@@ -910,10 +923,11 @@ class StreamsPreview(unittest.TestCase):
     def test_samples_go_through_the_real_renderer_and_the_poll_never_fetches(self):
         loader = self.body_of("async function loadActiveStreams()")
         self.assertTrue(loader.split("\n")[1].strip().startswith(
-            "if (_streamsPreview) { renderActiveStreams(sampleStreams()); return; }"), loader)
+            "if (_streamsPreview) { renderActiveStreams(sampleSet()); return; }"), loader)
         self.assertLess(loader.index("_streamsPreview"), loader.index("/api/integrations/active-streams"))
         # The sample label only shows while the preview is on, laid over the artwork.
-        self.assertIn("${_streamsPreview ? '<span class=\"absolute top-3 left-3 ", self.page)
+        self.assertIn("${preview ? '<span class=\"absolute top-3 left-3 ", self.page)
+        self.assertIn("return renderStreamCard(stream, _streamsPreview);", self.body_of("function renderActiveStreams(streams)"))
 
     def test_three_samples_direct_play_transcode_and_no_artwork(self):
         samples = self.body_of("function sampleStreams()")
@@ -925,7 +939,8 @@ class StreamsPreview(unittest.TestCase):
                          ["Sample Movie", "Sample Show", "Sample Movie Without Artwork"])
 
     def test_sample_data_holds_no_instance_strings_or_real_urls(self):
-        block = self.page[self.page.index("var _streamsPreview = false;"):self.page.index("// A Direct Play card with nothing in it:")]
+        block = self.page[self.page.index("// Sample artwork:"):self.page.index("// A Direct Play card with nothing in it:")]
+        self.assertIn("function sampleStreams()", block)
         self.assertNotIn("https:", block)
         self.assertNotIn("/api/", block)
         self.assertNotIn("/library/", block)          # no Plex artwork path
@@ -934,7 +949,7 @@ class StreamsPreview(unittest.TestCase):
             self.assertNotIn(bad.lower(), block.lower(), f"instance-specific string #{i}")
 
     def test_card_words_use_the_pure_status_colours(self):
-        card = self.body_of("function renderActiveStreams(streams)")
+        card = self.body_of("function renderStreamCard(stream, preview)")
         for cls in ('text-status-ok text-xs font-bold', 'text-status-warn text-[11px] font-bold',
                     'text-status-warn/70 hover:text-status-warn', 'text-status-warn/80'):
             self.assertIn(cls, card)

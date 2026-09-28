@@ -14,7 +14,7 @@ from app.tests.test_settings_static import function_body
 from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
-CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki"]
+CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -504,6 +504,91 @@ class WikiFixRound1(unittest.TestCase):
         boot = router[router.index("const firstPage = document.getElementById("):]
         self.assertRegex(boot, r"return mountPage\(mod, moduleUrl, new URL\(location\.href\)\)\.then\(function \(\) \{\s*"
                                r"restoreScroll\(y\);\s*if \(!y\) scrollToHash\(new URL\(location\.href\)\);")
+
+
+class HomePage(unittest.TestCase):
+    """Home reads on the page's signal and refreshes through ctx.poll, so no
+    gauge, status or section poll outlives a visit; its service list stays the
+    one request the header pill shares; its buttons are data-actions on one
+    listener; module state is data, never DOM (Task 10)."""
+
+    def code(self):
+        return js_code_only(module_source("index"))
+
+    def test_every_read_is_on_the_pages_signal(self):
+        code = self.code()
+        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 4, "news, streams, requests, releases")
+        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*?, \{ signal: signal \}\)", code)), 4)
+        fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
+        self.assertEqual(len(fetches), 2, "the gauges and the sidebar's request badge")
+        for at in fetches:
+            self.assertIn("signal: signal", ",".join(call_args(code, at + len("fetch"))), code[at:at + 60])
+        # A page left mid-request says nothing and writes nothing.
+        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 5,
+                         "four onError handlers and the gauges' catch")
+        self.assertRegex(code, r"catch \(e\) \{\s*if \(signal\.aborted \|\| isAbort\(e\)\) return;")
+        for name in ("renderNews", "renderActiveStreams", "renderRecentRequests", "renderServices",
+                     "renderUpcomingReleases"):
+            self.assertRegex(function_body(code, name), r"^\s*if \(signal\.aborted\) return;", name)
+
+    def test_the_service_list_is_the_pills_request(self):
+        src = module_source("index")
+        self.assertIn("return WS.swr('services', WS.serviceStatus, renderServices);", src)
+        self.assertNotIn("service-status", src, "never a request of its own")
+        shell = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
+        body = function_body(shell, "serviceStatus")
+        # Shared while on its way and for 5 s after, by the clock: a timer
+        # would be the asking page's, and outlive it.
+        self.assertIn("if (statusPromise && (!statusAt || Date.now() - statusAt < 5000)) return statusPromise;", body)
+        self.assertIn("statusAt = Date.now();", body)
+        self.assertNotRegex(body, r"\bsetTimeout\(")
+        leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
+        self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#wireNav', 'shell.js#serviceStatus'];", leaks)
+
+    def test_timers_and_refresh_are_the_pages(self):
+        code = self.code()
+        self.assertNotRegex(code, r"\bWS\.poll\(")
+        self.assertNotRegex(code, r"(?<![.\w])setTimeout\(", "one-off timers go through ctx.setTimeout")
+        self.assertEqual(len(re.findall(r"\bctx\.poll\(", code)), 3)
+        self.assertIn("ctx.poll(loadSystemStats, 1000);", code)
+        self.assertIn("ctx.poll(tickLastChecked, 1000);", code)
+        self.assertRegex(code, r"ctx\.poll\(function\(\) \{[^}]*loadRequestCount\(\);\s*\}, 30000\);")
+        # The first read is the page's own (a poll on screen reads nothing at once).
+        self.assertIn("first.push(loadRequestCount());", code)
+
+    def test_module_state_is_data(self):
+        # Top level: constants that hold data, and functions. No let or var,
+        # so nothing there can keep a node (or a visit's state) alive.
+        src = module_source("index")
+        names = re.findall(r"^(?:const|let|var) (\w+)", src, re.M)
+        self.assertEqual(sorted(names), ["HOMELAB_ICONS", "NEWS_FRESH_MS", "REQUEST_TONE_CLASSES", "SECTIONS",
+                                         "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE"])
+        self.assertNotRegex(src, r"^(?:let|var) ", )
+        # Every lookup stays inside the page.
+        self.assertNotRegex(self.code(), r"\bdocument\.getElementById\(")
+
+    def test_the_buttons_are_data_actions(self):
+        h = read("index")
+        for action in ("streams-prev", "streams-next"):
+            self.assertEqual(h.count(f'data-action="{action}"'), 1, action)
+        self.assertNotIn("scrollStreams(", h)
+        src = module_source("index")
+        self.assertEqual(src.count('data-action="stream-info"'), 1)
+        for action in ("streams-prev", "streams-next", "stream-info"):
+            self.assertIn(f"case '{action}':", src, action)
+        # One listener, on the page, for them and the news cards' Read more.
+        code = self.code()
+        self.assertEqual(re.findall(r"\b(\w+)\.addEventListener\(", code), ["root"])
+        self.assertIn("var toggle = t.closest('[data-news-toggle]');", src)
+
+    def test_sections_follow_the_pages_own_payload(self):
+        # The payload of the page the router swapped in, as html[data-home-hide]
+        # is (the router copies <html>'s data-* flags on every swap).
+        src = module_source("index")
+        self.assertIn("var branding = (ctx.data && ctx.data.branding) || window.WEBSERVARR_THEME || {};", src)
+        self.assertNotIn("WEBSERVARR_THEME ||", src.replace("window.WEBSERVARR_THEME || {};", ""))
+        router = function_body(js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8")), "syncHtmlFlags")
+        self.assertIn("if (a.name.indexOf('     ') === 0 && !fresh.hasAttribute(a.name)) root.removeAttribute(a.name);", router)
 
 
 class PageOffBanner(unittest.TestCase):

@@ -302,25 +302,61 @@ class ShellContract(unittest.TestCase):
         for hook in ("data-push-prompt-enable", "data-push-prompt-later", "data-push-prompt-actions"):
             self.assertIn(hook, inner, hook)
         self.assertRegex(inner, r'<p data-push-prompt-msg[^>]*aria-live="polite"')
-        # The decision runs inside the section (a visible sibling would add a
-        # space-y gap) and before first paint, from what the page already knows.
-        script = re.search(r"<script>(.*?)</script>", inner, re.S)
-        self.assertIsNotNone(script, "the deciding script sits inside #pushPrompt")
-        code = js_code_only(script.group(1))
-        for needle in ("has_email", "vapid_public_key", "Notification.permission", "dataset.dismissKey",
-                       "dataset.dismissDays", "card.hidden = false"):
+        # No script in the page (a soft-navigation page, test_soft_nav): the
+        # decision is made before the page is drawn from what the page already
+        # knows, by theme-loader.js in <head> on a full load and by the page
+        # module on every visit.
+        self.assertNotIn("<script", inner)
+        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+        m = re.search(r"\bfunction offer\(key, days\)\s*\{", loader)
+        self.assertIsNotNone(m, "theme-loader.js: the offer rule")
+        offer = loader[m.end():matching_brace(loader, m.end() - 1)]
+        code = js_code_only(offer)
+        for needle in ("has_email", "vapid_public_key", "Notification.permission", "localStorage.getItem(key)",
+                       "days * 86400000"):
             self.assertIn(needle, code, needle)
-        self.assertTrue(live_matches(script.group(1), r"""Notification\.permission\s*!==\s*['"]default['"]"""))
+        self.assertTrue(live_matches(offer, r"""Notification\.permission\s*!==\s*['"]default['"]"""))
+        self.assertIn("window.WSPushOffer = offer;", loader)
+        # A full load of Home marks <html>, with the card's own key and days,
+        # and the mark shows the card (and its space-y gap) at the first paint.
+        key = re.search(r'data-dismiss-key="([^"]+)"', attrs).group(1)
+        days = re.search(r'data-dismiss-days="([^"]+)"', attrs).group(1)
+        self.assertIn(f"var DISMISS_KEY = '{key}';", loader)
+        self.assertIn(f"var DISMISS_DAYS = {days};", loader)
+        self.assertRegex(js_code_only(loader), r"if \(\(window\.WS_DATA \|\| \{\}\)\.page === '     ' && offer\(DISMISS_KEY, DISMISS_DAYS\)\) \{\s*"
+                                               r"document\.documentElement\.setAttribute\('               ', ''\);")
+        self.assertIn("'data-push-offer'", loader)
+        theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        self.assertIn("html[data-push-offer] #pushPrompt[hidden] { display: block; }", theme)
+        self.assertIn("html[data-push-offer]:not([data-home-hide]) #pushPrompt[hidden] { margin-bottom: 2rem; }", theme)
+        # The page module decides again for its visit, before anything it
+        # awaits (so before the swapped page is drawn), takes the mark away and
+        # has notifications.js wire the card with the visit's signal.
+        home = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")
+        mount = home[home.index("export async function mount(ctx) {"):]
+        decide = mount.index("card.hidden = !(typeof window.WSPushOffer === 'function' &&")
+        self.assertIn("window.WSPushOffer(card.dataset.dismissKey, Number(card.dataset.dismissDays))", mount)
+        self.assertLess(decide, mount.index("await "))
+        self.assertLess(decide, mount.index("document.documentElement.removeAttribute('data-push-offer');"))
+        self.assertIn("if (!card.hidden && typeof window.initPushPrompt === 'function') window.initPushPrompt(card, signal);", mount)
         # Home only.
         for n in SHELL_PAGES:
             if n != "index":
                 self.assertNotIn("pushPrompt", read(n), n)
-        # notifications.js wires that card and writes the dismissal to its key.
+        # notifications.js wires the card it is given (not at its own start:
+        # each visit brings a new card) and writes the dismissal to its key.
         src = (STATIC / "js" / "notifications.js").read_text(encoding="utf-8")
         m = re.search(r"\bfunction init\(\)\s*\{", src)
         init = src[m.end():matching_brace(src, m.end() - 1)]
-        self.assertTrue(live_matches(init, r"\binitPushPrompt\(\s*\)"), "init() wires the prompt")
-        self.assertTrue(live_matches(src, r"""getElementById\(\s*['"]pushPrompt['"]\s*\)"""))
+        self.assertFalse(live_matches(init, r"\binitPushPrompt\("), "the page module wires the prompt")
+        self.assertTrue(live_matches(src, r"\bfunction initPushPrompt\(card, signal\)"))
+        self.assertTrue(live_matches(src, r"window\.initPushPrompt = initPushPrompt;"))
+        self.assertFalse(live_matches(src, r"""getElementById\(\s*['"]pushPrompt['"]\s*\)"""))
+        m = re.search(r"\bfunction initPushPrompt\(card, signal\)\s*\{", src)
+        wiring = src[m.end():matching_brace(src, m.end() - 1)]
+        adds = live_matches(wiring, r"\b(\w+)\.addEventListener\(")
+        self.assertEqual(sorted(a.group(1) for a in adds), ["enableBtn", "laterBtn"])
+        self.assertEqual(len(live_matches(wiring, r"\}, \{ signal: signal \}\);")), 2, "both end with the visit")
         self.assertTrue(live_matches(src, r"localStorage\.setItem\(\s*card\.dataset\.dismissKey\b"))
         for hook in ("data-push-prompt-enable", "data-push-prompt-later", "data-push-prompt-msg",
                      "data-push-prompt-actions"):

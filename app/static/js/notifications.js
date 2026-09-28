@@ -909,8 +909,10 @@
 
   // ---- Home push prompt ----
   //
-  // index.html decides before first paint whether to show #pushPrompt (so it
-  // never moves content after load); this wires its buttons. "Not now" and a
+  // Whether Home shows #pushPrompt is decided before the page is drawn (so it
+  // never moves content after load): theme-loader.js WSPushOffer, called from
+  // <head> on a full load and by pages/home.js on every visit, which then
+  // calls initPushPrompt to wire the card's buttons. "Not now" and a
   // closed browser prompt are remembered for data-dismiss-days under
   // data-dismiss-key. A denied prompt needs nothing stored: the page only
   // offers push while the permission is still "default".
@@ -997,8 +999,11 @@
     return false;
   }
 
-  function initPushPrompt() {
-    var card = document.getElementById('pushPrompt');
+  /** Wire the card on this visit of Home. Called by the page module
+   *  (pages/home.js) once it has shown the card, with the visit's signal: a
+   *  soft navigation brings a new card each time, and the old one's listeners
+   *  end with the page. */
+  function initPushPrompt(card, signal) {
     if (!card || card.hidden) return;
     var msg = card.querySelector('[data-push-prompt-msg]');
     var actions = card.querySelector('[data-push-prompt-actions]');
@@ -1009,7 +1014,7 @@
     laterBtn.addEventListener('click', function() {
       rememberPromptDismissed(card);
       hidePushPrompt(card);
-    });
+    }, { signal: signal });
 
     enableBtn.addEventListener('click', function() {
       setPromptBusy(enableBtn, true);
@@ -1049,7 +1054,7 @@
           msg.textContent = PUSH_MESSAGES[kind];
         }
       });
-    });
+    }, { signal: signal });
   }
 
   // ---- Close on outside click ----
@@ -1092,7 +1097,6 @@
     // Register service worker, then repair a push subscription the server lost
     registerServiceWorker();
     syncPushSubscription();
-    initPushPrompt();
 
     // Fetch initial count
     fetchUnreadCount().then(function(count) {
@@ -1113,5 +1117,6 @@
 
   // Expose
   window.initNotifications = init;
+  window.initPushPrompt = initPushPrompt;
 
 })();

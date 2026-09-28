@@ -641,7 +641,8 @@ class HomeAndEbooksDetails(unittest.TestCase):
     """R150: small Home and eBooks fixes."""
 
     def test_them(self):
-        home = (STATIC / "index.html").read_text(encoding="utf-8")
+        home = (STATIC / "index.html").read_text(encoding="utf-8") + \
+            (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")   # its cards
         clamp = "${Math.min(100, Math.max(0, Math.round(progress) || 0))}%"
         self.assertEqual(home.count(clamp), 2)          # the label and the bar
         self.assertNotIn("${Math.round(progress)}%", home)

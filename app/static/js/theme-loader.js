@@ -149,6 +149,42 @@
 })();
 
 /*
+ * Home's offer to turn on push (#pushPrompt, index.html), decided before the
+ * first paint so the card never pushes the page down after load.
+ *
+ * WSPushOffer(key, days) is true for an account push can reach, on a browser
+ * that supports it, that has never been asked, and that did not say "Not now"
+ * (localStorage[key], a time) within days. A full load of Home decides here
+ * and marks <html data-push-offer>, which shows the card (theme.css); the page
+ * module (pages/home.js) then decides again for every visit, soft ones
+ * included, sets the card's hidden attribute and takes the mark off. The key
+ * and days are the card's data-dismiss-key and data-dismiss-days.
+ */
+(function () {
+  'use strict';
+  var DISMISS_KEY = 'ws-push-prompt-dismissed';
+  var DISMISS_DAYS = 30;
+
+  function offer(key, days) {
+    var user = (window.WS_DATA || {}).user || {};
+    if (!user.has_email || !(window.WEBSERVARR_THEME || {}).vapid_public_key) return false;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return false;
+    if (Notification.permission !== 'default') return false;
+    try {
+      var at = parseInt(localStorage.getItem(key) || '', 10);
+      if (at && Date.now() - at < days * 86400000) return false;
+    } catch (e) {}
+    return true;
+  }
+
+  window.WSPushOffer = offer;
+
+  if ((window.WS_DATA || {}).page === 'index' && offer(DISMISS_KEY, DISMISS_DAYS)) {
+    document.documentElement.setAttribute('data-push-offer', '');
+  }
+})();
+
+/*
  * The shell's view-transition names, only while a transition runs.
  *
  * theme.css names the sidebar, header, mobile bar and <main> under
