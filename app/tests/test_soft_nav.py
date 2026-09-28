@@ -14,7 +14,7 @@ from app.tests.test_settings_static import function_body
 from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
-CONVERTED = ["news"]
+CONVERTED = ["news", "settings"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -261,6 +261,24 @@ class LeaveGuard(unittest.TestCase):
         m = re.search(r"window\.addEventListener\('\s+', function \(\) \{\s*if \(!current \|\| !samePage\(location\.href, current\.url\)\) return;"
                       r"\s*current\.url = location\.href;\s*if \(history\.state === null\) history\.replaceState\(\{ ws: 1,", code)
         self.assertIsNotNone(m)
+
+    def test_settings_guards_every_way_out(self):
+        page = js_code_only(module_source("settings"))
+        self.assertRegex(page, r"ctx\.beforeLeave\(function \(url, how\) \{\s*return Promise\.resolve\(window\.WSSettings\.canLeave\(how\)\)")
+        kit = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        kit_code = js_code_only(kit)
+        can = function_body(kit_code, "canLeave")
+        self.assertIn("if (S.leaving || !anyDirty()) return true;", can)
+        self.assertIn("return askLeave()", can)
+        # A link asks too (its listener on document runs before the router's
+        # on window), then is followed as it would have been.
+        self.assertIn("e.preventDefault();\n      askLeave().then(function (ok) {", kit)
+        self.assertIn("if (a.isConnected) a.click();", kit)
+        # Yes throws the changes away, so nothing asks twice (beforeunload
+        # included) and no preview outlives the page.
+        self.assertIn("if (ok) discardAll();", function_body(kit_code, "askLeave"))
+        self.assertIn("discardAll();", function_body(kit_code, "end"))
+        self.assertIn("signal.addEventListener('     ', end, { once: true });", function_body(kit_code, "init"))
 
 
 # The debug tools (spec 7): a leak checker that wraps addEventListener, the

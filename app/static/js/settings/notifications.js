@@ -101,7 +101,10 @@
   }
 
   WSSettings.registerTab('notifications', {
-    mount: function (panel, api) {
+    // ctx: the page's (the kit passes it on each visit). Every listener,
+    // request, timer and the clock below end with its signal.
+    mount: function (panel, api, ctx) {
+      var signal = ctx.signal;
       var status = null, statusSeq = 0;
 
       // ---- Push status and the test push ----
@@ -153,7 +156,7 @@
       // what is shown. Answers that land out of order are dropped.
       function loadStatus() {
         var mine = ++statusSeq;
-        return fetch(STATUS_URL, { credentials: 'same-origin' }).then(readJson, function () {
+        return fetch(STATUS_URL, { credentials: 'same-origin', signal: signal }).then(readJson, function () {
           return { status: 0, ok: false, d: {} };
         }).then(function (res) {
           if (mine !== statusSeq) return;
@@ -175,7 +178,7 @@
 
       testBtn.addEventListener('click', function () {
         testBtn.disabled = true;
-        fetch(TEST_URL, { method: 'POST', credentials: 'same-origin' }).then(readJson, function () {
+        fetch(TEST_URL, { method: 'POST', credentials: 'same-origin', signal: signal }).then(readJson, function () {
           return null;
         }).then(function (res) {
           if (!res) { WSSettings.toast(MSG.testOffline, 'err'); return; }
@@ -197,7 +200,7 @@
           if (window.console) console.error(e);
           WSSettings.toast(MSG.testFailed, 'err');
         }).then(function () { testBtn.disabled = false; });
-      });
+      }, { signal: signal });
 
       // ---- Announcement ----
 
@@ -242,7 +245,7 @@
           sendBtn.disabled = true;
           return fetch(SEND_URL, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: t, body: b }), credentials: 'same-origin'
+            body: JSON.stringify({ title: t, body: b }), credentials: 'same-origin', signal: signal
           }).then(readJson, function () {
             return null;
           }).then(function (res) {
@@ -261,7 +264,7 @@
           if (window.console) console.error(e);
           WSSettings.toast(MSG.sendFailed, 'err');
         }).then(function () { sendBtn.disabled = false; });
-      });
+      }, { signal: signal });
 
       // ---- Check intervals (the save bar) ----
 
@@ -279,10 +282,10 @@
       checks.body.appendChild(grid);
       panel.appendChild(checks.root);
 
-      // "Last push … ago" keeps counting while the tab is open.
-      if (window.WS && WS.poll) WS.poll(function () { if (status) paintStatus(); }, 30000);
+      // "Last push … ago" keeps counting while the page is open.
+      ctx.poll(function () { if (status) paintStatus(); }, 30000);
 
-      return Promise.race([loadStatus(), new Promise(function (done) { setTimeout(done, STATUS_WAIT); })]);
+      return Promise.race([loadStatus(), new Promise(function (done) { ctx.setTimeout(done, STATUS_WAIT); })]);
     }
   });
 })();

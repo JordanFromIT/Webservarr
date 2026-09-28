@@ -174,7 +174,10 @@
   }
 
   WSSettings.registerTab('integrations', {
-    mount: function (panel, api) {
+    // ctx: the page's (the kit passes it on each visit). Every listener,
+    // request and the clock below end with its signal.
+    mount: function (panel, api, ctx) {
+      var signal = ctx.signal;
       var cards = {};
       var health = {};
       // Answers can land out of order (a slow first check, then a card's
@@ -215,7 +218,7 @@
         ids.forEach(function (k) { asked[k] = mine; inflight[k] = mine; });
         if (id) { delete health[id]; paint(id); }
         var url = HEALTH_URL + (id ? '?refresh=1&service=' + encodeURIComponent(id) : '');
-        return fetch(url, { credentials: 'same-origin' }).then(function (r) {
+        return fetch(url, { credentials: 'same-origin', signal: signal }).then(function (r) {
           if (r.status === 401) { WSSettings.leave('/login'); throw new Error('HTTP 401'); }
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
@@ -281,7 +284,7 @@
           return;
         }
         setText(hint, MSG.choicesLoading);
-        fetch('/api/admin/chaptarr/options', { credentials: 'same-origin' }).then(readJson, function () {
+        fetch('/api/admin/chaptarr/options', { credentials: 'same-origin', signal: signal }).then(readJson, function () {
           return { status: 0, ok: false, d: {} };
         }).then(function (res) {
           if (stale()) return;
@@ -421,7 +424,7 @@
           body.classList.toggle('hidden', !open);
           chev.style.transform = open ? 'rotate(180deg)' : '';
         }
-        head.addEventListener('click', function () { expand(head.getAttribute('aria-expanded') !== 'true'); });
+        head.addEventListener('click', function () { expand(head.getAttribute('aria-expanded') !== 'true'); }, { signal: signal });
         // A link from another tab (WSSettings.go) scrolls here and focuses the
         // card: it opens, and focus moves to its header. A click inside an
         // open card that lands on blank space leaves it alone.
@@ -429,7 +432,7 @@
           if (e.relatedTarget && root.contains(e.relatedTarget)) return;
           if (head.getAttribute('aria-expanded') !== 'true') expand(true);
           head.focus({ preventScroll: true });
-        });
+        }, { signal: signal });
 
         testBtn.addEventListener('click', function () {
           var payload = { service: id, url: c.url ? api.get(c.url) : '',
@@ -440,7 +443,7 @@
           testBtn.disabled = true;
           fetch('/api/admin/test-connection', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-            credentials: 'same-origin'
+            credentials: 'same-origin', signal: signal
           }).then(readJson).then(function (res) {
             if (res.status === 401) { WSSettings.leave('/login'); return; }
             if (mine !== testSeq) return;
@@ -452,7 +455,7 @@
           }).catch(function () {
             if (mine === testSeq) showResult('error', MSG.testFailed);
           }).then(function () { testBtn.disabled = false; });
-        });
+        }, { signal: signal });
 
         clearBtn.addEventListener('click', function () {
           WSSettings.confirm({
@@ -466,7 +469,7 @@
               api.set(k, m && !m.allow_empty ? m.default : '');
             });
           });
-        });
+        }, { signal: signal });
 
         cards[id] = { light: light, reason: reason, when: when, clearResult: clearResult };
         return root;
@@ -492,14 +495,12 @@
           if (touches(keys, keysOf(id))) { cards[id].clearResult(); refresh(id); }
         });
         if (chaptarr && touches(keys, CHAPTARR_CONN)) loadChoices();
-      });
+      }, { signal: signal });
       api.onDiscard(function () {
         Object.keys(cards).forEach(function (id) { cards[id].clearResult(); });
       });
-      // "checked … ago" keeps counting while the tab is open.
-      if (window.WS && WS.poll) {
-        WS.poll(function () { Object.keys(cards).forEach(function (id) { if (health[id]) paint(id); }); }, 30000);
-      }
+      // "checked … ago" keeps counting while the page is open.
+      ctx.poll(function () { Object.keys(cards).forEach(function (id) { if (health[id]) paint(id); }); }, 30000);
       // Signed in with Plex: ask before a save clears or changes the Plex
       // address or token, the way the Sign-in tab asks about its own switches.
       WSSettings.ownSignIn.guard(api, { plex: ['integration.plex.url', 'integration.plex.token'] }, { askOnChange: true });

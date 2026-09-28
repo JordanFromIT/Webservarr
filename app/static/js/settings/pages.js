@@ -10,11 +10,17 @@
  * which keeps the first page first and the last page last, as the server's
  * normalize_page_order does. The order is one setting, pages.order, saved
  * with the bar like everything else.
+ *
+ * A page helper (spec 4.3): loading it only registers the tab. Its mount gets
+ * the page's ctx (the kit passes it on each visit); every listener, timer and
+ * request here ends with that visit's signal.
  */
 (function () {
   'use strict';
 
   var el = WSSettings.el, icon = WSSettings.icon, cls = WSSettings.cls;
+  // The visit the tab was last mounted in: its signal and ctx.setTimeout.
+  var signal = null, later = null;
   var ORDER_KEY = 'pages.order';
   var LOCKED = { home: 'Home is where everyone lands, so it is always on.',
                  settings: 'Settings is always on so you can always get back here.' };
@@ -48,7 +54,7 @@
     if (actionLabel) {
       var b = el('button', cls.btnQuiet + ' px-2 py-1', actionLabel);
       b.type = 'button';
-      b.addEventListener('click', onAction);
+      b.addEventListener('click', onAction, { signal: signal });
       p.appendChild(b);
     }
     return p;
@@ -93,7 +99,7 @@
   function loadMonitors(api, list) {
     list.replaceChildren(el('div', 'skel skel-row'));
     list.setAttribute('aria-busy', 'true');
-    return fetch(MONITORS_URL, { credentials: 'same-origin' })
+    return fetch(MONITORS_URL, { credentials: 'same-origin', signal: signal })
       .then(readJson, function () { return { status: 0, data: undefined }; })
       .then(function (res) {
         list.removeAttribute('aria-busy');
@@ -209,7 +215,7 @@
       bodyWrap.classList.toggle('hidden', !open);
       btn.firstChild.classList.toggle('rotate-180', open);
       if (open && onOpen) onOpen();
-    });
+    }, { signal: signal });
   }
 
   // A kit text field whose label only screen readers hear: the column heads
@@ -224,7 +230,9 @@
   // ---- The tab ----
 
   WSSettings.registerTab('pages', {
-    mount: function (panel, api) {
+    mount: function (panel, api, ctx) {
+      signal = ctx.signal;
+      later = ctx.setTimeout;
       // Normalised by the server (Home first, Settings last, every page once).
       var start = WSSettings.view('page_order');
       var addresses = WSSettings.view('page_addresses');
@@ -242,7 +250,7 @@
         // Emptied first, so the same words twice are still read out.
         live.textContent = '';
         clearTimeout(liveTimer);
-        liveTimer = setTimeout(function () { live.textContent = text; }, 60);
+        liveTimer = later(function () { live.textContent = text; }, 60);
       }
 
       var card = WSSettings.card('Pages',
@@ -357,30 +365,30 @@
           handle.setAttribute('role', 'button');
           handle.setAttribute('aria-roledescription', 'drag handle');
           handle.appendChild(icon('drag_indicator', 'text-[22px]'));
-          handle.addEventListener('pointerenter', function () { li.draggable = true; });
-          handle.addEventListener('pointerleave', function () { if (!pressed) li.draggable = false; });
+          handle.addEventListener('pointerenter', function () { li.draggable = true; }, { signal: signal });
+          handle.addEventListener('pointerleave', function () { if (!pressed) li.draggable = false; }, { signal: signal });
           // A press that never becomes a drag lets go wherever it ends.
           handle.addEventListener('pointerdown', function () {
             pressed = true;
             li.draggable = true;
-            window.addEventListener('pointerup', release);
-            window.addEventListener('pointercancel', release);
-          });
+            window.addEventListener('pointerup', release, { signal: signal });
+            window.addEventListener('pointercancel', release, { signal: signal });
+          }, { signal: signal });
           handle.addEventListener('keydown', function (e) {
             if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
             e.preventDefault();
             move(id, e.key === 'ArrowUp' ? -1 : 1);
             if (document.activeElement !== handle) handle.focus({ preventScroll: true });
             handle.scrollIntoView({ block: 'nearest' });
-          });
+          }, { signal: signal });
           up = el('button', cls.btnQuiet + ' lg:hidden px-2 disabled:opacity-40 disabled:pointer-events-none');
           up.type = 'button';
           up.appendChild(icon('arrow_upward', 'text-[20px]'));
-          up.addEventListener('click', function () { move(id, -1); up.scrollIntoView({ block: 'nearest' }); });
+          up.addEventListener('click', function () { move(id, -1); up.scrollIntoView({ block: 'nearest' }); }, { signal: signal });
           down = el('button', cls.btnQuiet + ' lg:hidden px-2 disabled:opacity-40 disabled:pointer-events-none');
           down.type = 'button';
           down.appendChild(icon('arrow_downward', 'text-[20px]'));
-          down.addEventListener('click', function () { move(id, 1); down.scrollIntoView({ block: 'nearest' }); });
+          down.addEventListener('click', function () { move(id, 1); down.scrollIntoView({ block: 'nearest' }); }, { signal: signal });
           moveBox.appendChild(handle);
           moveBox.appendChild(up);
           moveBox.appendChild(down);
@@ -483,14 +491,14 @@
           e.dataTransfer.effectAllowed = 'move';
           e.dataTransfer.setData('text/plain', id);
           li.classList.add('opacity-50');
-        });
+        }, { signal: signal });
         li.addEventListener('dragend', function () {
           pressed = false;
           li.draggable = !!handle && handle.matches(':hover');
           li.classList.remove('opacity-50');
           dragId = null;
           clearMark();
-        });
+        }, { signal: signal });
         return li;
       }
 
@@ -527,10 +535,10 @@
         clearMark();
         t.li.classList.add(t.after ? 'ws-drop-after' : 'ws-drop-before');
         mark = t;
-      });
+      }, { signal: signal });
       list.addEventListener('dragleave', function (e) {
         if (!e.relatedTarget || !list.contains(e.relatedTarget)) clearMark();
-      });
+      }, { signal: signal });
       list.addEventListener('drop', function (e) {
         var t = dropTarget(e);
         clearMark();
@@ -539,7 +547,7 @@
         var order = shown.filter(function (x) { return x !== dragId; });
         order.splice(order.indexOf(t.id) + (t.after ? 1 : 0), 0, dragId);
         commit(order, dragId);
-      });
+      }, { signal: signal });
 
       start.forEach(function (id) { rows[id] = buildRow(id); list.appendChild(rows[id]); });
       // get() is part of the binding shape; the kit never reads it back (the
@@ -551,7 +559,7 @@
       function refreshWarnings() { start.forEach(function (id) { rows[id]._refreshWarn(); }); }
       api.onChange('requests.source', refreshWarnings);
       // Integrations may set a connection up while this tab stays mounted.
-      document.addEventListener('ws-settings:saved', refreshWarnings);
+      document.addEventListener('ws-settings:saved', refreshWarnings, { signal: signal });
       card.body.appendChild(list);
       card.body.appendChild(orderError);
 

@@ -18,11 +18,19 @@
  * --font-display gets the saved font's value back. A saved font's stylesheet
  * stops being a preview and becomes the page's own. Names are checked with
  * the registry's pattern, read from meta, before anything is fetched.
+ *
+ * A page helper (spec 4.3): loading it only registers the tab. Its mount gets
+ * the page's ctx (the kit passes it on each visit). Every listener and timer
+ * ends with that visit's signal; leaving the page puts the saved font back at
+ * once (the kit's discard has already put the saved colours back) and lets
+ * go of the visit's nodes.
  */
 (function () {
   'use strict';
 
   var el = WSSettings.el, icon = WSSettings.icon, cls = WSSettings.cls;
+  // The visit the tab was last mounted in: its signal and ctx.setTimeout.
+  var signal = null, later = null;
   var COLORS = [
     ['theme.color_primary', 'Primary', 'primary', 'Buttons, the current page and highlights.'],
     ['theme.color_secondary', 'Secondary', 'secondary', 'Supporting surfaces.'],
@@ -111,7 +119,7 @@
     { fg: 'theme.color_status_warn', bg: 'theme.color_background', min: 4.5, on: 'theme.color_status_warn', say: ON_BG },
     { fg: 'theme.color_status_err', bg: 'theme.color_background', min: 4.5, on: 'theme.color_status_err', say: ON_BG }
   ];
-  var warnings = {};            // colour key -> its warning line
+  var warnings = {};            // colour key -> its warning line (this visit's; emptied on leave)
 
   // The colour the site paints for a key: what is being edited, or for a value
   // that isn't a colour, the registry default (what safe_color serves).
@@ -156,12 +164,12 @@
 
   // ---- Font preview ----
 
+  // <html> is never swapped: the font set on it stays for every page.
   var root = document.documentElement;
   var fontRe = null;            // the registry's pattern, anchored; null means no preview
   var pageFont = null;          // the saved font: served with the page, or saved since
   var baseFont = null;          // the font pageFontVar shows (pageFont, once it has loaded)
   var pageFontVar = '';         // --font-display for baseFont, as the page or promote() set it
-  var baseLink = null;          // a saved font's stylesheet (none: the server's own #ws-font)
   var shownFont = null;         // the font the page shows now
   var fontTimer = null;
   var fontSeq = 0;              // bumped on every change, so a font still loading can't land late
@@ -188,11 +196,13 @@
 
   // The saved font's stylesheet stops being a preview: it is the page's own
   // now (until a reload serves it as #ws-font), and a revert comes back to it.
+  // A saved font's stylesheet (none: the server's own #ws-font) is
+  // #ws-font-saved in <head>, looked up rather than held.
   function promote(link) {
-    if (baseLink && baseLink !== link) baseLink.remove();
+    var old = document.getElementById('ws-font-saved');
+    if (old && old !== link) old.remove();
     link.removeAttribute('data-ws-font-preview');
     link.id = 'ws-font-saved';
-    baseLink = link;
     baseFont = pageFont;
     pageFontVar = root.style.getPropertyValue('--font-display');
   }
@@ -235,7 +245,7 @@
     fontSeq += 1;
     if (name === pageFont) { revertFont(); return; }
     if (name === shownFont || !fontRe || !fontRe.test(name)) return;
-    if (delay) fontTimer = setTimeout(function () { loadFont(name); }, delay);
+    if (delay) fontTimer = later(function () { loadFont(name); }, delay);
     else loadFont(name);
   }
 
@@ -311,8 +321,8 @@
         showOther(false);
         api.set('theme.font', sel.value);
       }
-    });
-    custom.addEventListener('input', function () { api.set('theme.font', custom.value.trim()); });
+    }, { signal: signal });
+    custom.addEventListener('input', function () { api.set('theme.font', custom.value.trim()); }, { signal: signal });
     api.track('theme.font', {
       get: function () { return otherMode ? custom.value.trim() : sel.value; },
       set: paint,
@@ -374,8 +384,26 @@
     return box;
   }
 
+  // Leaving: no preview stylesheet stays and none still loading lands; the
+  // page shows the saved font, as it would after a full load. (A saved font
+  // still loading comes with the next full load.) The visit's nodes go.
+  function leave() {
+    clearTimeout(fontTimer);
+    fontSeq += 1;
+    document.querySelectorAll('link[data-ws-font-preview]').forEach(function (l) { l.remove(); });
+    if (pageFontVar) root.style.setProperty('--font-display', pageFontVar);
+    else root.style.removeProperty('--font-display');
+    shownFont = baseFont;
+    warnings = {};
+    onFontMissing = function () {};
+  }
+
   WSSettings.registerTab('appearance', {
-    mount: function (panel, api) {
+    mount: function (panel, api, ctx) {
+      signal = ctx.signal;
+      later = ctx.setTimeout;
+      warnings = {};
+      signal.addEventListener('abort', leave, { once: true });
       fontRe = fontGuard();
       if (pageFont === null) {
         pageFont = api.get('theme.font');
@@ -470,7 +498,7 @@
           body: 'Colours, font and custom CSS go back to the originals. You can review the changes; nothing is saved until you press Save.',
           confirmLabel: 'Reset', cancelLabel: 'Cancel'
         }).then(function (ok) { if (ok) api.stageDefaults(KEYS); });
-      });
+      }, { signal: signal });
       form.appendChild(reset);
 
       layout.appendChild(form);

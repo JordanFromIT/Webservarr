@@ -103,7 +103,9 @@ class Frame(unittest.TestCase):
         for t in TABS:
             self.assertRegex(h, rf'<a[^>]*href="#{t}"[^>]*data-tab="{t}"', t)
             self.assertIn(f'data-settings-panel="{t}"', h)
-            self.assertIn(f'<script data-tab="{t}" src="/static/js/settings/{MODULES[t]}?v=1"></script>', h)
+            # Page helpers (soft navigation, spec 4.3), in the inert template
+            # the kit loads them from the first time their tab opens.
+            self.assertIn(f'<script data-tab="{t}" src="/static/js/settings/{MODULES[t]}?v=1" data-ws-page-script></script>', h)
         self.assertIn('id="settingsSaveBar"', h)
         self.assertIn('id="settingsModules"', h)
         assert_ui_js_before(self, h, "/static/js/settings/kit.js?v=")
@@ -111,11 +113,23 @@ class Frame(unittest.TestCase):
 
     def test_first_paint_selects_the_tab_from_the_hash(self):
         h = (STATIC / FRAME).read_text(encoding="utf-8")
-        self.assertIn("data-settings-tab", h)
         # Set in <head>, so nothing in the body - the tab strip included -
         # paints before the tab is known.
         head = h[:h.index("</head>")]
-        self.assertRegex(head, r"document\.documentElement\.setAttribute\(\s*'data-settings-tab'")
+        # By first-paint.js (no inline script: soft navigation, spec 4.2), which
+        # the page carries again below the tab strip and below the panels, so
+        # each part is painted as soon as its markup has been read.
+        tag = '<script src="/static/js/settings/first-paint.js?v=1" data-ws-page-script></script>'
+        self.assertEqual(h.count(tag), 3)
+        self.assertIn(tag, head)
+        strip, panels = h.index('id="settingsTabHintRight"'), h.index('data-settings-panel="general"')
+        self.assertTrue(strip < h.index(tag, len(head)) < panels, "the second copy follows the tab strip")
+        self.assertGreater(h.rindex(tag), h.rindex('data-settings-panel='), "the third copy follows the panels")
+        fp = (STATIC / "js" / "settings" / "first-paint.js").read_text(encoding="utf-8")
+        self.assertRegex(fp, r"document\.documentElement\.setAttribute\(\s*'data-settings-tab'")
+        self.assertIn("if (document.readyState === 'loading') paint();", fp)
+        page = (STATIC / "js" / "pages" / "settings.js").read_text(encoding="utf-8")
+        self.assertIn("window.WSSettingsFirstPaint.paint();", page)
         css = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
         for t in TABS:
             self.assertIn(f'html[data-settings-tab="{t}"] [data-settings-panel="{t}"]', css)
@@ -226,11 +240,13 @@ class OwnSignInGuard(unittest.TestCase):
     def test_loaded_with_the_kit_not_with_a_tab(self):
         # Tab modules load the first time their tab opens, in any order.
         h = (STATIC / FRAME).read_text(encoding="utf-8")
-        tag = '<script src="/static/js/settings/signin-rule.js?v=1"></script>'
+        tag = '<script src="/static/js/settings/signin-rule.js?v=1" data-ws-page-script></script>'
         self.assertEqual(h.count(tag), 1)
         self.assertLess(h.index("/static/js/settings/kit.js?v="), h.index(tag))
         self.assertLess(h.index("</template>"), h.index(tag))
-        self.assertLess(h.index(tag), h.index("WSSettings.boot()"))
+        # A page helper the router loads with the page, before the page
+        # module's mount starts the kit (WSSettings.init).
+        self.assertIn("window.WSSettings.init(ctx);", (STATIC / "js" / "pages" / "settings.js").read_text(encoding="utf-8"))
 
     def test_the_rule_lives_once(self):
         rule = self.rule()
@@ -406,8 +422,8 @@ class Skeletons(unittest.TestCase):
 
     def test_the_state_rules_are_the_tabs(self):
         h = (STATIC / FRAME).read_text(encoding="utf-8")
-        script = h[h.index("'plex-hint'") - 900:]
-        script = re.sub(r"\s+", " ", script[:script.index("</script>")])
+        script = (STATIC / "js" / "settings" / "first-paint.js").read_text(encoding="utf-8")
+        script = re.sub(r"\s+", " ", script[script.index("function skeleton()"):])
         for rule in ("'plex-hint': !s.plex,",
                      "var akOpen = !!(f.show_authentik_auth || s.authentik_url);",
                      "'ak-fields-saved': akOpen && !!s.authentik_secret,",
@@ -498,7 +514,7 @@ class KitApi(unittest.TestCase):
 
     def test_kit_public_api(self):
         js = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
-        for name in ("boot", "registerTab", "go", "metaFor", "card", "leave", "view"):
+        for name in ("init", "canLeave", "registerTab", "go", "metaFor", "card", "leave", "view"):
             self.assertRegex(js, rf"\b{name}: {name}\b", name)
         for method in ("text", "textarea", "toggle", "select", "color", "iconPicker", "secret", "track",
                        "get", "set", "stageDefaults", "onChange", "onSaved", "onDiscard", "beforeSave",
@@ -570,7 +586,7 @@ class KitApi(unittest.TestCase):
         block = top_level(code[m.end():matching_brace(code, m.end() - 1)])
         clear = re.search(r"(?:^|[;{}])\s*(?P<stmt>(?:if \(window\.WS && WS\.clearPageCache\) )?WS\.clearPageCache\(\);)", block)
         self.assertIsNotNone(clear, "an unconditional WS.clearPageCache() in the success branch")
-        reload = re.search(r"(?:^|[;{}])\s*setTimeout\(function \(\) \{\}", block)
+        reload = re.search(r"(?:^|[;{}])\s*later\(function \(\) \{\}", block)
         self.assertIsNotNone(reload, "the delayed reload")
         self.assertLess(clear.start("stmt"), reload.start(), "cleared before the reload is scheduled")
 
@@ -833,7 +849,8 @@ class GeneralTab(unittest.TestCase):
         general = js_code_only((STATIC / "js" / "settings" / "general.js").read_text(encoding="utf-8"))
         self.assertNotRegex(general, r"location\.href\s*=(?!=)|location\.reload\(")
         self.assertRegex(general_function("failure"), r"s === 401\) \{ WSSettings\.leave\(")
-        self.assertRegex(general_function("startImport"), r"setTimeout\(function \(\) \{ WSSettings\.leave\(\); \}")
+        # The page's ctx.setTimeout (later): leaving first cancels the reload.
+        self.assertRegex(general_function("startImport"), r"later\(function \(\) \{ WSSettings\.leave\(\); \}")
 
     def test_notices_have_one_button(self):
         ui = js_code_only((STATIC / "js" / "ui.js").read_text(encoding="utf-8"))
@@ -918,7 +935,7 @@ class AppearanceTab(unittest.TestCase):
         back = re.search(r"if \(\w+ === pageFont\) \{ revertFont\(\); return; \}", preview)
         self.assertIsNotNone(back, "the page's own font doesn't revert the preview")
         self.assertLess(preview.index("clearTimeout(fontTimer)"), back.start())
-        self.assertLess(back.start(), preview.index("setTimeout("), "the revert waits on the typing delay")
+        self.assertLess(back.start(), preview.index("later("), "the revert waits on the typing delay")
         # First thing after the timer is cleared: no name check stands in front of it.
         first_check = re.search(r"\.test\(|===\s*shownFont|\breturn\b", preview)
         self.assertGreaterEqual(first_check.start(), back.start(), "a name check comes before the revert")
@@ -1125,7 +1142,7 @@ class SignInTab(unittest.TestCase):
             self.assertIn(f"'{k}'", keys.group(1), k)
         code = js_code_only(src)
         self.assertRegex(code, r"METHOD_KEYS\.forEach\(function \((\w+)\) \{ api\.onChange\(\1, syncAll\); \}\)")
-        self.assertRegex(code, r"addEventListener\(' {17}', syncAll\)")
+        self.assertRegex(code, r"addEventListener\(' {17}', syncAll, \{ signal: signal \}\)")
 
     def test_authentik_fields_stay_open_while_they_hold_a_change(self):
         # Turning Authentik off must not hide a field with a staged value (and
@@ -1378,8 +1395,8 @@ class IntegrationsTab(unittest.TestCase):
     def _mount(self) -> str:
         """The registered mount()'s body, as live code."""
         code = js_code_only(INTEGRATIONS.read_text(encoding="utf-8"))
-        m = re.search(r"WSSettings\.registerTab\(' {12}', \{\s*mount: function \(panel, api\) \{", code)
-        self.assertIsNotNone(m, "no mount(panel, api)")
+        m = re.search(r"WSSettings\.registerTab\(' {12}', \{\s*mount: function \(panel, api, ctx\) \{", code)
+        self.assertIsNotNone(m, "no mount(panel, api, ctx)")
         return code[m.end():matching_brace(code, m.end() - 1)]
 
     def test_mount_does_not_wait_for_the_checks(self):
@@ -1614,10 +1631,11 @@ class NotificationsTab(unittest.TestCase):
         self.assertNotRegex(code, r"\bMASK\b")
         self.assertNotRegex(code, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment|setHTML")
         self.assertNotRegex(code, r"\bsetInterval\(")
-        # The one setTimeout is the cap on how long the tab waits for the status.
+        # The one timer is the cap on how long the tab waits for the status:
+        # the page's ctx.setTimeout, cleared if the page is left.
         self.assertEqual(len(re.findall(r"\bsetTimeout\(", code)), 1)
         self.assertRegex(code, r"return Promise\.race\(\[loadStatus\(\), new Promise\(function \((\w+)\) \{ "
-                               r"setTimeout\(\1, STATUS_WAIT\); \}\)\]\);")
+                               r"ctx\.setTimeout\(\1, STATUS_WAIT\); \}\)\]\);")
 
     def test_confirm_shows_the_title_as_text(self):
         # R86 (g): the admin's announcement title reaches the dialog as a
@@ -2146,11 +2164,12 @@ class SwitchOver(unittest.TestCase):
         # from the hash on prerenderingchange, through the same no-op-when-
         # current path as back/forward.
         raw = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
-        self.assertEqual(len(live_matches(raw, r"document\.addEventListener\('prerenderingchange', fromHistory\)")), 1)
+        self.assertEqual(len(live_matches(raw, r"document\.addEventListener\('prerenderingchange', fromHistory, \{ signal: signal \}\)")), 1)
         body = function_body(kit_code(), "wireTabs")
         blank = " " * len("prerenderingchange")
-        self.assertIn(f"document.addEventListener('{blank}', fromHistory)", body)
-        self.assertRegex(body, r"function fromHistory\(\) \{\s*var id = tabFromHash\(\);\s*"
+        self.assertIn(f"document.addEventListener('{blank}', fromHistory, {{ signal: signal }})", body)
+        # A history step to another page is the router's: only this page's hashes switch tabs.
+        self.assertRegex(body, r"function fromHistory\(\) \{\s*if \(!onThisPage\(\)\) return;\s*var id = tabFromHash\(\);\s*"
                                r"if \(id !== S\.current\) show\(id, '\s+'\);\s*\}")
 
 

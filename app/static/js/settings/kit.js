@@ -8,6 +8,16 @@
  * GET /api/admin/settings?view=registry (values + meta + mask).
  *
  * Contract: G6 in docs/superpowers/plans/2026-09-22-settings-redesign.md.
+ *
+ * A page helper for the soft-navigated /settings (spec 4.3): loading this
+ * file only defines WSSettings. The page module (pages/settings.js) calls
+ * WSSettings.init(ctx) from mount on each visit. Everything of a visit (the
+ * values, what is staged, the controls, the bar) starts fresh there, every
+ * listener, timer and request ends with ctx.signal, and leaving drops the
+ * visit's nodes and throws away what was staged, so no colour or font
+ * preview outlives the page. Only the tabs' definitions (registerTab) are
+ * kept: each tab module loads once per document. A tab's mount gets the
+ * same ctx as its third argument.
  */
 (function () {
   'use strict';
@@ -50,15 +60,26 @@
     partial: 'Some changes weren’t saved. Check the marked fields.'
   };
 
-  var S = { values: {}, meta: {}, mask: null, view: {}, booted: false, loaded: false, loadFailed: false, current: null,
-            tabs: {}, busy: false, saving: false, failed: false, asking: false, leaving: false,
-            pendingFocus: null };
+  // One visit's state; init() starts a fresh one, leaving drops it.
+  function fresh() {
+    return { values: {}, meta: {}, mask: null, view: {}, booted: false, loaded: false, loadFailed: false, current: null,
+             tabs: {}, busy: false, saving: false, failed: false, asking: false, leaving: false,
+             pendingFocus: null, leaveAsk: null };
+  }
+  var S = fresh();
+  // Each tab module registers once per document (it loads once), so these
+  // are kept across visits: id -> its { mount } definition, and its load.
+  var defs = {}, loads = {};
   var bar, barText, barDiscard, barSave;
+  // The visit init() was given: its ctx (dropped on leave), its signal and
+  // ctx.setTimeout (kept: once aborted, they add nothing more).
+  var visit = null, signal = null, later = null;
   var hasOwn = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
   // Settings in safe colours (/settings?theme=safe, app/pages.py): the page
   // keeps the shipped colours so it stays readable, and a colour being edited
   // restyles only the Appearance preview cards ([data-ws-theme-preview]).
-  var SAFE = document.documentElement.hasAttribute('data-safe-theme');
+  // Read on each visit, from the page's <html> flags.
+  var SAFE = false;
   var scoped = {};
 
   function reducedMotion() {
@@ -67,7 +88,7 @@
 
   function tab(id) {
     if (!S.tabs[id]) {
-      S.tabs[id] = { id: id, def: null, staged: {}, bindings: {}, listeners: {}, saved: [], discarded: [],
+      S.tabs[id] = { id: id, staged: {}, bindings: {}, listeners: {}, saved: [], discarded: [],
                      before: [], mounted: false, mounting: null, api: null };
     }
     return S.tabs[id];
@@ -198,18 +219,19 @@
         b.setAttribute('aria-label', n);
         b.appendChild(icon(n, 'text-[24px] text-frosted-blue'));
         b.appendChild(el('span', 'text-xs text-frosted-blue/60 truncate w-full text-center', n));
-        b.addEventListener('click', function () { picked = n; render(); });
+        b.addEventListener('click', function () { picked = n; render(); }, { signal: signal });
         grid.appendChild(b);
       });
     }
-    search.addEventListener('input', render);
+    search.addEventListener('input', render, { signal: signal });
     body.appendChild(search);
     body.appendChild(grid);
     render();
+    var sig = signal;
     UI.confirm({ title: 'Choose an icon', body: body, confirmLabel: 'Use this icon' }).then(function (ok) {
-      if (ok && picked) onPick(picked);
+      if (ok && picked && !sig.aborted) onPick(picked);
     });
-    setTimeout(function () { search.focus(); }, 30);
+    later(function () { search.focus(); }, 30);
   }
 
   // The other half of an address/secret pair (address_credentials, from the
@@ -287,7 +309,7 @@
       }
       if (o.disabled) input.disabled = true;
       var shell = fieldShell(o, input);
-      input.addEventListener('input', function () { stage(o.key, input.value, true); });
+      input.addEventListener('input', function () { stage(o.key, input.value, true); }, { signal: signal });
       api.track(o.key, { get: function () { return input.value; }, set: function (v) { input.value = v; },
                          el: input, errorEl: shell.error });
       return shell.root;
@@ -301,7 +323,7 @@
       var m = metaFor(o.key) || {};
       if (m.max_length) ta.maxLength = m.max_length;
       var shell = fieldShell(o, ta);
-      ta.addEventListener('input', function () { stage(o.key, ta.value, true); });
+      ta.addEventListener('input', function () { stage(o.key, ta.value, true); }, { signal: signal });
       api.track(o.key, { get: function () { return ta.value; }, set: function (v) { ta.value = v; },
                          el: ta, errorEl: shell.error });
       return shell.root;
@@ -317,7 +339,7 @@
       function get() { return btn.getAttribute('aria-checked') === 'true' ? 'true' : 'false'; }
       btn.addEventListener('click', function () {
         if (!o.locked) stage(o.key, get() === 'true' ? 'false' : 'true', false);
-      });
+      }, { signal: signal });
       if (o.compact) {
         btn.setAttribute('aria-label', o.label || o.key);
         if (o.locked && o.lockedReason) btn.title = o.lockedReason;
@@ -379,7 +401,7 @@
           sel.value = v;
         }
       }
-      sel.addEventListener('change', function () { stage(o.key, sel.value, true); });
+      sel.addEventListener('change', function () { stage(o.key, sel.value, true); }, { signal: signal });
       api.track(o.key, { get: function () { return sel.value; }, set: paint, el: sel, errorEl: shell.error });
       return shell.root;
     };
@@ -420,13 +442,13 @@
         hex.value = picker.value.toUpperCase();
         preview(hex.value);
         stage(o.key, hex.value, true);
-      });
+      }, { signal: signal });
       hex.addEventListener('input', function () {
         stale.classList.add('hidden');
         var v = hex.value.trim();
         if (HEX.test(v)) { picker.value = v.toLowerCase(); preview(v); }
         stage(o.key, v, true);
-      });
+      }, { signal: signal });
       api.track(o.key, {
         get: function () { return hex.value; },
         set: function (v) {
@@ -470,7 +492,7 @@
       }
       btn.addEventListener('click', function () {
         openIconDialog(api.get(o.key), function (chosen) { stage(o.key, chosen, false); });
-      });
+      }, { signal: signal });
       var binding = { get: function () { return value; }, set: paint, el: btn, errorEl: null };
       if (o.compact) {
         api.track(o.key, binding);
@@ -554,10 +576,10 @@
         else if (v === '' && baseline(o.key) === S.mask) { input.value = ''; mode('cleared'); }
         else { if (v === '') input.value = ''; mode('input'); }
       }
-      replaceBtn.addEventListener('click', function () { mode('input'); input.focus(); });
-      clearBtn.addEventListener('click', function () { stage(o.key, '', false); });
-      undo.addEventListener('click', function () { stage(o.key, S.mask, false); });
-      cancel.addEventListener('click', function () { stage(o.key, S.mask, false); });
+      replaceBtn.addEventListener('click', function () { mode('input'); input.focus(); }, { signal: signal });
+      clearBtn.addEventListener('click', function () { stage(o.key, '', false); }, { signal: signal });
+      undo.addEventListener('click', function () { stage(o.key, S.mask, false); }, { signal: signal });
+      cancel.addEventListener('click', function () { stage(o.key, S.mask, false); }, { signal: signal });
       var binding = { get: function () { return input.value; }, set: paint, el: input, errorEl: err };
       input.addEventListener('input', function () {
         if (input.value === S.mask) {
@@ -568,7 +590,7 @@
           return;
         }
         stage(o.key, input.value === '' ? baseline(o.key) : input.value, true);
-      });
+      }, { signal: signal });
       api.track(o.key, binding);
       return root;
     };
@@ -580,7 +602,8 @@
 
   function buildBar() {
     bar = document.getElementById('settingsSaveBar');
-    bar.className = 'ws-savebar is-hidden fixed z-[60] inset-x-0 bottom-0 lg:inset-x-auto lg:right-8 lg:bottom-6 ' +
+    // Its bottom offset is theme.css's (.ws-savebar): above the player, if one shows.
+    bar.className = 'ws-savebar is-hidden fixed z-[60] inset-x-0 lg:inset-x-auto lg:right-8 ' +
       'flex items-center gap-3 px-4 py-3 lg:pl-5 border-t lg:border border-frosted-blue/10 lg:rounded-2xl ' +
       'bg-background-dark/85 backdrop-blur-md shadow-2xl';
     bar.setAttribute('role', 'region');
@@ -599,8 +622,8 @@
     bar.appendChild(barDiscard);
     bar.appendChild(barSave);
     bar.removeAttribute('hidden');
-    barDiscard.addEventListener('click', function () { if (!S.busy) discard(S.current); });
-    barSave.addEventListener('click', function () { save(S.current); });
+    barDiscard.addEventListener('click', function () { if (!S.busy) discard(S.current); }, { signal: signal });
+    barSave.addEventListener('click', function () { save(S.current); }, { signal: signal });
   }
 
   function setText(node, text) { if (node.textContent !== text) node.textContent = text; }
@@ -638,18 +661,23 @@
     S.busy = true;
     refreshBar();
     var keys = Object.keys(t.staged);
+    // Leaving the page cancels the save, as a full page load did; nothing of
+    // it then touches the next visit.
+    var sig = signal;
     return t.before.reduce(function (p, fn) {
-      return p.then(function (ok) { return ok ? fn(keys.slice()) : false; });
+      return p.then(function (ok) { return ok && !sig.aborted ? fn(keys.slice()) : false; });
     }, Promise.resolve(true)).then(function (ok) {
       // A hook may stage more keys, so the batch is read again after them.
-      if (!ok) return false;
+      if (!ok || sig.aborted) return false;
       var now = Object.keys(t.staged);
       return now.length ? send(t, now) : true;
     }).catch(function (e) {
+      if (sig.aborted) return false;
       if (window.console) console.error(e);
       UI.toast(MSG.failed, 'err');
       return false;
     }).then(function (result) {
+      if (sig.aborted) return false;
       S.busy = false;
       refreshBar();
       return result;
@@ -662,20 +690,24 @@
     S.saving = true;
     refreshBar();
     var payload = { settings: keys.map(function (k) { return { key: k, value: sent[k] }; }) };
+    var sig = signal;
     return fetch('/api/admin/settings/bulk', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      credentials: 'same-origin'
+      credentials: 'same-origin', signal: sig
     }).then(function (r) {
       // Read the body as text: a proxy error page or an empty body must not
       // surface as a parser error.
       return r.text().then(function (text) {
+        if (sig.aborted) return false;
         var data = null;
         try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
         return settle(t, sent, r.status, r.ok, data && typeof data === 'object' ? data : null);
-      }, function () { return settle(t, sent, r.status, r.ok, null); });
+      }, function () { return sig.aborted ? false : settle(t, sent, r.status, r.ok, null); });
     }, function () {
-      return fail(MSG.offline);
+      // Aborted (the page was left) is not a failure and says nothing.
+      return sig.aborted ? false : fail(MSG.offline);
     }).then(function (result) {
+      if (sig.aborted) return false;
       S.saving = false;
       refreshBar();
       return result;
@@ -730,7 +762,7 @@
     var WS = window.WS;
     if (!WS || !WS.setHTML) return;
     var seq = ++shellSeq;
-    fetch('/api/admin/settings/shell', { credentials: 'same-origin' }).then(function (r) {
+    fetch('/api/admin/settings/shell', { credentials: 'same-origin', signal: signal }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }).then(function (data) {
@@ -852,11 +884,13 @@
     revealTab(document.getElementById('tab-' + id), smooth);
   }
 
+  // The entry keeps the router's state: it is this page's, and Back to it
+  // from another page brings Settings back on this tab.
   function setHash(id, how) {
     var h = location.hash.slice(1);
     if (h === id || (!h && id === 'general')) return;     // no hash already means General
-    if (how === 'push') history.pushState(null, '', '#' + id);
-    else history.replaceState(null, '', '#' + id);
+    if (how === 'push') history.pushState(history.state, '', '#' + id);
+    else history.replaceState(history.state, '', '#' + id);
   }
 
   function switchTo(id, how) {
@@ -894,6 +928,7 @@
     var n = dirtyCount(from);
     if (!n) return switchTo(id, how);
     S.asking = true;
+    var sig = signal;
     return UI.confirm({
       title: 'Discard unsaved changes?',
       body: 'You have ' + changes(n) + ' on ' + TITLES[from] + '. Switching tabs throws ' +
@@ -904,24 +939,31 @@
       return false;                     // a dialog that failed counts as Keep editing
     }).then(function (ok) {
       S.asking = false;
+      // The page was left meanwhile (the dialog closed as Keep editing): the
+      // address is another page's now.
+      if (sig.aborted) return false;
       if (!ok) { setHash(from, 'replace'); return false; }
       discard(from);
       return switchTo(id, how);
     });
   }
 
+  // Once per document: a tab module stays loaded (and registered) for every
+  // later visit. A load in flight is shared; a failed one can be tried again.
   function loadModule(id) {
-    if (tab(id).def) return Promise.resolve();
-    return new Promise(function (resolve, reject) {
+    if (defs[id]) return Promise.resolve();
+    if (loads[id]) return loads[id];
+    loads[id] = new Promise(function (resolve, reject) {
       var tpl = document.getElementById('settingsModules');
       var src = tpl && tpl.content.querySelector('script[data-tab="' + id + '"]');
       if (!src) { reject(new Error('No module for ' + id)); return; }
       var s = document.createElement('script');
       s.src = src.getAttribute('src');
       s.onload = function () { resolve(); };
-      s.onerror = function () { reject(new Error('Could not load ' + s.src)); };
+      s.onerror = function () { s.remove(); reject(new Error('Could not load ' + s.src)); };
       document.body.appendChild(s);
-    });
+    }).then(function () { delete loads[id]; }, function (e) { delete loads[id]; throw e; });
+    return loads[id];
   }
 
   function panelHost(id) { return document.querySelector('[data-settings-panel="' + id + '"]'); }
@@ -934,7 +976,7 @@
     box.appendChild(el('p', 'mt-3 text-[15px] font-semibold text-frosted-blue', message));
     var btn = el('button', cls.btnGhost + ' mt-4', 'Try again');
     btn.type = 'button';
-    btn.addEventListener('click', retry);
+    btn.addEventListener('click', retry, { signal: signal });
     box.appendChild(btn);
     host.replaceChildren(box);
   }
@@ -961,11 +1003,14 @@
       if (S.loadFailed) showPanelError(id, LOAD_ERROR, load);
       return Promise.resolve();
     }
+    var sig = signal;
     t.mounting = loadModule(id).then(function () {
-      if (!t.def) throw new Error('Tab module did not register: ' + id);
+      if (sig.aborted) return;
+      if (!defs[id]) throw new Error('Tab module did not register: ' + id);
       t.api = t.api || makeApi(t);
       var panel = el('div');
-      return Promise.resolve(t.def.mount(panel, t.api)).then(function () {
+      return Promise.resolve(defs[id].mount(panel, t.api, visit)).then(function () {
+        if (sig.aborted) return;
         // One swap: the skeleton goes and the finished panel arrives together.
         var host = panelHost(id);
         host.replaceChildren(panel);
@@ -977,6 +1022,7 @@
         if (S.current === id) afterShow(id);
       });
     }).catch(function (e) {
+      if (sig.aborted) return;
       if (window.console) console.error(e);
       t.mounting = null;
       t.api = null;
@@ -988,7 +1034,7 @@
     return t.mounting;
   }
 
-  function registerTab(id, def) { tab(id).def = def; }
+  function registerTab(id, def) { defs[id] = def; }
 
   function go(tabId, focusId) {
     S.pendingFocus = focusId ? { tab: tabId, id: focusId } : null;
@@ -1002,7 +1048,7 @@
       if (!a) return;
       e.preventDefault();
       show(a.getAttribute('data-tab'), 'push');
-    });
+    }, { signal: signal });
     list.addEventListener('keydown', function (e) {
       var keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
       if (keys.indexOf(e.key) < 0) return;
@@ -1014,20 +1060,22 @@
         var a = document.getElementById('tab-' + S.current);
         if (a) a.focus();
       });
-    });
+    }, { signal: signal });
     // Back/forward fires popstate and, when only the hash differs, hashchange
     // too; an edited hash fires hashchange. The second of a pair is a no-op.
+    // A step to another page is the router's (and its leave guard's).
     function fromHistory() {
+      if (!onThisPage()) return;
       var id = tabFromHash();
       if (id !== S.current) show(id, 'history');
     }
-    window.addEventListener('popstate', fromHistory);
-    window.addEventListener('hashchange', fromHistory);
+    window.addEventListener('popstate', fromHistory, { signal: signal });
+    window.addEventListener('hashchange', fromHistory, { signal: signal });
     // The nav's speculation rules can prerender /settings (no hash) and the
     // browser may then show it for /settings#sign-in: the kit booted on
     // General and activation fires no hashchange, so route from the hash now.
     // Nothing can be staged before the page was shown, so no guard asks.
-    document.addEventListener('prerenderingchange', fromHistory);
+    document.addEventListener('prerenderingchange', fromHistory, { signal: signal });
 
     var scroller = document.getElementById('settingsTabScroller');
     var left = document.getElementById('settingsTabHintLeft');
@@ -1039,10 +1087,15 @@
       if (right) right.style.opacity = atEnd ? '0' : '1';
     }
     if (scroller) {
-      scroller.addEventListener('scroll', hints, { passive: true });
-      window.addEventListener('resize', hints);
-      if ('ResizeObserver' in window) new ResizeObserver(hints).observe(scroller);
-      if (document.fonts && document.fonts.ready) document.fonts.ready.then(hints);
+      scroller.addEventListener('scroll', hints, { passive: true, signal: signal });
+      window.addEventListener('resize', hints, { signal: signal });
+      if ('ResizeObserver' in window) {
+        var ro = new ResizeObserver(hints);
+        ro.observe(scroller);
+        signal.addEventListener('abort', function () { ro.disconnect(); }, { once: true });
+      }
+      var sig = signal;
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (!sig.aborted) hints(); });
       hints();
     }
   }
@@ -1057,14 +1110,60 @@
     if (url) window.location.href = url;
     else window.location.reload();
   }
-  //
-  // Links inside the app ask with the kit's dialog. Anything else that leaves
-  // (reload, closing the tab, a typed address, the browser's own back to
-  // another page) can only be asked by the browser, via beforeunload.
+
+  // The address is still this page's (a tab's hash may differ).
+  function onThisPage() {
+    var here = visit && visit.url;
+    return !!here && location.pathname.replace(/\/+$/, '') === here.pathname.replace(/\/+$/, '') &&
+      location.search === here.search;
+  }
+
+  // "Leave without saving?", asked once however many ways out are tried
+  // while it is open (a link, then Back). Leave throws the changes away here,
+  // so nothing asks again, beforeunload included, and no colour or font
+  // preview outlives the page.
+  function askLeave() {
+    if (S.leaveAsk) return S.leaveAsk;
+    var sig = signal;
+    var n = TABS.reduce(function (sum, id) { return sum + dirtyCount(id); }, 0);
+    S.leaveAsk = UI.confirm({
+      title: 'Leave without saving?',
+      body: 'You have ' + changes(n) + ' in Settings. Leaving this page throws ' +
+        (n === 1 ? 'it' : 'them') + ' away.',
+      confirmLabel: 'Leave page', cancelLabel: 'Keep editing', danger: true
+    }).catch(function (e) {
+      if (window.console) console.error(e);
+      return false;                     // a dialog that failed counts as Keep editing
+    }).then(function (ok) {
+      if (sig.aborted) return false;
+      S.leaveAsk = null;
+      if (ok) discardAll();
+      return ok;
+    });
+    return S.leaveAsk;
+  }
+
+  // The router asks before any soft navigation away from Settings (a link,
+  // Back or Forward, WS.router.navigate): true to go, or the dialog's answer.
+  // how.pop: Back or Forward. Held, the router puts this page's address back,
+  // and the open tab's hash follows it.
+  function canLeave(how) {
+    if (S.leaving || !anyDirty()) return true;
+    var sig = signal;
+    return askLeave().then(function (ok) {
+      if (!ok && how && how.pop && !sig.aborted) later(function () { setHash(S.current, 'replace'); }, 0);
+      return ok;
+    });
+  }
+
+  // Links ask with the kit's dialog, whether the router takes them or not;
+  // after Leave the link is followed as it would have been. Back and Forward
+  // ask through canLeave. Anything else that leaves (reload, closing the
+  // tab, a typed address) can only be asked by the browser, via beforeunload.
   function wireLeaveGuard() {
     window.addEventListener('beforeunload', function (e) {
       if (!S.leaving && anyDirty()) { e.preventDefault(); e.returnValue = ''; }
-    });
+    }, { signal: signal });
     document.addEventListener('click', function (e) {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       var a = e.target.closest && e.target.closest('a[href]');
@@ -1075,25 +1174,25 @@
       if (url.pathname === location.pathname && url.search === location.search && url.hash) return;
       if (!anyDirty() || S.leaving) return;
       e.preventDefault();
-      var n = TABS.reduce(function (sum, id) { return sum + dirtyCount(id); }, 0);
-      UI.confirm({
-        title: 'Leave without saving?',
-        body: 'You have ' + changes(n) + ' in Settings. Leaving this page throws ' +
-          (n === 1 ? 'it' : 'them') + ' away.',
-        confirmLabel: 'Leave page', cancelLabel: 'Keep editing', danger: true
-      }).then(function (ok) {
-        if (ok) leave(url.href);
+      askLeave().then(function (ok) {
+        if (!ok) return;
+        // Nothing is staged now, so this click passes: the router takes it,
+        // or the browser follows it, exactly as without the question.
+        if (a.isConnected) a.click();
+        else leave(url.href);
       });
-    });
+    }, { signal: signal });
   }
 
   function load() {
     S.loadFailed = false;
-    return fetch('/api/admin/settings?view=registry', { credentials: 'same-origin' }).then(function (r) {
+    var sig = signal;
+    return fetch('/api/admin/settings?view=registry', { credentials: 'same-origin', signal: sig }).then(function (r) {
       if (r.status === 401) { leave('/login'); throw new Error('HTTP 401'); }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     }).then(function (data) {
+      if (sig.aborted) return;
       if (!data || typeof data.mask !== 'string' || !data.values || !data.meta) throw new Error('Unexpected settings view');
       S.values = data.values;
       S.meta = data.meta;
@@ -1102,15 +1201,27 @@
       S.loaded = true;
       return mount(S.current);
     }).catch(function (e) {
+      if (sig.aborted) return;          // left the page: not a failure
       if (window.console) console.error(e);
       S.loadFailed = true;
       showPanelError(S.current, LOAD_ERROR, load);
     });
   }
 
-  function boot() {
-    if (S.booted) return;
+  function discardAll() {
+    TABS.forEach(function (id) { if (dirtyCount(id)) discard(id); });
+  }
+
+  // Each visit, from the page module's mount (the ctx is the router's).
+  function init(ctx) {
+    visit = ctx;
+    signal = ctx.signal;
+    later = ctx.setTimeout;
+    S = fresh();
+    scoped = {};
+    SAFE = document.documentElement.hasAttribute('data-safe-theme');
     S.booted = true;
+    signal.addEventListener('abort', end, { once: true });
     buildBar();
     wireTabs();
     wireLeaveGuard();
@@ -1119,6 +1230,20 @@
     if (location.hash && location.hash.slice(1) !== S.current) setHash(S.current, 'replace');
     paintTab(S.current, false);
     load();
+  }
+
+  // Leaving (the signal aborted; every listener is gone by now): whatever is
+  // staged is thrown away, so the saved colours and font are what the next
+  // page shows, as after a full page load. Then the visit's nodes go.
+  function end() {
+    discardAll();
+    document.body.classList.remove('ws-savebar-open');
+    var tag = document.getElementById('ws-theme-preview');
+    if (tag) tag.remove();
+    S = fresh();
+    scoped = {};
+    bar = barText = barDiscard = barSave = null;
+    visit = null;
   }
 
   function card(title, description) {
@@ -1138,9 +1263,18 @@
     return hasOwn(S.view, name) ? S.view[name] : null;
   }
 
+  // A tab's toast or question that lands after its page was left says
+  // nothing: the next page is not Settings. (The dialog router.js closes.)
+  function toast(message, tone, opts) {
+    if (signal && !signal.aborted) UI.toast(message, tone, opts);
+  }
+  function confirm(opts) {
+    return signal && !signal.aborted ? UI.confirm(opts) : Promise.resolve(false);
+  }
+
   var WSSettings = {
-    boot: boot, registerTab: registerTab, go: go, metaFor: metaFor, card: card, leave: leave, view: view,
-    toast: UI.toast, confirm: UI.confirm, el: el, icon: icon, cls: cls
+    init: init, canLeave: canLeave, registerTab: registerTab, go: go, metaFor: metaFor, card: card, leave: leave,
+    view: view, toast: toast, confirm: confirm, el: el, icon: icon, cls: cls
   };
   Object.defineProperty(WSSettings, 'values', { get: function () { return S.values; } });
   Object.defineProperty(WSSettings, 'meta', { get: function () { return S.meta; } });

@@ -851,8 +851,12 @@ html[data-settings-tab="notifications"] [data-settings-panel="notifications"] { 
 .ws-drop-before::before { top: -6px; }
 .ws-drop-after::before { bottom: -6px; }
 
-.ws-savebar { transition: transform 200ms ease-out, opacity 200ms ease-out; }
-.ws-savebar.is-hidden { transform: translateY(calc(100% + 1.5rem)); opacity: 0; pointer-events: none; }
+/* Settings' save bar sits above a visible player (the player's height, 0px
+   while it is hidden), at the bottom edge on phones and 1.5rem up from lg,
+   and hides below both. */
+.ws-savebar { bottom: var(--ws-player-h); transition: transform 200ms ease-out, opacity 200ms ease-out; }
+@media (min-width: 1024px) { .ws-savebar { bottom: calc(1.5rem + var(--ws-player-h)); } }
+.ws-savebar.is-hidden { transform: translateY(calc(100% + 1.5rem + var(--ws-player-h))); opacity: 0; pointer-events: none; }
 /* The mobile scroll hint stays; it moves up while the save bar covers the bottom edge. */
 body.ws-savebar-open #scrollDownHint { bottom: calc(6rem + var(--ws-player-h)); }
 

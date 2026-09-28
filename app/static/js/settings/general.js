@@ -5,11 +5,17 @@
  * the setting is written when the admin presses Save, like everything else.
  * The logo address is checked by the server when it is saved (its message
  * lands on the field), never by a pattern here.
+ *
+ * A page helper (spec 4.3): loading it only registers the tab. Its mount gets
+ * the page's ctx (the kit passes it on each visit); every listener, timer and
+ * request here ends with that visit's signal.
  */
 (function () {
   'use strict';
 
   var el = WSSettings.el, icon = WSSettings.icon, cls = WSSettings.cls;
+  // The visit the tab was last mounted in: its signal and ctx.setTimeout.
+  var signal = null, later = null;
   var TAB_KEYS = ['branding.app_name', 'branding.tagline', 'branding.logo_url'];
   var LOGO_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
   var MAX_LOGO_BYTES = 2 * 1024 * 1024;       // upload-logo's own limit
@@ -51,6 +57,7 @@
   function request(url, opts) {
     opts = opts || {};
     opts.credentials = 'same-origin';
+    opts.signal = signal;
     return fetch(url, opts).then(readBody, function () { return { status: 0, data: null }; });
   }
 
@@ -177,17 +184,17 @@
       none.classList.add('hidden');
       img.classList.remove('hidden');
       settle();
-    });
+    }, { signal: signal });
     img.addEventListener('error', function () {
       if (!shownUrl) return;
       placeholder('Can’t show this image');
       settle();
-    });
+    }, { signal: signal });
     api.onChange('branding.logo_url', function (url) {
       clearTimeout(typing);
       // A typed address is previewed once the typing pauses, not per key.
       if (document.activeElement === input) {
-        typing = setTimeout(function () { paint(api.get('branding.logo_url')); }, 400);
+        typing = later(function () { paint(api.get('branding.logo_url')); }, 400);
       } else {
         paint(url);
       }
@@ -210,10 +217,10 @@
       cancelUpload();
       say('');
       api.set('branding.logo_url', WSSettings.metaFor('branding.logo_url').default);
-    });
-    noLogo.addEventListener('click', function () { cancelUpload(); say(''); api.set('branding.logo_url', ''); });
-    input.addEventListener('input', function () { cancelUpload(); say(''); });
-    upload.addEventListener('click', function () { if (!uploading) file.click(); });
+    }, { signal: signal });
+    noLogo.addEventListener('click', function () { cancelUpload(); say(''); api.set('branding.logo_url', ''); }, { signal: signal });
+    input.addEventListener('input', function () { cancelUpload(); say(''); }, { signal: signal });
+    upload.addEventListener('click', function () { if (!uploading) file.click(); }, { signal: signal });
     file.addEventListener('change', function () {
       var f = file.files[0];
       file.value = '';
@@ -240,12 +247,12 @@
         api.set('branding.logo_url', url);
         say('Uploaded. Press Save to use it.');
       });
-    });
+    }, { signal: signal });
     api.onSaved(function () { say(''); });
     api.onDiscard(function () { cancelUpload(); say(''); });
 
     // The tab waits (briefly) for the preview, so it arrives with the rest.
-    return { root: c.root, ready: Promise.race([ready, new Promise(function (r) { setTimeout(r, 300); })]) };
+    return { root: c.root, ready: Promise.race([ready, new Promise(function (r) { later(r, 300); })]) };
   }
 
   // ---- Backup ----
@@ -406,7 +413,7 @@
               // old settings; dropped now, before the reload is even queued.
               if (window.WS && WS.clearPageCache) WS.clearPageCache();
               WSSettings.toast('Imported ' + n + ' setting' + (n === 1 ? '' : 's') + '. Reloading…', 'ok');
-              setTimeout(function () { WSSettings.leave(); }, 900);
+              later(function () { WSSettings.leave(); }, 900);
               return 'reloading';
             }
             if (applied.status === 422) return showProblems(applied.data);
@@ -422,7 +429,7 @@
   // A fetch rather than a plain link, so a failure is a sentence, not an
   // error page saved as the backup.
   function exportSettings() {
-    return fetch('/api/admin/settings/export', { credentials: 'same-origin' }).then(function (r) {
+    return fetch('/api/admin/settings/export', { credentials: 'same-origin', signal: signal }).then(function (r) {
       var json = (r.headers.get('Content-Type') || '').indexOf('application/json') === 0;
       if (!r.ok) return readBody(r).then(function (res) { tell(res, { fallback: MSG.exportFailed }); });
       if (!json) { WSSettings.toast(MSG.exportFailed, 'err'); return; }
@@ -436,7 +443,10 @@
         document.body.appendChild(a);
         a.click();
         a.remove();
-        setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+        // Kept a while for the download to start; leaving lets it go at once.
+        function revoke() { URL.revokeObjectURL(url); }
+        later(revoke, 10000);
+        signal.addEventListener('abort', revoke, { once: true });
         WSSettings.toast('Your settings file is downloading.', 'ok');
       });
     }).catch(function () { WSSettings.toast(MSG.offline, 'err'); });
@@ -501,10 +511,10 @@
         exporting = false;
         exp.setAttribute('aria-disabled', 'false');
       });
-    });
+    }, { signal: signal });
     imp.addEventListener('click', function () {
       if (!importing && !shared.uploading && !api.dirtyKeys().length) file.click();
-    });
+    }, { signal: signal });
     file.addEventListener('change', function () {
       var f = file.files[0];
       file.value = '';
@@ -524,12 +534,14 @@
         importing = false;
         sync();
       });
-    });
+    }, { signal: signal });
     return c.root;
   }
 
   WSSettings.registerTab('general', {
-    mount: function (panel, api) {
+    mount: function (panel, api, ctx) {
+      signal = ctx.signal;
+      later = ctx.setTimeout;
       var shared = { uploading: false, changed: function () {} };
       var site = siteCard(api);
       var logo = logoCard(api, shared);

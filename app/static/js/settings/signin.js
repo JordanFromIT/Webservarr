@@ -10,11 +10,17 @@
  * The account form talks to /api/admin/account on its own and never goes
  * through the kit: its passwords are never staged, stored, logged or shown,
  * and the fields are emptied after every try.
+ *
+ * A page helper (spec 4.3): loading it only registers the tab. Its mount gets
+ * the page's ctx (the kit passes it on each visit); every listener and
+ * request here ends with that visit's signal.
  */
 (function () {
   'use strict';
 
   var el = WSSettings.el, icon = WSSettings.icon, cls = WSSettings.cls;
+  // The visit the tab was last mounted in.
+  var signal = null;
   // Which methods work: the one rule, shared with Integrations.
   var RULE = WSSettings.ownSignIn;
   var FLAGS = RULE.FLAGS, setUp = RULE.setUp, usable = RULE.usable;
@@ -66,7 +72,7 @@
     if (actionLabel) {
       var b = el('button', cls.btnQuiet + ' px-2 py-1', actionLabel);
       b.type = 'button';
-      b.addEventListener('click', onAction);
+      b.addEventListener('click', onAction, { signal: signal });
       p.appendChild(b);
     }
     return p;
@@ -91,7 +97,7 @@
   function sendAccount(body) {
     return fetch('/api/admin/account', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-      body: JSON.stringify(body)
+      body: JSON.stringify(body), signal: signal
     }).then(readBody, function () { return { status: 0, data: null }; });
   }
 
@@ -231,14 +237,15 @@
         say(message);
         cur.input.focus();
       });
-    });
+    }, { signal: signal });
     return wrap;
   }
 
   // ---- The tab ----
 
   WSSettings.registerTab('sign-in', {
-    mount: function (panel, api) {
+    mount: function (panel, api, ctx) {
+      signal = ctx.signal;
       var intro = WSSettings.card('Sign-in methods',
         'Choose how people sign in. Keep at least one method on and set up, or nobody will be able to sign in.');
 
@@ -248,7 +255,7 @@
       var plexHint = note('Plex sign-in needs the Plex connection.', 'Set it up in Integrations', openPlexSetup);
       function syncPlexHint() { plexHint.classList.toggle('hidden', setUp('plex', api.saved)); }
       // Integrations may set the connection up while this tab stays mounted.
-      document.addEventListener('ws-settings:saved', syncPlexHint);
+      document.addEventListener('ws-settings:saved', syncPlexHint, { signal: signal });
       syncPlexHint();
       plex.body.appendChild(plexHint);
       intro.body.appendChild(plex.root);
@@ -297,7 +304,7 @@
       }
       METHOD_KEYS.forEach(function (k) { api.onChange(k, syncAll); });
       // The Plex connection is saved on Integrations.
-      document.addEventListener('ws-settings:saved', syncAll);
+      document.addEventListener('ws-settings:saved', syncAll, { signal: signal });
       syncAll();
       intro.body.appendChild(allOff);
       panel.appendChild(intro.root);
