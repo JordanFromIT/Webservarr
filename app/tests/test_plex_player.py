@@ -105,6 +105,12 @@ ALBUMS = {
     "600": {"ratingKey": "600", "type": "album", "title": "Boxed Set",
             "titleSort": "Boxed Set", "parentTitle": "Cal Penn",
             "thumb": "/library/metadata/600/thumb/1700000000"},
+    "700": {"ratingKey": "700", "type": "album", "title": "Two Halves - Read by Dee Lane",
+            "titleSort": "Two Halves", "parentTitle": "Ann Author",
+            "thumb": "/library/metadata/700/thumb/1700000000"},
+    "800": {"ratingKey": "800", "type": "album", "title": "Mixed Bag - Read by Dee Lane",
+            "titleSort": "Mixed Bag", "parentTitle": "Ann Author",
+            "thumb": "/library/metadata/800/thumb/1700000000"},
 }
 # Not in the audiobook library.
 OTHER_ALBUM = {"ratingKey": "900", "type": "album", "title": "Some Music", "parentTitle": "Band"}
@@ -130,6 +136,12 @@ TRACKS = {
     # number: every track stays.
     "600": [track(601, 600, 1, 1, 10_000, "C/Boxed/CD1"), track(602, 600, 1, 2, 10_000, "C/Boxed/CD1"),
             track(603, 600, 1, 3, 10_000, "C/Boxed/CD2"), track(604, 600, 1, 4, 10_000, "C/Boxed/CD2")],
+    # Two m4b parts, each carrying its own chapters.
+    "700": [track(701, 700, 1, 1, 100_000, "D/Halves", ext="m4b"),
+            track(702, 700, 1, 2, 80_000, "D/Halves", ext="m4b")],
+    # Mixed: the first part carries chapters, the second none.
+    "800": [track(801, 800, 1, 1, 50_000, "D/Mixed", ext="m4b"),
+            track(802, 800, 1, 2, 40_000, "D/Mixed")],
 }
 
 CHAPTERS = {
@@ -141,6 +153,20 @@ CHAPTERS = {
     "411": [
         {"index": 1, "startTimeOffset": 0, "endTimeOffset": 30_000, "tag": "Opening\xa0Credits"},
         {"index": 2, "startTimeOffset": 30_000, "endTimeOffset": 69_000, "tag": "02"},
+    ],
+    "701": [
+        {"index": 1, "startTimeOffset": 0, "endTimeOffset": 60_000, "tag": "Chapter 01 - The Start"},
+        {"index": 2, "startTimeOffset": 60_000, "endTimeOffset": 100_030, "tag": "Chapter 02 - The Road"},
+    ],
+    "702": [
+        # Plex's first chapter can start a moment in; the part still starts at 0.
+        {"index": 1, "startTimeOffset": 20, "endTimeOffset": 30_000, "tag": "Chapter 03 - The Inn"},
+        {"index": 2, "startTimeOffset": 30_000, "endTimeOffset": 50_000},
+        {"index": 3, "startTimeOffset": 50_000, "endTimeOffset": 79_000, "tag": "Chapter 05 - Home"},
+    ],
+    "801": [
+        {"index": 1, "startTimeOffset": 0, "endTimeOffset": 20_000, "tag": "Prologue"},
+        {"index": 2, "startTimeOffset": 20_000, "endTimeOffset": 50_000},
     ],
 }
 
@@ -214,6 +240,19 @@ class FakePlex:
                     return httpx.Response(404)
                 return self.mc(Metadata=[self._with_state(t, token) for t in TRACKS[rk]],
                                librarySectionID=int(SECTION))
+            if len(parts) == 3 and "," in rk:
+                # Several tracks in one request, as Plex answers a
+                # comma-joined list of rating keys.
+                wanted = rk.split(",")
+                found = []
+                for ts in TRACKS.values():
+                    for t in ts:
+                        if t["ratingKey"] in wanted:
+                            m = dict(t)
+                            if q.get("includeChapters") == ["1"] and t["ratingKey"] in CHAPTERS:
+                                m["Chapter"] = CHAPTERS[t["ratingKey"]]
+                            found.append(m)
+                return self.mc(Metadata=found, librarySectionID=int(SECTION))
             if len(parts) == 3:
                 if rk in ALBUMS:
                     return self.mc(Metadata=[ALBUMS[rk]], librarySectionID=int(SECTION))
@@ -377,7 +416,8 @@ class Books(BridgeBase):
 
     def test_list_books_keys_and_shapes(self):
         books = self.books()
-        self.assertEqual(set(books), {"100:1", "200:1", "300:1", "400:1", "400:2", "500:1", "600:1"})
+        self.assertEqual(set(books), {"100:1", "200:1", "300:1", "400:1", "400:2", "500:1", "600:1",
+                                      "700:1", "800:1"})
         self.assertEqual(books["100:1"]["shape"], "single")
         self.assertEqual(books["200:1"]["shape"], "parts")
         self.assertEqual(books["300:1"]["shape"], "parts")
@@ -438,10 +478,13 @@ class Detail(BridgeBase):
         self.assertEqual(d["tracks"], [{"key": "101", "part_path": "/library/parts/1019/1700000000/file.m4b",
                                         "duration_ms": 1_000_000, "index": 1}])
         self.assertEqual(d["chapters"], [
-            {"index": 1, "label": "Chapter 1 of 3", "start_ms": 0, "end_ms": 300_000, "track": "101"},
-            {"index": 2, "label": "Chapter 2 of 3", "start_ms": 300_000, "end_ms": 700_000, "track": "101"},
+            {"index": 1, "label": "Chapter 1 of 3", "start_ms": 0, "end_ms": 300_000, "track": "101",
+             "track_start_ms": 0, "track_end_ms": 300_000},
+            {"index": 2, "label": "Chapter 2 of 3", "start_ms": 300_000, "end_ms": 700_000, "track": "101",
+             "track_start_ms": 300_000, "track_end_ms": 700_000},
             # The last chapter runs to the end of the file.
-            {"index": 3, "label": "Chapter 3 of 3", "start_ms": 700_000, "end_ms": 1_000_000, "track": "101"},
+            {"index": 3, "label": "Chapter 3 of 3", "start_ms": 700_000, "end_ms": 1_000_000, "track": "101",
+             "track_start_ms": 700_000, "track_end_ms": 1_000_000},
         ])
         chap = [c for c in self.plex.calls if c.url.path == "/library/metadata/101"][0]
         self.assertIn(b"includeChapters=1", chap.url.query)
@@ -454,20 +497,62 @@ class Detail(BridgeBase):
     def test_single_file_without_chapters_is_one_chapter(self):
         d = self.run_async(pp.book_detail("500:1"))
         self.assertEqual(d["chapters"], [{"index": 1, "label": "Chapter 1 of 1", "start_ms": 0,
-                                          "end_ms": 90_000, "track": "501"}])
+                                          "end_ms": 90_000, "track": "501",
+                                          "track_start_ms": 0, "track_end_ms": 90_000}])
 
-    def test_multi_part_book_parts(self):
+    def test_mp3_parts_without_chapters_stay_parts(self):
         d = self.run_async(pp.book_detail("200:1"))
         self.assertEqual(d["shape"], "parts")
         self.assertEqual([t["key"] for t in d["tracks"]], ["201", "202", "203"])
         self.assertEqual([t["index"] for t in d["tracks"]], [1, 2, 3])
         self.assertEqual(d["chapters"], [
-            {"index": 1, "label": "Part 1 of 3", "start_ms": 0, "end_ms": 100_000, "track": "201"},
-            {"index": 2, "label": "Part 2 of 3", "start_ms": 100_000, "end_ms": 300_000, "track": "202"},
-            {"index": 3, "label": "Part 3 of 3", "start_ms": 300_000, "end_ms": 600_000, "track": "203"},
+            {"index": 1, "label": "Part 1 of 3", "start_ms": 0, "end_ms": 100_000, "track": "201",
+             "track_start_ms": 0, "track_end_ms": 100_000},
+            {"index": 2, "label": "Part 2 of 3", "start_ms": 100_000, "end_ms": 300_000, "track": "202",
+             "track_start_ms": 0, "track_end_ms": 200_000},
+            {"index": 3, "label": "Part 3 of 3", "start_ms": 300_000, "end_ms": 600_000, "track": "203",
+             "track_start_ms": 0, "track_end_ms": 300_000},
         ])
-        # Parts need no chapter lookup.
-        self.assertNotIn("/library/metadata/201", self.plex.paths())
+        # The parts were asked for their chapters, in one request.
+        chap = [c for c in self.plex.calls if b"includeChapters=1" in c.url.query]
+        self.assertEqual([c.url.path for c in chap], ["/library/metadata/201,202,203"])
+
+    def test_parts_with_chapters_in_every_part_use_them_across_the_book(self):
+        d = self.run_async(pp.book_detail("700:1"))
+        self.assertEqual(d["shape"], "parts")
+        self.assertEqual(d["chapters"], [
+            {"index": 1, "label": "Chapter 01 - The Start", "start_ms": 0, "end_ms": 60_000,
+             "track": "701", "track_start_ms": 0, "track_end_ms": 60_000},
+            # A part's last chapter ends at the part's end, not Plex's figure.
+            {"index": 2, "label": "Chapter 02 - The Road", "start_ms": 60_000, "end_ms": 100_000,
+             "track": "701", "track_start_ms": 60_000, "track_end_ms": 100_000},
+            {"index": 3, "label": "Chapter 03 - The Inn", "start_ms": 100_000, "end_ms": 130_000,
+             "track": "702", "track_start_ms": 0, "track_end_ms": 30_000},
+            # Untitled: numbered across the whole book.
+            {"index": 4, "label": "Chapter 4 of 5", "start_ms": 130_000, "end_ms": 150_000,
+             "track": "702", "track_start_ms": 30_000, "track_end_ms": 50_000},
+            {"index": 5, "label": "Chapter 05 - Home", "start_ms": 150_000, "end_ms": 180_000,
+             "track": "702", "track_start_ms": 50_000, "track_end_ms": 80_000},
+        ])
+        self.assertEqual(d["chapters"][-1]["end_ms"], d["duration_ms"])
+
+    def test_mixed_parts_count_a_part_without_chapters_as_one_chapter(self):
+        d = self.run_async(pp.book_detail("800:1"))
+        self.assertEqual(d["chapters"], [
+            {"index": 1, "label": "Prologue", "start_ms": 0, "end_ms": 20_000,
+             "track": "801", "track_start_ms": 0, "track_end_ms": 20_000},
+            {"index": 2, "label": "Chapter 2 of 3", "start_ms": 20_000, "end_ms": 50_000,
+             "track": "801", "track_start_ms": 20_000, "track_end_ms": 50_000},
+            {"index": 3, "label": "Chapter 3 of 3", "start_ms": 50_000, "end_ms": 90_000,
+             "track": "802", "track_start_ms": 0, "track_end_ms": 40_000},
+        ])
+
+    def test_chapter_requests_are_batched(self):
+        with mock.patch.object(pp, "CHAPTER_BATCH", 2):
+            d = self.run_async(pp.book_detail("200:1"))
+        chap = [c.url.path for c in self.plex.calls if b"includeChapters=1" in c.url.query]
+        self.assertEqual(chap, ["/library/metadata/201,202", "/library/metadata/203"])
+        self.assertEqual(len(d["chapters"]), 3)
 
     def test_unknown_or_foreign_book_is_not_in_library(self):
         for key in ("999:1", "900:1", "200:7"):

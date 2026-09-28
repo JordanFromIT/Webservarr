@@ -4,8 +4,8 @@ access, Plex's own listening state, and timeline write-through.
 
 The audiobook library is a Plex music library: artist (author), album, disc
 (the book), tracks (the files). A book's key is "<album ratingKey>:<disc>".
-One track is a single-file book whose chapters come from the file; several
-tracks are a multi-part book whose parts are its chapters.
+Chapters come from the files where they carry them; a multi-part book whose
+files carry none has its parts as chapters.
 
 Two tokens are in play and never mix:
 
@@ -445,10 +445,16 @@ def _chapter_label(tag, n: int, total: int) -> str:
     return text
 
 
-def _file_chapters(track: dict, duration: int) -> list:
-    """A single file's chapters as contiguous [start, end) ranges covering the
-    whole file: each ends where the next starts, the first starts at 0 and
-    the last ends at the file's duration."""
+# Tracks asked for per chapter request (comma-joined rating keys), which
+# bounds the URL on a book of many parts.
+CHAPTER_BATCH = 50
+
+
+def _file_marks(track: dict, duration: int) -> list:
+    """One file's embedded chapters as contiguous (start, end, tag) ranges in
+    file time covering the whole file: each ends where the next starts, the
+    first starts at 0 and the last ends at the file's duration. [] when the
+    file has none."""
     marks = {}
     for c in track.get("Chapter") or []:
         start = _int(c.get("startTimeOffset"))
@@ -456,48 +462,75 @@ def _file_chapters(track: dict, duration: int) -> list:
             marks[start] = c.get("tag")
     starts = sorted(marks)
     if not starts:
-        starts, marks = [0], {0: None}
-    elif starts[0] != 0:
+        return []
+    if starts[0] != 0:
         marks[0] = marks.pop(starts[0])
         starts[0] = 0
-    total = len(starts)
-    rk = str(track.get("ratingKey"))
-    return [{"index": i + 1, "label": _chapter_label(marks[s], i + 1, total), "start_ms": s,
-             "end_ms": starts[i + 1] if i + 1 < total else duration, "track": rk}
-            for i, s in enumerate(starts)]
+    return [(s, starts[i + 1] if i + 1 < len(starts) else duration, marks[s]) for i, s in enumerate(starts)]
+
+
+async def _embedded_chapters(client: httpx.AsyncClient, admin: dict, tracks: list) -> dict:
+    """{track rating key: its Chapter list} for tracks whose file carries chapters."""
+    found = {}
+    keys = [str(t["ratingKey"]) for t in tracks]
+    for i in range(0, len(keys), CHAPTER_BATCH):
+        batch = ",".join(keys[i:i + CHAPTER_BATCH])
+        container = await _pms_get(client, admin, admin["token"], f"/library/metadata/{batch}",
+                                   {"includeChapters": 1})
+        for item in (container or {}).get("Metadata") or []:
+            if item.get("Chapter"):
+                found[str(item.get("ratingKey"))] = item["Chapter"]
+    return found
+
+
+def _chapters(tracks: list, embedded: dict) -> list:
+    """The book's chapters, [{index, label, start_ms, end_ms, track,
+    track_start_ms, track_end_ms}]: start/end in book time (tracks laid end to
+    end), track_start/track_end inside that chapter's track.
+
+    When any track carries embedded chapters, those are the book's chapters,
+    numbered across the whole book ("Chapter N of M" when untitled); a track
+    without any in such a book counts as one untitled chapter spanning the
+    track, so the chapters always cover the book. When no track has any, a
+    single file is one chapter and a multi-part book's parts are its chapters
+    ("Part N of M")."""
+    durations = [_track_duration(t) for t in tracks]
+    marks = [_file_marks({"Chapter": embedded.get(str(t["ratingKey"]))}, d) for t, d in zip(tracks, durations)]
+    use_parts = len(tracks) > 1 and not any(marks)
+    spans = []   # (track index, start, end, tag)
+    for i, (m, d) in enumerate(zip(marks, durations)):
+        for start, end, tag in (m if m and not use_parts else [(0, d, None)]):
+            spans.append((i, start, end, tag))
+    total = len(spans)
+    out, base = [], [sum(durations[:i]) for i in range(len(tracks))]
+    for n, (i, start, end, tag) in enumerate(spans, start=1):
+        label = f"Part {n} of {total}" if use_parts else _chapter_label(tag, n, total)
+        out.append({"index": n, "label": label, "start_ms": base[i] + start, "end_ms": base[i] + end,
+                    "track": str(tracks[i]["ratingKey"]), "track_start_ms": start, "track_end_ms": end})
+    return out
 
 
 async def book_detail(key: str) -> dict:
     """One book, read with the admin token: the book_list fields plus
     tracks [{key, part_path, duration_ms, index}] in play order (index from 1)
-    and chapters [{index, label, start_ms, end_ms, track}], whose times are
-    book time (a multi-part book's parts laid end to end).
+    and chapters [{index, label, start_ms, end_ms, track, track_start_ms,
+    track_end_ms}] (see _chapters): start/end are book time (a multi-part
+    book's parts laid end to end), track_start/track_end are inside `track`.
 
-    A single file's chapters are its own ("Chapter N of M" when untitled); a
-    multi-part book's chapters are its parts ("Part N of M"). Raises
-    NotInLibrary, PlayerOff or PlayerUnavailable."""
+    Chapters come from the files where they have them ("Chapter N of M" when
+    untitled), numbered across the book; a multi-part book whose files have
+    none gets its parts ("Part N of M"). Raises NotInLibrary, PlayerOff or
+    PlayerUnavailable."""
     admin = _configured()
     parse_key(key)
     async with _pms_client() as client:
         album, disc, tracks, disc_count = await _book(client, admin, key)
-        chapters = []
-        if len(tracks) == 1:
-            only = tracks[0]
-            full = await _pms_get(client, admin, admin["token"], f"/library/metadata/{only['ratingKey']}",
-                                  {"includeChapters": 1})
-            items = (full or {}).get("Metadata") or [only]
-            chapters = _file_chapters(items[0], _track_duration(only))
+        embedded = await _embedded_chapters(client, admin, tracks)
 
-    out_tracks, start = [], 0
-    for i, t in enumerate(tracks):
-        duration = _track_duration(t)
-        out_tracks.append({"key": str(t["ratingKey"]), "part_path": _part(t).get("key") or "",
-                           "duration_ms": duration, "index": i + 1})
-        if len(tracks) > 1:
-            chapters.append({"index": i + 1, "label": f"Part {i + 1} of {len(tracks)}", "start_ms": start,
-                             "end_ms": start + duration, "track": str(t["ratingKey"])})
-        start += duration
-    return {**_summary(album, disc, tracks, disc_count), "tracks": out_tracks, "chapters": chapters}
+    out_tracks = [{"key": str(t["ratingKey"]), "part_path": _part(t).get("key") or "",
+                   "duration_ms": _track_duration(t), "index": i + 1} for i, t in enumerate(tracks)]
+    return {**_summary(album, disc, tracks, disc_count), "tracks": out_tracks,
+            "chapters": _chapters(tracks, embedded)}
 
 
 async def assert_in_library(key: str, track_key: Optional[str] = None) -> None:
