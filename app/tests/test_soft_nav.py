@@ -173,6 +173,37 @@ class CalendarPage(unittest.TestCase):
         self.assertNotRegex(code, r"\bWS\.poll\(")
 
 
+class PageOffBanner(unittest.TestCase):
+    """"This page is turned off" (pages.py PAGE_OFF_BANNER) is appended to the
+    header, outside #wsPage, so a swap alone would leave it behind or never
+    add it. The router brings it in step with the page it swaps in."""
+
+    def router(self):
+        return (STATIC / "js" / "router.js").read_text(encoding="utf-8")
+
+    def test_the_swap_brings_the_banner_in_step(self):
+        body = function_body(self.router(), "syncPageOffBanner")
+        self.assertIn("const live = document.getElementById('pageOffBanner');", body)
+        self.assertIn("const fresh = doc.getElementById('pageOffBanner');", body)
+        self.assertRegex(body, r"if \(!fresh\) \{\s*if \(live\) live\.remove\(\);\s*return;\s*\}")
+        self.assertIn("if (live) live.replaceWith(copy);", body)
+        self.assertIn("else document.getElementById('wsPage').before(copy);", body)
+        swap = function_body(self.router(), "swapDom")
+        self.assertLess(swap.index("old.replaceWith("), swap.index("syncPageOffBanner(doc);"))
+
+    def test_the_banner_is_the_one_the_server_renders(self):
+        pages = (STATIC.parent / "pages.py").read_text(encoding="utf-8")
+        start = pages.index("PAGE_OFF_BANNER = (")
+        self.assertIn('id="pageOffBanner"', pages[start:pages.index("\n)\n", start)])
+
+    def test_right_above_wspage_is_where_the_server_puts_it(self):
+        # The header marker (and so the banner after it) is followed by
+        # #wsPage with nothing but comments and white space between.
+        for name in CONVERTED:
+            with self.subTest(name):
+                self.assertRegex(read(name), r'<!-- ws:header -->(?:\s|<!--.*?-->)*<div id="wsPage"')
+
+
 class SharedShellScripts(unittest.TestCase):
     """ui.js (the toast and dialog) loads once, from the shell, on every shell
     page; the router closes dialogs before a swap; WS.getJSON takes the page's

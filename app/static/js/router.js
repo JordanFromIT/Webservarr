@@ -606,9 +606,26 @@ function start() {
     WS.applyShell(parts);
   }
 
+  /* "This page is turned off" (pages.py PAGE_OFF_BANNER) is rendered for an
+     admin under the header, outside #wsPage, on a page switched off in
+     Settings > Pages. After a swap it is there exactly when the server
+     rendered it for the new page, in the same place: right above #wsPage. */
+  function syncPageOffBanner(doc) {
+    const live = document.getElementById('pageOffBanner');
+    const fresh = doc.getElementById('pageOffBanner');
+    if (!fresh) {
+      if (live) live.remove();
+      return;
+    }
+    const copy = document.importNode(fresh, true);
+    if (live) live.replaceWith(copy);
+    else document.getElementById('wsPage').before(copy);
+  }
+
   function swapDom(doc, page) {
     const old = document.getElementById('wsPage');
     old.replaceWith(document.importNode(page, true));
+    syncPageOffBanner(doc);
     syncStyles(doc);
     document.title = doc.title;
     syncHtmlFlags(doc.documentElement);
