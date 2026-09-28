@@ -418,11 +418,16 @@
   }
 
   var statusPromise = null;
+  var statusAt = 0;   // when the last answer landed; 0 while one is on its way
 
   /* One request shared by the pill and any page that lists services (the
-     dashboard tiles), cached for the next visit. */
+     dashboard tiles), cached for the next visit. A request on its way is
+     shared, and its answer is reused for 5 s after it lands. That is timed
+     by the clock, not a timer: the request outlives the page that asked (it
+     is the pill's too), and so must nothing it leaves behind. */
   function serviceStatus() {
-    if (statusPromise) return statusPromise;
+    if (statusPromise && (!statusAt || Date.now() - statusAt < 5000)) return statusPromise;
+    statusAt = 0;
     statusPromise = fetch('/api/integrations/service-status')
       .then(function (r) { return r.ok ? r.json() : []; })
       .catch(function () { return []; })
@@ -432,7 +437,7 @@
           paintStatus(state);
           cacheSet('status', { state: state, list: list, t: Date.now() });
         }
-        setTimeout(function () { statusPromise = null; }, 5000);
+        statusAt = Date.now();
         return list;
       });
     return statusPromise;

@@ -332,6 +332,27 @@ const UI = 'https://host.example/static/js/ui.js?v=abc';
   g.clearTimeout(t2);
 }
 
+// The service-status request (WS.serviceStatus) is shared with the header's
+// pill: Home asks for it, never aborts it, and may leave while it is on its
+// way. It is the shell's, not Home's; Home's own reads still are Home's.
+{
+  const HOME = 'https://host.example/static/js/pages/home.js?v=abc';
+  tr.start('home');
+  fetchResolve = [];
+  nowStack = ['Error', `    at serviceStatus (${SHELL}:426:21)`, `    at swr (${SHELL}:214:12)`,
+    `    at loadServices (${HOME}:600:19)`, `    at mount (${HOME}:900:40)`].join('\n');
+  const shared = g.fetch('/api/integrations/service-status');
+  nowStack = ['Error', `    at loadSystemStats (${HOME}:700:34)`, `    at mount (${HOME}:900:40)`].join('\n');
+  const own = g.fetch('/api/integrations/system-stats');   // no signal: Home's leak
+  nowStack = stack(SELF, PAGE);
+  const out = tr.stop();
+  check('serviceStatus called from a page is the shell\'s; the page\'s own fetch is not',
+    out.length === 1 && out[0].kind === 'fetch' && out[0].page === 'home' && /system-stats/.test(out[0].detail), out);
+  fetchResolve.forEach((f) => f.resolve('R'));
+  await shared;
+  await own;
+}
+
 // ...but only ui.js's own calls. A page that polls, sets a timer or listens
 // itself, directly or through a helper or a shell helper (WS.poll, the
 // router's ctx.setTimeout), is still charged, as is a helper ui.js calls back.
