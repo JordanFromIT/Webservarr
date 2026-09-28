@@ -323,10 +323,10 @@ async def _ticket_creator_email(r: aioredis.Redis, db: Session, ticket) -> Optio
 
     Tickets record the creator's email (creator_email): it is the target, as
     long as _collect_recipient_emails would reach it (live session or push
-    subscription). Tickets from before that column keep the old behaviour, a
-    live session whose username matches, and nothing else: usernames from
-    different sign-in methods (local, Plex, OIDC) can collide, so a username
-    is never mapped to an email any other way.
+    subscription). A ticket without one is matched to a live session by its
+    owner's account identity (creator_identity, see tickets.account_identity),
+    never by username: usernames from different sign-in methods (local, Plex,
+    OIDC) can collide. A ticket with neither reaches nobody.
     """
     if ticket.creator_email:
         email = identity_email(ticket.creator_email)
@@ -334,19 +334,22 @@ async def _ticket_creator_email(r: aioredis.Redis, db: Session, ticket) -> Optio
             return None
         return email if email in await _collect_recipient_emails(r, db) else None
 
-    username = ticket.creator_username
-    if not username:
+    identity = ticket.creator_identity
+    if not identity:
         return None
+    from app.routers.tickets import account_identity
+
     cursor = 0
     while True:
         cursor, keys = await r.scan(cursor, match="session:*", count=100)
         for key in keys:
-            data = await r.hgetall(key)
-            uname = data.get(b"username", b"")
-            uname = uname.decode() if isinstance(uname, bytes) else uname
-            if uname == username:
-                found = data.get(b"email", b"")
-                found = identity_email(found.decode() if isinstance(found, bytes) else found)
+            raw = await r.hgetall(key)
+            data = {
+                (k.decode() if isinstance(k, bytes) else k): (v.decode() if isinstance(v, bytes) else v)
+                for k, v in raw.items()
+            }
+            if account_identity(data) == identity:
+                found = identity_email(data.get("email"))
                 if found:
                     return found
         if cursor == 0:

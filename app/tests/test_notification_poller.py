@@ -391,11 +391,12 @@ class TicketAlertTests(unittest.TestCase):
         self.r = FakeRedis()
         self.pushed = []
 
-    def _ticket(self, creator_email):
+    def _ticket(self, creator_email, creator_identity=None):
         db = self.Session()
         try:
             t = Ticket(title="Buffering", description="d", category="other", status="open",
-                       creator_username="bob", creator_name="Bob", creator_email=creator_email)
+                       creator_username="bob", creator_name="Bob", creator_email=creator_email,
+                       creator_identity=creator_identity)
             db.add(t)
             db.commit()
             tid = t.id
@@ -459,11 +460,32 @@ class TicketAlertTests(unittest.TestCase):
         self._poll()
         self.assertEqual(self._rows(), [])
 
-    def test_legacy_ticket_uses_a_live_session_only(self):
-        self.r.hashes["session:x"] = {"username": "bob", "email": "Bob@Example.com"}
-        self._ticket(None)
+    def test_a_ticket_without_email_reaches_its_owners_live_session_by_identity(self):
+        # The owner signed in through Authentik: another username, the same
+        # Plex account, so the same identity.
+        self.r.hashes["session:x"] = {"username": "robert", "email": "Bob@Example.com",
+                                      "auth_method": "oidc", "user_id": "sub-1",
+                                      "plex_account_id": "123456", "plex_token": "t"}
+        self._ticket(None, creator_identity="plex:123456")
         self._poll()
         self.assertEqual(self._rows(), [("bob@example.com", "New response on your ticket")])
+
+    def test_a_namesakes_session_is_never_the_recipient(self):
+        # A local "bob" is signed in; the ticket is Plex bob's.
+        self.r.hashes["session:local"] = {"username": "bob", "email": "bob@local.example",
+                                          "auth_method": "simple", "user_id": "7", "account_uid": "u-7"}
+        self._ticket(None, creator_identity="plex:123456")
+        self._poll()
+        self.assertEqual(self._rows(), [])
+
+    def test_a_ticket_with_no_identity_and_no_email_reaches_nobody(self):
+        # The username alone never picks a recipient.
+        self.r.hashes["session:x"] = {"username": "bob", "email": "bob@example.com",
+                                      "auth_method": "plex", "user_id": "123456",
+                                      "plex_account_id": "123456"}
+        self._ticket(None)
+        self._poll()
+        self.assertEqual(self._rows(), [])
 
     def test_legacy_ticket_without_session_gets_nothing(self):
         self._subscribe("bob@example.com")
