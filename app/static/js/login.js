@@ -3,14 +3,35 @@
  *
  * A full-page document, not a soft-navigation page: the router never loads
  * it. Loaded by a classic script tag inside <main>, right after the card, so
- * the branding below is applied as soon as the card is parsed; everything
- * else waits for DOMContentLoaded. A file rather than inline script: the CSP
- * is script-src 'self'.
+ * the branding below is applied and the sign-in handlers are wired as soon as
+ * the card is parsed; the rest (status, artwork, a branding fetch, the
+ * signed-in check) waits for DOMContentLoaded. A file rather than inline
+ * script: the CSP is script-src 'self'.
  */
 
 // First, before anything that could throw: this script ran. The page's CSS
 // shows a "Sign-in didn't load" hint after 2.5 s unless it did (login.html).
 document.documentElement.setAttribute('data-login-js', '');
+
+// The form starts hidden (login.html) so it never shows a sign-in method the
+// admin turned off. It is shown once the methods are applied, and after 2.5 s
+// in any case, whatever is still on its way (a slow /api/branding on a page
+// that came without its branding): the form then keeps what the server-rendered
+// page set, and a method that turns out to be off is refused by its route with
+// a message in the form. Its handlers are wired below, before anything waits,
+// so a form on screen always signs in through this script. Armed first, so
+// nothing later in this file that throws can keep the form hidden.
+var REVEAL_AFTER_MS = 2500;
+function revealForm() {
+    var f = document.getElementById('loginForm');
+    if (f) f.classList.add('auth-ready');
+}
+setTimeout(revealForm, REVEAL_AFTER_MS);
+
+// Plex PINs this page is completing: each one once (see finishPlexAuth).
+var plexFinishing = {};
+
+wireSignIn();
 
 // The logo and the sign-in methods are known before the first paint: the
 // branding is already in window.WEBSERVARR_THEME (theme-loader reads it from
@@ -126,6 +147,9 @@ async function completePlexAuth(pinId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin_id: pinId }),
         });
+        // Another call is completing this PIN (the server claimed it for
+        // that one); its answer is the one that counts.
+        if (resp.status === 409) return;
         if (!resp.ok) {
             var err = await resp.json();
             if (err.detail && err.detail.indexOf('not yet authorized') !== -1) {
@@ -141,6 +165,15 @@ async function completePlexAuth(pinId) {
     }
 }
 
+// Complete a PIN once. The popup's message, the popup-closed poll and a phone's
+// return can all say the same sign-in is done; only the first goes on
+// (completePlexAuth's own "not yet authorized" retries are not new starts).
+function finishPlexAuth(pinId) {
+    if (plexFinishing[pinId]) return;
+    plexFinishing[pinId] = true;
+    completePlexAuth(pinId);
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
     loadSystemStatus();
 
@@ -150,18 +183,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         var pinId = sessionStorage.getItem('plex_pin_id');
         if (pinId) {
             sessionStorage.removeItem('plex_pin_id');
-            completePlexAuth(parseInt(pinId, 10));
+            finishPlexAuth(parseInt(pinId, 10));
             return; // Don't load the rest of the page
         }
     }
-
-    // Failsafe: guarantee the form is revealed even if auth-method resolution
-    // below stalls (e.g. a hung /api/branding fetch) — never lock the user out
-    // behind a permanently-hidden form.
-    setTimeout(function() {
-        var f = document.getElementById('loginForm');
-        if (f) f.classList.add('auth-ready');
-    }, 2500);
 
     // --- Rotating TMDB Backgrounds ---
     (async function() {
@@ -297,21 +322,9 @@ document.addEventListener('DOMContentLoaded', async function() {
     // first paint; this repeats it for a page whose branding was fetched above.
     applyLoginBranding(theme);
 
-    // The Authentik button signs in through the OIDC login.
-    var authMethods = theme.auth_methods || {};
-    if (authMethods.authentik) {
-        var authentikBtn = document.getElementById('authentikLoginBtn');
-        if (authentikBtn) {
-            authentikBtn.addEventListener('click', function() {
-                window.location.href = '/auth/login';
-            });
-        }
-    }
-
     // Auth-method visibility is resolved — reveal the form (it starts hidden
     // via CSS to prevent the simple-auth fields flashing before Plex/SSO).
-    var revealForm = document.getElementById('loginForm');
-    if (revealForm) revealForm.classList.add('auth-ready');
+    revealForm();
 
     // If already authenticated, redirect to dashboard
     try {
@@ -322,10 +335,24 @@ document.addEventListener('DOMContentLoaded', async function() {
             return;
         }
     } catch (e) { /* Not authenticated, show login form */ }
+});
+
+// The form's and the sign-in buttons' handlers, wired when this script runs
+// (the card is parsed by then), before any await: whenever the form is on
+// screen, Enter and every button go through here, never a plain form post.
+function wireSignIn() {
+    // The Authentik button signs in through the OIDC login. It is hidden
+    // unless Authentik is on (applyLoginBranding).
+    var authentikLoginBtn = document.getElementById('authentikLoginBtn');
+    if (authentikLoginBtn) {
+        authentikLoginBtn.addEventListener('click', function() {
+            window.location.href = '/auth/login';
+        });
+    }
 
     // Handle login form submission
     var loginForm = document.getElementById('loginForm');
-    loginForm.addEventListener('submit', async function(e) {
+    if (loginForm) loginForm.addEventListener('submit', async function(e) {
         e.preventDefault();
 
         var username = document.getElementById('username').value;
@@ -354,7 +381,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
 
     // --- Plex login via direct PIN-based OAuth ---
-    document.getElementById('plexLoginBtn').addEventListener('click', async function() {
+    var plexLoginBtn = document.getElementById('plexLoginBtn');
+    if (plexLoginBtn) plexLoginBtn.addEventListener('click', async function() {
         var btn = this;
         var originalChildren = [];
         while (btn.firstChild) {
@@ -386,15 +414,18 @@ document.addEventListener('DOMContentLoaded', async function() {
                     if (e.origin !== window.location.origin || !popup || e.source !== popup) return;
                     if (e.data && e.data.type === 'plex-auth-complete') {
                         window.removeEventListener('message', handler);
+                        // The popup is closed next; the poll must not take
+                        // that for a second completion.
+                        clearInterval(pollInterval);
                         if (popup && !popup.closed) popup.close();
-                        completePlexAuth(data.pin_id);
+                        finishPlexAuth(data.pin_id);
                     }
                 });
                 // Fallback: poll in case popup closes without postMessage
                 var pollInterval = setInterval(function() {
                     if (popup && popup.closed) {
                         clearInterval(pollInterval);
-                        completePlexAuth(data.pin_id);
+                        finishPlexAuth(data.pin_id);
                     }
                 }, 1000);
             }
@@ -408,4 +439,4 @@ document.addEventListener('DOMContentLoaded', async function() {
             showLoginError(e.message);
         }
     });
-});
+}

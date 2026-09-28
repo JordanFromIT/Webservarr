@@ -107,17 +107,19 @@
     /* Prevent flash of the wrong auth method on load: keep the login form
        invisible (space reserved, so no layout shift) until JS has applied the
        configured auth methods, then reveal via .auth-ready. */
-    #loginForm { visibility: hidden; animation: login-fallback-show 0s linear 2.5s forwards; }
-    #loginForm.auth-ready { visibility: visible; animation: none; }
+    #loginForm { visibility: hidden; }
+    #loginForm.auth-ready { visibility: visible; }
     /* If login.js never runs (a failed load, a bad deploy), nothing adds
        .auth-ready and the form would stay hidden for good. So the form shows
-       itself after 2.5 s anyway, and so does a hint to reload. The normal
-       path cancels both: .auth-ready stops the form's animation, and the
-       hint goes the moment login.js runs (<html data-login-js>, its first
-       line) or the form is ready. The hint takes no space until it shows.
-       These are 0 s steps, not motion, so reduced motion keeps them. The
-       form posts (method="post"): without script a submit puts nothing in
-       the address bar. */
+       itself after 2.5 s anyway, and so does a hint to reload. Both apply
+       only while login.js has not run: its first line marks <html
+       data-login-js>, and from then on the script alone decides when the
+       form shows (by then its submit is wired), so a slow page never shows a
+       form Enter can't submit. The hint also goes once the form is ready. It
+       takes no space until it shows. These are 0 s steps, not motion, so
+       reduced motion keeps them. The form posts (method="post"): without
+       script a submit puts nothing in the address bar. */
+    html:not([data-login-js]) #loginForm { animation: login-fallback-show 0s linear 2.5s forwards; }
     #loginLoadHint { visibility: hidden; height: 0; overflow: hidden; animation: login-fallback-hint 0s linear 2.5s forwards; }
     #loginForm.auth-ready ~ #loginLoadHint,
     html[data-login-js] #loginLoadHint { display: none; }

@@ -1300,6 +1300,14 @@ def js_files():
     return sorted((STATIC / "js").rglob("*.js"))
 
 
+def own_rule(css: str, selector: str) -> str:
+    """The declarations of the rule written for exactly this selector at the
+    start of a line (a longer selector ending in it does not count)."""
+    found = re.findall(r"(?m)^\s*" + re.escape(selector) + r" \{([^{}]*)\}", css)
+    assert len(found) == 1, f"{selector}: {len(found)} rules"
+    return found[0]
+
+
 def string_matches(src: str, pattern) -> list:
     """Matches of pattern that lie inside a JS string or template literal
     (comments and regex literals excluded): the same text is present with the
@@ -1379,7 +1387,7 @@ class WholeSite(unittest.TestCase):
         body = code[start:matching_brace(code, code.index("{", start))]
         guard = "if (e.origin !== window.location.origin || !popup || e.source !== popup) return;"
         self.assertIn(guard, body)
-        for later in ("removeEventListener(", "popup.close()", "completePlexAuth("):
+        for later in ("removeEventListener(", "popup.close()", "finishPlexAuth("):
             self.assertLess(body.index(guard), body.index(later), later)
         self.assertIn("var popup = window.open(", code[:start])
         cb = js_code_only((STATIC / "js" / "plex-callback.js").read_text(encoding="utf-8"))
@@ -1390,22 +1398,20 @@ class WholeSite(unittest.TestCase):
         # .auth-ready. The form then shows itself after 2.5 s by CSS alone,
         # with a hint to reload; the normal path (.auth-ready, or login.js
         # having run) cancels both, so nothing changes when the script loads.
-        from app.tests.test_motion import css_rule, keyframe_properties, reduced_blocks
+        from app.tests.test_motion import keyframe_properties, reduced_blocks
         login = read("login")
         head = login.split("</head>", 1)[0]
-        form = css_rule(head, "#loginForm")
-        self.assertIn("visibility: hidden", form)
-        self.assertIn("animation: login-fallback-show 0s linear 2.5s forwards", form)
+        self.assertIn("visibility: hidden", own_rule(head, "#loginForm"))
+        self.assertIn("animation: login-fallback-show 0s linear 2.5s forwards",
+                      own_rule(head, "html:not([data-login-js]) #loginForm"))
         self.assertEqual(keyframe_properties(head, "login-fallback-show"), {"visibility"})
-        ready = css_rule(head, "#loginForm.auth-ready")
-        self.assertIn("visibility: visible", ready)
-        self.assertIn("animation: none", ready)
-        hint = re.search(r"^\s*#loginLoadHint \{([^{}]*)\}", head, re.M).group(1)
+        self.assertIn("visibility: visible", own_rule(head, "#loginForm.auth-ready"))
+        hint = own_rule(head, "#loginLoadHint")
         for decl in ("visibility: hidden", "height: 0", "overflow: hidden",
                      "animation: login-fallback-hint 0s linear 2.5s forwards"):
             self.assertIn(decl, hint)
         self.assertEqual(keyframe_properties(head, "login-fallback-hint"), {"visibility", "height", "margin-top"})
-        gone = css_rule(head, "#loginForm.auth-ready ~ #loginLoadHint,\n    html[data-login-js] #loginLoadHint")
+        gone = own_rule(head, "#loginForm.auth-ready ~ #loginLoadHint,\n    html[data-login-js] #loginLoadHint")
         self.assertIn("display: none", gone)
         # A 0 s step, not motion: no reduced-motion block takes it away.
         for block in reduced_blocks(head):
@@ -1427,6 +1433,58 @@ class WholeSite(unittest.TestCase):
         self.assertEqual(first, f"document.documentElement.setAttribute('{blank}', '');")
         self.assertIn("document.documentElement.setAttribute('data-login-js', '');",
                       (STATIC / "js" / "login.js").read_text(encoding="utf-8"))
+
+    def test_the_form_is_usable_whenever_it_shows(self):
+        # N1: the form could be shown (by the failsafe) before the page had
+        # wired its submit, so Enter did a real POST to /login (405). The
+        # handlers are now wired when login.js runs, before any await, and the
+        # CSS fallback only applies while login.js has not run at all.
+        head = read("login").split("</head>", 1)[0]
+        self.assertEqual(own_rule(head, "#loginForm").strip(), "visibility: hidden;")
+        fallback = own_rule(head, "html:not([data-login-js]) #loginForm")
+        self.assertIn("animation: login-fallback-show 0s linear 2.5s forwards", fallback)
+        self.assertEqual(own_rule(head, "#loginForm.auth-ready").strip(), "visibility: visible;")
+        src = (STATIC / "js" / "login.js").read_text(encoding="utf-8")
+        code = js_code_only(src)
+        dcl = code.index("document.addEventListener('                ', async function() {")
+        top = code[:dcl]
+        # Top level, in order: the marker, the failsafe reveal, the branding,
+        # the handlers. Nothing at top level awaits.
+        self.assertRegex(top, r"(?m)^setTimeout\(revealForm, REVEAL_AFTER_MS\);$")
+        self.assertRegex(top, r"(?m)^wireSignIn\(\);$")
+        self.assertNotRegex(re.sub(r"(?ms)^(?:async )?function .*?^\}", "", top), r"\bawait\b")
+        wire = function_body(code, "wireSignIn")
+        self.assertIn("loginForm.addEventListener('      ', async function(e) {", wire)
+        self.assertIn("e.preventDefault();", wire)
+        for btn in ("plexLoginBtn", "authentikLoginBtn"):
+            self.assertIn(f"var {btn} = document.getElementById(", wire)
+        on_ready = code[dcl:matching_brace(code, code.index("{", dcl)) + 1]
+        for gone in ("addEventListener('      '", "plexLoginBtn", "authentikLoginBtn"):
+            self.assertNotIn(gone, on_ready, "no sign-in wiring left behind an await")
+        reveal = function_body(code, "revealForm")
+        self.assertIn("f.classList.add('          ');", reveal)
+        self.assertIn("revealForm();", on_ready)
+
+    def test_one_plex_pin_is_completed_once(self):
+        # N2: the popup's message and the popup-closed poll both completed the
+        # same PIN. Each PIN is completed once per page; the message clears the
+        # poll; a 409 (the server's claim taken by another call) is ignored.
+        code = js_code_only((STATIC / "js" / "login.js").read_text(encoding="utf-8"))
+        finish = function_body(code, "finishPlexAuth")
+        self.assertRegex(finish, r"if \(plexFinishing\[pinId\]\) return;\s*plexFinishing\[pinId\] = true;\s*completePlexAuth\(pinId\);")
+        start = code.index("window.addEventListener('       ', function handler(e) {")
+        handler = code[start:matching_brace(code, code.index("{", start))]
+        self.assertLess(handler.index("clearInterval(pollInterval);"), handler.index("finishPlexAuth(data.pin_id);"))
+        self.assertNotIn("completePlexAuth(", handler)
+        poll = code[code.index("var pollInterval = setInterval("):]
+        poll = poll[:poll.index("}, 1000);")]
+        self.assertIn("finishPlexAuth(data.pin_id);", poll)
+        self.assertNotIn("completePlexAuth(", poll)
+        complete = function_body(code, "completePlexAuth")
+        self.assertRegex(complete, r"if \(resp\.status === 409\) return;")
+        # Only finishPlexAuth and completePlexAuth's own retry call it.
+        calls = [m.start() for m in re.finditer(r"(?<!function )\bcompletePlexAuth\(", code)]
+        self.assertEqual(len(calls), 2, calls)
 
     def test_old_navigation_removed(self):
         # The router's own hover prefetch replaces the sidebar's speculation
