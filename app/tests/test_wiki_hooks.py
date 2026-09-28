@@ -530,7 +530,7 @@ class WikiEditorHelp(unittest.TestCase):
         self.assertRegex(function_body(code, "mirror"),
                          r"var s = _session;\s*_mirrorTimer = setTimeout\(function \(\) \{\s*_mirrorTimer = null;\s*"
                          r"if \(_session !== s\) return;")
-        self.assertEqual(len(live_matches(src, r"box\.addEventListener\('change', mirror\);")), 1)
+        self.assertEqual(len(live_matches(src, r"box\.addEventListener\('change', mirror, \{ signal: vs \}\);")), 1)
 
     def test_a_new_page_names_holders_from_the_branding_payload(self):
         src = editor_js()
@@ -622,7 +622,7 @@ class WikiEditorDialogs(unittest.TestCase):
         # While the question was up the reader may have gone elsewhere; the
         # editor is then not drawn over the new view.
         self.assertRegex(opened, r"var here = location\.href;")
-        self.assertRegex(opened, r"if \(location\.href !== here\) return;")
+        self.assertRegex(opened, r"if \(location\.href !== here \|\| vsig\.aborted\) return;")
 
     def test_every_label_names_its_field(self):
         code = js_code_only(editor_js())

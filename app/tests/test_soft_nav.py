@@ -14,7 +14,7 @@ from app.tests.test_settings_static import function_body
 from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
-CONVERTED = ["news", "settings", "calendar", "issues", "tickets"]
+CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -288,6 +288,132 @@ class TicketsPage(unittest.TestCase):
                       "lead: 'It may already be answered here:' });", src)
 
 
+class WikiPage(unittest.TestCase):
+    """The wiki moves between its views (index, category, search, article)
+    without re-mounting: it claims /wiki URLs through ctx.onNavigate and the
+    router owns history, so the module writes none of its own."""
+
+    def test_wiki_module_does_not_push_history(self):
+        code = js_code_only(module_source("wiki"))
+        self.assertNotIn("pushState(", code)
+        self.assertNotIn("replaceState(", code)
+
+    def test_it_claims_its_own_addresses(self):
+        code = js_code_only(module_source("wiki"))
+        self.assertRegex(function_body(code, "isWikiPath"),
+                         r"^\s*return path === '\s*' \|\| path\.startsWith\('\s*'\);\s*$")
+        self.assertIn("return path === '/wiki' || path.startsWith('/wiki/');", module_source("wiki"))
+        claim = code[code.index("ctx.onNavigate(function (url, how) {"):]
+        claim = claim[:matching_brace(claim, claim.index("{"))]
+        self.assertRegex(claim, r"if \(!isWikiPath\(url\.pathname\)\) return false;\s*"
+                                r"if \(WikiEditor\.holds\(\)\) return false;\s*render\(url, \{")
+        self.assertIn("pop: !!(how && how.pop), scrollY: how && how.scrollY,", claim)
+        self.assertRegex(claim, r"\}\);\s*return true;\s*$")
+
+    def test_its_links_go_through_the_router(self):
+        # No click listener of its own: an article, category, back or body
+        # link is the router's, which offers it to the claim above.
+        code = js_code_only(module_source("wiki"))
+        self.assertNotRegex(code, r"(?:document|window)\.addEventListener\(")
+        self.assertNotIn("preventDefault", function_body(code, "categoryCard"))
+        self.assertRegex(function_body(code, "navigate"), r"^\s*return WS\.router\.navigate\(")
+        self.assertIn("navigate(term ? '/wiki?q=' + encodeURIComponent(term) : '/wiki');", module_source("wiki"))
+
+    def test_every_read_ends_with_its_view(self):
+        code = js_code_only(module_source("wiki"))
+        self.assertEqual(re.findall(r"(?<![.\w])fetch\([^)]*\)", code), ["fetch(path, { signal: vs })"])
+        calls = [m for m in re.finditer(r"(?<![.\w])api\(", code)
+                 if not code[:m.start()].rstrip().endswith("function")]
+        self.assertEqual(len(calls), 8, "two each: index, category, search (its fallback), article (its fallback)")
+        for m in calls:
+            self.assertEqual(call_args(code, m.end() - 1)[-1].strip(), "vs", code[m.start():m.start() + 80])
+        view = function_body(code, "newView")
+        self.assertIn("if (_view) _view.abort();", view)
+        self.assertIn("signal.addEventListener('     ', function () { v.abort(); }, { once: true, signal: v.signal });", view)
+        for name in ("renderIndex", "renderCategory", "renderSearch", "renderPage"):
+            self.assertIn("var vs = newView();", function_body(code, name), name)
+
+    def test_scroll_and_focus_follow_the_view(self):
+        code = js_code_only(module_source("wiki"))
+        render = function_body(code, "render")
+        self.assertIn("if (!how.first && !how.pop) toTop();", render)
+        self.assertIn("if (how.pop) restoreScroll(how.scrollY);", render)
+        self.assertIn("if (how.focus) focusHeading(how.from);", render)
+        self.assertRegex(code, r"await render\(ctx\.url, \{ first: true, ")
+
+    def test_the_helpers_define_only_and_start_from_mount(self):
+        page = module_source("wiki")
+        self.assertIn("WikiCategories.init(ctx);", page)
+        self.assertIn("WikiEditor.init(ctx, {", page)
+        for name, glob in (("wiki-categories.js", "WikiCategories"), ("wiki-editor.js", "WikiEditor")):
+            with self.subTest(name):
+                code = js_code_only((STATIC / "js" / name).read_text(encoding="utf-8"))
+                # Top level: the definition and nothing else.
+                self.assertRegex(code, r"^\s*var " + glob + r" = \(function \(\) \{")
+                self.assertRegex(code, r"return \{ init: init[^}]*\};\s*\}\)\(\);\s*$")
+                self.assertNotIn("DOMContentLoaded", (STATIC / "js" / name).read_text(encoding="utf-8"))
+                self.assertIn("function init(ctx", code)
+                # Every listener has a signal of its own, but the one on the
+                # visit's signal that tidies up when it aborts.
+                for m in re.finditer(r"\baddEventListener\s*\(", code):
+                    if code[:m.start()].endswith("signal."):
+                        continue
+                    self.assertTrue(has_own_signal(call_args(code, m.end() - 1)),
+                                    f"{name}: {code[m.start() - 20:m.start() + 80]!r}")
+                for m in re.finditer(r"(?<![.\w])fetch\(", code):
+                    self.assertIn("signal: ", ",".join(call_args(code, m.end() - 1)), f"{name}: {code[m.start():m.start() + 60]!r}")
+        cats = js_code_only((STATIC / "js" / "wiki-categories.js").read_text(encoding="utf-8"))
+        self.assertIn("var UI = null, el = null, icon = null, cls = null;", cats)
+        self.assertNotRegex(cats, r"(?<![.\w])setTimeout\(", "the panel's timers are the visit's (ctx.setTimeout)")
+        editor = js_code_only((STATIC / "js" / "wiki-editor.js").read_text(encoding="utf-8"))
+        self.assertNotIn("WikiView", editor)
+        self.assertNotIn("window.scrollTo", editor)
+        self.assertIn("var vs = host.newView();", function_body(editor, "render"))
+
+    def test_the_editor_asks_before_unsaved_text_is_left(self):
+        page = js_code_only(module_source("wiki"))
+        self.assertIn("ctx.beforeLeave(function () { return WikiEditor.canLeave(); });", page)
+        src = (STATIC / "js" / "wiki-editor.js").read_text(encoding="utf-8")
+        code = js_code_only(src)
+        holds = function_body(code, "holds")
+        self.assertIn("if (!s || !s.form || s.closed || s.approved || !s.form.isConnected) return false;", holds)
+        self.assertIn("return s.busy || !!s.restored || fingerprint(s) !== s.baseline;", holds)
+        self.assertIn("_session.baseline = fingerprint(_session);", function_body(code, "render"))
+        can = function_body(code, "canLeave")
+        self.assertRegex(can, r"^\s*if \(!holds\(\)\) return true;")
+        self.assertIn("s.asking = window.WSUI.confirm({", can)
+        # Leave approves and keeps the text as the draft; nothing is thrown away.
+        self.assertRegex(can, r"if \(ok && _session === s\) \{\s*s\.approved = true;\s*flush\(\);\s*\}")
+        self.assertNotIn("clearDraft", can)
+        init = function_body(code, "init")
+        self.assertRegex(init, r"window\.addEventListener\('\s+', function \(e\) \{\s*if \(holds\(\)\) \{ e\.preventDefault\(\); e\.returnValue = '';")
+        self.assertIn("'beforeunload'", src)
+        self.assertRegex(init, r"window\.addEventListener\('\s+', function \(\) \{\s*if \(_session\) _session\.approved = false;")
+        self.assertIn("'ws:nav-stayed'", src)
+        self.assertRegex(init, r"signal\.addEventListener\('\s+', function \(\) \{\s*flush\(\);")
+        # The admin's own ways out, and a landed save or delete, never ask.
+        self.assertRegex(function_body(code, "close"), r"^\s*if \(_session\) _session\.closed = true;")
+        self.assertRegex(function_body(code, "save"), r"s\.closed = true;\s*host\.navigate\(")
+        self.assertRegex(function_body(code, "remove"), r"s\.closed = true;\s*if \(_session === s && !sig\.aborted\) host\.navigate\(")
+        # A mirror reads the session's own form, so a late one never writes an empty draft.
+        self.assertRegex(function_body(code, "collect"), r"var f = \(s && s\.form\) \|\| document;")
+        self.assertNotIn("document.getElementById('wikiEditTitle')", code.replace(" ", ""))
+
+    def test_router_hands_the_claim_what_it_needs(self):
+        code = js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+        go = function_body(code, "go")
+        claim = go[go.index("if (!current.left && current.claim) {"):go.index("if (!current.left && current.guard) {")]
+        # The entry being left keeps its scroll before the page redraws.
+        self.assertLess(claim.index("if (!opts.pop) saveScroll();"), claim.index("current.claim("))
+        self.assertIn("current.claim(new URL(target.href), { pop: !!opts.pop, scrollY: opts.scrollY || 0 }) === true;", claim)
+        # One history write, and the same URL again replaces.
+        self.assertRegex(claim, r"if \(opts\.replace \|\| target\.href === location\.href\) history\.replaceState\(st, '', target\.href\);\s*"
+                                r"else history\.pushState\(st, '', target\.href\);")
+        self.assertEqual(claim.count("history."), 2)
+        self.assertIn("window.dispatchEvent(new CustomEvent('", claim)
+        self.assertIn("ws:page-claimed", (STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+
+
 class PageOffBanner(unittest.TestCase):
     """"This page is turned off" (pages.py PAGE_OFF_BANNER) is appended to the
     header, outside #wsPage, so a swap alone would leave it behind or never
@@ -459,7 +585,7 @@ class LeaveGuard(unittest.TestCase):
         go = function_body(code, "go")
         ask = go.index("verdict = await current.guard(new URL(target.href), { pop: !!opts.pop });")
         self.assertLess(go.index("if (!current) {"), ask, "an unconverted page has no guard to ask")
-        self.assertLess(go.index("current.claim(new URL(target.href))"), ask, "an in-page URL is not a leave")
+        self.assertLess(go.index("current.claim(new URL(target.href), "), ask, "an in-page URL is not a leave")
         self.assertLess(ask, go.index("takePrefetch(target.href)"), "asked before any fetch")
         after = go[ask:go.index("takePrefetch(target.href)")]
         self.assertIn("if (token !== navToken) return;", after, "a newer navigation wins over an answer")

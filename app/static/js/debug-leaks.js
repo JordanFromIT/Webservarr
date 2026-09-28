@@ -595,8 +595,11 @@ export function createTracker(g, opts) {
    Work no page could be named for ('unattributed' in leaks) that ran after
    a page had left is also a failure: it is never silent.
    deps: navigate(url), currentUrl(), mounts (array the ws:page-mounted URLs
-   are pushed to), isConverted(url), samePage(a, b), tracker, heap(),
-   interruptions(), tonePlaying(), sleep(ms).
+   are pushed to), claims (optional: the ws:page-claimed URLs, a page that
+   drew the URL itself, the wiki's views), isConverted(url), samePage(a, b),
+   tracker, heap(), interruptions(), tonePlaying(), sleep(ms).
+   A claimed navigation ends at once, in place, so a claimed first half of an
+   interleaved pair is not a second mount: only the mounts can collide.
    opts: dwell (ms on each page, default 100), settle (ms before each
    measurement, default 1000). */
 export async function runSoak(deps, urls, rounds, opts) {
@@ -617,11 +620,14 @@ export async function runSoak(deps, urls, rounds, opts) {
   let interleaved = 0;
   let round = 0;
 
+  const claims = deps.claims || [];
+
   async function step(url) {
     const mark = deps.mounts.length;
+    const took = claims.length;
     await deps.navigate(url);
     navigations += 1;
-    if (!same(deps.currentUrl(), url) || deps.mounts.length === mark) {
+    if (!same(deps.currentUrl(), url) || (deps.mounts.length === mark && claims.length === took)) {
       failures.push({ round: round, url: url, reason: 'did not end mounted on ' + url });
     }
     await deps.sleep(dwell);
@@ -631,14 +637,19 @@ export async function runSoak(deps, urls, rounds, opts) {
     const current = deps.currentUrl();
     const first = urls.find(function (u) { return !same(u, url) && !same(u, current); }) || current;
     const mark = deps.mounts.length;
+    const cmark = claims.length;
     const a = deps.navigate(first);
     const b = deps.navigate(url);
     navigations += 2;
     interleaved += 1;
     await Promise.allSettled([a, b]);
     const got = deps.mounts.slice(mark);
-    if (got.length !== 1 || !same(got[0], url) || !same(deps.currentUrl(), url)) {
-      failures.push({ round: round, url: url, reason: 'interleaved ' + first + ' then ' + url + ': mounted ' + JSON.stringify(got) });
+    const took = claims.slice(cmark);
+    const ended = got.length === 1 ? same(got[0], url)
+      : got.length === 0 && took.length > 0 && same(took[took.length - 1], url);
+    if (!ended || !same(deps.currentUrl(), url)) {
+      failures.push({ round: round, url: url, reason: 'interleaved ' + first + ' then ' + url + ': mounted ' + JSON.stringify(got) +
+        (took.length ? ', claimed ' + JSON.stringify(took) : '') });
     }
     await deps.sleep(dwell);
   }
@@ -771,6 +782,11 @@ export function install(win, opts) {
     mounts.push(e.detail && e.detail.url);
     if (mounts.length > 1000) mounts.splice(0, 500);
   });
+  const claims = [];
+  win.addEventListener('ws:page-claimed', function (e) {
+    claims.push(e.detail && e.detail.url);
+    if (claims.length > 1000) claims.splice(0, 500);
+  });
 
   let tracker = null;
   if (flags.indexOf('leaks') !== -1) {
@@ -797,6 +813,10 @@ export function install(win, opts) {
           mounts: {
             get length() { return mounts.length; },
             slice: function (i) { return mounts.slice(i); }
+          },
+          claims: {
+            get length() { return claims.length; },
+            slice: function (i) { return claims.slice(i); }
           },
           isConverted: async function (u) {
             const r = await origFetch.call(win, abs(u), { credentials: 'same-origin', headers: { 'X-WS-Nav': '1' } });

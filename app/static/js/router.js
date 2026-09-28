@@ -37,9 +37,13 @@
  * Forward waits (the address stays on the entry asked about). A navigation
  * the guard let go that then stays (a failed fetch) dispatches
  * ws:nav-stayed, so the page keeps what it holds.
+ * ctx.onNavigate(claim): the page draws some URLs itself (the wiki's views).
+ * Every navigation from it first calls claim(url, { pop, scrollY }); true
+ * takes it, and the router only records history (no fetch, no mount).
  * Events on window:
  *   ws:before-hard-nav  detail { url, waitUntil(promise) }; awaited, 500 ms cap
  *   ws:page-mounted     detail { url, page } after each mount
+ *   ws:page-claimed     detail { url } after the page claimed a navigation
  *   ws:nav-stayed       detail { url, reason } a navigation stayed on this page
  */
 
@@ -784,21 +788,28 @@ function start() {
     }
 
     // A mounted page may claim an in-page URL (the wiki, spec section 6):
-    // the router then only records history.
+    // the router then only records history. The page draws the new view at
+    // once, so the entry being left keeps its scroll first; the page scrolls
+    // the new view itself: how.pop is Back or Forward, how.scrollY the
+    // position that entry saved.
     if (!current.left && current.claim) {
+      if (!opts.pop) saveScroll();
       let claimed = false;
-      try { claimed = current.claim(new URL(target.href)) === true; } catch (e) { console.error(e); }
+      try {
+        claimed = current.claim(new URL(target.href), { pop: !!opts.pop, scrollY: opts.scrollY || 0 }) === true;
+      } catch (e) { console.error(e); }
       if (claimed) {
         fetchCtl = null;
         closeOverlays();
         if (!opts.pop) {
-          saveScroll();
+          // The same URL again replaces, as a swap does.
           const st = { ws: 1, scrollY: 0 };
-          if (opts.replace) history.replaceState(st, '', target.href);
+          if (opts.replace || target.href === location.href) history.replaceState(st, '', target.href);
           else history.pushState(st, '', target.href);
         }
         current.url = target.href;
         api.current = { url: current.url, module: current.module, controller: current.controller };
+        window.dispatchEvent(new CustomEvent('ws:page-claimed', { detail: { url: current.url } }));
         return;
       }
     }

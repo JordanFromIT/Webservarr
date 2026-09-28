@@ -2013,10 +2013,9 @@ class InPlaceNews(unittest.TestCase):
 
 
 def wiki_script() -> str:
-    """The one inline <script> of wiki.html (raw source)."""
-    blocks = re.findall(r"<script>(.*?)</script>", (STATIC / "wiki.html").read_text(encoding="utf-8"), re.S)
-    assert len(blocks) == 1, "wiki.html should carry exactly one inline script"
-    return blocks[0]
+    """The wiki's page module, pages/wiki.js (raw source): wiki.html carries
+    no inline script since it became a soft-navigation page."""
+    return (STATIC / "js" / "pages" / "wiki.js").read_text(encoding="utf-8")
 
 
 def wiki_categories_js() -> str:
@@ -2031,7 +2030,7 @@ class InPlaceWiki(unittest.TestCase):
         h = (STATIC / "wiki.html").read_text(encoding="utf-8")
         self.assertIn("/static/js/wiki-categories.js?v=", h)
         assert_ui_js_before(self, h, "/static/js/wiki-categories.js?v=")
-        self.assertIn("Manage categories", h)
+        self.assertIn("Manage categories", wiki_script())
         js = (STATIC / "js" / "wiki-categories.js").read_text(encoding="utf-8")
         self.assertIn("/api/wiki/categories", js)
         self.assertIsNone(NATIVE_DIALOG.search(js))
@@ -2057,9 +2056,13 @@ class InPlaceWiki(unittest.TestCase):
         # the write has answered - whether it landed, failed or never arrived.
         self.assertEqual(len(re.findall(r"\bfetch\(", code)), 1)
         send = function_body(code, "send")
-        self.assertRegex(send, r"^\s*return fetch\(")
+        self.assertRegex(send, r"^\s*var sig = signal;\s*return fetch\(")
+        self.assertIn("signal: sig", send)
+        # A write the visit was left during never answers: nothing is said
+        # or drawn on the next page (the cache is still cleared).
         self.assertRegex(send, r"\}, function \(\) \{\s*return \{ status: 0, ok: false, data: \{\} \};\s*\}\)"
-                               r"\.then\(function \(res\) \{\s*if \(window\.WS && WS\.clearPageCache\) WS\.clearPageCache\(\);\s*return res;")
+                               r"\.then\(function \(res\) \{\s*if \(window\.WS && WS\.clearPageCache\) WS\.clearPageCache\(\);\s*"
+                               r"return sig\.aborted \? new Promise\(function \(\) \{\}\) : res;")
         writes = live_matches(src, r"\bsend\('(PUT|POST|DELETE)', ")
         self.assertEqual(sorted(m.group(1) for m in writes), ["DELETE", "POST", "PUT", "PUT"])
 
@@ -2130,13 +2133,13 @@ class InPlaceWiki(unittest.TestCase):
         # The toggle state lives in the view, closes on navigation, and a
         # redraw after a write reopens the panel with the focus hint.
         self.assertRegex(code, r"\bvar _manage = false;")
-        self.assertRegex(top_level(function_body(code, "render")), r"var s = parse\(\);\s*_manage = false;")
+        self.assertRegex(top_level(function_body(code, "render")), r"var s = parse\(url\);\s*_manage = false;")
         index = function_body(code, "renderIndex")
         self.assertRegex(index, r"^\s*var gen = \+\+_gen;\s*if \(!keep\) skeleton\('\s*'\);")
         self.assertRegex(index, r"if \(_manage\) openPanel\(focus \|\| null\);")
         opened = function_body(index, "openPanel")
         self.assertRegex(opened, r"_cats = null;\s*if \(gen === _gen\) renderIndex\(true, next\);")
-        self.assertIn("}, { focus: hint, lock: [manageBtn] });", opened)
+        self.assertIn("}, { focus: hint, lock: [manageBtn], signal: vs });", opened)
         self.assertEqual(len(live_matches(src, r"var manageBtn = bar && bar\.querySelector\('\[data-wiki-manage\]'\);")), 1)
 
     def test_an_index_load_overtaken_by_another_view_is_dropped(self):

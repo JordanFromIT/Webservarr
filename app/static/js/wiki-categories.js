@@ -14,26 +14,37 @@
  * While an Edit or Add form is open, everything outside that form is disabled
  * too (the toggle included): any other write would redraw the panel and throw
  * away what the admin has typed. Cancel, or a save that lands, ends it.
+ *
+ * A page helper for the soft-navigated /wiki (spec 4.3): loading this file
+ * only defines WikiCategories. The page module calls init(ctx) from mount on
+ * each visit. A panel's listeners end with the signal the page hands it (its
+ * view's), its writes and timers with the visit's.
  */
 var WikiCategories = (function () {
   'use strict';
 
-  var UI = window.WSUI, el = UI.el, icon = UI.icon, cls = UI.cls;
+  // Bound by init(), so loading this file reads nothing from the page.
+  var UI = null, el = null, icon = null, cls = null;
+  // The visit init() was given: its signal and ctx.setTimeout.
+  var signal = null, later = null;
   var ICON_NAME = /^[a-z0-9_]{1,64}$/;   // the server enforces the same rule
 
   // Never rejects: a network failure answers as status 0. Every write clears
   // the prefetched pages whatever it answered, since a reorder can half-land.
+  // A write the visit was left during never answers: nothing is said or
+  // drawn on the page that follows.
   function send(method, url, body) {
+    var sig = signal;
     return fetch(url, {
       method: method, headers: body ? { 'Content-Type': 'application/json' } : {},
-      body: body ? JSON.stringify(body) : undefined
+      body: body ? JSON.stringify(body) : undefined, signal: sig
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, ok: r.ok, data: d }; });
     }, function () {
       return { status: 0, ok: false, data: {} };
     }).then(function (res) {
       if (window.WS && WS.clearPageCache) WS.clearPageCache();
-      return res;
+      return sig.aborted ? new Promise(function () {}) : res;
     });
   }
 
@@ -47,8 +58,8 @@ var WikiCategories = (function () {
   }
 
   // onSave(values) resolves to an error message to show, or null once the
-  // panel has taken over (it is about to be redrawn).
-  function form(cat, onSave, onCancel) {
+  // panel has taken over (it is about to be redrawn). vs: the panel's signal.
+  function form(cat, onSave, onCancel, vs) {
     var f = el('form', 'grid gap-4 sm:grid-cols-2 p-4');
     function field(id, label, value, placeholder, full) {
       var box = el('div', full ? 'sm:col-span-2' : '');
@@ -83,7 +94,7 @@ var WikiCategories = (function () {
       err.classList.remove('hidden');
       field.focus();
     }
-    cancel.addEventListener('click', onCancel);
+    cancel.addEventListener('click', onCancel, { signal: vs });
     f.addEventListener('submit', function (e) {
       e.preventDefault();
       if (!name.value.trim()) { fail('Give the category a name.', name); return; }
@@ -94,15 +105,17 @@ var WikiCategories = (function () {
       err.classList.add('hidden');
       onSave({ name: name.value.trim(), description: desc.value.trim() || null, icon: iconIn.value.trim() || null })
         .then(function (message) { if (message) fail(message, name); });
-    });
-    setTimeout(function () { name.focus(); }, 30);
+    }, { signal: vs });
+    later(function () { name.focus(); }, 30);
     return f;
   }
 
   // opts.focus: what to focus once drawn ({slug, what: 'up'|'down'|'edit'} or
   // {what: 'add'}). opts.lock: controls outside the panel to disable with it.
+  // opts.signal: ends the panel's listeners (the page's view that shows it).
   function panel(categories, onChanged, opts) {
     opts = opts || {};
+    var vs = opts.signal || signal;
     var cats = (categories || []).slice().sort(function (a, b) {
       return (a.sort_order - b.sort_order) || a.name.localeCompare(b.name);
     });
@@ -229,7 +242,7 @@ var WikiCategories = (function () {
         if (fixedOff) b.setAttribute('data-fixed', '');
         b.disabled = !!fixedOff;
         b.appendChild(icon(glyph, 'text-[20px]'));
-        b.addEventListener('click', onClick);
+        b.addEventListener('click', onClick, { signal: vs });
         tools.appendChild(b);
         return b;
       }
@@ -255,7 +268,7 @@ var WikiCategories = (function () {
         }, function () {
           closeForm(li, line);
           own.edit.focus();
-        }));
+        }, vs));
       });
       btn('delete', 'Delete ' + cat.name, function () {
         if (busy || formOpen) return;
@@ -298,14 +311,14 @@ var WikiCategories = (function () {
       }, function () {
         closeForm(addSlot);
         addBtn.focus();
-      }));
-    });
+      }, vs));
+    }, { signal: vs });
 
     // Focus lands once the page has put the panel in the document. A moved
     // row at the top or bottom has lost that arrow, so it takes the other one.
     var hint = opts.focus;
     if (hint) {
-      setTimeout(function () {
+      later(function () {
         var own = hint.slug && buttons[hint.slug];
         var target = hint.what === 'add' || !own ? addBtn : own[hint.what];
         if (target && target.disabled && own) target = hint.what === 'up' ? own.down : own.up;
@@ -316,5 +329,14 @@ var WikiCategories = (function () {
     return root;
   }
 
-  return { panel: panel };
+  // Each visit to /wiki, from its mount: the shared UI helpers, and the
+  // visit's signal and timer.
+  function init(ctx) {
+    UI = window.WSUI;
+    el = UI.el; icon = UI.icon; cls = UI.cls;
+    signal = ctx.signal;
+    later = ctx.setTimeout;
+  }
+
+  return { init: init, panel: panel };
 })();

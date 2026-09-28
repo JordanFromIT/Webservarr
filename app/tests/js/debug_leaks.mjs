@@ -778,6 +778,53 @@ function fakeDeps(router, extra) {
   check('soak: needs at least one neighbour', !!threw);
 }
 
+// A page that draws some URLs itself (the wiki): the router only records
+// history, at once, and says so with ws:page-claimed instead of a mount.
+function claimingRouter(owns) {
+  const r = fakeRouter();
+  r.claims = [];
+  const mount = r.navigate;
+  r.navigate = (u) => {
+    if (owns(r.url) && owns(u)) {
+      r.navCalls.push(u);
+      r.token += 1;           // a claim wins over a navigation still in flight
+      r.url = u;
+      r.claims.push(u);
+      return Promise.resolve();
+    }
+    return mount(u);
+  };
+  return r;
+}
+
+{
+  const wiki = (u) => u === '/wiki' || u.startsWith('/wiki/');
+  const router = claimingRouter(wiki);
+  router.url = '/wiki';
+  const res = await dbg.runSoak(fakeDeps(router, { claims: router.claims }), ['/wiki', '/wiki/a', '/news'], 10);
+  check('soak: a claimed navigation ends where it was asked to', res.failures.length === 0, res.failures);
+  check('soak: claims and mounts both happened', router.claims.length > 0 && router.mounts.length > 0,
+    [router.claims.length, router.mounts.length]);
+}
+
+{
+  // Claimed, but somewhere else: still a failure.
+  const router = claimingRouter((u) => u.startsWith('/wiki'));
+  const deps = fakeDeps(router, { claims: router.claims });
+  deps.navigate = (u) => router.navigate(u === '/wiki/a' ? '/wiki/b' : u);
+  router.url = '/wiki';
+  const res = await dbg.runSoak(deps, ['/wiki', '/wiki/a'], 1);
+  check('soak: a claim that ended on another URL is a failure', res.failures.length === 1, res.failures);
+}
+
+{
+  // Without claims (no deps.claims), a navigation that only claimed did not mount.
+  const router = claimingRouter((u) => u.startsWith('/wiki'));
+  router.url = '/wiki';
+  const res = await dbg.runSoak(fakeDeps(router), ['/wiki', '/wiki/a'], 1);
+  check('soak: a claim is counted only when claims are given', res.failures.length === 2, res.failures);
+}
+
 {
   const router = fakeRouter();
   const deps = fakeDeps(router);

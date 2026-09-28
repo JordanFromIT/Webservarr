@@ -13,6 +13,18 @@
  * when it was loaded, and the form it drew. A save or delete carries its own
  * session, disables that form while it is in flight, and once it answers acts
  * on screen only while its session is still the one showing.
+ *
+ * A page helper for the soft-navigated /wiki (spec 4.3): loading this file
+ * only defines WikiEditor. The page module calls init(ctx, host) from mount on
+ * each visit; host is the wiki's own view (see pages/wiki.js). The form's
+ * listeners end with the view it is drawn in, its requests with the visit.
+ *
+ * Leaving with unsaved text asks first (holds, canLeave): the wiki's claim
+ * on its own URLs declines while this holds text, so an article link, Back
+ * and Forward reach the router's leave guard, which asks here; a reload or a
+ * typed address is asked by the browser (beforeunload). Leave keeps the text
+ * as this device's draft, offered the next time the editor opens; a
+ * navigation that then stays (ws:nav-stayed) asks again next time.
  */
 var WikiEditor = (function () {
   'use strict';
@@ -20,12 +32,15 @@ var WikiEditor = (function () {
   var DRAFT_PREFIX = 'webservarr.wiki.draft.';
   var MIRROR_DEBOUNCE_MS = 500;
 
+  // The visit init() was given: its signal, and the wiki's view hooks.
+  var signal = null, host = null;
   var _root = null;
   var _mirrorTimer = null;
   var _slug = null;          // null while creating a new page
   var _slugTouched = false;  // once the author edits the slug, stop deriving it
   var _cats = [];
   var _session = null;       // the editor on screen: { slug, helpBase, helpSeen, holders, form, busy }
+                             // plus restored, baseline, closed, approved (leaving, below)
 
   // The places a page can be linked as help, in the order the editor lists them.
   var HELP_PLACES = [['tickets', 'Tickets'], ['issues', 'Issues'], ['playback', 'Playback problems']];
@@ -159,16 +174,18 @@ var WikiEditor = (function () {
 
   // ---------- API ----------
 
-  async function fetchCategories() {
+  function isAbort(e) { return !!e && e.name === 'AbortError'; }
+
+  async function fetchCategories(vsig) {
     try {
-      var res = await fetch('/api/wiki/categories');
+      var res = await fetch('/api/wiki/categories', { signal: vsig });
       if (!res.ok) return [];
       return await res.json();
     } catch (e) { return []; }
   }
 
-  async function fetchPage(slug) {
-    var res = await fetch('/api/wiki/pages/' + encodeURIComponent(slug));
+  async function fetchPage(slug, vsig) {
+    var res = await fetch('/api/wiki/pages/' + encodeURIComponent(slug), { signal: vsig });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return res.json();
   }
@@ -176,7 +193,7 @@ var WikiEditor = (function () {
   async function uploadImage(file) {
     var fd = new FormData();
     fd.append('file', file);
-    var res = await fetch('/api/wiki/images', { method: 'POST', body: fd });
+    var res = await fetch('/api/wiki/images', { method: 'POST', body: fd, signal: signal });
     if (!res.ok) {
       var body = await res.json().catch(function () { return {}; });
       throw new Error(typeof body.detail === 'string' ? body.detail : 'Upload failed');
@@ -185,15 +202,21 @@ var WikiEditor = (function () {
     return '![](' + data.url + ')';
   }
 
-  function collect() {
+  // The fields of session s's form (the one on screen by default). Read from
+  // the form itself, so a mirror that fires after the wiki has moved on to
+  // another view still writes what was typed, never an empty draft.
+  function collect(s) {
+    s = s || _session;
+    var f = (s && s.form) || document;
+    function value(id) { return (f.querySelector('#' + id) || {}).value; }
     return {
-      title: (document.getElementById('wikiEditTitle') || {}).value || '',
-      slug: (document.getElementById('wikiEditSlug') || {}).value || '',
-      summary: (document.getElementById('wikiEditSummary') || {}).value || '',
-      content: (document.getElementById('wikiEditContent') || {}).value || '',
-      category_slug: (document.getElementById('wikiEditCategory') || {}).value || null,
-      sort_order: parseInt((document.getElementById('wikiEditSort') || {}).value, 10) || 0,
-      help_on: Array.prototype.slice.call(document.querySelectorAll('input[name="wikiEditHelp"]'))
+      title: value('wikiEditTitle') || '',
+      slug: value('wikiEditSlug') || '',
+      summary: value('wikiEditSummary') || '',
+      content: value('wikiEditContent') || '',
+      category_slug: value('wikiEditCategory') || null,
+      sort_order: parseInt(value('wikiEditSort'), 10) || 0,
+      help_on: Array.prototype.slice.call(f.querySelectorAll('input[name="wikiEditHelp"]'))
         .filter(function (i) { return i.checked; })
         .map(function (i) { return i.value; })
     };
@@ -211,7 +234,8 @@ var WikiEditor = (function () {
   async function save(publish) {
     var s = _session;
     if (!s || s.busy) return;
-    var fields = collect();
+    var sig = signal;
+    var fields = collect(s);
     if (!fields.title.trim()) { status('Give the page a title before saving.', 'bad'); return; }
     if (!fields.content.trim()) { status('The page is empty.', 'bad'); return; }
 
@@ -237,18 +261,21 @@ var WikiEditor = (function () {
       res = await fetch(s.slug ? '/api/wiki/pages/' + encodeURIComponent(s.slug) : '/api/wiki/pages', {
         method: s.slug ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: sig
       });
     } catch (e) {
       // Network died. The text is still on screen and still mirrored. The
       // write may still have landed, so the prefetched pages go either way.
       clearPageCache();
+      if (sig.aborted) return;        // the page was left: nothing to tell
       setBusy(s, false);
       if (_session === s) status('Could not reach the server. Your text is safe here — try again.', 'bad');
       return;
     }
     clearPageCache();
-    var saved = res.ok ? await res.json() : null;
+    var saved = res.ok ? await res.json().catch(function () { return null; }) : null;
+    if (sig.aborted) return;
     if (saved) syncHooks(s, saved, payload.help_on);
 
     if (!res.ok) setBusy(s, false);
@@ -304,12 +331,15 @@ var WikiEditor = (function () {
     status(publish ? 'Published.' : 'Saved as a draft.');
 
     // Land on the saved page so the author sees exactly what a reader will.
-    WikiView.navigate('/wiki/' + encodeURIComponent(saved.slug));
+    // Nothing is left unsaved, so nothing asks on the way.
+    s.closed = true;
+    host.navigate('/wiki/' + encodeURIComponent(saved ? saved.slug : (s.slug || '')));
   }
 
   async function remove() {
     var s = _session;
     if (!s || s.busy) return;
+    var sig = signal;
     if (!s.slug) { close(); return; }
     var ok = await window.WSUI.confirm({
       title: 'Delete this page?',
@@ -322,9 +352,10 @@ var WikiEditor = (function () {
     setBusy(s, true);
     var res;
     try {
-      res = await fetch('/api/wiki/pages/' + encodeURIComponent(s.slug), { method: 'DELETE' });
+      res = await fetch('/api/wiki/pages/' + encodeURIComponent(s.slug), { method: 'DELETE', signal: sig });
     } catch (e) {
       clearPageCache();
+      if (sig.aborted) return;
       setBusy(s, false);
       if (_session === s) status('Could not reach the server.', 'bad');
       return;
@@ -338,12 +369,16 @@ var WikiEditor = (function () {
     syncHooks(s, null, null);
     if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
     clearDraft(s.slug);
-    if (_session === s) WikiView.navigate('/wiki');
+    s.closed = true;
+    if (_session === s && !sig.aborted) host.navigate('/wiki');
   }
 
+  // Back to the page, or Cancel: the admin chose to go, and the text stays
+  // as this device's draft (the editor offers it next time), so nothing asks.
   function close() {
-    if (_slug) WikiView.navigate('/wiki/' + encodeURIComponent(_slug));
-    else WikiView.navigate('/wiki');
+    if (_session) _session.closed = true;
+    if (_slug) host.navigate('/wiki/' + encodeURIComponent(_slug));
+    else host.navigate('/wiki');
   }
 
   // ---------- markdown toolbar ----------
@@ -371,7 +406,7 @@ var WikiEditor = (function () {
     mirror();
   }
 
-  function toolbar() {
+  function toolbar(vs) {
     var bar = el('div', 'flex flex-wrap gap-1 mb-2');
     var buttons = [
       ['format_bold', 'Bold', function () { wrapSelection('**', '**', 'bold text'); }],
@@ -387,7 +422,7 @@ var WikiEditor = (function () {
       btn.title = b[1];
       btn.setAttribute('aria-label', b[1]);
       btn.appendChild(icon(b[0], 'text-lg'));
-      btn.addEventListener('click', b[2]);
+      btn.addEventListener('click', b[2], { signal: vs });
       bar.appendChild(btn);
     });
     return bar;
@@ -405,7 +440,7 @@ var WikiEditor = (function () {
       // tell a change the admin made, and whether it still applies. (Older
       // drafts carried help_base or help_seen, keyed on titles; they are never
       // replayed.)
-      var fields = collect();
+      var fields = collect(s);
       fields.help_state = Object.assign({}, s.helpSeen);
       saveDraft(s.slug, fields);
     }, MIRROR_DEBOUNCE_MS);
@@ -414,18 +449,23 @@ var WikiEditor = (function () {
   // ---------- open ----------
 
   async function open(slug) {
-    if (!WikiView.isAdmin()) return;
+    if (!host || !host.isAdmin()) return;
+    // The view Edit or New page was pressed on. Moving on from it (another
+    // article, or leaving the wiki) drops this open: nothing is drawn over
+    // what replaced it.
+    var vsig = host.view();
 
     _slug = slug || null;
     _slugTouched = !!slug;
     if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
-    _root = document.getElementById('wikiRoot');
+    _root = host.root();
     if (!_root) return;
 
     var page = null;
     if (slug) {
-      try { page = await fetchPage(slug); }
+      try { page = await fetchPage(slug, vsig); }
       catch (e) {
+        if (vsig.aborted) return;
         // Stop here rather than falling through and loading `undefined` into the
         // fields — the News editor shipped exactly that bug once.
         window.WSUI.toast('Couldn’t load that page for editing. Try again.', 'err');
@@ -433,7 +473,8 @@ var WikiEditor = (function () {
       }
     }
 
-    _cats = await fetchCategories();
+    _cats = await fetchCategories(vsig);
+    if (vsig.aborted) return;
 
     var draft = loadDraft(_slug);
     var useDraft = false;
@@ -451,7 +492,7 @@ var WikiEditor = (function () {
         });
         // The reader may have gone elsewhere while the question was up; the
         // editor is then not drawn over the new view (the draft stays).
-        if (location.href !== here) return;
+        if (location.href !== here || vsig.aborted) return;
         if (!useDraft) clearDraft(_slug);
       }
     }
@@ -492,20 +533,23 @@ var WikiEditor = (function () {
     }
 
     _session = { slug: _slug, helpBase: helpBase, helpSeen: seenNow, holders: holders, form: null, busy: false };
+    _session.restored = useDraft;     // a restored draft is unsaved from the start
     render(initial, page);
     if (dropped) status('Your unsaved change to the help links was left out: that link has changed since.');
   }
 
   function render(initial, page) {
+    // A view of the wiki's own: the article's listeners end here, and the
+    // form's end when the wiki draws its next view.
+    var vs = host.newView();
     while (_root.firstChild) _root.removeChild(_root.firstChild);
-    window.scrollTo(0, 0);
 
     var head = el('div', 'mb-6');
     var backBtn = el('button', 'inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors mb-3');
     backBtn.type = 'button';
     backBtn.appendChild(icon('chevron_left', 'text-sm'));
     backBtn.appendChild(document.createTextNode(_slug ? 'Back to the page' : 'Back to the wiki'));
-    backBtn.addEventListener('click', close);
+    backBtn.addEventListener('click', close, { signal: vs });
     head.appendChild(backBtn);
     head.appendChild(el('h1', 'text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight',
       _slug ? 'Editing a page' : 'New page'));
@@ -531,15 +575,15 @@ var WikiEditor = (function () {
     title.addEventListener('input', function () {
       if (!_slugTouched) slugIn.value = slugify(title.value);
       mirror();
-    });
-    slugIn.addEventListener('input', function () { _slugTouched = true; mirror(); });
+    }, { signal: vs });
+    slugIn.addEventListener('input', function () { _slugTouched = true; mirror(); }, { signal: vs });
 
     var summary = el('input', INPUT_CLS);
     summary.id = 'wikiEditSummary';
     summary.type = 'text';
     summary.value = initial.summary || '';
     summary.placeholder = 'One line shown under the title in lists';
-    summary.addEventListener('input', mirror);
+    summary.addEventListener('input', mirror, { signal: vs });
     form.appendChild(field('Summary', summary));
 
     var row = el('div', 'grid gap-5 sm:grid-cols-2');
@@ -554,14 +598,14 @@ var WikiEditor = (function () {
       if (c.slug === initial.category_slug) o.selected = true;
       cat.appendChild(o);
     });
-    cat.addEventListener('change', mirror);
+    cat.addEventListener('change', mirror, { signal: vs });
     row.appendChild(field('Category', cat));
 
     var sort = el('input', INPUT_CLS);
     sort.id = 'wikiEditSort';
     sort.type = 'number';
     sort.value = initial.sort_order || 0;
-    sort.addEventListener('input', mirror);
+    sort.addEventListener('input', mirror, { signal: vs });
     row.appendChild(field('Order', sort, 'Lower numbers appear first.'));
     form.appendChild(row);
 
@@ -575,7 +619,7 @@ var WikiEditor = (function () {
       box.name = 'wikiEditHelp';
       box.value = h[0];
       box.checked = (initial.help_on || []).indexOf(h[0]) >= 0;
-      box.addEventListener('change', mirror);
+      box.addEventListener('change', mirror, { signal: vs });
       line.appendChild(box);
       line.appendChild(document.createTextNode(h[1]));
       // The other page's title goes in as text, never as markup.
@@ -589,17 +633,17 @@ var WikiEditor = (function () {
     var contentLabel = el('label', 'block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5', 'Content');
     contentLabel.htmlFor = 'wikiEditContent';
     contentWrap.appendChild(contentLabel);
-    contentWrap.appendChild(toolbar());
+    contentWrap.appendChild(toolbar(vs));
 
     var ta = el('textarea', INPUT_CLS + ' font-mono text-sm leading-relaxed');
     ta.id = 'wikiEditContent';
     ta.rows = 22;
     ta.value = initial.content || '';
     ta.placeholder = 'Write in Markdown. Drop an image anywhere to upload it.';
-    ta.addEventListener('input', mirror);
+    ta.addEventListener('input', mirror, { signal: vs });
 
     // Drag-drop and paste both upload, because both are how a screenshot arrives.
-    ta.addEventListener('dragover', function (e) { e.preventDefault(); });
+    ta.addEventListener('dragover', function (e) { e.preventDefault(); }, { signal: vs });
     ta.addEventListener('drop', async function (e) {
       var files = e.dataTransfer && e.dataTransfer.files;
       if (!files || !files.length) return;
@@ -610,9 +654,9 @@ var WikiEditor = (function () {
         insertAtCaret('\n' + md + '\n');
         status('Image added.');
       } catch (err) {
-        status(err.message, 'bad');
+        if (!isAbort(err)) status(err.message, 'bad');
       }
-    });
+    }, { signal: vs });
     ta.addEventListener('paste', async function (e) {
       var items = e.clipboardData && e.clipboardData.items;
       if (!items) return;
@@ -625,12 +669,12 @@ var WikiEditor = (function () {
             insertAtCaret('\n' + md + '\n');
             status('Image added.');
           } catch (err) {
-            status(err.message, 'bad');
+            if (!isAbort(err)) status(err.message, 'bad');
           }
           return;
         }
       }
-    });
+    }, { signal: vs });
     contentWrap.appendChild(ta);
     form.appendChild(contentWrap);
 
@@ -655,17 +699,17 @@ var WikiEditor = (function () {
     draftBtn.type = 'button';
     draftBtn.appendChild(icon('save', 'text-base'));
     draftBtn.appendChild(document.createTextNode('Save draft'));
-    draftBtn.addEventListener('click', function () { save(false); });
+    draftBtn.addEventListener('click', function () { save(false); }, { signal: vs });
 
     var pubBtn = el('button', BTN_PRIMARY);
     pubBtn.type = 'button';
     pubBtn.appendChild(icon('publish', 'text-base'));
     pubBtn.appendChild(document.createTextNode('Publish'));
-    pubBtn.addEventListener('click', function () { save(true); });
+    pubBtn.addEventListener('click', function () { save(true); }, { signal: vs });
 
     var cancelBtn = el('button', BTN_QUIET, 'Cancel');
     cancelBtn.type = 'button';
-    cancelBtn.addEventListener('click', close);
+    cancelBtn.addEventListener('click', close, { signal: vs });
 
     actions.appendChild(draftBtn);
     actions.appendChild(pubBtn);
@@ -676,7 +720,7 @@ var WikiEditor = (function () {
       delBtn.type = 'button';
       delBtn.appendChild(icon('delete', 'text-base'));
       delBtn.appendChild(document.createTextNode('Delete'));
-      delBtn.addEventListener('click', remove);
+      delBtn.addEventListener('click', remove, { signal: vs });
       actions.appendChild(delBtn);
     }
     form.appendChild(actions);
@@ -699,7 +743,86 @@ var WikiEditor = (function () {
 
     _root.appendChild(form);
     _session.form = form;
+    // What the form opened with: any difference from it is unsaved text.
+    _session.baseline = fingerprint(_session);
   }
 
-  return { open: open };
+  // ---------- leaving with unsaved text ----------
+
+  function fingerprint(s) { return JSON.stringify(collect(s)); }
+
+  // The editor is on screen with text that is not saved: changed since it
+  // opened, a restored draft, or a save still in flight. Not once the admin
+  // chose to go (closed) or agreed to leave (approved).
+  function holds() {
+    var s = _session;
+    if (!s || !s.form || s.closed || s.approved || !s.form.isConnected) return false;
+    return s.busy || !!s.restored || fingerprint(s) !== s.baseline;
+  }
+
+  // A pending mirror is written now, so the last keystrokes are in the draft.
+  function flush() {
+    if (!_mirrorTimer) return;
+    clearTimeout(_mirrorTimer);
+    _mirrorTimer = null;
+    var s = _session;
+    if (!s || !s.form) return;
+    var fields = collect(s);
+    fields.help_state = Object.assign({}, s.helpSeen);
+    saveDraft(s.slug, fields);
+  }
+
+  // The wiki's leave guard (ctx.beforeLeave) and its claim ask this: true to
+  // go, or the admin's answer. One question however many ways out are tried
+  // while it is open. Leave approves this way out and writes the draft; the
+  // editor stays until the page really changes, so a navigation that fails
+  // and stays keeps it (and ws:nav-stayed takes the approval back).
+  function canLeave() {
+    if (!holds()) return true;
+    var s = _session;
+    if (!s.asking) {
+      s.asking = window.WSUI.confirm({
+        title: 'Leave without saving?',
+        body: 'Your changes to this page aren’t saved. A copy stays on this device, and the editor offers it ' +
+          (s.slug ? 'the next time you edit this page.' : 'the next time you start a new page.'),
+        confirmLabel: 'Leave page', cancelLabel: 'Keep editing'
+      }).catch(function (e) {
+        if (window.console) console.error(e);
+        return false;                   // a dialog that failed counts as Keep editing
+      }).then(function (ok) {
+        s.asking = null;
+        if (ok && _session === s) {
+          s.approved = true;
+          flush();
+        }
+        return !!ok;
+      });
+    }
+    return s.asking;
+  }
+
+  // Each visit to /wiki, from its mount. host: the wiki's view hooks —
+  // isAdmin(), navigate(url), root() (#wikiRoot), view() (the signal of the
+  // view on screen) and newView() (a fresh one, at the top of the page).
+  function init(ctx, h) {
+    signal = ctx.signal;
+    host = h;
+    _root = null;
+    _session = null;
+    window.addEventListener('beforeunload', function (e) {
+      if (holds()) { e.preventDefault(); e.returnValue = ''; }
+    }, { signal: signal });
+    window.addEventListener('ws:nav-stayed', function () {
+      if (_session) _session.approved = false;
+    }, { signal: signal });
+    // Leaving: the last keystrokes go to the draft, and the visit's nodes go.
+    signal.addEventListener('abort', function () {
+      flush();
+      _root = null;
+      _session = null;
+      host = null;
+    }, { once: true });
+  }
+
+  return { init: init, open: open, holds: holds, canLeave: canLeave };
 })();
