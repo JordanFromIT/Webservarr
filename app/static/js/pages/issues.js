@@ -7,11 +7,12 @@
  *
  * A soft-navigation page (spec 4.2): everything below runs from mount(ctx),
  * each visit has its own state, and every listener, fetch and timer ends with
- * ctx.signal. One delegated click listener on ctx.root serves every control
- * (data-action), including the cards and the comment button rebuilt from
- * strings; one capturing error listener hides a poster that fails to load.
- * The detail modal lives inside #wsPage, so leaving the page takes it away
- * with the rest. The wiki pointer is wiki-hook.js (a page helper script,
+ * ctx.signal. One delegated click listener on ctx.root (and the same one on
+ * the detail modal) serves every control (data-action), including the cards
+ * and the comment button rebuilt from strings; one capturing error listener
+ * hides a poster that fails to load. The detail modal arrives inside #wsPage,
+ * spends the visit under <body> and is removed when the page is left, open
+ * or not. The wiki pointer is wiki-hook.js (a page helper script,
  * data-ws-page-script), started from mount with the same ctx.
  */
 
@@ -148,7 +149,13 @@ export async function mount(ctx) {
   var root = ctx.root;
   var signal = ctx.signal;
 
-  function $(id) { return root.querySelector('#' + id); }
+  // The detail modal spends the visit under <body> (see the end of mount),
+  // so a lookup tries the page and then the modal.
+  var modal = root.querySelector('#issueModal');
+  function $(id) {
+    if (id === 'issueModal') return modal;
+    return root.querySelector('#' + id) || modal.querySelector('#' + id);
+  }
 
   // This visit's state: every mount starts its own.
   var _currentSearchQuery = '';
@@ -455,7 +462,6 @@ export async function mount(ctx) {
 
   async function viewIssue(issueId) {
     _detailIssueId = String(issueId);
-    var modal = $('issueModal');
     var content = $('modalContent');
     modal.classList.remove('hidden');
 
@@ -576,11 +582,11 @@ export async function mount(ctx) {
 
   // ---- Wiring: one listener per kind, on the page or with its signal ----
 
-  root.addEventListener('click', function (e) {
+  function onClick(e) {
     var t = e.target;
     if (!t || !t.closest) return;
     var el = t.closest('[data-action]');
-    if (!el || !root.contains(el)) return;
+    if (!el || !e.currentTarget.contains(el)) return;
     switch (el.getAttribute('data-action')) {
       case 'close-modal': closeModal(); break;
       case 'deselect': deselectMedia(); break;
@@ -596,7 +602,9 @@ export async function mount(ctx) {
       case 'view-issue': viewIssue(parseInt(el.getAttribute('data-issue-id'), 10)); break;
       case 'add-comment': addComment(parseInt(el.getAttribute('data-issue-id'), 10)); break;
     }
-  }, { signal: signal });
+  }
+  root.addEventListener('click', onClick, { signal: signal });
+  modal.addEventListener('click', onClick, { signal: signal });
 
   // error does not bubble: caught on the way down, for every poster. The
   // placeholder right after it, if there is one, takes its place.
@@ -608,7 +616,7 @@ export async function mount(ctx) {
     if (fallback && fallback.hasAttribute('data-poster-fallback')) fallback.style.display = 'flex';
   }, { capture: true, signal: signal });
 
-  root.addEventListener('input', function (e) {
+  function onInput(e) {
     var t = e.target;
     if (!t) return;
     if (t.id === 'searchInput') {
@@ -627,7 +635,9 @@ export async function mount(ctx) {
       if (t.value) _commentDrafts[id] = t.value;
       else delete _commentDrafts[id];
     }
-  }, { signal: signal });
+  }
+  root.addEventListener('input', onInput, { signal: signal });
+  modal.addEventListener('input', onInput, { signal: signal });
 
   // Escape closes the issue detail, like every other overlay, but not while an
   // input method is composing. A WSUI dialog answers its own Escape first; the
@@ -642,8 +652,17 @@ export async function mount(ctx) {
     loadIssues();
   }, REFRESH_MS);
 
+  // The modal covers the whole window, the phone's top bar and the player
+  // included, as it did before the page was soft-navigated. Inside #wsPage
+  // no z-index can do that: <main> is a stacking context of its own (its
+  // view-transition-name). So for the visit it is a child of <body>, and
+  // the function mount returns takes it away when the page is left.
+  document.body.appendChild(modal);
+
   // The counts and the list are on screen (the last visit's copy, or
   // fetched) before mount resolves, so Back and Forward restore the scroll
   // onto them.
   await Promise.all([loadIssueCounts(), loadIssues()]);
+
+  return function () { modal.remove(); };
 }

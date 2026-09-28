@@ -209,11 +209,21 @@ class IssuesPage(unittest.TestCase):
         # The first read is the page's own (a poll on screen reads nothing at once).
         self.assertIn("await Promise.all([loadIssueCounts(), loadIssues()]);", code)
 
-    def test_the_modal_is_inside_the_page(self):
+    def test_the_modal_comes_with_the_page_and_goes_with_it(self):
+        # It arrives in #wsPage (a swap brings it), covers the whole window
+        # from <body> for the visit (<main> is a stacking context: its
+        # view-transition-name), and the function mount returns removes it.
         h = read("issues")
         page = h[h.index('<div id="wsPage"'):h.index("</main>")]
         self.assertEqual(h.count('id="issueModal"'), 1)
         self.assertIn('id="issueModal"', page)
+        code = module_source("issues")   # the event names are strings: read as written
+        self.assertIn("var modal = root.querySelector('#issueModal');", code)
+        moved = code.index("document.body.appendChild(modal);")
+        self.assertLess(code.index("modal.addEventListener('click', onClick, { signal: signal });"), moved)
+        self.assertLess(code.index("modal.addEventListener('input', onInput, { signal: signal });"), moved)
+        self.assertRegex(js_code_only(code[moved:]), r"^document\.body\.appendChild\(modal\);\s*await Promise\.all\(\[loadIssueCounts\(\), "
+                                       r"loadIssues\(\)\]\);\s*return function \(\) \{ modal\.remove\(\); \};\s*\}\s*$")
 
     def test_wiki_hook_defines_only_and_starts_from_mount(self):
         src = (STATIC / "js" / "wiki-hook.js").read_text(encoding="utf-8")
