@@ -611,8 +611,9 @@ class ShellFragment(unittest.TestCase):
         self.assertIn('id="ws-font" rel="stylesheet" href="' + frag["font_href"].replace("&", "&amp;") + '"', out)
         self.assertEqual(frag["custom_css"], "a{color:red}")
         self.assertEqual(frag["favicon"], "https://cdn.example.test/l.png")
-        self.assertIn("<title>" + frag["title"] + "</title>", out)
+        # The title the page's own <title> would get (this fixture is Home).
         self.assertEqual(frag["title"], "My Site - Settings")
+        self.assertIn("<title>" + pages.page_title(b, "WebServarr - Control Center") + "</title>", out)
         self.assertIn("My Site", frag["brand_html"])
         self.assertIn("--ws-gauge-cpu:var(--color-gauge-cpu)", frag["theme_css"])
 

@@ -476,7 +476,8 @@ class ShellPatch(SettingsApiBase):
         # would answer 404 for "shell" if it were matched first.
         r = self.client.get("/api/admin/settings/shell")
         self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(set(r.json()), {"nav_html"})
+        self.assertEqual(set(r.json()), {"nav_html", "brand_html", "bar_brand_html", "theme_css", "font_href",
+                                         "custom_css", "favicon", "title", "branding"})
 
     def test_fragment_is_the_page_renderer_output(self):
         # Same renderer, same branding, same active page as /settings, so
