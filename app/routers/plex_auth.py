@@ -28,6 +28,7 @@ from app.routers.auth import (
     _plex_auth_enabled,
     _user_has_server_access,
 )
+from app.routers.tickets import claim_legacy_tickets
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -375,12 +376,19 @@ async def plex_callback(
         "is_admin": str(is_admin).lower(),
         "auth_method": "plex",
         "plex_token": auth_token,
+        "plex_account_id": plex_user_id,
         "avatar_url": avatar_url,
         "id_token": "",
     }
 
     session_id = session_manager.generate_session_id()
     await session_manager.create_session(session_id, session_data)
+    # Tickets from before account identities become this account's, once.
+    # Never a reason to refuse the sign-in.
+    try:
+        claim_legacy_tickets(db, session_data)
+    except Exception as e:
+        logger.warning("Claiming legacy tickets failed (sign-in continues): %s", e)
 
     logger.info("Plex PIN login successful: %s (admin=%s)", email, is_admin)
 

@@ -122,6 +122,8 @@ class RouteHarness(unittest.TestCase):
             mock.patch.object(plex_auth, "_is_plex_server_owner", mock.AsyncMock(return_value=False)),
             mock.patch.object(plex_auth.seerr, "authenticate_with_plex_token", mock.AsyncMock(return_value=None)),
             mock.patch.object(plex_auth.httpx, "AsyncClient", fake_plex(lambda: self.authorized)),
+            # There is no database here; claiming is test_ticket_identity's.
+            mock.patch.object(plex_auth, "claim_legacy_tickets", mock.Mock(return_value=0)),
         ]
         for p in patches:
             p.start()

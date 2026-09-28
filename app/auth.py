@@ -212,6 +212,9 @@ class SessionManager:
             "auth_method": field("auth_method", default="simple"),
             "id_token": field("id_token"),
             "plex_token": field("plex_token"),
+            # The plex.tv account id, looked up at sign-in by both Plex paths
+            # (Plex directly, Authentik's Plex source). Tickets are owned by it.
+            "plex_account_id": field("plex_account_id"),
             "avatar_url": field("avatar_url"),
             # Creation time for the absolute-lifetime ceiling enforced in
             # get_session. Extra field only — older sessions without it are

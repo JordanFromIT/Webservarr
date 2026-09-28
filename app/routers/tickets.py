@@ -7,6 +7,7 @@ import mimetypes
 import os
 import shutil
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -14,7 +15,7 @@ import bleach
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import false, or_
+from sqlalchemy import false, func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -132,26 +133,114 @@ async def _save_upload(file: UploadFile) -> str:
     return f"/api/uploads/tickets/{filename}"
 
 
-def _is_owner(ticket: Ticket, username: str) -> bool:
-    """Whether this session username created the ticket. The username is the
-    ticket system's one identity (the list, detail and comment routes all key
-    on it); an empty one owns nothing, so two sessions without a username
-    never share tickets. Always from the session, never from the request."""
-    return bool(username) and ticket.creator_username == username
+def account_identity(user: dict) -> str:
+    """The stable account identity that owns tickets and comments, or "".
+
+    Never the username: usernames come from separate namespaces (local
+    accounts, Plex, Authentik) and can collide. A Plex account is its plex.tv
+    account id however it signed in: a Plex-direct session's user_id is that
+    id, and both Plex paths store it as plex_account_id. A local account is
+    its users.id, and an Authentik identity without a Plex account its OIDC
+    subject; each is namespaced so it can never equal a Plex id. An
+    Authentik session through Plex whose account lookup failed has no
+    identity (it owns nothing) rather than the subject, which would split
+    one person's tickets. Always from the session, never from the request.
+    """
+    method = user.get("auth_method") or "simple"
+    user_id = str(user.get("user_id") or "")
+    plex_id = str(user.get("plex_account_id") or "")
+    if method == "simple":
+        return f"local:{user_id}" if user_id else ""
+    if method == "plex":
+        plex_id = plex_id or user_id
+    if plex_id:
+        return f"plex:{plex_id}"
+    if method == "oidc" and user_id and not user.get("plex_token"):
+        return f"oidc:{user_id}"
+    return ""
 
 
-def _is_author(comment: TicketComment, username: str) -> bool:
-    """Whether this session username wrote the comment (the same rule)."""
-    return bool(username) and comment.author_username == username
+def claim_legacy_tickets(db: Session, user: dict) -> int:
+    """Give this signer's tickets from before identities existed their
+    identity. Called at sign-in by the Plex and Authentik paths, never by a
+    local login, and a local identity is refused here too.
+
+    A ticket with no identity is claimed by its creator_email first. The
+    username is used only when the signer is a Plex account and the ticket
+    has no email. The creator's own comments on a claimed ticket come with
+    it, and a Plex account also claims comments by username (comments have
+    no email). Only rows with no identity are touched, so a row is claimed
+    once and keeps that identity. Returns the number of tickets claimed.
+    """
+    identity = account_identity(user)
+    if not identity or identity.startswith("local:"):
+        return 0
+    is_plex = identity.startswith("plex:")
+    email = identity_email(user.get("email"))
+    username = user.get("username") or ""
+    unclaimed = Ticket.creator_identity.is_(None)
+    no_email = or_(Ticket.creator_email.is_(None), func.trim(Ticket.creator_email) == "")
+
+    claimed = 0
+    if email:
+        claimed += (
+            db.query(Ticket)
+            .filter(unclaimed, func.lower(func.trim(Ticket.creator_email)) == email)
+            .update({Ticket.creator_identity: identity}, synchronize_session=False)
+        )
+    if is_plex and username:
+        claimed += (
+            db.query(Ticket)
+            .filter(unclaimed, no_email, Ticket.creator_username == username)
+            .update({Ticket.creator_identity: identity}, synchronize_session=False)
+        )
+
+    # Only a ticket's creator or an admin can comment, so a non-admin comment
+    # under the creator's name on a ticket this identity owns is theirs.
+    owned = defaultdict(list)
+    for ticket_id, creator in db.query(Ticket.id, Ticket.creator_username).filter(
+        Ticket.creator_identity == identity
+    ):
+        if creator:
+            owned[creator].append(ticket_id)
+    for creator, ticket_ids in owned.items():
+        db.query(TicketComment).filter(
+            TicketComment.author_identity.is_(None),
+            TicketComment.is_admin == False,  # noqa: E712
+            TicketComment.author_username == creator,
+            TicketComment.ticket_id.in_(ticket_ids),
+        ).update({TicketComment.author_identity: identity}, synchronize_session=False)
+    if is_plex and username:
+        db.query(TicketComment).filter(
+            TicketComment.author_identity.is_(None),
+            TicketComment.author_username == username,
+        ).update({TicketComment.author_identity: identity}, synchronize_session=False)
+
+    db.commit()
+    if claimed:
+        logger.info("Claimed %d ticket(s) from before account identities", claimed)
+    return claimed
 
 
-def _owned_by(username: str):
+def _is_owner(ticket: Ticket, identity: str) -> bool:
+    """Whether this session's account identity created the ticket (see
+    account_identity). An empty identity owns nothing, so two sessions
+    without one never share tickets."""
+    return bool(identity) and ticket.creator_identity == identity
+
+
+def _is_author(comment: TicketComment, identity: str) -> bool:
+    """Whether this session's account identity wrote the comment (the same rule)."""
+    return bool(identity) and comment.author_identity == identity
+
+
+def _owned_by(identity: str):
     """_is_owner as a query filter: the caller's tickets, none for an empty
-    username."""
-    return Ticket.creator_username == username if username else false()
+    identity."""
+    return Ticket.creator_identity == identity if identity else false()
 
 
-def _ticket_to_dict(ticket: Ticket, is_admin: bool, current_username: str, comments: list = None) -> dict:
+def _ticket_to_dict(ticket: Ticket, is_admin: bool, current_identity: str, comments: list = None) -> dict:
     """Convert a Ticket ORM object to a response dict with privacy rules applied."""
     data = {
         "id": ticket.id,
@@ -165,11 +254,11 @@ def _ticket_to_dict(ticket: Ticket, is_admin: bool, current_username: str, comme
         "created_at": utc_iso(ticket.created_at),
         "updated_at": utc_iso(ticket.updated_at),
         # The page offers the comment box to the owner (and to admins).
-        "is_own": _is_owner(ticket, current_username),
+        "is_own": _is_owner(ticket, current_identity),
     }
 
     # Privacy: non-admin users never see other users' creator info
-    if is_admin or _is_owner(ticket, current_username):
+    if is_admin or _is_owner(ticket, current_identity):
         data["creator_username"] = ticket.creator_username
         data["creator_name"] = ticket.creator_name
     else:
@@ -178,13 +267,13 @@ def _ticket_to_dict(ticket: Ticket, is_admin: bool, current_username: str, comme
 
     if comments is not None:
         data["comments"] = [
-            _comment_to_dict(c, is_admin, current_username) for c in comments
+            _comment_to_dict(c, is_admin, current_identity) for c in comments
         ]
 
     return data
 
 
-def _comment_to_dict(comment: TicketComment, is_admin: bool, current_username: str) -> dict:
+def _comment_to_dict(comment: TicketComment, is_admin: bool, current_identity: str) -> dict:
     """Convert a TicketComment ORM object to a response dict with privacy rules applied."""
     data = {
         "id": comment.id,
@@ -196,7 +285,7 @@ def _comment_to_dict(comment: TicketComment, is_admin: bool, current_username: s
     }
 
     # Privacy: non-admin sees "Admin" label on admin comments, no author info on others' comments
-    if is_admin or _is_author(comment, current_username):
+    if is_admin or _is_author(comment, current_identity):
         data["author_username"] = comment.author_username
         data["author_name"] = comment.author_name
     else:
@@ -237,12 +326,12 @@ async def get_ticket_image(
     if not ticket:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    username = current_user.get("username", "")
+    identity = account_identity(current_user)
     is_admin = current_user.get("is_admin") == "true"
 
     # Someone else's private image answers as if it were not there, as the
     # ticket itself does.
-    if not is_admin and not _is_owner(ticket, username) and not ticket.is_public:
+    if not is_admin and not _is_owner(ticket, identity) and not ticket.is_public:
         raise HTTPException(status_code=404, detail="Image not found")
 
     content_type, _ = mimetypes.guess_type(filepath)
@@ -268,7 +357,7 @@ async def list_tickets(
     """
     _check_feature_enabled(db, current_user)
 
-    username = current_user.get("username", "")
+    identity = account_identity(current_user)
     is_admin = current_user.get("is_admin") == "true"
 
     query = db.query(Ticket)
@@ -277,7 +366,7 @@ async def list_tickets(
     if not is_admin:
         query = query.filter(
             or_(
-                _owned_by(username),
+                _owned_by(identity),
                 Ticket.is_public == True,
             )
         )
@@ -291,7 +380,7 @@ async def list_tickets(
     tickets = query.order_by(Ticket.updated_at.desc()).offset(offset).limit(limit).all()
 
     return {
-        "tickets": [_ticket_to_dict(t, is_admin, username) for t in tickets],
+        "tickets": [_ticket_to_dict(t, is_admin, identity) for t in tickets],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -348,6 +437,7 @@ async def create_ticket(
         creator_username=current_user.get("username", ""),
         creator_name=current_user.get("name", current_user.get("username", "Unknown")),
         creator_email=identity_email(current_user.get("email")) or None,
+        creator_identity=account_identity(current_user) or None,
         image_path=image_path,
     )
 
@@ -356,7 +446,7 @@ async def create_ticket(
     db.refresh(ticket)
 
     is_admin = current_user.get("is_admin") == "true"
-    return _ticket_to_dict(ticket, is_admin, ticket.creator_username)
+    return _ticket_to_dict(ticket, is_admin, account_identity(current_user))
 
 
 @router.get("/tickets/counts")
@@ -367,14 +457,14 @@ async def ticket_counts(
     """Get ticket counts by status for the current user's visible tickets."""
     _check_feature_enabled(db, current_user)
 
-    username = current_user.get("username", "")
+    identity = account_identity(current_user)
     is_admin = current_user.get("is_admin") == "true"
 
     query = db.query(Ticket)
     if not is_admin:
         query = query.filter(
             or_(
-                _owned_by(username),
+                _owned_by(identity),
                 Ticket.is_public == True,
             )
         )
@@ -406,11 +496,11 @@ async def get_ticket(
             detail="Ticket not found",
         )
 
-    username = current_user.get("username", "")
+    identity = account_identity(current_user)
     is_admin = current_user.get("is_admin") == "true"
 
     # Access check: own ticket, public, or admin
-    if not is_admin and not _is_owner(ticket, username) and not ticket.is_public:
+    if not is_admin and not _is_owner(ticket, identity) and not ticket.is_public:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ticket not found",
@@ -423,7 +513,7 @@ async def get_ticket(
         .all()
     )
 
-    return _ticket_to_dict(ticket, is_admin, username, comments=comments)
+    return _ticket_to_dict(ticket, is_admin, identity, comments=comments)
 
 
 @router.post("/tickets/{ticket_id}/comments", status_code=status.HTTP_201_CREATED)
@@ -447,10 +537,11 @@ async def add_comment(
         )
 
     username = current_user.get("username", "")
+    identity = account_identity(current_user)
     is_admin = current_user.get("is_admin") == "true"
 
     # Only ticket creator or admin can comment
-    if not is_admin and not _is_owner(ticket, username):
+    if not is_admin and not _is_owner(ticket, identity):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the ticket creator or an admin can comment",
@@ -473,6 +564,7 @@ async def add_comment(
         ticket_id=ticket_id,
         author_username=username,
         author_name=current_user.get("name", username),
+        author_identity=identity or None,
         is_admin=is_admin,
         message=clean_message,
         image_path=image_path,
@@ -486,7 +578,7 @@ async def add_comment(
     db.commit()
     db.refresh(comment)
 
-    return _comment_to_dict(comment, is_admin, username)
+    return _comment_to_dict(comment, is_admin, identity)
 
 
 # ============================================================
@@ -524,9 +616,9 @@ async def admin_list_tickets(
     total = query.count()
     tickets = query.order_by(Ticket.updated_at.desc()).offset(offset).limit(limit).all()
 
-    username = current_user.get("username", "")
+    identity = account_identity(current_user)
     return {
-        "tickets": [_ticket_to_dict(t, True, username) for t in tickets],
+        "tickets": [_ticket_to_dict(t, True, identity) for t in tickets],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -576,8 +668,7 @@ async def admin_update_ticket(
     db.commit()
     db.refresh(ticket)
 
-    username = current_user.get("username", "")
-    return _ticket_to_dict(ticket, True, username)
+    return _ticket_to_dict(ticket, True, account_identity(current_user))
 
 
 @router.delete("/admin/tickets/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)

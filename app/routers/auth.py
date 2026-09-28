@@ -20,6 +20,7 @@ from app.database import get_db
 from app.limiter import limiter
 from app.models import Setting
 from app.integrations import seerr
+from app.routers.tickets import claim_legacy_tickets
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -472,11 +473,20 @@ async def oidc_callback(request: Request, code: str, state: str, db: Session = D
             "auth_method": "oidc",
             "id_token": id_token,
             "plex_token": plex_token,
+            # The Plex account id looked up above: the identity that owns
+            # this account's tickets, the same one a Plex-direct sign-in has.
+            "plex_account_id": plex_user_id,
             "avatar_url": avatar_url,
         }
 
         session_id = session_manager.generate_session_id()
         await session_manager.create_session(session_id, session_data)
+        # Tickets from before account identities become this account's, once.
+        # Never a reason to refuse the sign-in.
+        try:
+            claim_legacy_tickets(db, session_data)
+        except Exception as e:
+            logger.warning("Claiming legacy tickets failed (sign-in continues): %s", e)
 
         logger.info(
             "OIDC login successful: %s (admin=%s)",
