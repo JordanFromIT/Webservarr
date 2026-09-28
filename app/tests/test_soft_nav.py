@@ -224,6 +224,45 @@ class SharedShellScripts(unittest.TestCase):
         self.assertIn("if (!res || res.status >= 500 || res.status === 429) res = await fetchPage(", code)
 
 
+class LeaveGuard(unittest.TestCase):
+    """A page can hold its visitor (Settings with unsaved changes): the router
+    awaits ctx.beforeLeave's guard before it leaves the page, for a link,
+    navigate(), Back and Forward (Task 5)."""
+
+    def code(self):
+        return js_code_only((STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+
+    def test_go_asks_the_guard_before_it_fetches(self):
+        code = self.code()
+        go = function_body(code, "go")
+        ask = go.index("verdict = await current.guard(new URL(target.href), { pop: !!opts.pop });")
+        self.assertLess(go.index("if (!current) {"), ask, "an unconverted page has no guard to ask")
+        self.assertLess(go.index("current.claim(new URL(target.href))"), ask, "an in-page URL is not a leave")
+        self.assertLess(ask, go.index("takePrefetch(target.href)"), "asked before any fetch")
+        after = go[ask:go.index("takePrefetch(target.href)")]
+        self.assertIn("if (token !== navToken) return;", after, "a newer navigation wins over an answer")
+        stay = re.search(r"if \(verdict === false\) \{(.*?)\n      \}", after, re.S)
+        self.assertIsNotNone(stay)
+        # Back or Forward already moved the address bar: a stay puts it back.
+        self.assertIn("if (opts.pop) history.replaceState(", stay.group(1))
+        self.assertIn("current.url);", stay.group(1))
+        self.assertRegex(after, r"if \(verdict === '    '\) \{[^}]*await hardNavigate\(target\.href, token\);")
+        self.assertIn("if (verdict === 'hard') {", (STATIC / "js" / "router.js").read_text(encoding="utf-8"))
+
+    def test_a_left_page_asks_nothing(self):
+        code = self.code()
+        self.assertIn("was.guard = null;", function_body(code, "leave"))
+        self.assertRegex(code, r"beforeLeave: function \(guard\) \{\s*if \(!entry\.left\) entry\.guard = ")
+
+    def test_a_fragment_entry_the_browser_made_is_marked(self):
+        # Back to it from another page must swap this page back in; a page's
+        # own entries (a state of their own) are left alone.
+        code = self.code()
+        m = re.search(r"window\.addEventListener\('\s+', function \(\) \{\s*if \(!current \|\| !samePage\(location\.href, current\.url\)\) return;"
+                      r"\s*current\.url = location\.href;\s*if \(history\.state === null\) history\.replaceState\(\{ ws: 1,", code)
+        self.assertIsNotNone(m)
+
+
 # The debug tools (spec 7): a leak checker that wraps addEventListener, the
 # timers and fetch, and a page module that throws on purpose. Neither may ever
 # load for someone who did not ask for it with ?ws-debug=.

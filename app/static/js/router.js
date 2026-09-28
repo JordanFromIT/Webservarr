@@ -29,6 +29,11 @@
  *   current                     { url, module, controller } of the mounted page
  *   hardNavigate(url)           ws:before-hard-nav, then a full navigation (sign-out)
  *   clearPrefetch()             forget hover-prefetched pages (WS.clearPageCache)
+ * A page module's ctx (spec 4.2) adds ctx.beforeLeave(guard): every
+ * navigation away from the page (a link, navigate(), Back or Forward) first
+ * awaits guard(url, { pop }): false stays (Back's address is put back),
+ * 'hard' leaves by full navigation, anything else goes on. Settings asks
+ * about unsaved changes this way.
  * Events on window:
  *   ws:before-hard-nav  detail { url, waitUntil(promise) }; awaited, 500 ms cap
  *   ws:page-mounted     detail { url, page } after each mount
@@ -614,6 +619,7 @@ function start() {
     if (!was) return;
     was.left = true;
     was.claim = null;          // a left page claims nothing, even mid-swap
+    was.guard = null;          // ...and asks nothing
     was.controller.abort();
     if (was.cleanup) {
       const fn = was.cleanup;
@@ -628,7 +634,7 @@ function start() {
     const root = document.getElementById('wsPage');
     const entry = {
       url: url.href, module: moduleUrl, controller: new AbortController(),
-      cleanup: null, claim: null, left: false
+      cleanup: null, claim: null, guard: null, left: false
     };
     current = entry;
     api.current = { url: entry.url, module: moduleUrl, controller: entry.controller };
@@ -659,6 +665,9 @@ function start() {
       },
       onNavigate: function (handler) {
         if (!entry.left) entry.claim = typeof handler === 'function' ? handler : null;
+      },
+      beforeLeave: function (guard) {
+        if (!entry.left) entry.guard = typeof guard === 'function' ? guard : null;
       }
     };
 
@@ -678,6 +687,7 @@ function start() {
       // signal of its own.
       entry.controller.abort();
       entry.claim = null;
+      entry.guard = null;
       entry.controller = new AbortController();
       api.current = { url: entry.url, module: moduleUrl, controller: entry.controller };
       if (entry.cleanup) { runCleanup(entry.cleanup); entry.cleanup = null; }
@@ -725,6 +735,31 @@ function start() {
         }
         current.url = target.href;
         api.current = { url: current.url, module: current.module, controller: current.controller };
+        return;
+      }
+    }
+
+    // A page may hold its visitor (Settings with unsaved changes): its guard
+    // answers false to stay, 'hard' for a full navigation, anything else to
+    // go on. On Back or Forward the address bar has already moved, so a stay
+    // puts it back, as a failed fetch does below.
+    if (!current.left && current.guard) {
+      let verdict;
+      try {
+        verdict = await current.guard(new URL(target.href), { pop: !!opts.pop });
+      } catch (e) {
+        console.error('[router] leave guard failed', e);
+        verdict = false;
+      }
+      if (token !== navToken) return;
+      if (verdict === false) {
+        fetchCtl = null;
+        if (opts.pop) history.replaceState({ ws: 1, scrollY: Math.round(scroller().scrollTop) }, '', current.url);
+        return;
+      }
+      if (verdict === 'hard') {
+        fetchCtl = null;
+        await hardNavigate(target.href, token);
         return;
       }
     }
@@ -877,8 +912,13 @@ function start() {
     go(location.href, { pop: true, scrollY: st.scrollY || 0 });
   });
 
+  // A fragment link the browser followed (Settings' tabs from the account
+  // menu, say) made an entry with no state. It is this page's: mark it, so
+  // Back to it from another page swaps this page back in.
   window.addEventListener('hashchange', function () {
-    if (current && samePage(location.href, current.url)) current.url = location.href;
+    if (!current || !samePage(location.href, current.url)) return;
+    current.url = location.href;
+    if (history.state === null) history.replaceState({ ws: 1, scrollY: Math.round(scroller().scrollTop) }, '', location.href);
   });
 
   // ---- First load (spec 5.3) ----
