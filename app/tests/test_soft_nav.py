@@ -770,8 +770,16 @@ class RequestsPage(unittest.TestCase):
         fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
         self.assertEqual(len(fetches), 8, "discover, both searches, a request, request status, "
                                           "the counts, the summary and the recent requests")
+        # The two search reads are on the search's own signal, which the
+        # page's aborts too (RequestsPage.test_an_older_search_never_paints).
+        on_search = 0
         for at in fetches:
-            self.assertIn("signal: signal", ",".join(call_args(code, at + len("fetch"))), code[at:at + 60])
+            args = ",".join(call_args(code, at + len("fetch")))
+            if "signal: ctl.signal" in args:
+                on_search += 1
+            else:
+                self.assertIn("signal: signal", args, code[at:at + 60])
+        self.assertEqual(on_search, 2, "the film/TV search and the book search")
         self.assertNotRegex(code, r"\bgetJSON\(")
         # A page left mid-request says nothing and writes nothing.
         self.assertEqual(len(re.findall(r"if \(signal\.aborted \|\| isAbort\(\w+\)\) return;", code)), 7,
@@ -796,6 +804,36 @@ class RequestsPage(unittest.TestCase):
         self.assertRegex(frame, r"^\s*if \(signal\.aborted\) \{ _searchMoveRaf = null; return; \}")
         # The first read is the page's own (a poll on screen reads nothing at once).
         self.assertIn("Promise.all([RS.load(), loadRequestCounts(), loadLibrarySummary(), loadExistingRequests()])", code)
+
+    def test_an_older_search_never_paints_over_a_newer_one(self):
+        # Task 12 fix round 1 (RS1): "dune" (slow), cleared, then "matrix"
+        # (fast): dune's answer landing last painted its results and count
+        # under a box reading "matrix". A new search, or clearing the box,
+        # aborts the one in flight, and an answer that is not the newest
+        # search's touches nothing.
+        src = module_source("requests")
+        body = function_body(src, "performSearch")
+        self.assertIn("var searchCtl = null;", src[src.index("export async function mount"):])
+        start = body.index("if (searchCtl) searchCtl.abort();")
+        self.assertLess(body.index("_currentSearchQuery = query;"), start)
+        self.assertIn("var ctl = searchCtl = new AbortController();", body)
+        # Chained to the visit: leaving the page aborts the search too.
+        self.assertIn("signal.addEventListener('abort', function () { ctl.abort(); }, { once: true, signal: ctl.signal });", body)
+        guard = "if (_currentSearchQuery !== query || searchCtl !== ctl) return;"
+        at = body.index(guard)
+        self.assertLess(body.index("var data = await resp.json();"), at)
+        for write in ("_totalSearchPages =", "_searchResults = screenResults;", "$('searchResultCount')",
+                      "renderSearchPage();", "updateSearchPagination();", "grid.textContent = '';\n        var emptyDiv"):
+            later = body.index(write, body.index("var data = await resp.json();"))
+            self.assertLess(at, later, write)
+        # The late book merge answers only to the newest search as well.
+        merge = body[body.index("bookSearch.then(function (bookResults) {"):]
+        self.assertRegex(merge, r"^bookSearch\.then\(function \(bookResults\) \{\s*"
+                                r"if \(signal\.aborted \|\| searchCtl !== ctl\) return;")
+        # A failure of a search that has been overtaken says nothing either.
+        catch = body[body.index("} catch (error) {"):]
+        self.assertLess(catch.index("if (searchCtl !== ctl) return;"), catch.index("grid.textContent = '';"))
+        self.assertIn("if (searchCtl) searchCtl.abort();", function_body(src, "clearSearch"))
 
     def test_the_inline_handlers_are_data_actions(self):
         h = read("requests")

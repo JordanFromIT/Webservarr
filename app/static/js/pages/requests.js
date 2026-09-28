@@ -671,6 +671,7 @@ export async function mount(ctx) {
 
   // This visit's state: every mount starts its own.
   var searchTimer = 0;
+  var searchCtl = null;             // the search in flight: a newer one aborts it
   var _currentSearchQuery = '';
   var _currentSearchPage = 1;
   var _totalSearchPages = 1;
@@ -1039,6 +1040,12 @@ export async function mount(ctx) {
 
   async function performSearch(query) {
     _currentSearchQuery = query;
+    // One search at a time. Its own controller, aborted by the next search,
+    // by clearing the box, and (chained below) by leaving the page: an older
+    // query answering late must never paint over the newer one.
+    if (searchCtl) searchCtl.abort();
+    var ctl = searchCtl = new AbortController();
+    signal.addEventListener('abort', function () { ctl.abort(); }, { once: true, signal: ctl.signal });
     var section = $('searchResultsSection');
     var emptyState = $('searchEmptyState');
     var grid = $('searchResultsGrid');
@@ -1064,15 +1071,18 @@ export async function mount(ctx) {
       // Films/TV and books are searched together. Books are a separate
       // backend, so a Chaptarr outage must not take out film and TV search -
       // its failure resolves to an empty list rather than rejecting.
-      var bookSearch = fetch('/api/integrations/chaptarr-search?query=' + encodeURIComponent(query), { signal: signal })
+      var bookSearch = fetch('/api/integrations/chaptarr-search?query=' + encodeURIComponent(query), { signal: ctl.signal })
         .then(function (r) { return r.ok ? r.json() : { results: [] }; })
         .then(function (d) { return d.results || []; })
         .catch(function () { return []; });
 
-      var resp = await fetch('/api/integrations/seerr-search?query=' + encodeURIComponent(query) + '&page=' + _currentSearchPage, { signal: signal });
+      var resp = await fetch('/api/integrations/seerr-search?query=' + encodeURIComponent(query) + '&page=' + _currentSearchPage, { signal: ctl.signal });
       if (!resp.ok) throw new Error('Search failed');
       var data = await resp.json();
       if (signal.aborted) return;
+      // A newer search, or a cleared box, has started since: this answer is
+      // not the one on screen, so it touches nothing.
+      if (_currentSearchQuery !== query || searchCtl !== ctl) return;
 
       _totalSearchPages = data.totalPages || 1;
       var screenResults = data.results || [];
@@ -1111,7 +1121,7 @@ export async function mount(ctx) {
       // Books arrive late and are merged in place. The query is re-checked
       // because a slow book search can outlive the search that started it.
       bookSearch.then(function (bookResults) {
-        if (signal.aborted) return;
+        if (signal.aborted || searchCtl !== ctl) return;
         if (_currentSearchQuery !== query || !bookResults.length) return;
         if (_currentSearchPage !== 1) return;
 
@@ -1135,6 +1145,7 @@ export async function mount(ctx) {
 
     } catch (error) {
       if (signal.aborted || isAbort(error)) return;   // left the page: nothing to say
+      if (searchCtl !== ctl) return;                   // a newer search owns the grid
       console.error('Search error:', error);
       grid.textContent = '';
       var errDiv = document.createElement('div');
@@ -1160,6 +1171,7 @@ export async function mount(ctx) {
   }
 
   function clearSearch() {
+    if (searchCtl) searchCtl.abort();
     _currentSearchQuery = '';
     _currentSearchPage = 1;
     _searchResults = [];
