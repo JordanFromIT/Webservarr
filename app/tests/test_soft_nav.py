@@ -14,7 +14,7 @@ from app.tests.test_settings_static import function_body
 from app.tests.test_shell_contract import STATIC, js_code_only, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
-CONVERTED = ["news", "settings", "calendar", "issues"]
+CONVERTED = ["news", "settings", "calendar", "issues", "tickets"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -226,14 +226,66 @@ class IssuesPage(unittest.TestCase):
     def test_wiki_hook_defines_only_and_starts_from_mount(self):
         src = (STATIC / "js" / "wiki-hook.js").read_text(encoding="utf-8")
         code = js_code_only(src)
-        # Top level: the WikiHook definition and the unconverted pages' wrapper.
+        # Top level: the WikiHook definition and nothing else. Its two pages
+        # are page modules now, so the old initWikiHook wrapper is gone.
         self.assertRegex(code, r"^\s*var WikiHook = \(function \(\) \{")
-        self.assertRegex(code, r"return \{ init: init \};\s*\}\)\(\);\s*function initWikiHook\(")
+        self.assertRegex(code, r"return \{ init: init \};\s*\}\)\(\);\s*$")
+        self.assertNotIn("initWikiHook", code)
         self.assertRegex(code, r"function init\(ctx, options\) \{\s*var el = ctx\.root\.querySelector\(")
         self.assertIn("var branding = ctx && ctx.data && ctx.data.branding;", code)
         self.assertNotIn("addEventListener", code)
         self.assertIn("WikiHook.init(ctx, { container: 'wikiHookIssues', hook: 'issues', "
                       "lead: 'Might this help first?' });", module_source("issues"))
+
+
+class TicketsPage(unittest.TestCase):
+    """Tickets reads, posts and refreshes on the page's signal and poll; its
+    three overlays are inside #wsPage, so a swap takes them away open or not;
+    the wiki pointers start from mount with the visit's ctx."""
+
+    def test_every_request_is_on_the_pages_signal(self):
+        code = js_code_only(module_source("tickets"))
+        self.assertEqual(re.findall(r"\bgetJSON\([^)]*\)", code), ["getJSON(url, { signal: signal })"])
+        fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
+        self.assertEqual(len(fetches), 3, "the two forms' POST, the admin's save and delete")
+        for at in fetches:
+            self.assertIn("signal: signal", ",".join(call_args(code, at + len("fetch"))), code[at:at + 60])
+        # A page left mid-request says nothing: every failure path lets an
+        # abort pass (read as written: the toast words are strings).
+        src = module_source("tickets")
+        self.assertEqual(code.count("if (signal.aborted || isAbort(err)) return;"), 3)
+        self.assertEqual(src.count("if (e !== TICKETS_OFF && !isAbort(e)) showToast(e.message, 'error');"), 2)
+        self.assertEqual(src.count("if (!isAbort(err)) showToast("), 2)
+
+    def test_timers_and_refresh_are_the_pages(self):
+        code = js_code_only(module_source("tickets"))
+        self.assertIn("_stopRefresh = ctx.poll(function() { loadTickets(); loadCounts(); }, REFRESH_MS);", code)
+        self.assertNotRegex(code, r"\bWS\.poll\(")
+        self.assertNotRegex(code, r"(?<![.\w])setTimeout\(")
+        self.assertTrue(code.rstrip().endswith("await Promise.all([loadTickets(), loadCounts()]);\n}"))
+
+    def test_the_overlays_are_inside_the_page(self):
+        h = read("tickets")
+        page = h[h.index('<div id="wsPage"'):h.index("</main>")]
+        for overlay in ("createModal", "detailModal", "lightbox"):
+            self.assertEqual(h.count(f'id="{overlay}"'), 1, overlay)
+            self.assertIn(f'id="{overlay}"', page, overlay)
+        code = js_code_only(module_source("tickets"))
+        self.assertNotIn("document.body.appendChild", code)
+        self.assertNotRegex(code, r"\bdocument\.getElementById\(", "lookups stay inside ctx.root")
+
+    def test_the_tab_styles_are_a_page_style(self):
+        # Injected by script they would pile up in <head>, one per visit.
+        h = read("tickets")
+        self.assertIn(".filter-tab.active, .cat-filter-tab.active {", h[:h.index("</head>")])
+        self.assertNotIn("createElement('style')", module_source("tickets"))
+
+    def test_wiki_pointers_start_from_mount(self):
+        src = module_source("tickets")
+        self.assertIn("WikiHook.init(ctx, { container: 'wikiHookTickets', hook: 'tickets', "
+                      "lead: 'Before you contact support:' });", src)
+        self.assertIn("WikiHook.init(ctx, { container: 'wikiHookPlayback', hook: 'playback', "
+                      "lead: 'It may already be answered here:' });", src)
 
 
 class PageOffBanner(unittest.TestCase):

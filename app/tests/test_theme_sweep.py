@@ -441,8 +441,8 @@ class BrightTextOnlyOnPrimary(unittest.TestCase):
         tickets = (STATIC / "tickets.html").read_text(encoding="utf-8")
         calendar = (STATIC / "calendar.html").read_text(encoding="utf-8")
         for page, call in ((ISSUES, 'data-action="close-modal" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
-                           (tickets, 'onclick="closeCreateModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
-                           (tickets, 'onclick="closeDetailModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
+                           (tickets, 'data-action="close-create" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
+                           (tickets, 'data-action="close-detail" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
                            (calendar, 'id="closePanelBtn" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue')):
             self.assertIn(call, page)
 
@@ -452,13 +452,16 @@ class BackdropClosesTheModal(unittest.TestCase):
     closes the modal (a click on the wrapper itself can never happen)."""
 
     def test_the_scrim_closes(self):
+        # A page module: the scrim names its action, the page's one click
+        # listener runs it.
         tickets = (STATIC / "tickets.html").read_text(encoding="utf-8")
-        for page, modal, close in ((tickets, "createModal", "closeCreateModal()"),
-                                   (tickets, "detailModal", "closeDetailModal()")):
-            m = re.search(r'<div id="' + modal + r'" class="([^"]*)"( onclick="[^"]*")?>\n<div class="absolute inset-0 ws-scrim '
-                          r'backdrop-blur-sm" onclick="' + re.escape(close) + r'"></div>', page)
+        for modal, action, close in (("createModal", "close-create", "closeCreateModal()"),
+                                     ("detailModal", "close-detail", "closeDetailModal()")):
+            m = re.search(r'<div id="' + modal + r'" class="([^"]*)"( data-action="[^"]*")?>\n<div class="absolute inset-0 ws-scrim '
+                          r'backdrop-blur-sm" data-action="' + action + r'"></div>', tickets)
             self.assertIsNotNone(m, modal)
-            self.assertIsNone(m.group(2), modal + ": the wrapper's own handler could never fire")
+            self.assertIsNone(m.group(2), modal + ": the wrapper's own action could never fire")
+            self.assertIn(f"case '{action}': {close}; break;", TICKETS)
 
     def test_the_issue_scrim_closes(self):
         # A page module: the scrim names its action, the page's one click
@@ -470,7 +473,8 @@ class BackdropClosesTheModal(unittest.TestCase):
         self.assertIn("case 'close-modal': closeModal(); break;", ISSUES_JS)
 
 
-TICKETS = (STATIC / "tickets.html").read_text(encoding="utf-8")
+# The Tickets page's script is its page module (soft navigation).
+TICKETS = (STATIC / "js" / "pages" / "tickets.js").read_text(encoding="utf-8")
 
 
 def js_function(src, head):
@@ -486,15 +490,15 @@ class TicketDraftsSurvive(unittest.TestCase):
     successful submit, and each ticket keeps its unsent comment."""
 
     def test_opening_the_form_keeps_the_draft(self):
-        opener = js_function(TICKETS, "window.openCreateModal = function() {")
+        opener = js_function(TICKETS, "function openCreateModal() {")
         self.assertNotIn(".value = ''", opener)
         self.assertNotIn("resetCreateForm", opener)
 
     def test_only_a_successful_submit_clears_it(self):
         reset = js_function(TICKETS, "function resetCreateForm() {")
         for field in ("createTitle", "createDescription", "createImage"):
-            self.assertIn(f"document.getElementById('{field}').value = ''", reset)
-        submit = js_function(TICKETS, "window.submitNewTicket = function() {")
+            self.assertIn(f"$('{field}').value = ''", reset)
+        submit = js_function(TICKETS, "function submitNewTicket() {")
         ok = submit[submit.index(".then(function() {"):submit.index(".catch(")]
         self.assertIn("resetCreateForm();", ok)
         self.assertEqual(TICKETS.count("resetCreateForm();"), 1)
@@ -519,7 +523,7 @@ class EscapeClosesTheModals(unittest.TestCase):
         self.assertIn("closeModal()", m.group(1))
 
     def test_tickets_topmost_first(self):
-        m = re.search(r"document\.addEventListener\('keydown', function\(e\) \{(.*?)\n  \}\);", TICKETS, re.S)
+        m = re.search(r"document\.addEventListener\('keydown', function\(e\) \{(.*?)\n  \}, \{ signal: signal \}\);", TICKETS, re.S)
         self.assertIsNotNone(m)
         body = m.group(1)
         self.assertIn("e.key !== 'Escape' || e.isComposing || document.querySelector('.ws-dialog')", body)
@@ -563,12 +567,12 @@ class TicketSendsSurviveAReopen(unittest.TestCase):
         self.assertIn("if (detailShowing(ticket.id)) openDetailModal(ticket.id);", ok)
 
     def test_a_late_new_ticket_success_leaves_a_newer_draft(self):
-        submit = js_function(TICKETS, "window.submitNewTicket = function() {")
+        submit = js_function(TICKETS, "function submitNewTicket() {")
         ok = submit[submit.index(".then(function() {"):submit.index(".catch(")]
-        guard = ok.index("document.getElementById('createTitle').value.trim() === title")
+        guard = ok.index("$('createTitle').value.trim() === title")
         self.assertLess(guard, ok.index("resetCreateForm();"))
         self.assertLess(guard, ok.index("closeCreateModal();"))
-        self.assertIn("document.getElementById('createDescription').value.trim() === description", ok)
+        self.assertIn("$('createDescription').value.trim() === description", ok)
         self.assertIn("showToast('Ticket submitted!', 'success');", ok)
 
 

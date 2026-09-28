@@ -72,10 +72,3 @@ var WikiHook = (function () {
   return { init: init };
 })();
 
-/**
- * For a page that is not a page module yet (Tickets): the branding payload is
- * stamped into the page by the server, so it is available before this runs.
- */
-function initWikiHook(containerId, hookName, lead) {
-  WikiHook.init({ root: document, data: window.WS_DATA }, { container: containerId, hook: hookName, lead: lead });
-}

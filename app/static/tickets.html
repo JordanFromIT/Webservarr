@@ -9,79 +9,19 @@
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
 <link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+<style>
+.filter-tab, .cat-filter-tab { background: rgb(var(--color-accent) / 0.1); color: rgb(var(--color-text) / 0.8); border: 1px solid transparent; }
+.filter-tab.active, .cat-filter-tab.active { background: rgb(var(--color-primary) / 0.2); color: rgb(var(--color-text)); border-color: rgb(var(--color-primary) / 0.3); }
+.filter-tab:hover, .cat-filter-tab:hover { background: rgb(var(--color-accent) / 0.2); }
+</style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <!-- ws:sidebar -->
-
-
-<!-- Create Ticket Modal -->
-<div id="createModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
-<div class="absolute inset-0 ws-scrim backdrop-blur-sm" onclick="closeCreateModal()"></div>
-<div class="relative w-full max-w-md rounded-xl glass-card p-5">
-<button onclick="closeCreateModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue transition-colors">
-<span class="material-symbols-outlined">close</span>
-</button>
-<h3 class="text-lg font-bold text-frosted-blue mb-1">Message support</h3>
-<p class="text-xs text-steel-blue mb-4">Goes straight to the server admin. You&rsquo;ll get replies right here.</p>
-
-<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Title</label>
-<input id="createTitle" type="text" maxlength="200" placeholder="What do you need help with?"
-  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"/>
-
-<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Category</label>
-<select id="createCategory"
-  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3">
-<option value="media_request">Media Request</option>
-<option value="playback_issue">Playback Issue</option>
-<option value="account_issue">Account Issue</option>
-<option value="feature_suggestion">Feature Suggestion</option>
-<option value="other">Other</option>
-</select>
-<p id="playbackRedirectHint" class="hidden text-xs text-frosted-blue/80 bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3">
-<span class="material-symbols-outlined text-[14px] align-text-bottom mr-1">info</span>
-If this is about one specific movie or show, <a href="/issues" class="text-frosted-blue underline hover:no-underline font-semibold">Issues</a> gets it to the right place faster.
-</p>
-<div id="wikiHookPlayback" class="hidden mb-3"></div>
-
-<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Description</label>
-<textarea id="createDescription" rows="4" placeholder="Give us the details — what you tried, what happened, and which device you were on."
-  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"></textarea>
-
-<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Screenshot (optional)</label>
-<input id="createImage" type="file" accept="image/png,image/jpeg,image/webp"
-  class="w-full text-sm text-steel-blue file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-primary/20 file:text-frosted-blue hover:file:bg-primary/30 transition-all mb-4"/>
-
-<button onclick="submitNewTicket()" id="createSubmitBtn" class="w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed">
-Send to support
-</button>
-</div>
-</div>
-
-<!-- Ticket Detail Modal -->
-<div id="detailModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
-<div class="absolute inset-0 ws-scrim backdrop-blur-sm" onclick="closeDetailModal()"></div>
-<div class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl glass-card p-5 custom-scrollbar">
-<button onclick="closeDetailModal()" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue transition-colors z-10">
-<span class="material-symbols-outlined">close</span>
-</button>
-<div id="detailContent">
-<div class="text-center text-steel-blue py-8">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin">progress_activity</span>
-<p>Loading...</p>
-</div>
-</div>
-</div>
-</div>
-
-<!-- Image Lightbox -->
-<div id="lightbox" class="fixed inset-0 z-[60] hidden items-center justify-center bg-background-dark/90 cursor-pointer" onclick="closeLightbox()">
-<img id="lightboxImg" src="" class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"/>
-</div>
-
 <!-- Main Content Area -->
 <main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
 <!-- ws:header -->
-
+<!-- The page (spec 4.1), swapped by the router -->
+<div id="wsPage" data-ws-module="/static/js/pages/tickets.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-hidden">
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
@@ -121,26 +61,26 @@ For a problem with a particular movie or show, use <a href="/issues" class="text
 
 <!-- New Ticket Button + Filter Tabs -->
 <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
-<button onclick="openCreateModal()" class="px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all flex items-center gap-2 shrink-0">
+<button data-action="open-create" class="px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all flex items-center gap-2 shrink-0">
 <span class="material-symbols-outlined text-sm">add</span> New message
 </button>
 <div class="flex flex-wrap gap-2">
-<button onclick="setFilter('all')" data-filter="all" class="filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All</button>
-<button onclick="setFilter('open')" data-filter="open" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Open</button>
-<button onclick="setFilter('in_progress')" data-filter="in_progress" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">In Progress</button>
-<button onclick="setFilter('resolved')" data-filter="resolved" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Resolved</button>
-<button onclick="setFilter('closed')" data-filter="closed" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Closed</button>
+<button data-action="filter" data-filter="all" class="filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All</button>
+<button data-action="filter" data-filter="open" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Open</button>
+<button data-action="filter" data-filter="in_progress" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">In Progress</button>
+<button data-action="filter" data-filter="resolved" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Resolved</button>
+<button data-action="filter" data-filter="closed" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Closed</button>
 </div>
 </div>
 
 <!-- Category Filter -->
 <div class="flex flex-wrap gap-2 mb-4">
-<button onclick="setCategoryFilter('all')" data-catfilter="all" class="cat-filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All Types</button>
-<button onclick="setCategoryFilter('media_request')" data-catfilter="media_request" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Media Request</button>
-<button onclick="setCategoryFilter('playback_issue')" data-catfilter="playback_issue" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Playback Issue</button>
-<button onclick="setCategoryFilter('account_issue')" data-catfilter="account_issue" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Account Issue</button>
-<button onclick="setCategoryFilter('feature_suggestion')" data-catfilter="feature_suggestion" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Feature</button>
-<button onclick="setCategoryFilter('other')" data-catfilter="other" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Other</button>
+<button data-action="cat-filter" data-catfilter="all" class="cat-filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All Types</button>
+<button data-action="cat-filter" data-catfilter="media_request" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Media Request</button>
+<button data-action="cat-filter" data-catfilter="playback_issue" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Playback Issue</button>
+<button data-action="cat-filter" data-catfilter="account_issue" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Account Issue</button>
+<button data-action="cat-filter" data-catfilter="feature_suggestion" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Feature</button>
+<button data-action="cat-filter" data-catfilter="other" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Other</button>
 </div>
 
 <!-- Ticket List -->
@@ -152,11 +92,11 @@ For a problem with a particular movie or show, use <a href="/issues" class="text
 
 <!-- Pagination -->
 <div id="pagination" class="hidden flex items-center justify-center gap-4 mt-6">
-<button onclick="prevPage()" id="prevBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
+<button data-action="prev-page" id="prevBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
 <span class="material-symbols-outlined text-sm align-middle">chevron_left</span> Prev
 </button>
 <span id="pageInfo" class="text-sm text-steel-blue font-bold"></span>
-<button onclick="nextPage()" id="nextBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
+<button data-action="next-page" id="nextBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
 Next <span class="material-symbols-outlined text-sm align-middle">chevron_right</span>
 </button>
 </div>
@@ -169,732 +109,77 @@ Next <span class="material-symbols-outlined text-sm align-middle">chevron_right<
 </div>
 
 </div>
+
+<!-- Create Ticket Modal -->
+<div id="createModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+<div class="absolute inset-0 ws-scrim backdrop-blur-sm" data-action="close-create"></div>
+<div class="relative w-full max-w-md rounded-xl glass-card p-5">
+<button data-action="close-create" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue transition-colors">
+<span class="material-symbols-outlined">close</span>
+</button>
+<h3 class="text-lg font-bold text-frosted-blue mb-1">Message support</h3>
+<p class="text-xs text-steel-blue mb-4">Goes straight to the server admin. You&rsquo;ll get replies right here.</p>
+
+<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Title</label>
+<input id="createTitle" type="text" maxlength="200" placeholder="What do you need help with?"
+  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"/>
+
+<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Category</label>
+<select id="createCategory"
+  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3">
+<option value="media_request">Media Request</option>
+<option value="playback_issue">Playback Issue</option>
+<option value="account_issue">Account Issue</option>
+<option value="feature_suggestion">Feature Suggestion</option>
+<option value="other">Other</option>
+</select>
+<p id="playbackRedirectHint" class="hidden text-xs text-frosted-blue/80 bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3">
+<span class="material-symbols-outlined text-[14px] align-text-bottom mr-1">info</span>
+If this is about one specific movie or show, <a href="/issues" class="text-frosted-blue underline hover:no-underline font-semibold">Issues</a> gets it to the right place faster.
+</p>
+<div id="wikiHookPlayback" class="hidden mb-3"></div>
+
+<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Description</label>
+<textarea id="createDescription" rows="4" placeholder="Give us the details — what you tried, what happened, and which device you were on."
+  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"></textarea>
+
+<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Screenshot (optional)</label>
+<input id="createImage" type="file" accept="image/png,image/jpeg,image/webp"
+  class="w-full text-sm text-steel-blue file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-primary/20 file:text-frosted-blue hover:file:bg-primary/30 transition-all mb-4"/>
+
+<button data-action="submit-ticket" id="createSubmitBtn" class="w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+Send to support
+</button>
+</div>
+</div>
+
+<!-- Ticket Detail Modal -->
+<div id="detailModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+<div class="absolute inset-0 ws-scrim backdrop-blur-sm" data-action="close-detail"></div>
+<div class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl glass-card p-5 custom-scrollbar">
+<button data-action="close-detail" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue transition-colors z-10">
+<span class="material-symbols-outlined">close</span>
+</button>
+<div id="detailContent">
+<div class="text-center text-steel-blue py-8">
+<span class="material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin">progress_activity</span>
+<p>Loading...</p>
+</div>
+</div>
+</div>
+</div>
+
+<!-- Image Lightbox -->
+<div id="lightbox" class="fixed inset-0 z-[60] hidden items-center justify-center bg-background-dark/90 cursor-pointer" data-action="close-lightbox">
+<img id="lightboxImg" src="" class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"/>
+</div>
+</div>
 </main>
 
 <!-- Scripts -->
 <script src="/static/js/auth.js?v=1"></script>
 <script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
-<script src="/static/js/wiki-hook.js?v=1"></script>
-<script>
-// WebServarr — Tickets Page
-(function() {
-  'use strict';
-
-  // ---- State ----
-  var _tickets = [];
-  var _currentFilter = 'all';
-  var _currentCatFilter = 'all';
-  var _currentPage = 0;
-  var _pageSize = 12;
-  var _total = 0;
-  var _isAdmin = false;
-  var _username = '';
-  var _stopRefresh = null;
-
-  // ---- Category display config ----
-  var CATEGORY_LABELS = {
-    media_request: 'Media Request',
-    playback_issue: 'Playback Issue',
-    account_issue: 'Account Issue',
-    feature_suggestion: 'Feature',
-    other: 'Other'
-  };
-  // Theme colours only. The category is a neutral chip (its words say which);
-  // the status uses the request tones the home and requests pages use
-  // (resolved on a primary tint, in progress in the text colour, open on the
-  // accent, closed dimmed); and only high and urgent priority, the ones that
-  // need attention, take a status colour.
-  var CATEGORY_COLORS = {
-    media_request: 'bg-frosted-blue/10 text-frosted-blue',
-    playback_issue: 'bg-frosted-blue/10 text-frosted-blue',
-    account_issue: 'bg-frosted-blue/10 text-frosted-blue',
-    feature_suggestion: 'bg-frosted-blue/10 text-frosted-blue',
-    other: 'bg-frosted-blue/10 text-frosted-blue'
-  };
-  var STATUS_COLORS = {
-    open: 'bg-steel-blue/20 text-frosted-blue/80',
-    in_progress: 'bg-frosted-blue/15 text-frosted-blue',
-    resolved: 'bg-primary/30 text-frosted-blue',
-    closed: 'bg-steel-blue/10 text-frosted-blue/80'
-  };
-  var PRIORITY_COLORS = {
-    low: 'bg-frosted-blue/10 text-frosted-blue/80',
-    medium: 'bg-frosted-blue/10 text-frosted-blue',
-    high: 'bg-status-warn/10 text-status-warn-text',
-    urgent: 'bg-status-err/10 text-status-err-text'
-  };
-
-  // ---- Helpers ----
-
-  function createEl(tag, classes, text) {
-    var el = document.createElement(tag);
-    if (classes) el.className = classes;
-    if (text !== undefined && text !== null) el.textContent = text;
-    return el;
-  }
-
-  function timeAgo(isoString) {
-    if (!isoString) return '';
-    var seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
-    if (seconds < 0) seconds = 0;
-    if (seconds < 5) return 'just now';
-    if (seconds < 60) return seconds + 's ago';
-    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
-    if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
-    if (seconds < 604800) return Math.floor(seconds / 86400) + 'd ago';
-    return new Date(isoString).toLocaleDateString();
-  }
-
-  // The site's one toast (ui.js): theme colours, a status light for the tone.
-  function showToast(message, type) {
-    WSUI.toast(message, type === 'error' ? 'err' : 'ok');
-  }
-
-  // ---- Filter tabs ----
-
-  window.setFilter = function(status) {
-    _currentFilter = status;
-    _currentPage = 0;
-    document.querySelectorAll('.filter-tab').forEach(function(btn) {
-      btn.classList.toggle('active', btn.getAttribute('data-filter') === status);
-    });
-    loadTickets();
-  };
-
-  window.setCategoryFilter = function(cat) {
-    _currentCatFilter = cat;
-    _currentPage = 0;
-    document.querySelectorAll('.cat-filter-tab').forEach(function(btn) {
-      btn.classList.toggle('active', btn.getAttribute('data-catfilter') === cat);
-    });
-    loadTickets();
-  };
-
-  // ---- Pagination ----
-
-  window.prevPage = function() { if (_currentPage > 0) { _currentPage--; loadTickets(); } };
-  window.nextPage = function() {
-    if ((_currentPage + 1) * _pageSize < _total) { _currentPage++; loadTickets(); }
-  };
-
-  function updatePagination() {
-    var pag = document.getElementById('pagination');
-    var totalPages = Math.max(1, Math.ceil(_total / _pageSize));
-    if (_total <= _pageSize) { pag.classList.add('hidden'); return; }
-    pag.classList.remove('hidden');
-    document.getElementById('pageInfo').textContent = 'Page ' + (_currentPage + 1) + ' of ' + totalPages;
-    document.getElementById('prevBtn').disabled = _currentPage === 0;
-    document.getElementById('nextBtn').disabled = (_currentPage + 1) >= totalPages;
-  }
-
-  // ---- Load tickets ----
-
-  /* WS.getJSON for the ticket API. A member gets 403 once Tickets is switched
-     off (the tab was open, or the page came from the prefetch cache). Instead
-     of an error toast and a 403 every 30 s, ticketsTurnedOff() takes over. The
-     promise never settles, so nothing renders from the failed call. */
-  function ticketsJSON(url) {
-    return WS.getJSON(url).catch(function (err) {
-      if (!_isAdmin && err && err.message === 'HTTP 403') {
-        ticketsTurnedOff();
-        return new Promise(function () {});
-      }
-      throw err;
-    });
-  }
-
-  var _ticketsOff = false;
-  var OFF_NOTICE = 'Messages have been turned off, so this can\u2019t be sent right now.';
-  // The ticket API's 403 detail while Tickets is switched off (app/routers/tickets.py).
-  var TICKETS_OFF_DETAIL = 'The ticket system is turned off';
-  // Rejection a send uses once the off-flow has taken over: no error toast.
-  var TICKETS_OFF = {};
-
-  /* Stop polling, then go home as the server-side page gate would - unless the
-     member is part-way through writing something. Their text is never thrown
-     away: the notice goes in that surface, and they leave when they close it.
-     A send's own 403 passes its button; a poll finds the open draft itself. */
-  function ticketsTurnedOff(sendBtn) {
-    _ticketsOff = true;
-    if (_stopRefresh) { _stopRefresh(); _stopRefresh = null; }
-    sendBtn = sendBtn || draftSendButton();
-    if (sendBtn) { showOffNotice(sendBtn); return; }
-    window.location.replace('/');
-  }
-
-  // The send button of an open compose surface holding typed text, or null.
-  function draftSendButton() {
-    if (!document.getElementById('createModal').classList.contains('hidden') &&
-        (document.getElementById('createTitle').value.trim() ||
-         document.getElementById('createDescription').value.trim())) {
-      return document.getElementById('createSubmitBtn');
-    }
-    var comment = document.getElementById('commentInput');
-    if (comment && !document.getElementById('detailModal').classList.contains('hidden') && comment.value.trim()) {
-      return document.getElementById('commentSendBtn');
-    }
-    return null;
-  }
-
-  // The notice says the draft can't be sent, so the button agrees.
-  function showOffNotice(sendBtn) {
-    sendBtn.disabled = true;
-    var prev = sendBtn.previousElementSibling;
-    if (prev && prev.hasAttribute('data-off-notice')) return;
-    var notice = createEl('p', 'text-xs text-frosted-blue/80 bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3', OFF_NOTICE);
-    notice.setAttribute('data-off-notice', '');
-    notice.setAttribute('role', 'status');
-    sendBtn.parentNode.insertBefore(notice, sendBtn);
-  }
-
-  /* POST for the New message and comment forms. Rejects with the server's
-     detail for the form's toast - except a member's "turned off" 403, which
-     takes the off-flow by that form's button and rejects with TICKETS_OFF.
-     Matching the detail keeps other 403s (a comment on someone else's ticket)
-     on the toast. */
-  function postTicketForm(url, formData, sendBtn) {
-    return fetch(url, { method: 'POST', body: formData }).then(function (r) {
-      if (r.ok) return r.json();
-      return r.json().then(function (d) {
-        if (!_isAdmin && r.status === 403 && d.detail === TICKETS_OFF_DETAIL) {
-          ticketsTurnedOff(sendBtn);
-          throw TICKETS_OFF;
-        }
-        throw new Error(d.detail || 'Failed');
-      });
-    });
-  }
-
-  function loadTickets() {
-    var params = new URLSearchParams();
-    if (_currentFilter !== 'all') params.set('status', _currentFilter);
-    if (_currentCatFilter !== 'all') params.set('category', _currentCatFilter);
-    params.set('limit', _pageSize);
-    params.set('offset', _currentPage * _pageSize);
-
-    var url = (_isAdmin ? '/api/admin/tickets' : '/api/tickets') + '?' + params.toString();
-
-    return WS.swr('tickets:' + url, function () { return ticketsJSON(url); }, function (data) {
-      _tickets = data.tickets || [];
-      _total = data.total || 0;
-      WS.arrive('list', function () {
-        renderTicketList();
-        updatePagination();
-      });
-    }, {
-      onError: function () { showToast('Failed to load tickets', 'error'); }
-    });
-  }
-
-  function loadCounts() {
-    return WS.swr('tickets:counts', function () { return ticketsJSON('/api/tickets/counts'); }, function (data) {
-      WS.arrive('counts', function () {
-        document.getElementById('statTotal').textContent = data.total || 0;
-        document.getElementById('statOpen').textContent = data.open || 0;
-        document.getElementById('statInProgress').textContent = data.in_progress || 0;
-        document.getElementById('statResolved').textContent = data.resolved || 0;
-      });
-    }, {
-      onError: function () {
-        WS.arrive('counts', function () {
-          ['statTotal', 'statOpen', 'statInProgress', 'statResolved'].forEach(function (id) { document.getElementById(id).textContent = '\u2013'; });
-        });
-      }
-    });
-  }
-
-  // ---- Render ticket list ----
-
-  function renderTicketList() {
-    var container = document.getElementById('ticketList');
-    var empty = document.getElementById('emptyState');
-
-    // Clear
-    while (container.firstChild) container.removeChild(container.firstChild);
-
-    if (_tickets.length === 0) {
-      container.classList.add('hidden');
-      empty.classList.remove('hidden');
-      return;
-    }
-    container.classList.remove('hidden');
-    empty.classList.add('hidden');
-
-    _tickets.forEach(function(ticket) {
-      var card = createEl('div', 'glass-card rounded-xl p-4 cursor-pointer hover:border-primary/40 transition-all border border-transparent');
-      card.addEventListener('click', function() { openDetailModal(ticket.id); });
-
-      // Top row: title + badges (stacked on mobile, side-by-side on desktop)
-      var topRow = createEl('div', 'flex flex-col lg:flex-row lg:items-start lg:justify-between gap-1 lg:gap-3 mb-2');
-
-      var titleDiv = createEl('div', 'flex-1 min-w-0');
-      var titleEl = createEl('p', 'text-frosted-blue font-bold text-sm truncate', ticket.title);
-      titleDiv.appendChild(titleEl);
-
-      // Creator (admin only)
-      if (_isAdmin && ticket.creator_username) {
-        var creatorEl = createEl('p', 'text-[10px] text-steel-blue mt-0.5', '@' + ticket.creator_username);
-        titleDiv.appendChild(creatorEl);
-      }
-
-      var badgeDiv = createEl('div', 'flex items-center gap-1.5 flex-wrap lg:shrink-0 lg:justify-end');
-
-      // Category badge
-      var catBadge = createEl('span', 'px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ' + (CATEGORY_COLORS[ticket.category] || CATEGORY_COLORS.other), CATEGORY_LABELS[ticket.category] || ticket.category);
-      badgeDiv.appendChild(catBadge);
-
-      // Status badge
-      var statusLabel = (ticket.status || 'open').replace('_', ' ');
-      var statusBadge = createEl('span', 'px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ' + (STATUS_COLORS[ticket.status] || STATUS_COLORS.open), statusLabel);
-      badgeDiv.appendChild(statusBadge);
-
-      // Priority badge (if set)
-      if (ticket.priority) {
-        var priBadge = createEl('span', 'px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ' + (PRIORITY_COLORS[ticket.priority] || ''), ticket.priority);
-        badgeDiv.appendChild(priBadge);
-      }
-
-      topRow.appendChild(titleDiv);
-      topRow.appendChild(badgeDiv);
-      card.appendChild(topRow);
-
-      // Bottom row: description snippet + time
-      var bottomRow = createEl('div', 'flex items-center justify-between gap-3');
-      var descSnippet = createEl('p', 'text-xs text-steel-blue truncate flex-1', ticket.description);
-      var timeEl = createEl('span', 'text-[10px] text-frosted-blue/70 shrink-0', timeAgo(ticket.created_at));
-      bottomRow.appendChild(descSnippet);
-      bottomRow.appendChild(timeEl);
-      card.appendChild(bottomRow);
-
-      container.appendChild(card);
-    });
-  }
-
-  // ---- Create ticket ----
-
-  // A tap outside the card closes it (the scrim), so what was typed stays
-  // until the ticket is actually sent: opening again shows the draft, and only
-  // a successful submit clears the form.
-  window.openCreateModal = function() {
-    document.getElementById('createModal').classList.remove('hidden');
-  };
-
-  function resetCreateForm() {
-    document.getElementById('createTitle').value = '';
-    document.getElementById('createDescription').value = '';
-    var cat = document.getElementById('createCategory');
-    cat.value = 'media_request';
-    cat.dispatchEvent(new Event('change'));   // the playback hint follows the category
-    document.getElementById('createImage').value = '';
-  }
-
-  window.closeCreateModal = function() {
-    document.getElementById('createModal').classList.add('hidden');
-    if (_ticketsOff) window.location.replace('/');
-  };
-
-  window.submitNewTicket = function() {
-    if (_ticketsOff) return;
-    var title = document.getElementById('createTitle').value.trim();
-    var description = document.getElementById('createDescription').value.trim();
-    var category = document.getElementById('createCategory').value;
-    var imageInput = document.getElementById('createImage');
-
-    if (!title) { showToast('Title is required', 'error'); return; }
-    if (!description) { showToast('Description is required', 'error'); return; }
-
-    var formData = new FormData();
-    formData.append('title', title);
-    formData.append('description', description);
-    formData.append('category', category);
-    if (imageInput.files.length > 0) {
-      formData.append('image', imageInput.files[0]);
-    }
-
-    var btn = document.getElementById('createSubmitBtn');
-    btn.disabled = true;
-    btn.textContent = 'Submitting...';
-
-    postTicketForm('/api/tickets', formData, btn)
-      .then(function() {
-        // The form may have been closed, reopened and rewritten while this was
-        // on its way: clear and close it only if it still holds what was sent.
-        if (document.getElementById('createTitle').value.trim() === title &&
-            document.getElementById('createDescription').value.trim() === description) {
-          resetCreateForm();
-          closeCreateModal();
-        }
-        showToast('Ticket submitted!', 'success');
-        loadTickets();
-        loadCounts();
-      })
-      .catch(function(e) { if (e !== TICKETS_OFF) showToast(e.message, 'error'); })
-      .finally(function() { btn.disabled = _ticketsOff; btn.textContent = 'Submit Ticket'; });
-  };
-
-  // ---- Ticket detail modal ----
-
-  // Unsent comments, by ticket id, for this visit: the comment box is rebuilt
-  // on every open, so a tap outside the card must not throw away what was
-  // typed. Cleared once the comment is posted.
-  var _commentDrafts = {};
-  // Comments on their way, by ticket id (the text sent). A box rebuilt for
-  // that ticket meanwhile (closed and reopened) waits for it instead of
-  // offering a second send.
-  var _commentSending = {};
-  var _detailTicketId = null;
-
-  function detailShowing(ticketId) {
-    return !document.getElementById('detailModal').classList.contains('hidden') && _detailTicketId === String(ticketId);
-  }
-
-  window.openDetailModal = function(ticketId) {
-    _detailTicketId = String(ticketId);
-    document.getElementById('detailModal').classList.remove('hidden');
-    var content = document.getElementById('detailContent');
-    // Show loading
-    while (content.firstChild) content.removeChild(content.firstChild);
-    var loadingDiv = createEl('div', 'text-center text-steel-blue py-8');
-    var spinner = createEl('span', 'material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin', 'progress_activity');
-    loadingDiv.appendChild(spinner);
-    loadingDiv.appendChild(createEl('p', '', 'Loading...'));
-    content.appendChild(loadingDiv);
-
-    ticketsJSON('/api/tickets/' + ticketId)
-      .then(function(data) { renderDetailContent(data, data.comments || []); })
-      .catch(function(err) { console.error('Detail modal error:', err); showToast('Failed to load ticket', 'error'); closeDetailModal(); });
-  };
-
-  window.closeDetailModal = function() {
-    document.getElementById('detailModal').classList.add('hidden');
-    if (_ticketsOff) window.location.replace('/');
-  };
-
-  function renderDetailContent(ticket, comments) {
-    var content = document.getElementById('detailContent');
-    while (content.firstChild) content.removeChild(content.firstChild);
-
-    // Title
-    content.appendChild(createEl('h3', 'text-lg font-bold text-frosted-blue mb-1 pr-8', ticket.title));
-
-    // Creator (admin or own)
-    if (ticket.creator_username) {
-      content.appendChild(createEl('p', 'text-xs text-steel-blue mb-3', 'by @' + ticket.creator_username + ' \u00B7 ' + timeAgo(ticket.created_at)));
-    } else {
-      content.appendChild(createEl('p', 'text-xs text-steel-blue mb-3', timeAgo(ticket.created_at)));
-    }
-
-    // Badges row
-    var badgeRow = createEl('div', 'flex flex-wrap gap-2 mb-4');
-    var catBadge = createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ' + (CATEGORY_COLORS[ticket.category] || ''), CATEGORY_LABELS[ticket.category] || ticket.category);
-    badgeRow.appendChild(catBadge);
-    var statusLabel = (ticket.status || 'open').replace('_', ' ');
-    var statusBadge = createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ' + (STATUS_COLORS[ticket.status] || ''), statusLabel);
-    badgeRow.appendChild(statusBadge);
-    if (ticket.priority) {
-      var priBadge = createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ' + (PRIORITY_COLORS[ticket.priority] || ''), ticket.priority);
-      badgeRow.appendChild(priBadge);
-    }
-    if (ticket.is_public) {
-      badgeRow.appendChild(createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-primary/20 text-frosted-blue', 'Public'));
-    }
-    content.appendChild(badgeRow);
-
-    // Description
-    content.appendChild(createEl('p', 'text-sm text-frosted-blue mb-4 whitespace-pre-wrap', ticket.description));
-
-    // Image
-    if (ticket.image_path) {
-      var img = document.createElement('img');
-      img.src = ticket.image_path;
-      img.className = 'w-full max-h-48 object-contain rounded-lg mb-4 cursor-pointer hover:opacity-80 transition-opacity';
-      img.alt = 'Ticket attachment';
-      img.addEventListener('click', function() { openLightbox(ticket.image_path); });
-      content.appendChild(img);
-    }
-
-    // Admin controls
-    if (_isAdmin) {
-      var controlsDiv = createEl('div', 'flex flex-wrap gap-2 mb-4 p-3 rounded-lg bg-frosted-blue/5 border border-steel-blue/20');
-
-      // Status dropdown
-      var statusSelect = document.createElement('select');
-      statusSelect.className = 'px-2 py-1.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue text-xs focus:outline-none focus:ring-1 focus:ring-primary/30';
-      ['open', 'in_progress', 'resolved', 'closed'].forEach(function(s) {
-        var opt = document.createElement('option');
-        opt.value = s;
-        opt.textContent = s.replace('_', ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
-        if (s === ticket.status) opt.selected = true;
-        statusSelect.appendChild(opt);
-      });
-
-      // Priority dropdown
-      var prioritySelect = document.createElement('select');
-      prioritySelect.className = 'px-2 py-1.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue text-xs focus:outline-none focus:ring-1 focus:ring-primary/30';
-      var noneOpt = document.createElement('option');
-      noneOpt.value = '';
-      noneOpt.textContent = 'No Priority';
-      if (!ticket.priority) noneOpt.selected = true;
-      prioritySelect.appendChild(noneOpt);
-      ['low', 'medium', 'high', 'urgent'].forEach(function(p) {
-        var opt = document.createElement('option');
-        opt.value = p;
-        opt.textContent = p.charAt(0).toUpperCase() + p.slice(1);
-        if (p === ticket.priority) opt.selected = true;
-        prioritySelect.appendChild(opt);
-      });
-
-      // Public toggle
-      var pubLabel = createEl('label', 'flex items-center gap-2 text-xs text-steel-blue cursor-pointer');
-      var pubCheck = document.createElement('input');
-      pubCheck.type = 'checkbox';
-      pubCheck.checked = ticket.is_public;
-      pubCheck.className = 'rounded border-steel-blue/30 bg-frosted-blue/[0.04] text-primary focus:ring-primary/30';
-      pubLabel.appendChild(pubCheck);
-      pubLabel.appendChild(document.createTextNode('Public'));
-
-      // Save button
-      var saveBtn = createEl('button', 'px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-xs font-bold transition-all ml-auto', 'Save');
-      saveBtn.addEventListener('click', function() {
-        fetch('/api/admin/tickets/' + ticket.id, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            status: statusSelect.value,
-            priority: prioritySelect.value || null,
-            is_public: pubCheck.checked,
-          }),
-        })
-          .then(function(r) { return r.json(); })
-          .then(function() {
-            showToast('Ticket updated', 'success');
-            loadTickets();
-            loadCounts();
-          })
-          .catch(function() { showToast('Failed to update', 'error'); });
-      });
-
-      // Delete button
-      var delBtn = createEl('button', 'px-3 py-1.5 rounded-lg bg-frosted-blue/[0.06] hover:bg-frosted-blue/10 text-frosted-blue ring-1 ring-inset ring-[rgb(var(--ws-status-err))] text-xs font-bold transition-all', 'Delete');
-      delBtn.addEventListener('click', function() {
-        window.WSUI.confirm({
-          title: 'Delete this ticket?',
-          body: 'The ticket and its comments are removed for good.',
-          confirmLabel: 'Delete ticket', cancelLabel: 'Keep it', danger: true
-        }).then(function (ok) {
-          if (!ok) return;
-          fetch('/api/admin/tickets/' + ticket.id, { method: 'DELETE' })
-            .then(function(r) { return r.json(); })
-            .then(function() {
-              closeDetailModal();
-              showToast('Ticket deleted', 'success');
-              loadTickets();
-              loadCounts();
-            })
-            .catch(function() { showToast('Failed to delete', 'error'); });
-        });
-      });
-
-      controlsDiv.appendChild(statusSelect);
-      controlsDiv.appendChild(prioritySelect);
-      controlsDiv.appendChild(pubLabel);
-      controlsDiv.appendChild(saveBtn);
-      controlsDiv.appendChild(delBtn);
-      content.appendChild(controlsDiv);
-    }
-
-    // Separator
-    content.appendChild(createEl('div', 'border-t border-steel-blue/20 my-4'));
-
-    // Comments header
-    content.appendChild(createEl('p', 'text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-3', 'Comments (' + comments.length + ')'));
-
-    // Comments list
-    if (comments.length === 0) {
-      content.appendChild(createEl('p', 'text-sm text-frosted-blue/70 italic mb-4', 'No comments yet'));
-    } else {
-      var commentsList = createEl('div', 'space-y-3 mb-4');
-      comments.forEach(function(comment) {
-        var cDiv = createEl('div', 'p-3 rounded-lg ' + (comment.is_admin ? 'bg-primary/10 border border-primary/20' : 'bg-frosted-blue/5 border border-steel-blue/10'));
-
-        // Author + time
-        var cHeader = createEl('div', 'flex items-center justify-between mb-1.5');
-        var authorText = comment.is_admin ? 'Admin' : (comment.author_name || 'You');
-        var cAuthor = createEl('span', 'text-xs font-bold ' + 'text-frosted-blue', authorText);
-        if (comment.is_admin) {
-          var adminBadge = createEl('span', 'ml-1.5 px-1.5 py-0.5 rounded text-[8px] font-bold bg-primary/20 text-frosted-blue uppercase', 'Staff');
-          var authorWrap = createEl('div', 'flex items-center');
-          authorWrap.appendChild(cAuthor);
-          authorWrap.appendChild(adminBadge);
-          cHeader.appendChild(authorWrap);
-        } else {
-          cHeader.appendChild(cAuthor);
-        }
-        cHeader.appendChild(createEl('span', 'text-[10px] text-frosted-blue/70', timeAgo(comment.created_at)));
-        cDiv.appendChild(cHeader);
-
-        // Message
-        cDiv.appendChild(createEl('p', 'text-sm text-frosted-blue whitespace-pre-wrap', comment.message));
-
-        // Image
-        if (comment.image_path) {
-          var cImg = document.createElement('img');
-          cImg.src = comment.image_path;
-          cImg.className = 'mt-2 max-h-32 rounded-lg cursor-pointer hover:opacity-80 transition-opacity';
-          cImg.alt = 'Comment attachment';
-          cImg.addEventListener('click', function() { openLightbox(comment.image_path); });
-          cDiv.appendChild(cImg);
-        }
-
-        commentsList.appendChild(cDiv);
-      });
-      content.appendChild(commentsList);
-    }
-
-    // Add comment form (only if own ticket or admin)
-    if (ticket.is_own || _isAdmin) {
-      var formDiv = createEl('div', 'border-t border-steel-blue/20 pt-4');
-      var textarea = document.createElement('textarea');
-      textarea.id = 'commentInput';
-      textarea.placeholder = 'Write a comment...';
-      textarea.rows = 3;
-      textarea.value = _commentDrafts[ticket.id] || '';
-      textarea.addEventListener('input', function() {
-        if (textarea.value) _commentDrafts[ticket.id] = textarea.value;
-        else delete _commentDrafts[ticket.id];
-      });
-      textarea.className = 'w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-2';
-
-      var fileInput = document.createElement('input');
-      fileInput.type = 'file';
-      fileInput.accept = 'image/png,image/jpeg,image/webp';
-      fileInput.className = 'w-full text-sm text-steel-blue file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-primary/20 file:text-frosted-blue hover:file:bg-primary/30 transition-all mb-2';
-
-      var sendBtn = createEl('button', 'w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed', 'Add Comment');
-      sendBtn.id = 'commentSendBtn';
-      sendBtn.setAttribute('data-ticket-id', String(ticket.id));
-      if (Object.prototype.hasOwnProperty.call(_commentSending, ticket.id)) {
-        sendBtn.disabled = true;
-        sendBtn.textContent = 'Sending...';
-      }
-      sendBtn.addEventListener('click', function() {
-        if (_ticketsOff) return;
-        if (Object.prototype.hasOwnProperty.call(_commentSending, ticket.id)) return;
-        var msg = textarea.value.trim();
-        if (!msg) { showToast('Comment cannot be empty', 'error'); return; }
-
-        var formData = new FormData();
-        formData.append('message', msg);
-        if (fileInput.files.length > 0) {
-          formData.append('image', fileInput.files[0]);
-        }
-
-        sendBtn.disabled = true;
-        sendBtn.textContent = 'Sending...';
-        _commentSending[ticket.id] = msg;
-
-        postTicketForm('/api/tickets/' + ticket.id + '/comments', formData, sendBtn)
-          .then(function() {
-            // Newer text typed meanwhile stays; only the sent text is cleared,
-            // compared trimmed as it was posted (a stray space is not new text).
-            if ((_commentDrafts[ticket.id] || '').trim() === msg) delete _commentDrafts[ticket.id];
-            showToast('Comment added', 'success');
-            if (detailShowing(ticket.id)) openDetailModal(ticket.id); // Refresh detail
-          })
-          .catch(function(e) { if (e !== TICKETS_OFF) showToast(e.message, 'error'); })
-          .finally(function() { sendBtn.disabled = _ticketsOff; sendBtn.textContent = 'Add Comment';
-            delete _commentSending[ticket.id];
-            // The box on screen for this ticket may be a rebuilt one.
-            var live = document.getElementById('commentSendBtn');
-            if (live && live !== sendBtn && live.getAttribute('data-ticket-id') === String(ticket.id)) {
-              live.disabled = _ticketsOff;
-              live.textContent = 'Add Comment';
-            }
-          });
-      });
-
-      formDiv.appendChild(textarea);
-      formDiv.appendChild(fileInput);
-      formDiv.appendChild(sendBtn);
-      content.appendChild(formDiv);
-    }
-  }
-
-  // ---- Lightbox ----
-
-  window.openLightbox = function(src) {
-    document.getElementById('lightboxImg').src = src;
-    document.getElementById('lightbox').classList.remove('hidden');
-    document.getElementById('lightbox').classList.add('flex');
-  };
-
-  // Escape closes the topmost of this page's overlays: the image lightbox,
-  // then the ticket, then the new-ticket form. Not while an input method is
-  // composing (Escape then cancels the composition). A WSUI dialog (the
-  // delete confirmation) answers its own Escape first and stops it reaching
-  // here; the check below is the belt to that.
-  document.addEventListener('keydown', function(e) {
-    if (e.key !== 'Escape' || e.isComposing || document.querySelector('.ws-dialog')) return;
-    var shown = function(id) { return !document.getElementById(id).classList.contains('hidden'); };
-    if (shown('lightbox')) closeLightbox();
-    else if (shown('detailModal')) closeDetailModal();
-    else if (shown('createModal')) closeCreateModal();
-  });
-
-  window.closeLightbox = function() {
-    document.getElementById('lightbox').classList.add('hidden');
-    document.getElementById('lightbox').classList.remove('flex');
-  };
-
-  // ---- Filter tab styles ----
-
-  var styleEl = document.createElement('style');
-  styleEl.textContent = '.filter-tab, .cat-filter-tab { background: rgb(var(--color-accent) / 0.1); color: rgb(var(--color-text) / 0.8); border: 1px solid transparent; }' +
-    '.filter-tab.active, .cat-filter-tab.active { background: rgb(var(--color-primary) / 0.2); color: rgb(var(--color-text)); border-color: rgb(var(--color-primary) / 0.3); }' +
-    '.filter-tab:hover, .cat-filter-tab:hover { background: rgb(var(--color-accent) / 0.2); }';
-  document.head.appendChild(styleEl);
-
-  // ---- Init ----
-
-  // Show the cross-link hint only while Playback Issue is selected - it is the
-  // one ticket category that belongs on the other help page more often than not.
-  (function () {
-    var cat = document.getElementById('createCategory');
-    var hint = document.getElementById('playbackRedirectHint');
-    if (!cat || !hint) return;
-    var wikiBox = document.getElementById('wikiHookPlayback');
-    function sync() {
-      var overlaps = cat.value === 'playback_issue';
-      hint.classList.toggle('hidden', !overlaps);
-      hint.classList.toggle('block', overlaps);
-      // The wiki pointer follows the same rule, and stays hidden entirely when
-      // no admin has chosen a page for it.
-      if (wikiBox) {
-        if (overlaps) initWikiHook('wikiHookPlayback', 'playback', 'It may already be answered here:');
-        else wikiBox.classList.add('hidden');
-      }
-    }
-    cat.addEventListener('change', sync);
-    sync();
-  })();
-
-  checkAuth().then(function(user) {
-    _isAdmin = user.is_admin;
-    _username = user.username || '';
-
-    initWikiHook('wikiHookTickets', 'tickets', 'Before you contact support:');
-
-    // Load data
-    loadTickets();
-    loadCounts();
-
-    // Auto-refresh every 30s
-    _stopRefresh = WS.poll(function() { loadTickets(); loadCounts(); }, 30000);
-
-  });
-
-})();
-</script>
+<script src="/static/js/wiki-hook.js?v=1" data-ws-page-script></script>
 </body>
 </html>

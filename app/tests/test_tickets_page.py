@@ -2,7 +2,7 @@
 Tickets switched off while a member is writing: the draft stays, sending stops.
 
 Once the ticket API answers a member with its "turned off" 403 (from a poll or
-from the send itself), tickets.html shows a calm notice by the form's send
+from the send itself), the Tickets page shows a calm notice by the form's send
 button and keeps the typed text. The notice says the message can't be sent, so
 the button must agree: it is disabled, the send handlers refuse to post, a
 send's own "turned off" 403 goes through the same notice instead of an error
@@ -12,8 +12,9 @@ its toast.
 
 There is no JavaScript runtime in the container, so these pin the control flow
 statically, with the scanner from test_shell_contract. Each check is a function
-of the page source, so the Mutations class can feed it a broken copy and prove
-the check notices.
+of the page's source (its module, js/pages/tickets.js, since the page became a
+soft-navigation page; the markup is still read from tickets.html), so the
+Mutations class can feed it a broken copy and prove the check notices.
 """
 import re
 import unittest
@@ -24,13 +25,18 @@ from app.tests.test_shell_contract import STATIC, assert_ui_js_before, js_code_o
 TICKETS_ROUTER = Path(__file__).resolve().parents[1] / "routers" / "tickets.py"
 
 
-def page() -> str:
+def markup() -> str:
     return (STATIC / "tickets.html").read_text(encoding="utf-8")
 
 
-def code_of(html: str) -> str:
-    """The page's inline scripts, comments removed and string contents blanked."""
-    return js_code_only("\n".join(re.findall(r"<script>(.*?)</script>", html, re.S)))
+def page() -> str:
+    """The page's script: its module (it has no inline script any more)."""
+    return (STATIC / "js" / "pages" / "tickets.js").read_text(encoding="utf-8")
+
+
+def code_of(src: str) -> str:
+    """The page's script, comments removed and string contents blanked."""
+    return js_code_only(src)
 
 
 def body(test, code: str, pattern: str, what: str) -> str:
@@ -41,7 +47,7 @@ def body(test, code: str, pattern: str, what: str) -> str:
 
 
 def submit_body(test, code):
-    return body(test, code, r"window\.submitNewTicket\s*=\s*function\s*\(\s*\)\s*\{", "submitNewTicket")
+    return body(test, code, r"\bfunction submitNewTicket\s*\(\s*\)\s*\{", "submitNewTicket")
 
 
 def comment_body(test, code):
@@ -53,7 +59,9 @@ GUARD = r"^\s*if\s*\(\s*_ticketsOff\s*\)\s*return\s*;"
 
 
 def catch_skips_toast(btn_body: str) -> bool:
-    return re.search(r"\.catch\(\s*function\s*\(\s*(\w+)\s*\)\s*\{\s*if\s*\(\s*\1\s*!==\s*TICKETS_OFF\s*\)\s*showToast\(",
+    # No toast for the off-flow, nor for a send cut short by leaving the page.
+    return re.search(r"\.catch\(\s*function\s*\(\s*(\w+)\s*\)\s*\{\s*if\s*\(\s*\1\s*!==\s*TICKETS_OFF\s*"
+                     r"&&\s*!isAbort\(\s*\1\s*\)\s*\)\s*showToast\(",
                      btn_body) is not None
 
 
@@ -102,7 +110,7 @@ def check_post_routes_only_the_off_403(test, html):
 
 
 def check_off_detail_matches_the_api(test, html):
-    m = re.search(r"var\s+TICKETS_OFF_DETAIL\s*=\s*'([^']*)'\s*;", html)
+    m = re.search(r"(?:var|const)\s+TICKETS_OFF_DETAIL\s*=\s*'([^']*)'\s*;", html)
     test.assertIsNotNone(m, "TICKETS_OFF_DETAIL is missing")
     router = TICKETS_ROUTER.read_text(encoding="utf-8")
     test.assertIn(f'detail="{m.group(1)}"', router,
@@ -119,7 +127,7 @@ def check_toast_and_reset_respect_the_off_flow(test, html):
 
 
 def check_send_buttons_look_disabled(test, html):
-    m = re.search(r'<button[^>]*id="createSubmitBtn"[^>]*>', html)
+    m = re.search(r'<button[^>]*id="createSubmitBtn"[^>]*>', markup())
     test.assertIsNotNone(m, "#createSubmitBtn is missing")
     test.assertIn("disabled:opacity-30", m.group(0))
     test.assertIn("disabled:cursor-not-allowed", m.group(0))
@@ -145,18 +153,18 @@ class TicketsOffWhileWriting(unittest.TestCase):
 MUTATIONS = [
     ("notice leaves send live", "    sendBtn.disabled = true;\n    var prev", "    var prev",
      check_notice_disables_send),
-    ("submit has no guard", "  window.submitNewTicket = function() {\n    if (_ticketsOff) return;\n",
-     "  window.submitNewTicket = function() {\n", check_send_handlers_refuse_while_off),
+    ("submit has no guard", "  function submitNewTicket() {\n    if (_ticketsOff) return;\n",
+     "  function submitNewTicket() {\n", check_send_handlers_refuse_while_off),
     ("comment has no guard", "      sendBtn.addEventListener('click', function() {\n        if (_ticketsOff) return;\n",
      "      sendBtn.addEventListener('click', function() {\n", check_send_handlers_refuse_while_off),
     ("403 on status alone", " && d.detail === TICKETS_OFF_DETAIL", "", check_post_routes_only_the_off_403),
     ("admins take the off-flow", "if (!_isAdmin && r.status === 403", "if (r.status === 403",
      check_post_routes_only_the_off_403),
-    ("detail drifts from the API", "var TICKETS_OFF_DETAIL = 'The ticket system is turned off';",
-     "var TICKETS_OFF_DETAIL = 'Ticket system is disabled';", check_off_detail_matches_the_api),
+    ("detail drifts from the API", "const TICKETS_OFF_DETAIL = 'The ticket system is turned off';",
+     "const TICKETS_OFF_DETAIL = 'Ticket system is disabled';", check_off_detail_matches_the_api),
     ("submit reset re-enables", "btn.disabled = _ticketsOff; btn.textContent = 'Submit Ticket';",
      "btn.disabled = false; btn.textContent = 'Submit Ticket';", check_toast_and_reset_respect_the_off_flow),
-    ("comment toasts the off-flow", ".catch(function(e) { if (e !== TICKETS_OFF) showToast(e.message, 'error'); })\n"
+    ("comment toasts the off-flow", ".catch(function(e) { if (e !== TICKETS_OFF && !isAbort(e)) showToast(e.message, 'error'); })\n"
      "          .finally(function() { sendBtn",
      ".catch(function(e) { showToast(e.message, 'error'); })\n          .finally(function() { sendBtn",
      check_toast_and_reset_respect_the_off_flow),
@@ -179,14 +187,13 @@ class Mutations(unittest.TestCase):
 
 class TicketDeleteDialog(unittest.TestCase):
     """Deleting a ticket asks with the site's own dialog (WSUI.confirm from
-    ui.js, which the shell loads before the page script), never the browser's confirm()."""
+    ui.js, which the shell loads before the page module), never the browser's confirm()."""
 
     def test_the_page(self):
         from app.tests.test_settings_static import NATIVE_DIALOG
-        html = page()
-        code = code_of(html)
+        code = code_of(page())
         self.assertIsNone(NATIVE_DIALOG.search(code))
-        assert_ui_js_before(self, html, "<script>\n")
+        assert_ui_js_before(self, markup(), 'data-ws-module="/static/js/pages/tickets.js?v=')
         self.assertRegex(code, r"window\.WSUI\.confirm\(\{[^}]*danger: true[^}]*\}\)\.then\(function \(ok\) \{\s*if \(!ok\) return;")
 
 
