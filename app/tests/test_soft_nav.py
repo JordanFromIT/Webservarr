@@ -538,12 +538,20 @@ class HomePage(unittest.TestCase):
         shell = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
         body = function_body(shell, "serviceStatus")
         # Shared while on its way and for 5 s after, by the clock: a timer
-        # would be the asking page's, and outlive it.
-        self.assertIn("if (statusPromise && (!statusAt || Date.now() - statusAt < 5000)) return statusPromise;", body)
-        self.assertIn("statusAt = Date.now();", body)
+        # would be the asking page's, and outlive it. The monotonic clock, so
+        # a wall clock set back cannot stretch it (app/tests/js/service_status.mjs
+        # runs it).
+        self.assertIn("if (statusPromise && (!statusAt || performance.now() - statusAt < 5000)) return statusPromise;", body)
+        self.assertIn("statusAt = performance.now();", body)
+        self.assertNotIn("statusAt = Date.now()", body)
         self.assertNotRegex(body, r"\bsetTimeout\(")
         leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
         self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#wireNav', 'shell.js#serviceStatus'];", leaks)
+
+    def test_the_clock_test_runs_locally_and_in_ci(self):
+        from app.tests.test_theme_engine import repo_file
+        for parts in (("package.json",), (".github", "workflows", "docker-publish.yml")):
+            self.assertIn("node app/tests/js/service_status.mjs", repo_file(self, *parts), "/".join(parts))
 
     def test_timers_and_refresh_are_the_pages(self):
         code = self.code()
