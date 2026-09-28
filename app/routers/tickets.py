@@ -14,7 +14,7 @@ import bleach
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import or_
+from sqlalchemy import false, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -140,6 +140,17 @@ def _is_owner(ticket: Ticket, username: str) -> bool:
     return bool(username) and ticket.creator_username == username
 
 
+def _is_author(comment: TicketComment, username: str) -> bool:
+    """Whether this session username wrote the comment (the same rule)."""
+    return bool(username) and comment.author_username == username
+
+
+def _owned_by(username: str):
+    """_is_owner as a query filter: the caller's tickets, none for an empty
+    username."""
+    return Ticket.creator_username == username if username else false()
+
+
 def _ticket_to_dict(ticket: Ticket, is_admin: bool, current_username: str, comments: list = None) -> dict:
     """Convert a Ticket ORM object to a response dict with privacy rules applied."""
     data = {
@@ -158,7 +169,7 @@ def _ticket_to_dict(ticket: Ticket, is_admin: bool, current_username: str, comme
     }
 
     # Privacy: non-admin users never see other users' creator info
-    if is_admin or ticket.creator_username == current_username:
+    if is_admin or _is_owner(ticket, current_username):
         data["creator_username"] = ticket.creator_username
         data["creator_name"] = ticket.creator_name
     else:
@@ -185,7 +196,7 @@ def _comment_to_dict(comment: TicketComment, is_admin: bool, current_username: s
     }
 
     # Privacy: non-admin sees "Admin" label on admin comments, no author info on others' comments
-    if is_admin or comment.author_username == current_username:
+    if is_admin or _is_author(comment, current_username):
         data["author_username"] = comment.author_username
         data["author_name"] = comment.author_name
     else:
@@ -229,9 +240,10 @@ async def get_ticket_image(
     username = current_user.get("username", "")
     is_admin = current_user.get("is_admin") == "true"
 
-    if not is_admin:
-        if ticket.creator_username != username and not ticket.is_public:
-            raise HTTPException(status_code=403, detail="Access denied")
+    # Someone else's private image answers as if it were not there, as the
+    # ticket itself does.
+    if not is_admin and not _is_owner(ticket, username) and not ticket.is_public:
+        raise HTTPException(status_code=404, detail="Image not found")
 
     content_type, _ = mimetypes.guess_type(filepath)
     return FileResponse(filepath, media_type=content_type or "application/octet-stream")
@@ -265,7 +277,7 @@ async def list_tickets(
     if not is_admin:
         query = query.filter(
             or_(
-                Ticket.creator_username == username,
+                _owned_by(username),
                 Ticket.is_public == True,
             )
         )
@@ -362,7 +374,7 @@ async def ticket_counts(
     if not is_admin:
         query = query.filter(
             or_(
-                Ticket.creator_username == username,
+                _owned_by(username),
                 Ticket.is_public == True,
             )
         )
@@ -398,7 +410,7 @@ async def get_ticket(
     is_admin = current_user.get("is_admin") == "true"
 
     # Access check: own ticket, public, or admin
-    if not is_admin and ticket.creator_username != username and not ticket.is_public:
+    if not is_admin and not _is_owner(ticket, username) and not ticket.is_public:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ticket not found",
