@@ -183,6 +183,23 @@ def home_guard_problems(page: str) -> list:
     return problems
 
 
+def function_text(src: str, signature: str) -> str:
+    """The raw source of the function that starts at signature, through its
+    closing brace, comments and strings included. The brace is matched in
+    js_code_only space (so no brace in a comment or string counts); the start
+    end is then taken back to a raw position. Comments are deleted, not
+    blanked, so a code-space length is no raw length: the raw end is the first
+    raw "}" whose prefix, in code-only form, is exactly the code up to and
+    including the matched brace (a "}" in a comment or a string never is)."""
+    text = src[src.index(signature):]
+    code = js_code_only(text)
+    want = code[:matching_brace(code, code.index("{")) + 1]
+    for i, ch in enumerate(text):
+        if ch == "}" and js_code_only(text[:i + 1]) == want:
+            return text[:i + 1]
+    raise AssertionError(f"no end found for {signature!r}")
+
+
 def css_rules(css: str) -> dict:
     """{selector: {property: value}} for the plain rules in a stylesheet."""
     rules = {}
@@ -892,6 +909,34 @@ class NewsCardsHoldTheirSkeleton(unittest.TestCase):
                 self.assertNotIn("<br", page[page.index('<div class="skel rounded-xl p-4'):page.index('<div class="skel rounded-xl p-4') + 600])
 
 
+class FunctionText(unittest.TestCase):
+    """function_text (StreamsPreview.body_of) returns the whole function, even
+    when comments come before the text a test looks for (Task 10 fix TH1)."""
+
+    SRC = ("function before() { return 1; }\n"
+           "// a comment { with a brace } before the function\n"
+           "function target(a) {\n"
+           "    // a comment, several words long, before the text asserted below\n"
+           "    /* and a block comment { } too */\n"
+           "    var s = '}';   // a brace in a string\n"
+           "    return a + 1;   // THE-END\n"
+           "}\n"
+           "function after() { return 2; }\n")
+
+    def test_the_whole_function_comments_included(self):
+        got = function_text(self.SRC, "function target(a)")
+        self.assertTrue(got.startswith("function target(a) {"), got)
+        self.assertTrue(got.endswith("return a + 1;   // THE-END\n}"), got)
+        self.assertNotIn("function after", got)
+
+    def test_home_renderers_are_whole(self):
+        page = static_text("js", "pages", "home.js")
+        body = function_text(page, "function renderActiveStreams(streams)")
+        # After several comments in the function: cut short, these were lost.
+        self.assertIn("return renderStreamCard(stream, _streamsPreview);", body)
+        self.assertTrue(body.rstrip().endswith("});\n    }"), body[-80:])
+
+
 class StreamsPreview(unittest.TestCase):
     """Owner request: /?preview=streams shows admins three sample streams on
     Home, through the same renderer as real ones, and nobody else anything."""
@@ -901,10 +946,7 @@ class StreamsPreview(unittest.TestCase):
         self.code = js_code_only(self.page)
 
     def body_of(self, signature):
-        start = self.page.index(signature)
-        code_start = len(js_code_only(self.page[:start]))
-        open_brace = self.code.index("{", code_start)
-        return self.page[start:start + (matching_brace(self.code, open_brace) - code_start) + 1]
+        return function_text(self.page, signature)
 
     def test_the_flag_needs_the_url_the_session_admin_and_the_server_mark(self):
         gate = ("_streamsPreview = ctx.url.searchParams.get('preview') === 'streams' &&\n"
