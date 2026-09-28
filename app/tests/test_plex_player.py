@@ -570,6 +570,31 @@ class Copies(unittest.TestCase):
         b = [disc_track(100 + i, i, 1_100_000 if i in (3, 7) else 1_000_000, "B/Rip B") for i in range(1, 11)]
         self.assertEqual(len(self.keys(a + b)), 20)
 
+    def test_fixed_length_cd_folders_that_match_exactly_are_both_kept(self):
+        # A rip cut into fixed-length tracks: CD1 and CD2 match track for
+        # track and in total, but their names say they are two discs.
+        cd = [disc_track(10 + i, i, 600_000, "Rip/Book Title - CD1") for i in (1, 2, 3)]
+        cd += [disc_track(20 + i, i, 600_000, "Rip/Book Title - CD2") for i in (1, 2, 3)]
+        self.assertEqual(self.keys(list(reversed(cd))), ["11", "12", "13", "21", "22", "23"])
+
+    def test_the_same_folders_under_names_that_are_not_a_sequence_still_dedupe(self):
+        cd = [disc_track(10 + i, i, 600_000, "Rip/Book Title") for i in (1, 2, 3)]
+        cd += [disc_track(20 + i, i, 600_000, "Rip/Book Title (1)") for i in (1, 2, 3)]
+        self.assertEqual(len(self.keys(cd)), 3)
+
+    def test_disc_sibling_names(self):
+        for a, b in (("CD1", "CD2"), ("Disc 1", "Disc 2"), ("CD 01", "CD 02"), ("Part 1", "Part 2"),
+                     ("Book Title - CD3", "Book Title - CD4"), ("book title - cd9", "Book Title - CD10"),
+                     ("Title/Disk_1", "Title/Disk_2"), ("x/CD2", "y/CD3")):
+            with self.subTest(a=a, b=b):
+                self.assertTrue(pp._disc_siblings(a, b))
+        for a, b in (("Book Title", "Book Title (1)"), ("CD 01", "CD1"), ("CD1", "CD1"),
+                     ("Title, Book 7", "Title, Book 8"), ("Alpha CD1", "Beta CD2"), ("Title 1", "Title 2"),
+                     ("Harry Potter and the Deathly Hallows - Jim Dale",
+                      "Harry Potter and the Deathly Hallows, Book 7 - Jim Dale")):
+            with self.subTest(a=a, b=b):
+                self.assertFalse(pp._disc_siblings(a, b))
+
     def test_durations_outside_tolerance_are_not_copies(self):
         # 2.5 s apart on a 100 s part: over max(2 s, 1%).
         tracks = [disc_track(1, 1, 100_000, "B/A"), disc_track(2, 1, 102_500, "B/B")]

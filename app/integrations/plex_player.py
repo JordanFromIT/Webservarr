@@ -350,6 +350,23 @@ def _close(a: int, b: int) -> bool:
     return abs(a - b) <= max(2000, 0.01 * max(a, b))
 
 
+_DISC_NUMBER = re.compile(r"(?<![a-z])(?:cd|disc|disk|part)[\s._-]*([0-9]+)(?![0-9])", re.IGNORECASE)
+
+
+def _disc_siblings(a: str, b: str) -> bool:
+    """True when two folder names differ only by a disc, CD or part number
+    ("CD1"/"CD2", "Disc 1"/"Disc 2", "Title - CD3"/"Title - CD4"): the discs
+    of one rip, never copies of each other, however alike their lengths
+    (audio CDs all run 70-79 minutes, and a rip cut into fixed-length tracks
+    matches track for track)."""
+    def split(name):
+        name = name.rsplit("/", 1)[-1]
+        numbers = tuple(int(n) for n in _DISC_NUMBER.findall(name))
+        return _DISC_NUMBER.sub("#", name).casefold(), numbers
+    (rest_a, nums_a), (rest_b, nums_b) = split(a), split(b)
+    return bool(nums_a) and rest_a == rest_b and nums_a != nums_b
+
+
 def _same_book(a: list, b: list) -> bool:
     """True when two folders' tracks are copies of one book: the same track
     numbers with durations matching track for track and in total, or one
@@ -378,8 +395,9 @@ def _pick_copy(tracks: list) -> list:
     each restart at track 1 repeats numbers too, so folders only count as
     copies when _same_book says so; one of each set of copies is kept (a
     copy whose track numbers do not repeat, then the longest, then the
-    earliest added). Every other folder stays, in natural folder order (CD2
-    before CD10), then by track number. Without a repeated number every track
+    earliest added). Folders whose names differ only by a disc, CD or part
+    number are never copies (_disc_siblings). Every other folder stays, in
+    natural folder order (CD2 before CD10), then by track number. Without a repeated number every track
     is kept in track order."""
     def order(t):
         return (_int(t.get("index")), _int(t.get("ratingKey")))
@@ -404,7 +422,9 @@ def _pick_copy(tracks: list) -> list:
     names = sorted(folders, key=_natural)
     sets = []
     for name in names:
-        home = next((c for c in sets if any(_same_book(folders[name], folders[o]) for o in c)), None)
+        home = next((c for c in sets
+                     if not any(_disc_siblings(name, o) for o in c)
+                     and any(_same_book(folders[name], folders[o]) for o in c)), None)
         if home is None:
             sets.append([name])
         else:
