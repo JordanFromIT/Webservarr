@@ -63,6 +63,7 @@ class FakePlexResponse:
     def __init__(self, status_code, payload):
         self.status_code = status_code
         self._payload = payload
+        self.text = ""
 
     def json(self):
         return self._payload
@@ -91,8 +92,10 @@ def fake_plex(authorized):
     return Client
 
 
-@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
-class OnePinOneSession(unittest.TestCase):
+class RouteHarness(unittest.TestCase):
+    """The plex_auth router alone, a fake Redis holding one bound PIN, and a
+    fake plex.tv."""
+
     def setUp(self):
         self.redis = FakeRedis()
         self.redis.data[f"plex_pin:{PIN}"] = plex_auth._hash_pin_nonce(NONCE).encode()
@@ -133,6 +136,9 @@ class OnePinOneSession(unittest.TestCase):
                                               for _ in range(n)])
         return asyncio.run(run())
 
+
+@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+class OnePinOneSession(RouteHarness):
     def test_two_callbacks_at_once_make_one_session(self):
         results = self.post(2)
         codes = sorted(r.status_code for r in results)
@@ -176,6 +182,98 @@ class OnePinOneSession(unittest.TestCase):
         self.assertNotIn(f"plex_pin_claim:{PIN}", self.redis.data)
         self.assertIn(f"plex_pin:{PIN}", self.redis.data)
         self.assertEqual(self.post()[0].status_code, 200)
+
+
+
+def failing_plex(how):
+    """plex.tv failing: 'status' answers 500, 'timeout' times out, 'error'
+    cannot be reached."""
+
+    class Client:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def _answer(self):
+            if how == "timeout":
+                raise httpx.ReadTimeout("slow")
+            if how == "error":
+                raise httpx.ConnectError("down")
+            return FakePlexResponse(500, {})
+
+        async def get(self, url, headers=None):
+            return await self._answer()
+
+        async def post(self, url, headers=None, data=None):
+            return await self._answer()
+
+    return Client
+
+
+@unittest.skipUnless(HAVE_APP, "needs the app's dependencies")
+class PlexDownIsA503(RouteHarness):
+    """plex.tv failing is answered 503 with the reason, never 502 or 504:
+    behind Cloudflare those bodies are replaced by its own HTML page, and the
+    login page then shows "Unexpected token '<'" (final review M8)."""
+
+    def use(self, how):
+        patch = mock.patch.object(plex_auth.httpx, "AsyncClient", failing_plex(how))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_the_callback_answers_503(self):
+        for how, detail in (("status", "Plex PIN check failed (HTTP 500)"),
+                            ("timeout", "Plex API timed out"),
+                            ("error", "Failed to contact Plex API")):
+            with self.subTest(how):
+                self.use(how)
+                r = self.post()[0]
+                self.assertEqual(r.status_code, 503, r.text)
+                self.assertEqual(r.json()["detail"], detail)
+                # The PIN stays usable for the next try.
+                self.assertIn(f"plex_pin:{PIN}", self.redis.data)
+                self.assertNotIn(f"plex_pin_claim:{PIN}", self.redis.data)
+
+    def test_starting_answers_503(self):
+        for how, detail in (("status", "Plex PIN creation failed (HTTP 500)"),
+                            ("timeout", "Plex API timed out"),
+                            ("error", "Failed to contact Plex API")):
+            with self.subTest(how):
+                self.use(how)
+
+                class Configured:
+                    # Plex's address and token are set.
+                    def query(self, *a):
+                        return self
+
+                    def filter(self, *a):
+                        return self
+
+                    def first(self):
+                        return mock.Mock(value="set")
+
+                def _db():
+                    yield Configured()
+                self.app.dependency_overrides[get_db] = _db
+
+                async def run():
+                    transport = httpx.ASGITransport(app=self.app)
+                    async with RealAsyncClient(transport=transport, base_url="https://test") as client:
+                        return await client.post("/auth/plex-start")
+                r = asyncio.run(run())
+                self.assertEqual(r.status_code, 503, r.text)
+                self.assertEqual(r.json()["detail"], detail)
+
+    def test_no_gateway_codes_anywhere_in_the_routes(self):
+        import inspect
+        import re
+        found = re.findall(r"HTTP_50[24]_\w+|status_code=50[24]\b", inspect.getsource(plex_auth))
+        self.assertEqual(found, [])
 
 
 if __name__ == "__main__":

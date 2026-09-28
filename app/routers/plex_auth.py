@@ -138,14 +138,14 @@ async def plex_start(request: Request, response: Response, db: Session = Depends
             if resp.status_code != 201:
                 logger.error("Plex PIN creation failed: HTTP %d — %s", resp.status_code, resp.text)
                 raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=f"Plex PIN creation failed (HTTP {resp.status_code})",
                 )
 
             pin_data = resp.json()
     except httpx.TimeoutException:
         raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Plex API timed out",
         )
     except HTTPException:
@@ -153,7 +153,7 @@ async def plex_start(request: Request, response: Response, db: Session = Depends
     except Exception as e:
         logger.error("Plex PIN request error: %s", str(e))
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to contact Plex API",
         )
 
@@ -161,7 +161,7 @@ async def plex_start(request: Request, response: Response, db: Session = Depends
     pin_code = pin_data.get("code")
     if not pin_id or not pin_code:
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Invalid PIN response from Plex",
         )
 
@@ -274,14 +274,14 @@ async def plex_callback(
                 )
                 if resp.status_code != 200:
                     raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                         detail=f"Plex PIN check failed (HTTP {resp.status_code})",
                     )
 
                 pin_data = resp.json()
         except httpx.TimeoutException:
             raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Plex API timed out",
             )
         except HTTPException:
@@ -289,7 +289,7 @@ async def plex_callback(
         except Exception as e:
             logger.error("Plex PIN check error: %s", str(e))
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Failed to contact Plex API",
             )
 
@@ -318,7 +318,7 @@ async def plex_callback(
             )
             if resp.status_code != 200:
                 raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Failed to fetch Plex user info",
                 )
 
@@ -328,7 +328,7 @@ async def plex_callback(
     except Exception as e:
         logger.error("Plex user info error: %s", str(e))
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Failed to fetch Plex user info",
         )
 
