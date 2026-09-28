@@ -132,6 +132,14 @@ async def _save_upload(file: UploadFile) -> str:
     return f"/api/uploads/tickets/{filename}"
 
 
+def _is_owner(ticket: Ticket, username: str) -> bool:
+    """Whether this session username created the ticket. The username is the
+    ticket system's one identity (the list, detail and comment routes all key
+    on it); an empty one owns nothing, so two sessions without a username
+    never share tickets. Always from the session, never from the request."""
+    return bool(username) and ticket.creator_username == username
+
+
 def _ticket_to_dict(ticket: Ticket, is_admin: bool, current_username: str, comments: list = None) -> dict:
     """Convert a Ticket ORM object to a response dict with privacy rules applied."""
     data = {
@@ -145,6 +153,8 @@ def _ticket_to_dict(ticket: Ticket, is_admin: bool, current_username: str, comme
         "image_path": ticket.image_path,
         "created_at": utc_iso(ticket.created_at),
         "updated_at": utc_iso(ticket.updated_at),
+        # The page offers the comment box to the owner (and to admins).
+        "is_own": _is_owner(ticket, current_username),
     }
 
     # Privacy: non-admin users never see other users' creator info
@@ -428,7 +438,7 @@ async def add_comment(
     is_admin = current_user.get("is_admin") == "true"
 
     # Only ticket creator or admin can comment
-    if not is_admin and ticket.creator_username != username:
+    if not is_admin and not _is_owner(ticket, username):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the ticket creator or an admin can comment",
