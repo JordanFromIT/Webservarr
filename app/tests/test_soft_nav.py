@@ -687,11 +687,21 @@ class ReaderPage(unittest.TestCase):
         self.assertIn("if (!('signal' in options)) options.signal = signal;", module_source("reader"))
         # The one call off the visit's signal: a progress write, which must
         # outlive the visit so the last save lands after it (fix round 2).
-        self.assertEqual(len(re.findall(r"\bsignal: null,", code)), 1)
+        # Its signal is the writer's deadline for that write alone (fix
+        # round 4), never the visit's.
+        self.assertEqual(len(re.findall(r"\bsignal: null,", code)), 0)
         send = function_body(module_source("reader"), "sendProgress")
-        self.assertIn("signal: null,\n      keepalive: true,", send)
+        self.assertIn("function sendProgress(page, deadline) {", module_source("reader"))
+        self.assertIn("signal: deadline,\n      keepalive: true,", send)
         self.assertNotRegex(code, r"(?<![.\w])setTimeout\(", "one-off timers go through ctx.setTimeout")
         self.assertIn("saveTimer = ctx.setTimeout(saveProgress, SAVE_DEBOUNCE_MS);", code)
+        # The one timer not the visit's: a write's deadline, which must outlive
+        # the visit as the write does, on the writer's clock (the window).
+        writer = function_body(code, "progressWriter")
+        self.assertEqual(len(re.findall(r"\btimers\.setTimeout\(", code)), 1)
+        self.assertIn("timer = timers.setTimeout(function () { deadline.abort(); resolve(TIMED_OUT); }, WRITE_DEADLINE_MS);", writer)
+        self.assertIn("const timers = clock || globalThis;", writer)
+        self.assertIn("const deadline = new AbortController();", writer)
 
     def test_the_position_is_saved_on_leaving(self):
         # A soft navigation away: the document keeps running, so the last
@@ -699,7 +709,9 @@ class ReaderPage(unittest.TestCase):
         # (fix round 2). A hard exit (tab hidden or closed) cannot wait: a
         # beacon, recorded as the newest send.
         code = self.code()
-        self.assertRegex(code, r"var leave = function \(\) \{\s*if \(positionKnown\) writer\.leave\(current\.page\);\s*\};")
+        # The writer is let go of on every leave (fix round 4), with no save
+        # when the position was never known.
+        self.assertRegex(code, r"var leave = function \(\) \{\s*if \(writer\) writer\.leave\(positionKnown \? current\.page : null\);\s*\};")
         self.assertEqual(len(re.findall(r"\breturn leave;", code)), 2, "both ways out of mount hand it to the router")
         save = function_body(code, "saveProgress")
         self.assertIn("var held = useBeacon ? (writer ? writer.confirmed : -1) : lastSaved;", save)
@@ -718,10 +730,14 @@ class ReaderPage(unittest.TestCase):
         self.assertEqual(len(re.findall(r"\bwriter = progressWriter\(", code)), 1)
         self.assertIn("writer = progressWriter(sendProgress, 'chapter:' + book.chapterId);", module_source("reader"))
         self.assertLess(code.index("book.chapterId = res.chapterId;"), code.index("writer = progressWriter("))
-        self.assertIn("return writer.settled().then(fetchProgress)", function_body(code, "restoreProgress"))
+        # ...but no longer than RESTORE_WAIT_MS, on the visit's timers (fix
+        # round 4), so a save that never answers cannot keep the book shut.
+        self.assertIn("return writer.settled(RESTORE_WAIT_MS, ctx).then(fetchProgress)", function_body(code, "restoreProgress"))
+        self.assertLess(code.index("if (signal.aborted) throw new Error("), code.index("writer = progressWriter("))
         src = module_source("reader")
-        self.assertRegex(src, r"export function progressWriter\(send, key\) \{")
-        self.assertIn("const progressQueues = new Map();", src)
+        self.assertRegex(src, r"export function progressWriter\(send, key, clock\) \{")
+        self.assertIn("export const progressQueues = new Map();", src)
+        self.assertIn("progressQueues.delete(key);", src)
         self.assertIn("return r.ok;", function_body(code, "sendProgress"))
         # The tab hidden or closed while reading: the beacon, until the visit ends.
         src = module_source("reader")

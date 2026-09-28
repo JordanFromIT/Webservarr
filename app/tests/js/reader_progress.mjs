@@ -13,7 +13,9 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(join(here, '../../static/js/pages/reader.js'), 'utf8');
-const { progressWriter } = await import('data:text/javascript;charset=utf-8,' + encodeURIComponent(src));
+const load = (tag) => import('data:text/javascript;charset=utf-8,' + encodeURIComponent(src + (tag ? '\n// ' + tag : '')));
+const reader = await load();
+const { progressWriter } = reader;
 
 let failed = 0;
 let total = 0;
@@ -29,6 +31,42 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 // writer for a book shares one queue): each case below uses a book of its own.
 let books = 0;
 const book = () => 'test-book-' + (++books);
+
+// Fake timers: a clock whose time moves only when the test says. advance()
+// fires every timer due by then, in order, and lets the promises each one
+// starts run before the next.
+const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); };
+function fakeClock() {
+  let now = 0;
+  let ids = 0;
+  const due = new Map();
+  return {
+    setTimeout(fn, ms) { const id = ++ids; due.set(id, { at: now + (ms || 0), fn }); return id; },
+    clearTimeout(id) { due.delete(id); },
+    get pending() { return due.size; },
+    async advance(ms) {
+      const end = now + ms;
+      for (;;) {
+        let next = null;
+        for (const [id, t] of due) if (t.at <= end && (!next || t.at < next[1].at)) next = [id, t];
+        if (!next) break;
+        now = next[1].at;
+        due.delete(next[0]);
+        next[1].fn();
+        await flush();
+      }
+      now = end;
+      await flush();
+    }
+  };
+}
+// A send that never answers (no response, and it ignores its abort): the
+// reviewer's hung send().
+function hungKavita() {
+  const k = { sent: [], signals: [] };
+  k.send = (page, signal) => { k.sent.push(page); k.signals.push(signal); return new Promise(() => {}); };
+  return k;
+}
 
 // A Kavita whose answers the test hands out, in any order.
 function fakeKavita() {
@@ -337,6 +375,169 @@ if (typeof progressWriter !== 'function') {
     w2.write(2);
     await tick(); await tick(); await tick();
     check('a plain true/false answer works and the queue moves on', w2.confirmed === 2 && sent.join() === '1,2', [w2.confirmed, sent]);
+  }
+
+  // Fix round 4 (Q1): a write that never answers must not hold the book's
+  // queue for good. Each write has its own deadline (an AbortController for
+  // that write alone, never the page's signal); at the deadline it is aborted,
+  // counts as settled with an unknown outcome, and the queue moves on.
+  check('the write deadline is about 15 s', reader.WRITE_DEADLINE_MS === 15000, reader.WRITE_DEADLINE_MS);
+  check('the restore wait is about 5 s', reader.RESTORE_WAIT_MS === 5000, reader.RESTORE_WAIT_MS);
+  const DEADLINE = reader.WRITE_DEADLINE_MS || 15000;
+  const RESTORE = reader.RESTORE_WAIT_MS || 5000;
+  {
+    const clock = fakeClock();
+    const k = hungKavita();
+    const w = progressWriter(k.send, book(), clock);
+    w.write(5);
+    w.write(6);
+    await clock.advance(DEADLINE - 1);
+    check('a hung write holds the queue until its deadline', JSON.stringify(k.sent) === '[5]', k.sent);
+    await clock.advance(1);
+    check('at the deadline the hung write releases the queue and the next write sends',
+      JSON.stringify(k.sent) === '[5,6]', k.sent);
+    check('the timed-out write is aborted', !!k.signals[0] && k.signals[0].aborted === true, k.signals[0] && k.signals[0].aborted);
+    check('each write has a signal of its own', !!k.signals[1] && k.signals[1] !== k.signals[0] && !k.signals[1].aborted);
+    check('a timed-out write confirms nothing', w.confirmed === -1, w.confirmed);
+  }
+  {
+    // Kavita answers "taken" only after the deadline: the outcome was
+    // unknown when the queue moved on, and the late answer changes nothing.
+    const clock = fakeClock();
+    const k = fakeKavita();
+    const w = progressWriter(k.send, book(), clock);
+    w.known(2);
+    w.write(3);
+    await clock.advance(DEADLINE);
+    k.take(3).answer(true);
+    await flush();
+    check('a late answer after the deadline does not confirm', w.confirmed === 2, w.confirmed);
+    w.write(4);
+    check('the book writes on after a timed-out write', JSON.stringify(k.sent) === '[3,4]', k.sent);
+    k.take(4).answer(true);
+    await flush();
+    check('an answered write clears its deadline', clock.pending === 0, clock.pending);
+    check('and confirms as before', w.confirmed === 4, w.confirmed);
+  }
+  {
+    // Across visits: visit 1's write hangs and it leaves; the reopened
+    // book's write still goes behind visit 1's leave-save, once the hung
+    // write's deadline has passed.
+    const clock = fakeClock();
+    const id = book();
+    const sent = [];
+    const answers = [];
+    const send = (page) => { sent.push(page); return page === 30 ? new Promise(() => {}) : new Promise((r) => answers.push(r)); };
+    const w1 = progressWriter(send, id, clock);
+    w1.write(30);
+    w1.leave(31);
+    const w2 = progressWriter(send, id, clock);
+    w2.write(3);
+    await clock.advance(DEADLINE);
+    check('after a hung write times out, the last visit\'s leave-save goes', JSON.stringify(sent) === '[30,31]', sent);
+    (answers.shift() || (() => {}))(true);
+    await flush();
+    check('then the reopened visit\'s write, in order', JSON.stringify(sent) === '[30,31,3]', sent);
+    (answers.shift() || (() => {}))(true);
+    await flush();
+    check('confirmed follows the newest send after a timeout', w2.confirmed === 3, w2.confirmed);
+  }
+
+  // restoreProgress waits for the book's queue at most RESTORE_WAIT_MS
+  // (writer.settled(RESTORE_WAIT_MS, ctx)), then asks Kavita anyway.
+  {
+    const clock = fakeClock();
+    const id = book();
+    const k = hungKavita();
+    const w1 = progressWriter(k.send, id, clock);
+    w1.write(12);
+    w1.leave(13);
+    const w2 = progressWriter(() => true, id, clock);
+    let fetched = false;
+    w2.settled(RESTORE, clock).then(() => { fetched = true; });
+    await clock.advance(RESTORE - 1);
+    check('the saved position waits for a hung write, up to the cap', fetched === false);
+    await clock.advance(1);
+    check('with a hung write, the saved position is fetched at the cap', fetched === true);
+  }
+  {
+    // A queue that drains first: the fetch goes at once and the cap's timer
+    // is cleared.
+    const clock = fakeClock();
+    const k = fakeKavita();
+    const id = book();
+    const w1 = progressWriter(k.send, id, clock);
+    w1.write(1);
+    const w2 = progressWriter(k.send, id, clock);
+    let fetched = false;
+    w2.settled(RESTORE, clock).then(() => { fetched = true; });
+    k.take(1).answer(true);
+    await flush();
+    check('a drained queue lets the fetch go before the cap', fetched === true);
+    check('the cap\'s timer is cleared', clock.pending === 0, clock.pending);
+  }
+
+  // Fix round 4 (Q2): a book's entry leaves the document's map once its
+  // queue has drained and no live writer holds it. A fresh copy of the
+  // module, so the other cases' writers do not count.
+  {
+    const fresh = await load('round 4 map');
+    const queues = fresh.progressQueues;
+    check('the map is visible to the test', queues instanceof Map);
+    if (queues instanceof Map) {
+      const clock = fakeClock();
+      const k = fakeKavita();
+      const w = fresh.progressWriter(k.send, 'b1', clock);
+      w.write(4);
+      check('a live writer holds its book\'s entry', queues.has('b1'));
+      k.take(4).answer(true);
+      await flush();
+      check('a drained queue with a live writer keeps the entry', queues.has('b1'));
+      w.leave(6);
+      check('a pending leave-save keeps the entry', queues.has('b1'));
+      k.take(6).answer(true);
+      await flush();
+      check('the map is empty once the queue drains with no writer', queues.size === 0, [...queues.keys()]);
+
+      // Left before the position was known (no final save): nothing stays.
+      const w2 = fresh.progressWriter(k.send, 'b2', clock);
+      await w2.leave(null);
+      check('a writer left with no page sends nothing and leaves no entry',
+        queues.size === 0 && k.sent.length === 2, [queues.size, k.sent]);
+
+      // A timed-out write drains too.
+      const h = hungKavita();
+      const w3 = fresh.progressWriter(h.send, 'b3', clock);
+      w3.write(1);
+      w3.leave(2);
+      await clock.advance(DEADLINE * 2);
+      check('a book whose writes timed out leaves no entry', queues.size === 0, [...queues.keys()]);
+
+      // A new writer after the entry went starts fresh (nothing inherited).
+      const w4 = fresh.progressWriter(k.send, 'b1', clock);
+      check('a new writer after the drain starts fresh', w4.confirmed === -1, w4.confirmed);
+      w4.leave(null);
+
+      // A new writer while the book still has a save pending shares its
+      // queue and goes behind it.
+      const w5 = fresh.progressWriter(k.send, 'b4', clock);
+      w5.write(7);
+      w5.leave(8);
+      const w6 = fresh.progressWriter(k.send, 'b4', clock);
+      w6.write(9);
+      check('a new writer behind a pending save waits for it', k.sent.slice(2).join() === '7', k.sent);
+      k.take(7).answer(true);
+      await flush();
+      k.take(8).answer(true);
+      await flush();
+      check('then goes after it', k.sent.slice(2).join() === '7,8,9', k.sent);
+      k.take(9).answer(true);
+      await flush();
+      w6.leave(9);
+      await flush();
+      check('and the entry goes when that writer leaves too', queues.size === 0, [...queues.keys()]);
+      check('no timer left behind', clock.pending === 0, clock.pending);
+    }
   }
 }
 

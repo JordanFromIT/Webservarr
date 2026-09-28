@@ -17,7 +17,8 @@
  * one deliberate exception: the progress writes. Each is a keepalive request
  * off the signal, one at a time (progressWriter), so a write in flight when
  * the reader is left still lands, and the last save, which the cleanup this
- * mount returns sends after it, lands last. They touch nothing on the page.
+ * mount returns sends after it, lands last. Each has its own deadline, whose
+ * timer is the one timer here not the visit's. They touch nothing on the page.
  * The reading settings are set on #wsPage, so they go with the page.
  */
 
@@ -76,27 +77,64 @@ const PANELS = ['loading', 'errorState', 'bookContent'];
  *                Kavita after the beacon and leave it on the older page: a
  *                rare race this accepts, and the next visit's first turn
  *                writes the position again.
- * send(page) returns (a promise of) true when Kavita took the page, false or
- * a rejection when not. known(page): Kavita reported the reader there.
- * settled(): a promise that settles when every write queued for the book so
- * far has answered (the reader asks Kavita where it is only after that).
+ * send(page, deadline) returns (a promise of) true when Kavita took the
+ * page, false or a rejection when not. known(page): Kavita reported the
+ * reader there.
+ *
+ * A write that never answers must not hold the book's queue for good (every
+ * later write, and the next visit's lookup of the saved position, waits on
+ * it). So each write has a deadline, WRITE_DEADLINE_MS after it is sent:
+ * deadline is an AbortSignal for that write alone (never the page's signal,
+ * which a leave aborts), aborted then. A write past its deadline counts as
+ * answered with an unknown outcome: it confirms nothing, an answer after it
+ * is ignored, and the queue moves on. Kavita taking the aborted write even
+ * later still, after the next one, is a rare race this accepts, like the
+ * beacon's; the next turn writes the position again. The deadline's timer
+ * is the clock's (the page's own window by default: it must outlive the
+ * visit, as the write does), and is cleared when the write answers.
+ *
+ * settled(ms, timers): a promise that settles when every write queued for
+ * the book so far has answered, or after ms on timers (the visit's ctx), if
+ * sooner. The reader asks Kavita where it is only after that, and waits no
+ * longer than RESTORE_WAIT_MS, so a slow save never keeps a book from
+ * opening. Without ms it waits for the queue alone.
+ *
+ * A book's entry leaves progressQueues once its queue has drained and no
+ * writer holds it (every writer ends with leave(), leave(null) when there is
+ * nothing to save), so the map does not grow over a long session. A new
+ * writer then starts fresh; one made while the book still has a save pending
+ * shares its queue and goes behind it.
  */
-const progressQueues = new Map();   // book key -> { confirmed, confirmedAt, sends, queued, tail }
+export const WRITE_DEADLINE_MS = 15000;
+export const RESTORE_WAIT_MS = 5000;
+
+// book key -> { confirmed, confirmedAt, sends, queued, writers, tail }
+// (exported for app/tests/js/reader_progress.mjs, which checks it empties).
+export const progressQueues = new Map();
 
 function progressQueue(key) {
   let q = progressQueues.get(key);
   if (!q) {
-    q = { confirmed: -1, confirmedAt: 0, sends: 0, queued: 0, tail: Promise.resolve() };
+    q = { confirmed: -1, confirmedAt: 0, sends: 0, queued: 0, writers: 0, tail: Promise.resolve() };
     progressQueues.set(key, q);
   }
   return q;
 }
 
-export function progressWriter(send, key) {
-  const q = progressQueue(String(key));
+// Nothing queued and no writer: the book's entry goes.
+function releaseQueue(key, q) {
+  if (q.queued === 0 && q.writers === 0 && progressQueues.get(key) === q) progressQueues.delete(key);
+}
+
+export function progressWriter(send, key, clock) {
+  const book = String(key);
+  const q = progressQueue(book);
+  const timers = clock || globalThis;
+  const TIMED_OUT = {};
   let mine = null;       // this visit's write queued or in flight
   let waiting = null;
-  let closed = false;    // left by a soft navigation: nothing more goes
+  let closed = false;    // left: nothing more goes, and the writer lets go of the queue
+  q.writers += 1;
 
   function take(at, page, ok) {
     if (ok === true && at > q.confirmedAt) {
@@ -110,12 +148,20 @@ export function progressWriter(send, key) {
   function enqueue(page, at) {
     function run() {
       if (at < q.confirmedAt || page === q.confirmed) return undefined;
+      const deadline = new AbortController();
+      let timer = 0;
+      const late = new Promise(function (resolve) {
+        timer = timers.setTimeout(function () { deadline.abort(); resolve(TIMED_OUT); }, WRITE_DEADLINE_MS);
+      });
       let answer;
-      try { answer = Promise.resolve(send(page)); } catch (e) { answer = Promise.resolve(false); }
-      return answer.then(function (ok) { take(at, page, ok); }, function () { /* not taken */ });
+      try { answer = Promise.resolve(send(page, deadline.signal)); } catch (e) { answer = Promise.resolve(false); }
+      return Promise.race([answer.then(null, function () { return false; }), late]).then(function (ok) {
+        timers.clearTimeout(timer);
+        if (ok !== TIMED_OUT) take(at, page, ok);   // past the deadline: unknown, not taken
+      });
     }
     const done = (q.queued ? q.tail.then(run) : Promise.resolve(run()))
-      .then(function () { q.queued -= 1; });
+      .then(function () { q.queued -= 1; releaseQueue(book, q); });
     q.queued += 1;
     q.tail = done;
     return done;
@@ -137,7 +183,14 @@ export function progressWriter(send, key) {
   return {
     get confirmed() { return q.confirmed; },
     known: function (page) { q.confirmed = page; q.confirmedAt = q.sends; },
-    settled: function () { return q.tail; },
+    settled: function (ms, visit) {
+      const tail = q.tail;
+      if (!ms) return tail;
+      return new Promise(function (resolve) {
+        const cap = visit.setTimeout(resolve, ms);
+        tail.then(function () { visit.clearTimeout(cap); resolve(); });
+      });
+    },
     write: function (page) {
       if (closed) return;
       if (mine) waiting = page;
@@ -148,9 +201,16 @@ export function progressWriter(send, key) {
       q.confirmedAt = ++q.sends;
       q.confirmed = page;
     },
+    // page null: nothing to save (the position was never known).
     leave: function (page) {
+      if (closed) return Promise.resolve();
       closed = true;
       waiting = null;
+      q.writers -= 1;
+      if (page === null || page === undefined) {
+        releaseQueue(book, q);
+        return Promise.resolve();
+      }
       return enqueue(page, ++q.sends);
     }
   };
@@ -568,14 +628,15 @@ export async function mount(ctx) {
    * One write, for the writer: true when Kavita took the page. Not on the
    * visit's signal, and keepalive: a write in flight when the reader is left
    * finishes (it touches nothing on the page), so the last save, which the
-   * writer sends after it, lands after it. A failed write must never
+   * writer sends after it, lands after it. Its own signal is the writer's
+   * deadline for this write alone (progressWriter). A failed write must never
    * interrupt reading: it is a background call, and lastSaved = -1 makes the
    * next save try again.
    */
-  function sendProgress(page) {
+  function sendProgress(page, deadline) {
     return kavita('/api/Reader/progress', {
       method: 'POST',
-      signal: null,
+      signal: deadline,
       keepalive: true,
       headers: { 'Content-Type': 'application/json' },
       body: progressBody(page)
@@ -601,11 +662,13 @@ export async function mount(ctx) {
   }
 
   function restoreProgress() {
-    // Asked only once every save for this book already on its way (an
-    // earlier visit's, Kavita being slow) has answered, so the answer is the
-    // newest position. One quiet retry before giving up: a lost lookup would
-    // otherwise leave the book at the start with saving switched off.
-    return writer.settled().then(fetchProgress)
+    // Asked once every save for this book already on its way (an earlier
+    // visit's, Kavita being slow) has answered, so the answer is the newest
+    // position; but after RESTORE_WAIT_MS at most, so a save that never
+    // answers cannot keep the book from opening. One quiet retry before
+    // giving up: a lost lookup would otherwise leave the book at the start
+    // with saving switched off.
+    return writer.settled(RESTORE_WAIT_MS, ctx).then(fetchProgress)
       .catch(function (err) { if (quiet(err)) throw err; return fetchProgress(); })
       .then(function (page) {
         positionKnown = true;
@@ -727,9 +790,10 @@ export async function mount(ctx) {
   // Leaving the reader by a soft navigation: the router runs this after the
   // visit's signal has aborted, and the document keeps running, so the last
   // position goes after any write in flight (progressWriter leave), as a
-  // keepalive request, and lands last.
+  // keepalive request, and lands last. With the position never known there
+  // is nothing to save, and the writer just lets go of the book's queue.
   var leave = function () {
-    if (positionKnown) writer.leave(current.page);
+    if (writer) writer.leave(positionKnown ? current.page : null);
   };
 
   var seriesId = ctx.url.searchParams.get('seriesId');
@@ -745,6 +809,9 @@ export async function mount(ctx) {
     book.chapterId = res.chapterId;
     book.volumeId = res.volumeId;
     // One queue per chapter, the position's key in Kavita, for every visit.
+    // Not once the visit has ended: its cleanup, which lets go of the
+    // writer, has already run.
+    if (signal.aborted) throw new Error('reconnecting');
     writer = progressWriter(sendProgress, 'chapter:' + book.chapterId);
     return kavita('/api/Book/' + book.chapterId + '/book-info');
   }).then(function (r) {
