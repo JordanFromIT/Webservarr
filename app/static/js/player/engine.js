@@ -35,10 +35,24 @@
  * played (1 s of it), so a run of broken parts never carries it past the
  * first.
  *
+ * Formats (spec 11a): before a part is loaded or probed, the browser is asked
+ * (canPlayType, with the container and codec Plex reports) whether it can
+ * decode it. If it says it cannot, the part streams from Plex's own
+ * transcoder on the same connection, as MP3, from a session the server asks
+ * Plex for (POST /api/player/transcode/<key>). The stream cannot seek: a seek
+ * starts it again at the new place once the seeking settles, and the
+ * element's time counts from there, so the place (track, offset) means the
+ * same in both modes; the part's length is always Plex's, never the
+ * element's. Failures take the same ladder. A part that neither the browser
+ * nor Plex can play is "This book's audio format can't play in this
+ * browser", with the place held, never skipped. Sessions are ended when the
+ * part, the book or the page is left (best effort; Plex ends idle ones).
+ *
  * Pure (importable by Node, no DOM at import time):
  *   toTrackOffset(tracks, bookMs)  -> { index, track, offset_ms } | null
  *   toBookMs(tracks, trackKey, offsetMs) -> number | null
  *   chapterAt(chapters, bookMs)    -> the chapter's position in the list, -1 if none
+ *   mimeFor(container, codec, profile) -> the MIME type for canPlayType, '' if unknown
  *   createEngine(env)              the engine, given its surroundings (tests)
  *   boot(win, overrides)           mounts the engine in #wsPlayer as WS.player
  *   UnknownTrack                   open()'s rejection for a place not in the book
@@ -91,7 +105,8 @@
  *                'save' (state().saveError changed)
  *     'ended'    { state } at the end of the last part
  *     'error'    { code, message, retry: function | null }; code 'unreachable',
- *                'part', 'forbidden', 'not-found', 'signed-out', 'busy', 'empty'
+ *                'part', 'format', 'forbidden', 'not-found', 'signed-out', 'busy',
+ *                'empty'
  *     'warning'  { kind: 'part-skipped', message }
  *                { kind: 'resume-lost', message } (see open)
  *                { kind: 'not-saved', active, lastSavedAt, message } (saves.js):
@@ -113,11 +128,17 @@ export const SPEED_STEP = 0.05;
 export const SKIP_S = 10;              // Media Session seek back and forward: the default
 export const SKIP_MIN_S = 5;
 export const SKIP_MAX_S = 60;
+export const SEEK_SETTLE_MS = 400;     // a seek on a transcoded part restarts once it settles
+export const ASK_MS = 10000;           // asking for a transcode session, at most
+export const END_SLACK_MS = 5000;      // a transcoded stream ending sooner than this before its end was cut off
 export const UNREACHABLE = "Can't reach the media server";
 export const RESUME_LOST = "Couldn't find your saved place in this book";
+export const FORMAT_UNSUPPORTED = "This book's audio format can't play in this browser";
 
 const MEDIA_ERR_ABORTED = 1;
 const MEDIA_ERR_NETWORK = 2;
+const TRANSCODE_SESSION = /^ws[0-9a-f]{32}$/;
+const MP4 = ['mp4', 'm4a', 'm4b', 'mov'];
 
 // ---------------------------------------------------------------------------
 // Book time
@@ -201,6 +222,40 @@ export class UnknownTrack extends Error {
   }
 }
 
+/* The MIME type, codecs included, that a track's container and codec (as
+   Plex reports them) make, for the browser's canPlayType. '' when the codec
+   is unknown or empty: such a track plays direct, as before. */
+export function mimeFor(container, codec, profile) {
+  const c = String(container || '').toLowerCase();
+  const k = String(codec || '').toLowerCase();
+  const p = String(profile || '').toLowerCase();
+  const mp4 = MP4.indexOf(c) !== -1;
+  const inMp4 = function (codecs) { return mp4 ? 'audio/mp4; codecs="' + codecs + '"' : ''; };
+  switch (k) {
+    case 'mp3':
+      return c === 'mp3' ? 'audio/mpeg' : inMp4('mp4a.6B');
+    case 'aac':
+      if (c === 'aac') return 'audio/aac';
+      if (p.indexOf('v2') !== -1) return inMp4('mp4a.40.29');
+      if (p.indexOf('he') !== -1) return inMp4('mp4a.40.5');
+      return inMp4('mp4a.40.2');
+    case 'eac3':
+      return inMp4('ec-3');
+    case 'ac3':
+      return inMp4('ac-3');
+    case 'alac':
+      return inMp4('alac');
+    case 'flac':
+      return c === 'flac' ? 'audio/flac' : inMp4('flac');
+    case 'opus':
+      return c === 'ogg' ? 'audio/ogg; codecs="opus"' : c === 'webm' ? 'audio/webm; codecs="opus"' : inMp4('opus');
+    case 'vorbis':
+      return c === 'ogg' ? 'audio/ogg; codecs="vorbis"' : c === 'webm' ? 'audio/webm; codecs="vorbis"' : '';
+    default:
+      return '';
+  }
+}
+
 // Only a finite number is a skip length; anything else (null, '', false, a
 // string) changes nothing.
 function roundSkip(x) {
@@ -221,7 +276,9 @@ function roundSpeed(x) {
 
 /* env: { host (where the element goes), createAudio(), fetch, setTimeout,
    clearTimeout, mediaSession, MediaMetadata, permissions, baseUrl,
-   skipSeconds, saver (saves.js createSaver) }. */
+   skipSeconds, saver (saves.js createSaver), clientId (this browser's id
+   for Plex's transcoder), stopTranscode(session) (ends one, best effort),
+   onPageHide(fn) }. */
 export function createEngine(env) {
   const setT = env.setTimeout;
   const clearT = env.clearTimeout;
@@ -230,12 +287,27 @@ export function createEngine(env) {
   const Metadata = env.MediaMetadata || null;
   const baseUrl = env.baseUrl || '';
   const saver = env.saver || null;
+  const clientId = /^[a-z0-9]{8,40}$/.test(String(env.clientId || '')) ? String(env.clientId)
+    : 'p' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   let skipS = roundSkip(env.skipSeconds) || SKIP_S;
 
   const audio = env.createAudio();
   audio.preload = 'auto';
   if (audio.setAttribute) audio.setAttribute('data-ws-player-audio', '');
   if (env.host) env.host.appendChild(audio);
+
+  /* Can this browser decode the track itself? Asked before the track is
+     loaded or probed. An unknown format is played direct, as always; one the
+     browser says it cannot play ('') is converted by Plex instead. */
+  function needsTranscode(t) {
+    const mime = mimeFor(t.container, t.codec, t.profile);
+    if (!mime || typeof audio.canPlayType !== 'function') return false;
+    try {
+      return audio.canPlayType(mime) === '';
+    } catch (e) {
+      return false;
+    }
+  }
 
   const handlers = { change: new Set(), ended: new Set(), error: new Set(), warning: new Set() };
 
@@ -286,6 +358,19 @@ export function createEngine(env) {
   const probes = new Map();   // live probe element -> its finish(ok)
   let probeCount = 0;
   let sessionReady = false;
+
+  // Transcoding: the Plex session the element streams from ({ index,
+  // session, start }; the start carries no token), a seek on a transcoded
+  // part waiting to settle, and the session requests in flight (each one's
+  // way to give up, for teardown).
+  let tc = null;
+  let restartTimer = null;
+  let asking = false;         // the part being loaded waits for its session
+  const asks = new Set();
+  if (typeof env.onPageHide === 'function') {
+    // Leaving the page: nothing will read the stream again.
+    env.onPageHide(function () { dropSession(); });
+  }
 
   // The saves' warning: an event to show or clear, and a change so a view
   // drawn from state() follows.
@@ -434,15 +519,120 @@ export function createEngine(env) {
     return origin + book.tracks[index].part_path + '?X-Plex-Token=' + encodeURIComponent(stream.token);
   }
 
+  function isTranscoded(index) {
+    return !!(book && book.tracks[index] && book.tracks[index].transcode);
+  }
+
+  /* A transcoded part's stream from `fromMs` into it: Plex's transcoder on
+     the same connection, the session's start path and query, the offset in
+     seconds, then the token. Built only for an element's src, like urlFor.
+     The element's time 0 is `fromMs` in the part. */
+  function transcodeUrl(side, s, fromMs) {
+    if (!usable(side) || !s) return '';
+    const origin = String(stream.uris[side][0]).replace(/\/+$/, '');
+    return origin + s.start + '&offset=' + (Math.max(0, Math.round(fromMs)) / 1000).toFixed(3) +
+      '&X-Plex-Token=' + encodeURIComponent(stream.token);
+  }
+
+  /* A new Plex transcode session for a part: { session, start }, or
+     { status } (0 for no answer). Plex starts a stream only for a session it
+     has decided on, and the decision is made by the server with the
+     listener's token. */
+  function askSession(index) {
+    const key = book.key;
+    const track = book.tracks[index].key;
+    return new Promise(function (resolve) {
+      let done = false;
+      let timer = null;
+      function finish(v) {
+        if (done) return;
+        done = true;
+        clearT(timer);
+        asks.delete(finish);
+        resolve(v);
+      }
+      asks.add(finish);
+      timer = setT(function () { finish({ status: 0 }); }, ASK_MS);
+      Promise.resolve().then(function () {
+        return fetchFn('/api/player/transcode/' + encodeURIComponent(key), {
+          method: 'POST',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ track: track, client: clientId })
+        });
+      }).then(function (resp) {
+        if (!resp.ok) return { status: resp.status };
+        return resp.json().then(function (d) {
+          const ok = d && typeof d.session === 'string' && TRANSCODE_SESSION.test(d.session) &&
+            typeof d.start === 'string' && /^\/[^/]/.test(d.start) && d.start.indexOf('?') !== -1;
+          return ok ? { session: d.session, start: d.start } : { status: 0 };
+        });
+      }).then(function (v) {
+        if (done) {
+          if (v && v.session) sendStop(v.session);  // too late: nobody will use it
+          return;
+        }
+        finish(v);
+      }, function () { finish({ status: 0 }); });
+    });
+  }
+
+  function sendStop(sid) {
+    if (typeof env.stopTranscode !== 'function') return;
+    try {
+      env.stopTranscode(sid);
+    } catch (e) { /* best effort; Plex ends it by itself */ }
+  }
+
+  // The element has let go of the transcode session: end it.
+  function dropSession() {
+    if (!tc) return;
+    const sid = tc.session;
+    tc = null;
+    sendStop(sid);
+  }
+
+  function cancelRestart() {
+    if (restartTimer !== null) {
+      clearT(restartTimer);
+      restartTimer = null;
+    }
+  }
+
   /* Does this side answer for this part? A throwaway element loads only its
      metadata, 1.5 s at most, and is then emptied so it holds no connection.
-     Its handlers are properties, dropped with it. */
-  function probe(side, index) {
+     A transcoded part is asked through the transcoder (the file itself is
+     what this browser cannot decode), with a session of its own that is
+     ended after. */
+  async function probe(side, index) {
+    if (!usable(side) || !book || !book.tracks[index]) return false;
+    const b = book;
+    let sid = null;
+    let base;
+    if (isTranscoded(index)) {
+      const got = await askSession(index);
+      if (!got.session) return false;
+      sid = got.session;
+      if (book !== b) {
+        sendStop(sid);
+        return false;
+      }
+      base = transcodeUrl(side, got, 0);
+    } else {
+      base = urlFor(side, index);
+    }
+    const ok = await probeUrl(base);
+    if (sid) sendStop(sid);
+    if (ok && book === b) proven.set(side, index);
+    return ok;
+  }
+
+  function probeUrl(base) {
     return new Promise(function (resolve) {
       // A URL of its own every time: a URL the element loaded before can be
       // answered from the browser's media cache with the server gone, and a
       // probe must ask the server.
-      const base = urlFor(side, index);
       probeCount += 1;
       const url = base ? base + '&wsprobe=' + probeCount.toString(36) + Date.now().toString(36) +
         Math.random().toString(36).slice(2, 8) : '';
@@ -462,7 +652,6 @@ export function createEngine(env) {
           el.removeAttribute('src');
           el.load();
         } catch (e) { /* nothing to release */ }
-        if (ok) proven.set(side, index);
         resolve(ok);
       }
       probes.set(el, finish);
@@ -493,19 +682,75 @@ export function createEngine(env) {
     } catch (e) { /* not while the element has no media */ }
   }
 
-  function load(index, offset, side) {
+  /* Loads a part at an offset on a side. A transcoded part streams from a
+     Plex session started at that offset (cur.base: the element's time 0 is
+     that far into the part). `reuse`: a seek restarting the session this
+     part already has; anything else asks for a new one. */
+  function load(index, offset, side, reuse) {
     gen += 1;
+    const g = gen;
     pending = true;
     seekApplied = false;
     metaLoaded = false;
+    cancelRestart();
     disarm();
-    cur = { index: index, side: side };
+    asking = false;
+    const transcoded = isTranscoded(index);
+    cur = { index: index, side: side, base: transcoded ? offset : 0 };
     target = { index: index, offset: offset };
     playhead = { index: index, offset: offset };
     setLoading(true);
-    audio.src = urlFor(side, index);
+    if (!transcoded) {
+      audio.src = urlFor(side, index);
+      dropSession();              // once the element has let go of it
+      applyRate();
+      if (wantPlay) startPlay();
+      return;
+    }
+    if (reuse && tc && tc.index === index) {
+      startStream(tc);
+      return;
+    }
+    // Nothing plays while Plex decides (the old stream is let go at once).
+    release();
+    dropSession();
+    asking = true;
+    askSession(index).then(function (got) {
+      if (g !== gen || !book) {
+        if (got.session) sendStop(got.session);
+        return;
+      }
+      asking = false;
+      if (!got.session) {
+        refused(got.status);
+        return;
+      }
+      tc = { index: index, session: got.session, start: got.start };
+      startStream(tc);
+    });
+  }
+
+  function startStream(s) {
+    audio.src = transcodeUrl(cur.side, s, cur.base);
     applyRate();
     if (wantPlay) startPlay();
+  }
+
+  /* No transcode session for the part at the playhead. Plex refusing to
+     convert it is the format message (the place held, never skipped); the
+     listener's own access is the open's messages; anything else (no answer,
+     busy, down) is a stream failure, up the connection ladder. */
+  function refused(status) {
+    if (status === 415) {
+      stopWith('format', FORMAT_UNSUPPORTED, retry);
+      return;
+    }
+    if (status === 401 || status === 403 || status === 404) {
+      const err = openError({ status: status, detail: '' }, retry);
+      stopWith(err.code, err.message, err.retry);
+      return;
+    }
+    fail('network');
   }
 
   function startPlay() {
@@ -557,7 +802,7 @@ export function createEngine(env) {
     proven.set(cur.side, cur.index);
     applyRate();
     if (!seekApplied) {
-      if (target.offset > 0) {
+      if (target.offset > 0 && !isTranscoded(cur.index)) {
         try {
           audio.currentTime = target.offset / 1000;
         } catch (e) { /* applied on the next seek */ }
@@ -601,9 +846,12 @@ export function createEngine(env) {
       if (!seekApplied || audio.seeking) return;
       pending = false;
     }
+    // The part's own length, never the element's (a transcoded stream has
+    // none); its time counts from where the stream started in the part.
     const d = durationOf(book.tracks[cur.index]);
     let off = Math.round(Number(audio.currentTime) * 1000);
     if (!isFinite(off) || off < 0) off = 0;
+    off += cur.base;
     if (off > d) off = d;
     const moved = !playhead || playhead.index !== cur.index || playhead.offset !== off;
     playhead = { index: cur.index, offset: off };
@@ -635,6 +883,15 @@ export function createEngine(env) {
   audio.addEventListener('ended', function () {
     if (!book || !cur || !audio.ended) return;
     const i = cur.index;
+    if (isTranscoded(i)) {
+      // Plex ending a session (stopped, or idle too long) ends its stream
+      // early, cleanly: that is a dropped stream, not the end of the part.
+      const off = cur.base + Math.round(Number(audio.currentTime) * 1000);
+      if (!(off >= durationOf(book.tracks[i]) - END_SLACK_MS)) {
+        fail('network');
+        return;
+      }
+    }
     hold = null;
     partSuspect = null;
     if (i + 1 < book.tracks.length) {
@@ -645,6 +902,7 @@ export function createEngine(env) {
     playhead = { index: i, offset: durationOf(book.tracks[i]) };
     wantPlay = false;
     disarm();
+    dropSession();
     setLoading(false);
     sessionState();
     changed('ended');
@@ -675,6 +933,7 @@ export function createEngine(env) {
     pending = true;
     seekApplied = false;
     metaLoaded = false;
+    cancelRestart();
     disarm();
     const at = { index: playhead.index, offset: playhead.offset };
     const side = cur.side;
@@ -762,6 +1021,13 @@ export function createEngine(env) {
   }
 
   function skipPart(at, side) {
+    if (isTranscoded(at.index)) {
+      // Neither this browser nor Plex's conversion can play it: say so, and
+      // hold the place (nothing the listener has not heard is passed over).
+      cur = { index: at.index, side: side, base: 0 };
+      stopWith('format', FORMAT_UNSUPPORTED, retry);
+      return;
+    }
     if (!hold) hold = { index: at.index, offset: at.offset };
     const n = book.tracks.length;
     emit('warning', {
@@ -773,7 +1039,7 @@ export function createEngine(env) {
       changed('part-skipped');
       return;
     }
-    cur = { index: at.index, side: side };
+    cur = { index: at.index, side: side, base: 0 };
     stopWith('part', "The rest of this book couldn't be played.", retry);
   }
 
@@ -783,11 +1049,14 @@ export function createEngine(env) {
     seekApplied = false;
     metaLoaded = false;
     partSuspect = null;
+    asking = false;
+    cancelRestart();
     disarm();
     try {
       audio.pause();
     } catch (e) { /* already */ }
     release();
+    dropSession();
     setLoading(false);
     error = { code: code, message: message };
     errorRetry = retryFn || null;
@@ -873,11 +1142,21 @@ export function createEngine(env) {
 
   function makeBook(key, data) {
     const tracks = data.tracks.map(function (t) {
+      const format = {
+        container: String(t.container || ''),
+        codec: String(t.codec || ''),
+        profile: String(t.profile || '')
+      };
       return Object.freeze({
         key: String(t.key),
         part_path: String(t.part_path || ''),
         duration_ms: durationOf(t),
-        index: t.index
+        index: t.index,
+        container: format.container,
+        codec: format.codec,
+        profile: format.profile,
+        // Decided once, before the part is ever loaded or probed.
+        transcode: needsTranscode(format)
       });
     });
     const starts = [];
@@ -930,12 +1209,16 @@ export function createEngine(env) {
     seekApplied = false;
     metaLoaded = false;
     partSuspect = null;
+    asking = false;
+    cancelRestart();
     disarm();
     Array.from(probes.values()).forEach(function (finish) { finish(false); });
+    Array.from(asks).forEach(function (finish) { finish({ status: 0 }); });
     try {
       audio.pause();
     } catch (e) { /* already */ }
     release();
+    dropSession();
     book = null;
     stream = null;
     cur = null;
@@ -1086,6 +1369,13 @@ export function createEngine(env) {
       changed('play');
       return Promise.resolve();
     }
+    if (restartTimer !== null || asking) {
+      // A transcoded part's new stream is on its way (the element still
+      // holds the old one, or none): it starts playing when it comes.
+      sessionState();
+      changed('play');
+      return Promise.resolve();
+    }
     if (atEnd()) {
       hold = null;
       load(0, 0, cur.side);
@@ -1127,6 +1417,28 @@ export function createEngine(env) {
       // play or retry loads it.
       playhead = next;
       target = { index: next.index, offset: next.offset };
+    } else if (isTranscoded(next.index)) {
+      // A transcoded stream cannot seek: Plex starts it again at the new
+      // place, once, when the listener stops moving it. Until then the old
+      // stream is let go (a session still being asked for is dropped), so
+      // nothing it does can move the place back.
+      gen += 1;
+      playhead = next;
+      target = { index: next.index, offset: next.offset };
+      pending = true;
+      seekApplied = false;
+      metaLoaded = false;
+      asking = false;
+      disarm();
+      release();
+      setLoading(true);
+      cancelRestart();
+      const side = cur.side;
+      restartTimer = setT(function () {
+        restartTimer = null;
+        if (!book || !cur || error) return;
+        load(target.index, target.offset, side, true);
+      }, SEEK_SETTLE_MS);
     } else if (to.index === cur.index && metaLoaded) {
       playhead = next;
       target = { index: next.index, offset: next.offset };
@@ -1290,6 +1602,48 @@ export function createEngine(env) {
 // Browser
 // ---------------------------------------------------------------------------
 
+/* This browser's id for Plex's transcoder, kept so Plex sees one device per
+   browser. Plex runs one transcode per id, so it is per browser, not per
+   account: two devices on one account never stop each other's stream. */
+const CLIENT_KEY = 'ws-player:client';
+function browserClientId(win) {
+  try {
+    const kept = win.localStorage.getItem(CLIENT_KEY);
+    if (kept && /^[a-z0-9]{8,40}$/.test(kept)) return kept;
+  } catch (e) { /* no storage: one for this page */ }
+  let id = '';
+  try {
+    const bytes = new Uint8Array(12);
+    win.crypto.getRandomValues(bytes);
+    id = Array.from(bytes, function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  } catch (e) {
+    id = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+  }
+  try {
+    win.localStorage.setItem(CLIENT_KEY, id);
+  } catch (e) { /* kept for this page only */ }
+  return id;
+}
+
+/* Ends a transcode session: a beacon (it survives the page going away),
+   else a keepalive fetch. Same-origin, no custom header. */
+function sendTranscodeStop(win, sid) {
+  const url = '/api/player/transcode/stop';
+  const body = JSON.stringify({ session: sid });
+  try {
+    const nav = win.navigator;
+    if (nav && typeof nav.sendBeacon === 'function' &&
+        nav.sendBeacon(url, new win.Blob([body], { type: 'application/json' }))) return;
+  } catch (e) { /* the fetch below */ }
+  try {
+    const p = win.fetch(url, {
+      method: 'POST', credentials: 'same-origin', keepalive: true,
+      headers: { 'Content-Type': 'application/json' }, body: body
+    });
+    if (p && typeof p.catch === 'function') p.catch(function () {});
+  } catch (e) { /* best effort; Plex ends it by itself */ }
+}
+
 /* Mounts the engine in #wsPlayer as WS.player, once per document. Its fetch
    and timers are the window's own, taken now. Returns the engine, or null on
    a page without the shell. */
@@ -1313,6 +1667,9 @@ export function boot(win, overrides) {
     permissions: nav.permissions || null,
     MediaMetadata: win.MediaMetadata || null,
     baseUrl: win.location.href,
+    clientId: browserClientId(win),
+    stopTranscode: function (sid) { sendTranscodeStop(win, sid); },
+    onPageHide: function (fn) { win.addEventListener('pagehide', fn); },
     saver: overrides && 'saver' in overrides ? null
       : saves && typeof saves.browserSaver === 'function' ? saves.browserSaver(win) : null
   }, overrides || {}));

@@ -405,6 +405,62 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     return result
 
 
+# --- Transcoding --------------------------------------------------------------------
+#
+# A track the browser cannot decode streams from Plex's transcoder instead.
+# The player asks for a transcode session per track (Plex refuses a stream it
+# has not decided on) and ends it when it moves on, by sendBeacon on the way
+# out of the page, so both are header-less same-origin POSTs.
+
+CANNOT_CONVERT = "This book's audio format can't play in this browser"
+
+
+class TranscodeAsk(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    track: Text = Field(min_length=1, max_length=listening.KEY_MAX)
+    client: Text = Field(min_length=8, max_length=40)
+
+
+class TranscodeStop(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    session: Text = Field(min_length=1, max_length=64)
+
+
+@router.post("/transcode/stop", status_code=204, dependencies=[Depends(require_same_origin)])
+@_limit(CHECKIN_LIMIT, "transcode-stop")
+async def transcode_stop(request: Request, body: TranscodeStop, background: BackgroundTasks,
+                         who: Listener = Depends(listener), _text: None = Depends(require_encodable_body)):
+    """End a transcode session the player started (best effort, after the
+    response, so a beacon on the way out is answered at once)."""
+    if not pp.transcode_session_ok(body.session):
+        raise HTTPException(status_code=422, detail="Not a player transcode session")
+    background.add_task(pp.stop_transcode, who.session(), body.session, session_id=who.session_id)
+    return Response(status_code=204)
+
+
+@router.post("/transcode/{key}", dependencies=[Depends(require_same_origin)])
+@_limit(PLAYER_LIMIT, "transcode")
+async def transcode(request: Request, key: str, body: TranscodeAsk, who: Listener = Depends(listener),
+                    _text: None = Depends(require_encodable_body)):
+    """A Plex transcode session for one of the book's tracks: {"session",
+    "start"}, the start path and query without a token (the player adds its
+    offset and the listener's token). 415 when Plex will not convert it."""
+    if not pp.transcode_client_ok(body.client):
+        raise HTTPException(status_code=422, detail="Malformed client id")
+    session = who.session()     # one copy, so the access library_access caches serves the decision
+    try:
+        await pp.assert_in_library(key, body.track)
+        await pp.library_access(session, session_id=who.session_id)
+        got = await pp.transcode(session, body.track, body.client, session_id=who.session_id)
+    except pp.CannotConvert:
+        raise HTTPException(status_code=415, detail=CANNOT_CONVERT) from None
+    except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
+        raise _http_error(exc, forbid=True) from None
+    return JSONResponse(got, headers={"Cache-Control": "no-store"})
+
+
 # --- Preferences --------------------------------------------------------------------
 
 @router.get("/prefs")

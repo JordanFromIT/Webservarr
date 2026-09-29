@@ -942,7 +942,16 @@ const BOOK = {
   ],
   chapters: [{ index: 1, label: 'One', start_ms: 0, end_ms: 1800000, track: '501', track_start_ms: 0, track_end_ms: 600000 }]
 };
-const durations = new Map(BOOK.tracks.map((t) => [t.part_path, t.duration_ms]));
+// A book this browser cannot decode (E-AC3): it streams from Plex's transcoder.
+const LOUD = {
+  key: '800:1', title: 'Loud Book', author: 'C. Writer', narrator: '', series: '', cover: '', duration_ms: 72000000, shape: 'single',
+  tracks: [{ key: '801', part_path: '/library/parts/981/1/file.m4b', duration_ms: 72000000, index: 1,
+    container: 'mp4', codec: 'eac3', profile: 'dolby digital plus + dolby atmos' }],
+  chapters: [{ index: 1, label: 'One', start_ms: 0, end_ms: 72000000, track: '801', track_start_ms: 0, track_end_ms: 72000000 }]
+};
+const TRANSCODE_PATH = '/music/:/transcode/universal/start.mp3';
+const durations = new Map(BOOK.tracks.concat(LOUD.tracks).map((t) => [t.part_path, t.duration_ms]));
+const trackDurations = new Map(BOOK.tracks.concat(LOUD.tracks).map((t) => [t.key, t.duration_ms]));
 class MiniAudio {
   constructor(clock, net) {
     this.net = net || {};                         // net.failLoads: every load fails (the stream is down)
@@ -950,6 +959,7 @@ class MiniAudio {
     this.paused = true; this.ended = false; this.error = null; this.readyState = 0; this.seeking = false;
     this.duration = NaN; this.playbackRate = 1; this.defaultPlaybackRate = 1; this.preload = 'auto'; this.ticking = false;
   }
+  canPlayType(mime) { return mime.indexOf('ec-3') !== -1 ? '' : 'probably'; }
   addEventListener(t, fn) { if (!this.ls.has(t)) this.ls.set(t, []); this.ls.get(t).push(fn); }
   removeEventListener() {}
   fire(t) { for (const fn of (this.ls.get(t) || []).slice()) fn.call(this, { type: t }); const h = this['on' + t]; if (typeof h === 'function') h.call(this, { type: t }); }
@@ -964,8 +974,15 @@ class MiniAudio {
   select() {
     const g = ++this.gen;
     this.paused = true; this.ended = false; this.readyState = 0; this._t = 0; this.ticking = false; this.duration = NaN;
+    this._end = null;
     if (!this._src) return;
-    const d = durations.get(new URL(this._src).pathname);
+    const u = new URL(this._src);
+    let d = durations.get(u.pathname);
+    if (u.pathname === TRANSCODE_PATH) {
+      // A progressive stream from the offset on: the element knows no length.
+      this._end = (trackDurations.get((u.searchParams.get('path') || '').split('/').pop()) - Number(u.searchParams.get('offset')) * 1000) / 1000;
+      d = Infinity;
+    }
     this.error = null;
     this.clock.setTimeout(() => {
       if (g !== this.gen) return;
@@ -984,14 +1001,16 @@ class MiniAudio {
   tick(g) {
     this.clock.setTimeout(() => {
       if (g !== this.gen || this.paused || !this.ticking) return;
-      this._t = Math.min(this.duration, this._t + 0.25);
+      const end = this._end !== null ? this._end : this.duration;
+      this._t = Math.min(end, this._t + 0.25);
       this.fire('timeupdate');
-      if (this._t >= this.duration) { this.ticking = false; this.paused = true; this.ended = true; this.fire('pause'); this.fire('ended'); return; }
+      if (this._t >= end) { this.ticking = false; this.paused = true; this.ended = true; this.fire('pause'); this.fire('ended'); return; }
       this.tick(g);
     }, 250);
   }
 }
 
+let transcodes = 0;
 function withEngine(o = {}) {
   const clock = o.clock || fakeClock();
   const server = o.server || fakeServer(clock);
@@ -1004,11 +1023,16 @@ function withEngine(o = {}) {
   const engine = E.createEngine({
     host: { appendChild() {} },
     createAudio: () => { const a = new MiniAudio(clock, net); audios.push(a); return a; },
-    fetch: async (url) => {
+    fetch: async (url, opts) => {
       got.push(url);
       const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(JSON.stringify(body)) });
       let m = /^\/api\/player\/book\/([^?]+)/.exec(url);
-      if (m) return reply(200, Object.assign({}, BOOK, { stream: { token: 'tok', uris: { local: [], remote: o.noStream ? [] : [REMOTE] } } }));
+      if (m) return reply(200, Object.assign({}, o.book || BOOK, { stream: { token: 'tok', uris: { local: [], remote: o.noStream ? [] : [REMOTE] } } }));
+      m = /^\/api\/player\/transcode\/(.+)$/.exec(url);
+      if (m) {
+        const sid = 'ws' + String(++transcodes).padStart(32, '0');
+        return reply(200, { session: sid, start: TRANSCODE_PATH + '?path=%2Flibrary%2Fmetadata%2F' + JSON.parse(opts.body).track + '&session=' + sid });
+      }
       m = /^\/api\/player\/position\/(.+)$/.exec(url);
       if (m) return o.positionStatus ? reply(o.positionStatus, { detail: 'down' })
         : reply(200, Object.assign({ now: new Date(clock.now + server.skewMs).toISOString() }, places));
@@ -1100,6 +1124,41 @@ current = 'the engine resumes at WebServarr\'s place when it is newest, and save
   await t.clock.advance(1100);
   check('the engine\'s pause is saved at once', t.server.fetches().pop().body.event === 'pause');
   t.engine.close();
+}
+
+current = 'positions in transcode mode are the place in the track, as in direct play';
+{
+  const t = withEngine({ book: LOUD, places: {
+    web: { track: '801', offset_ms: 5000000, duration_ms: 72000000, updated_at: iso(-5), device: 'Chrome on Windows', source: 'web' },
+    plex: null
+  } });
+  const opened = t.engine.open('800:1');
+  await t.clock.advance(1000);
+  await opened;
+  const a = t.audios[0];
+  check('it streams from the transcoder, at the saved place', new URL(a.src).pathname === TRANSCODE_PATH &&
+    new URL(a.src).searchParams.get('offset') === '5000.000', a.src);
+  await t.clock.advance(25000);
+  let f = t.server.fetches();
+  check('saves carry the track and the offset in it, not the element\'s time', f.length === 3 &&
+    f.every((c) => c.body.track === '801' && c.body.offset_ms >= 5000000 && c.body.offset_ms <= 5027000 &&
+      c.body.duration_ms === 72000000), f.map((c) => [c.body.event, c.body.offset_ms]));
+  const n = f.length;
+  t.engine.seek(9000000);
+  await t.clock.advance(1500);            // the restart settles and plays
+  await t.clock.advance(12000);
+  f = t.server.fetches().slice(n);
+  check('the seek is saved at the new place at once', f[0] && f[0].body.event === 'seek' && f[0].body.offset_ms === 9000000,
+    f.map((c) => [c.body.event, c.body.offset_ms]));
+  check('no save during or after the restart goes back before it', f.every((c) => c.body.offset_ms >= 9000000) && f.length >= 2,
+    f.map((c) => [c.body.event, c.body.offset_ms]));
+  const copy = localOf(t, '800:1');
+  check('the local copy agrees', copy && copy.offset_ms === t.engine.state().position.offset_ms && copy.offset_ms > 9010000, copy);
+  t.engine.close();
+  await t.clock.advance(2000);
+  const last = t.server.fetches().pop();
+  check('the final save is the place in the track', last.body.event === 'leave' && last.body.offset_ms > 9010000 &&
+    last.body.offset_ms < 9015000, last.body);
 }
 
 current = 'a saved place in a part the book no longer has: the next newest, else the start with a notice';

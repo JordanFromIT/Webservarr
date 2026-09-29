@@ -25,10 +25,11 @@ import hashlib
 import json
 import logging
 import re
+import secrets
 import time
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
@@ -397,6 +398,20 @@ def _part(t: dict) -> dict:
     return parts[0] or {}
 
 
+def _format(t: dict) -> dict:
+    """The track's container, codec and codec profile as Plex reports them
+    (lower case, "" when Plex gives none): the player asks the browser with
+    them whether it can decode the file itself."""
+    media = (t.get("Media") or [{}])[0] or {}
+
+    def text(value) -> str:
+        return str(value or "").strip().lower()[:64]
+
+    return {"container": text(media.get("container") or _part(t).get("container")),
+            "codec": text(media.get("audioCodec")),
+            "profile": text(media.get("audioProfile") or _part(t).get("audioProfile"))}
+
+
 def _track_duration(t: dict) -> int:
     return _int(t.get("duration")) or _int(_part(t).get("duration"))
 
@@ -680,7 +695,8 @@ def _chapters(tracks: list, embedded: dict) -> list:
 
 async def book_detail(key: str) -> dict:
     """One book, read with the admin token: the book_list fields plus
-    tracks [{key, part_path, duration_ms, index}] in play order (index from 1)
+    tracks [{key, part_path, duration_ms, index, container, codec, profile}]
+    in play order (index from 1; the format fields are strings, possibly empty)
     and chapters [{index, label, start_ms, end_ms, track, track_start_ms,
     track_end_ms}] (see _chapters): start/end are book time (a multi-part
     book's parts laid end to end), track_start/track_end are inside `track`.
@@ -696,7 +712,8 @@ async def book_detail(key: str) -> dict:
         embedded = await _embedded_chapters(client, admin, tracks)
 
     out_tracks = [{"key": str(t["ratingKey"]), "part_path": _part(t).get("key") or "",
-                   "duration_ms": _track_duration(t), "index": i + 1} for i, t in enumerate(tracks)]
+                   "duration_ms": _track_duration(t), "index": i + 1, **_format(t)}
+                  for i, t in enumerate(tracks)]
     return {**_summary(album, disc, tracks, disc_count), "tracks": out_tracks,
             "chapters": _chapters(tracks, embedded)}
 
@@ -861,3 +878,117 @@ async def timeline(session: dict, track_key: str, state: str, time_ms: int, dura
         logger.warning("Plex timeline failed: %s", type(exc).__name__)
     except Exception as exc:  # noqa: BLE001 - best effort by contract, never raised
         logger.warning("Plex timeline failed unexpectedly: %s", type(exc).__name__)
+
+
+# --- Transcoding ------------------------------------------------------------------
+#
+# A track the browser cannot decode (E-AC3 in .m4b, for one) is converted by
+# Plex's universal music transcoder into a progressive MP3 stream, which every
+# browser plays, on the same plex.direct connection as direct play. Plex
+# starts a stream only for a session it has already decided on, so the player
+# asks here first: this makes the decision with the listener's server token
+# (the header, as everywhere) and hands back the start path and query, which
+# carry no token. The browser adds its offset and the token to the element's
+# src itself. Plex keeps one transcode per client identifier, so each browser
+# sends its own id (two devices on one account must not stop each other).
+
+TRANSCODE_BASE = "/music/:/transcode/universal"
+TRANSCODE_START = f"{TRANSCODE_BASE}/start.mp3"
+_TRANSCODE_SESSION = re.compile(r"ws[0-9a-f]{32}", re.ASCII)
+_TRANSCODE_CLIENT = re.compile(r"[a-z0-9]{8,40}", re.ASCII)
+
+
+class CannotConvert(Exception):
+    """Plex will not convert this track for the player (maps to 415)."""
+
+
+def transcode_session_ok(value) -> bool:
+    """True for a transcode session id this module hands out: nothing else
+    (another app's Plex session) can be stopped through the player."""
+    return isinstance(value, str) and bool(_TRANSCODE_SESSION.fullmatch(value))
+
+
+def transcode_client_ok(value) -> bool:
+    return isinstance(value, str) and bool(_TRANSCODE_CLIENT.fullmatch(value))
+
+
+def _transcode_params(track_key: str, client: str, session_id: str) -> dict:
+    return {
+        "path": f"/library/metadata/{track_key}", "mediaIndex": "0", "partIndex": "0",
+        "protocol": "http", "directPlay": "0", "directStream": "0", "session": session_id,
+        "X-Plex-Client-Identifier": f"webservarr-web-{client}", "X-Plex-Product": PRODUCT,
+        "X-Plex-Platform": "Chrome", "X-Plex-Device": PLATFORM, "X-Plex-Version": VERSION,
+    }
+
+
+async def transcode(session: dict, track_key: str, client: str, session_id: Optional[str] = None) -> dict:
+    """A Plex transcode session for one track: {"session": id, "start":
+    "<start path>?<query>"}, neither holding a token. The caller has checked
+    the track is in the book. Raises CannotConvert when Plex refuses to
+    convert it, NotInLibrary when Plex does not know the track, and
+    PlayerUnavailable (TokenRejected on a 401, which drops the cached access)
+    when Plex cannot answer."""
+    if not (isinstance(track_key, str) and _RATING_KEY.fullmatch(track_key)):
+        raise NotInLibrary("Malformed track key")
+    if not transcode_client_ok(client):
+        raise ValueError("Malformed client id")
+    admin = _configured(need_section=False)
+    access = await server_access(session, session_id=session_id)
+    sid = "ws" + secrets.token_hex(16)
+    params = _transcode_params(track_key, client, sid)
+    try:
+        async with _pms_client() as client_:
+            resp = await client_.get(f"{admin['url']}{TRANSCODE_BASE}/decision", params=params,
+                                     headers={"X-Plex-Token": access["token"], "Accept": "application/json"})
+    except httpx.HTTPError as exc:
+        logger.warning("Plex transcode decision failed: %s", type(exc).__name__)
+        raise PlayerUnavailable("Plex is unavailable") from None
+    if resp.status_code == 401:
+        logger.warning("Plex refused the server token for a transcode decision (HTTP 401)")
+        await forget_access(session, session_id)
+        raise TokenRejected("Plex refused the token")
+    if resp.status_code == 404:
+        raise NotInLibrary("Plex does not know this track")
+    if resp.status_code == 400:
+        logger.info("Plex refused to convert a track (HTTP 400)")
+        raise CannotConvert("Plex will not convert this track")
+    if resp.status_code != 200:
+        logger.warning("Plex transcode decision returned HTTP %d", resp.status_code)
+        raise PlayerUnavailable("Plex is unavailable")
+    try:
+        container = (resp.json() or {}).get("MediaContainer") or {}
+    except ValueError:
+        logger.warning("Plex sent a transcode decision that is not JSON")
+        raise PlayerUnavailable("Plex is unavailable") from None
+    # 1xxx: Plex will play it (1001: "Direct play not available; Conversion OK").
+    code = _int(container.get("generalDecisionCode"))
+    media = ((container.get("Metadata") or [{}])[0] or {}).get("Media") or []
+    if not 1000 <= code < 2000 or not media:
+        logger.info("Plex will not convert a track (decision %d)", code)
+        raise CannotConvert("Plex will not convert this track")
+    return {"session": sid, "start": f"{TRANSCODE_START}?{urlencode(params)}"}
+
+
+async def stop_transcode(session: dict, transcode_session: str, session_id: Optional[str] = None) -> None:
+    """Ask Plex to end a transcode session the player started, with the
+    listener's server token. Best effort: Plex also ends one left idle by
+    itself (about three minutes after its stream is dropped). Every failure
+    is logged and swallowed."""
+    try:
+        if not transcode_session_ok(transcode_session):
+            return
+        admin = _configured(need_section=False)
+        access = await server_access(session, session_id=session_id)
+        async with _pms_client() as client:
+            resp = await client.get(f"{admin['url']}{TRANSCODE_BASE}/stop",
+                                    params={"session": transcode_session},
+                                    headers={"X-Plex-Token": access["token"]})
+        # 404: already over (Plex ended it, or it never started).
+        if resp.status_code not in (200, 404):
+            logger.warning("Plex transcode stop returned HTTP %d", resp.status_code)
+    except (PlayerUnavailable, NotInLibrary) as exc:
+        logger.info("Plex transcode stop skipped: %s", exc)
+    except httpx.HTTPError as exc:
+        logger.warning("Plex transcode stop failed: %s", type(exc).__name__)
+    except Exception as exc:  # noqa: BLE001 - best effort by contract, never raised
+        logger.warning("Plex transcode stop failed unexpectedly: %s", type(exc).__name__)

@@ -60,6 +60,11 @@ BOOKS = [
 ]
 
 
+TRANSCODE = {"session": "ws" + "a" * 32,
+             "start": "/music/:/transcode/universal/start.mp3?path=%2Flibrary%2Fmetadata%2F101&session=ws" + "a" * 32}
+CLIENT = "abc123def456"
+
+
 async def fake_assert_in_library(key, track_key=None):
     pp.parse_key(key)
     if key not in LIBRARY:
@@ -91,6 +96,8 @@ class PlayerApiBase(unittest.TestCase):
         self.library_access = mock.AsyncMock(return_value=STREAM)
         self.plex_position = mock.AsyncMock(return_value=None)
         self.cover_image = mock.AsyncMock(side_effect=fake_cover_image)
+        self.transcode = mock.AsyncMock(return_value=dict(TRANSCODE))
+        self.stop_transcode = mock.AsyncMock(return_value=None)
         self.on = mock.Mock(return_value=True)
         patches = [
             mock.patch("app.routers.setup.is_setup_completed", return_value=True),
@@ -102,6 +109,8 @@ class PlayerApiBase(unittest.TestCase):
             mock.patch.object(pp, "plex_position", self.plex_position),
             mock.patch.object(pp, "timeline", self.timeline),
             mock.patch.object(pp, "cover_image", self.cover_image),
+            mock.patch.object(pp, "transcode", self.transcode),
+            mock.patch.object(pp, "stop_transcode", self.stop_transcode),
             mock.patch.object(settings, "app_domain", "localhost"),
             mock.patch.object(settings, "app_scheme", "https"),
         ]
@@ -704,6 +713,98 @@ class SameOrigin(PlayerApiBase):
         self.assertEqual(self.client.get("/api/player/prefs").json()["speed"], 1.0)
 
 
+class Transcoding(PlayerApiBase):
+    """A track the browser cannot decode: the player asks for a Plex
+    transcode session per track, and ends it (by sendBeacon on the way out)."""
+
+    def ask(self, key="100:1", track="101", client=CLIENT, headers=None):
+        return self.client.post(f"/api/player/transcode/{key}", json={"track": track, "client": client},
+                                headers={"Origin": ORIGIN} if headers is None else headers)
+
+    def stop(self, session=TRANSCODE["session"], headers=None):
+        return self.client.post("/api/player/transcode/stop", content=json.dumps({"session": session}),
+                                headers={"Content-Type": "application/json",
+                                         **({"Origin": ORIGIN} if headers is None else headers)})
+
+    def test_a_track_of_the_book_gets_a_session_and_its_tokenless_start(self):
+        r = self.ask()
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json(), TRANSCODE)
+        self.assertEqual(r.headers["Cache-Control"], "no-store")
+        self.library_access.assert_awaited()
+        args = self.transcode.await_args
+        self.assertEqual(args.args[0]["plex_account_id"], "1001")
+        self.assertEqual(args.args[1:], ("101", CLIENT))
+        self.assertEqual(args.kwargs["session_id"], "sid-1001")
+        self.assertNotIn(STREAM["token"], r.text)
+
+    def test_the_track_must_be_the_books(self):
+        self.assertEqual(self.ask(track="202").status_code, 404)
+        self.assertEqual(self.ask(key="999:1").status_code, 404)
+        self.assertEqual(self.ask(key="junk").status_code, 404)
+        self.transcode.assert_not_awaited()
+
+    def test_plex_refusing_to_convert_is_415_with_the_format_message(self):
+        self.transcode.side_effect = pp.CannotConvert("no")
+        r = self.ask()
+        self.assertEqual(r.status_code, 415)
+        self.assertEqual(r.json()["detail"], "This book's audio format can't play in this browser")
+
+    def test_plex_down_is_503_and_no_access_is_403(self):
+        self.transcode.side_effect = pp.PlayerUnavailable("down")
+        self.assertEqual(self.ask().status_code, 503)
+        self.transcode.side_effect = pp.TokenRejected("401")
+        self.assertEqual(self.ask().status_code, 503)
+        self.transcode.side_effect = None
+        self.transcode.reset_mock()
+        self.library_access.side_effect = pp.NoLibraryAccess("no")
+        self.assertEqual(self.ask().status_code, 403)
+        self.transcode.assert_not_awaited()
+
+    def test_a_malformed_client_id_is_422(self):
+        for bad in ("short", "UPPER12345", "has-dash-12", "x" * 41):
+            with self.subTest(client=bad):
+                self.assertEqual(self.ask(client=bad).status_code, 422)
+        self.transcode.assert_not_awaited()
+
+    def test_both_routes_are_same_origin_only(self):
+        for headers in ({"Origin": "https://evil.example"}, {"Origin": "null"}, {}):
+            with self.subTest(headers=headers):
+                self.assertEqual(self.ask(headers=headers).status_code, 403)
+                self.assertEqual(self.stop(headers=headers).status_code, 403)
+        self.transcode.assert_not_awaited()
+        self.stop_transcode.assert_not_awaited()
+
+    def test_a_header_less_beacon_stops_the_session_after_the_response(self):
+        r = self.stop()
+        self.assertEqual(r.status_code, 204, r.text)
+        args = self.stop_transcode.await_args
+        self.assertEqual(args.args[0]["plex_account_id"], "1001")
+        self.assertEqual(args.args[1], TRANSCODE["session"])
+        self.assertEqual(args.kwargs["session_id"], "sid-1001")
+
+    def test_only_a_player_session_can_be_stopped(self):
+        for bad in ("7074ff70-b807-4a4a-b60e-51b7fe06daeb", "039c46f92e474ee9", "ws" + "a" * 31, "x" * 65):
+            with self.subTest(session=bad):
+                self.assertEqual(self.stop(session=bad).status_code, 422)
+        self.stop_transcode.assert_not_awaited()
+
+    def test_both_routes_need_a_plex_listener_and_the_player_on(self):
+        self.as_user(LOCAL)
+        self.assertEqual(self.ask().status_code, 403)
+        self.assertEqual(self.stop().status_code, 403)
+        self.as_user(A)
+        self.on.return_value = False
+        self.assertEqual(self.ask().status_code, 404)
+        self.assertEqual(self.stop().status_code, 404)
+        app.dependency_overrides.pop(get_current_user)
+        self.client.cookies.clear()
+        self.assertEqual(self.ask().status_code, 401)
+        self.assertEqual(self.stop().status_code, 401)
+        self.transcode.assert_not_awaited()
+        self.stop_transcode.assert_not_awaited()
+
+
 class IdentityIsolation(PlayerApiBase):
     def test_a_listener_never_reads_or_writes_anothers_rows(self):
         # A listens and sets prefs.
@@ -754,7 +855,9 @@ class RateLimits(unittest.TestCase):
         return [(str(lim.limit), lim.key_func, lim.scope) for lim in limiter._route_limits[name]]
 
     def test_each_route_has_one_budget_per_session(self):
-        expected = {"books": ("60 per 1 minute", "books"), "book": ("60 per 1 minute", "book"),
+        expected = {"transcode": ("60 per 1 minute", "transcode"),
+                    "transcode_stop": ("60 per 1 minute", "transcode-stop"),
+                    "books": ("60 per 1 minute", "books"), "book": ("60 per 1 minute", "book"),
                     "position": ("60 per 1 minute", "position"), "history": ("60 per 1 minute", "history"),
                     "get_prefs": ("60 per 1 minute", "prefs-get"), "put_prefs": ("60 per 1 minute", "prefs-put"),
                     "checkin": ("60 per 1 minute", "checkin"), "cover": ("240 per 1 minute", "cover")}

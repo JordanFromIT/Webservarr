@@ -110,9 +110,40 @@ const OTHER = JSON.parse(JSON.stringify(MULTI));
 Object.assign(OTHER, { key: '700:1', title: 'Another', cover: '' });
 OTHER.tracks.forEach((t, i) => { t.key = String(701 + i); t.part_path = `/library/parts/97${i}/1/file.mp3`; });
 OTHER.chapters.forEach((c, i) => { c.track = String(701 + i); });
-const BOOKS = { [MULTI.key]: MULTI, [SINGLE.key]: SINGLE, [OTHER.key]: OTHER };
+// Spec 11a: a format this browser cannot decode (E-AC3 in an .m4b), 20 h in
+// one file, and a book whose middle part is one, between two mp3 parts.
+const ATMOS_MS = 20 * 3600 * 1000;
+const EAC3 = { container: 'mp4', codec: 'eac3', profile: 'dolby digital plus + dolby atmos' };
+const ATMOS = {
+  key: '800:1', title: 'Loud Book', author: 'C. Writer', narrator: '', series: '',
+  cover: '', duration_ms: ATMOS_MS, shape: 'single',
+  tracks: [{ key: '801', part_path: '/library/parts/981/1/file.m4b', duration_ms: ATMOS_MS, index: 1, ...EAC3 }],
+  chapters: [
+    { index: 1, label: 'Chapter 1 of 2', start_ms: 0, end_ms: 36000000, track: '801', track_start_ms: 0, track_end_ms: 36000000 },
+    { index: 2, label: 'Chapter 2 of 2', start_ms: 36000000, end_ms: ATMOS_MS, track: '801', track_start_ms: 36000000, track_end_ms: ATMOS_MS }
+  ]
+};
+const MIXED = {
+  key: '900:1', title: 'Mixed Parts', author: 'D. Writer', narrator: '', series: '',
+  cover: '', duration_ms: 1800000, shape: 'parts',
+  tracks: [
+    { key: '901', part_path: '/library/parts/991/1/file.mp3', duration_ms: 600000, index: 1, container: 'mp3', codec: 'mp3', profile: '' },
+    { key: '902', part_path: '/library/parts/992/1/file.m4b', duration_ms: 900000, index: 2, ...EAC3 },
+    { key: '903', part_path: '/library/parts/993/1/file.m4a', duration_ms: 300000, index: 3, container: 'mp4', codec: 'aac', profile: 'lc' }
+  ],
+  chapters: [
+    { index: 1, label: 'Part 1 of 3', start_ms: 0, end_ms: 600000, track: '901', track_start_ms: 0, track_end_ms: 600000 },
+    { index: 2, label: 'Part 2 of 3', start_ms: 600000, end_ms: 1500000, track: '902', track_start_ms: 0, track_end_ms: 900000 },
+    { index: 3, label: 'Part 3 of 3', start_ms: 1500000, end_ms: 1800000, track: '903', track_start_ms: 0, track_end_ms: 300000 }
+  ]
+};
+const BOOKS = { [MULTI.key]: MULTI, [SINGLE.key]: SINGLE, [OTHER.key]: OTHER, [ATMOS.key]: ATMOS, [MIXED.key]: MIXED };
 const trackByPath = new Map();
-for (const b of Object.values(BOOKS)) for (const t of b.tracks) trackByPath.set(t.part_path, t);
+const trackByKey = new Map();
+for (const b of Object.values(BOOKS)) for (const t of b.tracks) { trackByPath.set(t.part_path, t); trackByKey.set(t.key, t); }
+const TRANSCODE_PATH = '/music/:/transcode/universal/start.mp3';
+// What a browser like Chrome answers canPlayType: '' for E-AC3.
+const UNDECODABLE = new Set(['audio/mp4; codecs="ec-3"', 'audio/mp4; codecs="ac-3"']);
 
 // ---- A scripted Plex: which connection, part and token answers how ----
 
@@ -135,7 +166,17 @@ function makeNet() {
     bookStatus: 200,
     bookDetail: '',
     loads: [],          // every load an element started: { side, part, probe }
-    fetches: []         // every URL the engine fetched
+    fetches: [],        // every URL the engine fetched
+    bodies: [],         // every request body the engine sent
+    // Plex's transcoder, as the server's /api/player/transcode answers it:
+    transcodeStatus: 200,   // what asking for a session answers
+    askDelay: 0,            // ms before it answers
+    asks: [],               // { key, track, client }
+    decided: new Map(),     // session -> track key (Plex starts only these)
+    noConvert: new Set(),   // track keys whose transcoded stream never loads (code 4)
+    cutAt: new Map(),       // session -> element second where Plex ends the stream early, cleanly
+    stops: [],              // sessions the engine ended
+    pagehide: []            // the engine's pagehide handlers
   };
 }
 const sideOf = (url) => url.startsWith(LOCAL + '/') ? 'local' : url.startsWith(REMOTE + '/') ? 'remote' : '?';
@@ -144,6 +185,19 @@ function answer(net, url) {
   const u = new URL(url);
   const side = sideOf(url);
   const part = u.pathname;
+  if (part === TRANSCODE_PATH) {
+    const sid = u.searchParams.get('session');
+    const rk = (u.searchParams.get('path') || '').split('/').pop();
+    const t = trackByKey.get(rk);
+    const off = Number(u.searchParams.get('offset'));
+    if (net.hang.has(side)) return { kind: 'hang', side, part: 'tc:' + rk };
+    if (net.down.has(side) || u.searchParams.get('X-Plex-Token') !== net.token || !t ||
+        net.decided.get(sid) !== rk || net.noConvert.has(rk) || !isFinite(off)) {
+      return { kind: 'fail', side, part: 'tc:' + rk };
+    }
+    return { kind: 'ok', side, part: 'tc:' + rk, transcode: true, sid, offset: off,
+      durationMs: Math.max(0, t.duration_ms - off * 1000) };
+  }
   if (net.mediaCache && net.cached.has(url) && trackByPath.get(part) &&
       (net.hang.has(side) || net.down.has(side))) {
     return { kind: 'ok', side, part, durationMs: trackByPath.get(part).duration_ms };   // the browser's media cache
@@ -190,6 +244,7 @@ class FakeAudio {
     this.onerror = null;
     env.audios.push(this);
   }
+  canPlayType(mime) { return UNDECODABLE.has(mime) ? '' : 'probably'; }
   addEventListener(t, fn) { if (!this.ls.has(t)) this.ls.set(t, []); this.ls.get(t).push(fn); }
   removeEventListener(t, fn) { const a = this.ls.get(t); if (a && a.indexOf(fn) !== -1) a.splice(a.indexOf(fn), 1); }
   listenerCount() { let n = 0; for (const a of this.ls.values()) n += a.length; return n; }
@@ -235,6 +290,8 @@ class FakeAudio {
     this.duration = NaN;
     this.seeking = false;
     this.ticking = false;
+    this._end = null;
+    this.sid = null;
     this._rate = 1;               // a new src plays at 1.0 until told otherwise (Chrome)
     this.paused = true;
     const moved = this._t !== 0;
@@ -245,13 +302,17 @@ class FakeAudio {
     const a = answer(this.env.net, this._src);
     this.side = a.side;
     this.part = a.part;
-    this.env.net.loads.push({ side: a.side, part: a.part, probe: this.preload === 'metadata', url: this._src });
+    this.sid = a.sid || null;
+    this.env.net.loads.push({ side: a.side, part: a.part, probe: this.preload === 'metadata', url: this._src,
+      sid: a.sid || null, offset: a.transcode ? a.offset : null });
     if (a.kind === 'hang') return;
     this.env.clock.setTimeout(() => {
       if (g !== this.gen) return;
       if (a.kind === 'fail') { this.error = { code: 4 }; this.fire('error'); return; }
       this.env.net.cached.add(this._src);
-      this.duration = a.durationMs / 1000;
+      // A transcoded stream is progressive: no length the element knows.
+      this.duration = a.transcode ? Infinity : a.durationMs / 1000;
+      this._end = a.transcode ? a.durationMs / 1000 : null;
       this.readyState = 1;
       this.fire('loadedmetadata');
       if (g !== this.gen) return;
@@ -301,9 +362,11 @@ class FakeAudio {
         this.ticking = false; this.error = { code: 3 }; this.fire('error'); return;
       }
       if (this.seeking) { this.tick(g); return; }
-      this._t = Math.min(this.duration, this._t + 0.25 * this.playbackRate);
+      const cut = this.sid !== null ? net.cutAt.get(this.sid) : undefined;
+      const end = cut !== undefined ? cut : this._end !== null ? this._end : this.duration;
+      this._t = Math.min(end, this._t + 0.25 * this.playbackRate);
       this.fire('timeupdate');
-      if (this._t >= this.duration) {
+      if (this._t >= end) {
         this.ticking = false;
         this.paused = true;
         this.ended = true;
@@ -324,9 +387,22 @@ function response(status, body) {
   };
 }
 
+let sessionIds = 0;
 function makeFetch(net, clock) {
-  return async function (url) {
+  return async function (url, opts) {
     net.fetches.push(url);
+    if (opts && opts.body !== undefined) net.bodies.push(String(opts.body));
+    const tm = /^\/api\/player\/transcode\/([^?]+)$/.exec(url);
+    if (tm) {
+      const body = JSON.parse(opts.body);
+      net.asks.push({ key: decodeURIComponent(tm[1]), track: body.track, client: body.client });
+      if (net.askDelay && clock) await new Promise((r) => clock.setTimeout(r, net.askDelay));
+      if (net.transcodeStatus !== 200) return response(net.transcodeStatus, { detail: 'no' });
+      const sid = 'ws' + String(++sessionIds).padStart(32, '0');
+      net.decided.set(sid, body.track);
+      return response(200, { session: sid, start: TRANSCODE_PATH + '?path=%2Flibrary%2Fmetadata%2F' + body.track +
+        '&session=' + sid + '&X-Plex-Client-Identifier=webservarr-web-' + body.client });
+    }
     const m = /^\/api\/player\/book\/([^?]+)(\?refresh=1)?$/.exec(url);
     if (!m) return response(404, { detail: 'Not Found' });
     const wait = net.fetchDelay[decodeURIComponent(m[1])];
@@ -372,7 +448,10 @@ function setup(o = {}) {
     mediaSession: ms,
     MediaMetadata: FakeMetadata,
     permissions: o.permissions,
-    baseUrl: 'https://ws.test/news'
+    baseUrl: 'https://ws.test/news',
+    clientId: 'testclient01',
+    stopTranscode: (sid) => { net.stops.push(sid); },
+    onPageHide: (fn) => { net.pagehide.push(fn); }
   });
   const log = { change: [], ended: [], error: [], warning: [], raw: [] };
   // Every place a change reported, with what the element was doing then:
@@ -1349,6 +1428,386 @@ current = 'a one-off glitch 60 s after a good retry does not skip the part';
   await t.clock.advance(65000);
   check('no skip for the one-off glitch', t.log.warning.length === 0, t.log.warning);
   check('part 2 plays on past it', partOf(t.main) === P2 && !t.main.paused && t.main.currentTime > now + 60, t.main.currentTime);
+  t.engine.close();
+}
+
+// ---- 17. Formats the browser cannot decode: Plex transcodes them (spec 11a) ----
+
+const tcLoads = (t) => t.net.loads.filter((l) => !l.probe && l.part.startsWith('tc:'));
+const rawLoads = (t, path) => t.net.loads.filter((l) => l.part === path);
+const srcParams = (t) => new URL(t.main.src).searchParams;
+const ATMOS_PATH = ATMOS.tracks[0].part_path;
+
+current = 'the MIME type for canPlayType';
+{
+  const cases = [
+    [['mp3', 'mp3', ''], 'audio/mpeg'],
+    [['mp4', 'aac', 'lc'], 'audio/mp4; codecs="mp4a.40.2"'],
+    [['m4b', 'aac', ''], 'audio/mp4; codecs="mp4a.40.2"'],
+    [['mp4', 'aac', 'he-aac'], 'audio/mp4; codecs="mp4a.40.5"'],
+    [['mp4', 'eac3', 'dolby digital plus + dolby atmos'], 'audio/mp4; codecs="ec-3"'],
+    [['mp4', 'ac3', ''], 'audio/mp4; codecs="ac-3"'],
+    [['flac', 'flac', ''], 'audio/flac'],
+    [['ogg', 'opus', ''], 'audio/ogg; codecs="opus"'],
+    [['mp4', 'dts', ''], ''],          // an unknown codec: played direct
+    [['mp4', '', ''], ''],             // Plex said nothing
+    [['', '', ''], ''],
+    [[undefined, null, undefined], '']
+  ];
+  check('mimeFor is exported', typeof E.mimeFor === 'function');
+  for (const [args, want] of cases) {
+    const got = typeof E.mimeFor === 'function' ? E.mimeFor(...args) : null;
+    check(`mimeFor(${JSON.stringify(args)})`, got === want, got);
+  }
+}
+
+current = 'a format the browser plays streams direct, exactly as before';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, MIXED.key);          // part 1 is mp3
+  check('the file itself', partOf(t.main) === MIXED.tracks[0].part_path && !t.main.paused);
+  check('no transcode session asked for', t.net.asks.length === 0 && tcLoads(t).length === 0);
+  t.engine.close();
+  // An unknown codec is played direct too, and its failure follows the ladder as before.
+  const u = setup({ net: { noLocal: true } });
+  const odd = JSON.parse(JSON.stringify(SINGLE));
+  odd.tracks[0].codec = 'dts';
+  odd.tracks[0].container = 'mp4';
+  BOOKS['650:1'] = Object.assign(odd, { key: '650:1' });
+  await openPlaying(u, '650:1');
+  check('an unknown codec plays direct', partOf(u.main) === SINGLE.tracks[0].part_path && u.net.asks.length === 0);
+  u.engine.close();
+  delete BOOKS['650:1'];
+}
+
+current = 'a format the browser cannot decode streams from Plex\'s transcoder';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key);
+  check('a session was asked for, for the book\'s track, with this browser\'s id',
+    t.net.asks.length === 1 && t.net.asks[0].key === ATMOS.key && t.net.asks[0].track === '801' &&
+    t.net.asks[0].client === 'testclient01', t.net.asks);
+  check('the element streams from the transcoder on the same connection', sideOf(t.main.src) === 'remote' &&
+    new URL(t.main.src).pathname === TRANSCODE_PATH, partOf(t.main));
+  check('from the start of the part', srcParams(t).get('offset') === '0.000');
+  check('with its session and the token', t.net.decided.has(srcParams(t).get('session')) &&
+    srcParams(t).get('X-Plex-Token') === TOKEN);
+  check('the undecodable file itself is never loaded, not even by a probe', rawLoads(t, ATMOS_PATH).length === 0);
+  check('it plays', !t.main.paused && t.engine.state().playing && t.engine.state().error === null);
+  t.engine.close();
+}
+
+current = 'the decision comes before any probe: the local probe asks the transcoder too';
+{
+  const t = setup({ permissions: { query: async () => ({ state: 'granted' }) } });
+  await openPlaying(t, ATMOS.key);
+  const probes = t.net.loads.filter((l) => l.probe);
+  check('a local probe ran', probes.length >= 1 && probes[0].side === 'local', probes);
+  check('through the transcoder, with a session of its own', probes.every((l) => l.part === 'tc:801' && l.sid) &&
+    new Set(probes.map((l) => l.sid)).size === probes.length);
+  check('its session was ended after', probes.every((l) => t.net.stops.includes(l.sid)), t.net.stops);
+  check('the file itself never loaded', rawLoads(t, ATMOS_PATH).length === 0);
+  check('local plays, from a session other than the probe\'s', t.engine.state().connection === 'local' &&
+    !probes.some((l) => l.sid === srcParams(t).get('session')));
+  t.engine.close();
+}
+
+current = 'position in transcode mode is the offset base plus the element time';
+{
+  // At the start.
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key);
+  await t.clock.advance(5000);
+  let pos = t.engine.state().position;
+  check('start: the track and the element time', pos.track === '801' && Math.abs(pos.offset_ms - Math.round(t.main.currentTime * 1000)) <= 1 &&
+    pos.offset_ms > 4000 && pos.duration_ms === ATMOS_MS, pos);
+  t.engine.close();
+  // Mid-track (10 h in), resumed at a saved place.
+  const m = setup({ net: { noLocal: true } });
+  await openPlaying(m, ATMOS.key, { at: at('801', 36000000) });
+  check('resume: the stream starts at the saved offset', srcParams(m).get('offset') === '36000.000', srcParams(m).get('offset'));
+  check('resume: the element counts from 0', m.main.currentTime < 1);
+  await m.clock.advance(5000);
+  pos = m.engine.state().position;
+  check('mid-track: base plus element time', pos.offset_ms === 36000000 + Math.round(m.main.currentTime * 1000) &&
+    pos.offset_ms > 36004000 && pos.offset_ms < 36006000, pos);
+  check('book time and chapter follow', m.engine.state().bookMs === pos.offset_ms && m.engine.state().chapterIndex === 1);
+  check('the element\'s length is never taken (it has none)', m.main.duration === Infinity && m.engine.state().bookDurationMs === ATMOS_MS);
+  check('every place reported was at or after the saved one', m.positions.every((p) => !p || p.offset_ms >= 36000000), m.positions);
+  m.engine.close();
+  // Near the end: plays out, ends at the part's length.
+  const n = setup({ net: { noLocal: true } });
+  await openPlaying(n, ATMOS.key, { at: at('801', ATMOS_MS - 3000) });
+  await n.clock.advance(5000);
+  check('near the end: ended once, at the part\'s length', n.log.ended.length === 1 &&
+    n.engine.state().position.offset_ms === ATMOS_MS && n.log.error.length === 0, n.engine.state().position);
+  check('its session is ended', n.net.stops.length === 1 && n.net.stops[0] === srcParams(n).get('session'));
+  n.engine.close();
+}
+
+current = 'a seek restarts the transcode at the new offset, once it settles';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 1000000) });
+  await t.clock.advance(2000);
+  const sid = srcParams(t).get('session');
+  const before = tcLoads(t).length;
+  const mark = t.positions.length;
+  const from = t.engine.state().position.offset_ms;
+  // A burst: a seek and five skips 100 ms apart, as a listener scrubbing.
+  t.engine.seek(50000000);
+  for (let i = 0; i < 5; i++) { await t.clock.advance(100); t.engine.skip(30); }
+  check('nothing restarted while moving', tcLoads(t).length === before);
+  check('the old stream is let go at once (nothing plays from the old place)', !t.main.src);
+  await t.clock.advance(399);
+  check('not before it settles', tcLoads(t).length === before);
+  await t.clock.advance(300);
+  const loads = tcLoads(t).slice(before);
+  check('one restart for the whole burst', loads.length === 1, loads.length);
+  check('at the settled place', loads[0] && loads[0].offset === 50150, loads[0] && loads[0].offset);
+  check('on the same session (Plex restarts it, no new decision)', loads[0] && loads[0].sid === sid && t.net.asks.length === 1);
+  await t.clock.advance(3000);
+  const after = t.positions.slice(mark).filter(Boolean);
+  check('the place never went back toward the old one during the restart', after.every((p) => p.offset_ms >= 50000000) &&
+    after.length > 0 && from < 50000000, after.map((p) => p.offset_ms));
+  const p = t.engine.state().position.offset_ms;
+  check('it plays on from the new place', !t.main.paused && p > 50150000 && p < 50154000, p);
+  check('the seek events carry from and to', t.log.change.some((c) => c.reason === 'skip' && c.to === 50150000));
+  t.engine.close();
+}
+
+current = 'a session answered after a seek never plays the old place';
+{
+  const t = setup({ net: { noLocal: true, askDelay: 300 } });
+  const p = t.engine.open(ATMOS.key, { at: at('801', 1000000) });
+  await t.clock.advance(100);                  // the first session is still being asked for
+  await p;
+  const mark = t.positions.length;
+  t.engine.seek(5000000);
+  await t.clock.advance(2000);
+  const after = t.positions.slice(mark).filter(Boolean);
+  check('never back at the old place', after.every((q) => q.offset_ms >= 5000000), after.map((q) => q.offset_ms));
+  check('no stream ever started from the old place', tcLoads(t).every((l) => l.offset === 5000), tcLoads(t).map((l) => l.offset));
+  check('it plays from the new place', !t.main.paused && srcParams(t).get('offset') === '5000.000');
+  check('the stale session was ended', t.net.stops.length === 1 && t.net.stops[0] !== srcParams(t).get('session'), t.net.stops);
+  t.engine.close();
+}
+
+current = 'play pressed while a seek settles does not play the old stream';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 1000000) });
+  await t.clock.advance(1000);
+  t.engine.pause();
+  t.engine.seek(2000000);
+  await t.engine.play();
+  check('nothing plays yet', t.main.paused && !t.main.src);
+  await t.clock.advance(1000);
+  check('then the new stream plays, from the new place', !t.main.paused && srcParams(t).get('offset') === '2000.000');
+  check('the place is the new one', t.engine.state().position.offset_ms >= 2000000);
+  t.engine.close();
+}
+
+current = 'a paused seek restarts too, and play goes on from there';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 1000000) });
+  t.engine.pause();
+  t.engine.seek(3000000);
+  await t.clock.advance(1000);
+  check('loaded at the new place, not playing', t.main.paused && srcParams(t).get('offset') === '3000.000' &&
+    t.engine.state().position.offset_ms === 3000000 && !t.engine.state().playing);
+  await t.engine.play();
+  await t.clock.advance(2000);
+  const p = t.engine.state().position.offset_ms;
+  check('play goes on from it', !t.main.paused && p > 3000000 && p < 3003000, p);
+  t.engine.close();
+}
+
+current = 'part advance from a direct part to a transcoded one and back';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, MIXED.key, { at: at('901', 598000) });
+  check('part 1 direct', partOf(t.main) === MIXED.tracks[0].part_path);
+  await t.clock.advance(3000);
+  check('part 2 from the transcoder at 0', new URL(t.main.src).pathname === TRANSCODE_PATH &&
+    srcParams(t).get('offset') === '0.000' && t.net.asks.length === 1 && t.net.asks[0].track === '902', t.main.src && partOf(t.main));
+  check('the place is part 2 once it plays', t.engine.state().position.track === '902');
+  const sid = srcParams(t).get('session');
+  t.engine.seek(1500000 - 2000);          // 2 s before part 2 ends
+  await t.clock.advance(1000);
+  await t.clock.advance(3000);
+  check('part 3 direct again', partOf(t.main) === MIXED.tracks[2].part_path && !t.main.paused);
+  check('part 2\'s session was ended on leaving it', t.net.stops.includes(sid), t.net.stops);
+  check('no warnings or errors', t.log.warning.length === 0 && t.log.error.length === 0);
+  const reasons2 = reasons(t);
+  check('two natural advances', reasons2.filter((r) => r === 'part').length === 2, reasons2);
+  t.engine.close();
+}
+
+current = 'a dropped transcoded stream takes the ladder and holds the place';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 7000000) });
+  await t.clock.advance(4000);
+  const held = t.engine.state().position.offset_ms;
+  const mark = t.positions.length;
+  t.net.down.add('remote');
+  t.net.bookStatus = 503;
+  await t.clock.advance(3000);
+  const s = t.engine.state();
+  check('"Can\'t reach the media server"', s.error && s.error.code === 'unreachable' && s.error.message === E.UNREACHABLE, s.error);
+  check('never the format message, never a skip', t.log.warning.length === 0 && !t.log.error.some((e) => e.code === 'format'));
+  check('the place is held', s.position.offset_ms === held && t.positions.slice(mark).every((p) => p && p.offset_ms === held),
+    t.positions.slice(mark).map((p) => p && p.offset_ms));
+  check('the undecodable file itself was never probed', rawLoads(t, ATMOS_PATH).length === 0);
+  check('every probe asked the transcoder with a session of its own',
+    t.net.loads.filter((l) => l.probe).every((l) => l.part === 'tc:801' && l.sid));
+  t.net.down.clear();
+  t.net.bookStatus = 200;
+  const asks = t.net.asks.length;
+  t.log.error[t.log.error.length - 1].retry && await t.engine.retry();
+  await t.clock.advance(1000);
+  check('Retry resumes exactly there on a new session', !t.main.paused && t.net.asks.length === asks + 1 &&
+    srcParams(t).get('offset') === (held / 1000).toFixed(3), srcParams(t).get('offset'));
+  t.engine.close();
+}
+
+current = 'a dropped stream switches to the other connection at the same offset';
+{
+  const t = setup({ permissions: { query: async () => ({ state: 'granted' }) } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 7000000) });
+  await t.clock.advance(2000);
+  const held = t.engine.state().position.offset_ms;
+  t.net.down.add('local');
+  await t.clock.advance(1000);
+  check('remote, at the same offset', t.engine.state().connection === 'remote' && !t.main.paused &&
+    Math.abs(Number(srcParams(t).get('offset')) * 1000 - held) <= 250, [held, srcParams(t).get('offset')]);
+  check('no error, no warning', t.log.error.length === 0 && t.log.warning.length === 0);
+  t.engine.close();
+}
+
+current = 'Plex ending the stream early is a dropped stream, not the end of the book';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 1000000) });
+  t.net.cutAt.set(srcParams(t).get('session'), 5);   // Plex stops it 5 s in (idle, or stopped)
+  await t.clock.advance(6000);
+  check('no ended, no advance', t.log.ended.length === 0 && !reasons(t).includes('ended'), reasons(t));
+  check('streaming again on a new session from where it was cut',
+    !t.main.paused && t.net.asks.length === 2 && Math.abs(Number(srcParams(t).get('offset')) - 1005) <= 0.25, srcParams(t).get('offset'));
+  check('the place never jumped to the end', t.positions.every((p) => !p || p.offset_ms < 1010000));
+  t.engine.close();
+}
+
+current = 'Plex refusing to convert shows the format message and holds the place';
+{
+  const t = setup({ net: { noLocal: true, transcodeStatus: 415 } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 5000000) });
+  const s = t.engine.state();
+  check('the format message', s.error && s.error.code === 'format' && s.error.message === E.FORMAT_UNSUPPORTED &&
+    E.FORMAT_UNSUPPORTED === "This book's audio format can't play in this browser", s.error);
+  check('never the network message', !t.log.error.some((e) => e.code === 'unreachable'));
+  check('the place is held', s.position && s.position.offset_ms === 5000000);
+  check('nothing loaded at all', t.net.loads.length === 0, t.net.loads);
+  check('with a retry', typeof t.log.raw.find((r) => r[0] === 'error')[1].retry === 'function');
+  t.engine.close();
+}
+
+current = 'a transcoded stream that never plays on a working connection is the format message, not a skip';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, MIXED.key, { at: at('901', 598000) });
+  t.net.noConvert.add('902');
+  await t.clock.advance(8000);
+  const s = t.engine.state();
+  check('the format message', s.error && s.error.code === 'format', s.error);
+  check('part 2 was not skipped: no warning, part 3 never loaded', t.log.warning.length === 0 &&
+    rawLoads(t, MIXED.tracks[2].part_path).length === 0, t.log.warning);
+  check('the place is where part 2 starts', s.position.track === '902' && s.position.offset_ms === 0, s.position);
+  check('never "Can\'t reach the media server"', !t.log.error.some((e) => e.code === 'unreachable'));
+  t.engine.close();
+}
+
+current = 'no answer when asking for a session is a network failure, up the ladder';
+{
+  const t = setup({ net: { noLocal: true, transcodeStatus: 503 } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 5000000) });
+  await t.clock.advance(1000);
+  const s = t.engine.state();
+  check('unreachable, not format', s.error && s.error.code === 'unreachable', s.error);
+  check('one refresh on the way', t.net.fetches.filter((f) => f.endsWith('?refresh=1')).length === 1);
+  check('the place is held', s.position.offset_ms === 5000000);
+  t.engine.close();
+  // An ask that never answers gives up after ASK_MS.
+  const u = setup({ net: { noLocal: true, askDelay: 60000 } });
+  const p = u.engine.open(ATMOS.key, { at: at('801', 5000000) });
+  await u.clock.advance(400);
+  await p;
+  await u.clock.advance(E.ASK_MS * 3 + 1000);
+  check('a hung ask ends unreachable, place held', u.engine.state().error && u.engine.state().error.code === 'unreachable' &&
+    u.engine.state().position.offset_ms === 5000000, u.engine.state().error);
+  u.engine.close();
+  check('close leaves no timer behind', u.live.size === 0, u.live.size);
+}
+
+current = 'sessions are ended on a track change, a book change, close and pagehide';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key);
+  const a = srcParams(t).get('session');
+  await openPlaying(t, MULTI.key);               // another book
+  check('a book change ends it', t.net.stops.includes(a), t.net.stops);
+  await openPlaying(t, ATMOS.key);
+  const b = srcParams(t).get('session');
+  t.engine.close();
+  check('close ends it', t.net.stops.includes(b));
+  await openPlaying(t, ATMOS.key);
+  const c = srcParams(t).get('session');
+  check('the engine listens for pagehide', t.net.pagehide.length === 1);
+  t.net.pagehide.forEach((fn) => fn({ persisted: false }));
+  check('pagehide ends it', t.net.stops.includes(c));
+  const n = t.net.stops.length;
+  t.engine.close();
+  check('each once', t.net.stops.length === n && new Set(t.net.stops).size === t.net.stops.length, t.net.stops);
+  // An error ends it too; a retry asks for a new one.
+  const u = setup({ net: { noLocal: true } });
+  await openPlaying(u, ATMOS.key);
+  const d = srcParams(u).get('session');
+  u.net.down.add('remote');
+  u.net.bookStatus = 503;
+  await u.clock.advance(3000);
+  check('the error state ends it', u.net.stops.includes(d) && u.engine.state().error);
+  u.engine.close();
+}
+
+current = 'a session answered after the part was left is ended at once';
+{
+  const t = setup({ net: { noLocal: true, askDelay: 2000 } });
+  const p = t.engine.open(ATMOS.key);
+  await t.clock.advance(400);
+  await p;
+  t.engine.close();
+  await t.clock.advance(3000);
+  check('its session was ended, nothing loaded', t.net.asks.length === 1 && t.net.stops.length === 1 &&
+    tcLoads(t).length === 0, [t.net.stops, tcLoads(t)]);
+}
+
+current = 'transcode mode keeps the token in the element\'s src only';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 1000000) });
+  await t.clock.advance(2000);
+  t.engine.seek(5000000);
+  await t.clock.advance(1000);
+  t.net.down.add('remote');
+  t.net.bookStatus = 503;
+  await t.clock.advance(3000);
+  check('state() has no token', asJson(t.engine.state()).indexOf(TOKEN) === -1);
+  check('no event carries it', asJson(t.log).indexOf(TOKEN) === -1);
+  check('no request body carries it', t.net.bodies.every((b) => b.indexOf(TOKEN) === -1) && t.net.bodies.length >= 1, t.net.bodies);
+  check('no stop carries it', t.net.stops.every((sid) => /^ws[0-9a-f]{32}$/.test(sid)));
+  check('the console never saw it', consoleSeen.every((l) => l.indexOf(TOKEN) === -1));
   t.engine.close();
 }
 
