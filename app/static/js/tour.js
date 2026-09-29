@@ -235,8 +235,30 @@
       placeTimer = setTimeout(place, 380);
     }
 
+    // The full-screen audiobook player covers the page (<html
+    // data-player-full>, js/player/ui.js): a tour never starts under it nor
+    // takes its keys. One asked for meanwhile starts once the player has
+    // closed.
+    var playerWait = null;
+    function playerOpen() {
+      return document.documentElement.hasAttribute('data-player-full');
+    }
+    function stopWaiting() {
+      if (playerWait) { playerWait.disconnect(); playerWait = null; }
+    }
+    function afterPlayer() {
+      if (playerWait || typeof window.MutationObserver !== 'function') return;
+      playerWait = new window.MutationObserver(function () {
+        if (playerOpen()) return;
+        stopWaiting();
+        start();
+      });
+      playerWait.observe(document.documentElement, { attributes: true, attributeFilter: ['data-player-full'] });
+    }
+
     function start() {
       if (active || !STEPS.length || (signal && signal.aborted)) return;
+      if (playerOpen()) { afterPlayer(); return; }
       active = true;
       step = 0;
       placed = false;
@@ -290,7 +312,7 @@
 
     // capture: the reader turns pages on the arrow keys too
     document.addEventListener('keydown', function (e) {
-      if (!active) return;
+      if (!active || playerOpen()) return;
       if (e.key === 'Escape') { finish(); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); next(); }
       else if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); back(); }
@@ -319,6 +341,7 @@
     if (signal) {
       signal.addEventListener('abort', function () {
         clearTimeout(startTimer);
+        stopWaiting();
         stop();
         var layer = q('tourLayer');
         if (layer) {
