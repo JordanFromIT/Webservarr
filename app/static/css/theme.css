@@ -1100,7 +1100,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 /* Four actions (speed, chapters, sleep, history) on one row down to 320 px. */
 @media (max-width: 359px) {
-  .wsp-actions { gap: 6px; }
+  .wsp-actions { gap: 4px; }
   .wsp-action { min-width: 64px; padding: 8px 4px; }
 }
 .wsp-action-icon { font-size: 24px; line-height: 24px; height: 24px; }
