@@ -1031,13 +1031,22 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 .wsp-main > * { width: 100%; max-width: 440px; flex-shrink: 0; }
 .wsp-main > .wsp-full-art {
-  /* The cover takes the height the rest leaves, so everything fits on any
-     screen without scrolling; it keeps its own shape inside it. */
-  flex: 1 1 0; min-height: 140px; max-height: min(400px, 44vh); margin: 4px 0 20px; touch-action: none;
+  /* The cover takes the height the rest leaves, keeping its own shape inside
+     it: on a short screen (with alerts showing) it gives way first, down to
+     nothing, before the scrubber, skip and play ever move. */
+  flex: 1 1 0; min-height: 0; max-height: min(400px, 44vh); margin: 4px 0 20px; touch-action: none;
+  container-type: size;
+}
+/* Too small to be a picture: gone, rather than a sliver. */
+@container (max-height: 64px) {
+  .wsp-full-art img, .wsp-full-art .wsp-art-mark { display: none; }
 }
 .wsp-full-art img { border-radius: 12px; box-shadow: 0 18px 40px -16px var(--ws-shade); }
 .wsp-full-art .wsp-art-mark { width: auto; max-width: 100%; aspect-ratio: 1; border-radius: 16px; font-size: 64px; }
 .wsp-meta { text-align: center; touch-action: none; }
+/* The column overflows (ui.js marks it): the cover and the title let it
+   scroll; the top bar still swipes the player closed. */
+.wsp-main.is-scrollable [data-swipe] { touch-action: pan-y; }
 .wsp-series, .wsp-byline { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgb(var(--color-text) / .7); }
 .wsp-series { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 .wsp-title {

@@ -69,6 +69,10 @@
  *                     player on a wide screen, over it (with a back button)
  *                     on a phone. body is where its content goes; opener, the
  *                     button that showed it, gets focus back when it hides.
+ *                     Call show() from the tap or key that asks for it: only
+ *                     then does the panel get a CloseWatcher of its own (the
+ *                     phone's Back closes it alone). Shown any other way, Escape
+ *                     still closes it first, but Back closes the player.
  *   open(), close(), isOpen()        the full player
  *   on('open' | 'close', fn) -> unsubscribe
  *
@@ -225,6 +229,7 @@ export function createUI(env) {
   let watcher = null;
   let panelWatcher = null;
   let openedAt = null;         // the address the full player opened on
+  let panelTapped = false;     // the panel over the player got its watcher from a tap
 
   // again: re-made for a layer that had one (the screen turned), not a new
   // layer, so no tap is needed.
@@ -463,7 +468,7 @@ export function createUI(env) {
     panelFrom = opener && opener.nodeType === 1 ? opener : doc.activeElement;
     view = name;
     // Over the player (a phone): a layer of its own, closed first.
-    if (isOpen && !panelWatcher && !matches(WIDE)) watchPanel(false);
+    if (isOpen && !panelWatcher && !matches(WIDE)) panelTapped = watchPanel(false);
     drawPanels();
     if (name === 'chapters') centreCurrent();
     const p = panels.get(name);
@@ -477,6 +482,7 @@ export function createUI(env) {
       panelWatcher = null;
       hidePanel(null);
     }, again);
+    return !!panelWatcher;
   }
 
   // The screen turned: a panel is a layer only while it covers the player.
@@ -486,7 +492,10 @@ export function createUI(env) {
       const w = panelWatcher;
       panelWatcher = null;
       unwatch(w);
-    } else if (!panelWatcher) {
+    } else if (!panelWatcher && panelTapped) {
+      // Only a watcher the panel had from its tap is made again: one made
+      // for a panel shown without a tap could join the player's, and one
+      // Back would close both.
       watchPanel(true);
     }
   }
@@ -495,6 +504,7 @@ export function createUI(env) {
     if (name && view !== name) return;
     if (view === null) return;
     view = null;
+    panelTapped = false;
     const w = panelWatcher;
     panelWatcher = null;
     unwatch(w);
@@ -619,6 +629,7 @@ export function createUI(env) {
       const at = order.indexOf(entry);
       if (at !== -1) order.splice(at, 1);
       syncHost();
+      syncScroll();
       if (hadFocus) {
         const back = isOpen ? fullPlay : (barShown ? barPlay : null);
         if (back) back.focus({ preventScroll: true });
@@ -663,6 +674,7 @@ export function createUI(env) {
     if (o.prompt) noticeBox.insertBefore(el, noticeBox.firstChild);
     else noticeBox.appendChild(el);
     syncHost();
+    syncScroll();
     return { remove: remove, get shown() { return !gone; } };
   }
 
@@ -714,7 +726,19 @@ export function createUI(env) {
   if (typeof env.ResizeObserver === 'function') {
     try {
       new env.ResizeObserver(function () { measureBar(); }).observe(bar);
+      // The screen turning or the alerts changing the column's height.
+      new env.ResizeObserver(function () { syncScroll(); }).observe(main);
     } catch (e) { /* measured on each change of shape instead */ }
+  }
+
+  // ---- A short screen ----
+
+  // The player's column overflows (a short screen, with alerts showing): the
+  // cover and the title stop taking the touch, so it scrolls from them too
+  // (the top bar still swipes it closed).
+  function syncScroll() {
+    if (!isOpen) return;
+    main.classList.toggle('is-scrollable', main.scrollHeight > main.clientHeight + 1);
   }
 
   // ---- The warning ----
@@ -735,6 +759,7 @@ export function createUI(env) {
       if (text) live.appendChild(warnNode(text));
     });
     measureBar();
+    syncScroll();
   }
 
   // ---- Drawing ----
@@ -985,7 +1010,8 @@ export function createUI(env) {
     const first = f[0];
     const last = f[f.length - 1];
     const a = doc.activeElement;
-    if (!full.contains(a)) {
+    // Focus on the sheet itself (a tap on the cover) is outside the controls.
+    if (!full.contains(a) || a === sheet) {
       e.preventDefault();
       (e.shiftKey ? last : first).focus();
     } else if (e.shiftKey && a === first) {
@@ -1049,6 +1075,7 @@ export function createUI(env) {
     });
     render(player.state());
     centreCurrent();
+    syncScroll();
     if (clockTimer === null) clockTimer = setT(tickClock, CLOCK_MS);
     closeBtn.focus({ preventScroll: true });
     emit('open');
@@ -1064,6 +1091,7 @@ export function createUI(env) {
     const pw = panelWatcher;
     watcher = null;
     panelWatcher = null;
+    panelTapped = false;
     unwatch(pw);
     unwatch(w);
     endDrag();

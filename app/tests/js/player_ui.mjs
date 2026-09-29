@@ -6,7 +6,8 @@
 //
 // Imports ui.js as it is, through a data: URL like player_engine.mjs, which
 // also proves the module touches no DOM at import time.
-// UI_JS=<path> runs the same cases against another copy of ui.js.
+// UI_JS=<path> runs the same cases against another copy of ui.js (TOUR_JS,
+// of tour.js, for the tour case).
 // Run: node app/tests/js/player_ui.mjs (npm run test:js; CI js-checks).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -847,19 +848,127 @@ await run('T7B4: a turned screen makes or drops the panel\'s watcher', () => {
   check('turned wide: the panel beside the player has none', t.env.watchers.length === 1);
   t.env.escape();
   check('wide: Escape closes the player', !t.ui.isOpen() && t.env.watchers.length === 0);
+  // A panel tapped on a phone, turned wide and back: its watcher is made again.
+  t.env.setWide(false);
   t.ui.open();
   t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1).click();
-  check('wide: one watcher', t.env.watchers.length === 1);
+  t.env.setWide(true);
+  check('wide again: one watcher', t.env.watchers.length === 1);
   t.env.activation = false;
   t.env.setWide(false);
-  check('turned narrow: the panel gets one again, without a tap', t.env.watchers.length === 2);
+  check('turned narrow: the tapped panel gets its watcher again, without a tap', t.env.watchers.length === 2);
   t.env.closeRequest();
   check('Back then closes the panel first', t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view'));
   t.env.closeRequest();
   check('then the player', !t.ui.isOpen() && t.env.watchers.length === 0);
+  // A panel first shown wide never had a watcher: turning narrow makes none.
+  t.env.activation = true;
+  t.env.setWide(true);
+  t.ui.open();
+  t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1).click();
+  t.env.activation = false;
+  t.env.setWide(false);
+  check('shown wide, turned narrow: no watcher is made', t.env.watchers.length === 1);
+  const esc = t.env.escape();
+  check('Escape still closes the panel first', esc.defaultPrevented && t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view'));
+  t.ui.close();
   t.env.setWide(true);
   t.env.setWide(false);
   check('closed: turning makes nothing', t.env.watchers.length === 0);
+});
+
+await run('T7B8: a panel shown without a tap never gets a watcher, turning or not', () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  t.q('.wsp-bar-open').click();
+  t.env.activation = false;
+  const h = t.ui.panel('history', { title: 'History' });
+  h.show();
+  check('shown through the API: no watcher of its own', t.env.watchers.length === 1);
+  t.env.setWide(true);
+  t.env.setWide(false);
+  check('turned wide and back: still none', t.env.watchers.length === 1);
+  const esc = t.env.escape();
+  check('Escape closes the panel first, by the player\'s own handler', esc.defaultPrevented && t.ui.isOpen() && !h.shown);
+  h.show();
+  t.env.closeRequest();
+  check('Back (its one watcher) closes the player, with the panel', !t.ui.isOpen() && !h.shown && t.env.watchers.length === 0);
+});
+
+await run('T7B7: Shift+Tab from the sheet itself wraps', () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  const f = Array.from(t.q('.wsp-full').querySelectorAll('button, input')).filter((el) => !el.closest('[hidden]') && !el.disabled);
+  const sheet = t.q('.wsp-sheet');
+  sheet.focus();
+  check('focus on the sheet', t.doc.activeElement === sheet);
+  let ev = t.key(sheet, 'Tab', { shiftKey: true });
+  check('Shift+Tab: the last control', ev.defaultPrevented && t.doc.activeElement === f[f.length - 1]);
+  sheet.focus();
+  ev = t.key(sheet, 'Tab');
+  check('Tab: the first control', ev.defaultPrevented && t.doc.activeElement === f[0]);
+});
+
+await run('T7B5: on a short screen the cover gives way and the column scrolls', () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  const main = t.q('.wsp-main');
+  let content = 900;
+  Object.defineProperty(main, 'scrollHeight', { configurable: true, get: () => content });
+  Object.defineProperty(main, 'clientHeight', { configurable: true, get: () => 500 });
+  t.ui.open();
+  check('overflowing: marked scrollable', main.classList.contains('is-scrollable'));
+  content = 480;
+  const n = t.ui.notify('x', { duration: 0 });
+  n.remove();
+  check('fitting again: unmarked', !main.classList.contains('is-scrollable'));
+  content = 900;
+  t.engine.emit('warning', { kind: 'not-saved', active: true, lastSavedAt: 1, message: "Your place isn't being saved." });
+  check('an alert that makes it overflow marks it', main.classList.contains('is-scrollable'));
+  const css = readFileSync(join(here, '../../static/css/theme.css'), 'utf8');
+  check('the cover can shrink to nothing', /\.wsp-main > \.wsp-full-art \{[^}]*flex: 1 1 0; min-height: 0;/.test(css));
+  check('and is gone when too small to be a picture', /@container \(max-height: 64px\) \{\s*\.wsp-full-art img, \.wsp-full-art \.wsp-art-mark \{ display: none; \}/.test(css) &&
+    /container-type: size;/.test(css));
+  check('scrollable: the cover and the title let the column pan', /\.wsp-main\.is-scrollable \[data-swipe\] \{ touch-action: pan-y; \}/.test(css));
+  // Nothing after the cover may flex away: the scrubber, skip and play keep their size.
+  check('the rest never shrinks', /\.wsp-main > \* \{[^}]*flex-shrink: 0;/.test(css));
+});
+
+await run('T7B6: a tour neither starts under the full player nor takes its keys', async () => {
+  const t = setup();
+  const src = readFileSync(process.env.TOUR_JS || join(here, '../../static/js/tour.js'), 'utf8');
+  t.doc.querySelector('main').insertAdjacentHTML('afterbegin', '<div id="wsPage"><h1 id="pageTitle">Library</h1></div>');
+  new Function('window', 'document', 'localStorage', 'location', src)(t.win, t.doc, t.win.localStorage, t.win.location);
+  const ctl = new AbortController();
+  const tour = t.win.WebServarrTour.init({
+    seenKey: 'test_tour_seen', autoStart: false, signal: ctl.signal,
+    steps: [{ target: '#pageTitle', icon: 'x', title: 'One', body: 'b' }, { target: '#pageTitle', icon: 'x', title: 'Two', body: 'b' }]
+  });
+  t.engine.set(BOOK, 'open');
+  t.q('.wsp-bar-open').click();
+  tour.maybeStart();
+  check('asked while the player is open: not started', !tour.isActive());
+  t.key(t.doc.activeElement, 'ArrowRight');
+  t.env.escape();
+  await flush();
+  check('the player closed on Escape', !t.ui.isOpen());
+  await t.clock.advance(400);
+  await flush();
+  check('then the tour starts', tour.isActive());
+  check('and nothing marked it seen', t.win.localStorage.getItem('test_tour_seen') === null);
+  // A tour running when the player opens over it leaves the player's keys alone.
+  t.q('.wsp-bar-open').click();
+  check('the player is open over the tour', t.ui.isOpen() && tour.isActive());
+  const title = () => t.doc.getElementById('tourTitle').textContent;
+  const before = title();
+  t.key(t.q('.wsp-range'), 'ArrowRight');
+  check('ArrowRight steps the scrubber, not the tour', title() === before && t.engine.calls.some((c) => c[0] === 'skip'));
+  t.env.escape();
+  check('Escape closes the player, and the tour is not marked seen', !t.ui.isOpen() && tour.isActive() &&
+    t.win.localStorage.getItem('test_tour_seen') === null);
+  ctl.abort();
+  check('the visit ends: the tour and its wait go with it', !tour.isActive());
 });
 
 // ---------------------------------------------------------------------------
