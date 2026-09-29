@@ -190,20 +190,12 @@ class FakePlex:
         self.pms_down = None
         self.timeline_down = False
         self.reject_tokens = set()    # tokens the server answers 401 to
-        self.reject_stop_tokens = set()  # tokens only the transcode stop answers 401 to
         self.identity = MACHINE
         # Per-token listening state: {token: {track rk: {viewOffset...}}}
         self.state = {}
         # Per-token readable library sections (the owner's view by default).
         self.sections = {}
         self.photo_type = "image/jpeg"
-        # The transcoder: how a decision is answered (None: conversion OK;
-        # "refuse": a decision code outside 1xxx; or an HTTP status), and
-        # what was asked of it.
-        self.decision = None
-        self.stop_status = 200
-        self.decided = []
-        self.stopped = []
         # path -> a JSON body answered as is (200), for odd shapes.
         self.raw = {}
 
@@ -247,8 +239,6 @@ class FakePlex:
         path = url.path
         q = parse_qs(url.query.decode() if isinstance(url.query, bytes) else url.query)
         if path in self.raw:
-            if path.endswith("/decision"):
-                self.decided.append({k: v[0] for k, v in q.items()})
             return httpx.Response(200, json=self.raw[path])
         if path == "/identity":
             return self.mc(machineIdentifier=self.identity)
@@ -257,20 +247,6 @@ class FakePlex:
             return self.mc(Directory=[{"key": k, "type": "artist", "title": f"Section {k}"} for k in keys])
         if path == "/photo/:/transcode":
             return httpx.Response(200, content=b"\x89PNG-or-JPEG", headers={"content-type": self.photo_type})
-        if path == "/music/:/transcode/universal/decision":
-            self.decided.append({k: v[0] for k, v in q.items()})
-            if isinstance(self.decision, int):
-                return httpx.Response(self.decision, text="<html>no</html>")
-            if self.decision == "refuse":
-                return self.mc(generalDecisionCode=2000, generalDecisionText="Neither direct play nor conversion is available.")
-            return self.mc(generalDecisionCode=1001, generalDecisionText="Direct play not available; Conversion OK.",
-                           Metadata=[{"ratingKey": q["path"][0].rsplit("/", 1)[-1],
-                                      "Media": [{"container": "mp3", "audioCodec": "mp3", "selected": True}]}])
-        if path == "/music/:/transcode/universal/stop":
-            self.stopped.append(q.get("session", [""])[0])
-            if token in self.reject_stop_tokens:
-                return httpx.Response(401, text="unauthorized")
-            return httpx.Response(self.stop_status, text="")
         if path == "/:/timeline":
             if self.timeline_down:
                 raise httpx.ConnectError("timeline unreachable", request=request)
@@ -1058,120 +1034,9 @@ class Cover(BridgeBase):
             self.assertEqual(pp.cover_version(bad), "", bad)
 
 
-class Transcode(BridgeBase):
-    """Plex's universal music transcoder, for a track the browser cannot
-    decode: a decision per session with the listener's server token, the
-    start path and query handed back without any token, and a stop."""
-
-    CLIENT = "abc123def456"
-
-    def decision_calls(self):
-        return [c for c in self.plex.calls if c.url.path == "/music/:/transcode/universal/decision"]
-
-    def test_a_decision_with_the_listeners_server_token_gives_a_tokenless_start(self):
-        got = self.run_async(pp.transcode(listener(), "101", self.CLIENT, session_id=SID))
-        self.assertEqual(set(got), {"session", "start"})
-        self.assertRegex(got["session"], r"^ws[0-9a-f]{32}$")
-        self.assertTrue(pp.transcode_session_ok(got["session"]))
-        calls = self.decision_calls()
-        self.assertEqual(len(calls), 1)
-        c = calls[0]
-        self.assertEqual(f"{c.url.scheme}://{c.url.host}:{c.url.port}", ADMIN_URL)
-        self.assertEqual(c.headers["X-Plex-Token"], SERVER_TOKEN)
-        asked = self.plex.decided[0]
-        self.assertEqual(asked["path"], "/library/metadata/101")
-        self.assertEqual(asked["session"], got["session"])
-        self.assertEqual((asked["protocol"], asked["directPlay"], asked["directStream"]), ("http", "0", "0"))
-        self.assertEqual(asked["X-Plex-Client-Identifier"], "webservarr-web-" + self.CLIENT)
-        self.assertEqual(asked["X-Plex-Product"], "WebServarr")
-        # The start is the same session and client on the progressive MP3 path.
-        start = urlsplit(got["start"])
-        self.assertEqual(start.path, "/music/:/transcode/universal/start.mp3")
-        self.assertEqual({k: v[0] for k, v in parse_qs(start.query).items()}, asked)
-        for tok in TOKENS:
-            self.assertNotIn(tok, json.dumps(got))
-        self.assert_no_token_in_urls()
-
-    def test_every_decision_is_a_new_session(self):
-        a = self.run_async(pp.transcode(listener(), "101", self.CLIENT, session_id=SID))
-        b = self.run_async(pp.transcode(listener(), "101", self.CLIENT, session_id=SID))
-        self.assertNotEqual(a["session"], b["session"])
-
-    def test_plex_refusing_to_convert_is_cannot_convert(self):
-        for answer in ("refuse", 400):
-            with self.subTest(answer=answer):
-                self.plex.decision = answer
-                with self.assertRaises(pp.CannotConvert):
-                    self.run_async(pp.transcode(listener(), "101", self.CLIENT, session_id=SID))
-
-    def test_plex_down_or_the_token_refused_is_player_unavailable(self):
-        self.plex.decision = 500
-        with self.assertRaises(pp.PlayerUnavailable):
-            self.run_async(pp.transcode(listener(), "101", self.CLIENT, session_id=SID))
-        self.plex.decision = None
-        self.plex.pms_down = "connect"
-        with self.assertRaises(pp.PlayerUnavailable):
-            self.run_async(pp.transcode(listener(), "101", self.CLIENT, session_id=SID))
-
-    def test_a_401_drops_the_cached_access(self):
-        self.plex.decision = 401
-        s = listener()
-        with self.assertRaises(pp.TokenRejected):
-            self.run_async(pp.transcode(s, "101", self.CLIENT, session_id=SID))
-        self.assertNotIn(pp.SERVER_FIELD, s)
-        self.assertEqual(self.update_session.await_args_list[-1].args, (SID, {pp.SERVER_FIELD: ""}))
-
-    def test_an_unknown_track_is_not_in_library(self):
-        self.plex.decision = 404
-        with self.assertRaises(pp.NotInLibrary):
-            self.run_async(pp.transcode(listener(), "101", self.CLIENT, session_id=SID))
-
-    def test_malformed_input_makes_no_plex_call(self):
-        with self.assertRaises(pp.NotInLibrary):
-            self.run_async(pp.transcode(listener(), "../101", self.CLIENT))
-        for bad in ("short", "UPPER12345", "has-dash-123", "x" * 41, "", None):
-            with self.subTest(client=bad), self.assertRaises(ValueError):
-                self.run_async(pp.transcode(listener(), "101", bad))
-        self.assertEqual(self.plex.calls, [])
-
-    def test_no_server_access_is_no_server_access(self):
-        with self.assertRaises(pp.NoServerAccess):
-            self.run_async(pp.transcode(listener(plex_token=""), "101", self.CLIENT))
-
-    def test_stop_ends_the_session_with_the_listeners_token(self):
-        sid = "ws" + "0" * 32
-        self.assertIsNone(self.run_async(pp.stop_transcode(listener(), sid, session_id=SID)))
-        self.assertEqual(self.plex.stopped, [sid])
-        c = [c for c in self.plex.calls if c.url.path == "/music/:/transcode/universal/stop"][0]
-        self.assertEqual(c.headers["X-Plex-Token"], SERVER_TOKEN)
-        self.assert_no_token_in_urls()
-
-    def test_stop_refuses_any_session_the_player_did_not_start(self):
-        for bad in ("7074ff70-b807-4a4a-b60e-51b7fe06daeb", "039c46f92e474ee9", "ws" + "0" * 31,
-                    "WS" + "0" * 32, "ws" + "0" * 32 + "\n", None, 12):
-            with self.subTest(session=bad):
-                self.assertFalse(pp.transcode_session_ok(bad))
-                self.run_async(pp.stop_transcode(listener(), bad, session_id=SID))
-        self.assertEqual(self.plex.stopped, [])
-
-    def test_a_401_on_stop_drops_the_cached_access(self):
-        self.plex.reject_stop_tokens.add(SERVER_TOKEN)
-        s = listener()
-        self.assertIsNone(self.run_async(pp.stop_transcode(s, "ws" + "3" * 32, session_id=SID)))
-        self.assertEqual(self.plex.stopped, ["ws" + "3" * 32])
-        self.assertNotIn(pp.SERVER_FIELD, s)
-        self.assertEqual(self.update_session.await_args_list[-1].args, (SID, {pp.SERVER_FIELD: ""}))
-
-    def test_a_decision_of_an_unexpected_shape_is_player_unavailable(self):
-        path = "/music/:/transcode/universal/decision"
-        for body in ([], [{"MediaContainer": {}}], {"MediaContainer": []}, {"MediaContainer": "x"},
-                     {"MediaContainer": {"generalDecisionCode": 1001, "Metadata": {"Media": []}}},
-                     {"MediaContainer": {"generalDecisionCode": 1001, "Metadata": ["x"]}},
-                     {"MediaContainer": {"generalDecisionCode": 1001, "Metadata": [{"Media": {"a": 1}}]}}):
-            with self.subTest(body=body):
-                self.plex.raw[path] = body
-                with self.assertRaises(pp.PlayerUnavailable):
-                    self.run_async(pp.transcode(listener(), "101", self.CLIENT, session_id=SID))
+class Shapes(BridgeBase):
+    """Plex answering in an unexpected shape is an outage (503), never a
+    crash (500); the listener's own odd state only means no Plex place."""
 
     def test_any_plex_read_of_an_unexpected_shape_is_player_unavailable(self):
         for body in ([], ["x"], {"MediaContainer": []}, {"MediaContainer": ["x"]}, {"MediaContainer": 5}):
@@ -1233,14 +1098,6 @@ class Transcode(BridgeBase):
             d = self.run_async(pp.book_detail("500:1"))
         self.assertEqual((d["tracks"][0]["part_path"], d["tracks"][0]["codec"]), ("", ""))
 
-    def test_stop_never_raises(self):
-        sid = "ws" + "1" * 32
-        self.plex.stop_status = 404       # already over
-        self.assertIsNone(self.run_async(pp.stop_transcode(listener(), sid)))
-        self.plex.pms_down = "connect"
-        self.assertIsNone(self.run_async(pp.stop_transcode(listener(), sid)))
-        self.assertIsNone(self.run_async(pp.stop_transcode(listener(plex_token=""), sid)))
-
 
 class NoTokenLogged(BridgeBase):
     def test_no_token_reaches_a_log_line_or_an_error(self):
@@ -1263,14 +1120,6 @@ class NoTokenLogged(BridgeBase):
             attempt(pp.book_detail("100:1"))
             attempt(pp.plex_position(listener(), "200:1", session_id=SID))
             attempt(pp.timeline(listener(), "202", "playing", 1, 2, session_id=SID))
-            attempt(pp.transcode(listener(), "101", "abc123def456", session_id=SID))
-            attempt(pp.stop_transcode(listener(), "ws" + "2" * 32, session_id=SID))
-            for answer in ("refuse", 400, 401, 500):
-                self.plex.decision = answer
-                attempt(pp.transcode(listener(), "101", "abc123def456", session_id=SID))
-            self.plex.decision = None
-            self.plex.stop_status = 500
-            attempt(pp.stop_transcode(listener(), "ws" + "2" * 32, session_id=SID))
             self.plex.timeline_down = True
             attempt(pp.timeline(listener(), "202", "playing", 1, 2, session_id=SID))
             self.plex.plextv_down = 500
