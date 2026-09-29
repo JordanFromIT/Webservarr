@@ -407,12 +407,22 @@ export function createSaver(o) {
   }
 
   /* acked: the server has this place (it came from the server, or a save
-     of it was stored), to within DRIFT_MS on the same part: the element's
-     timeupdate lands a moment past a saved pause. A copy that is not is this
-     browser's alone: the next open never overwrites it without asking
-     (engine.js, features.js). */
+     of it was stored). A copy that is not is this browser's alone: the next
+     open never overwrites it without asking (engine.js, features.js). */
   function nearPlace(a, b) {
     return !!a && !!b && String(a.track) === String(b.track) && Math.abs(Number(a.offset_ms) - Number(b.offset_ms)) <= DRIFT_MS;
+  }
+
+  /* Is a place written now the one the server last took? The very place,
+     or, only while paused with nothing to send and nothing in flight, one
+     within DRIFT_MS of it on its part: the element's timeupdate lands a
+     moment past a saved pause. Playing, or with a Play or a move not yet
+     answered, that ack may be stale (another device may have saved since):
+     a place a moment past it is not the server's. */
+  function ackedPlace(r, place) {
+    if (!r.acked || r.conflict) return false;
+    if (samePlace(place, r.acked)) return true;
+    return !r.playing && r.event === null && !r.inFlight && nearPlace(place, r.acked);
   }
 
   function writeLocal(book, place, own) {
@@ -426,7 +436,7 @@ export function createSaver(o) {
       updated_at: new Date(Math.min(now() + skew, capAt(book, r))).toISOString(),
       device: device,
       own: !!own,
-      acked: !!(r && r.book === book && nearPlace(place, r.acked) && !r.conflict)
+      acked: !!(r && r.book === book && ackedPlace(r, place))
     });
     stored(function (s) { s.setItem(localKey(id, book), value); });
   }

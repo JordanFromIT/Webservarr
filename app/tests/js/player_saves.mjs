@@ -2331,6 +2331,85 @@ current = 'the local copy says whether the server has that very place';
   check('a copy written before the flag: not acknowledged', t2.saver.readLocal('500:1').acked === false);
 }
 
+current = 'the drift allowance counts only while paused with nothing to send or in flight (T9R6)';
+{
+  // The live case: a stored pause, then the element's timeupdate 19 ms on.
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1', { held: { track: '501', offset_ms: 100000, duration_ms: 3600000 } });
+  p.open();
+  p.play();
+  await p.listen(3000);
+  p.pause();
+  await t.clock.advance(1500);
+  check('the pause stored: acknowledged', localOf(t).acked === true, localOf(t));
+  p.offset += 19;
+  p.emit('time');
+  check('a 19 ms drift after it: still acknowledged', localOf(t).acked === true && localOf(t).offset_ms === p.offset, localOf(t));
+  p.offset += 981;                 // 1000 ms from the stored pause in all
+  p.emit('time');
+  check('exactly 1000 ms: still acknowledged', localOf(t).acked === true, localOf(t));
+  p.offset += 1;
+  p.emit('time');
+  check('1001 ms: not acknowledged', localOf(t).acked === false, localOf(t));
+  t.saver.stop();
+}
+{
+  // A stale page: the ack is the phone's old pause; a Play whose answer
+  // never comes, a place a moment past that ack.
+  for (const [what, ms] of [['250 ms', 250], ['750 ms', 750], ['1000 ms', 1000]]) {
+    const t = makeSaver();
+    const p = listener(t);
+    p.offset = 303000;
+    t.saver.start('500:1', { held: { track: '501', offset_ms: 303000, duration_ms: 3600000 }, savedAt: new Date(T0).toISOString() });
+    p.open();
+    check(`${what}: opened at the server's place: acknowledged`, localOf(t).acked === true);
+    t.server.mode = 'hang';
+    p.play();
+    await p.listen(ms);
+    check(`${what} played, the Play unanswered: not acknowledged`, localOf(t).acked === false && localOf(t).offset_ms === 303000 + ms, localOf(t));
+    p.pause();
+    await t.clock.advance(50);
+    p.offset += 20;
+    p.emit('time');
+    check(`${what}, then Pause and a 20 ms drift, the Play still in flight: not acknowledged`, localOf(t).acked === false, localOf(t));
+    t.saver.stop();
+  }
+  // Playing, with nothing in flight: a place a moment past the ack is not it.
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 303000;
+  t.saver.start('500:1', { held: { track: '501', offset_ms: 303000, duration_ms: 3600000 } });
+  p.open();
+  t.server.mode = 'offline';
+  p.play();
+  await t.clock.advance(200);      // the Play's save failed: nothing in flight
+  p.offset += 250;
+  p.emit('time');
+  check('playing 250 ms past the ack: not acknowledged', localOf(t).acked === false, localOf(t));
+  p.pause();
+  await t.clock.advance(200);
+  p.offset += 20;
+  p.emit('time');
+  check('paused with the pause unsent: not acknowledged', localOf(t).acked === false, localOf(t));
+  t.saver.stop();
+  // The very place the server took counts, playing or not.
+  const t2 = makeSaver();
+  const p2 = listener(t2);
+  p2.offset = 100000;
+  t2.saver.start('500:1', { held: { track: '501', offset_ms: 100000, duration_ms: 3600000 } });
+  p2.open();
+  t2.server.mode = 'hang';
+  p2.play();
+  p2.offset = 100250;
+  p2.emit('time');
+  p2.offset = 100000;
+  p2.emit('seek', { from: 100250, to: 100000 });
+  check('back at the very place, a save in flight: acknowledged', localOf(t2).acked === true && localOf(t2).offset_ms === 100000, localOf(t2));
+  t2.saver.stop();
+}
+
 current = 'a last save refused with 409 caps the local copy too';
 {
   const t = makeSaver();
