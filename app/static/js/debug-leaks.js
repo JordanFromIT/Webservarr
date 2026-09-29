@@ -20,7 +20,8 @@
  * How an item is tied to a page (the leak checker's one judgement), in order:
  *   0. made by shell code that keeps its own lifetimes (ui.js: a toast's
  *      dismiss timers, a dialog's listeners; shell.js's serviceStatus: the
- *      request the header pill shares) it is the shell's, even when a page
+ *      request the header pill shares; the audiobook player's files: its
+ *      stream, saves and timers) it is the shell's, even when a page
  *      asked;
  *      any callback in it still runs as the page's (see SELF_OWNED_FILES);
  *   1. a stack frame in /static/js/pages/<name>.js makes it that page's;
@@ -58,17 +59,25 @@
  * ownerOf, createTracker (given a global-like object), runSoak (given deps).
  */
 
-export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js', 'auth.js', 'theme-loader.js'];
+// Files are matched by name, wherever they are: 'ui.js' is both js/ui.js and
+// the player's view, js/player/ui.js. engine.js, saves.js and features.js are
+// the audiobook player's (js/player/), which lives as long as the document.
+export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js', 'auth.js', 'theme-loader.js',
+  'engine.js', 'saves.js', 'features.js'];
 // Shell code whose timers and listeners live as long as the shell's own UI,
 // not the page that called it: ui.js (a toast dismisses itself, a dialog stops
 // listening when it closes) and shell.js's serviceStatus (the one
 // service-status request, shared with the header's pill, that Home asks for
-// but never aborts). 'file' is any of the file's functions,
-// 'file#name' one function. When the call that creates an item comes from
-// one of these, through shell frames only, the item is the shell's even
-// though a page asked. Nothing else: WS.poll (shell.js) and ctx.setTimeout
-// (router.js) run a page's own work, so what they create stays the page's.
-export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus'];
+// but never aborts), and the audiobook player (engine.js, saves.js, ui.js,
+// features.js), which owns and ends its own timers, listeners and requests
+// and keeps playing across pages: a book a page's Play button opened, its
+// saves and its sleep timer are the player's, not that page's. 'file' is any
+// of the file's functions, 'file#name' one function. When the call that
+// creates an item comes from one of these, through shell frames only, the
+// item is the shell's even though a page asked. Nothing else: WS.poll
+// (shell.js) and ctx.setTimeout (router.js) run a page's own work, so what
+// they create stays the page's.
+export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'engine.js', 'saves.js', 'features.js'];
 const SELF_FILE = 'debug-leaks.js';
 const PAGE_RE = /\/static\/js\/pages\/([^/]+)\.js$/;
 const FRAME_RE = /([a-z][\w+.-]*:\/\/[^\s()]+?):\d+(?::\d+)?/i;
