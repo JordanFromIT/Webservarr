@@ -64,7 +64,7 @@
  *   prefs() -> { skip_s, speed, smart_rewind }
  */
 
-export const SKIP_CHOICES = [5, 10, 15, 20, 30, 45, 60];
+export const SKIP_CHOICES = [5, 10, 15, 30, 45, 60];
 export const SPEED_MIN = 0.75;
 export const SPEED_MAX = 2;
 export const SPEED_STEP = 0.05;
@@ -758,7 +758,7 @@ export function createFeatures(env) {
   const slower = h('button', { type: 'button', class: 'wsp-icon-btn wsp-step', 'aria-label': 'Slower' }, [icon('remove')]);
   const faster = h('button', { type: 'button', class: 'wsp-icon-btn wsp-step', 'aria-label': 'Faster' }, [icon('add')]);
   const speedNow = h('p', { class: 'wsp-speed-now', 'aria-live': 'polite', 'aria-atomic': 'true' });
-  const speedChips = h('div', { class: 'wsp-chips wsp-chips-center', role: 'group', 'aria-label': 'Speeds' });
+  const speedChips = h('div', { class: 'wsp-chips', role: 'group', 'aria-label': 'Speeds' });
   SPEED_PRESETS.forEach(function (x) {
     speedChips.appendChild(h('button', { type: 'button', class: 'wsp-chip', 'data-speed': String(x), 'aria-pressed': 'false', text: formatSpeed(x) }));
   });

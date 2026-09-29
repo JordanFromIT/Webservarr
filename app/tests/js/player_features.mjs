@@ -548,7 +548,7 @@ await run('the skip length menu', async () => {
   menu.querySelector('button').click();
   check('its panel shows', t.q('[data-panel="settings"]') && !t.q('[data-panel="settings"]').hidden);
   const chips = t.qa('[data-skip]').map((b) => b.getAttribute('data-skip'));
-  check('5 to 60 s', chips.join(',') === '5,10,15,20,30,45,60', chips);
+  check('5 to 60 s', chips.join(',') === '5,10,15,30,45,60', chips);
   check('10 is pressed', t.q('[data-skip="10"]').getAttribute('aria-pressed') === 'true' && t.qa('[data-skip][aria-pressed="true"]').length === 1);
   t.q('[data-skip="30"]').click();
   check('the engine has 30', t.engine.setSkip() === 30);

@@ -1190,10 +1190,9 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-opt-note { margin: 4px 0 0; font-size: 13px; line-height: 1.4; color: rgb(var(--color-text) / .7); }
 .wsp-opt-row { display: flex; align-items: center; gap: 16px; }
 .wsp-opt-row > div { flex: 1; min-width: 0; }
-.wsp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-.wsp-chips-center { justify-content: center; }
+.wsp-chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
 .wsp-chip {
-  min-width: 56px; height: 40px; padding: 0 16px; border-radius: 9999px;
+  min-width: 0; height: 40px; padding: 0 8px; border-radius: 9999px;
   font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;
   color: rgb(var(--color-text)); background: rgb(var(--color-text) / .07);
   transition: background-color 150ms ease-out, color 150ms ease-out;
