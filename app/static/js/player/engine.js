@@ -98,12 +98,16 @@
  *                       position: { track, offset_ms, duration_ms } | null,
  *                       playing, loading, speed, connection: 'local'|'remote'|null,
  *                       error: { code, message } | null, lastSavedAt, saveError,
- *                       resumedFrom: { source, device, updated_at } | null }
+ *                       resumedFrom: { source, device, updated_at, age_ms } | null }
  *       bookMs is the playhead (what to show); position is the place to save.
  *       They differ only while a skipped part's successor has not played yet.
  *       lastSavedAt: ms (this device's clock) of the last save the server
  *       took, or null; saveError: the "not saved" warning is showing.
- *       resumedFrom: which copy open() resumed from ('web', 'plex', 'local').
+ *       resumedFrom: which copy open() resumed from ('web', 'plex', 'local');
+ *       age_ms: how old that place was when it was read, in the server's
+ *       clock (its `now` on GET /position less the copy's updated_at, which
+ *       is the server's clock too), so a device clock that is off never
+ *       counts; null when the server gave no time.
  *   on(event, fn) -> unsubscribe; fn gets one object:
  *     'change'   { reason, state } and, for 'seek' | 'skip' | 'jump', from and to
  *                (book ms). reason: 'loading' (a book is being fetched), 'open'
@@ -970,7 +974,7 @@ export function createEngine(env) {
     try {
       if (clockDone) clockDone(data.now);
     } catch (e) { /* no clock measure */ }
-    return { web: data.web || null, plex: data.plex || null };
+    return { web: data.web || null, plex: data.plex || null, now: typeof data.now === 'string' ? data.now : null };
   }
 
   function makeBook(key, data) {
@@ -1152,7 +1156,12 @@ export function createEngine(env) {
     playhead = { index: to.index, offset: to.offset_ms };
     target = { index: to.index, offset: to.offset_ms };
     const cannot = blocked(to.index);
-    resumedFrom = resumed ? { source: resumed.source, device: resumed.device, updated_at: resumed.updated_at } : null;
+    let age = null;
+    if (resumed && places) {
+      const a = Date.parse(places.now) - Date.parse(resumed.updated_at);
+      if (isFinite(a)) age = Math.max(0, a);
+    }
+    resumedFrom = resumed ? { source: resumed.source, device: resumed.device, updated_at: resumed.updated_at, age_ms: age } : null;
     if (saver) {
       try {
         saver.start(key, {

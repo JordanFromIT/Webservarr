@@ -17,8 +17,9 @@
  * buttons and the speed follow while paused). Until then, and for an account
  * the player is not for (401, 403, 404), the defaults (10 s, 1x, smart rewind
  * on), with no error; a read that failed otherwise is tried again when the
- * next book opens. A change is sent a moment later (only what changed), and
- * at once when the page is left.
+ * next book opens. A change is sent a moment later (only what changed here,
+ * kept until the server takes it: a failed save goes again with the next
+ * change), and at once when the page is left.
  *
  * - Skip length: 5 to 60 s, in the full player's settings (its top right).
  * - Speed: 0.75x to 2x in 0.05 steps (a stepper and presets).
@@ -29,17 +30,21 @@
  *   fade, cancelling, or another book ends it, the volume restored. The time
  *   left shows in its slot.
  * - Smart rewind (a per-listener switch): playback that starts again after a
- *   pause goes back by rewindFor(the time since the pause); a book opened at
- *   a saved place goes back by rewindFor(the time since that place was
- *   saved). Never before the book's start, and never into (or across) a part
- *   this browser can't play. A place the listener moves to while paused is
- *   theirs: no rewind from it. The rewound place is saved like any seek.
+ *   pause (Play, or Retry after a stop that came while paused) goes back by
+ *   rewindFor(the time since the pause); a book opened at a saved place goes
+ *   back by rewindFor(how old that place is, in the server's clock, so a
+ *   device clock that is off never counts), once, at that open's first real
+ *   playback: an open that never plays moves and saves nothing. Never before
+ *   the book's start, and never into (or across) a part this browser can't
+ *   play. A place the listener moves to is theirs: no rewind from it. No
+ *   rewind while the listener's settings are unknown (their read failed).
+ *   The rewound place is saved like any seek.
  * - Undo: a seek of more than 2 minutes (the scrubber, a chapter, a skip, the
  *   lock screen) shows "Jumped back|ahead <delta>." with Undo for 8 s. Undo
  *   goes back to where that jump started, and raises no notice of its own; a
  *   second big jump replaces the first's notice and place.
  * - Keys: Space plays or pauses, the left and right arrows skip by the skip
- *   length, [ and ] change the speed by 0.05. Inside the full player they are
+ *   length, [ and ] change the speed by 0.05; a held key acts once. Inside the full player they are
  *   always on (WS.playerUI.onKey; Space on a focused button presses the
  *   button). With it closed, on the page (document, bubble phase), only when
  *   a book is loaded and the key is nobody else's: not already handled, not
@@ -250,7 +255,8 @@ export function createFeatures(env) {
 
   const prefs = { skip_s: DEFAULTS.skip_s, speed: DEFAULTS.speed, smart_rewind: DEFAULTS.smart_rewind };
   const touched = new Set();   // changed here: never overwritten by a late read
-  const unsent = new Set();    // changed here and not sent yet
+  const unsent = new Map();    // changed here and not yet taken by the server: key -> its change's number
+  let changes = 0;
   let putTimer = null;
   let loadState = 'idle';      // 'loading', 'done', or 'retry' (try again at the next open)
 
@@ -293,10 +299,17 @@ export function createFeatures(env) {
     drawAll();
   }
 
+  // Known: read from the server, or the player is not this account's (the
+  // defaults, which then hold). Until then nothing is decided on them.
+  function prefsKnown() {
+    return loadState === 'done';
+  }
+
   function changePref(key, value) {
     prefs[key] = value;
     touched.add(key);
-    unsent.add(key);
+    changes += 1;
+    unsent.set(key, changes);
     if (putTimer !== null) clearT(putTimer);
     putTimer = setT(function () {
       putTimer = null;
@@ -304,27 +317,39 @@ export function createFeatures(env) {
     }, SAVE_PREFS_MS);
   }
 
-  // Only what changed here: a read that failed must not put the defaults
-  // over what the listener saved elsewhere.
+  /* Every key changed here and not yet taken by the server, never the
+     rest: a read that failed must not put the defaults over what the
+     listener saved elsewhere. A key stays until a 2xx takes it (as it was
+     sent: a newer change of it stays), so a failed save (the network, 429,
+     503) goes again with the next change, and on leaving. */
   function sendPrefs(leaving) {
     if (putTimer !== null) {
       clearT(putTimer);
       putTimer = null;
     }
     if (!unsent.size || !fetchFn) return;
+    const sent = new Map(unsent);
     const body = {};
-    unsent.forEach(function (k) { body[k] = prefs[k]; });
-    unsent.clear();
+    sent.forEach(function (n, k) { body[k] = prefs[k]; });
+    let asked;
     try {
-      Promise.resolve(fetchFn(PREFS_URL, {
+      asked = Promise.resolve(fetchFn(PREFS_URL, {
         method: 'PUT',
         credentials: 'same-origin',
         cache: 'no-store',
         keepalive: !!leaving,
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(body)
-      })).catch(function () { /* kept for this page; the next change sends it all again */ });
-    } catch (e) { /* the same */ }
+      }));
+    } catch (e) {
+      asked = Promise.reject(e);
+    }
+    asked.then(function (resp) {
+      if (!resp || !(resp.status >= 200 && resp.status < 300)) return;
+      sent.forEach(function (n, k) {
+        if (unsent.get(k) === n) unsent.delete(k);
+      });
+    }, function () { /* kept: the next change, or leaving, sends it again */ });
   }
 
   function setSkip(n) {
@@ -349,13 +374,14 @@ export function createFeatures(env) {
   let ownSeek = false;         // smart rewind is moving the place
   let undoing = false;         // Undo is
 
-  function rewindBy(s, backMs) {
-    if (!(backMs > 0) || !s.book) return;
+  // Back backMs from fromMs (book ms), within what can play.
+  function rewindBy(fromMs, backMs) {
+    if (!(backMs > 0) || !player.state().book) return;
     let parts = [];
     try {
       parts = player.parts();
     } catch (e) { /* no parts: the book's start is the only limit */ }
-    const to = rewindTarget(parts, s.bookMs, backMs);
+    const to = rewindTarget(parts, fromMs, backMs);
     if (to === null) return;
     ownSeek = true;
     try {
@@ -509,6 +535,11 @@ export function createFeatures(env) {
   let lastPlaying = false;
   let pausedAt = null;         // wall ms of the last pause after listening
   let heard = false;           // playback has moved since it last started
+  // The rewind a book opened at a saved place owes, taken at its first real
+  // playback (never before: an open that never plays moves nothing, and
+  // nothing is saved for it): { from (book ms it opened at), age (how old
+  // the place was then, the server's clock), since (mono, then) }.
+  let openRewind = null;
 
   function onChange(d) {
     const s = d && d.state ? d.state : player.state();
@@ -521,11 +552,14 @@ export function createFeatures(env) {
       dropUndo();
       pausedAt = null;
       heard = false;
+      openRewind = null;
     }
     const moved = r === 'seek' || r === 'skip' || r === 'jump';
     if (moved && !ownSeek) {
-      // A place the listener chose while paused is theirs: no rewind from it.
+      // A place the listener chose while paused is theirs: no rewind from it,
+      // nor from the place the book opened at once they have moved.
       if (!s.playing) pausedAt = null;
+      openRewind = null;
       if (sleep && sleep.kind === 'chapter') {
         sleep.endMs = chapterEnd(s);
         if (sleep.endMs === null) cancelSleep();
@@ -546,14 +580,24 @@ export function createFeatures(env) {
     if (r === 'open') {
       if (loadState === 'retry') loadPrefs();
       const from = s.resumedFrom;
-      const at = from && typeof from.updated_at === 'string' ? Date.parse(from.updated_at) : NaN;
-      if (prefs.smart_rewind && isFinite(at)) rewindBy(s, rewindFor(now() - at));
+      openRewind = from && typeof from.age_ms === 'number' && isFinite(from.age_ms)
+        ? { from: s.bookMs, age: from.age_ms, since: mono() } : null;
+    }
+    // The first real playback of a book opened at a saved place: playback has
+    // moved on from where it opened. The time away runs on to now.
+    if (openRewind && r === 'time' && s.playing && s.bookMs > openRewind.from) {
+      const o = openRewind;
+      openRewind = null;
+      if (prefsKnown() && prefs.smart_rewind) rewindBy(o.from, rewindFor(o.age + Math.max(0, mono() - o.since)));
     }
     if (!was && s.playing) {
       const at = pausedAt;
       pausedAt = null;
       heard = false;
-      if (r === 'play' && at !== null && prefs.smart_rewind) rewindBy(s, rewindFor(now() - at));
+      // Play again after a pause, or Retry after a stop that came while paused.
+      if ((r === 'play' || r === 'retry') && at !== null && prefsKnown() && prefs.smart_rewind) {
+        rewindBy(s.bookMs, rewindFor(now() - at));
+      }
     }
     tickSleep();
     if (r !== 'time') drawAll();
@@ -627,10 +671,13 @@ export function createFeatures(env) {
     } else if (k === 'ArrowLeft' || k === 'ArrowRight') {
       if (e.shiftKey) return;
       e.preventDefault();
+      // One skip a press: a held key does not run on to the book's end.
+      if (e.repeat) return;
       const n = num(player.setSkip()) || DEFAULTS.skip_s;
       player.skip(k === 'ArrowLeft' ? -n : n);
     } else if (k === '[' || k === ']') {
       e.preventDefault();
+      if (e.repeat) return;
       setSpeed(stepSpeed(s.speed, k === ']' ? 1 : -1));
     }
   }

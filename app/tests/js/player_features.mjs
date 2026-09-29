@@ -211,7 +211,7 @@ class FakeAudio {
     this.t.loads.push(path);
     this.t.clock.setTimeout(() => {
       if (g !== this.gen) return;
-      if (!track) { this.error = { code: 4 }; this.fire('error'); return; }
+      if (!track || this.t.down) { this.error = { code: 4 }; this.fire('error'); return; }
       this.duration = track.duration_ms / 1000;
       this.readyState = 1;
       this.fire('loadedmetadata');
@@ -222,6 +222,11 @@ class FakeAudio {
     }, 50);
   }
   play() {
+    if (this.t.blockAutoplay) {
+      const e = new Error('play() needs a user gesture');
+      e.name = 'NotAllowedError';
+      return Promise.reject(e);
+    }
     if (this.paused) {
       if (this.ended) { this._t = 0; this.ended = false; }
       this.paused = false;
@@ -278,6 +283,11 @@ async function setup(o = {}) {
   const clock = fakeClock();
   const t = { win, doc, clock, loads: [], posts: [], fetches: [], puts: [], path: o.path || '/news' };
   t.now = () => NOW0 + clock.now;
+  // The server's clock: o.skewMs ahead of this device's (negative: behind).
+  t.skew = o.skewMs || 0;
+  t.serverNow = () => t.now() + t.skew;
+  t.remote = o.remote || [REMOTE];
+  t.putStatus = 200;
   t.prefsAnswer = o.prefs === undefined ? { skip_s: 10, speed: 1, smart_rewind: true } : o.prefs;
   t.places = o.places || { web: null, plex: null };
   async function fetchFn(url, init) {
@@ -286,7 +296,8 @@ async function setup(o = {}) {
     if (url === '/api/player/prefs') {
       if ((init.method || 'GET') === 'PUT') {
         t.puts.push(JSON.parse(init.body));
-        return response(200, {});
+        if (t.putStatus === 0) throw new TypeError('Failed to fetch');
+        return response(t.putStatus, {});
       }
       if (typeof t.prefsAnswer === 'number') return response(t.prefsAnswer, { detail: 'no' });
       return response(200, t.prefsAnswer);
@@ -295,17 +306,20 @@ async function setup(o = {}) {
     if (m) {
       const b = BOOKS[decodeURIComponent(m[1])];
       if (!b) return response(404, { detail: 'Not in the audiobook library' });
-      return response(200, { ...b, stream: { token: 'tok', uris: { local: [], remote: [REMOTE] } } });
+      return response(200, { ...b, stream: { token: 'tok', uris: { local: [], remote: t.remote } } });
     }
     m = /^\/api\/player\/position\/(.+)$/.exec(url);
-    if (m) return response(200, { web: t.places.web, plex: t.places.plex || null, now: new Date(t.now()).toISOString() });
+    if (m) return response(200, { web: t.places.web, plex: t.places.plex || null, now: new Date(t.serverNow()).toISOString() });
     return response(404, {});
   }
   t.fetch = fetchFn;
   const saver = S.createSaver({
     post: (body) => {
       t.posts.push(body);
-      return Promise.resolve({ status: 200, data: { stored: true, updated_at: new Date(t.now()).toISOString() } });
+      const at = new Date(t.serverNow()).toISOString();
+      // o.stateful: the server keeps what it is sent, as WebServarr's copy.
+      if (o.stateful) t.places = { web: { track: body.track, offset_ms: body.offset_ms, duration_ms: body.duration_ms, updated_at: at, device: 'Test on Linux' }, plex: null };
+      return Promise.resolve({ status: 200, data: { stored: true, updated_at: at } });
     },
     now: t.now,
     mono: () => clock.now,
@@ -531,6 +545,55 @@ await run('changes are sent a moment later, only what changed, and at once on le
   t.engine.close();
   await t.openAt(MULTI.key, '501', 1000);
   check('kept', t.engine.setSkip() === 45 && t.features.prefs().smart_rewind === false, t.features.prefs());
+  t.engine.close();
+});
+
+await run('a settings save that fails is kept, and goes again with the next change and on leaving', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '501', 1000);
+  t.q('.wsp-slot-menu button').click();
+  t.putStatus = 503;
+  t.q('[data-skip="30"]').click();
+  await t.clock.advance(900);
+  check('tried', t.puts.length === 1 && JSON.stringify(t.puts[0]) === '{"skip_s":30}', t.puts);
+  t.putStatus = 0;                    // the network is gone
+  t.q('.wsp-switch').click();
+  await t.clock.advance(900);
+  check('the next change sends both', t.puts.length === 2 && JSON.stringify(t.puts[1]) === '{"skip_s":30,"smart_rewind":false}', t.puts);
+  t.putStatus = 429;
+  t.win.dispatchEvent(new t.win.Event('pagehide'));
+  await t.clock.advance(10);
+  check('leaving sends both again', t.puts.length === 3 && JSON.stringify(t.puts[2]) === '{"skip_s":30,"smart_rewind":false}', t.puts);
+  t.putStatus = 200;
+  t.win.dispatchEvent(new t.win.Event('pagehide'));
+  await t.clock.advance(10);
+  check('and once taken', t.puts.length === 4 && JSON.stringify(t.puts[3]) === '{"skip_s":30,"smart_rewind":false}', t.puts);
+  t.win.dispatchEvent(new t.win.Event('pagehide'));
+  await t.clock.advance(10);
+  check('nothing is left to send', t.puts.length === 4, t.puts);
+  t.q('[data-skip="45"]').click();
+  await t.clock.advance(900);
+  check('a later change sends only itself', JSON.stringify(t.puts[4]) === '{"skip_s":45}', t.puts);
+  t.engine.close();
+});
+
+await run('changing the skip length or the speed while paused sends no check-in', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(2000);
+  t.engine.pause();
+  await t.clock.advance(3000);
+  const n = t.posts.length;
+  t.ui.open();
+  t.q('.wsp-slot-menu button').click();
+  t.q('[data-skip="45"]').click();
+  t.q('.wsp-slot-speed button').click();
+  t.q('[data-speed="1.5"]').click();
+  t.key(t.q('.wsp-sheet'), ']');
+  await t.clock.advance(15000);
+  check('set', t.engine.setSkip() === 45 && t.st().speed === 1.55, [t.engine.setSkip(), t.st().speed]);
+  check('no check-in', t.posts.length === n, t.posts.slice(n).map((b) => b.event));
+  check('the settings were saved', t.puts.length === 1, t.puts);
   t.engine.close();
 });
 
@@ -812,20 +875,193 @@ await run('a place chosen while paused is not rewound', async () => {
   t.engine.close();
 });
 
+// A book opened at a saved place goes back at its first real playback, by
+// how old the place is in the server's clock.
+const webAt = (t, track, offset, agoMs) => ({ track, offset_ms: offset, duration_ms: 900000, updated_at: new Date(t.serverNow() - agoMs).toISOString(), device: 'Phone' });
 for (const [agoMs, want] of [[5000, 0], [45000, 3000], [2 * 3600000, 30000]]) {
-  await run(`a book opened at a place saved ${agoMs} ms ago goes back ${want} ms`, async () => {
+  await run(`a book opened at a place saved ${agoMs} ms ago goes back ${want} ms, once it plays`, async () => {
     const t = await setup();
-    t.places = { web: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(NOW0 - agoMs).toISOString(), device: 'Phone' } };
+    t.places = { web: webAt(t, '502', 300000, agoMs) };
     const p = t.engine.open(MULTI.key);
-    await t.clock.advance(300);
+    await t.clock.advance(100);
     await p;
-    check('opened there, less the rewind', bookMs(t) >= 900000 - want && bookMs(t) < 900000 - want + 1000, bookMs(t) - 900000);
+    check('opened where it was saved', bookMs(t) === 900000, bookMs(t));
+    check('nothing moved is sent before it plays', t.posts.every((b) => b.offset_ms === 300000), t.posts.map((b) => [b.event, b.offset_ms]));
+    await t.clock.advance(400);
+    check('then back by the rule', bookMs(t) >= 900000 - want && bookMs(t) < 900000 - want + 1000, bookMs(t) - 900000);
     await t.clock.advance(1500);
-    if (want) check('the rewound place was saved', t.posts.some((b) => b.track === '502' && b.offset_ms === 300000 - want), t.posts.map((b) => [b.event, b.offset_ms]));
+    const seeks = t.posts.filter((b) => b.event === 'seek');
+    if (want) check('the rewound place was saved, as a seek while playing', seeks.length === 1 && seeks[0].offset_ms >= 300000 - want && seeks[0].offset_ms < 300000 - want + 1000, t.posts.map((b) => [b.event, b.offset_ms]));
+    else check('no seek at all', seeks.length === 0, t.posts.map((b) => [b.event, b.offset_ms]));
+    const b1 = bookMs(t);
+    await t.clock.advance(2000);
+    check('once', bookMs(t) > b1, [b1, bookMs(t)]);
     check('no undo offered', t.notices().length === 0);
     t.engine.close();
   });
 }
+
+await run('opens that never play leave the saved place where it was (Plex unreachable)', async () => {
+  const t = await setup({ remote: [], stateful: true });
+  t.places = { web: webAt(t, '502', 300000, 2 * 3600000) };
+  for (let i = 0; i < 3; i++) {
+    const p = t.engine.open(MULTI.key);
+    await t.clock.advance(200);
+    await p;
+    check(`open ${i + 1}: unreachable, nothing loaded`, t.st().error && t.st().error.code === 'unreachable' && t.loads.length === 0, t.st().error);
+    check(`open ${i + 1}: the place is untouched`, bookMs(t) === 900000, bookMs(t));
+    t.engine.close();
+    await t.clock.advance(2 * 3600000);
+  }
+  const moved = t.posts.filter((b) => !(b.track === '502' && b.offset_ms === 300000));
+  check('no save moved it', moved.length === 0, t.posts.map((b) => [b.event, b.track, b.offset_ms]));
+});
+
+await run('opens whose autoplay is refused leave the place; the first real play rewinds once', async () => {
+  const t = await setup({ stateful: true });
+  t.places = { web: webAt(t, '502', 300000, 2 * 3600000) };
+  t.blockAutoplay = true;
+  for (let i = 0; i < 3; i++) {
+    const p = t.engine.open(MULTI.key);
+    await t.clock.advance(300);
+    await p;
+    check(`open ${i + 1}: refused, paused at the saved place`, !t.st().playing && bookMs(t) === 900000, [t.st().playing, bookMs(t)]);
+    if (i < 2) {
+      t.engine.close();
+      await t.clock.advance(10 * 60000);
+    }
+  }
+  check('the server still has the place', t.places.web.track === '502' && t.places.web.offset_ms === 300000, t.places.web);
+  // Each refused open still checked in at the same place (saves.js), so the
+  // server's copy is 10 minutes old at the last open: that is its age.
+  const age = Date.parse(t.places.web.updated_at);
+  check('re-stamped, not moved, 10 minutes before the last open', t.serverNow() - age < 11 * 60000, t.serverNow() - age);
+  t.blockAutoplay = false;
+  await t.engine.play();
+  await t.clock.advance(600);
+  check('the tap plays from 10 s back, once', bookMs(t) >= 890000 && bookMs(t) < 891000, bookMs(t) - 900000);
+  await t.clock.advance(1500);
+  check('and that is saved', t.places.web.offset_ms >= 290000 && t.places.web.offset_ms < 292500, t.places.web);
+  t.engine.close();
+});
+
+await run('a place chosen after opening is not rewound when it plays', async () => {
+  const t = await setup();
+  t.places = { web: webAt(t, '502', 300000, 2 * 3600000) };
+  const p = t.engine.open(MULTI.key, { autoplay: false });
+  await t.clock.advance(100);
+  await p;
+  t.engine.seek(1000000);
+  await t.engine.play();
+  await t.clock.advance(1000);
+  check('played on from the chosen place', bookMs(t) >= 1000000 && bookMs(t) < 1001500, bookMs(t));
+  t.engine.close();
+});
+
+// The device clock is off: the place's age is the server's.
+for (const [skew, agoMs, want, what] of [[-3600000, 5000, 0, 'an hour fast'], [120000, 61000, 10000, '2 minutes slow'], [-300000, 45000, 3000, '5 minutes fast']]) {
+  await run(`a device ${what}: a place saved ${agoMs} ms ago goes back ${want} ms`, async () => {
+    const t = await setup({ skewMs: skew });
+    t.places = { web: webAt(t, '502', 300000, agoMs) };
+    const p = t.engine.open(MULTI.key);
+    await t.clock.advance(600);
+    await p;
+    const back = 900000 - bookMs(t);
+    check('by the rule', back > want - 1000 && back <= want, back);
+    t.engine.close();
+  });
+}
+
+await run('a Retry after a pause rewinds as Play does', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(2000);
+  t.engine.pause();
+  const at = bookMs(t);
+  await t.clock.advance(2 * 3600000);
+  // The stream fails while paused, and stays down.
+  t.down = true;
+  t.audioEl.error = { code: 2 };
+  t.audioEl.fire('error');
+  await t.clock.advance(5000);
+  check('stopped with an error', t.st().error && t.st().error.code === 'unreachable', t.st().error);
+  t.down = false;
+  await t.engine.play();
+  check('back 30 s', bookMs(t) === at - 30000, bookMs(t) - at);
+  t.engine.close();
+});
+
+await run('smart rewind waits for the settings: none while they are unknown', async () => {
+  const t = await setup({ prefs: 503 });
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(2000);
+  t.engine.pause();
+  const at = bookMs(t);
+  await t.clock.advance(2 * 3600000);
+  await t.engine.play();
+  check('no rewind on unknown settings', bookMs(t) === at, bookMs(t) - at);
+  const gets = t.fetches.filter((f) => f.url === '/api/player/prefs' && f.method === 'GET');
+  check('asked again at the open', gets.length === 2, gets.length);
+  t.engine.close();
+  t.prefsAnswer = { skip_s: 10, speed: 1, smart_rewind: true };
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(2000);
+  t.engine.pause();
+  const at2 = bookMs(t);
+  await t.clock.advance(2 * 3600000);
+  await t.engine.play();
+  check('known again: the rewind is back', bookMs(t) === at2 - 30000, bookMs(t) - at2);
+  t.engine.close();
+});
+
+await run('an open with smart rewind off does not rewind', async () => {
+  const t = await setup({ prefs: { skip_s: 10, speed: 1, smart_rewind: false } });
+  t.places = { web: webAt(t, '502', 300000, 2 * 3600000) };
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(600);
+  await p;
+  check('played from the saved place', bookMs(t) > 900000 && bookMs(t) < 901000, bookMs(t) - 900000);
+  t.engine.close();
+});
+
+await run('an open while the settings are unknown does not rewind either', async () => {
+  const t = await setup({ prefs: 503 });
+  t.places = { web: webAt(t, '502', 300000, 2 * 3600000) };
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(600);
+  await p;
+  check('played from the saved place', bookMs(t) > 900000 && bookMs(t) < 901000, bookMs(t) - 900000);
+  t.engine.close();
+});
+
+await run('the time away of an opened book runs on until it plays', async () => {
+  const t = await setup();
+  t.places = { web: webAt(t, '502', 300000, 5000) };
+  const p = t.engine.open(MULTI.key, { autoplay: false });
+  await t.clock.advance(100);
+  await p;
+  await t.clock.advance(2 * 60000);
+  await t.engine.play();
+  await t.clock.advance(600);
+  check('5 s old at the open, 2 min more before play: back 10 s', bookMs(t) >= 890000 && bookMs(t) < 891000, bookMs(t) - 900000);
+  t.engine.close();
+});
+
+await run('a pause with nothing heard since the last resume arms no second rewind', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(2000);
+  t.engine.pause();
+  const at = bookMs(t);
+  await t.clock.advance(2 * 3600000);
+  await t.engine.play();
+  check('back 30 s', bookMs(t) === at - 30000);
+  t.engine.pause();
+  await t.clock.advance(20000);
+  await t.engine.play();
+  check('no second rewind', bookMs(t) === at - 30000, bookMs(t) - at);
+  t.engine.close();
+});
 
 // ---------------------------------------------------------------------------
 // Undo big jumps
@@ -933,6 +1169,17 @@ await run('keys on a page with the player closed', async () => {
   const paused = t.st().playing;
   ev = t.key(b, ' ', { repeat: true });
   check('a held Space does not flap', t.st().playing === paused);
+  // A held key acts once: the first press, never its repeats.
+  t.engine.setSpeed(1);
+  const b1 = bookMs(t);
+  t.key(b, 'ArrowRight');
+  for (let i = 0; i < 90; i++) t.key(b, 'ArrowRight', { repeat: true });
+  check('a held arrow skips once', bookMs(t) === b1 + 30000, bookMs(t) - b1);
+  t.key(b, ']');
+  for (let i = 0; i < 30; i++) t.key(b, ']', { repeat: true });
+  check('a held ] steps once', t.st().speed === 1.05, t.st().speed);
+  ev = t.key(b, '[', { repeat: true });
+  check('a repeat is still kept from the page', ev.defaultPrevented && t.st().speed === 1.05);
   t.engine.close();
 });
 

@@ -1096,6 +1096,9 @@ current = 'the engine resumes at WebServarr\'s place when it is newest, and save
   const s = t.engine.state();
   check('opened at the web place', s.position.track === '502' && s.position.offset_ms >= 200000 && s.position.offset_ms <= 201000, s.position);
   check('resumedFrom web', s.resumedFrom.source === 'web');
+  // Its age in the server's clock (its now on GET /position less updated_at),
+  // for smart rewind (features.js).
+  check('resumedFrom carries the place\'s age', typeof s.resumedFrom.age_ms === 'number' && Math.abs(s.resumedFrom.age_ms - 5000) < 1500, s.resumedFrom);
   await t.clock.advance(25000);
   const f = t.server.fetches();
   check('saves as it plays: play, then every 10 s', f.length === 3 && f[0].body.event === 'play' && f[1].body.event === 'checkin', f.map((c) => [c.at - T0, c.body.event, c.body.offset_ms]));
