@@ -1042,8 +1042,10 @@ html[data-player-full] #scrollDownHint { display: none; }
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
 }
 .wsp-byline { font-size: 15px; margin-top: 4px; }
-.wsp-main > .wsp-warn-live:not(:empty) { margin-top: 16px; }
-.wsp-main .wsp-warn { padding: 8px 12px; border-radius: 10px; }
+/* The warning: under the top bar, above whichever view shows. */
+.wsp-sheet > .wsp-warn-live { position: relative; flex-shrink: 0; padding: 0 16px; }
+.wsp-sheet > .wsp-warn-live:not(:empty) { margin-bottom: 8px; }
+.wsp-sheet .wsp-warn { max-width: 440px; margin: 0 auto; padding: 8px 12px; border-radius: 10px; }
 
 .wsp-scrub { margin-top: 20px; }
 .wsp-chapter { margin: 0 0 8px; text-align: center; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

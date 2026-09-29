@@ -113,32 +113,46 @@ function setup(o = {}) {
   doc.body.innerHTML = '<main><button id="pageBtn" type="button">Page</button></main><div id="wsPlayer" hidden></div>';
   const clock = fakeClock();
   const engine = fakeEngine(o.state);
-  const env = { reduce: !!o.reduce, wide: !!o.wide, dialog: false, left: [], layers: [], stepped: 0 };
-  // WS.router.pushOverlay as the router keeps it: a stack of entries. back()
-  // is the phone's Back (the top one's onClose); navigate() a navigation.
-  env.pushOverlay = function (onClose) {
-    const o = { onClose, open: true };
-    env.layers.push(o);
-    return {
-      get open() { return o.open; },
-      close() {
-        if (!o.open) return;
-        const k = env.layers.indexOf(o);
-        o.open = false;
-        for (const x of env.layers.splice(k).slice(1).reverse()) { x.open = false; x.onClose({ base: true }); }
-        env.stepped += 1;
-      }
-    };
+  const env = { reduce: !!o.reduce, wide: !!o.wide, dialog: false, left: [], activation: o.activation !== false,
+    watchers: [], made: 0, destroyed: 0 };
+  // The browser's CloseWatcher, as far as the player uses it: made per layer,
+  // destroyed when a layer closes some other way. closeRequest() is Android's
+  // Back or an uncancelled Escape: the newest live watcher gets 'close'.
+  class FakeCloseWatcher {
+    constructor() {
+      this.live = true;
+      this.fns = [];
+      env.made += 1;
+      env.watchers.push(this);
+    }
+    addEventListener(type, fn) { if (type === 'close') this.fns.push(fn); }
+    destroy() {
+      if (!this.live) return;
+      this.live = false;
+      env.destroyed += 1;
+      env.watchers.splice(env.watchers.indexOf(this), 1);
+    }
+  }
+  env.closeRequest = function () {
+    const w = env.watchers.pop();
+    if (!w) return false;
+    w.live = false;
+    for (const fn of w.fns) fn(new win.Event('close'));
+    return true;
   };
-  env.back = function () {
-    const o = env.layers.pop();
-    if (!o) return;
-    o.open = false;
-    o.onClose({ pop: true });
+  // Escape as the browser handles it: the keydown, then (uncancelled) a close request.
+  env.escape = function () {
+    const ev = new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    doc.activeElement.dispatchEvent(ev);
+    if (!ev.defaultPrevented && o.closeWatcher !== false) env.closeRequest();
+    return ev;
   };
-  env.navigate = function () {
-    while (env.layers.length) env.back();
-  };
+  // Every history write the page makes.
+  env.historyWrites = 0;
+  for (const k of ['pushState', 'replaceState']) {
+    const real = win.history[k].bind(win.history);
+    win.history[k] = (...a) => { env.historyWrites += 1; return real(...a); };
+  }
   const host = doc.getElementById('wsPlayer');
   const make = o.boot ? null : U.createUI;
   const opts = {
@@ -152,7 +166,9 @@ function setup(o = {}) {
     ResizeObserver: null,
     isDialogOpen: () => env.dialog,
     leaveTo: (u) => env.left.push(u),
-    pushOverlay: o.noRouter ? undefined : (fn) => env.pushOverlay(fn)
+    win,
+    CloseWatcher: o.closeWatcher === false ? null : FakeCloseWatcher,
+    hasActivation: () => env.activation
   };
   const ui = make ? make(opts) : null;
   const q = (sel) => doc.querySelector(sel);
@@ -300,7 +316,8 @@ await run('the book finished', () => {
 // ---------------------------------------------------------------------------
 
 await run('open and close: the bar, the close button, Escape, focus back', async () => {
-  const t = setup();
+  // The page's own Escape (no CloseWatcher; the watcher path is below).
+  const t = setup({ closeWatcher: false });
   t.engine.set(BOOK, 'open');
   const openBtn = t.q('.wsp-bar-open');
   const full = t.q('.wsp-full');
@@ -474,81 +491,236 @@ await run('covers keep their shape', () => {
   check('no cover: the mark', t2.q('.wsp-bar-art .wsp-art-mark').hidden === false && !t2.q('.wsp-bar-art img').getAttribute('src'));
 });
 
-await run('Back closes the innermost layer; the history entries are consumed', async () => {
+await run('CloseWatcher: one per layer, closed innermost first, never history', () => {
   const t = setup();
+  const len = t.win.history.length;
   t.engine.set(BOOK, 'open');
   const openBtn = t.q('.wsp-bar-open');
   openBtn.focus();
-  t.ui.open();
-  check('open: one entry', t.env.layers.length === 1);
-  t.env.back();
-  check('Back closes the player', !t.ui.isOpen());
+  openBtn.click();
+  check('the player has a watcher', t.env.watchers.length === 1);
+  t.env.closeRequest();
+  check('a close request (Android Back) closes the player', !t.ui.isOpen());
   check('focus back on the bar', t.doc.activeElement === openBtn);
-  check('its entry was the one Back used: no step of our own', t.env.stepped === 0 && t.env.layers.length === 0);
+  check('no watcher left', t.env.watchers.length === 0);
 
-  t.ui.open();
-  t.q('.wsp-full .wsp-icon-btn').click();
-  check('the close button consumes the entry', t.env.layers.length === 0 && t.env.stepped === 1);
-  t.ui.open();
-  t.key(t.doc.activeElement, 'Escape');
-  check('Escape consumes it too', t.env.layers.length === 0 && t.env.stepped === 2 && !t.ui.isOpen());
-  t.ui.open();
-  t.engine.set(EMPTY, 'close');
-  check('the book closing consumes it', t.env.layers.length === 0 && t.env.stepped === 3 && !t.ui.isOpen());
-
-  t.engine.set(BOOK, 'open');
   t.ui.open();
   const chaptersBtn = t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1);
   chaptersBtn.click();
-  check('a panel over the player: a second entry', t.env.layers.length === 2 && t.q('.wsp-full').getAttribute('data-view') === 'chapters');
-  t.env.back();
-  check('Back closes the panel first', t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view') && t.env.layers.length === 1);
+  check('a panel over the player: a second watcher', t.env.watchers.length === 2 && t.q('.wsp-full').getAttribute('data-view') === 'chapters');
+  t.env.closeRequest();
+  check('the first close request closes the panel', t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view') && t.env.watchers.length === 1);
   check('focus back on the button that showed it', t.doc.activeElement === chaptersBtn);
-  t.env.back();
-  check('then the player', !t.ui.isOpen() && t.env.layers.length === 0);
+  t.env.closeRequest();
+  check('the next closes the player', !t.ui.isOpen() && t.env.watchers.length === 0);
 
   t.ui.open();
   chaptersBtn.click();
-  t.key(t.doc.activeElement, 'Escape');
-  check('Escape: the panel first, its entry consumed', t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view') && t.env.layers.length === 1);
-  t.key(t.doc.activeElement, 'Escape');
-  check('Escape again: the player', !t.ui.isOpen() && t.env.layers.length === 0);
+  let ev = t.env.escape();
+  check('Escape is left to the browser: not cancelled', !ev.defaultPrevented);
+  check('Escape: the panel first', t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view') && t.env.watchers.length === 1);
+  ev = t.env.escape();
+  check('Escape again: the player', !t.ui.isOpen() && t.env.watchers.length === 0 && !ev.defaultPrevented);
 
-  t.ui.open();
-  chaptersBtn.click();
-  t.q('.wsp-panel-back').click();
-  check('the panel\'s back button consumes its entry', t.env.layers.length === 1 && t.ui.isOpen());
-  chaptersBtn.click();
-  t.qa('.wsp-chapter-item')[2].click();
-  check('a jump from the list consumes it too', t.env.layers.length === 1 && !t.q('.wsp-full').hasAttribute('data-view'));
-  chaptersBtn.click();
-  t.q('.wsp-full .wsp-icon-btn').click();
-  check('closing the player with a panel open consumes both', t.env.layers.length === 0 && !t.ui.isOpen());
-
-  t.ui.open();
-  chaptersBtn.click();
-  t.env.navigate();
-  check('a navigation closes the panel and the player', !t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view') && t.env.layers.length === 0);
-  for (let n = 0; n < 20; n++) {
-    t.ui.open();
-    if (n % 2) t.env.back();
-    else t.ui.close();
-  }
-  check('20 opens and closes leave no entry', t.env.layers.length === 0 && !t.ui.isOpen());
+  check('no history entry, ever', t.env.historyWrites === 0 && t.win.history.length === len, [t.env.historyWrites, t.win.history.length]);
 
   const wide = setup({ wide: true });
   wide.engine.set(BOOK, 'open');
   wide.ui.open();
   wide.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1).click();
-  check('wide: a panel beside the player is no layer', wide.env.layers.length === 1);
-  wide.key(wide.doc.activeElement, 'Escape');
-  check('wide: Escape closes the player', !wide.ui.isOpen() && wide.env.layers.length === 0);
+  check('wide: a panel beside the player has no watcher', wide.env.watchers.length === 1);
+  wide.env.escape();
+  check('wide: Escape closes the player', !wide.ui.isOpen() && wide.env.watchers.length === 0);
+});
 
-  const bare = setup({ noRouter: true });
-  bare.engine.set(BOOK, 'open');
-  bare.ui.open();
-  bare.ui.close();
-  check('without a router it still opens and closes', !bare.ui.isOpen());
+await run('every way a layer closes destroys its watcher', async () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  const chaptersBtn = () => t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1);
+  const ways = {
+    'the close button': () => t.q('.wsp-full .wsp-icon-btn').click(),
+    'WS.playerUI.close()': () => t.ui.close(),
+    'a swipe': () => {
+      const top = t.q('.wsp-top-label');
+      t.pointer(top, 'pointerdown', 100);
+      t.pointer(top, 'pointermove', 200);
+      t.pointer(top, 'pointermove', 300);
+      t.pointer(top, 'pointerup', 300);
+    },
+    'the book closing': () => { t.engine.set(EMPTY, 'close'); t.engine.set(BOOK, 'open'); },
+    'a new page': () => t.win.dispatchEvent(new t.win.CustomEvent('ws:page-mounted', { detail: {} })),
+    'a wiki view': () => t.win.dispatchEvent(new t.win.CustomEvent('ws:page-claimed', { detail: {} }))
+  };
+  for (const [name, way] of Object.entries(ways)) {
+    t.ui.open();
+    chaptersBtn().click();
+    const made = t.env.made;
+    way();
+    check(name + ': closed', !t.ui.isOpen(), name);
+    check(name + ': both watchers gone', t.env.watchers.length === 0, [name, t.env.watchers.length, made]);
+  }
+  t.ui.open();
+  chaptersBtn().click();
+  t.q('.wsp-panel-back').click();
+  check('the panel\'s back button: its watcher gone, the player\'s kept', t.env.watchers.length === 1 && t.ui.isOpen());
+  chaptersBtn().click();
+  t.qa('.wsp-chapter-item')[2].click();
+  check('a jump from the list: the same', t.env.watchers.length === 1 && !t.q('.wsp-full').hasAttribute('data-view'));
+  t.ui.close();
+  for (let n = 0; n < 20; n++) {
+    t.ui.open();
+    chaptersBtn().click();
+    if (n % 2) { t.env.closeRequest(); t.env.closeRequest(); } else t.ui.close();
+  }
+  check('20 opens and closes leave no watcher', t.env.watchers.length === 0 && !t.ui.isOpen() && t.env.made === t.env.destroyed + 20,
+    [t.env.watchers.length, t.env.made, t.env.destroyed]);
+  check('and no history', t.env.historyWrites === 0);
+});
+
+await run('no tap or key: no watcher, Escape handled here', () => {
+  const t = setup({ activation: false });
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  check('no watcher', t.env.watchers.length === 0);
+  const ev = t.env.escape();
+  check('Escape closes it itself', !t.ui.isOpen() && ev.defaultPrevented);
+});
+
+await run('no CloseWatcher: Escape innermost first, the player closes when a page is shown', () => {
+  const t = setup({ closeWatcher: false });
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1).click();
+  let ev = t.env.escape();
+  check('Escape: the panel first', ev.defaultPrevented && t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view'));
+  ev = t.env.escape();
+  check('Escape again: the player', ev.defaultPrevented && !t.ui.isOpen());
+  t.ui.open();
+  t.win.dispatchEvent(new t.win.CustomEvent('ws:page-mounted', { detail: { url: '/x' } }));
+  check('Back (a page mounted) closes it', !t.ui.isOpen());
+  t.ui.open();
+  t.win.dispatchEvent(new t.win.CustomEvent('ws:page-claimed', { detail: { url: '/wiki/a' } }));
+  check('a wiki view shown under it closes it', !t.ui.isOpen());
+  t.win.dispatchEvent(new t.win.CustomEvent('ws:page-mounted', { detail: {} }));
+  check('a page mounting with the player closed changes nothing', !t.ui.isOpen() && t.q('.wsp-bar').hidden === false);
+  check('no history', t.env.historyWrites === 0);
+});
+
+await run('T7U1: keys inside the full player never reach the page', () => {
+  const t = setup();
+  const turned = [];
+  // A reader's page-turn keys, on document (reader.js).
+  t.doc.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'j' || e.key === ' ') { e.preventDefault(); turned.push(e.key); }
+    else if (e.key === 'ArrowLeft' || e.key === 'k') { e.preventDefault(); turned.push(e.key); }
+  });
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  const play = t.q('.wsp-full .wsp-play');
+  play.focus();
+  const space = t.key(play, ' ');
+  for (const k of ['ArrowRight', 'ArrowLeft', 'j', 'k']) t.key(play, k);
+  check('the page heard none of them', turned.length === 0, turned);
+  check('Space is left to the button (not cancelled)', !space.defaultPrevented);
+  const f = Array.from(t.q('.wsp-full').querySelectorAll('button, input')).filter((el) => !el.closest('[hidden]') && !el.disabled);
+  f[f.length - 1].focus();
+  t.key(f[f.length - 1], 'Tab');
+  check('Tab still wraps', t.doc.activeElement === f[0]);
+  t.env.escape();
+  check('Escape still closes', !t.ui.isOpen());
+  t.key(t.doc.body, 'ArrowRight');
+  check('closed, the page has its keys back', turned.join() === 'ArrowRight', turned);
+});
+
+await run('T7U2: the warning shows over a panel too', () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1).click();
+  const msg = "Your place isn't being saved. Last saved 9:41 PM.";
+  t.engine.emit('warning', { kind: 'not-saved', active: true, lastSavedAt: 1, message: msg });
+  const live = t.qa('.wsp-warn-live')[1];
+  check('in the sheet, outside the player view a panel hides', live.parentNode === t.q('.wsp-sheet') && !live.closest('.wsp-main'));
+  check('said', live.textContent === msg);
+  const css = readFileSync(join(here, '../../static/css/theme.css'), 'utf8');
+  check('no rule hides it with the player view', !/\.wsp-main[^{]*\.wsp-warn-live/.test(css));
+});
+
+await run('T7U3: only a real flick closes', async () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  const top = t.q('.wsp-top-label');
+  // 99 px quickly, then held for 3 s before letting go.
+  t.pointer(top, 'pointerdown', 100);
+  await t.clock.advance(30);
+  t.pointer(top, 'pointermove', 199);
+  await t.clock.advance(3000);
+  t.pointer(top, 'pointerup', 199);
+  check('a drag held still is no flick', t.ui.isOpen());
+  // An 8 px wobble, fast.
+  t.pointer(top, 'pointerdown', 100);
+  await t.clock.advance(5);
+  t.pointer(top, 'pointermove', 108);
+  await t.clock.advance(5);
+  t.pointer(top, 'pointerup', 108);
+  check('a wobble is no flick', t.ui.isOpen());
+  // 60 px in 60 ms, released at once.
+  t.pointer(top, 'pointerdown', 100);
+  await t.clock.advance(30);
+  t.pointer(top, 'pointermove', 130);
+  await t.clock.advance(30);
+  t.pointer(top, 'pointerup', 160);
+  check('a flick closes', !t.ui.isOpen());
+});
+
+await run('T7U4: slots never start a swipe', () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  const menu = t.doc.createElement('div');
+  menu.textContent = 'Skip length';
+  t.ui.fill('menu', menu);
+  t.ui.open();
+  for (const name of U.SLOTS) check(name + ' opts out', t.ui.slot(name).hasAttribute('data-no-swipe'));
+  t.pointer(menu, 'pointerdown', 100);
+  t.pointer(menu, 'pointermove', 400);
+  t.pointer(menu, 'pointerup', 400);
+  check('a drag on the menu is not a swipe', t.ui.isOpen() && t.q('.wsp-sheet').style.transform === '');
+});
+
+await run('T7U5: the book closing under the full player puts focus somewhere real', () => {
+  const t = setup();
+  t.doc.querySelector('main').insertAdjacentHTML('afterbegin', '<div id="wsPage"><h1 id="pageTitle">News</h1></div>');
+  t.engine.set(BOOK, 'open');
+  const openBtn = t.q('.wsp-bar-open');
+  openBtn.focus();
+  openBtn.click();
+  t.engine.set(EMPTY, 'close');
+  check('not the hidden bar: the page heading', t.doc.activeElement === t.q('#pageTitle') && t.q('#pageTitle').getAttribute('tabindex') === '-1',
+    t.doc.activeElement && t.doc.activeElement.outerHTML.slice(0, 60));
+  // A failed open: its Retry.
+  t.engine.set(BOOK, 'open');
+  openBtn.focus();
+  openBtn.click();
+  t.engine.set({ book: null, loading: true }, 'loading');
+  t.engine.emit('error', { code: 'unreachable', message: "Can't reach the media server", retry: () => Promise.resolve() });
+  t.engine.set(Object.assign({}, EMPTY, { error: { code: 'unreachable', message: "Can't reach the media server" } }), 'error');
+  check('a failed open: focus on Retry', t.doc.activeElement && t.doc.activeElement.textContent === 'Retry', t.doc.activeElement && t.doc.activeElement.outerHTML.slice(0, 80));
+});
+
+await run('T7U6: a retry that can no longer find the place says so', async () => {
+  const t = setup();
+  const lost = Object.assign(new Error("The saved place is in a part this book doesn't have"), { name: 'UnknownTrack' });
+  t.engine.emit('error', { code: 'unreachable', message: "Can't reach the media server", retry: () => Promise.reject(lost) });
+  const quiet = console.error;
+  const logged = [];
+  console.error = (...a) => logged.push(a.join(' '));
+  t.qa('.wsp-notice-btn').find((b) => b.textContent === 'Retry').click();
+  await flush();
+  console.error = quiet;
+  const texts = t.qa('.wsp-notice-text').map((n) => n.textContent);
+  check('the resume-lost notice', texts.indexOf("Couldn't find your saved place in this book") !== -1, texts);
+  check('not just a log line', logged.length === 0, logged);
 });
 
 // ---------------------------------------------------------------------------
@@ -576,6 +748,9 @@ await run('the not-saved warning, in both, in live regions', () => {
   t.engine.set({ saveError: false }, 'save');
   check('cleared on active:false', barLive.textContent === '' && fullLive.textContent === '');
   check('the page gets its space back', t.cssH() === '72px', t.cssH());
+  t.engine.emit('warning', { kind: 'not-saved', active: true, lastSavedAt: 1, message: msg });
+  t.engine.emit('warning', { kind: 'not-saved', active: false, lastSavedAt: 2, message: msg });
+  check('active:false clears it even with a stale message', barLive.textContent === '' && fullLive.textContent === '');
   t.engine.emit('warning', { kind: 'not-saved', active: true, lastSavedAt: 1, message: msg });
   t.engine.set(EMPTY, 'close');
   check('a closed book clears it', barLive.textContent === '');

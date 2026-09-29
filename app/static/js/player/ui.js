@@ -56,7 +56,9 @@
  *       its buttons is pressed (which removes it, then runs run) or
  *       remove(). id defaults to 'prompt', so a new prompt replaces the last.
  *   slot(name)        the element of a slot: 'menu' (the full player's top
- *                     right), 'speed', 'sleep', 'history' (its row of actions)
+ *                     right), 'speed', 'sleep', 'history' (its row of actions).
+ *                     A slot never starts a swipe (data-no-swipe); anything
+ *                     else a feature adds to a swipe area opts out the same way.
  *   fill(name, node)  puts node in the slot and shows it; clear(name) empties
  *                     and hides it again. A slot is hidden until it is filled.
  *   actionButton({ icon, text, label }) -> <button>
@@ -67,15 +69,25 @@
  *                     player on a wide screen, over it (with a back button)
  *                     on a phone. body is where its content goes; opener, the
  *                     button that showed it, gets focus back when it hides.
- *   open(), close(), isOpen()        the full player. Open, it (and a panel over
- *                     it on a phone) has a history entry (WS.router.pushOverlay):
- *                     Back and Escape close the innermost layer first; a
- *                     navigation closes both.
+ *   open(), close(), isOpen()        the full player
  *   on('open' | 'close', fn) -> unsubscribe
+ *
+ * Closing: Escape and, on a phone, Back close the innermost layer first (a
+ * panel over the player, then the player). Where the browser has CloseWatcher,
+ * each layer opened by a tap or a key gets one, so the browser's own close
+ * request (Android Back, Escape) closes it; no history entry is ever written.
+ * Elsewhere Escape is handled here, Back navigates the page as usual, and the
+ * full player closes when a new page (or a page's own view) is shown. Keys
+ * pressed inside the full player never reach the page under it (a reader's
+ * page-turn keys, say); a feature that wants a key there listens inside it.
+ * The full player closes whenever a page (or a wiki view) is shown under it,
+ * including Back on a desktop browser, which is no close request.
  */
 
 export const SWIPE_CLOSE_PX = 120;     // a swipe down this far closes the full player
-export const SWIPE_FLING = 0.6;        // or a flick this fast (px per ms)
+export const SWIPE_FLING = 0.6;        // or a flick this fast (px per ms)...
+export const FLING_MIN_PX = 48;        // ...that has come at least this far
+export const FLING_WINDOW_MS = 100;    // a flick's speed: over its last 100 ms, the release included
 export const SLIDE_MS = 250;           // the full player's slide
 export const NOTICE_MS = 5000;
 export const NOTICE_ERR_MS = 7000;
@@ -85,6 +97,7 @@ export const CLOCK_MS = 30000;         // the "finishes around" clock, while pau
 export const SLOTS = ['menu', 'speed', 'sleep', 'history'];
 
 const WIDE = '(min-width: 1024px)';
+const RESUME_LOST = "Couldn't find your saved place in this book";
 const REDUCE = '(prefers-reduced-motion: reduce)';
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), ' +
   'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -171,8 +184,9 @@ export function chapterSpan(state) {
 
 /* env: { doc, host (#wsPlayer), player (WS.player), matchMedia(query),
    measure(el) -> px, isVisible(el), now(), setTimeout, clearTimeout,
-   ResizeObserver, isDialogOpen(), leaveTo(url),
-   pushOverlay(onClose) -> { open, close() } | null (WS.router's) }. */
+   ResizeObserver, isDialogOpen(), leaveTo(url), win (for the router's
+   events), CloseWatcher (the browser's, or none), hasActivation() (a tap or
+   a key is being handled now) }. */
 export function createUI(env) {
   const doc = env.doc;
   const host = env.host;
@@ -204,18 +218,31 @@ export function createUI(env) {
   let drag = null;             // a swipe: { id, y0, dy, moving, samples: [[t, y]] }
   let view = null;             // the panel shown over the player (phone) or beside it (wide)
   let panelFrom = null;        // what showed it, for focus on the way back
-  // History entries (WS.router.pushOverlay), so Back closes the innermost
-  // layer: the full player's, and a panel's while it covers the player.
-  let layer = null;
-  let panelLayer = null;
+  // CloseWatchers, one per layer: the full player's, and a panel's while it
+  // covers the player. null where the browser has none, or the layer was
+  // opened with no tap or key (a watcher made then would share the previous
+  // one's close request).
+  let watcher = null;
+  let panelWatcher = null;
 
-  function pushLayer(onClose) {
+  function watch(onClose) {
+    const CW = env.CloseWatcher;
+    if (typeof CW !== 'function') return null;
     try {
-      return env.pushOverlay ? env.pushOverlay(onClose) || null : null;
+      if (env.hasActivation && !env.hasActivation()) return null;
+      const w = new CW();
+      w.addEventListener('close', onClose);
+      return w;
     } catch (e) {
-      logError(e);
       return null;
     }
+  }
+
+  function unwatch(w) {
+    if (!w) return;
+    try {
+      w.destroy();
+    } catch (e) { /* gone already */ }
   }
 
   function matches(q) {
@@ -333,7 +360,7 @@ export function createUI(env) {
   const closeBtn = h('button', { type: 'button', class: 'wsp-icon-btn', 'aria-label': 'Close the player' }, [icon('keyboard_arrow_down')]);
   const slots = {};
   SLOTS.forEach(function (name) {
-    slots[name] = h('div', { class: 'wsp-slot wsp-slot-' + name, 'data-slot': name, hidden: true });
+    slots[name] = h('div', { class: 'wsp-slot wsp-slot-' + name, 'data-slot': name, 'data-no-swipe': '', hidden: true });
   });
   const fullArt = art('wsp-full-art');
   fullArt.frame.setAttribute('data-swipe', '');
@@ -355,11 +382,10 @@ export function createUI(env) {
   const fwdBtn = h('button', { type: 'button', class: 'wsp-skip' }, [icon('replay', 'wsp-mirror'), fwdN]);
   const fullPlay = h('button', { type: 'button', class: 'wsp-play wsp-play-lg', 'aria-label': 'Play' }, [icon('play_arrow')]);
   const chaptersBtn = actionButton({ icon: 'format_list_bulleted', label: 'Chapters' });
-  const chaptersSlot = h('div', { class: 'wsp-slot', hidden: true }, [chaptersBtn]);
+  const chaptersSlot = h('div', { class: 'wsp-slot', 'data-no-swipe': '', hidden: true }, [chaptersBtn]);
   const main = h('div', { class: 'wsp-main' }, [
     fullArt.frame,
     h('div', { class: 'wsp-meta', 'data-swipe': '' }, [series, title, byline]),
-    fullWarn,
     h('div', { class: 'wsp-scrub' }, [
       chapLabel,
       range,
@@ -379,6 +405,8 @@ export function createUI(env) {
       h('span', { class: 'wsp-top-label', text: 'Now playing' }),
       slots.menu
     ]),
+    // The warning sits above whichever view shows (the player, or a panel over it).
+    fullWarn,
     h('div', { class: 'wsp-body' }, [main, side])
   ]);
   const full = h('div', { class: 'wsp-full', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'wspTitle', hidden: true }, [sheet]);
@@ -429,11 +457,11 @@ export function createUI(env) {
     if (!panels.has(name)) return;
     panelFrom = opener && opener.nodeType === 1 ? opener : doc.activeElement;
     view = name;
-    // Over the player (a phone): a layer of its own, so Back closes it first.
-    if (isOpen && !panelLayer && !matches(WIDE)) {
-      panelLayer = pushLayer(function () {
-        panelLayer = null;
-        hidePanel(null, true);
+    // Over the player (a phone): a layer of its own, closed first.
+    if (isOpen && !panelWatcher && !matches(WIDE)) {
+      panelWatcher = watch(function () {
+        panelWatcher = null;
+        hidePanel(null);
       });
     }
     drawPanels();
@@ -444,14 +472,13 @@ export function createUI(env) {
     } catch (e) { /* not focusable yet */ }
   }
 
-  // fromHistory: Back (or a navigation) closed it; its entry is gone already.
-  function hidePanel(name, fromHistory) {
+  function hidePanel(name) {
     if (name && view !== name) return;
     if (view === null) return;
     view = null;
-    const l = panelLayer;
-    panelLayer = null;
-    if (l && !fromHistory) l.close();
+    const w = panelWatcher;
+    panelWatcher = null;
+    unwatch(w);
     drawPanels();
     const back = panelFrom;
     panelFrom = null;
@@ -840,8 +867,28 @@ export function createUI(env) {
 
   // ---- Controls ----
 
-  barPlay.addEventListener('click', safely(function () { return player.toggle(); }));
-  fullPlay.addEventListener('click', safely(function () { return player.toggle(); }));
+  // A retry reopens the book at a place, which can be one it no longer has.
+  function retryFailed(err) {
+    if (err && err.name === 'UnknownTrack') notify(RESUME_LOST, { id: 'resume-lost' });
+    else logError(err);
+  }
+
+  function guarded(fn) {
+    return function () {
+      let r;
+      try {
+        r = fn();
+      } catch (err) {
+        retryFailed(err);
+        return;
+      }
+      if (r && typeof r.catch === 'function') r.catch(retryFailed);
+    };
+  }
+
+  barPlay.addEventListener('click', guarded(function () { return player.toggle(); }));
+  fullPlay.addEventListener('click', guarded(function () { return player.toggle(); }));
+  full.addEventListener('keydown', onKey);
   backBtn.addEventListener('click', function () { player.skip(-(num(player.setSkip()) || 10)); });
   fwdBtn.addEventListener('click', function () { player.skip(num(player.setSkip()) || 10); });
   openBtn.addEventListener('click', function () { open(); });
@@ -871,12 +918,20 @@ export function createUI(env) {
     return Array.prototype.slice.call(full.querySelectorAll(FOCUSABLE)).filter(isVisible);
   }
 
+  // On the full player itself: a key pressed in it is the player's, and never
+  // reaches the page under it (a reader's Space and arrows turn its pages).
   function onKey(e) {
-    if (!isOpen || dialogOpen() || e.defaultPrevented) return;
+    if (!isOpen) return;
+    e.stopPropagation();
+    if (dialogOpen() || e.defaultPrevented) return;
     if (e.key === 'Escape' && !e.isComposing) {
-      e.preventDefault();
       // The innermost layer first: a panel over the player, then the player.
-      if (view !== null && !matches(WIDE)) hidePanel(view);
+      // A layer with a CloseWatcher is closed by the browser's own close
+      // request, which this Escape becomes unless it is cancelled here.
+      const panelUp = view !== null && !matches(WIDE);
+      if (panelUp ? panelWatcher : watcher) return;
+      e.preventDefault();
+      if (panelUp) hidePanel(view);
       else close();
       return;
     }
@@ -944,11 +999,10 @@ export function createUI(env) {
     // The closed place is drawn first, so the slide runs from it.
     if (motion()) void sheet.offsetWidth;
     full.classList.add('is-open');
-    doc.addEventListener('keydown', onKey);
     doc.addEventListener('focusin', onFocusIn);
-    layer = pushLayer(function () {
-      layer = null;
-      close(true);
+    watcher = watch(function () {
+      watcher = null;
+      close();
     });
     render(player.state());
     centreCurrent();
@@ -958,19 +1012,19 @@ export function createUI(env) {
     return true;
   }
 
-  // fromHistory: Back or a navigation closed it (the router's onClose); its
-  // entry is gone already. Otherwise its own controls did, and the router
-  // steps off the entry.
-  function close(fromHistory) {
+  function close() {
     if (!isOpen) return;
     isOpen = false;
-    const l = layer;
-    layer = null;
-    panelLayer = null;          // closes with the player's layer
-    if (l && fromHistory !== true) l.close();
+    // Whatever closed it, its watchers go (a watcher the browser just closed
+    // is gone already).
+    const w = watcher;
+    const pw = panelWatcher;
+    watcher = null;
+    panelWatcher = null;
+    unwatch(pw);
+    unwatch(w);
     endDrag();
     full.classList.remove('is-open');
-    doc.removeEventListener('keydown', onKey);
     doc.removeEventListener('focusin', onFocusIn);
     if (clockTimer !== null) {
       clearT(clockTimer);
@@ -993,11 +1047,22 @@ export function createUI(env) {
     } else {
       finishClose();
     }
-    const back = lastFocus && lastFocus.isConnected && lastFocus !== doc.body && !full.contains(lastFocus) &&
-      !lastFocus.closest('[inert]') ? lastFocus : (barShown ? openBtn : null);
+    let back = lastFocus && lastFocus.isConnected && lastFocus !== doc.body && !full.contains(lastFocus) &&
+      !lastFocus.closest('[inert]') ? lastFocus : openBtn;
     lastFocus = null;
+    // Not where it was if that is gone from view (the bar, when the book
+    // closed or failed to open): an error's Retry, else the page.
+    if (!isVisible(back)) back = fallbackFocus();
     if (back && typeof back.focus === 'function') back.focus({ preventScroll: true });
     emit('close');
+  }
+
+  function fallbackFocus() {
+    const retry = noticeBox.querySelector('.wsp-notice.is-err .wsp-notice-btn') || noticeBox.querySelector('.wsp-notice-btn');
+    if (retry && isVisible(retry)) return retry;
+    const target = doc.querySelector('#wsPage h1') || doc.querySelector('main');
+    if (target && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    return target;
   }
 
   // ---- Swipe down to close ----
@@ -1031,11 +1096,20 @@ export function createUI(env) {
   function release(e, cancelled) {
     if (!drag || e.pointerId !== drag.id) return;
     const d = drag;
-    let v = 0;
-    const first = d.samples[0];
-    const last = d.samples[d.samples.length - 1];
-    if (last[0] > first[0]) v = (last[1] - first[1]) / (last[0] - first[0]);
-    if (!cancelled && d.moving && (d.dy >= SWIPE_CLOSE_PX || v >= SWIPE_FLING)) {
+    // The release is a sample too: a drag held still before letting go is
+    // no flick, however fast it moved earlier.
+    const end = [now(), typeof e.clientY === 'number' ? e.clientY : d.y0 + d.dy];
+    const dy = Math.max(0, end[1] - d.y0);
+    let from = null;
+    for (const s of d.samples) {
+      if (end[0] - s[0] <= FLING_WINDOW_MS) {
+        from = s;
+        break;
+      }
+    }
+    if (!from) from = d.samples[d.samples.length - 1];
+    const v = end[0] > from[0] ? (end[1] - from[1]) / (end[0] - from[0]) : 0;
+    if (!cancelled && d.moving && (dy >= SWIPE_CLOSE_PX || (v >= SWIPE_FLING && dy >= FLING_MIN_PX))) {
       // Let the slide carry on from where the finger left it.
       drag = null;
       sheet.classList.remove('is-dragging');
@@ -1065,10 +1139,20 @@ export function createUI(env) {
   player.on('error', function (e) {
     if (!e) return;
     let action = null;
-    if (typeof e.retry === 'function') action = { label: 'Retry', run: e.retry };
+    if (typeof e.retry === 'function') action = { label: 'Retry', run: guarded(e.retry) };
     else if (e.code === 'signed-out' && typeof env.leaveTo === 'function') action = { label: 'Sign in', run: function () { env.leaveTo('/login'); } };
     notify(e.message, { tone: 'err', id: 'error', duration: 0, action: action });
   });
+
+  // A new page, or a page's own new view (the wiki's), shown while the full
+  // player is open (Back where no CloseWatcher takes it, a link): the player
+  // makes way for it.
+  const win = env.win || doc.defaultView;
+  if (win && typeof win.addEventListener === 'function') {
+    ['ws:page-mounted', 'ws:page-claimed'].forEach(function (type) {
+      win.addEventListener(type, function () { if (isOpen) close(); });
+    });
+  }
 
   render(player.state());
 
@@ -1116,10 +1200,12 @@ export function boot(win, overrides) {
     clearTimeout: win.clearTimeout.bind(win),
     ResizeObserver: win.ResizeObserver || null,
     isDialogOpen: function () { return !!(win.WSUI && win.WSUI.isDialogOpen && win.WSUI.isDialogOpen()); },
-    // The router loads before the player, so it is there by the time a
-    // listener opens the full player.
-    pushOverlay: function (onClose) {
-      return WS.router && typeof WS.router.pushOverlay === 'function' ? WS.router.pushOverlay(onClose) : null;
+    win: win,
+    CloseWatcher: typeof win.CloseWatcher === 'function' ? win.CloseWatcher : null,
+    // Where the browser cannot say, a watcher is made anyway.
+    hasActivation: function () {
+      const ua = win.navigator && win.navigator.userActivation;
+      return !ua || !!ua.isActive;
     },
     leaveTo: function (url) {
       if (WS.leaveTo) WS.leaveTo(url);
