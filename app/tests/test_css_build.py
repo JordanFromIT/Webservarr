@@ -23,6 +23,7 @@ CONTENT_GLOBS = [
     ("app/static/partials", "*.html"),
     ("app/static/js", "*.js"),
     ("app/static/js/settings", "*.js"),
+    ("app/static/js/pages", "*.js"),
     ("app/static/js/player", "*.js"),
     ("app", "pages.py"),
     ("app/static/css", "tailwind.src.css"),
@@ -56,6 +57,24 @@ class CssBuildTests(unittest.TestCase):
             m.group(1), css_content_hash(ROOT),
             "app.css is stale - run `npm run build:css` and commit the result",
         )
+
+    @unittest.skipUnless((ROOT / "tailwind.config.js").exists() and (ROOT / "scripts" / "stamp-css.mjs").exists(),
+                         "the build files are not in the image (.dockerignore); CI's checkout has them")
+    def test_the_stamp_scans_what_tailwind_scans(self):
+        # A content path Tailwind reads but the stamp does not is a file whose
+        # edits never make app.css stale in this test (a class added there is
+        # silently missing). tailwind.src.css is the stamp's own extra: the input.
+        config = (ROOT / "tailwind.config.js").read_text(encoding="utf-8")
+        block = re.search(r"content:\s*\[(.*?)\]", config, re.S).group(1)
+        tailwind = set()
+        for path in re.findall(r"""["']\./([^"']+)["']""", block):
+            folder, _, pattern = path.rpartition("/")
+            tailwind.add((folder, pattern))
+        ours = set(CONTENT_GLOBS) - {("app/static/css", "tailwind.src.css")}
+        self.assertEqual(ours, tailwind, "CONTENT_GLOBS differs from tailwind.config.js content")
+        stamp = (ROOT / "scripts" / "stamp-css.mjs").read_text(encoding="utf-8")
+        stamp_dirs = set(re.findall(r'\[\s*"([^"]+)",\s*/', re.search(r"const GLOBS = \[(.*?)\n\];", stamp, re.S).group(1)))
+        self.assertEqual(stamp_dirs, {d for d, _ in CONTENT_GLOBS}, "stamp-css.mjs GLOBS differs from CONTENT_GLOBS")
 
     def test_no_page_uses_the_play_cdn(self):
         for page in sorted(STATIC.glob("*.html")):
