@@ -2225,12 +2225,105 @@ for (const [label, prefs, playMs, how, o] of DRIFT_CASES) {
     check('the local copy: not acknowledged', local.acked === false, local);
     const again = await reopenAsks(d, prefs, label);
     check('Continue offers the desktop\'s place', /^Continue from 26:4\d \(Chrome on Linux, \d+ min ago\)\?$/.test(again.asked.join()), again.asked);
-    // Stamped after the desktop's save (T9R7): held at the phone's own place.
-    check('held at the phone\'s place', again.heldAt && again.heldAt.track === local.track && again.heldAt.offset_ms === local.offset_ms, [again.heldAt, local]);
+    // Stamped after the desktop's save, but under 10 s of book time past its
+    // last acked place (a stray Play's moment): held at the desktop's place.
+    check('held at the desktop\'s place', again.heldAt && again.heldAt.track === deskRow.track && again.heldAt.offset_ms === deskRow.offset_ms, [again.heldAt, deskRow]);
+    check('the desktop\'s place survives', row().updated_at === deskRow.updated_at && row().device_id === DESK_ID, row());
+    // Then a plain Play at the next open (the lock screen or the bar) goes on
+    // from the desktop's place: the stale place is never stored.
+    for (const act of ['lock-screen Play', 'Play button']) {
+      const next = await d.page('psid-phone-' + act.length, 'Chrome on Android', PHONE_ID, phone.storage, prefs);
+      const m = server.log.length;
+      await next.open();
+      await clock.advance(1000);
+      if (act === 'lock-screen Play') next.ms.handlers.get('play')();
+      else next.q('.wsp-play-sm').click();
+      await clock.advance(5000);
+      next.engine.pause();
+      await clock.advance(1500);
+      check(`${act}: from the desktop's place, the stale place never stored`, since(m).length > 0 && since(m).every((e) => e[0] === 'stored' && e[3] === deskRow.track && e[4] >= deskRow.offset_ms - 30000) &&
+        row().track === deskRow.track && row().offset_ms >= deskRow.offset_ms, [since(m), row(), deskRow]);
+      next.engine.close();
+      if (act === 'lock-screen Play') {
+        // Put the desktop's row back as it was for the second act.
+        server.rows[MULTI.key] = Object.assign({}, deskRow);
+        phone.storage.setItem('ws-player:place:' + ID + ':' + MULTI.key, JSON.stringify(local));
+      }
+    }
+    d.desk.engine.close();
+  });
+}
+
+/* T9R8: a paused move on the stale page carries its own save, so the place
+   it writes is never acknowledged before that save is stored, even within
+   the drift allowance or exactly on the saved place. Offline, then closed:
+   the next open asks and the desktop's place survives. */
+for (const [label, move] of [
+  ['a one-step scrubber nudge forward', (phone) => { const r = phone.q('.wsp-range'); r.value = String(Number(r.value) + 1); r.dispatchEvent(new phone.win.Event('change')); }],
+  ['a one-step scrubber nudge back', (phone) => { const r = phone.q('.wsp-range'); r.value = String(Number(r.value) - 1); r.dispatchEvent(new phone.win.Event('change')); }],
+  ['a lock-screen seekto 600 ms on', (phone, saved) => phone.ms.handlers.get('seekto')({ seekTime: (600000 + saved + 600) / 1000 })],
+  ['a lock-screen seekto 1000 ms on', (phone, saved) => phone.ms.handlers.get('seekto')({ seekTime: (600000 + saved + 1000) / 1000 })],
+  ['a lock-screen seekto onto the saved place itself', (phone, saved) => phone.ms.handlers.get('seekto')({ seekTime: (600000 + saved) / 1000 })]
+]) {
+  await run(`a paused move on a stale page (${label}), offline, closed: the next open asks and the desktop's place survives`, async () => {
+    const d = await staleFor(OFF, 0);
+    const { clock, phone, row, since, server } = d;
+    const saved = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key)).offset_ms;
+    phone.audioEl._t += 0.02;                // the element's late timeupdate after the pause
+    phone.audioEl.fire('timeupdate');
+    await clock.advance(200);
+    const drifted = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+    check('the drift is still the saved place', drifted.acked === true && drifted.offset_ms === saved + 20, drifted);
+    await clock.advance(6 * MIN);
+    const deskRow = Object.assign({}, row());
+    const n = server.log.length;
+    phone.offline = true;
+    move(phone, saved);
+    await clock.advance(1000);
+    const local = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+    check('the move is written, not acknowledged', local.acked === false && local.offset_ms !== saved + 20, local);
+    phone.engine.close();
+    await clock.advance(20000);
+    check('nothing stored', since(n).every((e) => e[0] !== 'stored'), since(n));
+    const again = await reopenAsks(d, OFF, label);
+    check('held at the desktop\'s place', again.heldAt && again.heldAt.track === deskRow.track && again.heldAt.offset_ms === deskRow.offset_ms, [again.heldAt, deskRow]);
     check('the desktop\'s place survives', row().updated_at === deskRow.updated_at && row().device_id === DESK_ID, row());
     d.desk.engine.close();
   });
 }
+
+/* Real offline listening on a stale page (a Play, a move to 26:00 and 2 min
+   on): far past its last acked place and newer by stamp, so the next open
+   holds at it and a plain Play goes on from there. */
+await run('offline listening on a stale page, well past its acked place: held at it, and a plain Play keeps it', async () => {
+  const d = await staleFor(OFF, 6 * MIN);
+  const { clock, phone, page, row, since, server } = d;
+  phone.offline = true;
+  phone.ms.handlers.get('play')();
+  await clock.advance(3000);
+  phone.engine.seek(1560000);
+  await clock.advance(2 * MIN);
+  phone.engine.pause();
+  await clock.advance(1500);
+  const reached = Object.assign({}, phone.st().position);
+  phone.engine.close();
+  await clock.advance(20000);
+  phone.offline = false;
+  await clock.advance(30 * MIN);
+  const again = await page('psid-phone-2', 'Chrome on Android', PHONE_ID, phone.storage, OFF);
+  const n = server.log.length;
+  await again.open();
+  await clock.advance(1000);
+  check('held at the offline place, asked', !again.st().playing && again.st().position.track === reached.track && again.st().position.offset_ms === reached.offset_ms &&
+    again.prompts().length === 1 && since(n).length === 0, [again.st().position, reached, again.prompts(), since(n)]);
+  again.q('.wsp-play-sm').click();
+  await clock.advance(5000);
+  again.engine.pause();
+  await clock.advance(1500);
+  check('a plain Play stores it and goes on', since(n)[0] && since(n)[0][0] === 'stored' && since(n)[0][3] === reached.track && since(n)[0][4] === reached.offset_ms &&
+    row().device_id === PHONE_ID && row().offset_ms >= reached.offset_ms + 4000, [since(n), row()]);
+  again.engine.close();
+});
 
 /* T9R7: listening offline the server never heard of is newer by stamp than
    the desktop's place: the next open holds at it, a plain Play goes on from

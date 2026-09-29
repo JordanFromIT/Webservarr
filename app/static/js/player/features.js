@@ -128,6 +128,7 @@ export const NEXT_URL = '/api/player/next/';
 export const SESSION_GAP_MS = 600000;     // a longer gap in the log starts a new session
 export const HANDOFF_WITHIN_MS = 86400000; // another device's place this recent is offered on open
 export const HANDOFF_APART_MS = 30000;    // places closer than this are the same place
+export const OWN_PAST_ACK_MS = 10000;     // the open holds at this browser's copy only this far past its ack
 export const DEFAULTS = Object.freeze({ skip_s: 10, speed: 1, smart_rewind: true });
 
 const WIDE = '(min-width: 1024px)';
@@ -299,7 +300,11 @@ export function handoffOffer(info) {
   const recent = !!i.resumed && i.resumed.source === 'web' && age <= HANDOFF_WITHIN_MS;
   if (!recent && own.acked === true) return null;
   const canGo = web.playable !== false;
-  const ownNewer = Date.parse(own.updated_at) > Date.parse(web.updated_at);
+  // Newer by stamp and at least 10 s of book time past its last acked place
+  // (real listening, not a stray Play's moment; a copy with no acked place
+  // recorded counts as far past it).
+  const past = typeof own.ackedBookMs === 'number' ? own.bookMs - own.ackedBookMs : Infinity;
+  const ownNewer = Date.parse(own.updated_at) > Date.parse(web.updated_at) && past >= OWN_PAST_ACK_MS;
   return {
     other: { bookMs: web.bookMs, device: web.device || '', agoMs: isFinite(age) ? age : null, sameLabel: sameLabel(web, i.me), canGo: canGo },
     own: { bookMs: own.bookMs },

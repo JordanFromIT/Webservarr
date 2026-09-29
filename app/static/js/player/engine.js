@@ -105,8 +105,9 @@
  *                     updated_at, device, device_id, bookMs (null: not in
  *                     this book), playable } or null), own: this browser's
  *                     own copy ({ track, offset_ms, updated_at, device, own,
- *                     acked, bookMs } or null), now (the server's clock, ISO,
- *                     or null), me: { device_id, device } }. An answer
+ *                     acked, bookMs, ackedBookMs (its last acked place, or
+ *                     null) } or null), now (the server's clock, ISO, or
+ *                     null), me: { device_id, device } }. An answer
  *                     { at: 'web' } holds the open paused at WebServarr's
  *                     place, { at: 'own' } at this browser's own (the newer
  *                     by stamp, or the only one that can play here);
@@ -1509,7 +1510,8 @@ export function createEngine(env) {
       c = null;
     }
     const b = c ? toBookMs(book.tracks, c.track, c.offset_ms) : null;
-    return c && b !== null ? Object.assign({}, c, { bookMs: b }) : null;
+    const ab = c && c.ackedAt ? toBookMs(book.tracks, c.ackedAt.track, c.ackedAt.offset_ms) : null;
+    return c && b !== null ? Object.assign({}, c, { bookMs: b, ackedBookMs: ab }) : null;
   }
 
   function close() {

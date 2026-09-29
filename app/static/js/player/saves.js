@@ -111,7 +111,7 @@
  *   wake()                          back from frozen or hidden: the save in flight
  *                                   gets its full 15 s again
  *   clockProbe() -> done(serverNow) measure the clock against a server answer
- *   readLocal(book) -> { track, offset_ms, duration_ms, updated_at, device, own } | null
+ *   readLocal(book) -> { track, offset_ms, duration_ms, updated_at, device, own, acked, ackedAt } | null
  *   resumeFrom(book, { web, plex }) -> resumeOrder with the local copy
  *   onWarning(fn) -> unsubscribe
  *   lastSavedAt (ms, this page's clock, or null), warning (bool), psid,
@@ -392,7 +392,8 @@ export function createSaver(o) {
     try { v = JSON.parse(raw); } catch (e) { return null; }
     const c = copyOf('local', v);
     if (!c) return null;
-    return { track: c.track, offset_ms: c.offset_ms, duration_ms: c.duration_ms, updated_at: c.updated_at, device: c.device, own: v.own === true, acked: v.acked === true };
+    return { track: c.track, offset_ms: c.offset_ms, duration_ms: c.duration_ms, updated_at: c.updated_at, device: c.device, own: v.own === true, acked: v.acked === true,
+      ackedAt: v.ackedAt && typeof v.ackedAt === 'object' ? { track: String(v.ackedAt.track), offset_ms: Number(v.ackedAt.offset_ms) } : null };
   }
 
   // Stamped when the place is reached, in the server's clock. own: the
@@ -425,7 +426,11 @@ export function createSaver(o) {
     return !r.playing && r.event === null && !r.inFlight && nearPlace(place, r.acked);
   }
 
-  function writeLocal(book, place, own) {
+  // sending: the change carries a save of its own (a move, a play, a
+  // pause); its place is acknowledged only by that save's 2xx (ackLocal).
+  // ackedAt: the place the server last took, so the next open can tell how
+  // far past it this copy is (features.js handoffOffer).
+  function writeLocal(book, place, own, sending) {
     const id = identity();
     if (!id) return;
     const r = run;
@@ -436,7 +441,8 @@ export function createSaver(o) {
       updated_at: new Date(Math.min(now() + skew, capAt(book, r))).toISOString(),
       device: device,
       own: !!own,
-      acked: !!(r && r.book === book && ackedPlace(r, place))
+      acked: !!(r && r.book === book && !sending && ackedPlace(r, place)),
+      ackedAt: r && r.book === book && r.acked ? { track: String(r.acked.track), offset_ms: r.acked.offset_ms } : null
     });
     stored(function (s) { s.setItem(localKey(id, book), value); });
   }
@@ -771,7 +777,7 @@ export function createSaver(o) {
       // local copy until the listener acts.
       if (reached) r.keepLocal = false;
       if (moved && !r.keepLocal) {
-        writeLocal(r.book, place, reached || r.reachedMono !== null);
+        writeLocal(r.book, place, reached || r.reachedMono !== null, !!ev);
       }
       if (moved) {
         if (r.dirtySince === null && !samePlace(place, r.acked)) r.dirtySince = t;

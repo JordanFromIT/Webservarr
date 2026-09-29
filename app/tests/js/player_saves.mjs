@@ -2394,7 +2394,8 @@ current = 'the drift allowance counts only while paused with nothing to send or 
   p.emit('time');
   check('paused with the pause unsent: not acknowledged', localOf(t).acked === false, localOf(t));
   t.saver.stop();
-  // The very place the server took counts, playing or not.
+  // A move back to the very place carries its own save: not acknowledged
+  // until that save is stored (T9R8).
   const t2 = makeSaver();
   const p2 = listener(t2);
   p2.offset = 100000;
@@ -2406,8 +2407,36 @@ current = 'the drift allowance counts only while paused with nothing to send or 
   p2.emit('time');
   p2.offset = 100000;
   p2.emit('seek', { from: 100250, to: 100000 });
-  check('back at the very place, a save in flight: acknowledged', localOf(t2).acked === true && localOf(t2).offset_ms === 100000, localOf(t2));
+  check('back at the very place by a move, its save in flight: not acknowledged', localOf(t2).acked === false && localOf(t2).offset_ms === 100000, localOf(t2));
   t2.saver.stop();
+}
+
+current = 'a paused move carries its own save: never acknowledged before that save is stored (T9R8)';
+for (const [what, to] of [['a one-step nudge (+1 s)', 101000], ['a nudge back (-1 s)', 99000], ['a seek of +600 ms', 100600], ['a seek onto the saved place itself', 100000], ['a seek of +1001 ms', 101001]]) {
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1', { held: { track: '501', offset_ms: 100000, duration_ms: 3600000 } });
+  p.open();
+  p.play();
+  await p.listen(3000);
+  p.pause();
+  await t.clock.advance(1500);
+  const at = p.offset;
+  const target = at + (to - 100000);
+  check(`${what}: the pause stored, acknowledged`, localOf(t).acked === true && localOf(t).offset_ms === at, localOf(t));
+  p.offset += 20;                  // the element's drift after the pause
+  p.emit('time');
+  check(`${what}: the drift is still that place`, localOf(t).acked === true, localOf(t));
+  t.server.mode = 'offline';
+  p.seek(target);
+  check(`${what}: the move written, not acknowledged`, localOf(t).acked === false && localOf(t).offset_ms === target, localOf(t));
+  await t.clock.advance(1500);
+  check(`${what}: its save failed, still not acknowledged`, localOf(t).acked === false, localOf(t));
+  t.server.mode = 200;
+  await t.clock.advance(12000);
+  check(`${what}: its save stored on the retry, acknowledged`, localOf(t).acked === true && t.server.row && t.server.row.offset_ms === target, [localOf(t), t.server.row && t.server.row.offset_ms]);
+  t.saver.stop();
 }
 
 current = 'a last save refused with 409 caps the local copy too';
