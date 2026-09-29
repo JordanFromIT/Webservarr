@@ -245,10 +245,11 @@ async def get_active_streams() -> list:
         return []
 
 
-async def get_thumbnail(path: str, width: int = 300, height: int = 170) -> tuple:
+async def get_thumbnail(path: str, width: int = 300, height: int = 170, fill: bool = True) -> tuple:
     """
-    Fetch a thumbnail image from Plex, scaled to cover width x height and
-    cropped to it, and return (content_bytes, content_type).
+    Fetch a thumbnail image from Plex and return (content_bytes, content_type).
+    Plex scales it, keeping its shape and never cropping: with `fill` it
+    covers width x height (one side may be longer), without it fits inside.
     Returns (None, None) on failure.
     """
     config = _get_config()
@@ -263,7 +264,7 @@ async def get_thumbnail(path: str, width: int = 300, height: int = 170) -> tuple
                 params={
                     "width": width,
                     "height": height,
-                    "minSize": 1,
+                    **({"minSize": 1} if fill else {}),
                     "upscale": 1,
                     "url": path,
                 },

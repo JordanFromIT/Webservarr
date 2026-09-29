@@ -722,7 +722,8 @@ async def assert_in_library(key: str, track_key: Optional[str] = None) -> None:
         raise NotInLibrary("Not in this book")
 
 
-# The album thumbnail paths a cover may come from, and the square size served.
+# The album thumbnail paths a cover may come from, and the square a cover is
+# scaled to fit.
 _THUMB_PATH = re.compile(r"/library/metadata/[0-9]{1,20}/thumb/[0-9]{1,20}", re.ASCII)
 COVER_SIZE = 600
 
@@ -736,9 +737,12 @@ def cover_version(thumb) -> str:
 
 
 async def cover_image(key: str, size: int = COVER_SIZE) -> tuple:
-    """(image bytes, content type) of the book's album cover, scaled and
-    cropped to a size x size square by Plex's photo transcoder with the admin
-    token.
+    """(image bytes, content type) of the book's album cover, scaled by Plex's
+    photo transcoder with the admin token to fit a size x size square.
+
+    It is not cropped to the square: Plex cannot crop, and most audiobook
+    covers are print covers, taller than wide (about 0.57 to 0.77), so a
+    square cut would lose the title. The player frames it instead.
 
     The key is checked as assert_in_library checks a book (malformed keys
     before any Plex call, then the album is in the audiobook library), in the
@@ -754,7 +758,7 @@ async def cover_image(key: str, size: int = COVER_SIZE) -> tuple:
         raise NotInLibrary("This book has no cover")
     # get_thumbnail sends the token in a header, serves only raster image
     # types and caps the bytes read.
-    content, content_type = await plex.get_thumbnail(thumb, width=size, height=size)
+    content, content_type = await plex.get_thumbnail(thumb, width=size, height=size, fill=False)
     if content is None:
         raise NotInLibrary("This book's cover is not available")
     return content, content_type

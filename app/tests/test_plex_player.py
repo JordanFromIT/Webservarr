@@ -960,7 +960,7 @@ class Cover(BridgeBase):
         p.start()
         self.addCleanup(p.stop)
 
-    def test_a_square_cover_through_the_photo_transcoder(self):
+    def test_a_cover_fitted_to_a_square_through_the_photo_transcoder(self):
         content, ctype = self.run_async(pp.cover_image("100:1"))
         self.assertEqual((content, ctype), (b"\x89PNG-or-JPEG", "image/jpeg"))
         call = [c for c in self.plex.calls if c.url.path == "/photo/:/transcode"][0]
@@ -968,6 +968,9 @@ class Cover(BridgeBase):
         self.assertEqual(q["width"], [str(pp.COVER_SIZE)])
         self.assertEqual(q["height"], [str(pp.COVER_SIZE)])
         self.assertEqual(q["url"], ["/library/metadata/100/thumb/1700000000"])
+        # Fitted inside the square, never covering it: Plex cannot crop, and
+        # a tall print cover must not come back 600 wide and 930 high.
+        self.assertNotIn("minSize", q)
         self.assertEqual(call.headers["X-Plex-Token"], ADMIN_TOKEN)
         self.assert_no_token_in_urls()
 
