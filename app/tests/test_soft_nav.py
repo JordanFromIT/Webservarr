@@ -1644,6 +1644,9 @@ class PlayerView(unittest.TestCase):
         self.assertEqual(string_matches(src, _HANDLER_TEXT_RE), [])
         # Colours only as classes and theme.css rules: no style colour writes.
         self.assertNotRegex(code, r"\.style\.(?:color|background\w*|border\w*)\s*=")
+        # Its Back entries are the router's (pushOverlay): it writes no history itself.
+        self.assertNotRegex(code, r"\bhistory\s*\.|pushState|replaceState|popstate")
+        self.assertIn("WS.router.pushOverlay(onClose)", code)
 
     def test_its_styles_are_theme_variables_only(self):
         from app.tests.test_theme_sweep import raw_line_hits

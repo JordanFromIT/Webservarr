@@ -67,7 +67,10 @@
  *                     player on a wide screen, over it (with a back button)
  *                     on a phone. body is where its content goes; opener, the
  *                     button that showed it, gets focus back when it hides.
- *   open(), close(), isOpen()        the full player
+ *   open(), close(), isOpen()        the full player. Open, it (and a panel over
+ *                     it on a phone) has a history entry (WS.router.pushOverlay):
+ *                     Back and Escape close the innermost layer first; a
+ *                     navigation closes both.
  *   on('open' | 'close', fn) -> unsubscribe
  */
 
@@ -168,7 +171,8 @@ export function chapterSpan(state) {
 
 /* env: { doc, host (#wsPlayer), player (WS.player), matchMedia(query),
    measure(el) -> px, isVisible(el), now(), setTimeout, clearTimeout,
-   ResizeObserver, isDialogOpen(), leaveTo(url) }. */
+   ResizeObserver, isDialogOpen(), leaveTo(url),
+   pushOverlay(onClose) -> { open, close() } | null (WS.router's) }. */
 export function createUI(env) {
   const doc = env.doc;
   const host = env.host;
@@ -200,6 +204,19 @@ export function createUI(env) {
   let drag = null;             // a swipe: { id, y0, dy, moving, samples: [[t, y]] }
   let view = null;             // the panel shown over the player (phone) or beside it (wide)
   let panelFrom = null;        // what showed it, for focus on the way back
+  // History entries (WS.router.pushOverlay), so Back closes the innermost
+  // layer: the full player's, and a panel's while it covers the player.
+  let layer = null;
+  let panelLayer = null;
+
+  function pushLayer(onClose) {
+    try {
+      return env.pushOverlay ? env.pushOverlay(onClose) || null : null;
+    } catch (e) {
+      logError(e);
+      return null;
+    }
+  }
 
   function matches(q) {
     try {
@@ -412,6 +429,13 @@ export function createUI(env) {
     if (!panels.has(name)) return;
     panelFrom = opener && opener.nodeType === 1 ? opener : doc.activeElement;
     view = name;
+    // Over the player (a phone): a layer of its own, so Back closes it first.
+    if (isOpen && !panelLayer && !matches(WIDE)) {
+      panelLayer = pushLayer(function () {
+        panelLayer = null;
+        hidePanel(null, true);
+      });
+    }
     drawPanels();
     if (name === 'chapters') centreCurrent();
     const p = panels.get(name);
@@ -420,10 +444,14 @@ export function createUI(env) {
     } catch (e) { /* not focusable yet */ }
   }
 
-  function hidePanel(name) {
+  // fromHistory: Back (or a navigation) closed it; its entry is gone already.
+  function hidePanel(name, fromHistory) {
     if (name && view !== name) return;
     if (view === null) return;
     view = null;
+    const l = panelLayer;
+    panelLayer = null;
+    if (l && !fromHistory) l.close();
     drawPanels();
     const back = panelFrom;
     panelFrom = null;
@@ -847,7 +875,9 @@ export function createUI(env) {
     if (!isOpen || dialogOpen() || e.defaultPrevented) return;
     if (e.key === 'Escape' && !e.isComposing) {
       e.preventDefault();
-      close();
+      // The innermost layer first: a panel over the player, then the player.
+      if (view !== null && !matches(WIDE)) hidePanel(view);
+      else close();
       return;
     }
     if (e.key !== 'Tab') return;
@@ -916,6 +946,10 @@ export function createUI(env) {
     full.classList.add('is-open');
     doc.addEventListener('keydown', onKey);
     doc.addEventListener('focusin', onFocusIn);
+    layer = pushLayer(function () {
+      layer = null;
+      close(true);
+    });
     render(player.state());
     centreCurrent();
     if (clockTimer === null) clockTimer = setT(tickClock, CLOCK_MS);
@@ -924,9 +958,16 @@ export function createUI(env) {
     return true;
   }
 
-  function close() {
+  // fromHistory: Back or a navigation closed it (the router's onClose); its
+  // entry is gone already. Otherwise its own controls did, and the router
+  // steps off the entry.
+  function close(fromHistory) {
     if (!isOpen) return;
     isOpen = false;
+    const l = layer;
+    layer = null;
+    panelLayer = null;          // closes with the player's layer
+    if (l && fromHistory !== true) l.close();
     endDrag();
     full.classList.remove('is-open');
     doc.removeEventListener('keydown', onKey);
@@ -1075,6 +1116,11 @@ export function boot(win, overrides) {
     clearTimeout: win.clearTimeout.bind(win),
     ResizeObserver: win.ResizeObserver || null,
     isDialogOpen: function () { return !!(win.WSUI && win.WSUI.isDialogOpen && win.WSUI.isDialogOpen()); },
+    // The router loads before the player, so it is there by the time a
+    // listener opens the full player.
+    pushOverlay: function (onClose) {
+      return WS.router && typeof WS.router.pushOverlay === 'function' ? WS.router.pushOverlay(onClose) : null;
+    },
     leaveTo: function (url) {
       if (WS.leaveTo) WS.leaveTo(url);
       else win.location.href = url;

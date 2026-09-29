@@ -113,7 +113,32 @@ function setup(o = {}) {
   doc.body.innerHTML = '<main><button id="pageBtn" type="button">Page</button></main><div id="wsPlayer" hidden></div>';
   const clock = fakeClock();
   const engine = fakeEngine(o.state);
-  const env = { reduce: !!o.reduce, wide: !!o.wide, dialog: false, left: [] };
+  const env = { reduce: !!o.reduce, wide: !!o.wide, dialog: false, left: [], layers: [], stepped: 0 };
+  // WS.router.pushOverlay as the router keeps it: a stack of entries. back()
+  // is the phone's Back (the top one's onClose); navigate() a navigation.
+  env.pushOverlay = function (onClose) {
+    const o = { onClose, open: true };
+    env.layers.push(o);
+    return {
+      get open() { return o.open; },
+      close() {
+        if (!o.open) return;
+        const k = env.layers.indexOf(o);
+        o.open = false;
+        for (const x of env.layers.splice(k).slice(1).reverse()) { x.open = false; x.onClose({ base: true }); }
+        env.stepped += 1;
+      }
+    };
+  };
+  env.back = function () {
+    const o = env.layers.pop();
+    if (!o) return;
+    o.open = false;
+    o.onClose({ pop: true });
+  };
+  env.navigate = function () {
+    while (env.layers.length) env.back();
+  };
   const host = doc.getElementById('wsPlayer');
   const make = o.boot ? null : U.createUI;
   const opts = {
@@ -126,7 +151,8 @@ function setup(o = {}) {
     setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
     ResizeObserver: null,
     isDialogOpen: () => env.dialog,
-    leaveTo: (u) => env.left.push(u)
+    leaveTo: (u) => env.left.push(u),
+    pushOverlay: o.noRouter ? undefined : (fn) => env.pushOverlay(fn)
   };
   const ui = make ? make(opts) : null;
   const q = (sel) => doc.querySelector(sel);
@@ -446,6 +472,83 @@ await run('covers keep their shape', () => {
   const t2 = setup();
   t2.engine.set(Object.assign({}, BOOK, { cover: '' }), 'open');
   check('no cover: the mark', t2.q('.wsp-bar-art .wsp-art-mark').hidden === false && !t2.q('.wsp-bar-art img').getAttribute('src'));
+});
+
+await run('Back closes the innermost layer; the history entries are consumed', async () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  const openBtn = t.q('.wsp-bar-open');
+  openBtn.focus();
+  t.ui.open();
+  check('open: one entry', t.env.layers.length === 1);
+  t.env.back();
+  check('Back closes the player', !t.ui.isOpen());
+  check('focus back on the bar', t.doc.activeElement === openBtn);
+  check('its entry was the one Back used: no step of our own', t.env.stepped === 0 && t.env.layers.length === 0);
+
+  t.ui.open();
+  t.q('.wsp-full .wsp-icon-btn').click();
+  check('the close button consumes the entry', t.env.layers.length === 0 && t.env.stepped === 1);
+  t.ui.open();
+  t.key(t.doc.activeElement, 'Escape');
+  check('Escape consumes it too', t.env.layers.length === 0 && t.env.stepped === 2 && !t.ui.isOpen());
+  t.ui.open();
+  t.engine.set(EMPTY, 'close');
+  check('the book closing consumes it', t.env.layers.length === 0 && t.env.stepped === 3 && !t.ui.isOpen());
+
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  const chaptersBtn = t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1);
+  chaptersBtn.click();
+  check('a panel over the player: a second entry', t.env.layers.length === 2 && t.q('.wsp-full').getAttribute('data-view') === 'chapters');
+  t.env.back();
+  check('Back closes the panel first', t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view') && t.env.layers.length === 1);
+  check('focus back on the button that showed it', t.doc.activeElement === chaptersBtn);
+  t.env.back();
+  check('then the player', !t.ui.isOpen() && t.env.layers.length === 0);
+
+  t.ui.open();
+  chaptersBtn.click();
+  t.key(t.doc.activeElement, 'Escape');
+  check('Escape: the panel first, its entry consumed', t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view') && t.env.layers.length === 1);
+  t.key(t.doc.activeElement, 'Escape');
+  check('Escape again: the player', !t.ui.isOpen() && t.env.layers.length === 0);
+
+  t.ui.open();
+  chaptersBtn.click();
+  t.q('.wsp-panel-back').click();
+  check('the panel\'s back button consumes its entry', t.env.layers.length === 1 && t.ui.isOpen());
+  chaptersBtn.click();
+  t.qa('.wsp-chapter-item')[2].click();
+  check('a jump from the list consumes it too', t.env.layers.length === 1 && !t.q('.wsp-full').hasAttribute('data-view'));
+  chaptersBtn.click();
+  t.q('.wsp-full .wsp-icon-btn').click();
+  check('closing the player with a panel open consumes both', t.env.layers.length === 0 && !t.ui.isOpen());
+
+  t.ui.open();
+  chaptersBtn.click();
+  t.env.navigate();
+  check('a navigation closes the panel and the player', !t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view') && t.env.layers.length === 0);
+  for (let n = 0; n < 20; n++) {
+    t.ui.open();
+    if (n % 2) t.env.back();
+    else t.ui.close();
+  }
+  check('20 opens and closes leave no entry', t.env.layers.length === 0 && !t.ui.isOpen());
+
+  const wide = setup({ wide: true });
+  wide.engine.set(BOOK, 'open');
+  wide.ui.open();
+  wide.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1).click();
+  check('wide: a panel beside the player is no layer', wide.env.layers.length === 1);
+  wide.key(wide.doc.activeElement, 'Escape');
+  check('wide: Escape closes the player', !wide.ui.isOpen() && wide.env.layers.length === 0);
+
+  const bare = setup({ noRouter: true });
+  bare.engine.set(BOOK, 'open');
+  bare.ui.open();
+  bare.ui.close();
+  check('without a router it still opens and closes', !bare.ui.isOpen());
 });
 
 // ---------------------------------------------------------------------------
