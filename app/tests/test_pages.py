@@ -322,20 +322,50 @@ class ShellRendering(unittest.TestCase):
         user = pages.public_user({"email": "sam@example.test"})
         self.assertNotIn("sam@example.test", json.dumps(user))
 
-    def test_public_user_carries_the_account_identity(self):
-        # The player keys its local copy of a listener's place by it: the
-        # account identity, never the username (which can collide).
-        self.assertEqual(pages.public_user({"auth_method": "plex", "user_id": "4242", "plex_account_id": "4242",
-                                            "username": "sam"})["identity"], "plex:4242")
-        self.assertEqual(pages.public_user({"auth_method": "oidc", "user_id": "sub-1", "plex_account_id": "77",
-                                            "plex_token": "t"})["identity"], "plex:77")
-        self.assertEqual(pages.public_user({"auth_method": "simple", "account_uid": "u-9",
-                                            "username": "sam"})["identity"], "local:u-9")
-        self.assertEqual(pages.public_user({"auth_method": "simple", "username": "sam"})["identity"], "")
-        # Two accounts with the same username are two identities.
-        a = pages.public_user({"auth_method": "simple", "account_uid": "u-1", "username": "kid"})
-        b = pages.public_user({"auth_method": "plex", "user_id": "5", "plex_account_id": "5", "username": "kid"})
-        self.assertNotEqual(a["identity"], b["identity"])
+    def test_public_user_carries_an_opaque_identity_key(self):
+        # The player keys its local copy of a listener's place by account
+        # identity (never the username, which can collide), but the page only
+        # ever gets an HMAC of it: a Plex account id must not sit in page
+        # data or storage keys on a shared family device.
+        import asyncio
+        from app.config import settings
+        from app.routers.simple_auth import check_session
+        from app.utils import identity_key
+        plex = {"auth_method": "plex", "user_id": "48151623", "plex_account_id": "48151623", "username": "sam"}
+        linked = {"auth_method": "oidc", "user_id": "sub-1", "plex_account_id": "48151623", "plex_token": "t"}
+        local = {"auth_method": "simple", "account_uid": "u-9", "username": "sam"}
+        other = {"auth_method": "plex", "user_id": "5", "plex_account_id": "5", "username": "sam"}
+        with mock.patch.object(settings, "app_secret_key", "test-secret-one"):
+            k = pages.public_user(plex)["identity_key"]
+            self.assertRegex(k, r"^[0-9a-f]{24}$")
+            self.assertEqual(k, identity_key("plex:48151623"))
+            # Stable for one identity, however it signed in; different across identities.
+            self.assertEqual(pages.public_user(dict(plex))["identity_key"], k)
+            self.assertEqual(pages.public_user(linked)["identity_key"], k)
+            keys = {k, pages.public_user(local)["identity_key"], pages.public_user(other)["identity_key"]}
+            self.assertEqual(len(keys), 3)
+            # Never the raw identity, nor containing it.
+            for key in keys:
+                self.assertNotIn("48151623", key)
+                self.assertNotIn("plex:", key)
+            self.assertNotIn("identity", pages.public_user(plex))
+            # No identity: no key.
+            self.assertEqual(pages.public_user({"auth_method": "simple", "username": "sam"})["identity_key"], "")
+            # Neither the page data nor check-session carries the raw id.
+            out = render(user=pages.public_user(plex))
+            data = data_of(out)
+            self.assertEqual(data["user"]["identity_key"], k)
+            self.assertNotIn("48151623", out)
+            answer = asyncio.run(check_session(current_user=plex))
+            self.assertEqual(answer["user"]["identity_key"], k)
+            self.assertNotIn("identity", answer["user"])
+            self.assertNotIn("48151623", json.dumps(answer))
+        # Keyed by the app's secret: another install gives another key.
+        with mock.patch.object(settings, "app_secret_key", "test-secret-two"):
+            self.assertNotEqual(pages.public_user(plex)["identity_key"], k)
+        # Before the secret is loaded there is no key rather than an unkeyed hash.
+        with mock.patch.object(settings, "app_secret_key", ""):
+            self.assertEqual(pages.public_user(plex)["identity_key"], "")
 
     def test_app_name_is_escaped_in_shell(self):
         out = render(b=branding(**{"branding.app_name": "A & B <x>"}))

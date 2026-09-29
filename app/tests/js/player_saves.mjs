@@ -129,7 +129,8 @@ function fakeStorage(opts = {}) {
   };
 }
 
-const IDENTITY = 'plex:4242';
+// The page's identity key (WS.user.identity_key): an opaque HMAC, never the account id.
+const IDENTITY = '3f9a0c1d2b7e4a6f8c5d1e0b';
 function makeSaver(o = {}) {
   const clock = o.clock || fakeClock();
   const server = o.server || fakeServer(clock);
@@ -404,7 +405,7 @@ current = 'a change whose position is null is never saved';
 current = 'pagehide, ws:before-hard-nav and a hidden page send a beacon';
 {
   const win = new Window({ url: 'https://ws.test/news' });
-  win.WS = { user: { username: 'sam', identity: IDENTITY } };
+  win.WS = { user: { username: 'sam', identity_key: IDENTITY } };
   const clock = fakeClock();
   const server = fakeServer(clock);
   const beacons = [];
@@ -445,6 +446,7 @@ current = 'pagehide, ws:before-hard-nav and a hidden page send a beacon';
   check('pagehide: a beacon', beacons.length === 3);
   const body2 = JSON.parse(await beacons[2].blob.text());
   check('its seq is the newest', body2.seq > body1.seq && body1.seq > body0.seq && body2.event === 'leave');
+  check('the local copy is keyed by the identity key', storage.map.has('ws-player:place:' + IDENTITY + ':500:1'), [...storage.map.keys()]);
   // Leaving, Chrome fires pagehide and then visibilitychange (seen on dev):
   // the leave stays the last word, not a checkin saying it still plays.
   saver.note({ reason: 'time', state: st(true, 6500) });
@@ -459,7 +461,7 @@ current = 'pagehide, ws:before-hard-nav and a hidden page send a beacon';
   check('a page that stayed (the place moved on) sends hidden beacons again', beacons.length === 5, beacons.length);
   // A browser whose beacon queue refuses: the same save as a keepalive fetch.
   const win2 = new Window({ url: 'https://ws.test/news' });
-  win2.WS = { user: { identity: IDENTITY } };
+  win2.WS = { user: { identity_key: IDENTITY } };
   const kept = [];
   const s2 = S.browserSaver(win2, {
     sendBeacon: () => false,
@@ -479,10 +481,40 @@ current = 'pagehide, ws:before-hard-nav and a hidden page send a beacon';
   await win2.happyDOM.close();
 }
 
+current = 'the browser saver keys the local copy by WS.user.identity_key only';
+{
+  const st = { book: '500:1', playing: false, position: { track: '501', offset_ms: 100, duration_ms: 600000 } };
+  const run = async (user) => {
+    const w = new Window({ url: 'https://ws.test/news' });
+    w.WS = { user };
+    const clock = fakeClock();
+    const storage = fakeStorage();
+    const s = S.browserSaver(w, {
+      sendBeacon: () => true,
+      fetch: async () => ({ status: 200, json: async () => ({ stored: true, updated_at: new Date(clock.now).toISOString() }) }),
+      now: () => clock.now, storage,
+      setTimeout: (fn, ms) => clock.setTimeout(fn, ms, 'page'), clearTimeout: (id) => clock.clearTimeout(id)
+    });
+    s.start('500:1');
+    s.note({ reason: 'open', state: st });
+    s.stop();
+    await w.happyDOM.close();
+    return [...storage.map.keys()].filter((k) => k.indexOf('ws-player:place:') === 0);
+  };
+  const keyed = await run({ username: 'sam', identity_key: IDENTITY });
+  check('keyed by the hash', keyed.length === 1 && keyed[0] === 'ws-player:place:' + IDENTITY + ':500:1', keyed);
+  const raw = await run({ username: 'sam', identity: 'plex:4242' });
+  check('a raw identity on WS.user is never used as a key', raw.length === 0, raw);
+  const bad = await run({ username: 'sam', identity_key: 'plex:4242' });
+  check('a key that is not a hex hash is refused', bad.length === 0, bad);
+  const none = await run(null);
+  check('signed out: no local copy', none.length === 0, none);
+}
+
 current = 'back online: the retry goes at once';
 {
   const win = new Window({ url: 'https://ws.test/news' });
-  win.WS = { user: { identity: IDENTITY } };
+  win.WS = { user: { identity_key: IDENTITY } };
   const clock = fakeClock();
   const server = fakeServer(clock);
   const saver = S.browserSaver(win, {
@@ -527,9 +559,9 @@ current = 'the local copy is written on every position change, per identity and 
   check('with its time (ISO, server clock) and device', Math.abs(Date.parse(c.updated_at) - t.clock.now) <= 1000 && c.device === 'Chrome on Android', c);
   p.seek(700000);
   check('a seek is written at once', localOf(t).offset_ms === 700000);
-  check('keyed by identity and book', t.storage.map.has('ws-player:place:plex:4242:500:1'), [...t.storage.map.keys()]);
+  check('keyed by identity and book', t.storage.map.has('ws-player:place:' + IDENTITY + ':500:1'), [...t.storage.map.keys()]);
   check('readLocal reads it back', t.saver.readLocal('500:1').offset_ms === 700000);
-  const u = makeSaver({ storage: t.storage, identity: 'plex:777' });
+  const u = makeSaver({ storage: t.storage, identity: 'a1b2c3d4e5f60718293a4b5c' });
   check('another listener on the same browser does not see it', u.saver.readLocal('500:1') === null);
   check('another book has none', t.saver.readLocal('700:1') === null);
   const anon = makeSaver({ identity: '' });
@@ -540,7 +572,7 @@ current = 'the local copy is written on every position change, per identity and 
   await q.listen(2000);
   const placeKeys = [...anon.storage.map.keys()].filter((k) => k.indexOf('ws-player:place:') === 0);
   check('no identity: no local copy, saves still go', placeKeys.length === 0 && anon.server.fetches().length >= 1, [...anon.storage.map.keys()]);
-  t.storage.map.set('ws-player:place:plex:4242:800:1', '{not json');
+  t.storage.map.set('ws-player:place:' + IDENTITY + ':800:1', '{not json');
   check('a damaged copy reads as none', t.saver.readLocal('800:1') === null);
   t.saver.stop();
   anon.saver.stop();
@@ -576,7 +608,7 @@ current = 'a newer local copy is sent at once when the book opens';
 {
   const t = makeSaver();
   const iso = (s) => new Date(T0 + s * 1000).toISOString();
-  t.storage.map.set('ws-player:place:plex:4242:500:1', JSON.stringify({ track: '502', offset_ms: 123000, duration_ms: 900000, updated_at: iso(-5), device: 'Chrome on Android' }));
+  t.storage.map.set('ws-player:place:' + IDENTITY + ':500:1', JSON.stringify({ track: '502', offset_ms: 123000, duration_ms: 900000, updated_at: iso(-5), device: 'Chrome on Android' }));
   const web = { track: '501', offset_ms: 50000, duration_ms: 600000, updated_at: iso(-300), device: 'Chrome on Windows', source: 'web' };
   const order = t.saver.resumeFrom('500:1', { web, plex: null });
   check('the local copy is newest', order[0].source === 'local' && order[0].track === '502' && order[0].offset_ms === 123000, order);

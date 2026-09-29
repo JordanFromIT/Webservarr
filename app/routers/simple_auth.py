@@ -16,7 +16,7 @@ from app.dependencies import get_current_user_optional
 from app.limiter import limiter
 from app.models import User, Setting
 from app.routers.tickets import account_identity
-from app.utils import identity_email
+from app.utils import identity_email, identity_key
 
 # Secure cookies whenever served over HTTPS (see settings.cookie_secure).
 _COOKIE_SECURE = settings.cookie_secure
@@ -218,7 +218,8 @@ async def check_session(
             "auth_method": current_user.get("auth_method", ""),
             # Whether push can reach this account; never the address itself.
             "has_email": bool(identity_email(current_user.get("email"))),
-            # The account identity (pages.public_user): the player's local copy key.
-            "identity": account_identity(current_user),
+            # An opaque key for the account identity (pages.public_user): the
+            # player's local copy key. Never the identity itself.
+            "identity_key": identity_key(account_identity(current_user)),
         },
     }

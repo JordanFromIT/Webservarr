@@ -23,7 +23,8 @@
  * Hard exits (ws:before-hard-nav, pagehide, the page hidden) send a beacon.
  *
  * Local copy: every change of place is written to localStorage under the
- * listener's account identity (WS.user.identity, from #ws-data) and the
+ * listener's identity key (WS.user.identity_key, from #ws-data: an opaque
+ * HMAC of the account identity, so no account id sits in storage) and the
  * book, stamped in the server's clock as last measured, so it compares
  * fairly with the server's copies from a fast or slow device. Storage can
  * throw (a private window): every call is guarded, and saves go on without.
@@ -43,7 +44,7 @@
  *                                     localStorage, WS.user, pagehide and friends)
  *
  * createSaver({ post(body, kind) -> Promise<{ status, data }> | boolean (a beacon),
- *               now, storage, identity (string or function), device,
+ *               now, storage, identity (the identity key: string or function), device,
  *               setTimeout, clearTimeout, onSignedOut, formatTime, psid })
  *   start(book, { push, savedAt, held })
  *                                   push: the place the book opens at is newer
@@ -651,7 +652,8 @@ export function browserSaver(win, o) {
     storage: storage,
     identity: function () {
       const u = win.WS && win.WS.user;
-      return u && typeof u.identity === 'string' ? u.identity : '';
+      const k = u && u.identity_key;
+      return typeof k === 'string' && /^[0-9a-f]{16,64}$/.test(k) ? k : '';
     },
     device: deviceLabel(nav.userAgent || ''),
     setTimeout: o.setTimeout || win.setTimeout.bind(win),

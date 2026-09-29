@@ -37,7 +37,7 @@ from app.settings_registry import (
     safe_font,
 )
 from app.settings_registry import REGISTRY as _REGISTRY
-from app.utils import identity_email, safe_http_url, same_origin_path
+from app.utils import identity_email, identity_key, safe_http_url, same_origin_path
 
 logger = logging.getLogger(__name__)
 
@@ -213,10 +213,12 @@ def public_user(session: Optional[dict]) -> Optional[dict]:
 
     has_email says whether the account can receive notifications and push
     (see utils.identity_email); the address itself never goes into the page.
-    identity is the account identity that owns this user's rows (tickets.
-    account_identity: "plex:<id>", "local:<uid>", "oidc:<sub>", or ""): the
-    audiobook player keys its local copy of the listener's place by it, so a
-    shared browser never resumes one person at another's place.
+    identity_key is an opaque key for the account identity that owns this
+    user's rows (utils.identity_key over tickets.account_identity; "" when
+    there is none). The audiobook player keys its local copy of the
+    listener's place by it, so a shared browser never resumes one person at
+    another's place. The identity itself (a Plex account id) never goes into
+    the page.
     """
     if not session:
         return None
@@ -228,7 +230,7 @@ def public_user(session: Optional[dict]) -> Optional[dict]:
         "avatar_url": _safe_url(session.get("avatar_url", "")),
         "auth_method": session.get("auth_method", ""),
         "has_email": bool(identity_email(session.get("email"))),
-        "identity": account_identity(session),
+        "identity_key": identity_key(account_identity(session)),
     }
 
 

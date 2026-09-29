@@ -1,5 +1,7 @@
 """Shared utility functions."""
 
+import hashlib
+import hmac
 import ipaddress
 import socket
 from datetime import datetime, timezone
@@ -23,6 +25,27 @@ def utc_iso(value: Optional[datetime]) -> Optional[str]:
 
 
 # --- Account identity ---
+
+IDENTITY_KEY_HEX = 24
+
+
+def identity_key(identity) -> str:
+    """An opaque key for an account identity, safe to hand to the browser, or "".
+
+    HMAC-SHA256 of the identity (tickets.account_identity, e.g. "plex:<id>")
+    keyed by the app's secret key, truncated to 24 hex characters. Stable for
+    one account on this install (the secret key is kept in the database) and
+    different for every account, but it does not reveal the account id: the
+    page data and the browser's storage keys carry this, never the identity.
+    "" for no identity, or before the secret key is loaded."""
+    from app.config import settings
+    secret = settings.app_secret_key or ""
+    if not isinstance(identity, str) or not identity or not secret:
+        return ""
+    digest = hmac.new(secret.encode("utf-8"), b"webservarr-identity-key:" + identity.encode("utf-8"),
+                      hashlib.sha256).hexdigest()
+    return digest[:IDENTITY_KEY_HEX]
+
 
 def identity_email(value) -> str:
     """The email that identifies an account for notifications and push, or "".
