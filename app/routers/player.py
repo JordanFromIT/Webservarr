@@ -25,12 +25,12 @@ the same site.
 import hashlib
 import logging
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Body, Cookie, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Body, Cookie, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictInt, model_validator
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -48,6 +48,14 @@ router = APIRouter()
 PLAYER_LIMIT = "60/minute"
 CHECKIN_LIMIT = "60/minute"
 COVER_LIMIT = "240/minute"
+
+
+def _limit(rate: str, route: str):
+    """One budget per session for the route, whatever book key the URL
+    carries. The app limiter keys by URL path, so a plain limit would give
+    every /position/<key> a fresh budget of its own."""
+    return limiter.shared_limit(rate, scope=f"player:{route}", key_func=session_rate_key)
+
 # Cover URLs carry the thumbnail's version stamp, so a changed cover gets a
 # new URL and the old one can be kept a long time.
 COVER_MAX_AGE = 30 * 24 * 60 * 60
@@ -60,6 +68,45 @@ EVENT_STATES = {
     "pause": "paused", "leave": "paused",
     "end": "stopped",
 }
+
+# --- Text the database can store --------------------------------------------------
+
+def _encodable(value) -> bool:
+    """False for a string holding a lone surrogate ("\\ud800" in JSON), which
+    UTF-8 and so the database cannot store; walks lists and dicts."""
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            return False
+        return True
+    if isinstance(value, dict):
+        return all(_encodable(k) and _encodable(v) for k, v in value.items())
+    if isinstance(value, list):
+        return all(_encodable(v) for v in value)
+    return True
+
+
+def _utf8(value: str) -> str:
+    if not _encodable(value):
+        raise ValueError("must be valid Unicode text")
+    return value
+
+
+Text = Annotated[str, AfterValidator(_utf8)]
+
+
+async def require_encodable_body(request: Request) -> None:
+    """422 when the JSON body holds text that is not valid Unicode, before the
+    body is validated: FastAPI's own 422 echoes the offending input, and a
+    lone surrogate cannot be encoded into that response (a 500)."""
+    try:
+        data = await request.json()
+    except ValueError:
+        return          # not JSON: body validation answers 422 itself
+    if not _encodable(data):
+        raise HTTPException(status_code=422, detail="The request holds text that is not valid Unicode")
+
 
 # Upper bounds that only refuse nonsense (a week of audio; JavaScript's
 # largest exact integer for seq).
@@ -163,9 +210,24 @@ def _cover_url(key: str, thumb) -> str:
 
 
 # --- Library ------------------------------------------------------------------------
+#
+# Every route that reads the library needs the listener's own access to it
+# (library_access), as /books does: a share that leaves the audiobook library
+# out gets 403 everywhere, not only on the list. A book key is checked before
+# any access or refresh work, so a bad key costs no plex.tv call.
+
+async def _book_access(who: "Listener", key: str, force: bool = False) -> dict:
+    """The key checked as a book in the library, then the listener's access to
+    the library: their stream access. Raises the HTTP error."""
+    try:
+        await pp.assert_in_library(key)
+        return await pp.library_access(who.session(), session_id=who.session_id, force=force)
+    except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
+        raise _http_error(exc, forbid=True) from None
+
 
 @router.get("/books")
-@limiter.limit(PLAYER_LIMIT, key_func=session_rate_key)
+@_limit(PLAYER_LIMIT, "books")
 async def books(request: Request, who: Listener = Depends(listener)):
     """The audiobook library's books, for a listener who may read it."""
     try:
@@ -177,17 +239,16 @@ async def books(request: Request, who: Listener = Depends(listener)):
 
 
 @router.get("/book/{key}")
-@limiter.limit(PLAYER_LIMIT, key_func=session_rate_key)
+@_limit(PLAYER_LIMIT, "book")
 async def book(request: Request, key: str, refresh: bool = False, who: Listener = Depends(listener)):
     """One book's tracks and chapters, plus this listener's stream access:
     their own server token and the server's connection URIs. `refresh`
     asks plex.tv again (after the stream refused the cached token)."""
+    access = await _book_access(who, key, force=refresh)
     try:
-        pp.parse_key(key)
-        access = await pp.library_access(who.session(), session_id=who.session_id, force=refresh)
         detail = await pp.book_detail(key)
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
-        raise _http_error(exc, forbid=True) from None
+        raise _http_error(exc) from None
     body = {**detail, "cover": _cover_url(key, detail.get("cover")),
             "stream": {"token": access["token"], "uris": access["uris"]}}
     # It carries the listener's server token: never stored by a cache.
@@ -195,10 +256,11 @@ async def book(request: Request, key: str, refresh: bool = False, who: Listener 
 
 
 @router.get("/cover/{key}")
-@limiter.limit(COVER_LIMIT, key_func=session_rate_key)
+@_limit(COVER_LIMIT, "cover")
 async def cover(request: Request, key: str, who: Listener = Depends(listener)):
-    """The book's cover as a square image, served from this origin (img-src
+    """The book's cover, fitted to a square, served from this origin (img-src
     stays as it is)."""
+    await _book_access(who, key)
     try:
         content, content_type = await pp.cover_image(key)
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
@@ -213,19 +275,16 @@ async def cover(request: Request, key: str, who: Listener = Depends(listener)):
 # --- Positions and history ----------------------------------------------------------
 
 @router.get("/position/{key}")
-@limiter.limit(PLAYER_LIMIT, key_func=session_rate_key)
+@_limit(PLAYER_LIMIT, "position")
 async def position(request: Request, key: str, who: Listener = Depends(listener),
                    db: Session = Depends(get_db)):
     """This listener's place in the book: WebServarr's, and Plex's own as a
     book position, each with its timestamp (null when there is none).
 
-    Plex's is best effort: when the listener's own Plex access fails (no
-    share, a refused token, plex.tv down) it is null and WebServarr's still
-    resumes the book."""
-    try:
-        await pp.assert_in_library(key)
-    except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
-        raise _http_error(exc) from None
+    Plex's is best effort: once the listener's access is confirmed, a failure
+    reading their Plex state (a refused token, plex.tv down) makes it null,
+    and WebServarr's still resumes the book."""
+    await _book_access(who, key)
     web = listening.get_position(db, who.identity, key)
     try:
         plex_pos = await pp.plex_position(who.session(), key, session_id=who.session_id)
@@ -238,27 +297,36 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
 
 
 @router.get("/history/{key}")
-@limiter.limit(PLAYER_LIMIT, key_func=session_rate_key)
-async def history(request: Request, key: str, who: Listener = Depends(listener),
-                  db: Session = Depends(get_db)):
-    """This listener's check-in log for the book, newest first."""
+@_limit(PLAYER_LIMIT, "history")
+async def history(request: Request, key: str,
+                  before: Optional[str] = Query(None, max_length=64),
+                  limit: int = Query(listening.HISTORY_PAGE, ge=1, le=listening.HISTORY_MAX),
+                  who: Listener = Depends(listener), db: Session = Depends(get_db)):
+    """This listener's check-in log for the book, newest first, a page at a
+    time: {"entries", "next_before"}. Pass next_before back as `before` for
+    the next page; null means there are no more."""
+    if before is not None:
+        try:
+            listening.parse_cursor(before)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+    await _book_access(who, key)
     try:
-        await pp.assert_in_library(key)
-    except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
-        raise _http_error(exc) from None
-    return {"entries": listening.get_history(db, who.identity, key)}
+        return listening.get_history_page(db, who.identity, key, limit=limit, before=before)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 class Checkin(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    book: str = Field(min_length=1, max_length=listening.KEY_MAX)
-    track: str = Field(min_length=1, max_length=listening.KEY_MAX)
+    book: Text = Field(min_length=1, max_length=listening.KEY_MAX)
+    track: Text = Field(min_length=1, max_length=listening.KEY_MAX)
     offset_ms: StrictInt = Field(ge=0, le=MAX_MS)
     duration_ms: StrictInt = Field(ge=0, le=MAX_MS)
     event: Literal[listening.EVENTS]
-    device: str = Field(default="", max_length=listening.DEVICE_MAX)
-    psid: str = Field(min_length=1, max_length=listening.PSID_MAX)
+    device: Text = Field(default="", max_length=listening.DEVICE_MAX)
+    psid: Text = Field(min_length=1, max_length=listening.PSID_MAX)
     seq: StrictInt = Field(ge=0, le=MAX_SEQ)
 
     @model_validator(mode="after")
@@ -269,11 +337,16 @@ class Checkin(BaseModel):
 
 
 @router.post("/checkin", dependencies=[Depends(require_same_origin)])
-@limiter.limit(CHECKIN_LIMIT, key_func=session_rate_key)
+@_limit(CHECKIN_LIMIT, "checkin")
 async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
-                  who: Listener = Depends(listener), db: Session = Depends(get_db)):
+                  who: Listener = Depends(listener), _text: None = Depends(require_encodable_body),
+                  db: Session = Depends(get_db)):
     """Store this listener's place in the book and log it, then report it to
     Plex's timeline after the response (a slow Plex never delays the save).
+
+    Not gated on library_access: it writes only the listener's own rows, and
+    a save should have as few ways to fail as possible. The book and track
+    are still checked as belonging to the library.
 
     {"stored": false} when an older seq from the page session that wrote the
     stored position arrived late: nothing is stored, logged or forwarded."""
@@ -295,22 +368,21 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
 # --- Preferences --------------------------------------------------------------------
 
 @router.get("/prefs")
-@limiter.limit(PLAYER_LIMIT, key_func=session_rate_key)
+@_limit(PLAYER_LIMIT, "prefs-get")
 async def get_prefs(request: Request, who: Listener = Depends(listener), db: Session = Depends(get_db)):
     """This listener's skip, speed and smart rewind settings."""
     return listening.get_prefs(db, who.identity)
 
 
 @router.put("/prefs", dependencies=[Depends(require_same_origin)])
-@limiter.limit(PLAYER_LIMIT, key_func=session_rate_key)
+@_limit(PLAYER_LIMIT, "prefs-put")
 async def put_prefs(request: Request, payload: dict = Body(...), who: Listener = Depends(listener),
-                    db: Session = Depends(get_db)):
+                    _text: None = Depends(require_encodable_body), db: Session = Depends(get_db)):
     """Change some of this listener's settings; returns all of them."""
     unknown = sorted(k for k in payload if k not in listening.PREF_DEFAULTS)
     if unknown:
-        raise HTTPException(status_code=422,
-                            detail="Unknown preference: " + ", ".join(unknown))
+        raise HTTPException(status_code=422, detail="Unknown preference: " + ", ".join(unknown))
     try:
         return listening.put_prefs(db, who.identity, **payload)
-    except ValueError as exc:
+    except (ValueError, OverflowError, TypeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None

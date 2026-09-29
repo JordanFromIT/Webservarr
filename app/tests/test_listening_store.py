@@ -184,7 +184,10 @@ class Prefs(StoreBase):
     def test_validation(self):
         bad = [dict(skip_s=4), dict(skip_s=61), dict(skip_s=10.5), dict(skip_s=True), dict(skip_s="10"),
                dict(speed=2.05), dict(speed=0.7), dict(speed=1.03), dict(speed="1.0"), dict(speed=float("nan")),
-               dict(smart_rewind="yes"), dict(volume=3)]
+               dict(smart_rewind="yes"), dict(volume=3),
+               # Too big for float arithmetic: a ValueError, never an OverflowError.
+               dict(speed=1e308), dict(speed=-1e308), dict(speed=10 ** 400), dict(speed=-(10 ** 400)),
+               dict(speed=float("inf")), dict(speed=float("-inf")), dict(skip_s=10 ** 400)]
         for kw in bad:
             with self.subTest(kw):
                 with self.assertRaises(ValueError):

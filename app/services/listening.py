@@ -22,11 +22,11 @@ and Redis.
 """
 
 import logging
-import math
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -48,6 +48,7 @@ KEY_MAX = 64
 PSID_MAX = 64
 DEVICE_MAX = 80
 HISTORY_MAX = 1000
+HISTORY_PAGE = 500
 
 PREF_DEFAULTS = {"skip_s": 10, "speed": 1.0, "smart_rewind": True}
 SKIP_MIN, SKIP_MAX = 5, 60
@@ -151,6 +152,11 @@ def get_position(db: Session, identity: str, book: str) -> Optional[dict]:
             "updated_at": utc_iso(row.updated_at), "device": row.device, "source": row.source}
 
 
+def _entry(r: ListeningLog) -> dict:
+    return {"track": r.track_key, "offset_ms": r.offset_ms, "device": r.device, "event": r.event,
+            "at": utc_iso(r.at)}
+
+
 def get_history(db: Session, identity: str, book: str, limit: int = 200) -> list:
     """This listener's log for the book, newest first."""
     limit = max(1, min(int(limit), HISTORY_MAX))
@@ -158,8 +164,51 @@ def get_history(db: Session, identity: str, book: str, limit: int = 200) -> list
             .filter(ListeningLog.identity == identity, ListeningLog.book_key == book)
             .order_by(ListeningLog.at.desc(), ListeningLog.id.desc())
             .limit(limit).all())
-    return [{"track": r.track_key, "offset_ms": r.offset_ms, "device": r.device, "event": r.event,
-             "at": utc_iso(r.at)} for r in rows]
+    return [_entry(r) for r in rows]
+
+
+# A history cursor: an ISO 8601 instant, optionally followed by "~" and a log
+# row id that breaks ties between rows logged at the same instant.
+_CURSOR = re.compile(r"(?P<at>[0-9T:.+\-]{10,40}Z?)(?:~(?P<id>[0-9]{1,18}))?", re.ASCII)
+
+
+def _cursor(r: ListeningLog) -> str:
+    return r.at.isoformat(timespec="microseconds") + "Z~" + str(r.id)
+
+
+def parse_cursor(value: str) -> tuple:
+    """(naive UTC instant, row id or None) from a history cursor. A bare
+    instant means every row logged strictly before it. Raises ValueError."""
+    m = _CURSOR.fullmatch(value) if isinstance(value, str) else None
+    if not m:
+        raise ValueError("before must be an ISO 8601 time")
+    try:
+        at = datetime.fromisoformat(m.group("at").replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("before must be an ISO 8601 time") from None
+    return _naive_utc(at), (int(m.group("id")) if m.group("id") else None)
+
+
+def get_history_page(db: Session, identity: str, book: str, limit: int = HISTORY_PAGE,
+                     before: Optional[str] = None) -> dict:
+    """One page of this listener's log for the book, newest first:
+    {"entries": [...], "next_before": cursor or None}.
+
+    Pass next_before back as `before` for the next page; None means there
+    are no more. Rows are ordered by (at, id), and the cursor carries both,
+    so rows logged at the same instant are never skipped or repeated across
+    pages. Raises ValueError for a bad limit or cursor."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= HISTORY_MAX:
+        raise ValueError(f"limit must be from 1 to {HISTORY_MAX}")
+    L = ListeningLog
+    q = db.query(L).filter(L.identity == identity, L.book_key == book)
+    if before is not None:
+        at, row_id = parse_cursor(before)
+        q = q.filter(L.at < at if row_id is None else or_(L.at < at, and_(L.at == at, L.id < row_id)))
+    rows = q.order_by(L.at.desc(), L.id.desc()).limit(limit + 1).all()
+    more = len(rows) > limit
+    rows = rows[:limit]
+    return {"entries": [_entry(r) for r in rows], "next_before": _cursor(rows[-1]) if more else None}
 
 
 def _prefs_dict(row: Optional[PlayerPrefs]) -> dict:
@@ -185,10 +234,12 @@ def _check_prefs(fields: dict) -> dict:
         out["skip_s"] = v
     if "speed" in fields:
         v = fields["speed"]
-        ok = not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+        # The range is checked first, by comparison alone: an int or float
+        # comparison never overflows, where math.isfinite(10**400) and
+        # round(1e308 * 20) raise OverflowError. NaN and infinities fail it.
+        ok = not isinstance(v, bool) and isinstance(v, (int, float)) and SPEED_MIN <= v <= SPEED_MAX
         steps = round(v * SPEED_STEPS) if ok else 0
-        if (not ok or abs(v * SPEED_STEPS - steps) > 1e-6
-                or not SPEED_MIN * SPEED_STEPS <= steps <= SPEED_MAX * SPEED_STEPS):
+        if not ok or abs(v * SPEED_STEPS - steps) > 1e-6:
             raise ValueError(f"Speed must be from {SPEED_MIN} to {SPEED_MAX} in steps of 0.05")
         out["speed"] = steps / SPEED_STEPS
     if "smart_rewind" in fields:

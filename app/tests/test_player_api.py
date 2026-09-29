@@ -258,6 +258,44 @@ class Access(PlayerApiBase):
         self.assertEqual(self.client.get("/api/player/book/200").status_code, 404)
         self.library_access.assert_not_awaited()
 
+    def test_a_bad_key_with_refresh_makes_no_plex_tv_call(self):
+        # library_access is the only way to plex.tv; a key that is malformed
+        # or not in the library never reaches it, refresh or not.
+        for path in ("/api/player/book/abc?refresh=1", "/api/player/book/999:1?refresh=1",
+                     "/api/player/book/200:9x?refresh=1"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 404)
+        self.library_access.assert_not_awaited()
+
+    def test_every_keyed_read_needs_the_listeners_library_access(self):
+        for exc in (pp.NoServerAccess("not shared"), pp.NoLibraryAccess("section not shared")):
+            self.library_access.side_effect = exc
+            for path in ("/api/player/book/200:1", "/api/player/cover/200:1",
+                         "/api/player/position/200:1", "/api/player/history/200:1"):
+                with self.subTest(exc=type(exc).__name__, path=path):
+                    r = self.client.get(path)
+                    self.assertEqual(r.status_code, 403)
+                    self.assertEqual(r.json()["detail"], player.NO_ACCESS)
+        self.cover_image.assert_not_awaited()
+        self.plex_position.assert_not_awaited()
+
+    def test_a_keyed_read_checks_the_key_before_access(self):
+        for path in ("/api/player/cover/999:1", "/api/player/position/999:1", "/api/player/history/999:1"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 404)
+        self.library_access.assert_not_awaited()
+
+    def test_checkin_is_not_gated_on_library_access(self):
+        self.library_access.side_effect = pp.NoLibraryAccess("x")
+        self.assertTrue(self.checkin().json()["stored"])
+        self.library_access.assert_not_awaited()
+
+    def test_keyed_reads_refused_by_a_rejected_token_are_503(self):
+        self.library_access.side_effect = pp.TokenRejected("401")
+        for path in ("/api/player/cover/200:1", "/api/player/position/200:1", "/api/player/history/200:1"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 503)
+
 
 class Shapes(PlayerApiBase):
     def test_books_carry_same_origin_cover_urls(self):
@@ -312,7 +350,9 @@ class Shapes(PlayerApiBase):
     def test_history_is_newest_first(self):
         self.checkin(seq=1, offset_ms=1_000, event="play")
         self.checkin(seq=2, offset_ms=2_000, event="pause")
-        entries = self.client.get("/api/player/history/200:1").json()["entries"]
+        body = self.client.get("/api/player/history/200:1").json()
+        entries = body["entries"]
+        self.assertIsNone(body["next_before"])
         self.assertEqual([e["offset_ms"] for e in entries], [2_000, 1_000])
         self.assertEqual(set(entries[0]), {"track", "offset_ms", "device", "event", "at"})
 
@@ -330,6 +370,87 @@ class Shapes(PlayerApiBase):
                 r = self.client.put("/api/player/prefs", json=body, headers={"Origin": ORIGIN})
                 self.assertEqual(r.status_code, 422)
         self.assertEqual(self.client.get("/api/player/prefs").json()["speed"], 1.0)
+
+    def test_prefs_numbers_too_big_to_handle_are_422(self):
+        for body in ({"speed": 1e308}, {"speed": -1e308}, {"speed": 10 ** 400}, {"speed": -(10 ** 400)},
+                     {"skip_s": 10 ** 400}, {"speed": 1e-320}):
+            with self.subTest(body=str(body)[:40]):
+                r = self.client.put("/api/player/prefs", json=body, headers={"Origin": ORIGIN})
+                self.assertEqual(r.status_code, 422)
+        for raw in (b'{"speed": 1e400}', b'{"speed": -1e400}', b'{"speed": NaN}', b'{"speed": Infinity}'):
+            with self.subTest(raw=raw):
+                r = self.client.put("/api/player/prefs", content=raw,
+                                    headers={"Origin": ORIGIN, "Content-Type": "application/json"})
+                self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.client.get("/api/player/prefs").json(),
+                         {"skip_s": 10, "speed": 1.0, "smart_rewind": True})
+
+
+class History(PlayerApiBase):
+    ROWS = 1_250
+
+    def fill(self, identity="plex:1001", book="200:1"):
+        from datetime import datetime, timedelta
+        base = datetime(2026, 9, 1, 12, 0, 0)
+        # Runs of up to seven rows share one instant, including runs that
+        # straddle every page boundary tried below.
+        rows = [ListeningLog(identity=identity, book_key=book, track_key="202", offset_ms=n,
+                             device="d", event="checkin", at=base + timedelta(seconds=n // 7))
+                for n in range(self.ROWS)]
+        self.db.add_all(rows)
+        self.db.commit()
+
+    def pages(self, limit=None):
+        out, before, n = [], None, 0
+        while True:
+            params = {}
+            if limit is not None:
+                params["limit"] = limit
+            if before is not None:
+                params["before"] = before
+            r = self.client.get("/api/player/history/200:1", params=params)
+            self.assertEqual(r.status_code, 200, r.text)
+            body = r.json()
+            self.assertLessEqual(len(body["entries"]), limit or 500)
+            out.extend(e["offset_ms"] for e in body["entries"])
+            n += 1
+            before = body["next_before"]
+            if before is None:
+                return out, n
+            self.assertLess(n, 2_000)
+
+    def test_every_row_once_across_pages_newest_first(self):
+        self.fill()
+        self.fill(identity="plex:1002")          # another listener's rows never appear
+        for limit in (None, 1_000, 499, 7, 3):
+            with self.subTest(limit=limit):
+                got, pages = self.pages(limit)
+                self.assertEqual(len(got), self.ROWS)
+                self.assertEqual(len(set(got)), self.ROWS)            # no duplicates
+                self.assertEqual(got, sorted(range(self.ROWS), reverse=True))   # no gaps, newest first
+                size = limit or 500
+                self.assertEqual(pages, -(-self.ROWS // size))
+
+    def test_default_page_is_500_and_a_bare_instant_is_before_it(self):
+        self.fill()
+        body = self.client.get("/api/player/history/200:1").json()
+        self.assertEqual(len(body["entries"]), 500)
+        self.assertIsNotNone(body["next_before"])
+        # An entry's own "at" as a bare instant: every row strictly older.
+        r = self.client.get("/api/player/history/200:1", params={"before": "2026-09-01T12:00:01.000Z"})
+        self.assertEqual([e["offset_ms"] for e in r.json()["entries"]], [6, 5, 4, 3, 2, 1, 0])
+        self.assertIsNone(r.json()["next_before"])
+
+    def test_bad_before_or_limit_is_422(self):
+        self.fill()
+        for params in ({"limit": 0}, {"limit": 1_001}, {"limit": -1}, {"limit": "ten"}, {"limit": 1.5},
+                       {"before": "yesterday"}, {"before": "2026-13-01T00:00:00Z"}, {"before": ""},
+                       {"before": "~5"}, {"before": "2026-09-01T00:00:00Z~abc"},
+                       {"before": "2026-09-01T00:00:00Z~"}, {"before": "2026-09-01T00:00:00Z" + "0" * 60}):
+            with self.subTest(params=params):
+                r = self.client.get("/api/player/history/200:1", params=params)
+                self.assertEqual(r.status_code, 422)
+        self.library_access.assert_not_awaited()
 
 
 class Checkins(PlayerApiBase):
@@ -435,6 +556,30 @@ class Checkins(PlayerApiBase):
         self.assertEqual(self.checkin(offset_ms=0, seq=1).status_code, 200)
         self.assertEqual(self.checkin(offset_ms=200_000, seq=2).status_code, 200)
 
+    def test_text_that_is_not_valid_unicode_is_422(self):
+        # A lone surrogate is valid JSON but no UTF-8 can hold it: refused
+        # before the database, and the 422 itself must not choke on it.
+        base = {"book": "200:1", "track": "202", "offset_ms": 1, "duration_ms": 2, "event": "play",
+                "device": "Chrome", "psid": "p", "seq": 1}
+        for field in ("device", "psid", "book", "track"):
+            body = json.dumps({**base, field: "ab\ud800"})     # ASCII JSON: the escape itself
+            with self.subTest(field=field):
+                self.assertIn("\\ud800", body)
+                r = self.client.post("/api/player/checkin", content=body.encode(),
+                                     headers={"Origin": ORIGIN, "Content-Type": "application/json"})
+                self.assertEqual(r.status_code, 422)
+        for raw in ('{"speed": 1.25, "\\ud800": 1}', '{"smart_rewind": "\\udfff"}'):
+            with self.subTest(raw=raw):
+                r = self.client.put("/api/player/prefs", content=raw.encode(),
+                                    headers={"Origin": ORIGIN, "Content-Type": "application/json"})
+                self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.db.query(ListeningPosition).count(), 0)
+        self.timeline.assert_not_awaited()
+        # The schema refuses it too, for any caller that bypasses the route.
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            player.Checkin(**{**base, "device": "x\ud800"})
+
     def test_a_slow_plex_timeline_runs_after_the_response_is_built(self):
         # The forward is a background task: the stored result is already
         # committed when it runs, so a slow or failing Plex cannot undo it.
@@ -538,15 +683,17 @@ class IdentityIsolation(PlayerApiBase):
 class RateLimits(unittest.TestCase):
     def limits(self, func):
         name = f"{func.__module__}.{func.__name__}"
-        return [(str(lim.limit), lim.key_func) for lim in limiter._route_limits[name]]
+        return [(str(lim.limit), lim.key_func, lim.scope) for lim in limiter._route_limits[name]]
 
-    def test_each_route_is_limited_per_session(self):
-        expected = {"books": "60 per 1 minute", "book": "60 per 1 minute", "position": "60 per 1 minute",
-                    "history": "60 per 1 minute", "get_prefs": "60 per 1 minute", "put_prefs": "60 per 1 minute",
-                    "checkin": "60 per 1 minute", "cover": "240 per 1 minute"}
-        for name, limit in expected.items():
+    def test_each_route_has_one_budget_per_session(self):
+        expected = {"books": ("60 per 1 minute", "books"), "book": ("60 per 1 minute", "book"),
+                    "position": ("60 per 1 minute", "position"), "history": ("60 per 1 minute", "history"),
+                    "get_prefs": ("60 per 1 minute", "prefs-get"), "put_prefs": ("60 per 1 minute", "prefs-put"),
+                    "checkin": ("60 per 1 minute", "checkin"), "cover": ("240 per 1 minute", "cover")}
+        for name, (limit, scope) in expected.items():
             with self.subTest(route=name):
-                self.assertEqual(self.limits(getattr(player, name)), [(limit, player.session_rate_key)])
+                self.assertEqual(self.limits(getattr(player, name)),
+                                 [(limit, player.session_rate_key, f"player:{scope}")])
 
     def request(self, cookie=None, peer="203.0.113.5"):
         headers = [(b"cookie", f"{settings.session_cookie_name}={cookie}".encode())] if cookie else []
@@ -561,6 +708,45 @@ class RateLimits(unittest.TestCase):
         self.assertNotEqual(a1, b)               # two listeners behind one address
         self.assertNotIn("sid-a", a1)            # the cookie itself never becomes a key
         self.assertEqual(player.session_rate_key(self.request()), "203.0.113.5")
+
+
+class LimitsAcrossKeys(PlayerApiBase):
+    """The limits enforced for real, on an in-memory store (never the shared
+    Redis): a budget is per route and session, not per book key."""
+
+    def setUp(self):
+        super().setUp()
+        from limits.storage import MemoryStorage
+        from limits.strategies import FixedWindowRateLimiter
+        storage = MemoryStorage()
+        for p in (mock.patch.object(limiter, "_storage", storage),
+                  mock.patch.object(limiter, "_limiter", FixedWindowRateLimiter(storage))):
+            p.start()
+            self.addCleanup(p.stop)
+        helpers.set_rate_limits(True)       # reset_overrides puts the earlier state back
+
+    def test_position_budget_is_shared_by_every_book(self):
+        codes = [self.client.get(f"/api/player/position/{('100:1', '200:1')[i % 2]}").status_code
+                 for i in range(60)]
+        self.assertEqual(set(codes), {200})
+        self.assertEqual(self.client.get("/api/player/position/200:1").status_code, 429)
+        self.assertEqual(self.client.get("/api/player/position/100:1").status_code, 429)
+        # Another route has its own budget, and so has another session.
+        self.assertEqual(self.client.get("/api/player/history/200:1").status_code, 200)
+        self.client.cookies.set(settings.session_cookie_name, "sid-someone-else")
+        self.assertEqual(self.client.get("/api/player/position/100:1").status_code, 200)
+
+    def test_cover_budget_is_240_across_books(self):
+        codes = [self.client.get(f"/api/player/cover/{('100:1', '200:1')[i % 2]}").status_code
+                 for i in range(240)]
+        self.assertEqual(set(codes), {200})
+        self.assertEqual(self.client.get("/api/player/cover/100:1").status_code, 429)
+
+    def test_checkin_budget_is_shared_by_every_book(self):
+        for i in range(60):
+            book, track = (("100:1", "101"), ("200:1", "202"))[i % 2]
+            self.assertEqual(self.checkin(book=book, track=track, seq=i + 1).status_code, 200)
+        self.assertEqual(self.checkin(book="100:1", track="101", seq=100).status_code, 429)
 
 
 if __name__ == "__main__":
