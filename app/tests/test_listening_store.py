@@ -138,7 +138,7 @@ class Positions(StoreBase):
             checkin(self.db, offset_ms=i * 1000, seq=i, event="play" if i == 0 else "checkin")
         hist = listening.get_history(self.db, ME, BOOK)
         self.assertEqual([h["offset_ms"] for h in hist], [4000, 3000, 2000, 1000, 0])
-        self.assertEqual(set(hist[0]), {"track", "offset_ms", "device", "event", "at"})
+        self.assertEqual(set(hist[0]), {"track", "offset_ms", "device", "device_id", "event", "at"})
         self.assertEqual([h["offset_ms"] for h in listening.get_history(self.db, ME, BOOK, limit=2)], [4000, 3000])
 
     def test_source_is_recorded(self):
