@@ -52,13 +52,14 @@ class Tables(StoreBase):
         insp = inspect(self.Session.kw["bind"])
         cols = {c["name"] for c in insp.get_columns("listening_positions")}
         self.assertEqual(cols, {"identity", "book_key", "track_key", "offset_ms", "duration_ms", "updated_at",
-                                "device", "source", "psid", "seq"})
+                                "device", "device_id", "source", "psid", "seq"})
         pk = insp.get_pk_constraint("listening_positions")["constrained_columns"]
         uniques = [u["column_names"] for u in insp.get_unique_constraints("listening_positions")]
         self.assertTrue(sorted(pk) == ["book_key", "identity"] or ["identity", "book_key"] in uniques,
                         "one row per identity and book")
         cols = {c["name"] for c in insp.get_columns("listening_log")}
-        self.assertEqual(cols, {"id", "identity", "book_key", "track_key", "offset_ms", "device", "event", "at"})
+        self.assertEqual(cols, {"id", "identity", "book_key", "track_key", "offset_ms", "device", "device_id",
+                                "event", "at"})
         self.assertIn(["identity", "book_key", "at"],
                       [i["column_names"] for i in insp.get_indexes("listening_log")])
         cols = {c["name"] for c in insp.get_columns("player_prefs")}
@@ -73,7 +74,8 @@ class Positions(StoreBase):
         self.assertRegex(out["updated_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
         pos = listening.get_position(self.db, ME, BOOK)
         self.assertEqual(pos, {"track": "6002", "offset_ms": 123456, "duration_ms": 3600000,
-                               "updated_at": out["updated_at"], "device": "Safari on iPhone", "source": "web"})
+                               "updated_at": out["updated_at"], "device": "Safari on iPhone", "device_id": None,
+                               "source": "web"})
         hist = listening.get_history(self.db, ME, BOOK)
         self.assertEqual(len(hist), 1)
         self.assertEqual(hist[0]["event"], "checkin")
@@ -162,6 +164,122 @@ class Positions(StoreBase):
     def test_a_long_device_label_is_cut_not_refused(self):
         checkin(self.db, device="x" * 500)
         self.assertLessEqual(len(listening.get_position(self.db, ME, BOOK)["device"]), 80)
+
+
+class DeviceIds(StoreBase):
+    """Each browser's own random id rides on its check-ins, so the handoff
+    prompt can tell two devices with one label apart."""
+
+    ID_A = "k3v9x0q2m7w1p4z8r6t5y2u0"
+    ID_B = "b" * 40
+
+    def test_the_position_and_the_log_carry_the_id(self):
+        checkin(self.db, device_id=self.ID_A)
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["device_id"], self.ID_A)
+        self.assertEqual(listening.get_history(self.db, ME, BOOK)[0]["device_id"], self.ID_A)
+        page = listening.get_history_page(self.db, ME, BOOK)
+        self.assertEqual(page["entries"][0]["device_id"], self.ID_A)
+
+    def test_the_newest_checkin_sets_it_and_none_clears_it(self):
+        checkin(self.db, device_id=self.ID_A, psid="p-a", seq=1)
+        checkin(self.db, device_id=self.ID_B, psid="p-b", seq=1)
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["device_id"], self.ID_B)
+        checkin(self.db, psid="p-c", seq=1)      # an older player that sends none
+        self.assertIsNone(listening.get_position(self.db, ME, BOOK)["device_id"])
+        self.assertEqual([e["device_id"] for e in listening.get_history(self.db, ME, BOOK)],
+                         [None, self.ID_B, self.ID_A])
+
+    def test_a_refused_older_seq_keeps_the_stored_id(self):
+        checkin(self.db, device_id=self.ID_A, seq=5)
+        self.assertFalse(checkin(self.db, device_id=self.ID_B, seq=4)["stored"])
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["device_id"], self.ID_A)
+
+    def test_a_malformed_id_is_refused(self):
+        for bad in ("", "short", "A" * 20, "a" * 41, "abc-def-ghi-jkl-mno", "a" * 15, 12345678901234567, " " + "a" * 20):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    checkin(self.db, device_id=bad)
+        self.assertIsNone(listening.get_position(self.db, ME, BOOK))
+        self.assertEqual(self.log_count(), 0)
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class DeviceIdMigration(unittest.TestCase):
+    """An install from before device ids gets the columns added, once, with
+    its rows kept (and a null id)."""
+
+    def old_schema(self):
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE listening_positions (identity VARCHAR(255) NOT NULL, book_key VARCHAR(64) NOT NULL, "
+                "track_key VARCHAR(64) NOT NULL, offset_ms INTEGER NOT NULL, duration_ms INTEGER NOT NULL, "
+                "updated_at DATETIME NOT NULL, device VARCHAR(80) NOT NULL, source VARCHAR(10) NOT NULL, "
+                "psid VARCHAR(64), seq INTEGER, PRIMARY KEY (identity, book_key))"))
+            conn.execute(text(
+                "CREATE TABLE listening_log (id INTEGER PRIMARY KEY, identity VARCHAR(255) NOT NULL, "
+                "book_key VARCHAR(64) NOT NULL, track_key VARCHAR(64) NOT NULL, offset_ms INTEGER NOT NULL, "
+                "device VARCHAR(80) NOT NULL, event VARCHAR(16) NOT NULL, at DATETIME NOT NULL)"))
+            conn.execute(text(
+                "INSERT INTO listening_positions VALUES ('plex:1', '5:1', '6', 10, 20, '2026-09-01 00:00:00', "
+                "'Chrome on Linux', 'web', 'p', 1)"))
+            conn.execute(text(
+                "INSERT INTO listening_log (identity, book_key, track_key, offset_ms, device, event, at) "
+                "VALUES ('plex:1', '5:1', '6', 10, 'Chrome on Linux', 'pause', '2026-09-01 00:00:00')"))
+        return sessionmaker(bind=engine)()
+
+    @staticmethod
+    def columns(db, table):
+        from sqlalchemy import text
+        return {row[1] for row in db.execute(text(f"PRAGMA table_info({table})"))}
+
+    def test_adds_the_columns_once_and_keeps_the_rows(self):
+        import logging
+        from sqlalchemy import text
+        from app.seed import migrate_listening_device_id
+        db = self.old_schema()
+        try:
+            with self.assertLogs("app.seed", level=logging.INFO):
+                migrate_listening_device_id(db)
+            with self.assertNoLogs("app.seed", level=logging.INFO):
+                migrate_listening_device_id(db)   # idempotent: nothing left to do
+            self.assertIn("device_id", self.columns(db, "listening_positions"))
+            self.assertIn("device_id", self.columns(db, "listening_log"))
+            self.assertEqual(tuple(db.execute(text("SELECT offset_ms, device_id FROM listening_positions")).one()),
+                             (10, None))
+            self.assertEqual(tuple(db.execute(text("SELECT event, device_id FROM listening_log")).one()),
+                             ("pause", None))
+            # The store works on the upgraded tables.
+            self.assertEqual(listening.get_position(db, "plex:1", "5:1")["device_id"], None)
+        finally:
+            db.close()
+
+    def test_no_op_on_a_fresh_schema_and_before_the_tables_exist(self):
+        import logging
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from app.seed import migrate_listening_device_id
+        db = helpers.make_sessionmaker()()
+        try:
+            with self.assertNoLogs("app.seed", level=logging.INFO):
+                migrate_listening_device_id(db)
+            self.assertIn("device_id", self.columns(db, "listening_log"))
+        finally:
+            db.close()
+        empty = sessionmaker(bind=create_engine("sqlite://"))()
+        try:
+            migrate_listening_device_id(empty)     # no tables yet: create_all makes them
+            self.assertEqual(self.columns(empty, "listening_log"), set())
+        finally:
+            empty.close()
+
+    def test_init_db_runs_it(self):
+        import inspect as pyinspect
+        from app import database
+        self.assertIn("migrate_listening_device_id(db)", pyinspect.getsource(database.init_db))
 
 
 class Prefs(StoreBase):

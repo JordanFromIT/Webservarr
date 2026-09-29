@@ -47,6 +47,8 @@ IDENTITY_MAX = 255
 KEY_MAX = 64
 PSID_MAX = 64
 DEVICE_MAX = 80
+# A browser's own random id for itself (saves.js), lower-case letters and digits.
+DEVICE_ID = re.compile(r"[a-z0-9]{16,40}", re.ASCII)
 HISTORY_MAX = 1000
 HISTORY_PAGE = 500
 
@@ -83,8 +85,12 @@ def _count(name: str, value) -> int:
 
 
 def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: int, duration_ms: int,
-                 event: str, device: str, psid: str, seq: int, source: str = "web") -> dict:
+                 event: str, device: str, psid: str, seq: int, source: str = "web",
+                 device_id: Optional[str] = None) -> dict:
     """Store a check-in as this listener's position in the book and log it.
+
+    `device_id` is the sending browser's own random id (DEVICE_ID), or None
+    from a player that sends none; the row keeps what the check-in carried.
 
     Returns {"stored": bool, "updated_at": iso8601}. `stored` is False when
     the stored row was written by the same psid with a higher seq; nothing is
@@ -102,10 +108,12 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     if source not in SOURCES:
         raise ValueError("source must be one of: " + ", ".join(SOURCES))
     device = (device if isinstance(device, str) else "")[:DEVICE_MAX]
+    if device_id is not None and not (isinstance(device_id, str) and DEVICE_ID.fullmatch(device_id)):
+        raise ValueError("device_id must be 16 to 40 lower-case letters and digits")
 
     now = _utcnow()
     values = {"track_key": track, "offset_ms": offset_ms, "duration_ms": duration_ms, "updated_at": now,
-              "device": device, "source": source, "psid": psid, "seq": seq}
+              "device": device, "device_id": device_id, "source": source, "psid": psid, "seq": seq}
     P = ListeningPosition
     mine = (P.identity == identity, P.book_key == book)
     # Overwrite unless the row is this psid's own and newer. A row written
@@ -130,7 +138,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
         raise RuntimeError("could not store the listening position")
 
     db.add(ListeningLog(identity=identity, book_key=book, track_key=track, offset_ms=offset_ms,
-                        device=device, event=event, at=now))
+                        device=device, device_id=device_id, event=event, at=now))
     db.commit()
 
     try:
@@ -149,12 +157,13 @@ def get_position(db: Session, identity: str, book: str) -> Optional[dict]:
     if row is None:
         return None
     return {"track": row.track_key, "offset_ms": row.offset_ms, "duration_ms": row.duration_ms,
-            "updated_at": utc_iso(row.updated_at), "device": row.device, "source": row.source}
+            "updated_at": utc_iso(row.updated_at), "device": row.device, "device_id": row.device_id,
+            "source": row.source}
 
 
 def _entry(r: ListeningLog) -> dict:
-    return {"track": r.track_key, "offset_ms": r.offset_ms, "device": r.device, "event": r.event,
-            "at": utc_iso(r.at)}
+    return {"track": r.track_key, "offset_ms": r.offset_ms, "device": r.device, "device_id": r.device_id,
+            "event": r.event, "at": utc_iso(r.at)}
 
 
 def get_history(db: Session, identity: str, book: str, limit: int = 200) -> list:

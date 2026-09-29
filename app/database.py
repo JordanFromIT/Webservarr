@@ -68,7 +68,7 @@ def init_db():
         migrate_setup_completed, migrate_overseerr_to_seerr,
         migrate_nav_sublabels_v2, migrate_home_sublabel_v3, migrate_wiki_sublabel_v4,
         migrate_ticket_creator_email, migrate_ticket_identity, migrate_drop_push_username_rows,
-        migrate_user_uid, migrate_local_usernames_snapshot,
+        migrate_user_uid, migrate_local_usernames_snapshot, migrate_listening_device_id,
         migrate_no_email_identity, migrate_tickets_page_switch_v1,
         migrate_ebooks_page_switch_v1, migrate_requests_source_v1,
     )
@@ -81,6 +81,8 @@ def init_db():
         # Every users query selects users.uid, the local ticket identity.
         migrate_user_uid(db)
         migrate_local_usernames_snapshot(db)
+        # The player's queries select the device_id columns.
+        migrate_listening_device_id(db)
         migrate_requests_rename(db)
         migrate_overseerr_to_seerr(db)
         seed_default_settings(db)

@@ -357,6 +357,25 @@ async def history(request: Request, key: str,
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
+@router.get("/next/{key}")
+@_limit(PLAYER_LIMIT, "next")
+async def next_book(request: Request, key: str, who: Listener = Depends(listener)):
+    """The next book in this book's series, {"next": book or null}: the book
+    fields /books gives. The same narrator's edition when the library has it,
+    else another edition; null for a standalone book, the last one, or one
+    whose place in its series the library doesn't say (see
+    plex_player.next_in_series). The player offers it at the end of a book
+    and never starts it on its own."""
+    await _book_access(who, key)
+    try:
+        found = await pp.next_in_series(key)
+    except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
+        raise _http_error(exc) from None
+    if found is None:
+        return {"next": None}
+    return {"next": {**found, "cover": _cover_url(found["key"], found.get("cover"))}}
+
+
 class Checkin(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -366,6 +385,8 @@ class Checkin(BaseModel):
     duration_ms: StrictInt = Field(ge=0, le=MAX_MS)
     event: Literal[listening.EVENTS]
     device: Text = Field(default="", max_length=listening.DEVICE_MAX)
+    # The browser's own random id for itself; optional (older players send none).
+    device_id: Optional[str] = Field(default=None, pattern=r"^[a-z0-9]{16,40}$")
     psid: Text = Field(min_length=1, max_length=listening.PSID_MAX)
     seq: StrictInt = Field(ge=0, le=MAX_SEQ)
 
@@ -396,7 +417,8 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
         raise _http_error(exc) from None
     try:
         result = listening.save_checkin(db, who.identity, body.book, body.track, body.offset_ms,
-                                        body.duration_ms, body.event, body.device, body.psid, body.seq)
+                                        body.duration_ms, body.event, body.device, body.psid, body.seq,
+                                        device_id=body.device_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     if result["stored"]:

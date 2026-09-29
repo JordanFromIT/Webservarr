@@ -540,6 +540,149 @@ class Books(BridgeBase):
         self.assertEqual(self.plex.calls, [])
 
 
+# A series in three editions: Dan Voice's numbers every book one way or
+# another, Fay Tone's none of hers (they take Dan's), and Fay has a fourth
+# book Dan lacks. A fifth edition-less extra has no number at all.
+SERIES_ALBUMS = {
+    "1100": {"ratingKey": "1100", "type": "album", "title": "Cycle One - Read by Dan Voice",
+             "parentTitle": "Jo Writer", "Collection": [{"tag": "The Cycle - Read by Dan Voice"}]},
+    "1200": {"ratingKey": "1200", "type": "album", "title": "Cycle Two - Read by Dan Voice",
+             "parentTitle": "Jo Writer", "Collection": [{"tag": "The Cycle - Read by Dan Voice"}]},
+    "1300": {"ratingKey": "1300", "type": "album", "title": "Cycle Three - Read by Dan Voice",
+             "titleSort": "The Cycle 3 - Cycle Three", "parentTitle": "Jo Writer",
+             "Collection": [{"tag": "The Cycle - Read by Dan Voice"}]},
+    "2100": {"ratingKey": "2100", "type": "album", "title": "Cycle \u2018One\u2019 - Read by Fay Tone",
+             "parentTitle": "Jo Writer", "Collection": [{"tag": "The Cycle - Read by Fay Tone"}]},
+    "2200": {"ratingKey": "2200", "type": "album", "title": "Cycle Two - Read by Fay Tone",
+             "parentTitle": "Jo Writer", "Collection": [{"tag": "The Cycle - Read by Fay Tone"}]},
+    "2400": {"ratingKey": "2400", "type": "album", "title": "Cycle Four - Read by Fay Tone",
+             "parentTitle": "Jo Writer", "Collection": [{"tag": "The Cycle - Read by Fay Tone"}]},
+    "3000": {"ratingKey": "3000", "type": "album", "title": "Cycle Extra - Read by Dan Voice",
+             "parentTitle": "Jo Writer", "Collection": [{"tag": "The Cycle - Read by Dan Voice"}]},
+    # A standalone book whose track says "Book 2": no series, so no next.
+    "4000": {"ratingKey": "4000", "type": "album", "title": "Lone Book - Read by Dan Voice",
+             "parentTitle": "Jo Writer"},
+    # The same series name by another author is another series.
+    "5100": {"ratingKey": "5100", "type": "album", "title": "Other Cycle - Read by Dan Voice",
+             "parentTitle": "Sam Other", "Collection": [{"tag": "The Cycle - Read by Dan Voice"}]},
+}
+
+
+def series_track(rk, album, title, folder):
+    return {"ratingKey": str(rk), "type": "track", "parentRatingKey": album, "parentIndex": 1, "index": 1,
+            "duration": 60_000, "title": title,
+            "Media": [{"Part": [{"key": f"/library/parts/{rk}/1/file.m4b",
+                                 "file": f"/data/Audiobooks/Jo Writer/{folder}/{rk}.m4b"}]}]}
+
+
+SERIES_TRACKS = {
+    "1100": [series_track(1101, "1100", "Cycle One, Book 1", "Cycle One - Dan Voice")],
+    "1200": [series_track(1201, "1200", "Cycle Two, Part 01", "Cycle Two, Book 2 - Dan Voice"),
+             {**series_track(1202, "1200", "Cycle Two, Part 02", "Cycle Two, Book 2 - Dan Voice"), "index": 2}],
+    "1300": [series_track(1301, "1300", "Cycle Three", "Cycle Three - Dan Voice")],
+    "2100": [series_track(2101, "2100", "Cycle One", "Cycle One - Fay Tone")],
+    "2200": [series_track(2201, "2200", "Cycle Two, Part 01", "Cycle Two - Fay Tone")],
+    "2400": [series_track(2401, "2400", "Cycle Four (Vol. 4)", "Cycle Four - Fay Tone")],
+    "3000": [series_track(3001, "3000", "Cycle Extra", "Cycle Extra - Dan Voice")],
+    "4000": [series_track(4001, "4000", "Lone Book, Book 2", "Lone Book - Dan Voice")],
+    "5100": [series_track(5101, "5100", "Other Cycle, Book 1", "Other Cycle - Dan Voice")],
+}
+
+
+class Series(BridgeBase):
+    """The next book in a series (next_in_series): Plex has no series number
+    for an album, so it is read from the text Plex has, and an edition
+    without one takes it from another edition of the same title."""
+
+    def setUp(self):
+        super().setUp()
+        for p in (mock.patch.dict(ALBUMS, SERIES_ALBUMS), mock.patch.dict(TRACKS, SERIES_TRACKS)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def next(self, key):
+        found = self.run_async(pp.next_in_series(key))
+        return found and found["key"]
+
+    def test_the_same_narrators_next_book(self):
+        self.assertEqual(self.next("1100:1"), "1200:1")      # "Book 1" in the track title
+        self.assertEqual(self.next("1200:1"), "1300:1")      # "Book 2" in the folder
+
+    def test_an_edition_without_numbers_takes_them_from_another(self):
+        self.assertEqual(self.next("2100:1"), "2200:1")      # curly quotes are the same title
+        self.assertEqual(self.next("2200:1"), "1300:1")      # Fay has no third: Dan's
+
+    def test_any_edition_when_the_narrators_lacks_the_next_number(self):
+        self.assertEqual(self.next("1300:1"), "2400:1")      # 3 (the sort title), then Fay's 4 ("Vol. 4")
+
+    def test_the_last_book_an_unnumbered_one_and_a_standalone_have_none(self):
+        self.assertIsNone(self.next("2400:1"))
+        self.assertIsNone(self.next("3000:1"))
+        self.assertIsNone(self.next("4000:1"))
+        self.assertIsNone(self.next("200:1"))                 # no collection at all
+
+    def test_another_authors_series_of_the_same_name_is_apart(self):
+        self.assertIsNone(self.next("5100:1"))
+
+    def test_a_multi_disc_albums_discs_are_its_series(self):
+        self.assertEqual(self.next("400:1"), "400:2")
+        self.assertIsNone(self.next("400:2"))
+
+    def test_the_book_fields_are_list_books_fields(self):
+        found = self.run_async(pp.next_in_series("1100:1"))
+        self.assertEqual(found, {"key": "1200:1", "title": "Cycle Two", "author": "Jo Writer",
+                                 "series": "The Cycle", "narrator": "Dan Voice", "cover": "",
+                                 "duration_ms": 120_000, "shape": "parts"})
+
+    def test_a_malformed_key_makes_no_plex_call(self):
+        for key in ("1100", "x:1", "1100:1:1", ""):
+            with self.subTest(key=key):
+                with self.assertRaises(pp.NotInLibrary):
+                    self.run_async(pp.next_in_series(key))
+        self.assertEqual(self.plex.calls, [])
+
+    def test_a_key_not_in_the_library_has_none(self):
+        self.assertIsNone(self.next("9999:1"))
+
+    def test_plex_down_is_player_unavailable_and_off_is_player_off(self):
+        self.plex.pms_down = 500
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.next_in_series("1100:1"))
+        self.plex.pms_down = None
+        self.admin["section"] = ""
+        with self.assertRaises(pp.PlayerOff):
+            self.run_async(pp.next_in_series("1100:1"))
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class SeriesNumbers(unittest.TestCase):
+    def test_where_a_number_is_read(self):
+        cases = [
+            (("Harry Porter and the Cup, Book 4, Part 01",), "Harry Porter", 4),
+            (("Title, Part 01",), "Title", None),
+            (("The Cycle 6 - Title",), "The Cycle", 6),
+            (("Mules II: The Road",), "Mules", 2),
+            (("Mules XIV",), "Mules", 14),
+            (("Mules Civil",), "Mules", None),
+            (("Mules IIII",), "Mules", None),
+            (("Harry Porter and the Cup",), "Harry Porter", None),
+            (("Vol. 3",), "", 3),
+            (("#12 The Case",), "", 12),
+            (("Books 1-3",), "", None),
+            (("Notebook 3",), "", None),
+            ((None, "", "Title (Book 7)"), "Other", 7),
+            (("Title, Book 1234",), "", None),
+        ]
+        for texts, series, want in cases:
+            with self.subTest(texts=texts):
+                self.assertEqual(pp._series_number(texts, series), want)
+
+    def test_editions_match_by_title_without_number_case_or_quotes(self):
+        self.assertEqual(pp._title_key("The Sorcerer\u2019s Stone"), pp._title_key("the sorcerer's stone"))
+        self.assertEqual(pp._title_key("Cup, Book 4"), pp._title_key("Cup"))
+        self.assertNotEqual(pp._title_key("Philosopher's Stone"), pp._title_key("Sorcerer's Stone"))
+
+
 def disc_track(rk, index, duration, folder):
     return {"ratingKey": str(rk), "type": "track", "parentIndex": 1, "index": index, "duration": duration,
             "Media": [{"Part": [{"key": f"/library/parts/{rk}/1/file.mp3",

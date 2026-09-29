@@ -75,6 +75,7 @@
  *       fails like a failed book fetch (with a retry), so nothing ever
  *       starts from 0 over a place it did not see.
  *   play(), pause(), toggle()
+ *       play() asks the play gate first, if one is set (setPlayGate).
  *   seek(bookMs), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters
  *   rewind(bookMs)    smart rewind's seek (features.js): a 'seek' change marked
  *                     { rewind: true }; the saves keep the place it went back
@@ -96,6 +97,25 @@
  *                     first fetch it opens the book again, so like open() it
  *                     can reject with UnknownTrack.
  *   close()           stops and forgets the book
+ *   setOpenGate(fn)   fn(info) is asked once per open() that resumes where the
+ *                     listener left off, before anything plays (features.js:
+ *                     the handoff prompt). info: { book, resumed: the copy it
+ *                     resumes from ({ source, track, offset_ms, updated_at,
+ *                     device, device_id, bookMs }), own: this browser's own
+ *                     copy ({ track, offset_ms, updated_at, device, own,
+ *                     bookMs } or null), now (the server's clock, ISO, or
+ *                     null), me: { device_id, device } }. A truthy answer
+ *                     holds the autoplay: the book loads at the resumed place,
+ *                     paused, for play() or a seek to decide.
+ *   setPlayGate(fn)   fn() is asked by play() before it starts: null (or
+ *                     nothing) plays at once; a promise plays when it
+ *                     resolves, unless it resolves false (held: the gate's
+ *                     owner asks the listener) or another book opened
+ *                     meanwhile. A promise that rejects plays.
+ *   placeMs(track, offsetMs)  the book time of a place in the loaded book, or null
+ *   own()             this browser's own copy of the loaded book's place (as
+ *                     in setOpenGate's info), or null
+ *   me()              { device_id, device }: how saves name this browser
  *   state()           { book (the key), title, author, narrator, series, cover,
  *                       chapters, chapterIndex, trackIndex, bookMs, bookDurationMs,
  *                       position: { track, offset_ms, duration_ms } | null,
@@ -347,6 +367,8 @@ export function createEngine(env) {
   let stream = null;
   let lastOpen = null;        // { key, opts } of the last open(), for its retry
   let openGen = 0;
+  let openGate = null;        // setOpenGate
+  let playGate = null;        // setPlayGate
   let resumedFrom = null;     // { source, device, updated_at } the open resumed from
   let unchosen = false;       // the book opened into an undecodable part: no connection chosen yet
 
@@ -1165,6 +1187,22 @@ export function createEngine(env) {
       if (isFinite(a)) age = Math.max(0, a);
     }
     resumedFrom = resumed ? { source: resumed.source, device: resumed.device, updated_at: resumed.updated_at, age_ms: age } : null;
+    // The gate sees this browser's own copy before the open overwrites it.
+    let held = false;
+    if (openGate && resumed && !cannot) {
+      try {
+        held = !!openGate({
+          book: key,
+          resumed: Object.assign({}, resumed, { bookMs: startMs }),
+          own: own(),
+          now: places.now || null,
+          me: me()
+        });
+      } catch (e) {
+        console.error('[player] the open gate failed', e);
+        held = false;
+      }
+    }
     if (saver) {
       try {
         saver.start(key, {
@@ -1205,7 +1243,7 @@ export function createEngine(env) {
       return;
     }
     chosen = side;
-    wantPlay = autoplay || wantPlay;
+    wantPlay = (autoplay && !held) || wantPlay;
     load(playhead.index, playhead.offset, side);
     sessionState();
     changed(wantPlay ? 'play' : 'ready');
@@ -1219,6 +1257,29 @@ export function createEngine(env) {
   }
 
   function play() {
+    if (!book) return Promise.resolve();
+    if (error) return retry();
+    if (wantPlay) return Promise.resolve();
+    let wait = null;
+    if (playGate) {
+      try {
+        wait = playGate();
+      } catch (e) {
+        console.error('[player] the play gate failed', e);
+        wait = null;
+      }
+    }
+    if (!wait || typeof wait.then !== 'function') return playNow();
+    const my = openGen;
+    const key = book.key;
+    const go = function (ok) {
+      if (ok === false || my !== openGen || !book || book.key !== key) return undefined;
+      return playNow();
+    };
+    return Promise.resolve(wait).then(go, function () { return go(true); });
+  }
+
+  function playNow() {
     if (!book) return Promise.resolve();
     if (error) return retry();
     if (wantPlay) return Promise.resolve();
@@ -1423,6 +1484,29 @@ export function createEngine(env) {
     changed('play');
   }
 
+  function placeMs(track, offsetMs) {
+    return book ? toBookMs(book.tracks, track, offsetMs) : null;
+  }
+
+  function me() {
+    return {
+      device_id: saver && typeof saver.deviceId === 'string' ? saver.deviceId : '',
+      device: saver && typeof saver.device === 'string' ? saver.device : ''
+    };
+  }
+
+  function own() {
+    if (!book || !saver || typeof saver.readLocal !== 'function') return null;
+    let c = null;
+    try {
+      c = saver.readLocal(book.key);
+    } catch (e) {
+      c = null;
+    }
+    const b = c ? toBookMs(book.tracks, c.track, c.offset_ms) : null;
+    return c && b !== null ? Object.assign({}, c, { bookMs: b }) : null;
+  }
+
   function close() {
     openGen += 1;
     const had = !!(book || error);
@@ -1510,7 +1594,12 @@ export function createEngine(env) {
     retry: retry,
     close: close,
     state: state,
-    on: on
+    on: on,
+    setOpenGate: function (fn) { openGate = typeof fn === 'function' ? fn : null; },
+    setPlayGate: function (fn) { playGate = typeof fn === 'function' ? fn : null; },
+    placeMs: placeMs,
+    own: own,
+    me: me
   };
 }
 

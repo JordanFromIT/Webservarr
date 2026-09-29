@@ -91,6 +91,7 @@ class PlayerApiBase(unittest.TestCase):
         self.library_access = mock.AsyncMock(return_value=STREAM)
         self.plex_position = mock.AsyncMock(return_value=None)
         self.cover_image = mock.AsyncMock(side_effect=fake_cover_image)
+        self.next_in_series = mock.AsyncMock(return_value=None)
         self.on = mock.Mock(return_value=True)
         patches = [
             mock.patch("app.routers.setup.is_setup_completed", return_value=True),
@@ -102,6 +103,7 @@ class PlayerApiBase(unittest.TestCase):
             mock.patch.object(pp, "plex_position", self.plex_position),
             mock.patch.object(pp, "timeline", self.timeline),
             mock.patch.object(pp, "cover_image", self.cover_image),
+            mock.patch.object(pp, "next_in_series", self.next_in_series),
             mock.patch.object(settings, "app_domain", "localhost"),
             mock.patch.object(settings, "app_scheme", "https"),
         ]
@@ -132,8 +134,8 @@ class PlayerApiBase(unittest.TestCase):
 class StatusCodes(PlayerApiBase):
     ROUTES = [("get", "/api/player/books"), ("get", "/api/player/book/200:1"),
               ("get", "/api/player/cover/200:1"), ("get", "/api/player/position/200:1"),
-              ("get", "/api/player/history/200:1"), ("get", "/api/player/prefs"),
-              ("put", "/api/player/prefs"), ("post", "/api/player/checkin")]
+              ("get", "/api/player/history/200:1"), ("get", "/api/player/next/200:1"),
+              ("get", "/api/player/prefs"), ("put", "/api/player/prefs"), ("post", "/api/player/checkin")]
 
     def call(self, method, path):
         if method == "get":
@@ -372,7 +374,7 @@ class Shapes(PlayerApiBase):
         entries = body["entries"]
         self.assertIsNone(body["next_before"])
         self.assertEqual([e["offset_ms"] for e in entries], [2_000, 1_000])
-        self.assertEqual(set(entries[0]), {"track", "offset_ms", "device", "event", "at"})
+        self.assertEqual(set(entries[0]), {"track", "offset_ms", "device", "device_id", "event", "at"})
 
     def test_prefs_default_then_change(self):
         self.assertEqual(self.client.get("/api/player/prefs").json(),
@@ -660,6 +662,81 @@ class Checkins(PlayerApiBase):
         self.assertEqual(seen, [1])
 
 
+class DeviceIds(PlayerApiBase):
+    """Each browser sends its own random id with every check-in (optional,
+    for older players); /position and /history hand it back."""
+
+    PHONE = "q8w2e6r4t0y9u1i3o5p7a2s4"
+    TABLET = "z" * 40
+
+    def test_the_id_is_stored_and_read_back(self):
+        self.assertEqual(self.checkin(device_id=self.PHONE).status_code, 200)
+        self.assertEqual(self.position()["device_id"], self.PHONE)
+        entries = self.client.get("/api/player/history/200:1").json()["entries"]
+        self.assertEqual(entries[0]["device_id"], self.PHONE)
+        self.assertEqual(self.db.query(ListeningLog).one().device_id, self.PHONE)
+
+    def test_two_devices_with_one_label_stay_apart(self):
+        self.checkin(device_id=self.PHONE, psid="p1", seq=1, device="Chrome on Android")
+        self.checkin(device_id=self.TABLET, psid="p2", seq=1, device="Chrome on Android")
+        web = self.position()
+        self.assertEqual((web["device"], web["device_id"]), ("Chrome on Android", self.TABLET))
+        ids = [e["device_id"] for e in self.client.get("/api/player/history/200:1").json()["entries"]]
+        self.assertEqual(ids, [self.TABLET, self.PHONE])
+
+    def test_no_id_is_null(self):
+        self.checkin()
+        self.assertIsNone(self.position()["device_id"])
+        self.checkin(device_id=None, seq=2)
+        self.assertIsNone(self.position()["device_id"])
+
+    def test_a_malformed_id_is_422_and_nothing_is_stored(self):
+        for bad in ("", "short", "A" * 20, "a" * 41, "abc-def-ghi-jkl-mno", 1234567890123456789, ["a" * 20],
+                    "a" * 20 + "\n", "\u0430" * 20):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.checkin(device_id=bad).status_code, 422)
+        self.assertEqual(self.db.query(ListeningPosition).count(), 0)
+        self.timeline.assert_not_awaited()
+
+
+class NextInSeries(PlayerApiBase):
+    NEXT = {"key": "100:1", "title": "Single Book", "author": "Ann Author", "series": "Saga",
+            "narrator": "Nora", "cover": "/library/metadata/100/thumb/1700000000", "duration_ms": 1_000_000,
+            "shape": "single"}
+
+    def test_the_next_book_with_a_same_origin_cover(self):
+        self.next_in_series.return_value = dict(self.NEXT)
+        r = self.client.get("/api/player/next/200:1")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json(), {"next": {**self.NEXT, "cover": "/api/player/cover/100:1?v=1700000000"}})
+        self.next_in_series.assert_awaited_once_with("200:1")
+
+    def test_none_is_null(self):
+        self.assertEqual(self.client.get("/api/player/next/100:1").json(), {"next": None})
+
+    def test_the_key_is_checked_before_access_or_the_library_read(self):
+        for path in ("/api/player/next/200", "/api/player/next/x:1", "/api/player/next/999:1",
+                     "/api/player/next/1:1:1"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 404)
+        self.library_access.assert_not_awaited()
+        self.next_in_series.assert_not_awaited()
+
+    def test_it_needs_the_listeners_library_access(self):
+        for exc in (pp.NoServerAccess("not shared"), pp.NoLibraryAccess("section not shared")):
+            self.library_access.side_effect = exc
+            r = self.client.get("/api/player/next/200:1")
+            self.assertEqual(r.status_code, 403)
+            self.assertEqual(r.json()["detail"], player.NO_ACCESS)
+        self.next_in_series.assert_not_awaited()
+
+    def test_plex_down_is_503_and_player_off_is_404(self):
+        self.next_in_series.side_effect = pp.PlayerUnavailable("down")
+        self.assertEqual(self.client.get("/api/player/next/200:1").status_code, 503)
+        self.next_in_series.side_effect = pp.PlayerOff("off")
+        self.assertEqual(self.client.get("/api/player/next/200:1").status_code, 404)
+
+
 class SameOrigin(PlayerApiBase):
     """navigator.sendBeacon posts a Blob of type application/json with no
     custom header; the check-in accepts it from this origin only."""
@@ -757,7 +834,8 @@ class RateLimits(unittest.TestCase):
         expected = {"books": ("60 per 1 minute", "books"), "book": ("60 per 1 minute", "book"),
                     "position": ("60 per 1 minute", "position"), "history": ("60 per 1 minute", "history"),
                     "get_prefs": ("60 per 1 minute", "prefs-get"), "put_prefs": ("60 per 1 minute", "prefs-put"),
-                    "checkin": ("60 per 1 minute", "checkin"), "cover": ("240 per 1 minute", "cover")}
+                    "checkin": ("60 per 1 minute", "checkin"), "cover": ("240 per 1 minute", "cover"),
+                    "next_book": ("60 per 1 minute", "next")}
         for name, (limit, scope) in expected.items():
             with self.subTest(route=name):
                 self.assertEqual(self.limits(getattr(player, name)),
@@ -809,6 +887,11 @@ class LimitsAcrossKeys(PlayerApiBase):
                  for i in range(240)]
         self.assertEqual(set(codes), {200})
         self.assertEqual(self.client.get("/api/player/cover/100:1").status_code, 429)
+
+    def test_next_budget_is_shared_by_every_book(self):
+        codes = [self.client.get(f"/api/player/next/{('100:1', '200:1')[i % 2]}").status_code for i in range(60)]
+        self.assertEqual(set(codes), {200})
+        self.assertEqual(self.client.get("/api/player/next/100:1").status_code, 429)
 
     def test_checkin_budget_is_shared_by_every_book(self):
         for i in range(60):

@@ -2,13 +2,14 @@
  * WebServarr — the audiobook player's listening features (ES module,
  * document-lifetime)
  *
- * Skip length, speed, the sleep timer, smart rewind, undo for big jumps and
- * the keyboard shortcuts, on top of the engine (engine.js, WS.player) and its
+ * Skip length, speed, the sleep timer, smart rewind, undo for big jumps, the
+ * keyboard shortcuts, the listening history, the handoff prompt and the next
+ * book in the series, on top of the engine (engine.js, WS.player) and its
  * view (ui.js, WS.playerUI). Loaded by the shell partial as its own module
  * script right after ui.js (so it carries its own asset stamp); nothing
  * imports it. Like the engine it lives as long as the document: its
- * listeners are added once, and its timers run only while a sleep timer or a
- * settings save is pending. Design:
+ * listeners are added once, and its timers run only while a sleep timer, a
+ * settings save or a place check is pending. Design:
  * docs/superpowers/specs/2026-09-28-audiobook-player-design.md, section 8.
  * Styles: theme.css "Audiobook player" (theme variables only).
  *
@@ -57,6 +58,29 @@
  *   a book is loaded and the key is nobody else's: not already handled, not
  *   in a field or on a button or other control, not on the reader (its own
  *   Space and arrows), not under a page's tour or a WSUI dialog.
+ * - History (GET /api/player/history/<book>, a page at a time): the log
+ *   grouped into listening sessions, newest first. A gap of more than 10
+ *   minutes, or another device, starts a new session; a session running
+ *   across two pages is one. Each shows when it started and ended, the
+ *   chapters it covered and the device, and a tap goes to where it ended
+ *   (a seek: the listener's own move, with Undo over 2 minutes). "Show
+ *   older" loads the next page.
+ * - Handoff: a book that opens at a place saved by ANOTHER device (its
+ *   device_id, else its label when either side has no id) in the last 24
+ *   hours, when this browser has its own place in the book (one the listener
+ *   played or moved to here) more than 30 s from it, opens paused and asks
+ *   "Continue from <time> (<device>, <ago>)?". Continue plays from there;
+ *   Start from here moves to this browser's place (a seek, so it is saved as
+ *   the newest) and plays. Play pressed instead is Continue. The place is
+ *   checked again when Play is pressed after 5 minutes or more without
+ *   playing, and when the page is shown again while paused: if another device
+ *   has saved a place since this one (more than 30 s from here), Play is held
+ *   and the same question asked (Continue moves there; Start from here plays
+ *   on from here), so a tab left open never saves its old place over a newer
+ *   one without asking. A check that fails or takes over 4 s lets Play go on.
+ * - Up next: at the end of the book, the next in its series
+ *   (GET /api/player/next/<book>): "Up next: <title>" with Play, which opens
+ *   it where the listener left off. It never starts by itself.
  *
  * Pure (importable by Node, no DOM at import time):
  *   rewindFor(awayMs)                     ms to go back: 0, 3 s, 10 s or 30 s
@@ -66,6 +90,13 @@
  *   formatDelta(ms), jumpMessage(from, to)   "12 min", "Jumped back 12 min."
  *   formatCountdown(ms)                   "14:32", "1:00:00"
  *   chapterEnd(state)                     the current chapter's end, book ms
+ *   otherDevice(copy, me)                 another device's copy (by id, else by label)
+ *   handoffOffer(info)                    the open's handoff question (engine setOpenGate info), or null
+ *   recheckOffer({ web, webMs, own, atMs, now, me })   the same when Play comes back to a paused book
+ *   handoffMessage(offer)                 "Continue from 1:02:03 (Chrome on Android, 3 min ago)?"
+ *   formatAgo(ms)                         "just now", "3 min ago", "2 h ago", "3 days ago"
+ *   groupSessions(entries, placeMs)       history entries (newest first) as sessions, newest first
+ *   sessionWhen(session, now), sessionChapters(session, chapters)   a session's lines
  *   createFeatures(env)                   the features, given their surroundings
  *   boot(win, overrides)                  WS.playerFeatures
  *
@@ -89,6 +120,15 @@ export const UNDO_MS = 8000;
 export const SAVE_PREFS_MS = 800;
 export const HEARD_MS = 1000;          // real progress that counts as listening (book ms)
 export const PREFS_URL = '/api/player/prefs';
+export const HISTORY_URL = '/api/player/history/';
+export const NEXT_URL = '/api/player/next/';
+export const POSITION_URL = '/api/player/position/';
+export const SESSION_GAP_MS = 600000;     // a longer gap in the log starts a new session
+export const HANDOFF_WITHIN_MS = 86400000; // another device's place this recent is offered on open
+export const HANDOFF_APART_MS = 30000;    // places closer than this are the same place
+export const RECHECK_AFTER_MS = 300000;   // Play after this long without playing checks the place again
+export const RECHECK_TIMEOUT_MS = 4000;   // a check that takes longer lets Play go on
+export const VISIBLE_CHECK_MS = 10000;    // at most one check a page shown again this often
 export const DEFAULTS = Object.freeze({ skip_s: 10, speed: 1, smart_rewind: true });
 
 const WIDE = '(min-width: 1024px)';
@@ -195,6 +235,194 @@ export function chapterEnd(state) {
   let end = num(list[i].end_ms);
   if (!(end > start)) end = i + 1 < list.length ? num(list[i + 1].start_ms) : num(s.bookDurationMs);
   return Math.max(start, end);
+}
+
+// A book time as a clock: "4:05", "1:02:03".
+function clock(ms) {
+  const t = Math.max(0, Math.floor(num(ms) / 1000));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = t % 60;
+  return h ? h + ':' + pad(m) + ':' + pad(s) : m + ':' + pad(s);
+}
+
+const DEVICE_ID = /^[a-z0-9]{16,40}$/;
+
+function idOf(v) {
+  return typeof v === 'string' && DEVICE_ID.test(v) ? v : '';
+}
+
+/* Is the copy another device's? By the browsers' own ids when both have
+   one, else by the device labels (both known and different). */
+export function otherDevice(copy, me) {
+  const c = copy || {};
+  const m = me || {};
+  const a = idOf(c.device_id);
+  const b = idOf(m.device_id);
+  if (a && b) return a !== b;
+  const la = typeof c.device === 'string' ? c.device : '';
+  const lb = typeof m.device === 'string' ? m.device : '';
+  return !!la && !!lb && la !== lb;
+}
+
+function ageOf(nowIso, atIso) {
+  const a = Date.parse(nowIso) - Date.parse(atIso);
+  return isFinite(a) ? Math.max(0, a) : NaN;
+}
+
+/* The handoff question for an open (the engine's setOpenGate info), or null.
+   Only when the book resumes from WebServarr's copy, saved by another device
+   in the last 24 hours (in the server's clock), and this browser has its own
+   place in the book (played or moved to here) more than 30 s from it. */
+export function handoffOffer(info) {
+  const i = info || {};
+  const r = i.resumed;
+  const own = i.own;
+  if (!r || r.source !== 'web' || !otherDevice(r, i.me)) return null;
+  const age = ageOf(i.now, r.updated_at);
+  if (!(age <= HANDOFF_WITHIN_MS)) return null;
+  if (!own || own.own !== true || typeof own.bookMs !== 'number' || typeof r.bookMs !== 'number') return null;
+  if (Math.abs(own.bookMs - r.bookMs) <= HANDOFF_APART_MS) return null;
+  return {
+    other: { bookMs: r.bookMs, device: r.device || '', agoMs: age },
+    own: { bookMs: own.bookMs }
+  };
+}
+
+/* The question when Play comes back to a paused book (or the page is shown
+   again): WebServarr's copy (web) is another device's and newer than this
+   browser's own place (own), and more than 30 s from where the player is
+   (atMs). webMs: web's place in book time (null: not in this book). */
+export function recheckOffer(o) {
+  const x = o || {};
+  const web = x.web;
+  if (!web || typeof x.webMs !== 'number' || typeof x.atMs !== 'number' || !otherDevice(web, x.me)) return null;
+  const webAt = Date.parse(web.updated_at);
+  if (!isFinite(webAt)) return null;
+  const ownAt = x.own ? Date.parse(x.own.updated_at) : NaN;
+  if (isFinite(ownAt) && webAt <= ownAt) return null;
+  if (Math.abs(x.webMs - x.atMs) <= HANDOFF_APART_MS) return null;
+  const age = ageOf(x.now, web.updated_at);
+  return {
+    other: { bookMs: x.webMs, device: web.device || '', agoMs: isFinite(age) ? age : null },
+    own: { bookMs: x.atMs }
+  };
+}
+
+export function formatAgo(ms) {
+  const v = Number(ms);
+  if (!isFinite(v) || v < 60000) return 'just now';
+  const mins = Math.floor(v / 60000);
+  if (mins < 60) return mins + ' min ago';
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return hours + ' h ago';
+  const days = Math.floor(hours / 24);
+  return days === 1 ? '1 day ago' : days + ' days ago';
+}
+
+export function handoffMessage(offer) {
+  const o = (offer && offer.other) || {};
+  return 'Continue from ' + clock(o.bookMs) + ' (' + (o.device || 'another device') + ', ' + formatAgo(o.agoMs) + ')?';
+}
+
+/* History entries (newest first, as GET /history gives them, several pages
+   joined) as listening sessions, newest first. A gap of more than 10
+   minutes, or another device, starts a new one. placeMs(track, offset) is a
+   place's book time (null when the book has no such part). Each session:
+   { start, end (ms), device, device_id, endPlace { track, offset_ms },
+     endMs (null: not in the book), fromMs, toMs (the book time covered, null
+     when none of its places is in the book), count }. */
+export function groupSessions(entries, placeMs) {
+  const list = Array.isArray(entries) ? entries : [];
+  const out = [];
+  let cur = null;
+  for (const e of list) {
+    if (!e || typeof e !== 'object') continue;
+    const at = Date.parse(e.at);
+    if (!isFinite(at)) continue;
+    const devId = idOf(e.device_id);
+    const who = devId ? 'id:' + devId : 'label:' + (typeof e.device === 'string' ? e.device : '');
+    let ms = null;
+    if (typeof placeMs === 'function' && e.track != null && typeof e.offset_ms === 'number') {
+      const b = placeMs(String(e.track), e.offset_ms);
+      if (typeof b === 'number' && isFinite(b)) ms = b;
+    }
+    if (!cur || cur.who !== who || cur.start - at > SESSION_GAP_MS) {
+      cur = {
+        who: who, start: at, end: at,
+        device: typeof e.device === 'string' ? e.device : '', device_id: devId,
+        endPlace: { track: String(e.track), offset_ms: num(e.offset_ms) },
+        endMs: ms, fromMs: ms, toMs: ms, count: 0
+      };
+      out.push(cur);
+    }
+    cur.start = at;
+    cur.count += 1;
+    if (ms !== null) {
+      cur.fromMs = cur.fromMs === null ? ms : Math.min(cur.fromMs, ms);
+      cur.toMs = cur.toMs === null ? ms : Math.max(cur.toMs, ms);
+    }
+  }
+  return out.map(function (x) {
+    return {
+      start: x.start, end: x.end, device: x.device, device_id: x.device_id, endPlace: x.endPlace,
+      endMs: x.endMs, fromMs: x.fromMs, toMs: x.toMs, count: x.count
+    };
+  });
+}
+
+function dayStart(ms) {
+  const d = new Date(ms);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+function timeText(ms) {
+  try {
+    return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch (e) {
+    return new Date(ms).toISOString().slice(11, 16);
+  }
+}
+
+/* When a session was: "Today · 9:14 PM to 9:52 PM", "Yesterday · ...",
+   "Tue · ..." within the week, else "Sep 12 · ..." (with the year when it is
+   another year's). */
+export function sessionWhen(session, nowMs) {
+  const s = session || {};
+  const start = num(s.start);
+  const end = num(s.end);
+  const days = Math.round((dayStart(num(nowMs)) - dayStart(start)) / 86400000);
+  let day;
+  if (days <= 0) day = 'Today';
+  else if (days === 1) day = 'Yesterday';
+  else if (days < 7) day = new Date(start).toLocaleDateString([], { weekday: 'short' });
+  else if (new Date(start).getFullYear() === new Date(num(nowMs)).getFullYear()) day = new Date(start).toLocaleDateString([], { month: 'short', day: 'numeric' });
+  else day = new Date(start).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  const a = timeText(start);
+  const b = timeText(end);
+  return day + ' · ' + (a === b ? a : a + ' to ' + b);
+}
+
+// The chapter a book time is in: the last one starting at or before it.
+function chapterIndexAt(chapters, ms) {
+  let found = -1;
+  for (let i = 0; i < chapters.length; i++) {
+    if (num(chapters[i].start_ms) <= ms) found = i;
+    else break;
+  }
+  return found === -1 && chapters.length ? 0 : found;
+}
+
+/* The chapters a session covered: the one chapter's label, or "Chapters 3
+   to 5". '' when the book has no chapters or none of its places is known. */
+export function sessionChapters(session, chapters) {
+  const s = session || {};
+  const list = Array.isArray(chapters) ? chapters : [];
+  if (!list.length || s.fromMs === null || s.fromMs === undefined || s.toMs === null || s.toMs === undefined) return '';
+  const a = chapterIndexAt(list, num(s.fromMs));
+  const b = chapterIndexAt(list, num(s.toMs));
+  if (a === b) return String(list[a].label || 'Chapter ' + (a + 1));
+  return 'Chapters ' + (a + 1) + ' to ' + (b + 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -570,6 +798,20 @@ export function createFeatures(env) {
 
   // ---- The engine ----
 
+  // Handoff (below): the question showing { book, offer, kind ('open' |
+  // 'recheck'), prompt }; the one an open's gate held its book for, asked at
+  // its 'open' { book, offer }; since when (mono) the loaded book has not
+  // been playing; a place check in flight { book, promise }; Play from the
+  // question itself (no gate); the last check for a page shown again.
+  let handoff = null;
+  let pendingOpen = null;
+  let idleSince = null;
+  let checking = null;
+  let bypass = false;
+  let visibleCheckAt = -Infinity;
+  let upNext = null;           // { book, prompt }: the next book offered at the end
+  let hist = null;             // the history loaded (see History)
+
   let lastBook = null;
   let lastPlaying = false;
   let pausedAt = null;         // wall ms of the last pause after listening
@@ -598,7 +840,17 @@ export function createFeatures(env) {
       heard = false;
       startAt = null;
       openRewind = null;
+      dropHandoff();
+      dropUpNext();
+      idleSince = null;
+      bookChanged();
     }
+    // How long the book has gone without playing (the place check on Play).
+    if (s.playing) idleSince = null;
+    else if (s.book && idleSince === null) idleSince = mono();
+    // Playing again, or a stop: a question about where to play is over.
+    if (s.playing || s.error) dropHandoff();
+    if (s.playing) dropUpNext();
     const moved = r === 'seek' || r === 'skip' || r === 'jump';
     if (moved && !ownSeek) {
       // A place the listener chose while paused is theirs: no rewind from it,
@@ -624,8 +876,15 @@ export function createFeatures(env) {
       if (r === 'pause' && heard) pausedAt = now();
       heard = false;
     }
-    if (r === 'ended') cancelSleep();
+    if (r === 'ended') {
+      cancelSleep();
+      askNext(s.book);
+    }
     if (r === 'open') {
+      // The open's gate held the book for the handoff question: ask it now.
+      const p = pendingOpen;
+      pendingOpen = null;
+      if (p && p.book === s.book && !s.playing && !s.error) showHandoff(p.offer, 'open');
       if (loadState === 'retry') loadPrefs();
       const from = s.resumedFrom;
       openRewind = from && typeof from.age_ms === 'number' && isFinite(from.age_ms)
@@ -663,6 +922,197 @@ export function createFeatures(env) {
       logError(e);
     }
   });
+
+  function getJSON(url) {
+    if (!fetchFn) return Promise.reject(new Error('no fetch'));
+    let asked;
+    try {
+      asked = Promise.resolve(fetchFn(url, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      }));
+    } catch (e) {
+      asked = Promise.reject(e);
+    }
+    return asked.then(function (resp) {
+      if (!resp || !resp.ok) throw new Error('status ' + (resp && resp.status));
+      return resp.json();
+    });
+  }
+
+  // ---- Handoff ----
+
+  function dropHandoff() {
+    const h = handoff;
+    handoff = null;
+    if (h && h.prompt) h.prompt.remove();
+  }
+
+  function showHandoff(offer, kind) {
+    dropHandoff();
+    const book = player.state().book;
+    if (!book) return;
+    const entry = { book: book, offer: offer, kind: kind, prompt: null };
+    handoff = entry;
+    entry.prompt = ui.prompt({
+      id: 'handoff',
+      message: handoffMessage(offer),
+      actions: [
+        { label: 'Continue', primary: true, run: function () { chooseHandoff(entry, 'other'); } },
+        { label: 'Start from here', run: function () { chooseHandoff(entry, 'own'); } }
+      ]
+    });
+  }
+
+  function playFromChoice() {
+    bypass = true;
+    let r;
+    try {
+      r = player.play();
+    } finally {
+      bypass = false;
+    }
+    if (r && typeof r.catch === 'function') r.catch(logError);
+  }
+
+  /* The listener's answer. Continue: the other device's place (where an
+     open already is; after a check, a seek there). Start from here: this
+     browser's place, as a move of the listener's own at an open (so it is
+     saved as the newest place, and nothing rewinds from the other's), and
+     at a check simply Play where the player is (the play is saved). */
+  function chooseHandoff(entry, which) {
+    if (handoff !== entry) return;
+    handoff = null;
+    const s = player.state();
+    if (s.book !== entry.book) return;
+    if (which === 'other' && entry.kind === 'recheck') player.seek(entry.offer.other.bookMs);
+    else if (which === 'own' && entry.kind === 'open') player.seek(entry.offer.own.bookMs);
+    playFromChoice();
+  }
+
+  if (typeof player.setOpenGate === 'function') {
+    player.setOpenGate(function (info) {
+      const offer = handoffOffer(info);
+      pendingOpen = offer ? { book: info.book, offer: offer } : null;
+      return !!offer;
+    });
+  }
+
+  // WebServarr's copy of the place, for a check: { web, now } or null (a
+  // failure, or no answer within RECHECK_TIMEOUT_MS).
+  function fetchPlace(book) {
+    return new Promise(function (resolve) {
+      let done = false;
+      const timer = setT(function () { finish(null); }, RECHECK_TIMEOUT_MS);
+      function finish(v) {
+        if (done) return;
+        done = true;
+        clearT(timer);
+        resolve(v);
+      }
+      getJSON(POSITION_URL + encodeURIComponent(book)).then(function (data) {
+        finish(data && typeof data === 'object' ? { web: data.web || null, now: typeof data.now === 'string' ? data.now : null } : null);
+      }, function () { finish(null); });
+    });
+  }
+
+  /* Has another device saved a place in this book since this browser's own?
+     Asks the server; if so, shows the question. Resolves true when it did
+     (Play is held), false otherwise. One check at a time per book. */
+  function recheck(book) {
+    if (checking && checking.book === book) return checking.promise;
+    const entry = { book: book, promise: null };
+    checking = entry;
+    entry.promise = fetchPlace(book).then(function (got) {
+      if (checking === entry) checking = null;
+      const s = player.state();
+      if (!got || s.book !== book || s.playing || s.error || handoff) return false;
+      const web = got.web;
+      const offer = recheckOffer({
+        web: web,
+        webMs: web ? player.placeMs(web.track, web.offset_ms) : null,
+        own: player.own(),
+        atMs: s.bookMs,
+        now: got.now,
+        me: player.me()
+      });
+      if (!offer) return false;
+      showHandoff(offer, 'recheck');
+      return true;
+    });
+    return entry.promise;
+  }
+
+  if (typeof player.setPlayGate === 'function') {
+    player.setPlayGate(function () {
+      if (bypass) return null;
+      const s = player.state();
+      if (!s.book || s.playing) return null;
+      // Play while the question shows: from where the player is.
+      if (handoff && handoff.book === s.book) {
+        dropHandoff();
+        return null;
+      }
+      if (checking && checking.book === s.book) return checking.promise.then(function (held) { return !held; });
+      if (idleSince === null || mono() - idleSince < RECHECK_AFTER_MS) return null;
+      return recheck(s.book).then(function (held) { return !held; });
+    });
+  }
+
+  // Shown again while paused: another device may have gone on meanwhile.
+  doc.addEventListener('visibilitychange', function () {
+    try {
+      if (doc.visibilityState !== 'visible') return;
+      const s = player.state();
+      if (!s.book || s.playing || s.loading || s.error || handoff) return;
+      if (mono() - visibleCheckAt < VISIBLE_CHECK_MS) return;
+      visibleCheckAt = mono();
+      recheck(s.book);
+    } catch (e) {
+      logError(e);
+    }
+  });
+
+  // ---- Up next ----
+
+  function dropUpNext() {
+    const u = upNext;
+    upNext = null;
+    if (u && u.prompt) u.prompt.remove();
+  }
+
+  // At the end of the book: the next in its series, offered, never started.
+  function askNext(book) {
+    if (!book) return;
+    dropUpNext();
+    const entry = { book: book, prompt: null };
+    upNext = entry;
+    getJSON(NEXT_URL + encodeURIComponent(book)).then(function (data) {
+      const next = data && data.next;
+      if (upNext !== entry || player.state().book !== book || !next || typeof next.key !== 'string' || !next.key) return;
+      entry.prompt = ui.prompt({
+        id: 'upnext',
+        message: 'Up next: ' + String(next.title || ''),
+        actions: [
+          { label: 'Play', primary: true, run: function () { playNext(entry, next.key); } },
+          { label: 'Not now', run: function () { if (upNext === entry) upNext = null; } }
+        ]
+      });
+    }, function () { /* no offer: nothing to say */ });
+  }
+
+  function playNext(entry, key) {
+    if (upNext === entry) upNext = null;
+    let r;
+    try {
+      r = player.open(key);
+    } catch (e) {
+      logError(e);
+      return;
+    }
+    if (r && typeof r.catch === 'function') r.catch(logError);
+  }
 
   // ---- The keys ----
 
@@ -947,6 +1397,110 @@ export function createFeatures(env) {
       setAttr(b, 'aria-pressed', pressed ? 'true' : 'false');
     });
   }
+
+  // History: the book's listening sessions, a tap goes to where one ended.
+  const historyBtn = ui.actionButton({ icon: 'history', label: 'History' });
+  const historyPanel = ui.panel('history', { title: 'History' });
+  const histNote = h('p', { class: 'wsp-opt-note wsp-hist-note', role: 'status' });
+  const histList = h('ul', { class: 'wsp-rows wsp-hist', role: 'list' });
+  const histMore = h('button', { type: 'button', class: 'wsp-row wsp-hist-more', hidden: true }, [
+    h('span', { class: 'wsp-row-text', text: 'Show older' })
+  ]);
+  historyPanel.body.appendChild(h('div', { class: 'wsp-opt-sec' }, [histNote, histList, histMore]));
+
+  // hist: { book, gen, entries (newest first, every page so far), next (the
+  // cursor for older ones, null: no more), loading, failed, sessions }.
+  let histGen = 0;
+
+  function bookChanged() {
+    hist = null;
+    histList.textContent = '';
+    setText(histNote, '');
+    setAttr(histMore, 'hidden', '');
+    if (historyPanel.shown && player.state().book) loadHistory(false);
+  }
+
+  function loadHistory(older) {
+    const book = player.state().book;
+    if (!book) return;
+    if (!older || !hist || hist.book !== book) {
+      histGen += 1;
+      hist = { book: book, gen: histGen, entries: [], next: null, loading: false, failed: false, sessions: [] };
+    }
+    const h0 = hist;
+    if (h0.loading || (older && !h0.next)) return;
+    h0.loading = true;
+    h0.failed = false;
+    drawHistory();
+    const url = HISTORY_URL + encodeURIComponent(book) + (older ? '?before=' + encodeURIComponent(h0.next) : '');
+    getJSON(url).then(function (data) {
+      if (hist !== h0) return;
+      h0.loading = false;
+      const entries = data && Array.isArray(data.entries) ? data.entries : [];
+      h0.entries = h0.entries.concat(entries);
+      h0.next = data && typeof data.next_before === 'string' && data.next_before ? data.next_before : null;
+      drawHistory();
+    }, function () {
+      if (hist !== h0) return;
+      h0.loading = false;
+      h0.failed = true;
+      drawHistory();
+    });
+  }
+
+  function drawHistory() {
+    const hs = hist;
+    if (!hs) return;
+    const s = player.state();
+    // Regrouped from every page each time: a session across two pages is one.
+    hs.sessions = groupSessions(hs.entries, function (track, offset) { return player.placeMs(track, offset); });
+    histList.textContent = '';
+    const nowMs = now();
+    hs.sessions.forEach(function (x, i) {
+      const when = sessionWhen(x, nowMs);
+      const what = [sessionChapters(x, s.chapters), x.device || 'Another device'].filter(Boolean).join(' · ');
+      const at = x.endMs === null ? '' : clock(x.endMs);
+      const b = h('button', {
+        type: 'button', class: 'wsp-row wsp-hist-row', 'data-session': String(i),
+        disabled: x.endMs === null ? true : null,
+        'aria-label': when + ', ' + what + (at ? '. Go to where it ended, ' + at : '')
+      }, [
+        h('span', { class: 'wsp-row-text' }, [
+          h('span', { class: 'wsp-hist-when', text: when }),
+          h('span', { class: 'wsp-hist-what', text: what })
+        ]),
+        h('span', { class: 'wsp-hist-at', text: at })
+      ]);
+      histList.appendChild(h('li', null, [b]));
+    });
+    let note = '';
+    if (hs.loading && !hs.entries.length) note = 'Loading…';
+    else if (hs.failed) note = "Couldn't load your listening history.";
+    else if (!hs.sessions.length) note = 'No listening history for this book yet.';
+    setText(histNote, note);
+    const more = hs.failed || (!!hs.next && !hs.loading);
+    setAttr(histMore, 'hidden', more ? null : '');
+    setText(histMore.firstChild, hs.failed ? 'Try again' : 'Show older');
+  }
+
+  histList.addEventListener('click', function (e) {
+    const b = e.target && e.target.closest ? e.target.closest('[data-session]') : null;
+    if (!b || !hist || hist.book !== player.state().book) return;
+    const x = hist.sessions[Number(b.getAttribute('data-session'))];
+    if (!x || x.endMs === null) return;
+    // The listener's own move: saved as their place, with Undo over 2 minutes.
+    player.seek(x.endMs);
+    // On a phone the list covers the player: back to it, to see the jump.
+    hideOnPhone(historyPanel);
+  });
+  histMore.addEventListener('click', function () {
+    loadHistory(!(hist && hist.failed && !hist.entries.length));
+  });
+  historyBtn.addEventListener('click', function () {
+    historyPanel.show(historyBtn);
+    loadHistory(false);
+  });
+  ui.fill('history', historyBtn);
 
   function drawAll() {
     const s = player.state();

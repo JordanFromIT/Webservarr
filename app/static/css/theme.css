@@ -1224,6 +1224,16 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-row[aria-pressed="true"] { font-weight: 600; background: rgb(var(--color-primary) / .2); }
 .wsp-row[aria-pressed="true"] .wsp-row-check { visibility: visible; }
 .wsp-row-off { color: rgb(var(--color-text) / .7); }
+/* History: one listening session a row, where it ended on the right. */
+.wsp-hist { margin-top: 0; }
+.wsp-hist-note:empty { display: none; }
+.wsp-hist-row { align-items: center; }
+.wsp-hist-row:disabled { cursor: default; opacity: .6; }
+.wsp-hist-when, .wsp-hist-what { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsp-hist-when { font-weight: 600; }
+.wsp-hist-what { margin-top: 2px; font-size: 13px; color: rgb(var(--color-text) / .7); }
+.wsp-hist-at { flex-shrink: 0; font-size: 13px; font-variant-numeric: tabular-nums; color: rgb(var(--color-text) / .7); }
+.wsp-hist-more { justify-content: center; font-weight: 600; }
 .wsp-action.is-on { color: rgb(var(--color-text)); background: rgb(var(--color-primary) / .2); }
 .wsp-slot-sleep .wsp-action-label { font-variant-numeric: tabular-nums; }
 /* The keyboard shortcuts: only where there is a keyboard and a mouse. */
@@ -1241,6 +1251,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-chip[aria-pressed="true"]:hover { background: rgb(var(--color-primary) / .88); }
   .wsp-row:hover { background: rgb(var(--color-text) / .06); }
   .wsp-row[aria-pressed="true"]:hover { background: rgb(var(--color-primary) / .26); }
+  .wsp-hist-row:disabled:hover { background: none; }
   .wsp-action.is-on:hover { background: rgb(var(--color-primary) / .26); }
 }
 

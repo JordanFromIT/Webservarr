@@ -96,6 +96,34 @@ def migrate_ticket_identity(db: Session) -> None:
         db.commit()
 
 
+def migrate_listening_device_id(db: Session) -> None:
+    """One-time migration: add device_id to listening_positions and
+    listening_log in existing databases.
+
+    The audiobook player's handoff prompt tells devices apart by a random id
+    each browser keeps; the device label alone can't (two phones of one
+    kind share it). Existing rows keep a null id, which the player reads as
+    "compare the labels". Guarded by PRAGMA table_info and idempotent, like
+    migrate_ticket_identity; a worker that loses the race to the other one
+    ignores its "duplicate column" error.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    for table in ("listening_positions", "listening_log"):
+        columns = {row[1] for row in db.execute(text(f"PRAGMA table_info({table})"))}
+        if not columns or "device_id" in columns:
+            continue  # no table yet (create_all makes it with the column) or done
+        try:
+            db.execute(text(f"ALTER TABLE {table} ADD COLUMN device_id VARCHAR(40)"))
+            db.commit()
+            logger.info("Added %s.device_id", table)
+        except OperationalError as exc:
+            db.rollback()
+            if "duplicate column" not in str(exc).lower():
+                raise
+
+
 def migrate_user_uid(db: Session) -> None:
     """One-time migration: add users.uid (unique) and give every existing
     user a permanent random one.

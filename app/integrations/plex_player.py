@@ -596,12 +596,10 @@ def _summary(album: dict, disc: int, tracks: list, disc_count: int) -> dict:
     }
 
 
-async def list_books() -> list:
-    """Every book in the audiobook library, read with the admin token:
-    [{key, title, author, series, narrator, cover, duration_ms, shape}].
-
-    `cover` is the album's Plex thumbnail path, not a URL. Raises PlayerOff
-    when no library is configured and PlayerUnavailable when Plex fails."""
+async def _library() -> list:
+    """Every book in the audiobook library, read with the admin token, as
+    (album, disc, the disc's tracks in play order, disc count, summary), in
+    the order list_books gives them."""
     admin = _configured()
     path = f"/library/sections/{admin['section']}/all"
     async with _pms_client() as client:
@@ -618,10 +616,149 @@ async def list_books() -> list:
     for album in _items(albums):
         discs = _discs(by_album.get(str(album.get("ratingKey")), []))
         for disc, ts in discs.items():
-            books.append((album.get("titleSort") or album.get("title") or "", disc,
+            books.append((album.get("titleSort") or album.get("title") or "", album, disc, ts, len(discs),
                           _summary(album, disc, ts, len(discs))))
-    books.sort(key=lambda b: (b[2]["author"].casefold(), b[0].casefold(), b[1]))
-    return [b[2] for b in books]
+    books.sort(key=lambda b: (b[5]["author"].casefold(), b[0].casefold(), b[2]))
+    return [b[1:] for b in books]
+
+
+async def list_books() -> list:
+    """Every book in the audiobook library, read with the admin token:
+    [{key, title, author, series, narrator, cover, duration_ms, shape}].
+
+    `cover` is the album's Plex thumbnail path, not a URL. Raises PlayerOff
+    when no library is configured and PlayerUnavailable when Plex fails."""
+    return [b[4] for b in await _library()]
+
+
+# --- Series ---------------------------------------------------------------------------
+#
+# Plex keeps no series or series number for a music album. A book's series is
+# its album's collection ("<Series> - Read by <Narrator>", one collection per
+# series and narration, so the same series can be there several times, once
+# per edition), or, for an album holding several books as discs, the album.
+# Its number in the series is the disc number for such an album; otherwise it
+# is only ever written in text, if at all: "Book 4", "Vol. 2" or "#3" in the
+# album's title, its sort title, the first track's title or the book's
+# folder, or the series name followed by a number ("<Series> 6 - Title",
+# "<Series> II: Title"). An edition that gives no number takes the one another
+# edition of the same title in the same series gives. A book with no number
+# has no next book: the order can't be known.
+
+_NUMBERED = re.compile(r"(?:\bbook|\bvolume|\bvol\.?|#)\s*#?\s*([0-9]{1,3})(?![0-9])", re.IGNORECASE)
+_NUMBER_WORDS = re.compile(r",?\s*(?:\bbook|\bvolume|\bvol\.?|#)\s*#?\s*[0-9]{1,3}(?![0-9])", re.IGNORECASE)
+_ROMAN = {"i": 1, "v": 5, "x": 10, "l": 50}
+
+
+def _fold(text) -> str:
+    """Casefolded, with typographic quotes made plain and spaces collapsed."""
+    text = str(text or "").replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    return " ".join(text.casefold().split())
+
+
+def _roman(word: str) -> Optional[int]:
+    """The value of a Roman numeral from I to L written the usual way, or None."""
+    total, prev = 0, 0
+    for ch in reversed(word):
+        v = _ROMAN.get(ch)
+        if v is None:
+            return None
+        total = total - v if v < prev else total + v
+        prev = max(prev, v)
+    return total if 0 < total <= 50 and _to_roman(total) == word else None
+
+
+def _to_roman(n: int) -> str:
+    out = ""
+    for value, letters in ((50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")):
+        while n >= value:
+            out += letters
+            n -= value
+    return out
+
+
+def _series_number(texts, series: str) -> Optional[int]:
+    """The book's number in its series from the first of `texts` that gives
+    one, or None."""
+    lead = re.compile(re.escape(_fold(series)) + r"[\s,:.\-–]*([0-9]{1,3}|[ivxl]{1,7})\b") if series else None
+    for text in texts:
+        folded = _fold(text)
+        if not folded:
+            continue
+        m = _NUMBERED.search(folded)
+        if m:
+            return int(m.group(1))
+        m = lead.match(folded) if lead else None
+        if m:
+            word = m.group(1)
+            n = int(word) if word.isdigit() else _roman(word)
+            if n:
+                return n
+    return None
+
+
+def _title_key(title: str) -> str:
+    """A book's title for matching its editions: without its number, case,
+    quotes or punctuation."""
+    return " ".join(re.sub(r"[^\w]+", " ", _NUMBER_WORDS.sub(" ", _fold(title))).split())
+
+
+def _series_entries(library: list) -> list:
+    """The library's books that belong to a series, each with its series
+    (author and name), narrator, number (None when unknown) and summary."""
+    entries = []
+    for album, disc, tracks, disc_count, summary in library:
+        if not summary["series"]:
+            continue
+        if disc_count > 1:
+            number = disc
+        else:
+            first = tracks[0] if tracks else {}
+            folder = (_part(first).get("file") or "").rsplit("/", 1)[0].rsplit("/", 1)[-1]
+            number = _series_number((album.get("titleSort"), _split_narrator(album.get("title") or "")[0],
+                                     first.get("title"), folder), summary["series"])
+        entries.append({"series": (_fold(summary["author"]), _fold(summary["series"])),
+                        "title": _title_key(summary["title"]), "narrator": _fold(summary["narrator"]),
+                        "number": number, "book": summary})
+    # An edition without a number takes the one the same title has in another
+    # edition of the series (the most common, the lowest on a tie).
+    known = {}
+    for e in entries:
+        if e["number"] is not None:
+            known.setdefault((e["series"], e["title"]), []).append(e["number"])
+    for e in entries:
+        if e["number"] is None and (e["series"], e["title"]) in known:
+            numbers = known[(e["series"], e["title"])]
+            e["number"] = min(set(numbers), key=lambda n: (-numbers.count(n), n))
+    return entries
+
+
+def pick_next(entries: list, key: str) -> Optional[dict]:
+    """The next book after `key` among _series_entries: the lowest number
+    above its own in the same series, by the same narrator when that edition
+    has it, else by any; None when there is none or its number is unknown."""
+    me = next((e for e in entries if e["book"]["key"] == key), None)
+    if me is None or me["number"] is None:
+        return None
+    later = [e for e in entries if e["series"] == me["series"] and e["number"] is not None
+             and e["number"] > me["number"]]
+    if not later:
+        return None
+    n = min(e["number"] for e in later)
+    pool = [e for e in later if e["number"] == n]
+    same = [e for e in pool if me["narrator"] and e["narrator"] == me["narrator"]]
+    pick = min(same or pool, key=lambda e: (e["narrator"], e["title"], e["book"]["key"]))
+    return dict(pick["book"])
+
+
+async def next_in_series(key: str) -> Optional[dict]:
+    """The book after this one in its series (the list_books fields), or
+    None for a standalone book, the last one, or one whose number in its
+    series the library doesn't give (see the Series notes above). A
+    malformed key is NotInLibrary before any Plex call. Raises PlayerOff or
+    PlayerUnavailable as list_books does."""
+    parse_key(key)
+    return pick_next(_series_entries(await _library()), key)
 
 
 async def _album(client: httpx.AsyncClient, admin: dict, album_key: str) -> dict:

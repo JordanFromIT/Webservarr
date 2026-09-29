@@ -34,6 +34,11 @@
  * place is what every save (and the local copy) carries; the listener's own
  * seek, skip or jump, another book or a close ends that.
  *
+ * Device: every save carries the device label ("Chrome on Android") and this
+ * browser's own random id (device_id), made once and kept in localStorage
+ * (for the page session only where storage throws), so the handoff prompt
+ * can tell two phones of one kind apart, and a reload is still this device.
+ *
  * Local copy: every change of place is written to localStorage under the
  * listener's identity key (WS.user.identity_key, from #ws-data: an opaque
  * HMAC of the account identity, so no account id sits in storage) and the
@@ -41,7 +46,9 @@
  * measured (from a stored check-in, or the server's `now` on GET /position,
  * measured before the resume merge compares copies; kept across page
  * sessions), so it compares fairly with the server's copies from a fast or
- * slow device. Storage can
+ * slow device, and marked `own` once the listener has played or moved to it
+ * here (an untouched opening place, taken from another device, is not this
+ * device's own place). Storage can
  * throw (a private window): every call is guarded, and saves go on without.
  *
  * Warning: while playing, once saves have failed and the place has gone
@@ -51,8 +58,11 @@
  *
  * Pure (importable by Node, no DOM at import time):
  *   deviceLabel(userAgent)            "<Browser> on <OS>", e.g. "Chrome on Android"
+ *   deviceIdFrom(storage)             this browser's id: the stored one, else a new one
+ *                                     (stored when storage lets it)
+ *   isDeviceId(v)                     16 to 40 lower-case letters and digits
  *   resumeOrder({ web, plex, local }) every usable copy, newest first:
- *                                     [{ source, track, offset_ms, duration_ms, updated_at, device }]
+ *                                     [{ source, track, offset_ms, duration_ms, updated_at, device, device_id }]
  *   resolveResume({ web, plex, local }) the newest of them, or null
  *   createSaver(o)                    the saver, given its surroundings (tests)
  *   browserSaver(win, o)              a saver wired to the page (fetch, sendBeacon,
@@ -61,7 +71,7 @@
  * createSaver({ post(body, kind) -> Promise<{ status, data }> | boolean (a beacon),
  *               now (wall clock), mono (monotonic; default performance.now),
  *               storage, identity (the identity key: string or function), device,
- *               setTimeout, clearTimeout, onSignedOut, formatTime, psid })
+ *               deviceId, setTimeout, clearTimeout, onSignedOut, formatTime, psid })
  *   start(book, { push, savedAt, held })
  *                                   push: the place the book opens at is newer
  *                                   than the server's (a local copy): send it at
@@ -79,9 +89,11 @@
  *   wake()                          back from frozen or hidden: the save in flight
  *                                   gets its full 15 s again
  *   clockProbe() -> done(serverNow) measure the clock against a server answer
- *   readLocal(book), resumeFrom(book, { web, plex }) -> resumeOrder with the local copy
+ *   readLocal(book) -> { track, offset_ms, duration_ms, updated_at, device, own } | null
+ *   resumeFrom(book, { web, plex }) -> resumeOrder with the local copy
  *   onWarning(fn) -> unsubscribe
- *   lastSavedAt (ms, this page's clock, or null), warning (bool), psid
+ *   lastSavedAt (ms, this page's clock, or null), warning (bool), psid,
+ *   device (the label), deviceId ('' when none was given)
  *
  * In the browser, loaded as its own module script before engine.js (so it
  * carries its own asset stamp), it sets WS.playerSaves for the engine's boot.
@@ -100,7 +112,9 @@ export const NOT_SAVED = "Your place isn't being saved.";
 const CHECKIN_URL = '/api/player/checkin';
 const STORE_PREFIX = 'ws-player:';
 const CLOCK_KEY = STORE_PREFIX + 'clock';
+const DEVICE_KEY = STORE_PREFIX + 'device';
 const DEVICE_MAX = 80;
+const DEVICE_ID = /^[a-z0-9]{16,40}$/;
 
 // The check-in event for an engine change, and whether it is saved at once.
 const EVENTS = {
@@ -145,6 +159,46 @@ export function deviceLabel(ua) {
   return (os ? browser + ' on ' + os : browser).slice(0, DEVICE_MAX);
 }
 
+/* This browser's own id: random, 32 lower-case letters and digits. */
+function newDeviceId() {
+  const abc = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const c = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
+  let out = '';
+  try {
+    if (c && typeof c.getRandomValues === 'function') {
+      // 252 is the largest multiple of 36 under 256: no letter is likelier.
+      while (out.length < 32) {
+        c.getRandomValues(new Uint8Array(40)).forEach(function (b) {
+          if (b < 252 && out.length < 32) out += abc[b % 36];
+        });
+      }
+      return out;
+    }
+  } catch (e) { out = ''; }
+  while (out.length < 32) out += abc[Math.floor(Math.random() * 36)];
+  return out;
+}
+
+export function isDeviceId(v) {
+  return typeof v === 'string' && DEVICE_ID.test(v);
+}
+
+/* The id this browser keeps for itself: the stored one, else a new one,
+   stored if storage lets it. Where storage throws (a private window) the new
+   one lasts for the page session. */
+export function deviceIdFrom(storage) {
+  let kept = null;
+  try {
+    kept = storage ? storage.getItem(DEVICE_KEY) : null;
+  } catch (e) { kept = null; }
+  if (isDeviceId(kept)) return kept;
+  const id = newDeviceId();
+  try {
+    if (storage) storage.setItem(DEVICE_KEY, id);
+  } catch (e) { /* this page session only */ }
+  return id;
+}
+
 // ---------------------------------------------------------------------------
 // Resume: the newest copy
 // ---------------------------------------------------------------------------
@@ -169,6 +223,7 @@ function copyOf(source, p) {
     duration_ms: isFinite(duration) && duration > 0 ? Math.round(duration) : 0,
     updated_at: new Date(at).toISOString(),
     device: typeof p.device === 'string' ? p.device : '',
+    device_id: isDeviceId(p.device_id) ? p.device_id : '',
     // Plex stamps its copy of a save WebServarr forwarded after it, in whole
     // seconds: that echo is not a newer place.
     rankAt: source === 'plex' ? at - PLEX_ECHO_MS : at
@@ -180,7 +235,7 @@ export function resumeOrder(copies) {
   const list = [copyOf('web', c.web), copyOf('local', c.local), copyOf('plex', c.plex)].filter(Boolean);
   list.sort(function (a, b) { return (b.rankAt - a.rankAt) || (RANK[a.source] - RANK[b.source]); });
   return list.map(function (x) {
-    return { source: x.source, track: x.track, offset_ms: x.offset_ms, duration_ms: x.duration_ms, updated_at: x.updated_at, device: x.device };
+    return { source: x.source, track: x.track, offset_ms: x.offset_ms, duration_ms: x.duration_ms, updated_at: x.updated_at, device: x.device, device_id: x.device_id };
   });
 }
 
@@ -241,6 +296,7 @@ export function createSaver(o) {
   const storage = o.storage || null;
   const identityOf = typeof o.identity === 'function' ? o.identity : function () { return o.identity; };
   const device = typeof o.device === 'string' ? o.device.slice(0, DEVICE_MAX) : '';
+  const deviceId = isDeviceId(o.deviceId) ? o.deviceId : '';
   const setT = o.setTimeout;
   const clearT = o.clearTimeout;
   const formatTime = typeof o.formatTime === 'function' ? o.formatTime : clockTime;
@@ -313,11 +369,12 @@ export function createSaver(o) {
     try { v = JSON.parse(raw); } catch (e) { return null; }
     const c = copyOf('local', v);
     if (!c) return null;
-    return { track: c.track, offset_ms: c.offset_ms, duration_ms: c.duration_ms, updated_at: c.updated_at, device: c.device };
+    return { track: c.track, offset_ms: c.offset_ms, duration_ms: c.duration_ms, updated_at: c.updated_at, device: c.device, own: v.own === true };
   }
 
-  // Stamped when the place is reached, in the server's clock.
-  function writeLocal(book, place) {
+  // Stamped when the place is reached, in the server's clock. own: the
+  // listener played or moved to it here.
+  function writeLocal(book, place, own) {
     const id = identity();
     if (!id) return;
     const value = JSON.stringify({
@@ -325,7 +382,8 @@ export function createSaver(o) {
       offset_ms: place.offset_ms,
       duration_ms: place.duration_ms,
       updated_at: new Date(now() + skew).toISOString(),
-      device: device
+      device: device,
+      own: !!own
     });
     stored(function (s) { s.setItem(localKey(id, book), value); });
   }
@@ -375,7 +433,7 @@ export function createSaver(o) {
 
   function body(book, place, event) {
     seq += 1;
-    return {
+    const b = {
       book: book,
       track: place.track,
       offset_ms: place.offset_ms,
@@ -385,6 +443,8 @@ export function createSaver(o) {
       psid: psid,
       seq: seq
     };
+    if (deviceId) b.device_id = deviceId;
+    return b;
   }
 
   // When (mono) the next save is due: Infinity for none.
@@ -567,14 +627,15 @@ export function createSaver(o) {
     const ev = change.rewind || (change.reason === 'play' && wasPlaying) ? null : EVENTS[change.reason];
     if (place) {
       const moved = !samePlace(place, r.latest);
-      if (moved) {
-        writeLocal(r.book, place);
-        if (r.dirtySince === null && !samePlace(place, r.acked)) r.dirtySince = t;
-      }
       // Reached by the listener: an act of theirs, or playback moving on.
       // Opening at a place (and the element settling there) is neither, and
       // nor is an error: the place it holds was reached by playback, if at all.
-      if ((EVENTS[change.reason] && change.reason !== 'error' && !change.rewind) || (r.playing && moved)) {
+      const reached = (EVENTS[change.reason] && change.reason !== 'error' && !change.rewind) || (r.playing && moved);
+      if (moved) {
+        writeLocal(r.book, place, reached || r.reachedMono !== null);
+        if (r.dirtySince === null && !samePlace(place, r.acked)) r.dirtySince = t;
+      }
+      if (reached) {
         r.reachedMono = t;
         r.reachedWall = now();
       }
@@ -707,7 +768,9 @@ export function createSaver(o) {
     },
     get lastSavedAt() { return lastSavedAt; },
     get warning() { return warning; },
-    get psid() { return psid; }
+    get psid() { return psid; },
+    get device() { return device; },
+    get deviceId() { return deviceId; }
   };
 }
 
@@ -787,6 +850,7 @@ export function browserSaver(win, o) {
       return typeof k === 'string' && /^[0-9a-f]{16,64}$/.test(k) ? k : '';
     },
     device: deviceLabel(nav.userAgent || ''),
+    deviceId: o.deviceId !== undefined ? o.deviceId : deviceIdFrom(storage),
     setTimeout: o.setTimeout || win.setTimeout.bind(win),
     clearTimeout: o.clearTimeout || win.clearTimeout.bind(win),
     // The session ended: the router's sign-in path (ws:before-hard-nav first).
@@ -819,6 +883,8 @@ if (typeof window !== 'undefined' && window.document) {
     browserSaver: browserSaver,
     resumeOrder: resumeOrder,
     resolveResume: resolveResume,
-    deviceLabel: deviceLabel
+    deviceLabel: deviceLabel,
+    deviceIdFrom: deviceIdFrom,
+    isDeviceId: isDeviceId
   };
 }

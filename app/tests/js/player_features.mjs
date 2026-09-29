@@ -276,9 +276,21 @@ class FakeAudio {
 const NOW0 = Date.UTC(2026, 8, 29, 18, 0, 0);
 const response = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(JSON.stringify(body)) });
 
+// localStorage as far as the saves use it.
+function memoryStorage() {
+  const map = new Map();
+  return {
+    map,
+    getItem(k) { return map.has(k) ? map.get(k) : null; },
+    setItem(k, v) { map.set(k, String(v)); },
+    removeItem(k) { map.delete(k); }
+  };
+}
+
 /* One page: the real engine, saves, view and features. o: { path, prefs
    (the GET's answer; a number is its status), places ({ web } for the
-   resume), wide, noFeatures }. */
+   resume), wide, noFeatures, storage and identity (the local copy),
+   deviceId (this browser's id) }. */
 async function setup(o = {}) {
   const win = new Window({ url: 'https://ws.test' + (o.path || '/news') });
   const doc = win.document;
@@ -300,6 +312,11 @@ async function setup(o = {}) {
   t.noNow = false;
   t.prefsAnswer = o.prefs === undefined ? { skip_s: 10, speed: 1, smart_rewind: true } : o.prefs;
   t.places = o.places || { web: null, plex: null };
+  // History pages by their cursor ('' the first); the next book per book.
+  t.history = {};
+  t.nextBooks = {};
+  t.positionCalls = 0;
+  t.positionMode = 'ok';      // 'down' (a network error) or 'hang' (never answers)
   async function fetchFn(url, init) {
     init = init || {};
     t.fetches.push({ url, method: init.method || 'GET', body: init.body, keepalive: !!init.keepalive });
@@ -325,8 +342,22 @@ async function setup(o = {}) {
       if (!b) return response(404, { detail: 'Not in the audiobook library' });
       return response(200, { ...b, stream: { token: 'tok', uris: { local: [], remote: t.remote } } });
     }
+    m = /^\/api\/player\/history\/([^?]+)(?:\?before=(.+))?$/.exec(url);
+    if (m) {
+      const page = t.history[m[2] ? decodeURIComponent(m[2]) : ''];
+      if (page === 'fail') return response(503, { detail: 'Plex is unavailable right now.' });
+      return response(200, page || { entries: [], next_before: null });
+    }
+    m = /^\/api\/player\/next\/(.+)$/.exec(url);
+    if (m) {
+      const k = decodeURIComponent(m[1]);
+      return response(200, { next: t.nextBooks[k] || null });
+    }
     m = /^\/api\/player\/position\/(.+)$/.exec(url);
     if (m) {
+      t.positionCalls += 1;
+      if (t.positionMode === 'down') throw new TypeError('Failed to fetch');
+      if (t.positionMode === 'hang') return new Promise(() => {});
       const reply = { web: t.places.web, plex: t.places.plex || null };
       if (!t.noNow) reply.now = new Date(t.serverNow()).toISOString();
       return response(200, reply);
@@ -339,14 +370,15 @@ async function setup(o = {}) {
       t.posts.push(body);
       const at = new Date(t.serverNow()).toISOString();
       // o.stateful: the server keeps what it is sent, as WebServarr's copy.
-      if (o.stateful) t.places = { web: { track: body.track, offset_ms: body.offset_ms, duration_ms: body.duration_ms, updated_at: at, device: 'Test on Linux' }, plex: null };
+      if (o.stateful) t.places = { web: { track: body.track, offset_ms: body.offset_ms, duration_ms: body.duration_ms, updated_at: at, device: 'Test on Linux', device_id: body.device_id || null }, plex: null };
       return Promise.resolve({ status: 200, data: { stored: true, updated_at: at } });
     },
     now: t.now,
     mono: () => clock.now,
-    storage: null,
-    identity: '',
+    storage: o.storage || null,
+    identity: o.identity || '',
     device: 'Test on Linux',
+    deviceId: o.deviceId,
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
     psid: 'test-psid'
@@ -1575,6 +1607,464 @@ await run('keys in a panel', async () => {
 // ---------------------------------------------------------------------------
 // Boot and markup
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// History, handoff and up next
+// ---------------------------------------------------------------------------
+
+const ME = 'k3v9x0q2m7w1p4z8r6t5y2u0';        // this browser's id
+const OTHER = 'q8w2e6r4t0y9u1i3o5p7a2s4';     // another device's
+const ID = '3f9a0c1d2b7e4a6f';                // the identity key of the local copy
+const entry = (t, agoMs, track, offset, device = 'Chrome on Android', id = OTHER, event = 'checkin') =>
+  ({ track, offset_ms: offset, device, device_id: id, event, at: new Date(t.now() - agoMs).toISOString() });
+
+await run('history sessions: a gap over 10 minutes splits, exactly 10 does not; another device splits', () => {
+  const at = (min) => new Date(Date.UTC(2026, 8, 29, 20, 0) - min * 60000).toISOString();
+  const e = (min, offset, device_id = OTHER, device = 'Chrome on Android') => ({ track: '501', offset_ms: offset, device, device_id, event: 'checkin', at: at(min) });
+  // Newest first, as the server gives them.
+  const entries = [
+    e(0, 500000), e(5, 450000), e(15, 400000),      // one session: gaps of 5 and 10 minutes
+    e(25.001, 300000),                                // over 10 minutes before: a new one
+    e(26, 290000, ME, 'Chrome on Linux'),             // another device: a new one
+    e(27, 280000, ME, 'Chrome on Linux')
+  ];
+  const place = (track, off) => (track === '501' ? off : null);
+  const g = F.groupSessions(entries, place);
+  check('three sessions', g.length === 3, g.map((x) => x.count));
+  check('newest first, with the ends', g[0].end === Date.parse(at(0)) && g[0].start === Date.parse(at(15)) && g[0].count === 3, g[0]);
+  check('ends where it ended', g[0].endMs === 500000 && g[0].endPlace.track === '501' && g[0].endPlace.offset_ms === 500000);
+  check('covers the book time between', g[0].fromMs === 400000 && g[0].toMs === 500000);
+  check('the device', g[0].device === 'Chrome on Android' && g[0].device_id === OTHER && g[2].device === 'Chrome on Linux');
+  check('the split sessions', g[1].count === 1 && g[2].count === 2, g.map((x) => x.count));
+  // Without ids, the labels tell devices apart.
+  const noIds = entries.map((x) => Object.assign({}, x, { device_id: null }));
+  check('labels when there are no ids', F.groupSessions(noIds, place).length === 3, F.groupSessions(noIds, place).length);
+  // A place not in the book: the session is kept, with no end to go to.
+  const lost = F.groupSessions([{ track: '999', offset_ms: 5, device: 'x', event: 'pause', at: at(0) }], place);
+  check('no place in the book: no end', lost.length === 1 && lost[0].endMs === null && lost[0].fromMs === null);
+  check('junk is skipped', F.groupSessions([null, { at: 'yesterday' }, 5], place).length === 0 && F.groupSessions(null).length === 0);
+});
+
+await run('a session across a page boundary is one', () => {
+  const at = (min) => new Date(Date.UTC(2026, 8, 29, 20, 0) - min * 60000).toISOString();
+  const e = (min) => ({ track: '501', offset_ms: 1000 * (100 - min), device: 'Chrome on Android', device_id: OTHER, event: 'checkin', at: at(min) });
+  const page1 = [e(0), e(3), e(6)];
+  const page2 = [e(9), e(12), e(40)];
+  const one = F.groupSessions(page1, () => 1);
+  const both = F.groupSessions(page1.concat(page2), () => 1);
+  check('the first page alone: one session', one.length === 1 && one[0].count === 3);
+  check('with the older page: the first session grows, then a new one', both.length === 2 && both[0].count === 5 && both[1].count === 1, both.map((x) => x.count));
+  check('it starts where the older page has it', both[0].start === Date.parse(at(12)) && both[0].end === Date.parse(at(0)));
+});
+
+await run('session lines: when, and the chapters covered', () => {
+  const now = new Date(2026, 8, 29, 21, 30).getTime();
+  const s = (d, h1, m1, h2, m2) => ({ start: new Date(2026, 8, d, h1, m1).getTime(), end: new Date(2026, 8, d, h2, m2).getTime() });
+  const t1 = new Date(2026, 8, 29, 21, 0).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const t2 = new Date(2026, 8, 29, 21, 20).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  check('today', F.sessionWhen(s(29, 21, 0, 21, 20), now) === 'Today · ' + t1 + ' to ' + t2, F.sessionWhen(s(29, 21, 0, 21, 20), now));
+  check('yesterday', F.sessionWhen(s(28, 21, 0, 21, 20), now).startsWith('Yesterday · '));
+  check('this week: the weekday', F.sessionWhen(s(25, 21, 0, 21, 20), now).startsWith(new Date(2026, 8, 25).toLocaleDateString([], { weekday: 'short' }) + ' · '));
+  check('older: the date', F.sessionWhen(s(2, 21, 0, 21, 20), now).startsWith(new Date(2026, 8, 2).toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' · '));
+  check('one minute: one time', F.sessionWhen(s(29, 21, 0, 21, 0), now) === 'Today · ' + t1);
+  const other = { start: new Date(2025, 11, 30, 9, 0).getTime(), end: new Date(2025, 11, 30, 9, 30).getTime() };
+  check('another year: with the year', F.sessionWhen(other, now).indexOf('2025') !== -1, F.sessionWhen(other, now));
+  check('one chapter: its label', F.sessionChapters({ fromMs: 610000, toMs: 900000 }, MULTI.chapters) === 'Part 2 of 3');
+  check('several: their numbers', F.sessionChapters({ fromMs: 10000, toMs: 1600000 }, MULTI.chapters) === 'Chapters 1 to 3');
+  check('none known: nothing', F.sessionChapters({ fromMs: null, toMs: null }, MULTI.chapters) === '' && F.sessionChapters({ fromMs: 1, toMs: 2 }, []) === '');
+});
+
+await run('handoff: only another device, within 24 h, with a place of its own here over 30 s away', () => {
+  const now = '2026-09-29T20:00:00.000Z';
+  const ago = (ms) => new Date(Date.parse(now) - ms).toISOString();
+  const base = () => ({
+    book: '500:1',
+    resumed: { source: 'web', track: '502', offset_ms: 300000, updated_at: ago(5 * MIN), device: 'Chrome on Android', device_id: OTHER, bookMs: 900000 },
+    own: { track: '501', offset_ms: 100000, updated_at: ago(3600000), device: 'Chrome on Linux', own: true, bookMs: 100000 },
+    now,
+    me: { device_id: ME, device: 'Chrome on Linux' }
+  });
+  const offer = F.handoffOffer(base());
+  check('offered', offer && offer.other.bookMs === 900000 && offer.other.device === 'Chrome on Android' && offer.other.agoMs === 5 * MIN && offer.own.bookMs === 100000, offer);
+  const with_ = (fn) => { const i = base(); fn(i); return F.handoffOffer(i); };
+  check('this device: none', with_((i) => { i.resumed.device_id = ME; }) === null);
+  check('the same id with another label is still this device', with_((i) => { i.resumed.device_id = ME; i.resumed.device = 'Firefox on Windows'; }) === null);
+  check('another id with the same label is another device', with_((i) => { i.resumed.device = 'Chrome on Linux'; }) !== null);
+  check('no ids: the labels decide (same)', with_((i) => { i.resumed.device_id = ''; i.resumed.device = 'Chrome on Linux'; }) === null);
+  check('no ids: the labels decide (different)', with_((i) => { i.resumed.device_id = null; }) !== null);
+  check('one side without an id: the labels', with_((i) => { i.me.device_id = ''; i.resumed.device = 'Chrome on Linux'; }) === null);
+  check('no label and no id: none', with_((i) => { i.resumed.device_id = ''; i.resumed.device = ''; }) === null);
+  check('exactly 24 h: offered', with_((i) => { i.resumed.updated_at = ago(86400000); }) !== null);
+  check('over 24 h: none', with_((i) => { i.resumed.updated_at = ago(86400001); }) === null);
+  check('no server time: none', with_((i) => { i.now = null; }) === null);
+  check('a copy stamped ahead of the server counts as now', with_((i) => { i.resumed.updated_at = ago(-5000); }).other.agoMs === 0);
+  check('exactly 30 s apart: none', with_((i) => { i.own.bookMs = 870000; }) === null);
+  check('30.001 s apart: offered', with_((i) => { i.own.bookMs = 869999; }) !== null);
+  check('ahead of it counts too', with_((i) => { i.own.bookMs = 1000000; }) !== null);
+  check('no copy here: none', with_((i) => { i.own = null; }) === null);
+  check('a copy never played or moved to here: none', with_((i) => { i.own.own = false; }) === null);
+  check('resumed from the local copy or Plex: none', with_((i) => { i.resumed.source = 'local'; }) === null && with_((i) => { i.resumed.source = 'plex'; }) === null);
+  check('the question', F.handoffMessage(offer) === 'Continue from 15:00 (Chrome on Android, 5 min ago)?', F.handoffMessage(offer));
+  check('an unnamed device', F.handoffMessage({ other: { bookMs: 3723000, device: '', agoMs: 30000 } }) === 'Continue from 1:02:03 (another device, just now)?');
+  check('ago', F.formatAgo(59999) === 'just now' && F.formatAgo(60000) === '1 min ago' && F.formatAgo(3599999) === '59 min ago' &&
+    F.formatAgo(3600000) === '1 h ago' && F.formatAgo(86400000) === '1 day ago' && F.formatAgo(3 * 86400000) === '3 days ago' && F.formatAgo(NaN) === 'just now');
+});
+
+await run('the check on Play: another device newer than this one, and more than 30 s away', () => {
+  const web = { track: '503', offset_ms: 100000, updated_at: '2026-09-29T20:00:00.000Z', device: 'Chrome on Android', device_id: OTHER };
+  const base = () => ({ web: Object.assign({}, web), webMs: 1600000, own: { updated_at: '2026-09-29T19:50:00.000Z' }, atMs: 900000, now: '2026-09-29T20:06:00.000Z', me: { device_id: ME, device: 'Chrome on Linux' } });
+  const got = F.recheckOffer(base());
+  check('offered', got && got.other.bookMs === 1600000 && got.other.agoMs === 6 * MIN && got.own.bookMs === 900000, got);
+  const with_ = (fn) => { const i = base(); fn(i); return F.recheckOffer(i); };
+  check('this device: none', with_((i) => { i.web.device_id = ME; }) === null);
+  check('older than this one: none', with_((i) => { i.own.updated_at = '2026-09-29T20:00:00.001Z'; }) === null);
+  check('the same instant: none', with_((i) => { i.own.updated_at = i.web.updated_at; }) === null);
+  check('no copy here: offered', with_((i) => { i.own = null; }) !== null);
+  check('within 30 s: none', with_((i) => { i.webMs = 930000; }) === null);
+  check('not in this book: none', with_((i) => { i.webMs = null; }) === null);
+  check('no web copy: none', with_((i) => { i.web = null; }) === null);
+});
+
+// A page with a local copy of its own and an id: the handoff's surroundings.
+async function handoffSetup(o = {}) {
+  const storage = memoryStorage();
+  const t = await setup(Object.assign({ storage, identity: ID, deviceId: ME }, o));
+  t.storage = storage;
+  t.setOwn = (track, offset, agoMs, own = true, book = MULTI.key) => storage.setItem('ws-player:place:' + ID + ':' + book, JSON.stringify({
+    track, offset_ms: offset, duration_ms: 900000, updated_at: new Date(t.serverNow() - agoMs).toISOString(), device: 'Test on Linux', own
+  }));
+  t.other = (track, offset, agoMs, extra = {}) => Object.assign({ track, offset_ms: offset, duration_ms: 900000, updated_at: new Date(t.serverNow() - agoMs).toISOString(), device: 'Chrome on Android', device_id: OTHER, source: 'web' }, extra);
+  t.button = (label) => t.qa('.wsp-notice-btn').find((b) => b.textContent === label) || null;
+  t.prompts = () => t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
+  t.open = async (key = MULTI.key) => {
+    const p = t.engine.open(key);
+    await t.clock.advance(300);
+    await p;
+  };
+  return t;
+}
+
+await run('handoff at open: held at the other device\'s place, Continue plays from there', async () => {
+  const t = await handoffSetup();
+  t.setOwn('501', 100000, 3600000);
+  t.places = { web: t.other('502', 300000, 5 * MIN) };
+  await t.open();
+  check('held, not playing', !t.st().playing && t.st().book === MULTI.key, t.st().playing);
+  check('at the other device\'s place', bookMs(t) === 900000, bookMs(t));
+  check('the question', t.prompts().join() === 'Continue from 15:00 (Chrome on Android, 5 min ago)?', t.prompts());
+  check('its buttons', t.qa('.wsp-prompt .wsp-notice-btn').map((b) => b.textContent).join() === 'Continue,Start from here');
+  check('nothing sent while it asks', t.posts.length === 0, t.posts);
+  t.button('Continue').click();
+  await t.clock.advance(1500);
+  check('playing on from there', t.st().playing && bookMs(t) > 880000 && bookMs(t) < 902000, bookMs(t));
+  check('the question is gone', t.prompts().length === 0);
+  check('saved there, with this device\'s id', t.posts.length > 0 && t.posts.every((b) => b.track === '502' && b.offset_ms >= 300000 && b.device_id === ME), t.posts.map((b) => [b.event, b.track, b.offset_ms, b.device_id]));
+  t.engine.close();
+});
+
+await run('handoff at open: Start from here moves to this device\'s place and saves it as the newest', async () => {
+  const t = await handoffSetup();
+  t.setOwn('501', 100000, 3600000);
+  t.places = { web: t.other('502', 300000, 5 * MIN) };
+  await t.open();
+  t.button('Start from here').click();
+  check('a move of the listener\'s own, saved at once', t.posts.length >= 1 && t.posts[0].track === '501' && t.posts[0].offset_ms === 100000 && t.posts[0].device_id === ME, t.posts.map((b) => [b.event, b.track, b.offset_ms]));
+  await t.clock.advance(1500);
+  check('playing from here, nothing rewound', t.st().playing && bookMs(t) >= 100000 && bookMs(t) < 102000, bookMs(t));
+  check('every save from here on', t.posts.every((b) => b.track === '501' && b.offset_ms >= 100000), t.posts.map((b) => [b.event, b.track, b.offset_ms]));
+  check('the question is gone', t.prompts().length === 0);
+  check('Undo can take it back to the other device\'s place', !!t.undoBtn() && t.notices().indexOf('Jumped back 13 min.') !== -1, t.notices());
+  t.engine.close();
+});
+
+await run('handoff at open: Play pressed instead plays from the other device\'s place', async () => {
+  const t = await handoffSetup();
+  t.setOwn('501', 100000, 3600000);
+  t.places = { web: t.other('502', 300000, 2 * MIN) };
+  await t.open();
+  check('asked', t.prompts().length === 1);
+  t.q('.wsp-play-sm').click();
+  await t.clock.advance(1500);
+  check('playing from the other device\'s place', t.st().playing && bookMs(t) > 880000, bookMs(t));
+  check('the question is gone', t.prompts().length === 0);
+  t.engine.close();
+});
+
+for (const [what, arrange] of [
+  ['this device saved it', (t) => { t.setOwn('501', 100000, 3600000); t.places = { web: t.other('502', 300000, 5 * MIN, { device_id: ME }) }; }],
+  ['it is over 24 h old', (t) => { t.setOwn('501', 100000, 2 * 86400000); t.places = { web: t.other('502', 300000, 86400000 + 1000) }; }],
+  ['this device has no place of its own', (t) => { t.places = { web: t.other('502', 300000, 5 * MIN) }; }],
+  ['this device only ever opened it', (t) => { t.setOwn('501', 100000, 3600000, false); t.places = { web: t.other('502', 300000, 5 * MIN) }; }],
+  ['the places are 30 s apart', (t) => { t.setOwn('502', 270000, 3600000); t.places = { web: t.other('502', 300000, 5 * MIN) }; }],
+  ['this device\'s place is the newest', (t) => { t.setOwn('501', 100000, 60000); t.places = { web: t.other('502', 300000, 5 * MIN) }; }]
+]) {
+  await run(`no handoff when ${what}: it plays at once`, async () => {
+    const t = await handoffSetup();
+    arrange(t);
+    await t.open();
+    check('no question', t.prompts().length === 0, t.prompts());
+    check('playing', t.st().playing);
+    t.engine.close();
+  });
+}
+
+await run('a place check on Play after 5 minutes paused holds for another device\'s newer place', async () => {
+  for (const choice of ['Continue', 'Start from here']) {
+    const t = await handoffSetup({ stateful: true });
+    await t.openAt(MULTI.key, '502', 300000);
+    await t.clock.advance(3000);
+    t.engine.pause();
+    await t.clock.advance(100);
+    const here = bookMs(t);
+    check(`${choice}: saved here first`, t.places.web.device_id === ME, t.places.web);
+    await t.clock.advance(F.RECHECK_AFTER_MS);
+    // Another device went on meanwhile, a minute ago.
+    t.places = { web: t.other('503', 100000, 60000) };
+    const calls = t.positionCalls;
+    const posts = t.posts.length;
+    t.q('.wsp-play-sm').click();
+    await t.clock.advance(100);
+    check(`${choice}: asked the server`, t.positionCalls === calls + 1, t.positionCalls - calls);
+    check(`${choice}: held`, !t.st().playing && bookMs(t) === here, [t.st().playing, bookMs(t)]);
+    check(`${choice}: nothing saved over it`, t.posts.length === posts, t.posts.slice(posts));
+    check(`${choice}: the question`, t.prompts().join() === 'Continue from 26:40 (Chrome on Android, 1 min ago)?', t.prompts());
+    t.button(choice).click();
+    await t.clock.advance(1500);
+    check(`${choice}: playing`, t.st().playing);
+    if (choice === 'Continue') {
+      check('Continue: from the other device\'s place', bookMs(t) >= 1600000 && bookMs(t) < 1602000, bookMs(t));
+      check('Continue: saved there', t.places.web.track === '503' && t.places.web.offset_ms >= 100000 && t.places.web.device_id === ME, t.places.web);
+    } else {
+      check('Start from here: from here, less the pause\'s rewind', bookMs(t) >= here - 10000 && bookMs(t) < here, bookMs(t) - here);
+      check('Start from here: saved as the newest place', t.places.web.track === '502' && t.places.web.device_id === ME, t.places.web);
+    }
+    t.engine.close();
+  }
+});
+
+await run('no place check on Play under 5 minutes, or when this device is the newest', async () => {
+  const t = await handoffSetup({ stateful: true });
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(3000);
+  t.engine.pause();
+  await t.clock.advance(F.RECHECK_AFTER_MS - 1000);
+  const calls = t.positionCalls;
+  await t.engine.play();
+  check('under 5 minutes: plays at once, no check', t.st().playing && t.positionCalls === calls);
+  await t.clock.advance(3000);
+  t.engine.pause();
+  await t.clock.advance(F.RECHECK_AFTER_MS + 1000);
+  t.q('.wsp-play-sm').click();
+  await t.clock.advance(100);
+  check('the newest is this device\'s: checked, then plays', t.positionCalls === calls + 1 && t.st().playing && t.prompts().length === 0, [t.positionCalls - calls, t.st().playing]);
+  t.engine.close();
+});
+
+await run('a place check that fails or takes over 4 s lets Play go on', async () => {
+  for (const mode of ['down', 'hang']) {
+    const t = await handoffSetup({ stateful: true });
+    await t.openAt(MULTI.key, '502', 300000);
+    await t.clock.advance(3000);
+    t.engine.pause();
+    await t.clock.advance(F.RECHECK_AFTER_MS);
+    t.positionMode = mode;
+    t.q('.wsp-play-sm').click();
+    await t.clock.advance(100);
+    if (mode === 'hang') {
+      check('hang: waiting', !t.st().playing);
+      await t.clock.advance(F.RECHECK_TIMEOUT_MS);
+    }
+    await t.clock.advance(100);
+    check(`${mode}: plays`, t.st().playing && t.prompts().length === 0);
+    t.engine.close();
+  }
+});
+
+await run('the page shown again while paused asks too; Play then plays from here', async () => {
+  const t = await handoffSetup({ stateful: true });
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(3000);
+  t.engine.pause();
+  await t.clock.advance(100);
+  const here = bookMs(t);
+  await t.clock.advance(60000);
+  t.places = { web: t.other('503', 100000, 30000) };
+  t.doc.dispatchEvent(new t.win.Event('visibilitychange'));
+  await t.clock.advance(100);
+  check('asked', t.prompts().length === 1 && t.prompts()[0].startsWith('Continue from 26:40 (Chrome on Android'), t.prompts());
+  const calls = t.positionCalls;
+  t.doc.dispatchEvent(new t.win.Event('visibilitychange'));
+  await t.clock.advance(100);
+  check('not asked twice', t.positionCalls === calls && t.prompts().length === 1);
+  t.q('.wsp-play-sm').click();
+  await t.clock.advance(1500);
+  check('Play instead: from here (less the pause\'s rewind), the question gone', t.st().playing && bookMs(t) >= here - 10000 && bookMs(t) < here && t.prompts().length === 0, bookMs(t) - here);
+  t.engine.close();
+});
+
+await run('the play gate: held, a failure plays, another book meanwhile does not', async () => {
+  const t = await setup({ noFeatures: true });
+  await t.openAt(MULTI.key, '502', 300000, { autoplay: false });
+  let answer;
+  t.engine.setPlayGate(() => new Promise((r) => { answer = r; }));
+  const p1 = t.engine.play();
+  await t.clock.advance(100);
+  check('waits', !t.st().playing);
+  answer(false);
+  await p1;
+  await t.clock.advance(100);
+  check('false holds', !t.st().playing);
+  t.engine.setPlayGate(() => Promise.reject(new Error('x')));
+  await t.engine.play();
+  await t.clock.advance(100);
+  check('a rejection plays', t.st().playing);
+  t.engine.pause();
+  t.engine.setPlayGate(() => new Promise((r) => { answer = r; }));
+  const p2 = t.engine.play();
+  const o = t.engine.open(SPAN.key, { at: { track: '511', offset_ms: 1000 }, autoplay: false });
+  await t.clock.advance(200);
+  await o;
+  answer(true);
+  await p2;
+  await t.clock.advance(100);
+  check('another book opened meanwhile: not played', t.st().book === SPAN.key && !t.st().playing);
+  t.engine.setPlayGate(null);
+  await t.engine.play();
+  check('no gate: plays', t.st().playing);
+  t.engine.close();
+});
+
+await run('history: sessions from the log, and a tap goes to where one ended', async () => {
+  const t = await setup({ wide: false });
+  await t.openAt(MULTI.key, '501', 60000);
+  t.engine.pause();
+  t.history[''] = {
+    entries: [
+      entry(t, 60000, '501', 60000, 'Test on Linux', ME, 'pause'),
+      entry(t, 3600000, '503', 100000, 'Chrome on Android', OTHER, 'pause'),
+      entry(t, 3700000, '502', 800000),
+      entry(t, 3900000, '502', 200000, 'Chrome on Android', OTHER, 'play')
+    ],
+    next_before: null
+  };
+  t.ui.open();
+  const btn = t.q('.wsp-slot-history .wsp-action');
+  check('the History button shows in its slot', !!btn && !t.q('.wsp-slot-history').hidden && btn.textContent.indexOf('History') !== -1);
+  btn.click();
+  await t.clock.advance(50);
+  const rows = t.qa('.wsp-hist-row');
+  check('two sessions, newest first', rows.length === 2, rows.length);
+  const what = rows.map((r) => r.querySelector('.wsp-hist-what').textContent);
+  check('chapters and device', what[0] === 'Part 1 of 3 · Test on Linux' && what[1] === 'Chapters 2 to 3 · Chrome on Android', what);
+  const ends = rows.map((r) => r.querySelector('.wsp-hist-at').textContent);
+  check('where each ended', ends.join() === '1:00,26:40', ends);
+  check('when', rows[1].querySelector('.wsp-hist-when').textContent.startsWith('Today · '), rows[1].querySelector('.wsp-hist-when').textContent);
+  check('a spoken label', /Go to where it ended, 26:40$/.test(rows[1].getAttribute('aria-label')), rows[1].getAttribute('aria-label'));
+  check('no older pages: no Show older', t.q('.wsp-hist-more').hidden);
+  const posts = t.posts.length;
+  rows[1].click();
+  check('gone to where it ended', bookMs(t) === 1600000, bookMs(t));
+  check('with Undo', !!t.undoBtn() && t.notices().indexOf('Jumped ahead 26 min.') !== -1, t.notices());
+  await t.clock.advance(1100);
+  check('saved as the listener\'s own move', t.posts.length === posts + 1 && t.posts[posts].track === '503' && t.posts[posts].offset_ms === 100000, t.posts.slice(posts));
+  check('back to the player on a phone', t.q('.wsp-full').getAttribute('data-view') === null);
+  t.engine.close();
+});
+
+await run('history: Show older loads the next page, and a session across the pages is one', async () => {
+  const t = await setup({ wide: true });
+  await t.openAt(MULTI.key, '501', 60000, { autoplay: false });
+  t.history[''] = { entries: [entry(t, 0, '502', 500000), entry(t, 4 * MIN, '502', 400000)], next_before: 'cur~1' };
+  t.history['cur~1'] = { entries: [entry(t, 8 * MIN, '502', 300000), entry(t, 60 * MIN, '501', 10000)], next_before: null };
+  t.ui.open();
+  t.q('.wsp-slot-history .wsp-action').click();
+  await t.clock.advance(50);
+  check('one session on the first page', t.qa('.wsp-hist-row').length === 1);
+  const more = t.q('.wsp-hist-more');
+  check('Show older', !more.hidden && more.textContent === 'Show older');
+  more.click();
+  await t.clock.advance(50);
+  const urls = t.fetches.filter((f) => f.url.startsWith('/api/player/history/')).map((f) => f.url);
+  check('the next page by its cursor', urls[urls.length - 1] === '/api/player/history/500%3A1?before=cur~1', urls);
+  const rows = t.qa('.wsp-hist-row');
+  check('the session runs on into the older page, then an older one', rows.length === 2, rows.length);
+  check('the first covers both pages', rows[0].querySelector('.wsp-hist-what').textContent.startsWith('Part 2 of 3'), rows[0].querySelector('.wsp-hist-what').textContent);
+  check('no more pages', t.q('.wsp-hist-more').hidden);
+  t.engine.close();
+});
+
+await run('history: empty, failing and another book', async () => {
+  const t = await setup({ wide: true });
+  await t.openAt(MULTI.key, '501', 60000, { autoplay: false });
+  t.ui.open();
+  t.q('.wsp-slot-history .wsp-action').click();
+  await t.clock.advance(50);
+  check('nothing yet', t.q('.wsp-hist-note').textContent === 'No listening history for this book yet.');
+  t.history[''] = 'fail';
+  t.q('.wsp-slot-history .wsp-action').click();
+  await t.clock.advance(50);
+  check('a failure says so', t.q('.wsp-hist-note').textContent === "Couldn't load your listening history." && t.q('.wsp-hist-more').textContent === 'Try again');
+  t.history[''] = { entries: [entry(t, 0, '502', 500000)], next_before: null };
+  t.q('.wsp-hist-more').click();
+  await t.clock.advance(50);
+  check('Try again loads it', t.qa('.wsp-hist-row').length === 1 && t.q('.wsp-hist-note').textContent === '');
+  t.history[''] = { entries: [], next_before: null };
+  await t.openAt(SPAN.key, '511', 1000, { autoplay: false });
+  await t.clock.advance(50);
+  const last = t.fetches.filter((f) => f.url.startsWith('/api/player/history/')).pop();
+  check('another book: its own history, asked again while the panel shows', last.url === '/api/player/history/510%3A1' && t.qa('.wsp-hist-row').length === 0, [last.url, t.qa('.wsp-hist-row').length]);
+  t.engine.close();
+});
+
+await run('up next at the end of the book: offered, never started; Play opens it where the listener left off', async () => {
+  const t = await setup();
+  t.nextBooks[MULTI.key] = { key: SPAN.key, title: 'Spanning', author: 'B. Writer', series: 'S', narrator: '', cover: '', duration_ms: 600000, shape: 'parts' };
+  await t.openAt(MULTI.key, '503', 298000);
+  await t.clock.advance(3000);
+  check('the book ended', !t.st().playing && bookMs(t) === 1800000, bookMs(t));
+  const asked = t.fetches.filter((f) => f.url === '/api/player/next/500%3A1');
+  check('the next book was asked for once', asked.length === 1, asked.length);
+  const prompts = t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
+  check('Up next', prompts.join() === 'Up next: Spanning', prompts);
+  check('Play and Not now', t.qa('.wsp-prompt .wsp-notice-btn').map((b) => b.textContent).join() === 'Play,Not now');
+  const loads = t.loads.length;
+  await t.clock.advance(120000);
+  check('it never starts by itself', t.st().book === MULTI.key && !t.st().playing && t.loads.length === loads);
+  check('still offered', t.qa('.wsp-prompt').length === 1);
+  const before = t.fetches.length;
+  t.qa('.wsp-notice-btn').find((b) => b.textContent === 'Play').click();
+  await t.clock.advance(300);
+  check('Play opens the next book, playing', t.st().book === SPAN.key && t.st().playing, [t.st().book, t.st().playing]);
+  check('with the normal resume', t.fetches.slice(before).some((f) => f.url === '/api/player/position/510%3A1'));
+  check('the offer is gone', t.qa('.wsp-prompt').length === 0);
+  t.engine.close();
+});
+
+await run('up next: none for a standalone book, not at the end of a part, Not now and a replay remove it', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '502', 898000);
+  await t.clock.advance(3000);
+  check('the end of a part asks nothing', t.fetches.every((f) => !f.url.startsWith('/api/player/next/')) && t.st().playing);
+  t.engine.seek(1798000);
+  await t.clock.advance(3000);
+  check('none for a standalone book', t.fetches.some((f) => f.url.startsWith('/api/player/next/')) && t.qa('.wsp-prompt').length === 0);
+  t.nextBooks[MULTI.key] = { key: SPAN.key, title: 'Spanning' };
+  await t.engine.play();
+  await t.clock.advance(100);
+  t.engine.seek(1798000);
+  await t.clock.advance(3000);
+  check('offered at the end', t.qa('.wsp-prompt').length === 1);
+  t.qa('.wsp-notice-btn').find((b) => b.textContent === 'Not now').click();
+  check('Not now removes it', t.qa('.wsp-prompt').length === 0);
+  t.engine.seek(1798000);
+  await t.engine.play();
+  await t.clock.advance(3000);
+  check('offered again at the next end', t.qa('.wsp-prompt').length === 1);
+  await t.engine.play();
+  await t.clock.advance(300);
+  check('playing again (from the start) removes it', t.st().playing && t.qa('.wsp-prompt').length === 0);
+  t.engine.close();
+});
 
 await run('boot sets WS.playerFeatures once, and only with the player', async () => {
   const t = await setup({ noFeatures: true });

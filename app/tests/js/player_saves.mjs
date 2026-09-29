@@ -1902,6 +1902,102 @@ current = 'a smart rewind never moves the saved place back';
   check('another run has no floor', t.server.row.offset_ms === top - 30000, t.server.row);
 }
 
+// ---- Device ids: one per browser, on every save ----
+current = 'this browser\'s id: made once, kept, and carried on every save';
+{
+  const storage = fakeStorage();
+  const id = S.deviceIdFrom(storage);
+  check('32 lower-case letters and digits', /^[a-z0-9]{32}$/.test(id) && S.isDeviceId(id), id);
+  check('stored', storage.map.get('ws-player:device') === id);
+  check('the same one next time (a reload is still this device)', S.deviceIdFrom(storage) === id);
+  const other = S.deviceIdFrom(fakeStorage());
+  check('another browser gets another', other !== id && S.isDeviceId(other));
+  storage.map.set('ws-player:device', 'NOT-AN-ID');
+  const fresh = S.deviceIdFrom(storage);
+  check('a bad stored one is replaced', S.isDeviceId(fresh) && fresh !== 'NOT-AN-ID' && storage.map.get('ws-player:device') === fresh);
+  const locked = fakeStorage({ throws: true });
+  const a = S.deviceIdFrom(locked);
+  check('storage that throws: an id all the same (this page session only)', S.isDeviceId(a) && S.deviceIdFrom(locked) !== a);
+  check('no storage at all: an id', S.isDeviceId(S.deviceIdFrom(null)));
+  check('isDeviceId', !S.isDeviceId('short') && !S.isDeviceId('A'.repeat(20)) && !S.isDeviceId('a'.repeat(41)) && !S.isDeviceId(null) && S.isDeviceId('a'.repeat(16)));
+  // On the saves.
+  const clock = fakeClock();
+  const server = fakeServer(clock);
+  const saver = S.createSaver({
+    post: (body, kind) => server.post(body, kind), now: () => clock.now, mono: () => clock.now, storage: fakeStorage(),
+    identity: IDENTITY, device: 'Chrome on Android', deviceId: id,
+    setTimeout: (fn, ms) => clock.setTimeout(fn, ms, 'page'), clearTimeout: (x) => clock.clearTimeout(x)
+  });
+  check('the saver says who it is', saver.deviceId === id && saver.device === 'Chrome on Android');
+  saver.start('500:1');
+  const st = (playing, offset) => ({ book: '500:1', playing, position: { track: '501', offset_ms: offset, duration_ms: 600000 } });
+  saver.note({ reason: 'open', state: st(false, 5000) });
+  saver.note({ reason: 'play', state: st(true, 5000) });
+  await clock.advance(11000);
+  saver.note({ reason: 'time', state: st(true, 16000) });
+  await clock.advance(500);
+  saver.flush('beacon', 'leave');
+  saver.stop();
+  await clock.advance(1500);
+  check('every save carries it, the beacon too', server.calls.length >= 3 && server.calls.every((c) => c.body.device_id === id), server.calls.map((c) => [c.kind, c.body.event, c.body.device_id]));
+  const bare = S.createSaver({
+    post: (body, kind) => server.post(body, kind), now: () => clock.now, mono: () => clock.now, storage: null,
+    identity: '', device: 'x', deviceId: 'Not An Id',
+    setTimeout: (fn, ms) => clock.setTimeout(fn, ms, 'page'), clearTimeout: (x) => clock.clearTimeout(x)
+  });
+  check('a bad id is none', bare.deviceId === '');
+  const n = server.calls.length;
+  bare.start('500:1');
+  bare.note({ reason: 'open', state: st(false, 1000) });
+  bare.note({ reason: 'play', state: st(true, 1000) });
+  await clock.advance(500);
+  check('and no device_id field is sent', server.calls.length > n && server.calls.slice(n).every((c) => !('device_id' in c.body)));
+  bare.stop();
+  // browserSaver makes and keeps it.
+  const win = new Window({ url: 'https://ws.test/news' });
+  win.WS = { user: { identity_key: IDENTITY } };
+  const bs = fakeStorage();
+  const b1 = S.browserSaver(win, { fetch: async () => ({ status: 200, json: async () => ({}) }), storage: bs, now: () => clock.now, setTimeout: (fn, ms) => clock.setTimeout(fn, ms, 'page'), clearTimeout: (x) => clock.clearTimeout(x) });
+  check('the page\'s saver has the stored id', S.isDeviceId(b1.deviceId) && bs.map.get('ws-player:device') === b1.deviceId);
+  const win2 = new Window({ url: 'https://ws.test/news' });
+  win2.WS = { user: { identity_key: IDENTITY } };
+  const b2 = S.browserSaver(win2, { fetch: async () => ({ status: 200, json: async () => ({}) }), storage: bs, now: () => clock.now, setTimeout: (fn, ms) => clock.setTimeout(fn, ms, 'page'), clearTimeout: (x) => clock.clearTimeout(x) });
+  check('a reload keeps it', b2.deviceId === b1.deviceId);
+  await win.happyDOM.close();
+  await win2.happyDOM.close();
+}
+
+current = 'the local copy is this device\'s own once the listener played or moved to it';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  t.saver.start('500:1', { held: { track: '501', offset_ms: 0 } });
+  p.offset = 300000;
+  p.open();
+  check('an untouched opening place is not its own', localOf(t) && localOf(t).own === false && t.saver.readLocal('500:1').own === false, localOf(t));
+  p.seek(310000);
+  check('a move while paused is', localOf(t).own === true && t.saver.readLocal('500:1').own === true, localOf(t));
+  t.saver.stop();
+  const t2 = makeSaver();
+  const p2 = listener(t2);
+  t2.saver.start('500:1');
+  p2.offset = 1000;
+  p2.open();
+  p2.play();
+  await p2.listen(1000);
+  check('played to is', localOf(t2).own === true && localOf(t2).offset_ms > 1000, localOf(t2));
+  t2.saver.stop();
+  const t3 = makeSaver();
+  const p3 = listener(t3);
+  t3.storage.map.set('ws-player:place:' + IDENTITY + ':500:1', JSON.stringify({ track: '501', offset_ms: 5, updated_at: new Date(T0).toISOString() }));
+  check('a copy from before the flag is not its own', t3.saver.readLocal('500:1').own === false);
+  t3.saver.start('500:1', { push: true });
+  p3.offset = 5;
+  p3.open();
+  check('a local copy the book opens at (pushed) is still its own', localOf(t3).own === true, localOf(t3));
+  t3.saver.stop();
+}
+
 if (failed) {
   realError(`${failed}/${total} player saves cases FAILED`);
   process.exit(1);

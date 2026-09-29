@@ -295,6 +295,9 @@ class ListeningPosition(Base):
     duration_ms = Column(Integer, nullable=False, default=0)
     updated_at = Column(DateTime, nullable=False)   # naive UTC
     device = Column(String(80), nullable=False, default="")
+    # The browser's own random id (the label alone can't tell two phones of
+    # one kind apart); null from a player that sent none.
+    device_id = Column(String(40), nullable=True)
     source = Column(String(10), nullable=False, default="web")   # web, plex, local
     # The page session that wrote the row and its check-in number: an older
     # seq from the same page session never overwrites a newer one.
@@ -316,6 +319,7 @@ class ListeningLog(Base):
     track_key = Column(String(64), nullable=False)
     offset_ms = Column(Integer, nullable=False)
     device = Column(String(80), nullable=False, default="")
+    device_id = Column(String(40), nullable=True)
     event = Column(String(16), nullable=False)   # play, pause, checkin, seek, jump, leave, end
     at = Column(DateTime, nullable=False)        # naive UTC
 
