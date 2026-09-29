@@ -218,6 +218,7 @@ export function createSaver(o) {
   let lastSavedAt = null;
   let warning = false;
   let lastBeacon = '';
+  let leftAt = '';            // the place a leave beacon went from: the page is going
 
   // ---- Storage (it can throw anywhere: a private window, a full quota) ----
 
@@ -485,6 +486,7 @@ export function createSaver(o) {
     run = newRun(String(book));
     warning = false;
     lastBeacon = '';
+    leftAt = '';
     const saved = timeOf(opts.savedAt);
     lastSavedAt = isFinite(saved) ? saved - skew : null;
     // The place the server already holds needs no save until it moves.
@@ -533,10 +535,15 @@ export function createSaver(o) {
     if (!r || r.stopped || signedOut || !r.latest) return false;
     if (kind === 'beacon') {
       if (!r.playing && !dirty(r)) return false;
+      const at = r.book + '|' + r.latest.track + '|' + r.latest.offset_ms;
+      // Leaving, Chrome fires pagehide and then visibilitychange: after the
+      // leave, a hidden page's checkin would tell Plex it still plays.
+      if (!event && at === leftAt) return false;
       const ev = r.event === 'end' ? 'end' : event || (r.playing ? 'checkin' : r.event || 'pause');
-      const key = r.book + '|' + r.latest.track + '|' + r.latest.offset_ms + '|' + ev;
+      const key = at + '|' + ev;
       if (key === lastBeacon) return false;
       lastBeacon = key;
+      if (ev === 'leave') leftAt = at;
       try {
         post(body(r.book, r.latest, ev), 'beacon');
       } catch (e) {

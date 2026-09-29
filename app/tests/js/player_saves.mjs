@@ -445,6 +445,18 @@ current = 'pagehide, ws:before-hard-nav and a hidden page send a beacon';
   check('pagehide: a beacon', beacons.length === 3);
   const body2 = JSON.parse(await beacons[2].blob.text());
   check('its seq is the newest', body2.seq > body1.seq && body1.seq > body0.seq && body2.event === 'leave');
+  // Leaving, Chrome fires pagehide and then visibilitychange (seen on dev):
+  // the leave stays the last word, not a checkin saying it still plays.
+  saver.note({ reason: 'time', state: st(true, 6500) });
+  Object.defineProperty(win.document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  win.dispatchEvent(new win.Event('pagehide'));
+  Object.defineProperty(win.document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  win.document.dispatchEvent(new win.Event('visibilitychange'));
+  const tail = await Promise.all(beacons.slice(3).map(async (b) => JSON.parse(await b.blob.text()).event));
+  check('pagehide then hidden: one leave, no checkin after it', tail.join() === 'leave', tail);
+  saver.note({ reason: 'time', state: st(true, 6750) });
+  win.document.dispatchEvent(new win.Event('visibilitychange'));
+  check('a page that stayed (the place moved on) sends hidden beacons again', beacons.length === 5, beacons.length);
   // A browser whose beacon queue refuses: the same save as a keepalive fetch.
   const win2 = new Window({ url: 'https://ws.test/news' });
   win2.WS = { user: { identity: IDENTITY } };
