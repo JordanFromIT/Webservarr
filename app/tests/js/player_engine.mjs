@@ -193,6 +193,12 @@ function makeNet() {
     events: [],             // asks and stops in order: ['ask', track] | ['stop', session]
     realDelta: new Map(),   // track key -> the real audio's length minus Plex's (ms)
     dropAtStart: false,     // every transcoded stream starts, then drops at once (code 2)
+    hiccupSeq: [],          // the next streams of the listener's element (never a check or probe)
+                            // give nothing, one mode each: 'empty' (0 s, a clean end),
+                            // 'tiny' (0.5 s, a clean end), 'fail' (no audio: code 4)
+    checkFail: 0,           // the next end checks' streams fail (code 4)
+    checkHang: 0,           // the next end checks' streams never answer
+    checkCut: [],           // the next end checks' streams end cleanly at these element seconds
     pastEnd: 'fail',        // a start past the real audio: what Plex gives ('fail', as a
                             // real server does: a header and no audio; or 'empty')
     pagehide: []            // the engine's pagehide handlers
@@ -216,6 +222,11 @@ function answer(net, url) {
     }
     const real = t.duration_ms + (net.realDelta.get(rk) || 0);
     if (off * 1000 >= real && net.pastEnd === 'fail') return { kind: 'fail', side, part: 'tc:' + rk };
+    if (!u.searchParams.has('wsprobe') && net.hiccupSeq.length) {
+      const mode = net.hiccupSeq.shift();
+      if (mode === 'fail') return { kind: 'fail', side, part: 'tc:' + rk };
+      return { kind: 'ok', side, part: 'tc:' + rk, transcode: true, sid, offset: off, durationMs: mode === 'tiny' ? 500 : 0 };
+    }
     return { kind: 'ok', side, part: 'tc:' + rk, transcode: true, sid, offset: off,
       durationMs: Math.max(0, real - off * 1000) };
   }
@@ -320,11 +331,25 @@ class FakeAudio {
     this.fire('emptied');
     if (moved) this.fire('timeupdate');
     if (!this._src) return;
-    const a = answer(this.env.net, this._src);
+    let a = answer(this.env.net, this._src);
+    // An end check (a transcoded stream on a wsprobe URL that plays, not a
+    // metadata probe) the test makes fail.
+    if (a.transcode && this.preload !== 'metadata' && this._src.indexOf('wsprobe=') !== -1) {
+      const n = this.env.net;
+      if (n.checkFail > 0) {
+        n.checkFail -= 1;
+        a = { kind: 'fail', side: a.side, part: a.part };
+      } else if (n.checkHang > 0) {
+        n.checkHang -= 1;
+        a = { kind: 'hang', side: a.side, part: a.part };
+      } else if (n.checkCut.length) {
+        n.cutAt.set(a.sid, n.checkCut.shift());
+      }
+    }
     this.side = a.side;
     this.part = a.part;
     this.sid = a.sid || null;
-    this.env.net.loads.push({ side: a.side, part: a.part, probe: this.preload === 'metadata', url: this._src,
+    this.env.net.loads.push({ side: a.side, part: a.part, probe: this.preload === 'metadata' || this._src.indexOf('wsprobe=') !== -1, url: this._src,
       sid: a.sid || null, offset: a.transcode ? a.offset : null });
     if (a.kind === 'hang') return;
     this.env.clock.setTimeout(() => {
@@ -1730,10 +1755,15 @@ current = 'Plex ending the stream early is a dropped stream, not the end of the 
   const t = setup({ net: { noLocal: true } });
   await openPlaying(t, ATMOS.key, { at: at('801', 1000000) });
   t.net.cutAt.set(srcParams(t).get('session'), 5);   // Plex stops it 5 s in (idle, or stopped)
-  await t.clock.advance(6000);
+  const mainLoads = () => t.net.loads.filter((l) => !l.probe && l.part.startsWith('tc:'));
+  await t.clock.advance(12000);
   check('no ended, no advance', t.log.ended.length === 0 && !reasons(t).includes('ended'), reasons(t));
-  check('streaming again on a new session from where it was cut',
-    !t.main.paused && t.net.asks.length === 2 && Math.abs(Number(srcParams(t).get('offset')) - 1005) <= 0.25, srcParams(t).get('offset'));
+  const checks = t.net.loads.filter((l) => l.probe && l.part === 'tc:801');
+  check('a muted check played from 5 s before the place, on a session of its own, ended after',
+    checks.length === 1 && checks[0].offset === 1000 && checks[0].sid !== null && t.net.stops.includes(checks[0].sid), checks);
+  check('streaming again on a new session from where it was cut (never from before it)',
+    !t.main.paused && t.net.asks.length === 3 && Math.abs(Number(srcParams(t).get('offset')) - 1005) <= 0.25 &&
+    mainLoads().length === 2 && mainLoads()[1].offset >= 1004.75, [srcParams(t).get('offset'), mainLoads().map((l) => l.offset)]);
   check('the place never jumped to the end', t.positions.every((p) => !p || p.offset_ms < 1010000));
   t.engine.close();
 }
@@ -1767,15 +1797,15 @@ current = 'a real Plex kill mid-part still reconnects at the held place, and aga
   const t = setup({ net: { noLocal: true } });
   await openPlaying(t, ATMOS.key, { at: at('801', 1000000) });
   t.net.cutAt.set(srcParams(t).get('session'), 5);
-  await t.clock.advance(8000);
-  check('reconnected at the held place', !t.main.paused && t.net.asks.length === 2 &&
+  await t.clock.advance(12000);
+  check('reconnected at the held place', !t.main.paused && t.net.asks.length === 3 &&
     Math.abs(Number(srcParams(t).get('offset')) - 1005) <= 0.25 && t.log.error.length === 0, srcParams(t).get('offset'));
   const second = srcParams(t).get('session');
   await t.clock.advance(10000);
   t.net.cutAt.set(second, 20);                  // a second kill, after real playback
-  await t.clock.advance(15000);
-  check('a later kill reconnects too (real playback gave the ladder back)', !t.main.paused &&
-    t.net.asks.length === 3 && t.log.error.length === 0 && t.log.ended.length === 0, [t.net.asks.length, t.log.error]);
+  await t.clock.advance(25000);
+  check('a later kill is checked and reconnects too (real playback gave the ladder back)', !t.main.paused &&
+    t.net.asks.length === 5 && t.log.error.length === 0 && t.log.ended.length === 0, [t.net.asks.length, t.log.error]);
   check('never ended, never jumped', t.positions.every((p) => !p || p.offset_ms < 1100000));
   t.engine.close();
 }
@@ -1824,6 +1854,246 @@ current = 'Plex killing a stream and then going away is never taken for the end 
   check('no end, no advance', t.log.ended.length === 0 && !reasons(t).includes('ended'), reasons(t).slice(-6));
   check('"Can\'t reach the media server", the place held', s.error && s.error.code === 'unreachable' &&
     s.position.offset_ms >= 1004000 && s.position.offset_ms <= 1005000, [s.error, s.position]);
+  t.engine.close();
+}
+
+// ---- 19. Fix round 2: an early end is the part's end only once confirmed ----
+
+// The end checks: elements of the engine's own that play (not metadata probes).
+const endChecks = (t) => t.env.audios.filter((a) => a !== t.main && a.preload === 'auto');
+const kill = (t) => t.net.cutAt.set(srcParams(t).get('session'), t.main.currentTime + 0.25);
+
+for (const [label, placeMs] of [['1 h in', 3600000], ['30 s in', 30000], ['near the start (2 s)', 2000]]) {
+  for (const mode of ['empty', 'tiny', 'fail']) {
+    current = `a Plex kill and one ${mode} hiccup ${label} plays on, never ends`;
+    const t = setup({ net: { noLocal: true } });
+    await openPlaying(t, ATMOS.key, { at: at('801', placeMs) });
+    await t.clock.advance(3000);
+    const held = t.engine.state().position.offset_ms;
+    kill(t);
+    t.net.hiccupSeq = [mode];
+    await t.clock.advance(40000);
+    const s = t.engine.state();
+    check('never ended (so no end check-in)', t.log.ended.length === 0 && !reasons(t).includes('ended') && !reasons(t).includes('part'),
+      reasons(t).filter((r) => r !== 'time').slice(-6));
+    check('no error, no warning', t.log.error.length === 0 && t.log.warning.length === 0, [t.log.error, t.log.warning]);
+    check('plays on from where it was', s.playing && !t.main.paused && s.position.offset_ms > held + 20000 &&
+      s.position.offset_ms < held + 45000, [held, s.position.offset_ms]);
+    check('the place never went back or jumped', t.positions.every((p, i, a) => !p || !a[i - 1] || p.offset_ms >= a[i - 1].offset_ms) &&
+      t.positions.every((p) => !p || p.offset_ms < held + 45000));
+    check('every check\'s and every stream\'s session but the playing one ended', t.net.asks.length - t.net.stops.length === 1,
+      [t.net.asks.length, t.net.stops.length]);
+    t.engine.close();
+  }
+}
+
+current = 'two failed streams at open, then Plex works: plays on';
+{
+  for (const seq of [['empty', 'empty'], ['tiny', 'tiny'], ['empty', 'fail']]) {
+    const t = setup({ net: { noLocal: true, hiccupSeq: seq.slice() } });
+    await openPlaying(t, ATMOS.key, { at: at('801', 3600000) });
+    await t.clock.advance(40000);
+    check(`${seq.join('+')}: no end, playing on from the saved place`, t.log.ended.length === 0 && t.engine.state().playing &&
+      t.engine.state().position.offset_ms > 3600000 && t.engine.state().position.offset_ms < 3650000, [t.log.ended.length, t.engine.state().position]);
+    t.engine.close();
+  }
+}
+
+current = 'a hiccup in part 2 of 3 does not advance to part 3';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, MIXED.key, { at: at('902', 300000) });
+  await t.clock.advance(3000);
+  kill(t);
+  t.net.hiccupSeq = ['empty'];
+  await t.clock.advance(30000);
+  const s = t.engine.state();
+  check('still part 2, past where it was', s.position.track === '902' && s.position.offset_ms > 310000 && s.position.offset_ms < 340000, s.position);
+  check('no advance, no warning', !reasons(t).includes('part') && t.log.warning.length === 0 && t.log.error.length === 0);
+  t.engine.close();
+}
+
+current = 'a check that confirms: played real audio from 5 s before, then ended at the place';
+{
+  const t = setup({ net: { noLocal: true, realDelta: new Map([['801', -30000]]) } });
+  await openPlaying(t, ATMOS.key, { at: at('801', ATMOS_MS - 60000) });
+  await t.clock.advance(28000);
+  check('not ended before the real audio ends', t.log.ended.length === 0);
+  await t.clock.advance(15000);
+  const checks = endChecks(t);
+  check('one check, muted, from 5 s before the place', checks.length === 1 && checks[0].muted === true &&
+    t.net.loads.some((l) => l.probe && l.offset === (ATMOS_MS - 30000 - 5000) / 1000), t.net.loads.filter((l) => l.probe).map((l) => l.offset));
+  check('then the book ended, once, at its length', t.log.ended.length === 1 && t.engine.state().position.offset_ms === ATMOS_MS);
+  check('two sessions in all, both ended', t.net.asks.length === 2 && t.net.stops.length === 2, [t.net.asks.length, t.net.stops]);
+  check('nothing reported from the check: every place before the end came from the listener\'s stream',
+    t.positions.every((p) => !p || p.offset_ms <= ATMOS_MS - 30000 || p.offset_ms === ATMOS_MS), t.positions.filter(Boolean).slice(-4));
+  t.engine.close();
+}
+
+current = 'a hiccup in the check itself goes up the ladder and plays on';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 3600000) });
+  await t.clock.advance(3000);
+  const held = t.engine.state().position.offset_ms;
+  kill(t);
+  t.net.checkFail = 1;
+  await t.clock.advance(20000);
+  const s = t.engine.state();
+  check('no end, no error', t.log.ended.length === 0 && t.log.error.length === 0, [t.log.ended.length, t.log.error]);
+  check('reconnected at the held place and playing', s.playing && s.position.offset_ms > held && s.position.offset_ms < held + 25000, s.position);
+  check('one refresh on the way (the ladder)', t.net.fetches.filter((f) => f.endsWith('?refresh=1')).length === 1);
+  t.engine.close();
+  // A check that never answers counts as a dropped stream after CHECK_MS.
+  const u = setup({ net: { noLocal: true } });
+  await openPlaying(u, ATMOS.key, { at: at('801', 3600000) });
+  await u.clock.advance(3000);
+  kill(u);
+  u.net.askDelay = 60000;
+  await u.clock.advance(1000);
+  u.net.askDelay = 0;
+  await u.clock.advance(E.CHECK_MS + 5000);
+  check('a hung check: no end, the ladder reconnects', u.log.ended.length === 0 && u.engine.state().playing, reasons(u).slice(-4));
+  u.engine.close();
+}
+
+current = 'a check that ends too soon, or too little, is no confirmation';
+{
+  // It plays 3.5 s of the 5 s before the place and ends cleanly: short of the place.
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 3600000) });
+  await t.clock.advance(3000);
+  kill(t);
+  t.net.checkCut = [3.5];
+  await t.clock.advance(25000);
+  check('ends 1.5 s before the place: no end, plays on', t.log.ended.length === 0 && t.engine.state().playing &&
+    t.log.error.length === 0, reasons(t).filter((r) => r !== 'time').slice(-5));
+  t.engine.close();
+  // Near the start: the check plays from 0 and ends at the place, 2 s in: under 3 s of audio.
+  const u = setup({ net: { noLocal: true } });
+  await openPlaying(u, ATMOS.key);
+  await u.clock.advance(1750);
+  kill(u);
+  u.net.checkCut = [2];
+  await u.clock.advance(25000);
+  check('2 s of audio ending at the place: no end, plays on', u.log.ended.length === 0 && u.engine.state().playing &&
+    u.log.error.length === 0, reasons(u).filter((r) => r !== 'time').slice(-5));
+  u.engine.close();
+}
+
+current = 'a check that never answers is a dropped stream after CHECK_MS';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 3600000) });
+  await t.clock.advance(3000);
+  const held = t.engine.state().position.offset_ms;
+  kill(t);
+  t.net.checkHang = 1;
+  await t.clock.advance(E.CHECK_MS - 1000);
+  check('still checking just before CHECK_MS, quiet, place held', t.engine.state().loading && t.main.paused &&
+    Math.abs(t.engine.state().position.offset_ms - held) <= 500);
+  await t.clock.advance(8000);
+  const mains = t.net.loads.filter((l) => !l.probe && l.part === 'tc:801');
+  check('then the ladder reconnects at the place and it plays on', mains.length === 2 && !t.main.paused &&
+    t.log.ended.length === 0 && t.engine.state().position.offset_ms > held + 3000, [mains.length, t.engine.state().position]);
+  check('the hung check\'s session was ended', t.net.asks.length - t.net.stops.length === 1);
+  t.engine.close();
+}
+
+current = 'pause and play during a check, and a book change during one';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 3600000) });
+  await t.clock.advance(3000);
+  kill(t);
+  await t.clock.advance(1000);
+  t.engine.pause();
+  await t.engine.play();
+  check('play during the check starts nothing on the listener\'s element', t.main.paused && !t.main.src);
+  await t.clock.advance(15000);
+  check('the check still decides, and playback goes on from the place', !t.main.paused && t.engine.state().playing &&
+    t.log.ended.length === 0, reasons(t).filter((r) => r !== 'time').slice(-5));
+  kill(t);
+  await t.clock.advance(1000);
+  const check1 = endChecks(t)[endChecks(t).length - 1];
+  const sid1 = check1 && new URL(check1.src).searchParams.get('session');
+  await openPlaying(t, MULTI.key);
+  check('a book change ends the check at once', !!check1 && !check1.src && t.net.stops.includes(sid1), [check1 && check1.src, sid1]);
+  await t.clock.advance(15000);
+  check('a book change ends the check (its element emptied, every session ended)', !!check1 && !check1.src &&
+    t.net.asks.length === t.net.stops.length, [t.net.asks.length, t.net.stops.length]);
+  check('and the new book plays undisturbed', partOf(t.main) === MULTI.tracks[0].part_path && !t.main.paused && t.log.ended.length === 0);
+  t.engine.close();
+}
+
+current = 'a seek while a check runs ends the check';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 3600000) });
+  await t.clock.advance(3000);
+  kill(t);
+  await t.clock.advance(1000);
+  const el = endChecks(t)[0];
+  const sid = el && new URL(el.src).searchParams.get('session');
+  t.engine.seek(3700000);           // the check is dropped for the new place
+  await t.clock.advance(10);
+  check('the check was let go at once on the seek', !!el && !el.src && t.net.stops.includes(sid), [el && el.src, t.net.stops]);
+  await t.clock.advance(2000);
+  check('the new place plays', !t.main.paused && t.engine.state().position.offset_ms > 3700000);
+  t.engine.close();
+}
+
+current = 'the check is muted, and close ends it at once';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 3600000) });
+  await t.clock.advance(3000);
+  kill(t);
+  await t.clock.advance(2000);
+  const el = endChecks(t)[0];
+  check('one check element, muted', endChecks(t).length === 1 && el.muted === true);
+  const sid = new URL(el.src).searchParams.get('session');
+  t.engine.close();
+  check('close empties it and ends its session at once', !el.src && t.net.stops.includes(sid) && t.live.size === 0, [el.src, t.live.size]);
+}
+
+current = 'a place checked once is checked again after real playback';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 3600000) });
+  await t.clock.advance(3000);
+  const place = t.engine.state().position.offset_ms;
+  kill(t);
+  await t.clock.advance(15000);
+  check('first kill: checked, playing on', endChecks(t).length === 1 && t.engine.state().playing);
+  // Back before the place; Plex kills the stream at the very same place again.
+  t.engine.seek(place - 8000);
+  await t.clock.advance(1000);
+  t.net.cutAt.set(srcParams(t).get('session'), 7.75);
+  await t.clock.advance(20000);
+  check('checked again (real playback came between), still playing', endChecks(t).length === 2 && t.engine.state().playing &&
+    t.log.ended.length === 0, [endChecks(t).length, reasons(t).filter((r) => r !== 'time').slice(-5)]);
+  t.engine.close();
+}
+
+current = 'another place is checked even right after a check, with no playback between';
+{
+  // The part's real audio ends 30 s before Plex's length. A kill 10 min
+  // before that is checked (a hiccup); the listener at once jumps to 0.5 s
+  // before the real end, which then ends: a new place, checked, confirmed.
+  const R = ATMOS_MS - 30000;
+  const t = setup({ net: { noLocal: true, realDelta: new Map([['801', -30000]]) } });
+  await openPlaying(t, ATMOS.key, { at: at('801', R - 600000) });
+  await t.clock.advance(3000);
+  let jumped = false;
+  t.engine.on('change', (d) => {
+    if (!jumped && d.reason === 'connection') { jumped = true; t.engine.seek(R - 500); }
+  });
+  kill(t);
+  await t.clock.advance(40000);
+  check('the jump happened after the first check', jumped && endChecks(t).length === 2, endChecks(t).length);
+  check('the book ended (confirmed at the real end), no error', t.log.ended.length === 1 && t.log.error.length === 0,
+    [t.log.ended.length, t.log.error]);
   t.engine.close();
 }
 
@@ -1889,9 +2159,9 @@ current = 'an early end within 5 s of the part\'s end is its end; further out it
   const u = setup({ net: { noLocal: true } });
   await openPlaying(u, ATMOS.key, { at: at('801', ATMOS_MS - 20000) });
   u.net.cutAt.set(srcParams(u).get('session'), 14);
-  await u.clock.advance(15000);
-  check('6 s short: a second session from where it was cut', u.net.asks.length === 2 &&
-    Math.abs(Number(srcParams(u).get('offset')) * 1000 - (ATMOS_MS - 6000)) <= 250, srcParams(u).get('offset'));
+  await u.clock.advance(22000);
+  check('6 s short: checked, then a session from where it was cut', u.net.asks.length === 3 &&
+    Math.abs(Number(srcParams(u).get('offset')) * 1000 - (ATMOS_MS - 6000)) <= 250, [u.net.asks.length, srcParams(u).get('offset')]);
   await u.clock.advance(10000);
   check('and it plays out to the end', u.log.ended.length === 1 && u.log.error.length === 0);
   u.engine.close();

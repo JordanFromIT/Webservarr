@@ -131,6 +131,10 @@ export const SKIP_MAX_S = 60;
 export const SEEK_SETTLE_MS = 400;     // a seek on a transcoded part restarts once it settles
 export const ASK_MS = 10000;           // asking for a transcode session, at most
 export const END_SLACK_MS = 5000;      // a transcoded stream ending sooner than this before its end was cut off
+export const CHECK_LEAD_MS = 5000;     // an early end is checked by playing from this far before it
+export const CHECK_PLAYED_MS = 3000;   // the check must play this much real audio to confirm an end
+export const CHECK_PAST_MS = 2000;     // playing this far past the early end shows it was a hiccup
+export const CHECK_MS = 20000;         // the whole check, at most
 export const UNREACHABLE = "Can't reach the media server";
 export const RESUME_LOST = "Couldn't find your saved place in this book";
 export const FORMAT_UNSUPPORTED = "This book's audio format can't play in this browser";
@@ -366,11 +370,13 @@ export function createEngine(env) {
   let tc = null;
   let restartTimer = null;
   let asking = false;         // the part being loaded waits for its session
-  // Where a transcoded stream last ended early, cleanly ({ index, offset }):
-  // Plex dropping the session, or the part's real audio being shorter than
-  // Plex's length for it. A stream there that then gives nothing tells them
-  // apart.
-  let earlyEnd = null;
+  // An early clean end of a transcoded stream is either Plex dropping the
+  // session or the part's real audio being shorter than Plex's length for it.
+  // endCheck: the check in progress (a muted element of its own, playing up
+  // to the place); checkedAt ({ index, offset }): the place last checked,
+  // checked once until real playback moves on.
+  let endCheck = null;
+  let checkedAt = null;
   const asks = new Set();
   if (typeof env.onPageHide === 'function') {
     // Leaving the page: nothing will read the stream again.
@@ -876,7 +882,7 @@ export function createEngine(env) {
       // and this connection works, so the failure ladder starts afresh.
       hold = null;
       partSuspect = null;
-      earlyEnd = null;
+      checkedAt = null;
       tried.clear();
       refreshed = false;
     }
@@ -908,31 +914,134 @@ export function createEngine(env) {
     if (isTranscoded(i)) {
       const off = cur.base + Math.round(Number(audio.currentTime) * 1000);
       if (!(off >= durationOf(book.tracks[i]) - END_SLACK_MS)) {
-        // Ended early, cleanly. Plex dropping the session (stopped, or idle
-        // too long) looks like this: a dropped stream, not the end. But a
-        // stream that gives nothing at the very place the last one ended
-        // says the part's real audio ends there.
-        if (off < cur.base + PLAYED_MS && endedHere(i, cur.base)) {
-          partEnded(i, cur.side);
+        // Ended early, cleanly: Plex dropping the session (stopped, or idle
+        // too long), or the real end of a part Plex thinks is longer. Only a
+        // check can tell, once per place; otherwise it is a dropped stream.
+        const place = playhead && playhead.index === i ? playhead.offset : off;
+        if (checkedAt && checkedAt.index === i && Math.abs(checkedAt.offset - place) <= PLAYED_MS) {
+          fail('network');
           return;
         }
-        earlyEnd = { index: i, offset: playhead ? playhead.offset : off };
-        fail('network');
+        checkedAt = { index: i, offset: place };
+        checkEnd(i, place, cur.side);
         return;
       }
     }
     partEnded(i, cur.side);
   });
 
-  function endedHere(index, offset) {
-    return !!(earlyEnd && earlyEnd.index === index && Math.abs(earlyEnd.offset - offset) <= PLAYED_MS);
+  /* Is an early clean end at `place` the part's real end? A muted element of
+     its own, on a new transcode session, plays from CHECK_LEAD_MS before it.
+     It confirms only by playing CHECK_PLAYED_MS of real audio and then
+     ending cleanly within PLAYED_MS of the place; playing CHECK_PAST_MS past
+     it shows a hiccup (the listener's stream starts again at the place);
+     anything else (an error, no audio, no answer in CHECK_MS) is a dropped
+     stream, up the connection ladder. The listener's element stays quiet
+     meanwhile and never plays anything again; nothing is saved from the
+     check, and its session is ended after. */
+  function checkEnd(index, place, side) {
+    gen += 1;
+    const g = gen;
+    pending = true;
+    seekApplied = false;
+    metaLoaded = false;
+    disarm();
+    release();
+    dropSession();
+    setLoading(true);
+    const start = Math.max(0, place - CHECK_LEAD_MS);
+    const check = { el: null, session: null, timer: null, done: false };
+    endCheck = check;
+    function finish() {
+      if (check.done) return;
+      check.done = true;
+      clearT(check.timer);
+      if (endCheck === check) endCheck = null;
+      const el = check.el;
+      if (el) {
+        el.ontimeupdate = null;
+        el.onended = null;
+        el.onerror = null;
+        try {
+          el.pause();
+          el.removeAttribute('src');
+          el.load();
+        } catch (e) { /* nothing to release */ }
+      }
+      if (check.session) sendStop(check.session);
+    }
+    check.finish = finish;
+    function dropped() {
+      finish();
+      if (g !== gen || !book) return;
+      fail('network');
+    }
+    check.timer = setT(dropped, CHECK_MS);
+    askSession(index).then(function (got) {
+      if (check.done || g !== gen || !book) {
+        if (got.session) sendStop(got.session);
+        return;
+      }
+      if (!got.session) {
+        dropped();
+        return;
+      }
+      check.session = got.session;
+      probeCount += 1;
+      const base = transcodeUrl(side, got, start);
+      if (!base) {
+        dropped();
+        return;
+      }
+      const el = env.createAudio();
+      check.el = el;
+      el.muted = true;
+      el.preload = 'auto';
+      const reached = function () {
+        const t = Number(el.currentTime);
+        return start + (isFinite(t) && t > 0 ? Math.round(t * 1000) : 0);
+      };
+      el.ontimeupdate = function () {
+        if (check.done || reached() < place + CHECK_PAST_MS) return;
+        // Plex has audio past the place: the listener's stream only dropped.
+        finish();
+        if (g !== gen || !book) return;
+        load(index, place, side);
+        changed('connection');
+      };
+      el.onended = function () {
+        const at = reached();
+        const confirmed = at - start >= CHECK_PLAYED_MS && Math.abs(at - place) <= PLAYED_MS;
+        if (!confirmed) {
+          dropped();
+          return;
+        }
+        finish();
+        if (g !== gen || !book) return;
+        partEnded(index, side);
+      };
+      el.onerror = dropped;
+      el.src = base + '&wsprobe=' + probeCount.toString(36) + Date.now().toString(36) +
+        Math.random().toString(36).slice(2, 8);
+      let p = null;
+      try {
+        p = el.play();
+      } catch (e) {
+        p = null;
+      }
+      if (p && typeof p.catch === 'function') p.catch(function () { if (!check.done) dropped(); });
+    });
+  }
+
+  function cancelCheck() {
+    if (endCheck) endCheck.finish();
   }
 
   /* The part is over: the next one starts at 0, or the book has ended. */
   function partEnded(i, side) {
     hold = null;
     partSuspect = null;
-    earlyEnd = null;
+    checkedAt = null;
     if (i + 1 < book.tracks.length) {
       load(i + 1, 0, side);
       changed('part');
@@ -987,20 +1096,6 @@ export function createEngine(env) {
     const suspect = partSuspect;
     partSuspect = null;
     setLoading(true);
-
-    if (kind === 'media' && isTranscoded(at.index) && endedHere(at.index, cur.base) &&
-        playhead.offset < cur.base + PLAYED_MS) {
-      // The last stream ended cleanly here, and one from here will not even
-      // start (Plex answers a place past a part's real audio with nothing it
-      // can play). If Plex converts the part from its start on this
-      // connection, the part's audio ends here; if not, this is the server.
-      const ok = await probe(side, at.index);
-      if (g !== gen) return;
-      if (ok) {
-        partEnded(at.index, side);
-        return;
-      }
-    }
 
     if (kind === 'media') {
       if (suspect && suspect.index === at.index && suspect.side === side) {
@@ -1271,8 +1366,9 @@ export function createEngine(env) {
     metaLoaded = false;
     partSuspect = null;
     asking = false;
-    earlyEnd = null;
+    checkedAt = null;
     cancelRestart();
+    cancelCheck();
     disarm();
     Array.from(probes.values()).forEach(function (finish) { finish(false); });
     Array.from(asks).forEach(function (finish) { finish({ status: 0 }); });
@@ -1431,7 +1527,7 @@ export function createEngine(env) {
       changed('play');
       return Promise.resolve();
     }
-    if (restartTimer !== null || asking) {
+    if (restartTimer !== null || asking || endCheck) {
       // A transcoded part's new stream is on its way (the element still
       // holds the old one, or none): it starts playing when it comes.
       sessionState();
@@ -1491,6 +1587,7 @@ export function createEngine(env) {
       seekApplied = false;
       metaLoaded = false;
       asking = false;
+      cancelCheck();
       disarm();
       release();
       setLoading(true);

@@ -1188,6 +1188,51 @@ class Transcode(BridgeBase):
                 with self.assertRaises(pp.NotInLibrary):
                     self.run_async(pp.assert_in_library("100:1"))
 
+    def test_metadata_that_is_not_a_list_of_objects_is_player_unavailable(self):
+        all_path = f"/library/sections/{SECTION}/all"
+        for meta in ({"k": 1}, [None], ["x"], "abc", 5):
+            body = {"MediaContainer": {"Metadata": meta, "librarySectionID": int(SECTION)}}
+            reads = (
+                ("list_books", lambda: pp.list_books(), all_path),
+                ("book_detail album", lambda: pp.book_detail("100:1"), "/library/metadata/100"),
+                ("book_detail children", lambda: pp.book_detail("100:1"), "/library/metadata/100/children"),
+                ("assert_in_library track", lambda: pp.assert_in_library("100:1", "101"), "/library/metadata/101"),
+            )
+            for name, run, path in reads:
+                with self.subTest(read=name, metadata=meta):
+                    self.plex.raw = {path: body}
+                    with self.assertRaises(pp.PlayerUnavailable):
+                        self.run_async(run())
+        # Sections that are not a list of objects: the library check cannot be made.
+        self.plex.raw = {"/library/sections": {"MediaContainer": {"Directory": {"key": SECTION}}}}
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.library_access(listener(), session_id=SID))
+
+    def test_plex_position_with_listener_state_of_an_odd_shape_is_none(self):
+        for meta in ({"k": 1}, [None], ["x"], "abc"):
+            with self.subTest(metadata=meta):
+                self.plex.raw = {}
+                # The admin view of the book is fine; the listener's own read is odd.
+                orig = self.plex.handle
+
+                def handle(request, orig=orig, meta=meta):
+                    if request.url.path == "/library/metadata/200/children" and \
+                            request.headers.get("X-Plex-Token") == SERVER_TOKEN:
+                        self.plex.calls.append(request)
+                        return httpx.Response(200, json={"MediaContainer": {"Metadata": meta}})
+                    return orig(request)
+                self.plex.handle = handle
+                try:
+                    self.assertIsNone(self.run_async(pp.plex_position(listener(), "200:1", session_id=SID)))
+                finally:
+                    self.plex.handle = orig
+
+    def test_a_track_whose_media_is_odd_still_reads(self):
+        odd = dict(TRACKS["500"][0], Media={"Part": []})
+        with mock.patch.dict(TRACKS, {"500": [odd]}):
+            d = self.run_async(pp.book_detail("500:1"))
+        self.assertEqual((d["tracks"][0]["part_path"], d["tracks"][0]["codec"]), ("", ""))
+
     def test_stop_never_raises(self):
         sid = "ws" + "1" * 32
         self.plex.stop_status = 404       # already over

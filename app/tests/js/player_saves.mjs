@@ -981,6 +981,11 @@ class MiniAudio {
     if (u.pathname === TRANSCODE_PATH) {
       // A progressive stream from the offset on: the element knows no length.
       this._end = (trackDurations.get((u.searchParams.get('path') || '').split('/').pop()) - Number(u.searchParams.get('offset')) * 1000) / 1000;
+      // net.cutNext: Plex ends the listener's next streams cleanly this many
+      // seconds in, one each (a check, on a wsprobe URL, is never cut).
+      if (this.net.cutNext && this.net.cutNext.length && !u.searchParams.has('wsprobe')) {
+        this._end = Math.min(this._end, this.net.cutNext.shift());
+      }
       d = Infinity;
     }
     this.error = null;
@@ -1159,6 +1164,27 @@ current = 'positions in transcode mode are the place in the track, as in direct 
   const last = t.server.fetches().pop();
   check('the final save is the place in the track', last.body.event === 'leave' && last.body.offset_ms > 9010000 &&
     last.body.offset_ms < 9015000, last.body);
+}
+
+current = 'a Plex kill mid-book is checked, never saved as the end of the book';
+{
+  const t = withEngine({ book: LOUD, places: {
+    web: { track: '801', offset_ms: 3600000, duration_ms: 72000000, updated_at: iso(-5), device: 'Chrome on Windows', source: 'web' },
+    plex: null
+  } });
+  t.net.cutNext = [8, 0];                  // a kill 8 s in, then one empty stream (a hiccup)
+  const opened = t.engine.open('800:1');
+  await t.clock.advance(1000);
+  await opened;
+  await t.clock.advance(40000);
+  const f = t.server.fetches();
+  check('no end check-in, ever', f.length > 0 && f.every((c) => c.body.event !== 'end'), f.map((c) => [c.body.event, c.body.offset_ms]));
+  check('every save is the place in the book, none past where it has played', f.every((c) => c.body.offset_ms >= 3600000 &&
+    c.body.offset_ms < 3650000), f.map((c) => c.body.offset_ms));
+  const copy = localOf(t, '800:1');
+  check('the local copy holds the place, not the end', copy && copy.offset_ms > 3608000 && copy.offset_ms < 3650000, copy);
+  check('still playing', t.engine.state().playing && t.log.error.length === 0);
+  t.engine.close();
 }
 
 current = 'a saved place in a part the book no longer has: the next newest, else the start with a notice';

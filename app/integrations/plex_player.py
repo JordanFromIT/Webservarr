@@ -180,6 +180,27 @@ async def _pms_get(client: httpx.AsyncClient, admin: dict, token: str, path: str
     return container
 
 
+def _items(container, key: str = "Metadata") -> list:
+    """A container's list of objects under `key` ([] when there is none).
+    Any other shape (an object, a string, a list holding something that is
+    not an object) is Plex misbehaving: PlayerUnavailable (503), not a crash."""
+    value = container.get(key) if isinstance(container, dict) else None
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(v, dict) for v in value):
+        logger.warning("Plex sent %s of an unexpected shape", key)
+        raise PlayerUnavailable("Plex is unavailable")
+    return value
+
+
+def _first(container, key: str) -> dict:
+    """The first object of a container's list under `key`, or {} (lenient:
+    the Media and Part of a track that is otherwise fine)."""
+    value = container.get(key) if isinstance(container, dict) else None
+    first = value[0] if isinstance(value, list) and value else None
+    return first if isinstance(first, dict) else {}
+
+
 def _pms_client() -> httpx.AsyncClient:
     # The admin address is usually the LAN server with a self-signed
     # certificate, as for every other Plex call in the app.
@@ -358,7 +379,7 @@ async def library_access(session: dict, session_id: Optional[str] = None, force:
     if container is None:
         logger.warning("Plex has no /library/sections for the listener's token")
         raise PlayerUnavailable("Plex is unavailable")
-    readable = {str(d.get("key")) for d in container.get("Directory") or [] if isinstance(d, dict)}
+    readable = {str(d.get("key")) for d in _items(container, "Directory")}
     if admin["section"] not in readable:
         logger.info("The listener's share does not include the audiobook library")
         raise NoLibraryAccess("This account cannot read the audiobook library")
@@ -402,16 +423,14 @@ def _int(value) -> int:
 
 
 def _part(t: dict) -> dict:
-    media = t.get("Media") or [{}]
-    parts = (media[0] or {}).get("Part") or [{}]
-    return parts[0] or {}
+    return _first(_first(t, "Media"), "Part")
 
 
 def _format(t: dict) -> dict:
     """The track's container, codec and codec profile as Plex reports them
     (lower case, "" when Plex gives none): the player asks the browser with
     them whether it can decode the file itself."""
-    media = (t.get("Media") or [{}])[0] or {}
+    media = _first(t, "Media")
 
     def text(value) -> str:
         return str(value or "").strip().lower()[:64]
@@ -594,10 +613,10 @@ async def list_books() -> list:
         raise PlayerUnavailable("The audiobook library was not found")
 
     by_album = {}
-    for t in tracks.get("Metadata") or []:
+    for t in _items(tracks):
         by_album.setdefault(str(t.get("parentRatingKey")), []).append(t)
     books = []
-    for album in albums.get("Metadata") or []:
+    for album in _items(albums):
         discs = _discs(by_album.get(str(album.get("ratingKey")), []))
         for disc, ts in discs.items():
             books.append((album.get("titleSort") or album.get("title") or "", disc,
@@ -609,7 +628,7 @@ async def list_books() -> list:
 async def _album(client: httpx.AsyncClient, admin: dict, album_key: str) -> dict:
     """The album's metadata when it is an album in the audiobook library."""
     container = await _pms_get(client, admin, admin["token"], f"/library/metadata/{album_key}")
-    items = (container or {}).get("Metadata") or []
+    items = _items(container)
     album = items[0] if items else {}
     section = str(album.get("librarySectionID") or (container or {}).get("librarySectionID") or "")
     if album.get("type") != "album" or section != admin["section"]:
@@ -622,7 +641,7 @@ async def _book(client: httpx.AsyncClient, admin: dict, key: str) -> tuple:
     album_key, disc = parse_key(key)
     album = await _album(client, admin, album_key)
     children = await _pms_get(client, admin, admin["token"], f"/library/metadata/{album_key}/children")
-    discs = _discs((children or {}).get("Metadata") or [])
+    discs = _discs(_items(children))
     if disc not in discs:
         raise NotInLibrary("Not in the audiobook library")
     return album, disc, discs[disc], len(discs)
@@ -649,6 +668,8 @@ def _file_marks(track: dict, duration: int) -> list:
     file has none."""
     marks = {}
     for c in track.get("Chapter") or []:
+        if not isinstance(c, dict):
+            continue
         start = _int(c.get("startTimeOffset"))
         if start < duration and start not in marks:
             marks[start] = c.get("tag")
@@ -669,8 +690,8 @@ async def _embedded_chapters(client: httpx.AsyncClient, admin: dict, tracks: lis
         batch = ",".join(keys[i:i + CHAPTER_BATCH])
         container = await _pms_get(client, admin, admin["token"], f"/library/metadata/{batch}",
                                    {"includeChapters": 1})
-        for item in (container or {}).get("Metadata") or []:
-            if item.get("Chapter"):
+        for item in _items(container):
+            if isinstance(item.get("Chapter"), list) and item["Chapter"]:
                 found[str(item.get("ratingKey"))] = item["Chapter"]
     return found
 
@@ -741,7 +762,7 @@ async def assert_in_library(key: str, track_key: Optional[str] = None) -> None:
         if track_key is None:
             return
         container = await _pms_get(client, admin, admin["token"], f"/library/metadata/{track_key}")
-    items = (container or {}).get("Metadata") or []
+    items = _items(container)
     t = items[0] if items else {}
     if (t.get("type") != "track" or str(t.get("parentRatingKey")) != album_key
             or (_int(t.get("parentIndex")) or 1) != disc):
@@ -821,7 +842,13 @@ async def plex_position(session: dict, key: str, session_id: Optional[str] = Non
         except TokenRejected:
             await forget_access(session, session_id)
             raise
-    state = {str(t.get("ratingKey")): t for t in (mine or {}).get("Metadata") or []}
+    try:
+        rows = _items(mine)
+    except PlayerUnavailable:
+        # The listener's own state in a shape we can't read: no Plex place
+        # (the book still resumes from WebServarr's copy and the local one).
+        return None
+    state = {str(t.get("ratingKey")): t for t in rows}
 
     durations = [_track_duration(t) for t in tracks]
     best = None   # (lastViewedAt, in progress, track position, offset)
