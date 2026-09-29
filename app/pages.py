@@ -213,9 +213,14 @@ def public_user(session: Optional[dict]) -> Optional[dict]:
 
     has_email says whether the account can receive notifications and push
     (see utils.identity_email); the address itself never goes into the page.
+    identity is the account identity that owns this user's rows (tickets.
+    account_identity: "plex:<id>", "local:<uid>", "oidc:<sub>", or ""): the
+    audiobook player keys its local copy of the listener's place by it, so a
+    shared browser never resumes one person at another's place.
     """
     if not session:
         return None
+    from app.routers.tickets import account_identity
     return {
         "username": session.get("username", ""),
         "display_name": session.get("display_name", ""),
@@ -223,6 +228,7 @@ def public_user(session: Optional[dict]) -> Optional[dict]:
         "avatar_url": _safe_url(session.get("avatar_url", "")),
         "auth_method": session.get("auth_method", ""),
         "has_email": bool(identity_email(session.get("email"))),
+        "identity": account_identity(session),
     }
 
 

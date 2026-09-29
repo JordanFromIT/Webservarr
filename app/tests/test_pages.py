@@ -322,6 +322,21 @@ class ShellRendering(unittest.TestCase):
         user = pages.public_user({"email": "sam@example.test"})
         self.assertNotIn("sam@example.test", json.dumps(user))
 
+    def test_public_user_carries_the_account_identity(self):
+        # The player keys its local copy of a listener's place by it: the
+        # account identity, never the username (which can collide).
+        self.assertEqual(pages.public_user({"auth_method": "plex", "user_id": "4242", "plex_account_id": "4242",
+                                            "username": "sam"})["identity"], "plex:4242")
+        self.assertEqual(pages.public_user({"auth_method": "oidc", "user_id": "sub-1", "plex_account_id": "77",
+                                            "plex_token": "t"})["identity"], "plex:77")
+        self.assertEqual(pages.public_user({"auth_method": "simple", "account_uid": "u-9",
+                                            "username": "sam"})["identity"], "local:u-9")
+        self.assertEqual(pages.public_user({"auth_method": "simple", "username": "sam"})["identity"], "")
+        # Two accounts with the same username are two identities.
+        a = pages.public_user({"auth_method": "simple", "account_uid": "u-1", "username": "kid"})
+        b = pages.public_user({"auth_method": "plex", "user_id": "5", "plex_account_id": "5", "username": "kid"})
+        self.assertNotEqual(a["identity"], b["identity"])
+
     def test_app_name_is_escaped_in_shell(self):
         out = render(b=branding(**{"branding.app_name": "A & B <x>"}))
         self.assertIn("A &amp; B &lt;x&gt;", out)
