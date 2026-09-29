@@ -944,7 +944,8 @@ const BOOK = {
 };
 const durations = new Map(BOOK.tracks.map((t) => [t.part_path, t.duration_ms]));
 class MiniAudio {
-  constructor(clock) {
+  constructor(clock, net) {
+    this.net = net || {};                         // net.failLoads: every load fails (the stream is down)
     this.clock = clock; this.ls = new Map(); this._src = ''; this._t = 0; this.gen = 0;
     this.paused = true; this.ended = false; this.error = null; this.readyState = 0; this.seeking = false;
     this.duration = NaN; this.playbackRate = 1; this.defaultPlaybackRate = 1; this.preload = 'auto'; this.ticking = false;
@@ -965,8 +966,10 @@ class MiniAudio {
     this.paused = true; this.ended = false; this.readyState = 0; this._t = 0; this.ticking = false; this.duration = NaN;
     if (!this._src) return;
     const d = durations.get(new URL(this._src).pathname);
+    this.error = null;
     this.clock.setTimeout(() => {
       if (g !== this.gen) return;
+      if (this.net.failLoads) { this.error = { code: 4 }; this.fire('error'); return; }
       this.duration = d / 1000; this.readyState = 4;
       this.fire('loadedmetadata');
       if (!this.paused) this.begin();
@@ -996,9 +999,11 @@ function withEngine(o = {}) {
   const places = o.places || { web: null, plex: null };
   const got = [];
   const t = makeSaver({ clock, server, storage });
+  const net = { failLoads: false };
+  const audios = [];
   const engine = E.createEngine({
     host: { appendChild() {} },
-    createAudio: () => new MiniAudio(clock),
+    createAudio: () => { const a = new MiniAudio(clock, net); audios.push(a); return a; },
     fetch: async (url) => {
       got.push(url);
       const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(JSON.stringify(body)) });
@@ -1023,7 +1028,7 @@ function withEngine(o = {}) {
   });
   engine.on('warning', (w) => { log.warning.push(w); log.order.push(['warning', w.kind, w.active]); });
   engine.on('error', (e) => log.error.push(e));
-  return Object.assign(t, { engine, got, log, places });
+  return Object.assign(t, { engine, got, log, places, net, audios });
 }
 const iso = (s) => new Date(T0 + s * 1000).toISOString();
 const setLocal = (storage, place) => storage.map.set('ws-player:place:' + IDENTITY + ':500:1', JSON.stringify(place));
@@ -1685,6 +1690,79 @@ current = 'T6S8: an error on an untouched open is not a reach: nothing sent';
   await w.clock.advance(1100);
   check('played within 2 minutes: the error saves its place as a pause', w.server.fetches().pop().body.event === 'pause');
   w.saver.stop();
+}
+
+// ---- 14. Fix round 3 ----
+
+current = 'T6S9: after an error that could not be saved, the first save once playback restarts is not a pause';
+{
+  const evs = (t, n) => t.server.fetches().slice(n).map((c) => c.body.event);
+  // Saver level, as the engine reports it: an error, then Retry ('retry' while
+  // playing), then the element playing ('play' while already playing).
+  for (const how of ['untouched open', 'paused 5 min']) {
+    const t = makeSaver();
+    const st = (playing, offset) => ({ book: '500:1', playing, position: { track: '502', offset_ms: offset, duration_ms: 900000 } });
+    t.saver.start('500:1', { held: { track: '502', offset_ms: 300000 } });
+    t.saver.note({ reason: 'open', state: st(false, 300000) });
+    if (how === 'paused 5 min') {
+      t.saver.note({ reason: 'play', state: st(true, 300000) });
+      await t.clock.advance(4000);
+      t.saver.note({ reason: 'pause', state: st(false, 304000) });
+      await t.clock.advance(300000);
+    }
+    const n = t.server.fetches().length;
+    t.saver.note({ reason: 'error', state: st(false, how === 'paused 5 min' ? 304000 : 300000) });
+    await t.clock.advance(30000);
+    check(how + ': the error sent nothing', t.server.fetches().length === n, evs(t, n));
+    const base = how === 'paused 5 min' ? 304000 : 300000;
+    t.saver.note({ reason: 'retry', state: st(true, base) });
+    t.saver.note({ reason: 'play', state: st(true, base) });
+    for (let k = 1; k <= 48; k++) { await t.clock.advance(250); t.saver.note({ reason: 'time', state: st(true, base + k * 250) }); }
+    const after = evs(t, n);
+    check(how + ': the first save after Play is play, never pause', after.length >= 2 && after[0] === 'play' && !after.includes('pause'), after);
+    t.saver.stop();
+  }
+  // Engine level: autoplay off, the stream down; it comes back and the listener taps Play.
+  const u = withEngine({ places: { web: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-3600), device: 'Chrome on Windows' }, plex: null } });
+  u.net.failLoads = true;
+  const op = u.engine.open('500:1', { autoplay: false });
+  await u.clock.advance(20000); await op;
+  check('engine, untouched open: the stream failed', u.engine.state().error && u.engine.state().error.code === 'unreachable', u.engine.state().error);
+  check('engine, untouched open: nothing sent', u.server.calls.length === 0, u.server.calls.map((c) => c.body.event));
+  u.net.failLoads = false;
+  await u.engine.play();
+  await u.clock.advance(12000);
+  check('engine, untouched open: Play saves play, then checkins', evs(u, 0)[0] === 'play' && !evs(u, 0).includes('pause'), evs(u, 0));
+  u.engine.close();
+  // Engine level: played, paused 5 minutes, the element errors while paused, then Play.
+  const v = withEngine({ places: { web: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-3600) }, plex: null } });
+  const op2 = v.engine.open('500:1');
+  await v.clock.advance(5000); await op2;
+  v.engine.pause();
+  await v.clock.advance(300000);
+  const n = v.server.fetches().length;
+  v.net.failLoads = true;
+  const el = v.audios[0];
+  el.error = { code: 2 }; el.fire('error');
+  await v.clock.advance(30000);
+  check('engine, paused 5 min: the error ended unreachable', v.engine.state().error && v.engine.state().error.code === 'unreachable', v.engine.state().error);
+  check('engine, paused 5 min: nothing sent for the stale place', v.server.fetches().length === n, evs(v, n));
+  v.net.failLoads = false;
+  await v.engine.play();
+  await v.clock.advance(12000);
+  check('engine, paused 5 min: Play saves play, never pause', evs(v, n)[0] === 'play' && !evs(v, n).includes('pause'), evs(v, n));
+  v.engine.close();
+  // The T5E1 hold, reached by playback, is still saved as a pause.
+  const w = withEngine({ places: { web: null, plex: null } });
+  const op3 = w.engine.open('500:1');
+  await w.clock.advance(5000); await op3;
+  const m = w.server.fetches().length;
+  w.net.failLoads = true;
+  const el2 = w.audios[0];
+  el2.error = { code: 2 }; el2.fire('error');
+  await w.clock.advance(30000);
+  check('the hold reached by playback: saved as a pause', evs(w, m).includes('pause'), evs(w, m));
+  w.engine.close();
 }
 
 current = 'the saver never lets a failing listener or storage break the engine';

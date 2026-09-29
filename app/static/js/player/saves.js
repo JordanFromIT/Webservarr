@@ -538,6 +538,9 @@ export function createSaver(o) {
     if (wasPlaying && r.lastNoteAt !== null && t - r.lastNoteAt > FREEZE_MS) wakeRun(r);
     r.playing = !!st.playing;
     r.lastNoteAt = r.playing ? t : null;
+    // Playback started again (Play, or Retry after an error): a pause still
+    // waiting to go (an error's, never sent) is over. The next save is a play.
+    if (r.playing && !wasPlaying && r.event === 'pause') r.event = 'play';
     const place = placeOf(st.position);
     // The engine reports a start more than once (asked, then playing): one save.
     const ev = change.reason === 'play' && wasPlaying ? null : EVENTS[change.reason];
