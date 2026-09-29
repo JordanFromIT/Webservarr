@@ -1599,5 +1599,91 @@ class WholeSite(unittest.TestCase):
             self.assertNotIn(gone, shell, gone)
 
 
+class PlayerView(unittest.TestCase):
+    """The audiobook player's mini bar and full player (js/player/ui.js,
+    audiobook player spec section 7): document-lifetime like the engine, so
+    loaded once by the shell as its own stamped module; no markup from
+    strings and no inline handlers (CSP script-src 'self'); styles from the
+    theme engine only; reduced motion stills it; the open player covers the
+    top bar and stays under the shared toasts and dialogs. Its behaviour is
+    app/tests/js/player_ui.mjs."""
+
+    UI = STATIC / "js" / "player" / "ui.js"
+    THEME = STATIC / "css" / "theme.css"
+    START = "/* ---- Audiobook player (js/player/ui.js) ----"
+
+    def player_css(self) -> str:
+        theme = self.THEME.read_text(encoding="utf-8")
+        return theme[theme.index(self.START):]
+
+    def test_it_loads_once_from_the_shell_right_after_the_engine(self):
+        from app.tests.test_shell_contract import BARE_PAGES, SHELL_PAGES
+        part = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
+        tags = [m for m in _SCRIPT_TAG_RE.finditer(part)]
+        srcs = [attr(m.group(1), "src") or "" for m in tags]
+        ui = [i for i, s in enumerate(srcs) if s.startswith("/static/js/player/ui.js")]
+        self.assertEqual(len(ui), 1, "the shell loads the player view exactly once")
+        self.assertEqual(srcs[ui[0]], "/static/js/player/ui.js?v=1", "stamped like every shell script")
+        self.assertEqual(attr(tags[ui[0]].group(1), "type"), "module")
+        self.assertEqual(srcs[ui[0] - 1], "/static/js/player/engine.js?v=1", "right after the engine it draws")
+        for name in SHELL_PAGES + BARE_PAGES:
+            with self.subTest(name):
+                self.assertNotIn("/static/js/player/ui.js", read(name), f"{name} loads the player view itself")
+        # Not imported by another module either: an import is unstamped.
+        for p in (STATIC / "js").rglob("*.js"):
+            self.assertNotRegex(p.read_text(encoding="utf-8"), r"""(?:\bfrom|\bimport\s*\(?)\s*['"][^'"]*player/ui\.js['"]""", p.name)
+            if p.parent.name == "player":
+                self.assertNotRegex(p.read_text(encoding="utf-8"), r"""(?:\bfrom|\bimport\s*\(?)\s*['"]\./ui\.js['"]""", p.name)
+
+    def test_it_builds_no_markup_from_strings_and_no_handler_properties(self):
+        src = self.UI.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        for word in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "setInterval", "eval("):
+            self.assertNotIn(word, code, word)
+        self.assertNotRegex(code, r"\.on[a-z]+\s*=(?!=)", "listeners go through addEventListener")
+        self.assertEqual(string_matches(src, _HANDLER_TEXT_RE), [])
+        # Colours only as classes and theme.css rules: no style colour writes.
+        self.assertNotRegex(code, r"\.style\.(?:color|background\w*|border\w*)\s*=")
+
+    def test_its_styles_are_theme_variables_only(self):
+        from app.tests.test_theme_sweep import raw_line_hits
+        css = self.player_css()
+        self.assertIn(".wsp-bar", css)
+        for n, line in enumerate(css.splitlines(), 1):
+            with self.subTest(line=n):
+                self.assertEqual(raw_line_hits("theme.css", line), [], line)
+        # Every colour a rule sets comes from a theme variable.
+        for m in re.finditer(r"(?<![\w-])(color|background(?:-color)?|border(?:-top)?|box-shadow)\s*:\s*([^;{}]+)", css):
+            prop, value = m.group(1), m.group(2).strip()
+            if value in ("transparent", "inherit", "none", "0"):
+                continue
+            self.assertIn("var(--", value, f"{prop}: {value}")
+
+    def test_reduced_motion_stills_it(self):
+        from app.tests.test_motion import stilled
+        theme = self.THEME.read_text(encoding="utf-8")
+        self.assertTrue(stilled(theme, ".wsp-sheet", "transition"), "the full player's slide")
+        for sel in (".wsp-bar", ".wsp-notice", ".wsp-spin"):
+            self.assertTrue(stilled(theme, sel, "animation"), sel)
+        # The sheet slides on transform only, from below.
+        self.assertRegex(theme, r"\.wsp-sheet \{[^}]*transform: translateY\(100%\);[^}]*transition: transform 250ms")
+        self.assertRegex(theme, r"\.wsp-full\.is-open \.wsp-sheet \{ transform: none; \}")
+
+    def test_the_open_player_covers_the_top_bar_under_the_dialogs(self):
+        theme = self.THEME.read_text(encoding="utf-8")
+        lifted = int(re.search(r"html\[data-player-full\] #wsPlayer \{ z-index: (\d+); \}", theme).group(1))
+        resting = int(re.search(r"#wsPlayer \{ position: fixed; left: 0; right: 0; bottom: 0; z-index: (\d+); \}", theme).group(1))
+        shell = "".join((STATIC / "partials" / f).read_text(encoding="utf-8") for f in ("shell-sidebar.html", "shell-header.html"))
+        for el in ("appHeader", "mobileTopBar", "drawerOverlay"):
+            tag = re.search(rf'<[^>]*id="{el}"[^>]*>', shell).group(0)
+            z = int(re.search(r"\bz-(\d+)\b", tag).group(1))
+            self.assertGreater(lifted, z, el)
+        self.assertGreater(resting, 40, "the bar sits over the phone's top bar and the page")
+        ui = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
+        for z in re.findall(r"z-\[(\d+)\]", ui):
+            self.assertLess(lifted, int(z), "the shared toasts and dialogs stay on top")
+        self.assertIn("html[data-player-full] body { overflow: hidden; }", theme)
+
+
 if __name__ == "__main__":
     unittest.main()

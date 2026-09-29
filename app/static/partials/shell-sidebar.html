@@ -98,6 +98,9 @@
      the life of the document, so soft navigation never stops it. After the
      router: modules run in order, and both after shell.js made window.WS.
      Its saves (WS.playerSaves) load just before it, as a module of their own,
-     so each file carries its own asset stamp. -->
+     so each file carries its own asset stamp. Its view (the mini bar and the
+     full player, WS.playerUI) loads just after it, the same way, and draws
+     the engine it finds there. -->
 <script type="module" src="/static/js/player/saves.js?v=1"></script>
 <script type="module" src="/static/js/player/engine.js?v=1"></script>
+<script type="module" src="/static/js/player/ui.js?v=1"></script>
