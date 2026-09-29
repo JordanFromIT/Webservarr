@@ -216,9 +216,15 @@ class FakeAudio {
       this.readyState = 1;
       this.fire('loadedmetadata');
       if (g !== this.gen) return;
-      this.readyState = 4;
-      this.fire('canplay');
-      if (!this.paused) this.begin();
+      // t.bufferMs: a slow stream, playable only that much later.
+      const ready = () => {
+        if (g !== this.gen) return;
+        this.readyState = 4;
+        this.fire('canplay');
+        if (!this.paused) this.begin();
+      };
+      if (this.t.bufferMs) this.t.clock.setTimeout(ready, this.t.bufferMs);
+      else ready();
     }, 50);
   }
   play() {
@@ -288,6 +294,9 @@ async function setup(o = {}) {
   t.serverNow = () => t.now() + t.skew;
   t.remote = o.remote || [REMOTE];
   t.putStatus = 200;
+  t.putDelays = [];
+  t.serverPrefs = {};
+  t.noNow = false;
   t.prefsAnswer = o.prefs === undefined ? { skip_s: 10, speed: 1, smart_rewind: true } : o.prefs;
   t.places = o.places || { web: null, plex: null };
   async function fetchFn(url, init) {
@@ -295,8 +304,14 @@ async function setup(o = {}) {
     t.fetches.push({ url, method: init.method || 'GET', body: init.body, keepalive: !!init.keepalive });
     if (url === '/api/player/prefs') {
       if ((init.method || 'GET') === 'PUT') {
-        t.puts.push(JSON.parse(init.body));
+        const body = JSON.parse(init.body);
+        t.puts.push(body);
+        // t.putDelays: how long each PUT in turn takes; the server applies it
+        // when it gets to it (t.serverPrefs), so PUTs can land out of order.
+        const wait = t.putDelays.length ? t.putDelays.shift() : 0;
+        if (wait) await new Promise((r) => clock.setTimeout(r, wait));
         if (t.putStatus === 0) throw new TypeError('Failed to fetch');
+        if (t.putStatus >= 200 && t.putStatus < 300) Object.assign(t.serverPrefs, body);
         return response(t.putStatus, {});
       }
       if (typeof t.prefsAnswer === 'number') return response(t.prefsAnswer, { detail: 'no' });
@@ -309,7 +324,11 @@ async function setup(o = {}) {
       return response(200, { ...b, stream: { token: 'tok', uris: { local: [], remote: t.remote } } });
     }
     m = /^\/api\/player\/position\/(.+)$/.exec(url);
-    if (m) return response(200, { web: t.places.web, plex: t.places.plex || null, now: new Date(t.serverNow()).toISOString() });
+    if (m) {
+      const reply = { web: t.places.web, plex: t.places.plex || null };
+      if (!t.noNow) reply.now = new Date(t.serverNow()).toISOString();
+      return response(200, reply);
+    }
     return response(404, {});
   }
   t.fetch = fetchFn;
@@ -577,6 +596,39 @@ await run('a settings save that fails is kept, and goes again with the next chan
   t.engine.close();
 });
 
+await run('one settings save at a time: a slow one is never overtaken', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '501', 1000);
+  t.putDelays = [3000];
+  t.q('.wsp-slot-speed button').click();
+  t.q('[data-speed="1.25"]').click();
+  await t.clock.advance(1000);         // the first save is out, and slow
+  t.q('[data-speed="1.5"]').click();
+  await t.clock.advance(1000);         // its debounce is over: it waits
+  check('one in flight', t.puts.length === 1, t.puts);
+  await t.clock.advance(3000);
+  check('sent when the first returned, the latest', t.puts.length === 2 && JSON.stringify(t.puts[1]) === '{"speed":1.5}', t.puts);
+  check('the server ends with the latest', t.serverPrefs.speed === 1.5, t.serverPrefs);
+  t.engine.close();
+});
+
+await run('a change made while its key is being saved is not lost', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '501', 1000);
+  t.putDelays = [3000];
+  t.q('.wsp-slot-menu button').click();
+  t.q('[data-skip="30"]').click();
+  await t.clock.advance(1000);
+  t.q('[data-skip="45"]').click();
+  await t.clock.advance(5000);
+  check('sent after the first returned', t.puts.length === 2 && JSON.stringify(t.puts[1]) === '{"skip_s":45}', t.puts);
+  check('the server has 45', t.serverPrefs.skip_s === 45, t.serverPrefs);
+  t.win.dispatchEvent(new t.win.Event('pagehide'));
+  await t.clock.advance(10);
+  check('nothing left', t.puts.length === 2, t.puts);
+  t.engine.close();
+});
+
 await run('changing the skip length or the speed while paused sends no check-in', async () => {
   const t = await setup();
   await t.openAt(MULTI.key, '502', 300000);
@@ -841,7 +893,7 @@ await run('smart rewind goes back into the part before, never before the start',
   check('and plays there', t.st().playing && t.audioEl.part === MULTI.tracks[0].part_path);
   t.engine.close();
   await t.openAt(MULTI.key, '501', 2000);
-  await t.clock.advance(500);
+  await t.clock.advance(1500);
   t.engine.pause();
   await t.clock.advance(3600000);
   await t.engine.play();
@@ -1044,6 +1096,91 @@ await run('the time away of an opened book runs on until it plays', async () => 
   await t.engine.play();
   await t.clock.advance(600);
   check('5 s old at the open, 2 min more before play: back 10 s', bookMs(t) >= 890000 && bookMs(t) < 891000, bookMs(t) - 900000);
+  t.engine.close();
+});
+
+await run('play and a quick pause, again and again (a double tap): one rewind per break', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(2000);
+  t.engine.pause();
+  const reached = bookMs(t);
+  for (let i = 1; i <= 3; i++) {
+    await t.clock.advance(2 * 3600000);
+    await t.engine.play();
+    await t.clock.advance(200);
+    t.engine.pause();
+    await t.clock.advance(1500);
+    check(`cycle ${i}: one rewind in all`, bookMs(t) >= reached - 30000 && bookMs(t) <= reached - 30000 + 500, bookMs(t) - reached);
+  }
+  // Real listening (over HEARD_MS) makes the next pause a break again.
+  await t.engine.play();
+  await t.clock.advance(3000);
+  t.engine.pause();
+  const here = bookMs(t);
+  await t.clock.advance(2 * 3600000);
+  await t.engine.play();
+  check('a real break rewinds again', bookMs(t) === here - 30000, bookMs(t) - here);
+  t.engine.close();
+});
+
+await run('listening is counted from where a rewind lands', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(2000);
+  t.engine.pause();
+  await t.clock.advance(2 * 3600000);
+  await t.engine.play();
+  // 3 s heard after the 30 s rewind: well short of where it had been.
+  await t.clock.advance(3000);
+  t.engine.pause();
+  const here = bookMs(t);
+  await t.clock.advance(2 * 3600000);
+  await t.engine.play();
+  check('that was a break: back 30 s again', bookMs(t) === here - 30000, bookMs(t) - here);
+  t.engine.close();
+});
+
+for (const [name, buffer, pauseAt, retry] of [
+  ['a fast stream, paused 100 ms in', 0, 100, false],
+  ['a slow stream (3 s to buffer), paused at 1 s', 3000, 1000, false],
+  ['a slow stream, paused at 1 s, failing while paused, then Retry', 3000, 1000, true]
+]) {
+  await run(`an opened book paused before it plays (${name}): one rewind`, async () => {
+    const t = await setup();
+    t.bufferMs = buffer;
+    t.places = { web: webAt(t, '502', 300000, 2 * 3600000) };
+    const seeks = [];
+    t.engine.on('change', (d) => { if (d.reason === 'seek') seeks.push([d.from, d.to]); });
+    const p = t.engine.open(MULTI.key);
+    await t.clock.advance(pauseAt);
+    await p;
+    t.engine.pause();
+    await t.clock.advance(5 * MIN);
+    if (retry) {
+      t.down = true;
+      t.audioEl.error = { code: 2 };
+      t.audioEl.fire('error');
+      await t.clock.advance(5000);
+      check('stopped with an error', t.st().error && t.st().error.code === 'unreachable', t.st().error);
+      t.down = false;
+    }
+    await t.engine.play();
+    await t.clock.advance(20000);
+    check('one rewind', seeks.length === 1 && seeks[0][1] === 870000, seeks);
+    t.engine.close();
+  });
+}
+
+await run('no server time on the saved place: no open rewind, never the device clock', async () => {
+  const t = await setup();
+  t.noNow = true;
+  t.places = { web: webAt(t, '502', 300000, 2 * 3600000) };
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(600);
+  await p;
+  check('no age', t.st().resumedFrom && t.st().resumedFrom.age_ms === null, t.st().resumedFrom);
+  check('played on from the saved place', bookMs(t) > 900000 && bookMs(t) < 901000, bookMs(t) - 900000);
   t.engine.close();
 });
 

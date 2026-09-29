@@ -1322,6 +1322,20 @@ await run('onKey hears the keys pressed in the full player, and only those', () 
   check('a non-function is ignored', typeof t.ui.onKey(null) === 'function');
 });
 
+// Task 8: a held arrow on the scrubber skips once.
+await run('the scrubber skips once for a held arrow key', () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  const range = t.q('.wsp-range');
+  const first = t.key(range, 'ArrowRight');
+  let kept = 0;
+  for (let i = 0; i < 30; i++) if (t.key(range, 'ArrowRight', { repeat: true }).defaultPrevented) kept += 1;
+  const skips = t.engine.calls.filter((c) => c[0] === 'skip');
+  check('one skip', skips.length === 1 && skips[0][1] === 10, skips);
+  check('the press and every repeat kept from the range itself', first.defaultPrevented && kept === 30, kept);
+});
+
 await run('no markup from strings', () => {
   const src = readFileSync(UI_PATH, 'utf8');
   check('no innerHTML or insertAdjacentHTML', !/innerHTML|insertAdjacentHTML|outerHTML/.test(src));

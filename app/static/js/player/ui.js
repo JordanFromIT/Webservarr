@@ -909,6 +909,9 @@ export function createUI(env) {
     const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
     if (!step || e.altKey || e.ctrlKey || e.metaKey) return;
     e.preventDefault();
+    // One skip a press: a held key does not run on to the book's end (its
+    // repeats are still kept from the range's own stepping).
+    if (e.repeat) return;
     // By the skip length, not a second at a time.
     let n = 10;
     try {
