@@ -49,13 +49,16 @@
  *       (autoplay false: loads only). Resolves once playback is set going;
  *       a failure is an 'error' event and state().error. It rejects only
  *       with UnknownTrack: the place given is in a part the book does not
- *       have; then nothing is loaded and no place is reported.
+ *       have; then nothing is loaded and no place is reported (the
+ *       'loading' change is followed by a 'close' one, no book, no place).
  *   play(), pause(), toggle()
  *   seek(bookMs), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters
  *   setSpeed(x)       0.75 to 2 in 0.05 steps (clamped, rounded); returns the speed
  *   setSkip(s)        the Media Session seek back and forward, 5 to 60 s
  *                     (clamped, rounded); returns it
- *   retry()           after an error: again from the place
+ *   retry()           after an error: again from the place. After a failed
+ *                     first fetch it opens the book again, so like open() it
+ *                     can reject with UnknownTrack.
  *   close()           stops and forgets the book
  *   state()           { book (the key), title, author, narrator, series, cover,
  *                       chapters, chapterIndex, trackIndex, bookMs, bookDurationMs,
@@ -174,10 +177,11 @@ export class UnknownTrack extends Error {
   }
 }
 
+// Only a finite number is a skip length; anything else (null, '', false, a
+// string) changes nothing.
 function roundSkip(x) {
-  const v = Number(x);
-  if (!isFinite(v)) return null;
-  return clampNumber(Math.round(v), SKIP_MIN_S, SKIP_MAX_S);
+  if (typeof x !== 'number' || !isFinite(x)) return null;
+  return clampNumber(Math.round(x), SKIP_MIN_S, SKIP_MAX_S);
 }
 
 function roundSpeed(x) {
@@ -254,6 +258,7 @@ export function createEngine(env) {
 
   let watchdog = null;
   const probes = new Map();   // live probe element -> its finish(ok)
+  let probeCount = 0;
   let sessionReady = false;
 
   // ---- Events ----
@@ -390,7 +395,13 @@ export function createEngine(env) {
      Its handlers are properties, dropped with it. */
   function probe(side, index) {
     return new Promise(function (resolve) {
-      const url = urlFor(side, index);
+      // A URL of its own every time: a URL the element loaded before can be
+      // answered from the browser's media cache with the server gone, and a
+      // probe must ask the server.
+      const base = urlFor(side, index);
+      probeCount += 1;
+      const url = base ? base + '&wsprobe=' + probeCount.toString(36) + Date.now().toString(36) +
+        Math.random().toString(36).slice(2, 8) : '';
       if (!url) {
         resolve(false);
         return;
@@ -902,6 +913,8 @@ export function createEngine(env) {
         book = null;
         stream = null;
         setLoading(false);
+        // Listeners saw 'loading': they see it end, with no book and no place.
+        changed('close');
         throw new UnknownTrack(track);
       }
       startMs = b;
@@ -1047,7 +1060,9 @@ export function createEngine(env) {
       stopWith('unreachable', UNREACHABLE, retry);
       return Promise.resolve();
     }
-    load(playhead.index, playhead.offset, side);
+    // From the place held after a skipped part, else the playhead.
+    const from = hold || playhead;
+    load(from.index, from.offset, side);
     sessionState();
     changed('retry');
     return Promise.resolve();

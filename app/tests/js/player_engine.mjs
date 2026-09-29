@@ -127,6 +127,9 @@ function makeNet() {
     blockAutoplay: false,
     safari: false,      // playbackRate throws before metadata
     fetchDelay: {},     // book key -> ms before /api/player/book answers
+    mediaCache: false,  // a URL that loaded before still loads its metadata while its side is down
+    cached: new Set(),  // (with mediaCache) every URL that has loaded
+    glitchOnce: new Map(), // part path -> second at which decoding fails once
     statusFor: {},      // book key -> the status /api/player/book answers
     noLocal: false,
     bookStatus: 200,
@@ -141,6 +144,10 @@ function answer(net, url) {
   const u = new URL(url);
   const side = sideOf(url);
   const part = u.pathname;
+  if (net.mediaCache && net.cached.has(url) && trackByPath.get(part) &&
+      (net.hang.has(side) || net.down.has(side))) {
+    return { kind: 'ok', side, part, durationMs: trackByPath.get(part).duration_ms };   // the browser's media cache
+  }
   if (net.hang.has(side)) return { kind: 'hang', side, part };
   if (net.down.has(side) || u.searchParams.get('X-Plex-Token') !== net.token || net.missing.has(part)) {
     return { kind: 'fail', side, part };
@@ -238,11 +245,12 @@ class FakeAudio {
     const a = answer(this.env.net, this._src);
     this.side = a.side;
     this.part = a.part;
-    this.env.net.loads.push({ side: a.side, part: a.part, probe: this.preload === 'metadata' });
+    this.env.net.loads.push({ side: a.side, part: a.part, probe: this.preload === 'metadata', url: this._src });
     if (a.kind === 'hang') return;
     this.env.clock.setTimeout(() => {
       if (g !== this.gen) return;
       if (a.kind === 'fail') { this.error = { code: 4 }; this.fire('error'); return; }
+      this.env.net.cached.add(this._src);
       this.duration = a.durationMs / 1000;
       this.readyState = 1;
       this.fire('loadedmetadata');
@@ -287,6 +295,11 @@ class FakeAudio {
       if (net.hang.has(this.side)) { this.ticking = false; this.fire('waiting'); return; }
       const bad = net.decodeAt.get(this.part);
       if (bad !== undefined && this._t >= bad) { this.ticking = false; this.error = { code: 3 }; this.fire('error'); return; }
+      const once = net.glitchOnce.get(this.part);
+      if (once !== undefined && this._t >= once) {
+        net.glitchOnce.delete(this.part);
+        this.ticking = false; this.error = { code: 3 }; this.fire('error'); return;
+      }
       if (this.seeking) { this.tick(g); return; }
       this._t = Math.min(this.duration, this._t + 0.25 * this.playbackRate);
       this.fire('timeupdate');
@@ -1201,6 +1214,141 @@ current = 'a slow open(A) that fails after a fast open(B) leaves B alone';
   const s = t.engine.state();
   check('no error from A', t.log.error.length === 0 && s.error === null, t.log.error);
   check('B plays', s.book === OTHER.key && s.playing && !t.main.paused);
+  t.engine.close();
+}
+
+// ---- 16. Fix round 2 ----
+
+// T5E6: an outage just as a part ends. The next part fails like a media
+// error; a check of the finished part must ask the server, not the cache.
+current = 'an outage at the end of a part ends unreachable, holding the place, skipping nothing';
+{
+  const t = setup({ net: { mediaCache: true, noLocal: true } });
+  await openPlaying(t, MULTI.key, { at: at('501', 598000) });
+  // Plex (and the refresh) go away just as part 1 ends: its last data is in.
+  t.main.addEventListener('pause', () => {
+    if (!t.main.ended) return;
+    t.net.down.add('remote');
+    t.net.bookStatus = 503;
+  });
+  await t.clock.advance(20000);
+  check('nothing skipped', t.log.warning.length === 0, t.log.warning);
+  check('unreachable, with a retry', t.log.error.length === 1 && t.log.error[0].code === 'unreachable' && t.log.error[0].retry === '[fn]');
+  const s = t.engine.state();
+  check('the place is the start of part 2', s.position.track === '502' && s.position.offset_ms === 0, s.position);
+  check('never a place in part 3', t.seen.every((r) => !r.pos || r.pos.track !== '503'));
+  const probeUrls = t.env.audios.filter((a) => a !== t.main).length;
+  check('the checks ran', probeUrls >= 1, probeUrls);
+  t.net.down.clear();
+  t.net.bookStatus = 200;
+  t.engine.retry();
+  await t.clock.advance(1500);
+  check('Retry plays part 2 from 0', partOf(t.main) === MULTI.tracks[1].part_path && !t.main.paused &&
+    t.engine.state().position.track === '502' && t.engine.state().position.offset_ms < 2000, t.engine.state().position);
+  t.engine.close();
+}
+current = 'every probe asks with a URL of its own';
+{
+  const t = setup({ net: { mediaCache: true } });
+  await openPlaying(t, MULTI.key, { at: at('501', 590000) });
+  t.net.missing.add(MULTI.tracks[1].part_path); // part 2 fails twice: probes of part 1 on the way
+  await t.clock.advance(15000);
+  const probes = t.net.loads.filter((l) => l.probe).map((l) => l.url);
+  const mains = new Set(t.net.loads.filter((l) => !l.probe).map((l) => l.url));
+  check('probes ran', probes.length >= 2, probes.length);
+  check('no two probes share a URL', new Set(probes).size === probes.length);
+  check('no probe reuses a URL the player loaded', probes.every((u) => !mains.has(u)));
+  check('probe URLs carry the part and the token', probes.every((u) => u.indexOf('/library/parts/') !== -1 && u.indexOf(TOKEN) !== -1));
+  t.engine.close();
+}
+
+// T5E7: Retry after the last part failed resumes at the held place.
+current = 'Retry after two skipped parts resumes at the held place';
+{
+  const t = setup();
+  await openPlaying(t, MULTI.key, { at: at('501', 598000) });
+  t.net.missing.add(MULTI.tracks[1].part_path);
+  t.net.missing.add(MULTI.tracks[2].part_path);
+  await t.clock.advance(15000);
+  check('two parts skipped, then the part error', t.log.warning.length === 2 && t.log.error.length === 1 && t.log.error[0].code === 'part');
+  const held = t.engine.state().position;
+  check('held at the start of part 2', held.track === '502' && held.offset_ms === 0, held);
+  t.net.missing.clear();
+  t.engine.retry();
+  await t.clock.advance(300);
+  check('Retry loads part 2', partOf(t.main) === MULTI.tracks[1].part_path, partOf(t.main));
+  check('at its start', t.main.currentTime < 0.5 && t.engine.state().position.track === '502', [t.main.currentTime, t.engine.state().position]);
+  t.engine.close();
+}
+
+// T5E8: Retry after a failed first fetch, into a place the book lacks.
+current = 'Retry of a failed open at an unknown track rejects like open() and ends idle';
+{
+  const t = setup({ net: { bookStatus: 503 } });
+  await t.engine.open(MULTI.key, { at: at('999', 5000) });
+  const e = t.log.raw.filter(([k]) => k === 'error').pop();
+  check('the fetch failed with a retry', e && e[1].code === 'unreachable' && typeof e[1].retry === 'function');
+  t.net.bookStatus = 200;
+  const mark = t.log.change.length;
+  let err = null;
+  await e[1].retry().catch((x) => { err = x; });
+  check('error.retry() rejects with UnknownTrack', typeof E.UnknownTrack === 'function' && err instanceof E.UnknownTrack, err && err.name);
+  let s = t.engine.state();
+  check('not loading, no book, no place', s.loading === false && s.book === null && s.position === null, s);
+  const after = t.log.change.slice(mark).map((c) => c.reason);
+  check('loading, then its end', JSON.stringify(after) === '["loading","close"]', after);
+  const last = t.log.change[t.log.change.length - 1];
+  check('the last change says not loading, no book, no place', last && last.state.loading === false &&
+    last.state.book === null && last.state.position === null, last && last.state);
+  check('nothing loaded', t.net.loads.length === 0);
+  // The same through retry() itself.
+  t.net.bookStatus = 503;
+  await t.engine.open(MULTI.key, { at: at('999', 5000) });
+  t.net.bookStatus = 200;
+  let err2 = null;
+  await t.engine.retry().catch((x) => { err2 = x; });
+  s = t.engine.state();
+  check('retry() rejects with UnknownTrack', typeof E.UnknownTrack === 'function' && err2 instanceof E.UnknownTrack);
+  check('and ends idle', s.loading === false && s.book === null && s.error === null, s);
+  const last2 = t.log.change[t.log.change.length - 1];
+  check('listeners see it end', last2 && last2.reason === 'close' && last2.state.loading === false);
+  t.engine.close();
+}
+
+// T5E9: setSkip takes finite numbers only.
+current = 'setSkip ignores anything that is not a finite number';
+{
+  const t = setup();
+  await openPlaying(t, MULTI.key);
+  if (typeof t.engine.setSkip !== 'function') t.engine.setSkip = () => NaN;
+  t.engine.setSkip(20);
+  for (const bad of [null, '', false, true, '30', undefined, Infinity, -Infinity, NaN, {}, []]) {
+    check(`setSkip(${JSON.stringify(bad)}) keeps 20`, t.engine.setSkip(bad) === 20);
+  }
+  check('a number still sets it', t.engine.setSkip(7) === 7 && t.engine.setSkip(-3) === 5 && t.engine.setSkip(99) === 60);
+  t.engine.close();
+}
+
+// T5T3: a part that recovered and played on is not held against it.
+current = 'a one-off glitch 60 s after a good retry does not skip the part';
+{
+  const t = setup();
+  await openPlaying(t, MULTI.key, { at: at('501', 597000) });
+  const P2 = MULTI.tracks[1].part_path;
+  t.net.missing.add(P2);
+  for (let i = 0; i < 600; i++) {               // part 2 fails once, and comes back for its retry
+    await t.clock.advance(10);
+    const k = t.net.loads.findIndex((l) => !l.probe && l.part === P2);
+    if (k !== -1 && t.net.loads.slice(k + 1).some((l) => l.probe)) break;
+  }
+  t.net.missing.clear();
+  await t.clock.advance(3000);
+  check('part 2 plays after its retry', partOf(t.main) === P2 && !t.main.paused && t.log.warning.length === 0);
+  const now = t.main.currentTime;
+  t.net.glitchOnce.set(P2, now + 60);           // one bad frame a minute later
+  await t.clock.advance(65000);
+  check('no skip for the one-off glitch', t.log.warning.length === 0, t.log.warning);
+  check('part 2 plays on past it', partOf(t.main) === P2 && !t.main.paused && t.main.currentTime > now + 60, t.main.currentTime);
   t.engine.close();
 }
 
