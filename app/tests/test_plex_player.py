@@ -184,6 +184,9 @@ class FakePlex:
         self.identity = MACHINE
         # Per-token listening state: {token: {track rk: {viewOffset...}}}
         self.state = {}
+        # Per-token readable library sections (the owner's view by default).
+        self.sections = {}
+        self.photo_type = "image/jpeg"
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -226,6 +229,11 @@ class FakePlex:
         q = parse_qs(url.query.decode() if isinstance(url.query, bytes) else url.query)
         if path == "/identity":
             return self.mc(machineIdentifier=self.identity)
+        if path == "/library/sections":
+            keys = self.sections.get(token, [SECTION, "5"])
+            return self.mc(Directory=[{"key": k, "type": "artist", "title": f"Section {k}"} for k in keys])
+        if path == "/photo/:/transcode":
+            return httpx.Response(200, content=b"\x89PNG-or-JPEG", headers={"content-type": self.photo_type})
         if path == "/:/timeline":
             if self.timeline_down:
                 raise httpx.ConnectError("timeline unreachable", request=request)
@@ -864,6 +872,140 @@ class Timeline(BridgeBase):
         self.assertIsNone(self.run_async(pp.timeline(listener(plex_token=""), "202", "playing", 1, 2)))
         self.plex.plextv_down = "connect"
         self.assertIsNone(self.run_async(pp.timeline(listener(), "202", "stopped", 1, 2)))
+
+
+class LibraryAccess(BridgeBase):
+    """The listener's own server token must read the audiobook section: a
+    share can leave it out, and the book list is read with the admin token."""
+
+    def test_a_listener_whose_share_includes_the_section_gets_access(self):
+        out = self.run_async(pp.library_access(listener(), session_id=SID))
+        self.assertEqual(out["token"], SERVER_TOKEN)
+        check = [c for c in self.plex.calls if c.url.path == "/library/sections"]
+        self.assertEqual(len(check), 1)
+        self.assertEqual(check[0].headers["X-Plex-Token"], SERVER_TOKEN)
+        self.assert_no_token_in_urls()
+
+    def test_a_share_without_the_section_is_no_library_access(self):
+        self.plex.sections = {SERVER_TOKEN: ["5", "6"]}
+        with self.assertRaises(pp.NoLibraryAccess) as ctx:
+            self.run_async(pp.library_access(listener(), session_id=SID))
+        self.assertIsInstance(ctx.exception, pp.NoServerAccess)
+        self.assertNotIn("section", self.cached_blob())
+
+    def test_the_check_is_remembered_with_the_cached_access(self):
+        session = listener()
+        self.run_async(pp.library_access(session, session_id=SID))
+        blob = self.cached_blob()
+        self.assertEqual(blob["section"], SECTION)
+        self.assertEqual(blob["token"], SERVER_TOKEN)
+        # The next request carries it from Redis: no Plex call at all.
+        n = len(self.plex.calls)
+        again = self.run_async(pp.library_access(listener(**{pp.SERVER_FIELD: json.dumps(blob)}), session_id=SID))
+        self.assertEqual(again["token"], SERVER_TOKEN)
+        self.assertEqual(len(self.plex.calls), n)
+
+    def test_a_refusal_is_not_remembered(self):
+        self.plex.sections = {SERVER_TOKEN: ["5"]}
+        session = listener()
+        with self.assertRaises(pp.NoLibraryAccess):
+            self.run_async(pp.library_access(session, session_id=SID))
+        self.plex.sections = {}
+        self.assertEqual(self.run_async(pp.library_access(session, session_id=SID))["token"], SERVER_TOKEN)
+
+    def test_a_different_library_setting_checks_again(self):
+        self.run_async(pp.library_access(listener(), session_id=SID))
+        blob = self.cached_blob()
+        self.admin["section"] = "5"
+        n = len(self.plex.calls)
+        self.run_async(pp.library_access(listener(**{pp.SERVER_FIELD: json.dumps(blob)}), session_id=SID))
+        self.assertIn("/library/sections", [c.url.path for c in self.plex.calls[n:]])
+        self.assertEqual(self.cached_blob()["section"], "5")
+
+    def test_force_refetches_and_checks_again(self):
+        self.run_async(pp.library_access(listener(), session_id=SID))
+        cached = listener(**{pp.SERVER_FIELD: json.dumps(self.cached_blob())})
+        n = len(self.plex.calls)
+        self.run_async(pp.library_access(cached, session_id=SID, force=True))
+        paths = [c.url.path for c in self.plex.calls[n:]]
+        self.assertIn("/api/v2/resources", paths)
+        self.assertIn("/library/sections", paths)
+
+    def test_a_401_on_the_listeners_token_drops_the_cache(self):
+        self.run_async(pp.server_access(listener(), session_id=SID))
+        session = listener(**{pp.SERVER_FIELD: json.dumps(self.cached_blob())})
+        self.update_session.reset_mock()
+        self.plex.reject_tokens = {SERVER_TOKEN}
+        with self.assertRaises(pp.TokenRejected):
+            self.run_async(pp.library_access(session, session_id=SID))
+        self.update_session.assert_awaited_once_with(SID, {pp.SERVER_FIELD: ""})
+
+    def test_no_plex_token_is_no_server_access(self):
+        with self.assertRaises(pp.NoServerAccess):
+            self.run_async(pp.library_access(listener(plex_token=""), session_id=SID))
+
+    def test_player_off(self):
+        self.admin["section"] = ""
+        self.assertFalse(pp.player_on())
+        with self.assertRaises(pp.PlayerOff):
+            self.run_async(pp.library_access(listener(), session_id=SID))
+        self.admin["section"] = SECTION
+        self.assertTrue(pp.player_on())
+
+
+class Cover(BridgeBase):
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(pp.plex, "_get_config", lambda: {"url": ADMIN_URL, "token": ADMIN_TOKEN})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_a_square_cover_through_the_photo_transcoder(self):
+        content, ctype = self.run_async(pp.cover_image("100:1"))
+        self.assertEqual((content, ctype), (b"\x89PNG-or-JPEG", "image/jpeg"))
+        call = [c for c in self.plex.calls if c.url.path == "/photo/:/transcode"][0]
+        q = parse_qs(call.url.query.decode())
+        self.assertEqual(q["width"], [str(pp.COVER_SIZE)])
+        self.assertEqual(q["height"], [str(pp.COVER_SIZE)])
+        self.assertEqual(q["url"], ["/library/metadata/100/thumb/1700000000"])
+        self.assertEqual(call.headers["X-Plex-Token"], ADMIN_TOKEN)
+        self.assert_no_token_in_urls()
+
+    def test_a_key_outside_the_library_never_reaches_the_transcoder(self):
+        for key in ("900:1", "999:1", "junk", "100"):
+            with self.subTest(key=key), self.assertRaises(pp.NotInLibrary):
+                self.run_async(pp.cover_image(key))
+        self.assertNotIn("/photo/:/transcode", self.plex.paths())
+
+    def test_a_malformed_key_makes_no_plex_call(self):
+        with self.assertRaises(pp.NotInLibrary):
+            self.run_async(pp.cover_image("../1"))
+        self.assertEqual(self.plex.calls, [])
+
+    def test_no_cover_or_an_unsafe_image_is_not_found(self):
+        with mock.patch.dict(ALBUMS["500"], {"thumb": ""}):
+            with self.assertRaises(pp.NotInLibrary):
+                self.run_async(pp.cover_image("500:1"))
+        with mock.patch.dict(ALBUMS["500"], {"thumb": "/library/sections/all/refresh?force=1"}):
+            with self.assertRaises(pp.NotInLibrary):
+                self.run_async(pp.cover_image("500:1"))
+        self.plex.photo_type = "image/svg+xml"
+        with self.assertRaises(pp.NotInLibrary):
+            self.run_async(pp.cover_image("100:1"))
+
+    def test_player_off_and_plex_down(self):
+        self.plex.pms_down = 500
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.cover_image("100:1"))
+        self.admin["section"] = ""
+        with self.assertRaises(pp.PlayerOff):
+            self.run_async(pp.cover_image("100:1"))
+
+    def test_cover_version(self):
+        self.assertEqual(pp.cover_version("/library/metadata/100/thumb/1700000000"), "1700000000")
+        for bad in ("", None, "/library/metadata/100/art/1", "/library/metadata/100/thumb/1?x=1",
+                    "https://x/library/metadata/100/thumb/1"):
+            self.assertEqual(pp.cover_version(bad), "", bad)
 
 
 class NoTokenLogged(BridgeBase):

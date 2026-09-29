@@ -71,6 +71,11 @@ class NoServerAccess(PlayerUnavailable):
     chooses to treat it as the listener's own lack of access."""
 
 
+class NoLibraryAccess(NoServerAccess):
+    """The listener reaches the server, but their share does not include the
+    audiobook library: their server token cannot read that section."""
+
+
 class TokenRejected(PlayerUnavailable):
     """Plex answered 401 to the token sent. On the listener's server token it
     means the cached access is stale (revoked share, changed token): the
@@ -93,6 +98,11 @@ def _admin() -> dict:
     section = (integration_config.read((LIBRARY_KEY,)).get(LIBRARY_KEY) or "").strip()
     return {"url": config["url"], "token": config["token"],
             "section": section if _RATING_KEY.fullmatch(section) else ""}
+
+
+def player_on() -> bool:
+    """True when an audiobook library is configured (the player is on)."""
+    return bool(_admin()["section"])
 
 
 def _configured(need_section: bool = True) -> dict:
@@ -299,6 +309,58 @@ async def server_access(session: dict, session_id: Optional[str] = None, force: 
     session[SERVER_FIELD] = blob
     if session_id:
         await session_manager.update_session(session_id, {SERVER_FIELD: blob})
+    return access
+
+
+async def library_access(session: dict, session_id: Optional[str] = None, force: bool = False) -> dict:
+    """server_access(), once the listener's own server token is known to read
+    the audiobook library section.
+
+    A share can leave a library out, and list_books reads with the admin
+    token, so without this a listener outside the library would see every
+    book and then fail on the stream. The server's /library/sections lists
+    only the sections the token may read. A confirmed check is remembered in
+    the same session field as the access ("section"), so it is made once per
+    cached access: a refetch (expiry, force, a 401) or a different library
+    setting checks again. A refusal is not remembered, so a library shared
+    later works at once.
+
+    Raises NoLibraryAccess (a NoServerAccess) when the section is not
+    readable, and what server_access raises. A 401 on the listener's token
+    drops the cached access and raises TokenRejected."""
+    admin = _configured()
+    access = await server_access(session, session_id=session_id, force=force)
+    try:
+        blob = json.loads(session.get(SERVER_FIELD) or "")
+    except (ValueError, TypeError):
+        blob = None
+    if not isinstance(blob, dict):
+        blob = None
+    if blob and blob.get("section") == admin["section"] and blob.get("token") == access["token"]:
+        return access
+
+    async with _pms_client() as client:
+        try:
+            container = await _pms_get(client, admin, access["token"], "/library/sections")
+        except TokenRejected:
+            await forget_access(session, session_id)
+            raise
+    if container is None:
+        logger.warning("Plex has no /library/sections for the listener's token")
+        raise PlayerUnavailable("Plex is unavailable")
+    readable = {str(d.get("key")) for d in container.get("Directory") or [] if isinstance(d, dict)}
+    if admin["section"] not in readable:
+        logger.info("The listener's share does not include the audiobook library")
+        raise NoLibraryAccess("This account cannot read the audiobook library")
+
+    if blob:
+        raw = json.dumps({**blob, "section": admin["section"]})
+        session[SERVER_FIELD] = raw
+        if session_id:
+            try:
+                await session_manager.update_session(session_id, {SERVER_FIELD: raw})
+            except Exception as exc:  # noqa: BLE001 - the check is simply made again next time
+                logger.warning("Could not remember the library check: %s", type(exc).__name__)
     return access
 
 
@@ -658,6 +720,44 @@ async def assert_in_library(key: str, track_key: Optional[str] = None) -> None:
     if (t.get("type") != "track" or str(t.get("parentRatingKey")) != album_key
             or (_int(t.get("parentIndex")) or 1) != disc):
         raise NotInLibrary("Not in this book")
+
+
+# The album thumbnail paths a cover may come from, and the square size served.
+_THUMB_PATH = re.compile(r"/library/metadata/[0-9]{1,20}/thumb/[0-9]{1,20}", re.ASCII)
+COVER_SIZE = 600
+
+
+def cover_version(thumb) -> str:
+    """The version stamp of an album thumbnail path (its last segment, which
+    Plex changes with the image), or "" when it is not a thumbnail path."""
+    if not (isinstance(thumb, str) and _THUMB_PATH.fullmatch(thumb)):
+        return ""
+    return thumb.rsplit("/", 1)[1]
+
+
+async def cover_image(key: str, size: int = COVER_SIZE) -> tuple:
+    """(image bytes, content type) of the book's album cover, scaled and
+    cropped to a size x size square by Plex's photo transcoder with the admin
+    token.
+
+    The key is checked as assert_in_library checks a book (malformed keys
+    before any Plex call, then the album is in the audiobook library), in the
+    same album read that finds the thumbnail. Raises NotInLibrary (also when
+    the album has no cover or Plex cannot give it), PlayerOff or
+    PlayerUnavailable."""
+    album_key, _disc = parse_key(key)
+    admin = _configured()
+    async with _pms_client() as client:
+        album = await _album(client, admin, album_key)
+    thumb = album.get("thumb") or ""
+    if not cover_version(thumb):
+        raise NotInLibrary("This book has no cover")
+    # get_thumbnail sends the token in a header, serves only raster image
+    # types and caps the bytes read.
+    content, content_type = await plex.get_thumbnail(thumb, width=size, height=size)
+    if content is None:
+        raise NotInLibrary("This book's cover is not available")
+    return content, content_type
 
 
 # --- Plex's listening state ---------------------------------------------------------

@@ -245,9 +245,10 @@ async def get_active_streams() -> list:
         return []
 
 
-async def get_thumbnail(path: str) -> tuple:
+async def get_thumbnail(path: str, width: int = 300, height: int = 170) -> tuple:
     """
-    Fetch a thumbnail image from Plex and return (content_bytes, content_type).
+    Fetch a thumbnail image from Plex, scaled to cover width x height and
+    cropped to it, and return (content_bytes, content_type).
     Returns (None, None) on failure.
     """
     config = _get_config()
@@ -260,8 +261,8 @@ async def get_thumbnail(path: str) -> tuple:
                 "GET",
                 f"{config['url']}/photo/:/transcode",
                 params={
-                    "width": 300,
-                    "height": 170,
+                    "width": width,
+                    "height": height,
                     "minSize": 1,
                     "upscale": 1,
                     "url": path,

@@ -21,7 +21,7 @@ from app.database import init_db, SessionLocal
 from app.auth import session_manager
 from app.seed import seed_secret_key
 from app.pages import render_page
-from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status
+from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
 from app.services.shelf_warmer import start_warmer, stop_warmer
@@ -313,6 +313,9 @@ async def add_security_headers(request: Request, call_next):
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data: https:",
         "worker-src 'self'",
+        # The audiobook player streams straight from the listener's Plex
+        # server over its plex.direct https addresses, on Plex's port.
+        "media-src 'self' https://*.plex.direct:32400",
         # Standards-compliant clickjacking defense (supersedes X-Frame-Options).
         "frame-ancestors 'self'",
         "base-uri 'self'",
@@ -390,6 +393,7 @@ app.include_router(notifications.router, prefix="/api", tags=["Notifications"])
 app.include_router(tickets.router, prefix="/api", tags=["Tickets"])
 app.include_router(wiki.router, prefix="/api/wiki", tags=["Wiki"])
 app.include_router(request_status.router, prefix="/api/request-status", tags=["Request Status"])
+app.include_router(player.router, prefix="/api/player", tags=["Player"])
 # No /api prefix: this router owns /kavita/* and /signin-oidc at the app root.
 # /signin-oidc must be at root because Kavita sets its OIDC correlation cookies
 # with path=/signin-oidc, and the browser only sends them to that exact path.

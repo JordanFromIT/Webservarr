@@ -52,6 +52,42 @@ class StaticHeaders(unittest.TestCase):
         script = [d for d in directives if d.split(" ", 1)[0] == "script-src"]
         self.assertEqual(script, ["script-src 'self'"])
 
+    def test_csp_media_src_is_self_and_plex_direct_only(self):
+        # The audiobook player streams from the listener's Plex server over
+        # its plex.direct https addresses. That is the only thing the player
+        # adds: covers are served same-origin, so img-src is unchanged, and
+        # no other directive names plex.direct.
+        from app.config import settings
+        r = self.client.get("/static/css/theme.css?v=1")
+        directives = {}
+        for d in r.headers["content-security-policy"].split(";"):
+            name, _, value = d.strip().partition(" ")
+            self.assertNotIn(name, directives, f"{name} appears twice")
+            directives[name] = value
+        self.assertEqual(directives["media-src"], "'self' https://*.plex.direct:32400")
+        expected = {
+            "default-src": "'self'",
+            "script-src": "'self'",
+            "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "font-src": "'self' https://fonts.gstatic.com",
+            "img-src": "'self' data: https:",
+            "worker-src": "'self'",
+            "media-src": "'self' https://*.plex.direct:32400",
+            "frame-ancestors": "'self'",
+            "base-uri": "'self'",
+            "object-src": "'none'",
+        }
+        configured = {"frame-src", "connect-src"}
+        self.assertEqual(set(directives) - configured, set(expected))
+        for name, value in expected.items():
+            self.assertEqual(directives[name], value, name)
+        # connect-src and frame-src come only from the operator's config.
+        connect = ["'self'"] + ([settings.authentik_url] if settings.authentik_url else []) + [
+            s.strip() for s in settings.csp_connect_src.split(",") if s.strip()]
+        self.assertEqual(directives["connect-src"], " ".join(connect))
+        frames = [s.strip() for s in settings.csp_frame_src.split(",") if s.strip()]
+        self.assertEqual(directives.get("frame-src", ""), " ".join(frames))
+
 
 if __name__ == "__main__":
     unittest.main()
