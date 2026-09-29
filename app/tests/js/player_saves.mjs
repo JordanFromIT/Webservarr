@@ -2313,11 +2313,14 @@ current = 'the local copy says whether the server has that very place';
   p.open();
   check('opened at the server\'s place: acknowledged', localOf(t).acked === true && t.saver.readLocal('500:1').acked === true, localOf(t));
   p.play();
-  await p.listen(500);
-  check('played on, not yet saved: not acknowledged', localOf(t).acked === false, localOf(t));
+  await p.listen(3000);
+  check('played on over 1 s, not yet saved: not acknowledged', localOf(t).acked === false, localOf(t));
   p.pause();
   await t.clock.advance(1500);
   check('the pause stored: acknowledged', localOf(t).acked === true && localOf(t).offset_ms === p.offset, localOf(t));
+  p.offset += 250;                 // the element's drift after the pause
+  p.emit('time');
+  check('the drift after it is still that place', localOf(t).acked === true && localOf(t).offset_ms === p.offset, localOf(t));
   t.server.mode = 'offline';
   p.seek(p.offset + 60000);
   await t.clock.advance(1500);

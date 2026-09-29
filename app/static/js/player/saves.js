@@ -406,9 +406,15 @@ export function createSaver(o) {
     return isFinite(c) ? c : Infinity;
   }
 
-  /* acked: the server has this very place (it came from the server, or a
-     save of it was stored). A copy that is not is this browser's alone: the
-     next open never overwrites it without asking (engine.js, features.js). */
+  /* acked: the server has this place (it came from the server, or a save
+     of it was stored), to within DRIFT_MS on the same part: the element's
+     timeupdate lands a moment past a saved pause. A copy that is not is this
+     browser's alone: the next open never overwrites it without asking
+     (engine.js, features.js). */
+  function nearPlace(a, b) {
+    return !!a && !!b && String(a.track) === String(b.track) && Math.abs(Number(a.offset_ms) - Number(b.offset_ms)) <= DRIFT_MS;
+  }
+
   function writeLocal(book, place, own) {
     const id = identity();
     if (!id) return;
@@ -420,7 +426,7 @@ export function createSaver(o) {
       updated_at: new Date(Math.min(now() + skew, capAt(book, r))).toISOString(),
       device: device,
       own: !!own,
-      acked: !!(r && r.book === book && samePlace(place, r.acked) && !r.conflict)
+      acked: !!(r && r.book === book && nearPlace(place, r.acked) && !r.conflict)
     });
     stored(function (s) { s.setItem(localKey(id, book), value); });
   }
@@ -453,7 +459,7 @@ export function createSaver(o) {
   // A save of this place was stored: the local copy of it is acknowledged.
   function ackLocal(book, place) {
     editLocal(book, function (v) {
-      if (v.acked === true || String(v.track) !== place.track || v.offset_ms !== place.offset_ms) return false;
+      if (v.acked === true || !nearPlace(v, place)) return false;
       v.acked = true;
       return true;
     });
