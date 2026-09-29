@@ -1704,6 +1704,19 @@ await run('handoff: only another device, within 24 h, with a place of its own he
   check('no copy here: none', with_((i) => { i.own = null; }) === null);
   check('a copy never played or moved to here: none', with_((i) => { i.own.own = false; }) === null);
   check('resumed from the local copy or Plex: none', with_((i) => { i.resumed.source = 'local'; }) === null && with_((i) => { i.resumed.source = 'plex'; }) === null);
+  // Plex stamps a paused part again when it ends the session a minute later:
+  // its copy at WebServarr's place is that save, not a newer one.
+  const echo = (fn) => with_((i) => {
+    i.web = { track: '502', offset_ms: 300000, updated_at: ago(5 * MIN), device: 'Chrome on Android', device_id: OTHER };
+    i.resumed = { source: 'plex', track: '502', offset_ms: 300000, updated_at: ago(3 * MIN), device: 'Plex', device_id: '', bookMs: 900000 };
+    if (fn) fn(i);
+  });
+  const e1 = echo();
+  check('Plex echoing the other device\'s save: offered, as that device, from that save\'s time', e1 && e1.other.device === 'Chrome on Android' && e1.other.agoMs === 5 * MIN, e1);
+  check('an echo up to 30 s off (a playing session ended late) counts', echo((i) => { i.resumed.offset_ms = 330000; }) !== null);
+  check('Plex further on: its own place, none', echo((i) => { i.resumed.offset_ms = 330001; }) === null);
+  check('Plex in another part: none', echo((i) => { i.resumed.track = '503'; }) === null);
+  check('Plex echoing this device\'s save: none', echo((i) => { i.web.device_id = ME; }) === null);
   check('the question', F.handoffMessage(offer) === 'Continue from 15:00 (Chrome on Android, 5 min ago)?', F.handoffMessage(offer));
   check('an unnamed device', F.handoffMessage({ other: { bookMs: 3723000, device: '', agoMs: 30000 } }) === 'Continue from 1:02:03 (another device, just now)?');
   check('ago', F.formatAgo(59999) === 'just now' && F.formatAgo(60000) === '1 min ago' && F.formatAgo(3599999) === '59 min ago' &&
@@ -1777,6 +1790,19 @@ await run('handoff at open: Start from here moves to this device\'s place and sa
   t.engine.close();
 });
 
+await run('handoff at open: Plex\'s later stamp of the same place still asks', async () => {
+  const t = await handoffSetup();
+  t.setOwn('501', 100000, 3600000);
+  t.places = {
+    web: t.other('502', 300000, 5 * MIN),
+    plex: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(t.serverNow() - 4 * MIN).toISOString(), device: 'Plex', source: 'plex' }
+  };
+  await t.open();
+  check('resumed from Plex\'s copy', t.st().resumedFrom && t.st().resumedFrom.source === 'plex');
+  check('held, and asked as the other device', !t.st().playing && t.prompts().join() === 'Continue from 15:00 (Chrome on Android, 5 min ago)?', t.prompts());
+  t.engine.close();
+});
+
 await run('handoff at open: Play pressed instead plays from the other device\'s place', async () => {
   const t = await handoffSetup();
   t.setOwn('501', 100000, 3600000);
@@ -1796,7 +1822,11 @@ for (const [what, arrange] of [
   ['this device has no place of its own', (t) => { t.places = { web: t.other('502', 300000, 5 * MIN) }; }],
   ['this device only ever opened it', (t) => { t.setOwn('501', 100000, 3600000, false); t.places = { web: t.other('502', 300000, 5 * MIN) }; }],
   ['the places are 30 s apart', (t) => { t.setOwn('502', 270000, 3600000); t.places = { web: t.other('502', 300000, 5 * MIN) }; }],
-  ['this device\'s place is the newest', (t) => { t.setOwn('501', 100000, 60000); t.places = { web: t.other('502', 300000, 5 * MIN) }; }]
+  ['this device\'s place is the newest', (t) => { t.setOwn('501', 100000, 60000); t.places = { web: t.other('502', 300000, 5 * MIN) }; }],
+  ['Plex has a newer place of its own', (t) => {
+    t.setOwn('501', 100000, 3600000);
+    t.places = { web: t.other('502', 300000, 5 * MIN), plex: { track: '502', offset_ms: 400000, duration_ms: 900000, updated_at: new Date(t.serverNow() - 60000).toISOString(), device: 'Plex', source: 'plex' } };
+  }]
 ]) {
   await run(`no handoff when ${what}: it plays at once`, async () => {
     const t = await handoffSetup();

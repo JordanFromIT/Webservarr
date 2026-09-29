@@ -273,11 +273,19 @@ function ageOf(nowIso, atIso) {
 /* The handoff question for an open (the engine's setOpenGate info), or null.
    Only when the book resumes from WebServarr's copy, saved by another device
    in the last 24 hours (in the server's clock), and this browser has its own
-   place in the book (played or moved to here) more than 30 s from it. */
+   place in the book (played or moved to here) more than 30 s from it.
+   Plex's copy at WebServarr's place (the same part, within 30 s) is that
+   save echoed: Plex stamps a paused part again when it ends the session a
+   minute or so later, so it looks newer. It counts as WebServarr's copy. */
 export function handoffOffer(info) {
   const i = info || {};
-  const r = i.resumed;
+  let r = i.resumed;
   const own = i.own;
+  const web = i.web;
+  if (r && r.source === 'plex' && web && typeof web === 'object' && String(web.track) === String(r.track) &&
+      Math.abs(num(web.offset_ms) - num(r.offset_ms)) <= HANDOFF_APART_MS) {
+    r = { source: 'web', device: web.device, device_id: web.device_id, updated_at: web.updated_at, bookMs: r.bookMs };
+  }
   if (!r || r.source !== 'web' || !otherDevice(r, i.me)) return null;
   const age = ageOf(i.now, r.updated_at);
   if (!(age <= HANDOFF_WITHIN_MS)) return null;
