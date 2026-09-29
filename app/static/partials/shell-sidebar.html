@@ -96,5 +96,8 @@
 
 <!-- The audiobook player's engine (WS.player): one <audio> in #wsPlayer for
      the life of the document, so soft navigation never stops it. After the
-     router: modules run in order, and both after shell.js made window.WS. -->
+     router: modules run in order, and both after shell.js made window.WS.
+     Its saves (WS.playerSaves) load just before it, as a module of their own,
+     so each file carries its own asset stamp. -->
+<script type="module" src="/static/js/player/saves.js?v=1"></script>
 <script type="module" src="/static/js/player/engine.js?v=1"></script>

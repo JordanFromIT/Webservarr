@@ -101,6 +101,7 @@ jobs:
           node app/tests/js/service_status.mjs
           node app/tests/js/reader_progress.mjs
           node app/tests/js/player_engine.mjs
+          node app/tests/js/player_saves.mjs
 
   build-and-push:
     needs: [test, js-checks]

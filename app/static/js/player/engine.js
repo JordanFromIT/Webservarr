@@ -44,13 +44,22 @@
  *   UnknownTrack                   open()'s rejection for a place not in the book
  *
  * In the browser, window.WS.player:
- *   open(key, { at: { track, offset_ms }, autoplay }) -> Promise<void>
- *       loads the book (at its start, or at the place given) and plays it
- *       (autoplay false: loads only). Resolves once playback is set going;
- *       a failure is an 'error' event and state().error. It rejects only
- *       with UnknownTrack: the place given is in a part the book does not
- *       have; then nothing is loaded and no place is reported (the
- *       'loading' change is followed by a 'close' one, no book, no place).
+ *   open(key, { at: { track, offset_ms }, autoplay, resume }) -> Promise<void>
+ *       loads the book (at the place given, else where the listener left
+ *       off, else its start) and plays it (autoplay false: loads only).
+ *       Resolves once playback is set going; a failure is an 'error' event
+ *       and state().error. It rejects only with UnknownTrack: the place
+ *       given is in a part the book does not have; then nothing is loaded
+ *       and no place is reported (the 'loading' change is followed by a
+ *       'close' one, no book, no place).
+ *       Where the listener left off (with a saver, and no at; resume: false
+ *       skips it): the newest of WebServarr's copy, Plex's and this
+ *       browser's (GET /api/player/position/<key> and the local copy), the
+ *       next newest when a copy's part is not in the book, else the start
+ *       with a 'warning' { kind: 'resume-lost' }. A local copy that wins is
+ *       sent to the server at once. If the copies cannot be read, the open
+ *       fails like a failed book fetch (with a retry), so nothing ever
+ *       starts from 0 over a place it did not see.
  *   play(), pause(), toggle()
  *   seek(bookMs), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters
  *   setSpeed(x)       0.75 to 2 in 0.05 steps (clamped, rounded); returns the speed
@@ -64,9 +73,13 @@
  *                       chapters, chapterIndex, trackIndex, bookMs, bookDurationMs,
  *                       position: { track, offset_ms, duration_ms } | null,
  *                       playing, loading, speed, connection: 'local'|'remote'|null,
- *                       error: { code, message } | null, lastSavedAt, saveError }
+ *                       error: { code, message } | null, lastSavedAt, saveError,
+ *                       resumedFrom: { source, device, updated_at } | null }
  *       bookMs is the playhead (what to show); position is the place to save.
  *       They differ only while a skipped part's successor has not played yet.
+ *       lastSavedAt: ms (this device's clock) of the last save the server
+ *       took, or null; saveError: the "not saved" warning is showing.
+ *       resumedFrom: which copy open() resumed from ('web', 'plex', 'local').
  *   on(event, fn) -> unsubscribe; fn gets one object:
  *     'change'   { reason, state } and, for 'seek' | 'skip' | 'jump', from and to
  *                (book ms). reason: 'loading' (a book is being fetched), 'open'
@@ -74,11 +87,20 @@
  *                element's timeupdate while playing), 'seek', 'skip', 'jump',
  *                'part' (one part ended, the next starts at 0), 'part-skipped',
  *                'connection' (switched, or refreshed its token), 'speed',
- *                'ready' (loaded, not playing), 'retry', 'error', 'ended', 'close'
+ *                'ready' (loaded, not playing), 'retry', 'error', 'ended', 'close',
+ *                'save' (state().saveError changed)
  *     'ended'    { state } at the end of the last part
  *     'error'    { code, message, retry: function | null }; code 'unreachable',
  *                'part', 'forbidden', 'not-found', 'signed-out', 'busy', 'empty'
  *     'warning'  { kind: 'part-skipped', message }
+ *                { kind: 'resume-lost', message } (see open)
+ *                { kind: 'not-saved', active, lastSavedAt, message } (saves.js):
+ *                active true: "Your place isn't being saved. Last saved <time>."
+ *                to show; false: it cleared
+ *
+ * Saving (saves.js) is injected as env.saver: the engine hands it every
+ * change and opens and stops it with each book. Without one (the engine's
+ * own tests) nothing is saved and open() does not look for a place.
  */
 
 export const PROBE_MS = 1500;          // the local connection's probe
@@ -91,6 +113,7 @@ export const SKIP_S = 10;              // Media Session seek back and forward: t
 export const SKIP_MIN_S = 5;
 export const SKIP_MAX_S = 60;
 export const UNREACHABLE = "Can't reach the media server";
+export const RESUME_LOST = "Couldn't find your saved place in this book";
 
 const MEDIA_ERR_ABORTED = 1;
 const MEDIA_ERR_NETWORK = 2;
@@ -197,7 +220,7 @@ function roundSpeed(x) {
 
 /* env: { host (where the element goes), createAudio(), fetch, setTimeout,
    clearTimeout, mediaSession, MediaMetadata, permissions, baseUrl,
-   skipSeconds }. */
+   skipSeconds, saver (saves.js createSaver) }. */
 export function createEngine(env) {
   const setT = env.setTimeout;
   const clearT = env.clearTimeout;
@@ -205,6 +228,7 @@ export function createEngine(env) {
   const session = env.mediaSession || null;
   const Metadata = env.MediaMetadata || null;
   const baseUrl = env.baseUrl || '';
+  const saver = env.saver || null;
   let skipS = roundSkip(env.skipSeconds) || SKIP_S;
 
   const audio = env.createAudio();
@@ -221,6 +245,7 @@ export function createEngine(env) {
   let stream = null;
   let lastOpen = null;        // { key, opts } of the last open(), for its retry
   let openGen = 0;
+  let resumedFrom = null;     // { source, device, updated_at } the open resumed from
 
   // Where: the loaded part and its connection, the playhead, where the load
   // is heading, and the place held after a skipped part.
@@ -261,6 +286,15 @@ export function createEngine(env) {
   let probeCount = 0;
   let sessionReady = false;
 
+  // The saves' warning: an event to show or clear, and a change so a view
+  // drawn from state() follows.
+  if (saver && typeof saver.onWarning === 'function') {
+    saver.onWarning(function (w) {
+      emit('warning', w);
+      changed('save');
+    });
+  }
+
   // ---- Events ----
 
   function emit(type, detail) {
@@ -275,6 +309,14 @@ export function createEngine(env) {
 
   function changed(reason, extra) {
     const detail = Object.assign({ reason: reason }, extra || {});
+    if (saver) {
+      // First, so this change already carries what saving it changed.
+      try {
+        saver.note({ reason: reason, state: state() });
+      } catch (e) {
+        console.error('[player] saving failed', e);
+      }
+    }
     detail.state = state();
     emit('change', detail);
     if (reason !== 'time') sessionPosition();
@@ -316,8 +358,9 @@ export function createEngine(env) {
       speed: speed,
       connection: book && cur ? cur.side : null,
       error: error ? { code: error.code, message: error.message } : null,
-      lastSavedAt: null,
-      saveError: false
+      lastSavedAt: saver ? saver.lastSavedAt : null,
+      saveError: saver ? !!saver.warning : false,
+      resumedFrom: resumedFrom
     };
   }
 
@@ -794,6 +837,31 @@ export function createEngine(env) {
     return data;
   }
 
+  /* This listener's saved copies of the place: { web, plex }, either null.
+     Fails like fetchBook, so the open fails rather than starting from 0 over
+     a place it could not see. */
+  async function fetchPlaces(key) {
+    let resp;
+    try {
+      resp = await fetchFn('/api/player/position/' + encodeURIComponent(key), {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      });
+    } catch (e) {
+      throw { status: 0, detail: '' };
+    }
+    if (!resp.ok) throw { status: resp.status, detail: '' };
+    let data;
+    try {
+      data = await resp.json();
+    } catch (e) {
+      throw { status: 0, detail: '' };
+    }
+    if (!data || typeof data !== 'object') throw { status: 0, detail: '' };
+    return { web: data.web || null, plex: data.plex || null };
+  }
+
   function makeBook(key, data) {
     const tracks = data.tracks.map(function (t) {
       return Object.freeze({
@@ -838,6 +906,15 @@ export function createEngine(env) {
 
   // Stops whatever plays and forgets the book (the connection choice stays).
   function teardown() {
+    // The saves first, while they still know the place: its last save.
+    if (saver) {
+      try {
+        saver.stop();
+      } catch (e) {
+        console.error('[player] saving failed', e);
+      }
+    }
+    resumedFrom = null;
     gen += 1;
     wantPlay = false;
     pending = true;
@@ -885,9 +962,20 @@ export function createEngine(env) {
     lastOpen = { key: key, opts: opts };
     setLoading(true);
     changed('loading');
+    const resume = !!saver && !opts.at && opts.resume !== false;
+    const placesAsked = resume ? fetchPlaces(key).then(
+      function (v) { return { places: v }; },
+      function (e) { return { failed: e }; }
+    ) : null;
     let data;
+    let places = null;
     try {
       data = await fetchBook(key, false);
+      if (placesAsked) {
+        const got = await placesAsked;
+        if (got.failed) throw got.failed;
+        places = got.places;
+      }
     } catch (e) {
       if (my !== openGen) return;
       const err = openError(e, function () { return open(key, opts); });
@@ -919,12 +1007,46 @@ export function createEngine(env) {
       }
       startMs = b;
     }
+    // Where the listener left off: the newest copy whose part the book has.
+    let resumed = null;
+    let lost = false;
+    if (places) {
+      let order = [];
+      try {
+        order = saver.resumeFrom(key, places) || [];
+      } catch (e) {
+        console.error('[player] saving failed', e);
+      }
+      for (const c of order) {
+        const b = toBookMs(book.tracks, c.track, c.offset_ms);
+        if (b !== null) {
+          startMs = b;
+          resumed = c;
+          break;
+        }
+      }
+      lost = order.length > 0 && !resumed;
+    }
     const to = toTrackOffset(book.tracks, startMs);
     playhead = { index: to.index, offset: to.offset_ms };
     target = { index: to.index, offset: to.offset_ms };
+    resumedFrom = resumed ? { source: resumed.source, device: resumed.device, updated_at: resumed.updated_at } : null;
+    if (saver) {
+      try {
+        saver.start(key, {
+          // A local copy newer than the server's goes to the server at once.
+          push: !!(resumed && resumed.source === 'local'),
+          savedAt: places && places.web ? places.web.updated_at : null,
+          held: resumed && resumed.source === 'web' ? resumed : null
+        });
+      } catch (e) {
+        console.error('[player] saving failed', e);
+      }
+    }
     installSession();
     sessionMetadata();
     changed('open');
+    if (lost) emit('warning', { kind: 'resume-lost', message: RESUME_LOST });
     const side = await chooseSide(to.index);
     if (my !== openGen || !book) return;
     if (!side) {
@@ -1169,6 +1291,9 @@ export function boot(win, overrides) {
   const host = doc.getElementById('wsPlayer');
   if (!host) return null;
   const nav = win.navigator || {};
+  // Saving comes from saves.js, loaded as its own module just before this
+  // one (WS.playerSaves), so each file keeps its own asset stamp.
+  const saves = WS.playerSaves;
   const engine = createEngine(Object.assign({
     host: host,
     createAudio: function () { return doc.createElement('audio'); },
@@ -1178,7 +1303,9 @@ export function boot(win, overrides) {
     mediaSession: nav.mediaSession || null,
     permissions: nav.permissions || null,
     MediaMetadata: win.MediaMetadata || null,
-    baseUrl: win.location.href
+    baseUrl: win.location.href,
+    saver: overrides && 'saver' in overrides ? null
+      : saves && typeof saves.browserSaver === 'function' ? saves.browserSaver(win) : null
   }, overrides || {}));
   WS.player = engine;
   return engine;
