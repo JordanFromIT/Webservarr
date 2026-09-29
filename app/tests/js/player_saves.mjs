@@ -1998,6 +1998,125 @@ current = 'the local copy is this device\'s own once the listener played or move
   t3.saver.stop();
 }
 
+// ---- A paused, saved run never sends its drift over a newer place ----
+current = 'two devices: the drift after a saved pause is not sent over the other device\'s newer place';
+{
+  const clock = fakeClock();
+  const server = fakeServer(clock);
+  const A = makeSaver({ clock, server });
+  const B = makeSaver({ clock, server });
+  const a = listener(A);
+  a.offset = 100000;
+  A.saver.start('500:1');
+  a.open();
+  a.play();
+  await a.listen(12000);
+  a.pause();
+  await clock.advance(1500);
+  const saved = server.row;
+  check('A\'s pause is saved', saved && saved.psid === A.saver.psid && saved.event === 'pause' && saved.offset_ms === a.offset, saved);
+  // The element's last timeupdate lands a moment past the pause.
+  a.offset += 250;
+  a.emit('time');
+  check('the local copy follows the drift', localOf(A).offset_ms === a.offset, localOf(A));
+  await clock.advance(3000);
+  // B, another device, saves a newer place.
+  const b = listener(B);
+  b.offset = 900000;
+  B.saver.start('500:1');
+  b.open();
+  b.play();
+  await b.listen(2000);
+  b.pause();
+  await clock.advance(1500);
+  check('B\'s place is stored', server.row.psid === B.saver.psid && server.row.offset_ms === b.offset, server.row);
+  const n = server.calls.length;
+  // A closes, within 2 minutes: a hidden page, pagehide, the router's hard exit, then stop().
+  A.saver.flush('beacon');
+  A.saver.flush('beacon', 'leave');
+  A.saver.flush('fetch');
+  A.saver.stop();
+  await clock.advance(20000);
+  check('A sends nothing', server.calls.length === n, server.calls.slice(n).map((c) => [c.kind, c.body.event, c.body.offset_ms]));
+  check('the server keeps B\'s place', server.row.psid === B.saver.psid && server.row.offset_ms === b.offset, server.row);
+  B.saver.stop();
+}
+
+current = 'a paused run that is really unsaved still sends its last save';
+{
+  // A skip while paused whose save has not been taken (it hangs): stop() sends it.
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1');
+  p.open();
+  p.play();
+  await p.listen(3000);
+  p.pause();
+  await t.clock.advance(1500);
+  t.server.mode = 'hang';
+  p.seek(p.offset + 30000, 'skip');
+  await t.clock.advance(100);
+  t.server.mode = 200;
+  const n = t.server.calls.length;
+  t.saver.stop();
+  await t.clock.advance(20000);
+  const finals = t.server.calls.slice(n);
+  check('the final goes, at the skipped-to place', finals.length === 1 && finals[0].body.event === 'leave' && finals[0].body.offset_ms === p.offset, finals.map((c) => [c.body.event, c.body.offset_ms]));
+  check('stored', t.server.row.offset_ms === p.offset && t.server.row.event === 'leave');
+}
+
+for (const [drift, sent] of [[1000, false], [1001, true], [-1000, false], [-1001, true]]) {
+  current = `a paused drift of ${drift} ms ${sent ? 'is' : 'is not'} a new place`;
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1');
+  p.open();
+  p.play();
+  await p.listen(3000);
+  p.pause();
+  await t.clock.advance(1500);
+  const at = p.offset;
+  p.offset = at + drift;
+  p.emit('time');
+  const n = t.server.calls.length;
+  t.saver.flush('beacon', 'leave');
+  t.saver.stop();
+  await t.clock.advance(20000);
+  const after = t.server.calls.slice(n);
+  if (sent) {
+    check('its beacon leave carries it', after.length >= 1 && after[0].kind === 'beacon' && after[0].body.event === 'leave' && after[0].body.offset_ms === at + drift, after.map((c) => [c.kind, c.body.event, c.body.offset_ms]));
+    check('and the server has it', t.server.row.offset_ms === at + drift);
+  } else {
+    check('nothing is sent', after.length === 0, after.map((c) => [c.kind, c.body.event, c.body.offset_ms]));
+    check('the server keeps the pause', t.server.row.offset_ms === at && t.server.row.event === 'pause');
+  }
+}
+
+current = 'playing again after the drift saves as ever';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1');
+  p.open();
+  p.play();
+  await p.listen(3000);
+  p.pause();
+  await t.clock.advance(1500);
+  p.offset += 250;
+  p.emit('time');
+  const n = t.server.calls.length;
+  p.play();
+  await p.listen(1500);
+  check('the play is saved at once', t.server.calls.length > n && t.server.calls[n].body.event === 'play', t.server.calls.slice(n).map((c) => c.body.event));
+  const before = t.server.calls.length;
+  t.saver.stop();
+  await t.clock.advance(2000);
+  check('and a close while playing sends its leave', t.server.calls.length === before + 1 && t.server.calls[before].body.event === 'leave');
+}
+
 if (failed) {
   realError(`${failed}/${total} player saves cases FAILED`);
   process.exit(1);

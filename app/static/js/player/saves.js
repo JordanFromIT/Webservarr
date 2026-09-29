@@ -29,6 +29,9 @@
  * and the listener is sent to sign in (shell.js WS.leaveTo, through the
  * router, so ws:before-hard-nav runs first).
  * Hard exits (ws:before-hard-nav, pagehide, the page hidden) send a beacon.
+ * A paused place within 1 s of the one the server took (the element's last
+ * timeupdate lands just past a saved pause) is that saved place: it is not
+ * sent again, by a save, a beacon or stop()'s last save.
  * Smart rewind (a change the engine marks { rewind: true }) never moves the
  * saved place back: until playback passes the place it went back from, that
  * place is what every save (and the local copy) carries; the listener's own
@@ -107,6 +110,7 @@ export const POST_TIMEOUT_MS = 15000;   // a save not answered by then has faile
 export const PLEX_ECHO_MS = 2000;       // Plex's copy of a save forwarded to it is stamped a moment later
 export const FRESH_MS = 120000;         // an unsaved place older than this stays local (see sendable)
 export const FREEZE_MS = 5000;          // a silence this long while playing: the page was frozen
+export const DRIFT_MS = 1000;           // paused, this close to the saved place is the saved place
 export const NOT_SAVED = "Your place isn't being saved.";
 
 const CHECKIN_URL = '/api/player/checkin';
@@ -416,8 +420,18 @@ export function createSaver(o) {
     };
   }
 
+  /* Paused within DRIFT_MS of the place the server took, on its part: the
+     element's last timeupdate after a pause lands a moment past the saved
+     pause (about 250 ms). That is the saved place, not a new one: a close
+     or a hard exit must not send it as a 'leave' over a newer place another
+     device saved meanwhile. The local copy still follows it. */
+  function nearAcked(r) {
+    return !r.playing && !!r.acked && r.latest.track === r.acked.track &&
+      Math.abs(r.latest.offset_ms - r.acked.offset_ms) <= DRIFT_MS;
+  }
+
   function dirty(r) {
-    return !!r.latest && (r.event !== null || !samePlace(r.latest, r.acked));
+    return !!r.latest && (r.event !== null || (!samePlace(r.latest, r.acked) && !nearAcked(r)));
   }
 
   /* May this place go to the server? Only one the listener played or moved
