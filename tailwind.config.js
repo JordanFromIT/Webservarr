@@ -14,6 +14,7 @@ module.exports = {
     "./app/static/js/*.js",
     "./app/static/js/settings/*.js",
     "./app/static/js/pages/*.js",
+    "./app/static/js/player/*.js",
     "./app/pages.py",
   ],
   darkMode: "class",

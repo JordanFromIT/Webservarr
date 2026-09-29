@@ -93,3 +93,8 @@
 <!-- Soft navigation (router.js). A module runs after the page is parsed, so
      shell.js (a classic script at the end of every page) has made window.WS. -->
 <script type="module" src="/static/js/router.js?v=1"></script>
+
+<!-- The audiobook player's engine (WS.player): one <audio> in #wsPlayer for
+     the life of the document, so soft navigation never stops it. After the
+     router: modules run in order, and both after shell.js made window.WS. -->
+<script type="module" src="/static/js/player/engine.js?v=1"></script>
