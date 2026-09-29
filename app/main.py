@@ -21,6 +21,7 @@ from app.database import init_db, SessionLocal
 from app.auth import session_manager
 from app.seed import seed_secret_key
 from app.pages import render_page
+from app.integrations import plex_player
 from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
@@ -604,6 +605,23 @@ async def settings_page(
     if user.get("is_admin") != "true":
         return RedirectResponse(url="/", status_code=302)
     return render_page("settings", request, user)
+
+
+# The audiobook player's test launcher (admin only, not in the navigation)
+@app.get("/player-test", response_class=HTMLResponse, include_in_schema=False)
+async def player_test_page(
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Every audiobook with a Play button, for admins testing the player.
+
+    Anyone else, signed in or not, and everyone while the player is off, gets
+    the 404 an unknown address gets: the page is not there for them. Rate
+    limited by the app limiter's default, as every page is."""
+    user = await _require_session(session_id)
+    if not user or user.get("is_admin") != "true" or not plex_player.player_on():
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+    return render_page("player-test", request, user)
 
 
 @app.get("/settings/next", include_in_schema=False)
