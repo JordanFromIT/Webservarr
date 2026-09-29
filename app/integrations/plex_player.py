@@ -165,10 +165,19 @@ async def _pms_get(client: httpx.AsyncClient, admin: dict, token: str, path: str
         logger.warning("Plex returned HTTP %d for %s", resp.status_code, path)
         raise PlayerUnavailable("Plex is unavailable")
     try:
-        return (resp.json() or {}).get("MediaContainer") or {}
+        body = resp.json()
     except ValueError:
         logger.warning("Plex sent a response that is not JSON for %s", path)
         raise PlayerUnavailable("Plex is unavailable") from None
+    # An empty answer is an empty container, as before; any other shape than
+    # {"MediaContainer": {...}} is Plex misbehaving, not a crash here.
+    container = body.get("MediaContainer") if isinstance(body, dict) else None
+    if container is None:
+        container = {}
+    if not isinstance(body, (dict, type(None))) or not isinstance(container, dict):
+        logger.warning("Plex sent a response of an unexpected shape for %s", path)
+        raise PlayerUnavailable("Plex is unavailable")
+    return container
 
 
 def _pms_client() -> httpx.AsyncClient:
@@ -956,13 +965,20 @@ async def transcode(session: dict, track_key: str, client: str, session_id: Opti
         logger.warning("Plex transcode decision returned HTTP %d", resp.status_code)
         raise PlayerUnavailable("Plex is unavailable")
     try:
-        container = (resp.json() or {}).get("MediaContainer") or {}
+        body = resp.json()
     except ValueError:
         logger.warning("Plex sent a transcode decision that is not JSON")
         raise PlayerUnavailable("Plex is unavailable") from None
+    container = body.get("MediaContainer") if isinstance(body, dict) else None
+    items = container.get("Metadata") if isinstance(container, dict) else None
+    item = items[0] if isinstance(items, list) and items else {}
+    media = item.get("Media") if isinstance(item, dict) else None
+    if not isinstance(container, dict) or not isinstance(items, (list, type(None))) \
+            or not isinstance(item, dict) or not isinstance(media, (list, type(None))):
+        logger.warning("Plex sent a transcode decision of an unexpected shape")
+        raise PlayerUnavailable("Plex is unavailable")
     # 1xxx: Plex will play it (1001: "Direct play not available; Conversion OK").
     code = _int(container.get("generalDecisionCode"))
-    media = ((container.get("Metadata") or [{}])[0] or {}).get("Media") or []
     if not 1000 <= code < 2000 or not media:
         logger.info("Plex will not convert a track (decision %d)", code)
         raise CannotConvert("Plex will not convert this track")
@@ -984,7 +1000,10 @@ async def stop_transcode(session: dict, transcode_session: str, session_id: Opti
                                     params={"session": transcode_session},
                                     headers={"X-Plex-Token": access["token"]})
         # 404: already over (Plex ended it, or it never started).
-        if resp.status_code not in (200, 404):
+        if resp.status_code == 401:
+            logger.warning("Plex refused the server token for a transcode stop (HTTP 401); access will be fetched again")
+            await forget_access(session, session_id)
+        elif resp.status_code not in (200, 404):
             logger.warning("Plex transcode stop returned HTTP %d", resp.status_code)
     except (PlayerUnavailable, NotInLibrary) as exc:
         logger.info("Plex transcode stop skipped: %s", exc)

@@ -190,6 +190,7 @@ class FakePlex:
         self.pms_down = None
         self.timeline_down = False
         self.reject_tokens = set()    # tokens the server answers 401 to
+        self.reject_stop_tokens = set()  # tokens only the transcode stop answers 401 to
         self.identity = MACHINE
         # Per-token listening state: {token: {track rk: {viewOffset...}}}
         self.state = {}
@@ -203,6 +204,8 @@ class FakePlex:
         self.stop_status = 200
         self.decided = []
         self.stopped = []
+        # path -> a JSON body answered as is (200), for odd shapes.
+        self.raw = {}
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -243,6 +246,10 @@ class FakePlex:
             return httpx.Response(401, text="unauthorized")
         path = url.path
         q = parse_qs(url.query.decode() if isinstance(url.query, bytes) else url.query)
+        if path in self.raw:
+            if path.endswith("/decision"):
+                self.decided.append({k: v[0] for k, v in q.items()})
+            return httpx.Response(200, json=self.raw[path])
         if path == "/identity":
             return self.mc(machineIdentifier=self.identity)
         if path == "/library/sections":
@@ -261,6 +268,8 @@ class FakePlex:
                                       "Media": [{"container": "mp3", "audioCodec": "mp3", "selected": True}]}])
         if path == "/music/:/transcode/universal/stop":
             self.stopped.append(q.get("session", [""])[0])
+            if token in self.reject_stop_tokens:
+                return httpx.Response(401, text="unauthorized")
             return httpx.Response(self.stop_status, text="")
         if path == "/:/timeline":
             if self.timeline_down:
@@ -1144,6 +1153,40 @@ class Transcode(BridgeBase):
                 self.assertFalse(pp.transcode_session_ok(bad))
                 self.run_async(pp.stop_transcode(listener(), bad, session_id=SID))
         self.assertEqual(self.plex.stopped, [])
+
+    def test_a_401_on_stop_drops_the_cached_access(self):
+        self.plex.reject_stop_tokens.add(SERVER_TOKEN)
+        s = listener()
+        self.assertIsNone(self.run_async(pp.stop_transcode(s, "ws" + "3" * 32, session_id=SID)))
+        self.assertEqual(self.plex.stopped, ["ws" + "3" * 32])
+        self.assertNotIn(pp.SERVER_FIELD, s)
+        self.assertEqual(self.update_session.await_args_list[-1].args, (SID, {pp.SERVER_FIELD: ""}))
+
+    def test_a_decision_of_an_unexpected_shape_is_player_unavailable(self):
+        path = "/music/:/transcode/universal/decision"
+        for body in ([], [{"MediaContainer": {}}], {"MediaContainer": []}, {"MediaContainer": "x"},
+                     {"MediaContainer": {"generalDecisionCode": 1001, "Metadata": {"Media": []}}},
+                     {"MediaContainer": {"generalDecisionCode": 1001, "Metadata": ["x"]}},
+                     {"MediaContainer": {"generalDecisionCode": 1001, "Metadata": [{"Media": {"a": 1}}]}}):
+            with self.subTest(body=body):
+                self.plex.raw[path] = body
+                with self.assertRaises(pp.PlayerUnavailable):
+                    self.run_async(pp.transcode(listener(), "101", self.CLIENT, session_id=SID))
+
+    def test_any_plex_read_of_an_unexpected_shape_is_player_unavailable(self):
+        for body in ([], ["x"], {"MediaContainer": []}, {"MediaContainer": ["x"]}, {"MediaContainer": 5}):
+            with self.subTest(body=body):
+                self.plex.raw["/library/metadata/100"] = body
+                with self.assertRaises(pp.PlayerUnavailable):
+                    self.run_async(pp.book_detail("100:1"))
+                with self.assertRaises(pp.PlayerUnavailable):
+                    self.run_async(pp.assert_in_library("100:1"))
+        # An empty answer is still an empty container (not in the library).
+        for body in ({}, {"MediaContainer": None}, {"MediaContainer": {}}):
+            with self.subTest(body=body):
+                self.plex.raw["/library/metadata/100"] = body
+                with self.assertRaises(pp.NotInLibrary):
+                    self.run_async(pp.assert_in_library("100:1"))
 
     def test_stop_never_raises(self):
         sid = "ws" + "1" * 32

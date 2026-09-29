@@ -366,6 +366,11 @@ export function createEngine(env) {
   let tc = null;
   let restartTimer = null;
   let asking = false;         // the part being loaded waits for its session
+  // Where a transcoded stream last ended early, cleanly ({ index, offset }):
+  // Plex dropping the session, or the part's real audio being shorter than
+  // Plex's length for it. A stream there that then gives nothing tells them
+  // apart.
+  let earlyEnd = null;
   const asks = new Set();
   if (typeof env.onPageHide === 'function') {
     // Leaving the page: nothing will read the stream again.
@@ -707,6 +712,16 @@ export function createEngine(env) {
       if (wantPlay) startPlay();
       return;
     }
+    if (offset > 0 && offset >= durationOf(book.tracks[index]) - END_SLACK_MS) {
+      // At (or within END_SLACK_MS of) the part's end: nothing to convert.
+      // The part is over, once whoever loaded it has told its listeners.
+      release();
+      dropSession();
+      Promise.resolve().then(function () {
+        if (g === gen && book) partEnded(index, side);
+      });
+      return;
+    }
     if (reuse && tc && tc.index === index) {
       startStream(tc);
       return;
@@ -828,10 +843,10 @@ export function createEngine(env) {
     if (!book || !cur) return;
     disarm();
     if (pending && seekApplied) pending = false;
-    // This connection works: the failure ladder starts afresh next time.
+    // This connection answers. The failure ladder starts afresh only once it
+    // has really played (timeupdate): a stream that starts and at once ends
+    // or fails keeps the ladder where it was, so it cannot loop.
     chosen = cur.side;
-    tried.clear();
-    refreshed = false;
     if (loading) {
       setLoading(false);
       changed('play');
@@ -855,9 +870,16 @@ export function createEngine(env) {
     if (off > d) off = d;
     const moved = !playhead || playhead.index !== cur.index || playhead.offset !== off;
     playhead = { index: cur.index, offset: off };
-    if (hold && !audio.paused && off >= target.offset + PLAYED_MS) hold = null;
-    // A part loaded again after failing plays on (not just starts): it is fine.
-    if (partSuspect && !audio.paused && off >= target.offset + PLAYED_MS) partSuspect = null;
+    if (!audio.paused && off >= target.offset + PLAYED_MS) {
+      // Real playback (1 s of it, not just a start): the place held after a
+      // skipped part moves on, a part loaded again after failing is fine,
+      // and this connection works, so the failure ladder starts afresh.
+      hold = null;
+      partSuspect = null;
+      earlyEnd = null;
+      tried.clear();
+      refreshed = false;
+    }
     if (moved && wantPlay && !audio.paused) disarm();
     changed('time');
   });
@@ -884,30 +906,55 @@ export function createEngine(env) {
     if (!book || !cur || !audio.ended) return;
     const i = cur.index;
     if (isTranscoded(i)) {
-      // Plex ending a session (stopped, or idle too long) ends its stream
-      // early, cleanly: that is a dropped stream, not the end of the part.
       const off = cur.base + Math.round(Number(audio.currentTime) * 1000);
       if (!(off >= durationOf(book.tracks[i]) - END_SLACK_MS)) {
+        // Ended early, cleanly. Plex dropping the session (stopped, or idle
+        // too long) looks like this: a dropped stream, not the end. But a
+        // stream that gives nothing at the very place the last one ended
+        // says the part's real audio ends there.
+        if (off < cur.base + PLAYED_MS && endedHere(i, cur.base)) {
+          partEnded(i, cur.side);
+          return;
+        }
+        earlyEnd = { index: i, offset: playhead ? playhead.offset : off };
         fail('network');
         return;
       }
     }
+    partEnded(i, cur.side);
+  });
+
+  function endedHere(index, offset) {
+    return !!(earlyEnd && earlyEnd.index === index && Math.abs(earlyEnd.offset - offset) <= PLAYED_MS);
+  }
+
+  /* The part is over: the next one starts at 0, or the book has ended. */
+  function partEnded(i, side) {
     hold = null;
     partSuspect = null;
+    earlyEnd = null;
     if (i + 1 < book.tracks.length) {
-      load(i + 1, 0, cur.side);
+      load(i + 1, 0, side);
       changed('part');
       return;
     }
     playhead = { index: i, offset: durationOf(book.tracks[i]) };
+    target = { index: i, offset: playhead.offset };
     wantPlay = false;
     disarm();
+    if (isTranscoded(i)) {
+      // Nothing more comes from this stream; its time is not the place.
+      pending = true;
+      seekApplied = false;
+      metaLoaded = false;
+      release();
+    }
     dropSession();
     setLoading(false);
     sessionState();
     changed('ended');
     emit('ended', { state: state() });
-  });
+  }
 
   audio.addEventListener('error', function () {
     const err = audio.error;
@@ -940,6 +987,20 @@ export function createEngine(env) {
     const suspect = partSuspect;
     partSuspect = null;
     setLoading(true);
+
+    if (kind === 'media' && isTranscoded(at.index) && endedHere(at.index, cur.base) &&
+        playhead.offset < cur.base + PLAYED_MS) {
+      // The last stream ended cleanly here, and one from here will not even
+      // start (Plex answers a place past a part's real audio with nothing it
+      // can play). If Plex converts the part from its start on this
+      // connection, the part's audio ends here; if not, this is the server.
+      const ok = await probe(side, at.index);
+      if (g !== gen) return;
+      if (ok) {
+        partEnded(at.index, side);
+        return;
+      }
+    }
 
     if (kind === 'media') {
       if (suspect && suspect.index === at.index && suspect.side === side) {
@@ -1210,6 +1271,7 @@ export function createEngine(env) {
     metaLoaded = false;
     partSuspect = null;
     asking = false;
+    earlyEnd = null;
     cancelRestart();
     disarm();
     Array.from(probes.values()).forEach(function (finish) { finish(false); });

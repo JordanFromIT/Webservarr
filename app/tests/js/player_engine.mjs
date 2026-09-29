@@ -137,13 +137,27 @@ const MIXED = {
     { index: 3, label: 'Part 3 of 3', start_ms: 1500000, end_ms: 1800000, track: '903', track_start_ms: 0, track_end_ms: 300000 }
   ]
 };
-const BOOKS = { [MULTI.key]: MULTI, [SINGLE.key]: SINGLE, [OTHER.key]: OTHER, [ATMOS.key]: ATMOS, [MIXED.key]: MIXED };
+// Two transcoded parts in a row.
+const TWIN = {
+  key: '950:1', title: 'Twin Parts', author: 'E. Writer', narrator: '', series: '',
+  cover: '', duration_ms: 1200000, shape: 'parts',
+  tracks: [
+    { key: '951', part_path: '/library/parts/951/1/file.m4b', duration_ms: 600000, index: 1, ...EAC3 },
+    { key: '952', part_path: '/library/parts/952/1/file.m4b', duration_ms: 600000, index: 2, ...EAC3 }
+  ],
+  chapters: [
+    { index: 1, label: 'Part 1 of 2', start_ms: 0, end_ms: 600000, track: '951', track_start_ms: 0, track_end_ms: 600000 },
+    { index: 2, label: 'Part 2 of 2', start_ms: 600000, end_ms: 1200000, track: '952', track_start_ms: 0, track_end_ms: 600000 }
+  ]
+};
+const BOOKS = { [MULTI.key]: MULTI, [SINGLE.key]: SINGLE, [OTHER.key]: OTHER, [ATMOS.key]: ATMOS, [MIXED.key]: MIXED, [TWIN.key]: TWIN };
 const trackByPath = new Map();
 const trackByKey = new Map();
 for (const b of Object.values(BOOKS)) for (const t of b.tracks) { trackByPath.set(t.part_path, t); trackByKey.set(t.key, t); }
 const TRANSCODE_PATH = '/music/:/transcode/universal/start.mp3';
-// What a browser like Chrome answers canPlayType: '' for E-AC3.
-const UNDECODABLE = new Set(['audio/mp4; codecs="ec-3"', 'audio/mp4; codecs="ac-3"']);
+// What a browser like Chrome answers canPlayType: '' for E-AC3, and '' for
+// an empty type (as every browser does).
+const UNDECODABLE = new Set(['', 'audio/mp4; codecs="ec-3"', 'audio/mp4; codecs="ac-3"']);
 
 // ---- A scripted Plex: which connection, part and token answers how ----
 
@@ -176,6 +190,11 @@ function makeNet() {
     noConvert: new Set(),   // track keys whose transcoded stream never loads (code 4)
     cutAt: new Map(),       // session -> element second where Plex ends the stream early, cleanly
     stops: [],              // sessions the engine ended
+    events: [],             // asks and stops in order: ['ask', track] | ['stop', session]
+    realDelta: new Map(),   // track key -> the real audio's length minus Plex's (ms)
+    dropAtStart: false,     // every transcoded stream starts, then drops at once (code 2)
+    pastEnd: 'fail',        // a start past the real audio: what Plex gives ('fail', as a
+                            // real server does: a header and no audio; or 'empty')
     pagehide: []            // the engine's pagehide handlers
   };
 }
@@ -195,8 +214,10 @@ function answer(net, url) {
         net.decided.get(sid) !== rk || net.noConvert.has(rk) || !isFinite(off)) {
       return { kind: 'fail', side, part: 'tc:' + rk };
     }
+    const real = t.duration_ms + (net.realDelta.get(rk) || 0);
+    if (off * 1000 >= real && net.pastEnd === 'fail') return { kind: 'fail', side, part: 'tc:' + rk };
     return { kind: 'ok', side, part: 'tc:' + rk, transcode: true, sid, offset: off,
-      durationMs: Math.max(0, t.duration_ms - off * 1000) };
+      durationMs: Math.max(0, real - off * 1000) };
   }
   if (net.mediaCache && net.cached.has(url) && trackByPath.get(part) &&
       (net.hang.has(side) || net.down.has(side))) {
@@ -352,7 +373,9 @@ class FakeAudio {
     this.env.clock.setTimeout(() => {
       if (g !== this.gen || this.paused || !this.ticking) return;
       const net = this.env.net;
-      if (net.down.has(this.side)) { this.ticking = false; this.error = { code: 2 }; this.fire('error'); return; }
+      if (net.down.has(this.side) || (net.dropAtStart && this.sid !== null)) {
+        this.ticking = false; this.error = { code: 2 }; this.fire('error'); return;
+      }
       if (net.hang.has(this.side)) { this.ticking = false; this.fire('waiting'); return; }
       const bad = net.decodeAt.get(this.part);
       if (bad !== undefined && this._t >= bad) { this.ticking = false; this.error = { code: 3 }; this.fire('error'); return; }
@@ -396,6 +419,7 @@ function makeFetch(net, clock) {
     if (tm) {
       const body = JSON.parse(opts.body);
       net.asks.push({ key: decodeURIComponent(tm[1]), track: body.track, client: body.client });
+      net.events.push(['ask', body.track]);
       if (net.askDelay && clock) await new Promise((r) => clock.setTimeout(r, net.askDelay));
       if (net.transcodeStatus !== 200) return response(net.transcodeStatus, { detail: 'no' });
       const sid = 'ws' + String(++sessionIds).padStart(32, '0');
@@ -450,7 +474,7 @@ function setup(o = {}) {
     permissions: o.permissions,
     baseUrl: 'https://ws.test/news',
     clientId: 'testclient01',
-    stopTranscode: (sid) => { net.stops.push(sid); },
+    stopTranscode: (sid) => { net.stops.push(sid); net.events.push(['stop', sid]); },
     onPageHide: (fn) => { net.pagehide.push(fn); }
   });
   const log = { change: [], ended: [], error: [], warning: [], raw: [] };
@@ -1435,7 +1459,7 @@ current = 'a one-off glitch 60 s after a good retry does not skip the part';
 
 const tcLoads = (t) => t.net.loads.filter((l) => !l.probe && l.part.startsWith('tc:'));
 const rawLoads = (t, path) => t.net.loads.filter((l) => l.part === path);
-const srcParams = (t) => new URL(t.main.src).searchParams;
+const srcParams = (t) => (t.main.src ? new URL(t.main.src).searchParams : new URLSearchParams());
 const ATMOS_PATH = ATMOS.tracks[0].part_path;
 
 current = 'the MIME type for canPlayType';
@@ -1478,6 +1502,18 @@ current = 'a format the browser plays streams direct, exactly as before';
   check('an unknown codec plays direct', partOf(u.main) === SINGLE.tracks[0].part_path && u.net.asks.length === 0);
   u.engine.close();
   delete BOOKS['650:1'];
+  // Plex giving no codec (or nothing at all) plays direct too.
+  for (const fmt of [{ container: 'mp4', codec: '', profile: '' }, { container: '', codec: '', profile: '' }]) {
+    const v = setup({ net: { noLocal: true } });
+    const bare = JSON.parse(JSON.stringify(SINGLE));
+    Object.assign(bare.tracks[0], fmt);
+    BOOKS['651:1'] = Object.assign(bare, { key: '651:1' });
+    await openPlaying(v, '651:1');
+    check(`an empty codec plays direct (${JSON.stringify(fmt)})`, partOf(v.main) === SINGLE.tracks[0].part_path &&
+      v.net.asks.length === 0, partOf(v.main));
+    v.engine.close();
+    delete BOOKS['651:1'];
+  }
 }
 
 current = 'a format the browser cannot decode streams from Plex\'s transcoder';
@@ -1537,11 +1573,13 @@ current = 'position in transcode mode is the offset base plus the element time';
   m.engine.close();
   // Near the end: plays out, ends at the part's length.
   const n = setup({ net: { noLocal: true } });
-  await openPlaying(n, ATMOS.key, { at: at('801', ATMOS_MS - 3000) });
-  await n.clock.advance(5000);
+  await openPlaying(n, ATMOS.key, { at: at('801', ATMOS_MS - 8000) });
+  const nsid = srcParams(n).get('session');
+  await n.clock.advance(10000);
   check('near the end: ended once, at the part\'s length', n.log.ended.length === 1 &&
     n.engine.state().position.offset_ms === ATMOS_MS && n.log.error.length === 0, n.engine.state().position);
-  check('its session is ended', n.net.stops.length === 1 && n.net.stops[0] === srcParams(n).get('session'));
+  check('its session is ended', n.net.stops.length === 1 && n.net.stops[0] === nsid, n.net.stops);
+  check('one session in all', n.net.asks.length === 1);
   n.engine.close();
 }
 
@@ -1697,6 +1735,179 @@ current = 'Plex ending the stream early is a dropped stream, not the end of the 
   check('streaming again on a new session from where it was cut',
     !t.main.paused && t.net.asks.length === 2 && Math.abs(Number(srcParams(t).get('offset')) - 1005) <= 0.25, srcParams(t).get('offset'));
   check('the place never jumped to the end', t.positions.every((p) => !p || p.offset_ms < 1010000));
+  t.engine.close();
+}
+
+// ---- 18. Fix round 1: the end of a transcoded part ----
+
+current = 'a transcoded part whose real audio is 30 s short ends and advances, with few asks';
+{
+  // Plex answers a start past the real audio with nothing playable (as a real server does).
+  const t = setup({ net: { noLocal: true, realDelta: new Map([['902', -30000]]) } });
+  await openPlaying(t, MIXED.key, { at: at('902', 900000 - 60000) });
+  await t.clock.advance(90000);
+  check('part 3 plays', partOf(t.main) === MIXED.tracks[2].part_path && !t.main.paused, partOf(t.main));
+  check('no error, no warning', t.log.error.length === 0 && t.log.warning.length === 0, [t.log.error, t.log.warning]);
+  check('a bounded number of asks and refreshes', t.net.asks.length <= 3 &&
+    t.net.fetches.filter((f) => f.endsWith('?refresh=1')).length <= 1, t.net.asks.length);
+  check('one advance', reasons(t).filter((r) => r === 'part').length === 1);
+  t.engine.close();
+  // The last part, where Plex gives an empty stream past the real audio: the book ends.
+  const u = setup({ net: { noLocal: true, realDelta: new Map([['801', -30000]]), pastEnd: 'empty' } });
+  await openPlaying(u, ATMOS.key, { at: at('801', ATMOS_MS - 60000) });
+  await u.clock.advance(90000);
+  check('the book ends once', u.log.ended.length === 1 && u.log.error.length === 0, [u.log.ended.length, u.log.error]);
+  check('asks stay bounded', u.net.asks.length <= 2, u.net.asks.length);
+  check('the place is the end', u.engine.state().position.offset_ms === ATMOS_MS);
+  u.engine.close();
+}
+
+current = 'a real Plex kill mid-part still reconnects at the held place, and again later';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 1000000) });
+  t.net.cutAt.set(srcParams(t).get('session'), 5);
+  await t.clock.advance(8000);
+  check('reconnected at the held place', !t.main.paused && t.net.asks.length === 2 &&
+    Math.abs(Number(srcParams(t).get('offset')) - 1005) <= 0.25 && t.log.error.length === 0, srcParams(t).get('offset'));
+  const second = srcParams(t).get('session');
+  await t.clock.advance(10000);
+  t.net.cutAt.set(second, 20);                  // a second kill, after real playback
+  await t.clock.advance(15000);
+  check('a later kill reconnects too (real playback gave the ladder back)', !t.main.paused &&
+    t.net.asks.length === 3 && t.log.error.length === 0 && t.log.ended.length === 0, [t.net.asks.length, t.log.error]);
+  check('never ended, never jumped', t.positions.every((p) => !p || p.offset_ms < 1100000));
+  t.engine.close();
+}
+
+current = 'a stream that starts and at once ends, or drops, does not loop';
+{
+  // Every start of the part gives a stream that ends at once, cleanly.
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 1000000) });
+  const orig = t.net.cutAt;
+  t.net.cutAt = { get: () => 0, set: () => {} };
+  const n = t.net.asks.length;
+  t.engine.seek(2000000);
+  await t.clock.advance(60000);
+  t.net.cutAt = orig;
+  check('ends at once: a bounded number of asks', t.net.asks.length - n <= 3, t.net.asks.length - n);
+  check('ends at once: it stops, not a loop', t.log.ended.length + t.log.error.length === 1, [t.log.ended.length, t.log.error]);
+  t.engine.close();
+  // Every stream starts playing and drops at once: 'playing' alone never
+  // gives the ladder back, so it runs out and holds the place.
+  const u = setup({ net: { noLocal: true } });
+  await openPlaying(u, ATMOS.key, { at: at('801', 1000000) });
+  await u.clock.advance(3000);
+  const held = u.engine.state().position.offset_ms;
+  const m = u.net.asks.length;
+  u.net.dropAtStart = true;
+  await u.clock.advance(60000);
+  check('drops at once: a bounded number of asks and one refresh', u.net.asks.length - m <= 3 &&
+    u.net.fetches.filter((f) => f.endsWith('?refresh=1')).length === 1, [u.net.asks.length - m, u.net.fetches.length]);
+  check('drops at once: unreachable, place held', u.engine.state().error && u.engine.state().error.code === 'unreachable' &&
+    Math.abs(u.engine.state().position.offset_ms - held) <= 250, [u.engine.state().error, u.engine.state().position]);
+  u.engine.close();
+}
+
+current = 'Plex killing a stream and then going away is never taken for the end of the part';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 1000000) });
+  const sid = srcParams(t).get('session');
+  await t.clock.advance(3000);
+  // Plex ends the stream cleanly (a restart), and is down when the player comes back.
+  t.net.cutAt.set(sid, 5);
+  t.main.addEventListener('ended', () => { t.net.down.add('remote'); });
+  await t.clock.advance(20000);
+  const s = t.engine.state();
+  check('no end, no advance', t.log.ended.length === 0 && !reasons(t).includes('ended'), reasons(t).slice(-6));
+  check('"Can\'t reach the media server", the place held', s.error && s.error.code === 'unreachable' &&
+    s.position.offset_ms >= 1004000 && s.position.offset_ms <= 1005000, [s.error, s.position]);
+  t.engine.close();
+}
+
+current = 'skipping past the end of a transcoded book ends it without asking Plex';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', ATMOS_MS - 10000) });
+  await t.clock.advance(2000);
+  t.engine.skip(30);
+  await t.clock.advance(3000);
+  check('ended once, no error', t.log.ended.length === 1 && t.log.error.length === 0, t.log.error);
+  check('no new session asked for', t.net.asks.length === 1, t.net.asks.length);
+  check('the place is the end', t.engine.state().position.offset_ms === ATMOS_MS && !t.engine.state().playing);
+  check('the old session was ended', t.net.stops.length === 1);
+  t.engine.close();
+  // A middle part: a skip into its last seconds moves on to the next part.
+  const u = setup({ net: { noLocal: true } });
+  await openPlaying(u, MIXED.key, { at: at('902', 900000 - 20000) });
+  u.engine.skip(17);                             // 3 s before part 2's end
+  await u.clock.advance(3000);
+  check('the next part plays, direct', partOf(u.main) === MIXED.tracks[2].part_path && !u.main.paused &&
+    u.net.asks.length === 1 && u.log.error.length === 0, partOf(u.main));
+  u.engine.close();
+}
+
+current = 'reopening a finished transcoded book ends at once, and play starts it over';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', ATMOS_MS) });
+  check('ended, no error, nothing asked', t.log.ended.length === 1 && t.log.error.length === 0 && t.net.asks.length === 0,
+    [t.log.ended.length, t.log.error, t.net.asks.length]);
+  check('not playing, at the end', !t.engine.state().playing && t.engine.state().position.offset_ms === ATMOS_MS);
+  await t.engine.play();
+  await t.clock.advance(2000);
+  check('play starts it from the beginning', !t.main.paused && srcParams(t).get('offset') === '0.000' && t.net.asks.length === 1);
+  t.engine.close();
+}
+
+current = 'a transcoded stream longer than Plex\'s length never reports a place past it';
+{
+  const t = setup({ net: { noLocal: true, realDelta: new Map([['801', 10000]]) } });
+  await openPlaying(t, ATMOS.key, { at: at('801', ATMOS_MS - 20000) });
+  await t.clock.advance(12000);
+  check('the element has no length (Infinity)', t.main.duration === Infinity);
+  await t.clock.advance(30000);
+  check('no place past the part\'s length', t.positions.every((p) => !p || p.offset_ms <= ATMOS_MS) &&
+    t.log.change.every((c) => c.state.bookMs <= ATMOS_MS), Math.max(...t.positions.filter(Boolean).map((p) => p.offset_ms)));
+  check('it ends once, at the part\'s length', t.log.ended.length === 1 && t.engine.state().position.offset_ms === ATMOS_MS);
+  t.engine.close();
+}
+
+current = 'an early end within 5 s of the part\'s end is its end; further out it reconnects';
+{
+  // Plex cuts the stream 4 s before the end: that is the end (one session in all).
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', ATMOS_MS - 20000) });
+  t.net.cutAt.set(srcParams(t).get('session'), 16);
+  await t.clock.advance(20000);
+  check('4 s short: ended, one session', t.log.ended.length === 1 && t.net.asks.length === 1 && t.log.error.length === 0,
+    [t.log.ended.length, t.net.asks.length]);
+  t.engine.close();
+  // Cut 6 s before the end: a dropped stream, so it reconnects and plays those 6 s.
+  const u = setup({ net: { noLocal: true } });
+  await openPlaying(u, ATMOS.key, { at: at('801', ATMOS_MS - 20000) });
+  u.net.cutAt.set(srcParams(u).get('session'), 14);
+  await u.clock.advance(15000);
+  check('6 s short: a second session from where it was cut', u.net.asks.length === 2 &&
+    Math.abs(Number(srcParams(u).get('offset')) * 1000 - (ATMOS_MS - 6000)) <= 250, srcParams(u).get('offset'));
+  await u.clock.advance(10000);
+  check('and it plays out to the end', u.log.ended.length === 1 && u.log.error.length === 0);
+  u.engine.close();
+}
+
+current = 'between two transcoded parts, the first session ends before the second is asked for';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, TWIN.key, { at: at('951', 600000 - 8000) });
+  const first = srcParams(t).get('session');
+  await t.clock.advance(12000);
+  check('part 2 streams from the transcoder', new URL(t.main.src).pathname === TRANSCODE_PATH &&
+    new URL(t.main.src).searchParams.get('path').endsWith('/952') && !t.main.paused);
+  const stopAt = t.net.events.findIndex((e) => e[0] === 'stop' && e[1] === first);
+  const askAt = t.net.events.findIndex((e) => e[0] === 'ask' && e[1] === '952');
+  check('stopped first, then asked', stopAt !== -1 && askAt !== -1 && stopAt < askAt, t.net.events);
   t.engine.close();
 }
 
