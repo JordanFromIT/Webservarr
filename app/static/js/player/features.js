@@ -279,10 +279,15 @@ function ageOf(nowIso, atIso) {
      played on offline, or after a refused save, or its last save's answer
      never came back), whatever its age or stamp: it is never overwritten or
      pushed without asking.
-   The open then holds at the web place ({ at: 'web' }), or, when that place
-   is in a part this browser can't play, at this browser's own ({ at: 'own' },
-   other.canGo false). (Plex's echoes of our own saves never get here:
-   GET /position leaves out a Plex copy of a place WebServarr logged.) */
+   The open then holds at the newer of the two by stamp: the web place
+   ({ at: 'web' }), or this browser's own ({ at: 'own' }) when it is stamped
+   later (listening here the server never heard of: a plain Play goes on
+   from it, and the question offers the web place). A copy capped by a
+   refused save is stamped no later than the place that refused it, so it
+   holds at the web place. When the web place is in a part this browser
+   can't play, it holds at this browser's own (other.canGo false). (Plex's
+   echoes of our own saves never get here: GET /position leaves out a Plex
+   copy of a place WebServarr logged.) */
 export function handoffOffer(info) {
   const i = info || {};
   const web = i.web || (i.resumed && i.resumed.source === 'web' ? i.resumed : null);
@@ -294,10 +299,11 @@ export function handoffOffer(info) {
   const recent = !!i.resumed && i.resumed.source === 'web' && age <= HANDOFF_WITHIN_MS;
   if (!recent && own.acked === true) return null;
   const canGo = web.playable !== false;
+  const ownNewer = Date.parse(own.updated_at) > Date.parse(web.updated_at);
   return {
     other: { bookMs: web.bookMs, device: web.device || '', agoMs: isFinite(age) ? age : null, sameLabel: sameLabel(web, i.me), canGo: canGo },
     own: { bookMs: own.bookMs },
-    at: canGo ? 'web' : 'own'
+    at: canGo && !ownNewer ? 'web' : 'own'
   };
 }
 

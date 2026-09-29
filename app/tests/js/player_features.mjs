@@ -1764,6 +1764,17 @@ await run('handoff: only another device, within 24 h, with a place of its own he
   check('unacknowledged: asked, at the web place', un() && un().at === 'web' && un().other.canGo === true);
   check('unacknowledged and the web copy over 24 h old: still asked', un((i) => { i.resumed.updated_at = ago(25 * 3600000); i.web.updated_at = ago(25 * 3600000); }) !== null);
   check('unacknowledged and newer than the web copy (resumed from it): still asked', un((i) => { i.resumed = Object.assign({}, i.own, { source: 'local' }); }) !== null);
+  // T9R7: the open holds at the newer copy by stamp; the question offers the other.
+  const newer = un((i) => { i.own.updated_at = ago(2 * MIN); i.resumed = Object.assign({}, i.own, { source: 'local' }); });
+  check('unacknowledged and stamped later than the web copy: held at this browser\'s place, Continue offers the web one',
+    newer && newer.at === 'own' && newer.other.canGo === true && newer.other.bookMs === 900000 && newer.own.bookMs === 100000, newer);
+  const tie = un((i) => { i.own.updated_at = i.web.updated_at; });
+  check('stamped the same as the web copy (capped by a refused save): held at the web place', tie && tie.at === 'web', tie);
+  const older = un((i) => { i.own.updated_at = new Date(Date.parse(i.web.updated_at) - 1).toISOString(); });
+  check('a millisecond older: held at the web place', older && older.at === 'web', older);
+  const later1 = un((i) => { i.own.updated_at = new Date(Date.parse(i.web.updated_at) + 1).toISOString(); });
+  check('a millisecond newer: held at this browser\'s place', later1 && later1.at === 'own', later1);
+  check('no stamp on this browser\'s copy: held at the web place', un((i) => { delete i.own.updated_at; }).at === 'web');
   check('unacknowledged, no server time: asked', un((i) => { i.now = null; }) !== null);
   check('unacknowledged but within 30 s: none', un((i) => { i.own.bookMs = 880000; }) === null);
   check('unacknowledged, the web copy this device\'s: none', un((i) => { i.web.device_id = ME; }) === null);
@@ -2108,6 +2119,8 @@ async function reopenAsks(d, prefs, what) {
   await clock.advance(2000);
   check(`${what}: the next open asks`, again.prompts().length === 1 && !again.st().playing && again.buttons().indexOf('Start from here') !== -1, [again.prompts(), again.buttons(), again.st().resumedFrom]);
   check(`${what}: nothing is pushed`, since(m).length === 0, since(m));
+  again.asked = again.prompts();
+  again.heldAt = again.st().position;
   again.engine.close();
   return again;
 }
@@ -2130,7 +2143,9 @@ for (const [rtt, closeAt] of [[300, 260], [3000, 1500]]) {
         const local = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
         check('the local copy: capped, not acknowledged', Date.parse(local.updated_at) <= Date.parse(deskRow.updated_at) && local.acked === false, [local, deskRow.updated_at]);
         phone.engine.close();
-        await reopenAsks(d, prefs, 'C1');
+        const again = await reopenAsks(d, prefs, 'C1');
+        // Capped, so never newer than the desktop's place (T9R7): held there.
+        check('held at the desktop\'s place', again.heldAt && again.heldAt.track === deskRow.track && again.heldAt.offset_ms === deskRow.offset_ms, [again.heldAt, deskRow]);
         check('the desktop\'s place survives', row().updated_at === deskRow.updated_at && row().device_id === DESK_ID, row());
         d.desk.engine.close();
       });
@@ -2138,24 +2153,140 @@ for (const [rtt, closeAt] of [[300, 260], [3000, 1500]]) {
   }
 }
 
-await run('C2: the page killed with the Play unanswered (its beacon\'s answer never read): the next open asks', async () => {
-  const d = await staleFor(OFF, 6 * MIN);
-  const { clock, phone, row, since, server } = d;
-  const deskRow = Object.assign({}, row());
-  phone.hold = true;
-  const n = server.log.length;
-  phone.ms.handlers.get('play')();
-  await clock.advance(1500);
-  // The page goes: its pagehide beacon, whose answer no one reads.
-  check('the beacon goes', phone.saver.flush('beacon', 'leave') === true);
-  await clock.advance(100);
-  check('both refused at the server', since(n).map((e) => e[0] + ':' + e[1]).join() === 'conflict:fetch,conflict:beacon', since(n));
-  const local = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
-  check('the local copy: newer, but not acknowledged', local.acked === false, local);
-  await reopenAsks(d, OFF, 'C2');
-  check('the desktop\'s place survives', row().updated_at === deskRow.updated_at, row());
-  d.desk.engine.close();
-});
+for (const playMs of [250, 1500]) {
+  await run(`C2: the page killed ${playMs} ms into the Play, unanswered (its beacon's answer never read): the next open asks`, async () => {
+    const d = await staleFor(OFF, 6 * MIN);
+    const { clock, phone, row, since, server } = d;
+    const deskRow = Object.assign({}, row());
+    phone.hold = true;
+    const n = server.log.length;
+    phone.ms.handlers.get('play')();
+    await clock.advance(playMs);
+    // The page goes: its pagehide beacon, whose answer no one reads.
+    check('the beacon goes', phone.saver.flush('beacon', 'leave') === true);
+    await clock.advance(100);
+    check('both refused at the server', since(n).map((e) => e[0] + ':' + e[1]).join() === 'conflict:fetch,conflict:beacon', since(n));
+    const local = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+    check('the local copy: newer, but not acknowledged', local.acked === false, local);
+    await reopenAsks(d, OFF, 'C2');
+    check('the desktop\'s place survives', row().updated_at === deskRow.updated_at, row());
+    d.desk.engine.close();
+  });
+}
+
+/* T9R6: a stray Play under the drift allowance on a stale page (the phone
+   paused and saved 5:03; the desktop has since saved 26:41). The Play's
+   answer never comes (the page dies), or the phone has no signal and the
+   player is closed. The place a moment past the phone's old save is not the
+   server's: the next open asks, and nothing overwrites the desktop's row. */
+const DRIFT_CASES = [];
+for (const playMs of [250, 1500]) {
+  DRIFT_CASES.push([`D1 (${playMs} ms, pagehide beacon, killed)`, OFF, playMs, 'kill', { beacon: true }]);
+  DRIFT_CASES.push([`D2 (${playMs} ms, no beacon, killed)`, OFF, playMs, 'kill', {}]);
+  DRIFT_CASES.push([`D3 (${playMs} ms, Pause, 20 ms drift, beacon, killed)`, OFF, playMs, 'kill', { beacon: true, pause: true }]);
+  DRIFT_CASES.push([`D5 (${playMs} ms offline, closed)`, OFF, playMs, 'offline', {}]);
+  DRIFT_CASES.push([`D5b (${playMs} ms offline, Pause, 20 ms drift, closed)`, OFF, playMs, 'offline', { pause: true }]);
+}
+for (const playMs of [10250, 12000]) {
+  DRIFT_CASES.push([`D6 (${playMs} ms offline, smart rewind on, closed)`, { skip_s: 10, speed: 1, smart_rewind: true }, playMs, 'offline', {}]);
+}
+for (const [label, prefs, playMs, how, o] of DRIFT_CASES) {
+  await run(`a stray Play on a stale page, ${label}: the next open asks and the desktop's place survives`, async () => {
+    const d = await staleFor(prefs, 6 * MIN);
+    const { clock, phone, row, since, server } = d;
+    const deskRow = Object.assign({}, row());
+    const before = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+    check('the phone\'s saved pause is acknowledged', before.acked === true, before);
+    const n = server.log.length;
+    if (how === 'kill') phone.hold = true;  // the Play's answer is still to come when the page dies
+    else phone.offline = true;              // no signal
+    phone.ms.handlers.get('play')();        // a headset reconnects
+    await clock.advance(playMs);
+    if (o.pause) {
+      phone.engine.pause();
+      await clock.advance(50);
+      phone.audioEl._t += 0.02;              // the element's late timeupdate
+      phone.audioEl.fire('timeupdate');
+      await clock.advance(200);
+    }
+    if (o.beacon) phone.saver.flush('beacon', 'leave');
+    await clock.advance(10);
+    if (how === 'kill') {
+      phone.offline = true;
+      phone.hold = false;
+      phone.audioEl.gen += 1;
+      phone.audioEl.ticking = false;
+      phone.audioEl.paused = true;
+    }
+    phone.engine.close();
+    await clock.advance(20000);
+    check('nothing stored', since(n).every((e) => e[0] !== 'stored'), since(n));
+    const local = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+    check('the local copy: not acknowledged', local.acked === false, local);
+    const again = await reopenAsks(d, prefs, label);
+    check('Continue offers the desktop\'s place', /^Continue from 26:4\d \(Chrome on Linux, \d+ min ago\)\?$/.test(again.asked.join()), again.asked);
+    // Stamped after the desktop's save (T9R7): held at the phone's own place.
+    check('held at the phone\'s place', again.heldAt && again.heldAt.track === local.track && again.heldAt.offset_ms === local.offset_ms, [again.heldAt, local]);
+    check('the desktop\'s place survives', row().updated_at === deskRow.updated_at && row().device_id === DESK_ID, row());
+    d.desk.engine.close();
+  });
+}
+
+/* T9R7: listening offline the server never heard of is newer by stamp than
+   the desktop's place: the next open holds at it, a plain Play goes on from
+   it, and the question offers the desktop's place. */
+for (const how of ['Play button', 'lock-screen Play', 'Continue']) {
+  await run(`offline listening newer than the other device's place: held at it, then ${how}`, async () => {
+    const { clock, phone, desk, page, row, since, server } = await twoDevices({ phonePrefs: OFF });
+    await desk.openAt(MULTI.key, '503', 100000);
+    await clock.advance(2000);
+    desk.engine.pause();
+    await clock.advance(1500);
+    desk.engine.close();
+    const deskRow = Object.assign({}, row());
+    await clock.advance(3600000);
+    // The phone reads the book at home, then listens 2 min with no signal.
+    phone.offline = true;
+    await phone.open();
+    await clock.advance(2 * MIN);
+    phone.engine.pause();
+    await clock.advance(1500);
+    const reached = Object.assign({}, phone.st().position);
+    phone.engine.close();
+    await clock.advance(20000);
+    check('nothing reached the server', row().updated_at === deskRow.updated_at, row());
+    const local = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+    check('the local copy: the offline place, newer, not acknowledged', local.offset_ms === reached.offset_ms && local.acked === false &&
+      Date.parse(local.updated_at) > Date.parse(deskRow.updated_at), [local, deskRow]);
+    phone.offline = false;
+    await clock.advance(2 * 3600000);
+    const again = await page('psid-phone-2', 'Chrome on Android', PHONE_ID, phone.storage, OFF);
+    const n = server.log.length;
+    await again.open();
+    await clock.advance(1000);
+    check('held at the offline place, not playing', !again.st().playing && again.st().position.track === reached.track &&
+      again.st().position.offset_ms === reached.offset_ms && again.st().resumedFrom.source === 'local', [again.st().position, again.st().resumedFrom]);
+    check('the question offers the desktop\'s place', /^Continue from 26:4\d \(Chrome on Linux, 3 h ago\)\?$/.test(again.prompts().join()) &&
+      again.buttons().join() === 'Continue,Start from here', [again.prompts(), again.buttons()]);
+    check('nothing sent while it asks', since(n).length === 0, since(n));
+    if (how === 'Play button') again.q('.wsp-play-sm').click();
+    else if (how === 'lock-screen Play') again.ms.handlers.get('play')();
+    else again.button('Continue').click();
+    await clock.advance(5000);
+    again.engine.pause();
+    await clock.advance(1500);
+    const first = since(n)[0];
+    if (how === 'Continue') {
+      check('Continue: at the desktop\'s place, saved as the phone\'s', first && first[0] === 'stored' && first[3] === '503' && first[4] >= 100000 && first[4] < 110000 &&
+        row().device_id === PHONE_ID && row().track === '503', [since(n), row()]);
+    } else {
+      check('played on from the offline place, nothing lost', first && first[0] === 'stored' && first[3] === reached.track && first[4] === reached.offset_ms &&
+        row().device_id === PHONE_ID && row().offset_ms >= reached.offset_ms + 4000, [since(n), row(), reached]);
+      check('the question is gone', again.prompts().length === 0, again.prompts());
+    }
+    again.engine.close();
+  });
+}
 
 await run('C3: a failed Play, then a close online: the last save\'s 409 is read and caps', async () => {
   const d = await staleFor(OFF, 6 * MIN);

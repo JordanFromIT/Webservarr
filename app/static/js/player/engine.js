@@ -108,9 +108,10 @@
  *                     acked, bookMs } or null), now (the server's clock, ISO,
  *                     or null), me: { device_id, device } }. An answer
  *                     { at: 'web' } holds the open paused at WebServarr's
- *                     place, { at: 'own' } at this browser's own; nothing is
- *                     pushed and the local copy is left as it was until the
- *                     listener plays or moves.
+ *                     place, { at: 'own' } at this browser's own (the newer
+ *                     by stamp, or the only one that can play here);
+ *                     nothing is pushed and the local copy is left as it was
+ *                     until the listener plays or moves.
  *   resolveConflict() the listener answered a 409 (saves.js 'conflict'
  *                     warning): saves go again. Returns the conflict or null.
  *   placeMs(track, offsetMs)  the book time of a place in the loaded book, or null
@@ -1179,8 +1180,8 @@ export function createEngine(env) {
     }
     // The handoff gate sees this browser's own copy before the open can
     // overwrite it (features.js). A hold opens paused at WebServarr's place
-    // ({ at: 'web' }), or at this browser's own when that place can't play
-    // here ({ at: 'own' }); nothing is pushed then.
+    // ({ at: 'web' }), or at this browser's own ({ at: 'own' }: stamped
+    // later, or that place can't play here); nothing is pushed then.
     const mine = places ? own() : null;
     let webCopy = null;
     let held = null;
