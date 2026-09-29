@@ -21,16 +21,19 @@
  * 1.5 s at most, else the remote one; the choice is kept for the page
  * session. Where the browser gates private addresses behind a Local Network
  * Access prompt, local is tried only if that permission is already granted:
- * the engine never makes the browser ask. When the stream fails, in order: the other connection at the same
- * offset; then a fresh token (GET /api/player/book/<key>?refresh=1) once;
- * then "Can't reach the media server" with a retry. A stream that stops
- * without an error (8 s waiting with nothing arriving) counts as a failure.
- * A part that 404s or will not decode while the connection is shown to work
- * (another part, or the same one, still loads its metadata there) is skipped
- * with a notice. The place (state().position, what the save loop stores)
- * never moves because of a failure: after a skipped part it stays where the
- * failed part stopped until the next part has really played (1 s of it), so a
- * run of broken parts never carries it past the first.
+ * the engine never makes the browser ask. When the stream fails, in order:
+ * the other connection at the same offset; then a fresh token
+ * (GET /api/player/book/<key>?refresh=1) once; then "Can't reach the media
+ * server" with a retry. A stream that stops without an error (8 s waiting
+ * with nothing arriving) counts as a failure. Only a part that will not load
+ * or decode (never a dropped connection) can be skipped, with a notice, and
+ * only when it fails that way twice, the second time on a connection just
+ * shown to work (another part, or the same one, loads its metadata there).
+ * The place (state().position, what the save loop stores) never moves
+ * because of a failure, and is frozen in the error state: after a skipped
+ * part it stays where the failed part stopped until the next part has really
+ * played (1 s of it), so a run of broken parts never carries it past the
+ * first.
  *
  * Pure (importable by Node, no DOM at import time):
  *   toTrackOffset(tracks, bookMs)  -> { index, track, offset_ms } | null
@@ -38,15 +41,20 @@
  *   chapterAt(chapters, bookMs)    -> the chapter's position in the list, -1 if none
  *   createEngine(env)              the engine, given its surroundings (tests)
  *   boot(win, overrides)           mounts the engine in #wsPlayer as WS.player
+ *   UnknownTrack                   open()'s rejection for a place not in the book
  *
  * In the browser, window.WS.player:
  *   open(key, { at: { track, offset_ms }, autoplay }) -> Promise<void>
  *       loads the book (at its start, or at the place given) and plays it
  *       (autoplay false: loads only). Resolves once playback is set going;
- *       a failure is an 'error' event and state().error, never a rejection.
+ *       a failure is an 'error' event and state().error. It rejects only
+ *       with UnknownTrack: the place given is in a part the book does not
+ *       have; then nothing is loaded and no place is reported.
  *   play(), pause(), toggle()
  *   seek(bookMs), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters
  *   setSpeed(x)       0.75 to 2 in 0.05 steps (clamped, rounded); returns the speed
+ *   setSkip(s)        the Media Session seek back and forward, 5 to 60 s
+ *                     (clamped, rounded); returns it
  *   retry()           after an error: again from the place
  *   close()           stops and forgets the book
  *   state()           { book (the key), title, author, narrator, series, cover,
@@ -76,7 +84,9 @@ export const PLAYED_MS = 1000;         // this much real playback shows a part p
 export const SPEED_MIN = 0.75;
 export const SPEED_MAX = 2;
 export const SPEED_STEP = 0.05;
-export const SKIP_S = 10;              // Media Session seek back and forward, until the listener's setting
+export const SKIP_S = 10;              // Media Session seek back and forward: the default
+export const SKIP_MIN_S = 5;
+export const SKIP_MAX_S = 60;
 export const UNREACHABLE = "Can't reach the media server";
 
 const MEDIA_ERR_ABORTED = 1;
@@ -152,6 +162,24 @@ export function chapterAt(chapters, bookMs) {
   return found;
 }
 
+/* open()'s rejection when the place it was given is in a part this book
+   does not have (the book changed in Plex since the place was saved). Nothing
+   is loaded and no place is reported, so no save can overwrite the stored one
+   with the start of the book; the caller decides where to start. */
+export class UnknownTrack extends Error {
+  constructor(track) {
+    super("The saved place is in a part this book doesn't have");
+    this.name = 'UnknownTrack';
+    this.track = String(track);
+  }
+}
+
+function roundSkip(x) {
+  const v = Number(x);
+  if (!isFinite(v)) return null;
+  return clampNumber(Math.round(v), SKIP_MIN_S, SKIP_MAX_S);
+}
+
 function roundSpeed(x) {
   const v = Number(x);
   if (!isFinite(v)) return null;
@@ -173,7 +201,7 @@ export function createEngine(env) {
   const session = env.mediaSession || null;
   const Metadata = env.MediaMetadata || null;
   const baseUrl = env.baseUrl || '';
-  const skipS = env.skipSeconds || SKIP_S;
+  let skipS = roundSkip(env.skipSeconds) || SKIP_S;
 
   const audio = env.createAudio();
   audio.preload = 'auto';
@@ -204,6 +232,10 @@ export function createEngine(env) {
   let seekApplied = false;
   let metaLoaded = false;
   let failedGen = -1;
+  // A part being loaded once more after it would not load or decode where the
+  // connection was just shown to work: { index, side }. Failing the same way
+  // again, it is skipped.
+  let partSuspect = null;
 
   let wantPlay = false;
   let loading = false;
@@ -507,7 +539,9 @@ export function createEngine(env) {
   });
 
   audio.addEventListener('timeupdate', function () {
-    if (!book || !cur) return;
+    // The place is frozen in the error state: emptying the element there
+    // resets its time to 0, which is not where the listener is.
+    if (!book || !cur || error) return;
     if (pending) {
       if (!seekApplied || audio.seeking) return;
       pending = false;
@@ -519,6 +553,8 @@ export function createEngine(env) {
     const moved = !playhead || playhead.index !== cur.index || playhead.offset !== off;
     playhead = { index: cur.index, offset: off };
     if (hold && !audio.paused && off >= target.offset + PLAYED_MS) hold = null;
+    // A part loaded again after failing plays on (not just starts): it is fine.
+    if (partSuspect && !audio.paused && off >= target.offset + PLAYED_MS) partSuspect = null;
     if (moved && wantPlay && !audio.paused) disarm();
     changed('time');
   });
@@ -545,6 +581,7 @@ export function createEngine(env) {
     if (!book || !cur || !audio.ended) return;
     const i = cur.index;
     hold = null;
+    partSuspect = null;
     if (i + 1 < book.tracks.length) {
       load(i + 1, 0, cur.side);
       changed('part');
@@ -568,25 +605,40 @@ export function createEngine(env) {
   // ---- Failures ----
 
   /* The stream failed at the playhead. kind: 'network' (the connection
-     dropped or stalled) or 'media' (the part would not load or decode). */
+     dropped or stalled) or 'media' (the part would not load or decode; a
+     404, a refused token and an unreachable host look the same here).
+
+     Only a media failure can be the part's fault, and a part is skipped only
+     when it fails that way twice: once, then again when loaded afresh on a
+     connection just shown to work (another part, or this one, loads its
+     metadata there). Anything else goes up the connection ladder and, at its
+     top, to the error state, where the place is held for Retry. */
   async function fail(kind) {
     if (failedGen === gen || !book || !cur) return;
     failedGen = gen;
     const g = gen;
     pending = true;
+    seekApplied = false;
     metaLoaded = false;
     disarm();
     const at = { index: playhead.index, offset: playhead.offset };
     const side = cur.side;
+    const suspect = partSuspect;
+    partSuspect = null;
     setLoading(true);
 
-    // A part that will not play where the connection is shown to work.
-    if (kind === 'media' && proven.has(side)) {
-      const ok = await probe(side, verifyIndex(side, at.index));
-      if (g !== gen) return;
-      if (ok) {
+    if (kind === 'media') {
+      if (suspect && suspect.index === at.index && suspect.side === side) {
         skipPart(at, side);
         return;
+      }
+      if (proven.has(side)) {
+        const ok = await probe(side, verifyIndex(side, at.index));
+        if (g !== gen) return;
+        if (ok) {
+          retryPart(at, side);
+          return;
+        }
       }
     }
 
@@ -622,18 +674,26 @@ export function createEngine(env) {
       }
     }
 
-    // 3. The server answers for another part: this one is the problem.
-    if (book.tracks.length > 1) {
+    // 3. A part that would not load: if the server answers for another part
+    //    (a missing first part, before anything was shown to work), this
+    //    part is loaded once more, and skipped if it fails that way again.
+    if (kind === 'media') {
       const s = preferredSide();
-      if (s && await probe(s, verifyIndex(s, at.index))) {
-        if (g !== gen) return;
-        skipPart(at, s);
+      const ok = !!s && await probe(s, verifyIndex(s, at.index));
+      if (g !== gen) return;
+      if (ok) {
+        retryPart(at, s);
         return;
       }
-      if (g !== gen) return;
     }
 
     stopWith('unreachable', UNREACHABLE, retry);
+  }
+
+  function retryPart(at, side) {
+    load(at.index, at.offset, side);
+    partSuspect = { index: at.index, side: side };
+    changed('connection');
   }
 
   // A part to test the connection with: one that loaded there, else a
@@ -665,7 +725,9 @@ export function createEngine(env) {
   function stopWith(code, message, retryFn) {
     wantPlay = false;
     pending = true;
+    seekApplied = false;
     metaLoaded = false;
+    partSuspect = null;
     disarm();
     try {
       audio.pause();
@@ -768,7 +830,9 @@ export function createEngine(env) {
     gen += 1;
     wantPlay = false;
     pending = true;
+    seekApplied = false;
     metaLoaded = false;
+    partSuspect = null;
     disarm();
     Array.from(probes.values()).forEach(function (finish) { finish(false); });
     try {
@@ -787,6 +851,13 @@ export function createEngine(env) {
     proven.clear();
     tried.clear();
     refreshed = false;
+    // Nothing plays: the lock screen shows nothing (a failed open included).
+    if (session) {
+      try {
+        session.metadata = null;
+        session.playbackState = 'none';
+      } catch (e) { /* not supported */ }
+    }
   }
 
   async function open(key, opts) {
@@ -824,9 +895,16 @@ export function createEngine(env) {
       return;
     }
     let startMs = 0;
-    if (opts.at && typeof opts.at === 'object') {
-      const b = toBookMs(book.tracks, opts.at.track, opts.at.offset_ms);
-      if (b !== null) startMs = b;
+    if (opts.at) {
+      const b = typeof opts.at === 'object' ? toBookMs(book.tracks, opts.at.track, opts.at.offset_ms) : null;
+      if (b === null) {
+        const track = typeof opts.at === 'object' ? opts.at.track : opts.at;
+        book = null;
+        stream = null;
+        setLoading(false);
+        throw new UnknownTrack(track);
+      }
+      startMs = b;
     }
     const to = toTrackOffset(book.tracks, startMs);
     playhead = { index: to.index, offset: to.offset_ms };
@@ -898,6 +976,7 @@ export function createEngine(env) {
     const from = bookMsNow();
     const to = toTrackOffset(book.tracks, clampNumber(v, 0, book.durationMs));
     hold = null;
+    partSuspect = null;
     const next = { index: to.index, offset: to.offset_ms };
     if (error || !cur) {
       // Nothing loaded (an error, or still choosing): the place moves, and
@@ -935,6 +1014,12 @@ export function createEngine(env) {
     seek(Number(c.start_ms), 'jump');
   }
 
+  function setSkip(x) {
+    const v = roundSkip(x);
+    if (v !== null) skipS = v;
+    return skipS;
+  }
+
   function setSpeed(x) {
     const v = roundSpeed(x);
     if (v === null) return speed;
@@ -951,6 +1036,7 @@ export function createEngine(env) {
     }
     if (!error || !playhead) return Promise.resolve();
     const side = preferredSide();
+    partSuspect = null;
     error = null;
     errorRetry = null;
     tried.clear();
@@ -972,12 +1058,6 @@ export function createEngine(env) {
     const had = !!(book || error);
     teardown();
     lastOpen = null;
-    if (session) {
-      try {
-        session.metadata = null;
-        session.playbackState = 'none';
-      } catch (e) { /* not supported */ }
-    }
     if (had) changed('close');
   }
 
@@ -1052,6 +1132,7 @@ export function createEngine(env) {
     skip: skip,
     jumpToChapter: jumpToChapter,
     setSpeed: setSpeed,
+    setSkip: setSkip,
     retry: retry,
     close: close,
     state: state,

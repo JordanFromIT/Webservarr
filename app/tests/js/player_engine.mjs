@@ -125,6 +125,9 @@ function makeNet() {
     decodeAt: new Map(),// part path -> second at which decoding fails (code 3)
     latency: 50,
     blockAutoplay: false,
+    safari: false,      // playbackRate throws before metadata
+    fetchDelay: {},     // book key -> ms before /api/player/book answers
+    statusFor: {},      // book key -> the status /api/player/book answers
     noLocal: false,
     bookStatus: 200,
     bookDetail: '',
@@ -165,7 +168,7 @@ class FakeAudio {
     this.ended = false;
     this.duration = NaN;
     this.error = null;
-    this.playbackRate = 1;
+    this._rate = 1;
     this.defaultPlaybackRate = 1;
     this.readyState = 0;
     this.seeking = false;
@@ -192,6 +195,12 @@ class FakeAudio {
   getAttribute(n) { return n === 'src' ? (this._src || null) : (this.attrs.has(n) ? this.attrs.get(n) : null); }
   hasAttribute(n) { return this.getAttribute(n) !== null; }
   removeAttribute(n) { if (n === 'src') this._src = ''; else this.attrs.delete(n); }
+  get playbackRate() { return this._rate; }
+  set playbackRate(v) {
+    // Safari refuses a rate before the media's metadata is known.
+    if (this.env.net.safari && this.readyState < 1) throw new DOMException('The operation is not supported.', 'NotSupportedError');
+    this._rate = Number(v);
+  }
   get src() { return this._src; }
   set src(v) { this._src = String(v); this.select(); }
   load() { this.loads += 1; this.select(); }
@@ -219,7 +228,7 @@ class FakeAudio {
     this.duration = NaN;
     this.seeking = false;
     this.ticking = false;
-    this.playbackRate = this.defaultPlaybackRate;
+    this._rate = 1;               // a new src plays at 1.0 until told otherwise (Chrome)
     this.paused = true;
     const moved = this._t !== 0;
     this._t = 0;
@@ -302,11 +311,15 @@ function response(status, body) {
   };
 }
 
-function makeFetch(net) {
+function makeFetch(net, clock) {
   return async function (url) {
     net.fetches.push(url);
     const m = /^\/api\/player\/book\/([^?]+)(\?refresh=1)?$/.exec(url);
     if (!m) return response(404, { detail: 'Not Found' });
+    const wait = net.fetchDelay[decodeURIComponent(m[1])];
+    if (wait && clock) await new Promise((r) => clock.setTimeout(r, wait));
+    const own = net.statusFor[decodeURIComponent(m[1])];
+    if (own) return response(own, { detail: 'down' });
     if (net.bookStatus !== 200) return response(net.bookStatus, { detail: net.bookDetail });
     const book = BOOKS[decodeURIComponent(m[1])];
     if (!book) return response(404, { detail: 'Not in the audiobook library' });
@@ -340,7 +353,7 @@ function setup(o = {}) {
   const engine = E.createEngine({
     host,
     createAudio: () => new FakeAudio(env),
-    fetch: makeFetch(net),
+    fetch: makeFetch(net, clock),
     setTimeout(fn, t) { const id = clock.setTimeout(() => { live.delete(id); fn(); }, t); live.add(id); return id; },
     clearTimeout(id) { live.delete(id); clock.clearTimeout(id); },
     mediaSession: ms,
@@ -989,6 +1002,206 @@ current = 'close() leaves no timer or probe behind';
   const u = t.engine.on('change', () => {});
   check('on() returns an unsubscribe', typeof u === 'function');
   u();
+}
+
+// ---- 15. Fix round 1 ----
+
+// T5E1: in the error state the place is frozen; Retry resumes exactly there.
+// Remote only (Chrome's default behind the local-network gate).
+for (const [name, key, place] of [['single file at 10:02', SINGLE.key, at('601', 602000)],
+                                  ['part 2 at 5:09', MULTI.key, at('502', 309000)]]) {
+  current = `the error state holds the place, and Retry resumes there (${name})`;
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, key, { at: place });
+  await t.clock.advance(3000);
+  const held = t.engine.state().position;
+  const mark = t.seen.length;
+  t.net.down.add('remote');                    // the stream drops
+  t.net.bookStatus = 503;                      // and the refresh fails
+  await t.clock.advance(15000);
+  check('the error state', t.engine.state().error && t.engine.state().error.code === 'unreachable');
+  const after = t.seen.slice(mark);
+  const moved = after.filter((r) => !r.pos || r.pos.track !== held.track || r.pos.offset_ms !== held.offset_ms);
+  check('no change carries another place', moved.length === 0, moved.slice(0, 3).map((r) => [r.reason, r.pos]));
+  const inError = after.filter((r) => r.reason === 'error' || t.engine.state().error);
+  check('the error change itself carries the place', inError.length > 0 && inError.every((r) => r.pos.offset_ms === held.offset_ms));
+  check('the place is unchanged', JSON.stringify(t.engine.state().position) === JSON.stringify(held), [t.engine.state().position, held]);
+  t.net.down.clear();
+  t.net.bookStatus = 200;
+  t.engine.retry();
+  let landed = null;
+  for (let i = 0; i < 100 && landed === null; i++) {
+    await t.clock.advance(10);
+    if (t.main.readyState >= 1 && !t.main.seeking) landed = Math.round(t.main.currentTime * 1000);
+  }
+  check('Retry lands on the exact held offset', landed === held.offset_ms, [landed, held.offset_ms]);
+  await t.clock.advance(1000);
+  check('and plays on from there', t.engine.state().playing && !t.main.paused &&
+    t.engine.state().position.track === held.track && t.engine.state().position.offset_ms > held.offset_ms);
+  t.engine.close();
+}
+
+// T5E2: a dropped connection never skips a part (the Chrome case).
+current = 'a stalled stream whose refresh fails holds the place; it never skips';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, MULTI.key, { at: at('502', 309000) });
+  await t.clock.advance(2000);
+  const before = t.engine.state().position;
+  t.net.hang.add('remote');                    // the connection dies mid-stream
+  t.net.bookStatus = 503;                      // the refresh gets a 503
+  await t.clock.advance(2000);
+  t.net.hang.delete('remote');                 // new requests are answered again; the old one stays dead
+  await t.clock.advance(15000);
+  check('no part is skipped', t.log.warning.length === 0, t.log.warning);
+  check('the error state with a retry', t.log.error.length === 1 && t.log.error[0].code === 'unreachable' && t.log.error[0].retry === '[fn]');
+  const s = t.engine.state();
+  check('the place is held in part 2', s.position.track === '502' && Math.abs(s.position.offset_ms - before.offset_ms) <= 2500, [s.position, before]);
+  check('never a place in part 3', t.seen.every((r) => !r.pos || r.pos.track !== '503'));
+  check('part 3 was never loaded to play', t.net.loads.every((l) => l.probe || l.part !== MULTI.tracks[2].part_path));
+  t.engine.close();
+}
+current = 'a genuinely broken part is still skipped (remote only)';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, MULTI.key, { at: at('501', 597000) });
+  t.net.missing.add(MULTI.tracks[1].part_path);
+  await t.clock.advance(8000);
+  check('skipped with a notice', t.log.warning.length === 1 && /Part 2 of 3/.test(t.log.warning[0].message));
+  check('part 2 was tried twice before the skip', t.net.loads.filter((l) => !l.probe && l.part === MULTI.tracks[1].part_path).length >= 2);
+  check('part 3 plays', partOf(t.main) === MULTI.tracks[2].part_path && !t.main.paused && t.log.error.length === 0);
+  t.engine.close();
+}
+current = 'a part that fails once and then plays is not skipped';
+{
+  const t = setup();
+  await openPlaying(t, MULTI.key, { at: at('501', 597000) });
+  t.net.missing.add(MULTI.tracks[1].part_path);
+  // Part 2 fails once; while the connection is being checked, it comes back.
+  const P2 = MULTI.tracks[1].part_path;
+  for (let i = 0; i < 600; i++) {
+    await t.clock.advance(10);
+    const k = t.net.loads.findIndex((l) => !l.probe && l.part === P2);
+    if (k !== -1 && t.net.loads.slice(k + 1).some((l) => l.probe)) break;
+  }
+  t.net.missing.clear();
+  await t.clock.advance(3000);
+  check('no notice', t.log.warning.length === 0, t.log.warning);
+  check('part 2 plays', partOf(t.main) === MULTI.tracks[1].part_path && !t.main.paused && t.engine.state().position.track === '502');
+  t.engine.close();
+}
+
+// T5E3: a place in a part the book does not have.
+current = 'open() at an unknown track rejects with UnknownTrack and loads nothing';
+{
+  const t = setup();
+  check('UnknownTrack is exported', typeof E.UnknownTrack === 'function');
+  let err = null;
+  const p = t.engine.open(MULTI.key, { at: at('999', 5000) }).catch((e) => { err = e; });
+  await t.clock.advance(2000);
+  await p;
+  check('it rejects with UnknownTrack', typeof E.UnknownTrack === 'function' && err instanceof E.UnknownTrack && err.name === 'UnknownTrack' && err.track === '999', err && err.name);
+  check('nothing was loaded or probed', t.net.loads.length === 0 && t.main.src === '' && t.probes().length === 0);
+  check('no place was ever reported', t.seen.every((r) => r.pos === null));
+  check('no open, play or error event', !reasons(t).some((r) => r === 'open' || r === 'play' || r === 'ready') && t.log.error.length === 0, reasons(t));
+  check('the state has no book', t.engine.state().book === null && t.engine.state().position === null && !t.engine.state().loading);
+  check('the message carries no token', String(err && err.message).indexOf(TOKEN) === -1);
+  t.engine.close();
+}
+
+// T5E4: the Media Session seek length.
+current = 'setSkip sets the Media Session seek length, 5 to 60 s';
+{
+  const t = setup();
+  await openPlaying(t, MULTI.key, { at: at('502', 300000) });
+  if (typeof t.engine.setSkip !== 'function') t.engine.setSkip = () => NaN;   // (an engine without it fails, not crashes)
+  check('setSkip(30)', t.engine.setSkip(30) === 30);
+  const b0 = t.engine.state().bookMs;
+  t.ms.handlers.get('seekbackward')({ action: 'seekbackward' });
+  check('seek back uses it', t.engine.state().bookMs === b0 - 30000, t.engine.state().bookMs - b0);
+  t.ms.handlers.get('seekforward')({ action: 'seekforward' });
+  check('seek forward uses it', t.engine.state().bookMs === b0);
+  check('clamped to 5', t.engine.setSkip(2) === 5);
+  check('clamped to 60', t.engine.setSkip(100) === 60);
+  check('rounded', t.engine.setSkip(14.6) === 15);
+  check('NaN ignored', t.engine.setSkip(NaN) === 15 && t.engine.setSkip('x') === 15);
+  t.ms.handlers.get('seekforward')({ action: 'seekforward' });
+  check('the handler reads the current value', t.engine.state().bookMs === b0 + 15000);
+  t.engine.close();
+}
+
+// T5E5: a failed open clears the lock screen.
+current = 'a failed open of another book clears the Media Session';
+{
+  const t = setup();
+  await openPlaying(t, MULTI.key);
+  check('A shows', t.ms.metadata && t.ms.metadata.title === MULTI.title && t.ms.playbackState === 'playing');
+  t.net.bookStatus = 503;
+  await t.engine.open(OTHER.key);
+  await t.clock.advance(100);
+  check('metadata cleared', t.ms.metadata === null);
+  check('playbackState none', t.ms.playbackState === 'none');
+  check('A stopped', t.main.paused && t.main.src === '');
+  t.engine.close();
+}
+
+// T5T1: the rate after a part advance and after a connection switch, in
+// Chrome (the rate resets to 1.0 with a new src) and in Safari (setting it
+// before metadata throws).
+for (const safari of [false, true]) {
+  current = `the speed holds across a part advance and a connection switch (${safari ? 'Safari' : 'Chrome'})`;
+  const t = setup({ net: { safari } });
+  await openPlaying(t, MULTI.key, { at: at('501', 597000) });
+  t.engine.setSpeed(1.5);
+  check('set', t.main.playbackRate === 1.5);
+  let atSwitch = null;
+  const off = t.engine.on('change', (d) => { if (d.reason === 'part') atSwitch = t.main.playbackRate; });
+  for (let i = 0; i < 400 && partOf(t.main) !== MULTI.tracks[1].part_path; i++) await t.clock.advance(10);
+  off();
+  if (!safari) check('the new part is at 1.5 the moment its src is set', atSwitch === 1.5, atSwitch);
+  await t.clock.advance(200);
+  check('the next part plays at 1.5', partOf(t.main) === MULTI.tracks[1].part_path && t.main.readyState >= 1 && t.main.playbackRate === 1.5, t.main.playbackRate);
+  t.net.down.add('local');
+  for (let i = 0; i < 300 && sideOf(t.main.src) !== 'remote'; i++) await t.clock.advance(10);
+  await t.clock.advance(200);
+  check('after switching to remote it plays at 1.5', sideOf(t.main.src) === 'remote' && !t.main.paused && t.main.playbackRate === 1.5, t.main.playbackRate);
+  check('no error from the rate', t.log.error.length === 0);
+  t.engine.close();
+}
+
+// T5T2: two opens at once; the later one wins.
+current = 'a slow open(A) then a fast open(B): B wins';
+{
+  const t = setup();
+  t.net.fetchDelay[MULTI.key] = 1000;
+  const pa = t.engine.open(MULTI.key);
+  await t.clock.advance(100);
+  const pb = t.engine.open(OTHER.key);
+  await t.clock.advance(2000);
+  await pa;
+  await pb;
+  const s = t.engine.state();
+  check('B is the book', s.book === OTHER.key && s.title === OTHER.title);
+  check('B plays', partOf(t.main) === OTHER.tracks[0].part_path && !t.main.paused);
+  check('nothing of A was ever loaded', t.net.loads.every((l) => !MULTI.tracks.some((tr) => tr.part_path === l.part)));
+  check('no open event for A', t.log.change.filter((c) => c.reason === 'open').every((c) => c.state.book === OTHER.key));
+  t.engine.close();
+}
+current = 'a slow open(A) that fails after a fast open(B) leaves B alone';
+{
+  const t = setup();
+  t.net.fetchDelay[MULTI.key] = 1000;
+  t.net.statusFor[MULTI.key] = 503;
+  const pa = t.engine.open(MULTI.key);
+  await t.clock.advance(100);
+  const pb = t.engine.open(OTHER.key);
+  await t.clock.advance(2000);
+  await pa;
+  await pb;
+  const s = t.engine.state();
+  check('no error from A', t.log.error.length === 0 && s.error === null, t.log.error);
+  check('B plays', s.book === OTHER.key && s.playing && !t.main.paused);
+  t.engine.close();
 }
 
 // ---- 14. Boot in the page (happy-dom) ----
