@@ -224,12 +224,15 @@ export function createUI(env) {
   // one's close request).
   let watcher = null;
   let panelWatcher = null;
+  let openedAt = null;         // the address the full player opened on
 
-  function watch(onClose) {
+  // again: re-made for a layer that had one (the screen turned), not a new
+  // layer, so no tap is needed.
+  function watch(onClose, again) {
     const CW = env.CloseWatcher;
     if (typeof CW !== 'function') return null;
     try {
-      if (env.hasActivation && !env.hasActivation()) return null;
+      if (!again && env.hasActivation && !env.hasActivation()) return null;
       const w = new CW();
       w.addEventListener('close', onClose);
       return w;
@@ -397,7 +400,10 @@ export function createUI(env) {
   ]);
   const side = h('div', { class: 'wsp-side' });
   const noticeBox = h('div', { class: 'wsp-notices', 'aria-live': 'polite' });
-  const sheet = h('div', { class: 'wsp-sheet' }, [
+  // The warning and, while the player is open, the notices: one column under
+  // the top bar, above whichever view shows, so neither covers the other.
+  const alerts = h('div', { class: 'wsp-alerts' }, [fullWarn]);
+  const sheet = h('div', { class: 'wsp-sheet', tabindex: '-1' }, [
     h('div', { class: 'wsp-ambient', 'aria-hidden': 'true' }, [ambientImg]),
     h('div', { class: 'wsp-top', 'data-swipe': '' }, [
       h('span', { class: 'wsp-grab', 'aria-hidden': 'true' }),
@@ -405,8 +411,7 @@ export function createUI(env) {
       h('span', { class: 'wsp-top-label', text: 'Now playing' }),
       slots.menu
     ]),
-    // The warning sits above whichever view shows (the player, or a panel over it).
-    fullWarn,
+    alerts,
     h('div', { class: 'wsp-body' }, [main, side])
   ]);
   const full = h('div', { class: 'wsp-full', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'wspTitle', hidden: true }, [sheet]);
@@ -458,18 +463,32 @@ export function createUI(env) {
     panelFrom = opener && opener.nodeType === 1 ? opener : doc.activeElement;
     view = name;
     // Over the player (a phone): a layer of its own, closed first.
-    if (isOpen && !panelWatcher && !matches(WIDE)) {
-      panelWatcher = watch(function () {
-        panelWatcher = null;
-        hidePanel(null);
-      });
-    }
+    if (isOpen && !panelWatcher && !matches(WIDE)) watchPanel(false);
     drawPanels();
     if (name === 'chapters') centreCurrent();
     const p = panels.get(name);
     try {
       p.heading.focus({ preventScroll: true });
     } catch (e) { /* not focusable yet */ }
+  }
+
+  function watchPanel(again) {
+    panelWatcher = watch(function () {
+      panelWatcher = null;
+      hidePanel(null);
+    }, again);
+  }
+
+  // The screen turned: a panel is a layer only while it covers the player.
+  function onWideChange() {
+    if (!isOpen || view === null) return;
+    if (matches(WIDE)) {
+      const w = panelWatcher;
+      panelWatcher = null;
+      unwatch(w);
+    } else if (!panelWatcher) {
+      watchPanel(true);
+    }
   }
 
   function hidePanel(name) {
@@ -918,6 +937,35 @@ export function createUI(env) {
     return Array.prototype.slice.call(full.querySelectorAll(FOCUSABLE)).filter(isVisible);
   }
 
+  // The innermost layer first: a panel over the player, then the player. A
+  // layer with a CloseWatcher is closed by the browser's own close request,
+  // which this Escape becomes unless it is cancelled here.
+  function escapeInnermost(e) {
+    const panelUp = view !== null && !matches(WIDE);
+    if (panelUp ? panelWatcher : watcher) return;
+    e.preventDefault();
+    if (panelUp) hidePanel(view);
+    else close();
+  }
+
+  // While the full player is open, on document in the capture phase: a key
+  // whose target is outside it (focus left on the page, as a click on the
+  // cover in Chrome or on any button in Safari leaves it) is still the
+  // player's. It never reaches the page's own keys; Escape closes the
+  // innermost layer, Tab comes back inside.
+  function onDocKey(e) {
+    if (!isOpen || dialogOpen() || full.contains(e.target)) return;
+    e.stopPropagation();
+    if (e.defaultPrevented) return;
+    if (e.key === 'Escape' && !e.isComposing) {
+      escapeInnermost(e);
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      const f = focusables();
+      if (f.length) (e.shiftKey ? f[f.length - 1] : f[0]).focus();
+    }
+  }
+
   // On the full player itself: a key pressed in it is the player's, and never
   // reaches the page under it (a reader's Space and arrows turn its pages).
   function onKey(e) {
@@ -925,14 +973,7 @@ export function createUI(env) {
     e.stopPropagation();
     if (dialogOpen() || e.defaultPrevented) return;
     if (e.key === 'Escape' && !e.isComposing) {
-      // The innermost layer first: a panel over the player, then the player.
-      // A layer with a CloseWatcher is closed by the browser's own close
-      // request, which this Escape becomes unless it is cancelled here.
-      const panelUp = view !== null && !matches(WIDE);
-      if (panelUp ? panelWatcher : watcher) return;
-      e.preventDefault();
-      if (panelUp) hidePanel(view);
-      else close();
+      escapeInnermost(e);
       return;
     }
     if (e.key !== 'Tab') return;
@@ -990,16 +1031,18 @@ export function createUI(env) {
     if (isOpen) return true;
     isOpen = true;
     lastFocus = doc.activeElement;
+    openedAt = address();
     full.hidden = false;
     root.setAttribute('data-player-full', '');
     bar.setAttribute('inert', '');
     setAttr(openBtn, 'aria-expanded', 'true');
-    sheet.appendChild(noticeBox);
+    alerts.appendChild(noticeBox);
     syncHost();
     // The closed place is drawn first, so the slide runs from it.
     if (motion()) void sheet.offsetWidth;
     full.classList.add('is-open');
     doc.addEventListener('focusin', onFocusIn);
+    doc.addEventListener('keydown', onDocKey, true);
     watcher = watch(function () {
       watcher = null;
       close();
@@ -1026,6 +1069,7 @@ export function createUI(env) {
     endDrag();
     full.classList.remove('is-open');
     doc.removeEventListener('focusin', onFocusIn);
+    doc.removeEventListener('keydown', onDocKey, true);
     if (clockTimer !== null) {
       clearT(clockTimer);
       clockTimer = null;
@@ -1073,6 +1117,15 @@ export function createUI(env) {
     sheet.style.transform = '';
   }
 
+  // A tap on the sheet outside anything focusable (the cover, the title, the
+  // times) keeps focus in the player, so its keys stay its own.
+  sheet.addEventListener('pointerdown', function (e) {
+    const t = e.target;
+    if (!isOpen || !t || !t.closest || t.closest(FOCUSABLE)) return;
+    try {
+      sheet.focus({ preventScroll: true });
+    } catch (err) { /* not focusable here */ }
+  });
   sheet.addEventListener('pointerdown', function (e) {
     if (!isOpen || drag || (e.button !== undefined && e.button > 0)) return;
     const t = e.target;
@@ -1144,13 +1197,46 @@ export function createUI(env) {
     notify(e.message, { tone: 'err', id: 'error', duration: 0, action: action });
   });
 
+  // Where the address is now: the router's (location), as it records a page's
+  // address before the page mounts.
+  function address() {
+    try {
+      return (typeof location !== 'undefined' && location ? location : win.location).href;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function withoutHash(u) {
+    try {
+      const x = new URL(u, address() || undefined);
+      x.hash = '';
+      return x.href;
+    } catch (e) {
+      return String(u || '');
+    }
+  }
+
+  // The width at which a panel sits beside the player: on a change (a turned
+  // phone) the panel's watcher is made or dropped to match.
+  try {
+    const wideQuery = env.matchMedia && env.matchMedia(WIDE);
+    if (wideQuery && typeof wideQuery.addEventListener === 'function') wideQuery.addEventListener('change', onWideChange);
+    else if (wideQuery && typeof wideQuery.addListener === 'function') wideQuery.addListener(onWideChange);
+  } catch (e) { /* no media queries: nothing turns */ }
+
   // A new page, or a page's own new view (the wiki's), shown while the full
   // player is open (Back where no CloseWatcher takes it, a link): the player
   // makes way for it.
   const win = env.win || doc.defaultView;
   if (win && typeof win.addEventListener === 'function') {
     ['ws:page-mounted', 'ws:page-claimed'].forEach(function (type) {
-      win.addEventListener(type, function () { if (isOpen) close(); });
+      win.addEventListener(type, function (e) {
+        // A page mounts after its first fetches: one the player was opened
+        // over (tapped while it loaded) is the page it opened on.
+        const url = e && e.detail && e.detail.url;
+        if (isOpen && (!url || withoutHash(url) !== withoutHash(openedAt))) close();
+      });
     });
   }
 

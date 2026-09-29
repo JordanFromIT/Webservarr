@@ -997,6 +997,9 @@ html[data-player-full] #scrollDownHint { display: none; }
   transition: transform 250ms cubic-bezier(.2, .8, .2, 1);
 }
 .wsp-full.is-open .wsp-sheet { transform: none; }
+/* Focus rests on the sheet after a tap on the cover or the title, so the
+   player's keys stay its own; it draws no ring. */
+.wsp-sheet:focus { outline: none; }
 .wsp-sheet.is-dragging { transition: none; }
 /* The cover's own colours, blurred, fading into the page colour. */
 .wsp-ambient { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
@@ -1042,9 +1045,10 @@ html[data-player-full] #scrollDownHint { display: none; }
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
 }
 .wsp-byline { font-size: 15px; margin-top: 4px; }
-/* The warning: under the top bar, above whichever view shows. */
-.wsp-sheet > .wsp-warn-live { position: relative; flex-shrink: 0; padding: 0 16px; }
-.wsp-sheet > .wsp-warn-live:not(:empty) { margin-bottom: 8px; }
+/* The warning and the notices: one column under the top bar, above
+   whichever view shows; neither ever covers the other. */
+.wsp-alerts { position: relative; flex-shrink: 0; display: flex; flex-direction: column; padding: 0 16px; }
+.wsp-alerts > :not(:empty) { margin-bottom: 8px; }
 .wsp-sheet .wsp-warn { max-width: 440px; margin: 0 auto; padding: 8px 12px; border-radius: 10px; }
 
 .wsp-scrub { margin-top: 20px; }
@@ -1133,15 +1137,13 @@ html[data-player-full] #scrollDownHint { display: none; }
 }
 
 /* ---- The player's notices and prompts ----
- * Above the bar (or the bottom edge while it is hidden); at the top of the
- * full player while it is open (ui.js moves the box into it). */
+ * Above the bar (or the bottom edge while it is hidden); in the full player
+ * while it is open, under the warning (ui.js moves the box into its column). */
 .wsp-notices {
   position: fixed; left: 16px; right: 16px; bottom: calc(max(var(--ws-player-h), env(safe-area-inset-bottom)) + 12px);
   display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none;
 }
-.wsp-sheet .wsp-notices { position: absolute; top: calc(env(safe-area-inset-top) + 60px); bottom: auto; z-index: 1; }
-/* Wide: in the top bar's row, clear of the cover and the chapter list. */
-@media (min-width: 1024px) { .wsp-sheet .wsp-notices { top: 8px; } }
+.wsp-alerts .wsp-notices { position: static; }
 .wsp-notice {
   pointer-events: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; width: 100%; max-width: 28rem;
   padding: 12px 12px 12px 16px; border-radius: 16px; border: 1px solid rgb(var(--color-text) / .10);

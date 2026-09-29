@@ -114,7 +114,12 @@ function setup(o = {}) {
   const clock = fakeClock();
   const engine = fakeEngine(o.state);
   const env = { reduce: !!o.reduce, wide: !!o.wide, dialog: false, left: [], activation: o.activation !== false,
-    watchers: [], made: 0, destroyed: 0 };
+    watchers: [], made: 0, destroyed: 0, wideFns: [] };
+  // The screen turning across the wide breakpoint.
+  env.setWide = function (v) {
+    env.wide = !!v;
+    for (const fn of env.wideFns) fn({ matches: env.wide });
+  };
   // The browser's CloseWatcher, as far as the player uses it: made per layer,
   // destroyed when a layer closes some other way. closeRequest() is Android's
   // Back or an uncancelled Escape: the newest live watcher gets 'close'.
@@ -157,7 +162,10 @@ function setup(o = {}) {
   const make = o.boot ? null : U.createUI;
   const opts = {
     doc, host, player: engine,
-    matchMedia: (q) => ({ matches: q.indexOf('reduce') !== -1 ? env.reduce : q.indexOf('min-width') !== -1 ? env.wide : false }),
+    matchMedia: (q) => ({
+      get matches() { return q.indexOf('reduce') !== -1 ? env.reduce : q.indexOf('min-width') !== -1 ? env.wide : false; },
+      addEventListener(type, fn) { if (type === 'change' && q.indexOf('min-width') !== -1) env.wideFns.push(fn); }
+    }),
     // The bar is 72 px, and 30 more while it shows the warning.
     measure: (el) => (o.height !== undefined ? o.height : 72) + (el.querySelector('.wsp-warn') ? 30 : 0),
     isVisible: (el) => !el.closest('[hidden]'),
@@ -640,7 +648,8 @@ await run('T7U2: the warning shows over a panel too', () => {
   const msg = "Your place isn't being saved. Last saved 9:41 PM.";
   t.engine.emit('warning', { kind: 'not-saved', active: true, lastSavedAt: 1, message: msg });
   const live = t.qa('.wsp-warn-live')[1];
-  check('in the sheet, outside the player view a panel hides', live.parentNode === t.q('.wsp-sheet') && !live.closest('.wsp-main'));
+  check('in the sheet, outside the player view a panel hides', live.parentNode === t.q('.wsp-alerts') &&
+    t.q('.wsp-alerts').parentNode === t.q('.wsp-sheet') && !live.closest('.wsp-main'));
   check('said', live.textContent === msg);
   const css = readFileSync(join(here, '../../static/css/theme.css'), 'utf8');
   check('no rule hides it with the player view', !/\.wsp-main[^{]*\.wsp-warn-live/.test(css));
@@ -721,6 +730,136 @@ await run('T7U6: a retry that can no longer find the place says so', async () =>
   const texts = t.qa('.wsp-notice-text').map((n) => n.textContent);
   check('the resume-lost notice', texts.indexOf("Couldn't find your saved place in this book") !== -1, texts);
   check('not just a log line', logged.length === 0, logged);
+});
+
+await run('T7B1: focus left on the page still keeps the keys the player\'s', () => {
+  for (const cw of [true, false]) {
+    const how = cw ? ' (CloseWatcher)' : ' (no CloseWatcher)';
+    const t = setup({ closeWatcher: cw ? undefined : false });
+    const turned = [];
+    t.doc.addEventListener('keydown', (e) => {
+      if (['ArrowRight', 'ArrowLeft', 'j', 'k', ' '].indexOf(e.key) !== -1) { e.preventDefault(); turned.push(e.key); }
+    });
+    t.engine.set(BOOK, 'open');
+    t.q('.wsp-bar-open').click();
+    t.doc.activeElement.blur();
+    check('focus is on the page' + how, t.doc.activeElement === t.doc.body);
+    for (const k of [' ', 'ArrowRight', 'ArrowLeft', 'j', 'k']) t.key(t.doc.body, k);
+    check('the page heard none of them' + how, turned.length === 0, turned);
+    const tab = t.key(t.doc.body, 'Tab');
+    check('Tab comes back inside' + how, tab.defaultPrevented && t.q('.wsp-full').contains(t.doc.activeElement));
+    t.doc.activeElement.blur();
+    t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1).click();
+    t.doc.activeElement.blur();
+    let ev = t.env.escape();
+    check('Escape from the page: the panel first' + how, t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view') &&
+      ev.defaultPrevented === !cw, ev.defaultPrevented);
+    t.doc.activeElement.blur();
+    ev = t.env.escape();
+    check('then the player' + how, !t.ui.isOpen() && ev.defaultPrevented === !cw);
+    t.key(t.doc.body, 'j');
+    check('closed: the page has its keys again' + how, turned.join() === 'j', turned);
+    check('closed: no key guard left behind' + how, t.env.watchers.length === 0);
+    // A tap on the cover keeps focus in the player.
+    t.ui.open();
+    t.doc.activeElement.blur();
+    t.pointer(t.q('.wsp-full-art'), 'pointerdown', 300);
+    t.pointer(t.q('.wsp-full-art'), 'pointerup', 300);
+    check('a tap on the cover focuses the sheet' + how, t.doc.activeElement === t.q('.wsp-sheet') && t.q('.wsp-sheet').getAttribute('tabindex') === '-1');
+    t.key(t.doc.activeElement, 'k');
+    check('and its keys stay the player\'s' + how, turned.join() === 'j', turned);
+    t.ui.close();
+  }
+  const css = readFileSync(join(here, '../../static/css/theme.css'), 'utf8');
+  check('the sheet draws no focus ring', /\.wsp-sheet:focus \{ outline: none; \}/.test(css));
+});
+
+await run('T7B1: the page-level key guard lives only while the player is open', () => {
+  const t = setup();
+  const live = new Set();
+  const add = t.doc.addEventListener.bind(t.doc);
+  const remove = t.doc.removeEventListener.bind(t.doc);
+  t.doc.addEventListener = (type, fn, o) => { if (type === 'keydown' && o === true) live.add(fn); return add(type, fn, o); };
+  t.doc.removeEventListener = (type, fn, o) => { if (type === 'keydown' && o === true) live.delete(fn); return remove(type, fn, o); };
+  t.engine.set(BOOK, 'open');
+  const ways = [() => t.ui.close(), () => t.env.closeRequest(), () => t.q('.wsp-full .wsp-icon-btn').click(),
+    () => t.win.dispatchEvent(new t.win.CustomEvent('ws:page-mounted', { detail: {} })), () => { t.engine.set(EMPTY, 'close'); t.engine.set(BOOK, 'open'); }];
+  for (const way of ways) {
+    t.ui.open();
+    check('open: one capture guard on document', live.size === 1, live.size);
+    way();
+    check('closed: none', live.size === 0 && !t.ui.isOpen(), live.size);
+  }
+});
+
+await run('T7B1: a dialog on top keeps its keys', () => {
+  const t = setup({ closeWatcher: false });
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  t.env.dialog = true;
+  const outside = t.doc.getElementById('pageBtn');
+  outside.focus();
+  let heard = 0;
+  outside.addEventListener('keydown', () => { heard += 1; });
+  t.key(outside, 'Tab');
+  t.key(outside, 'Escape');
+  check('the dialog\'s keys reach it', heard === 2 && t.ui.isOpen());
+});
+
+await run('T7B2: a page that mounts late under the player it opened on keeps it open', () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  const here = t.win.location.href;
+  t.win.dispatchEvent(new t.win.CustomEvent('ws:page-mounted', { detail: { url: here } }));
+  check('the page it opened on: stays open', t.ui.isOpen());
+  t.win.dispatchEvent(new t.win.CustomEvent('ws:page-mounted', { detail: { url: here + '#top' } }));
+  check('the same page with a fragment: stays open', t.ui.isOpen());
+  t.win.dispatchEvent(new t.win.CustomEvent('ws:page-mounted', { detail: { url: new URL('/calendar', here).href } }));
+  check('another page: closes', !t.ui.isOpen());
+  t.ui.open();
+  t.win.dispatchEvent(new t.win.CustomEvent('ws:page-claimed', { detail: { url: new URL('/wiki/a', here).href } }));
+  check('another view: closes', !t.ui.isOpen());
+});
+
+await run('T7B3: the warning and the notices share one column', () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  t.engine.emit('warning', { kind: 'not-saved', active: true, lastSavedAt: 1, message: "Your place isn't being saved. Last saved 9:41 PM." });
+  t.engine.emit('error', { code: 'unreachable', message: "Can't reach the media server", retry: () => Promise.resolve() });
+  const col = t.q('.wsp-alerts');
+  check('warning, then notices, in one column', col.children[0] === t.qa('.wsp-warn-live')[1] && col.children[1] === t.q('.wsp-notices'));
+  const css = readFileSync(join(here, '../../static/css/theme.css'), 'utf8');
+  check('the notices sit in its flow, not over it', /\.wsp-alerts \.wsp-notices \{ position: static; \}/.test(css) &&
+    !/\.wsp-sheet \.wsp-notices \{[^}]*absolute/.test(css));
+  t.ui.close();
+  check('closed: the notices go back above the bar', t.q('#wsPlayer > .wsp-notices') !== null);
+});
+
+await run('T7B4: a turned screen makes or drops the panel\'s watcher', () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  t.ui.open();
+  t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1).click();
+  check('narrow: the panel has a watcher', t.env.watchers.length === 2);
+  t.env.setWide(true);
+  check('turned wide: the panel beside the player has none', t.env.watchers.length === 1);
+  t.env.escape();
+  check('wide: Escape closes the player', !t.ui.isOpen() && t.env.watchers.length === 0);
+  t.ui.open();
+  t.qa('.wsp-action').find((b) => b.textContent.indexOf('Chapters') !== -1).click();
+  check('wide: one watcher', t.env.watchers.length === 1);
+  t.env.activation = false;
+  t.env.setWide(false);
+  check('turned narrow: the panel gets one again, without a tap', t.env.watchers.length === 2);
+  t.env.closeRequest();
+  check('Back then closes the panel first', t.ui.isOpen() && !t.q('.wsp-full').hasAttribute('data-view'));
+  t.env.closeRequest();
+  check('then the player', !t.ui.isOpen() && t.env.watchers.length === 0);
+  t.env.setWide(true);
+  t.env.setWide(false);
+  check('closed: turning makes nothing', t.env.watchers.length === 0);
 });
 
 // ---------------------------------------------------------------------------
