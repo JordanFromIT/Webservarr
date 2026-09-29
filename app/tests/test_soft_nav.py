@@ -1697,5 +1697,59 @@ class PlayerView(unittest.TestCase):
         self.assertIn("html[data-player-full] body { overflow: hidden; }", theme)
 
 
+class PlayerFeatures(unittest.TestCase):
+    """The audiobook player's listening features (js/player/features.js,
+    audiobook player spec section 8): document-lifetime like the engine and
+    its view, so loaded once by the shell as its own stamped module after
+    ui.js; no markup from strings and no inline handlers (CSP script-src
+    'self'); its keys inside the full player through WS.playerUI.onKey, and
+    on the page through one document listener in the bubble phase, so a
+    page's own handlers (and the player's capture guard) come first. Its
+    behaviour is app/tests/js/player_features.mjs."""
+
+    FEATURES = STATIC / "js" / "player" / "features.js"
+
+    def test_it_loads_once_from_the_shell_right_after_the_view(self):
+        from app.tests.test_shell_contract import BARE_PAGES, SHELL_PAGES
+        part = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
+        tags = [m for m in _SCRIPT_TAG_RE.finditer(part)]
+        srcs = [attr(m.group(1), "src") or "" for m in tags]
+        mine = [i for i, s in enumerate(srcs) if s.startswith("/static/js/player/features.js")]
+        self.assertEqual(len(mine), 1, "the shell loads the features exactly once")
+        self.assertEqual(srcs[mine[0]], "/static/js/player/features.js?v=1", "stamped like every shell script")
+        self.assertEqual(attr(tags[mine[0]].group(1), "type"), "module")
+        self.assertEqual(srcs[mine[0] - 1], "/static/js/player/ui.js?v=1", "right after the view it adds to")
+        for name in SHELL_PAGES + BARE_PAGES:
+            with self.subTest(name):
+                self.assertNotIn("/static/js/player/features.js", read(name), f"{name} loads the features itself")
+        for p in (STATIC / "js").rglob("*.js"):
+            self.assertNotRegex(p.read_text(encoding="utf-8"),
+                                r"""(?:\bfrom|\bimport\s*\(?)\s*['"][^'"]*features\.js['"]""", p.name)
+
+    def test_it_builds_no_markup_from_strings_and_no_handler_properties(self):
+        src = self.FEATURES.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        for word in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "setInterval", "eval("):
+            self.assertNotIn(word, code, word)
+        self.assertNotRegex(code, r"\.on[a-z]+\s*=(?!=)", "listeners go through addEventListener")
+        self.assertEqual(string_matches(src, _HANDLER_TEXT_RE), [])
+        self.assertNotRegex(code, r"\.style\.")
+        self.assertNotRegex(code, r"\bhistory\s*\.|pushState|replaceState")
+        # No WSUI dialog over the player: its choices are panels in it.
+        self.assertNotRegex(code, r"WSUI\.(?:confirm|alert|prompt|dialog|open)")
+
+    def test_its_keys_come_after_everyone_else(self):
+        kept = js_code_only(self.FEATURES.read_text(encoding="utf-8"), keep_strings=True)
+        docs = re.findall(r"(?:doc|document|window|win)\.(?:add|remove)EventListener\('keydown'[^)]*\)", kept)
+        self.assertEqual(docs, ["doc.addEventListener('keydown', onDocKey)"], "one listener, in the bubble phase")
+        self.assertIn("ui.onKey(", kept, "inside the full player it listens through the view")
+
+    def test_its_controls_are_stilled_by_reduced_motion(self):
+        from app.tests.test_motion import stilled
+        theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        for sel in (".wsp-chip", ".wsp-switch", ".wsp-switch::after", ".wsp-row"):
+            self.assertTrue(stilled(theme, sel, "transition"), sel)
+
+
 if __name__ == "__main__":
     unittest.main()

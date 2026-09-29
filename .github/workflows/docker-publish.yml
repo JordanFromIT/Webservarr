@@ -103,6 +103,7 @@ jobs:
           node app/tests/js/player_engine.mjs
           node app/tests/js/player_saves.mjs
           node app/tests/js/player_ui.mjs
+          node app/tests/js/player_features.mjs
 
   build-and-push:
     needs: [test, js-checks]

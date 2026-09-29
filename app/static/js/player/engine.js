@@ -77,8 +77,18 @@
  *   play(), pause(), toggle()
  *   seek(bookMs), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters
  *   setSpeed(x)       0.75 to 2 in 0.05 steps (clamped, rounded); returns the speed
- *   setSkip(s)        the Media Session seek back and forward, 5 to 60 s
- *                     (clamped, rounded); returns it
+ *   setSkip(s)        the skip length (the skip buttons and the Media Session
+ *                     seek back and forward), 5 to 60 s (clamped, rounded; a
+ *                     finite number only); returns it. A new value is a
+ *                     'prefs' change.
+ *   applyPrefs({ skip, speed })  the listener's saved settings (features.js):
+ *                     each a number or left as it is; then one 'prefs' change.
+ *                     Returns { skip, speed }.
+ *   setVolume(v)      the element's volume, 0 to 1 (the sleep timer's fade);
+ *                     returns it. No change event.
+ *   parts()           [{ start_ms, duration_ms, playable }] of the book, in
+ *                     book time; playable false: a format this browser can't
+ *                     decode (never a place to move to)
  *   retry()           after an error: again from the place. After a failed
  *                     first fetch it opens the book again, so like open() it
  *                     can reject with UnknownTrack.
@@ -102,7 +112,8 @@
  *                'part' (one part ended, the next starts at 0), 'part-skipped',
  *                'connection' (switched, or refreshed its token), 'speed',
  *                'ready' (loaded, not playing), 'retry', 'error', 'ended', 'close',
- *                'save' (state().saveError changed)
+ *                'save' (state().saveError changed), 'prefs' (the skip length or
+ *                the listener's settings changed)
  *     'ended'    { state } at the end of the last part
  *     'error'    { code, message, retry: function | null }; code 'unreachable',
  *                'part', 'format' (no retry), 'forbidden', 'not-found', 'signed-out',
@@ -1289,8 +1300,49 @@ export function createEngine(env) {
 
   function setSkip(x) {
     const v = roundSkip(x);
-    if (v !== null) skipS = v;
+    if (v !== null && v !== skipS) {
+      skipS = v;
+      // So what shows the skip length follows, while paused too.
+      changed('prefs');
+    }
     return skipS;
+  }
+
+  /* The listener's settings, as loaded or changed (features.js): numbers
+     only; anything else leaves that one as it is. One 'prefs' change after. */
+  function applyPrefs(p) {
+    p = p || {};
+    const s = roundSkip(p.skip);
+    if (s !== null) skipS = s;
+    const v = typeof p.speed === 'number' ? roundSpeed(p.speed) : null;
+    if (v !== null) {
+      speed = v;
+      applyRate();
+    }
+    changed('prefs');
+    return { skip: skipS, speed: speed };
+  }
+
+  /* The element's volume, 0 to 1 (the sleep timer's fade); no argument, or
+     anything but a finite number, only reads it. Where the browser does not
+     let a page set it (iOS), it stays as it is. */
+  function setVolume(x) {
+    if (typeof x === 'number' && isFinite(x)) {
+      try {
+        audio.volume = clampNumber(x, 0, 1);
+      } catch (e) { /* not settable here */ }
+    }
+    const v = Number(audio.volume);
+    return isFinite(v) ? v : 1;
+  }
+
+  /* The book's parts in book time, and whether each can play here (not a
+     format this browser cannot decode): [{ start_ms, duration_ms, playable }]. */
+  function parts() {
+    if (!book) return [];
+    return book.tracks.map(function (t, i) {
+      return { start_ms: book.starts[i], duration_ms: t.duration_ms, playable: !t.undecodable };
+    });
   }
 
   function setSpeed(x) {
@@ -1439,6 +1491,9 @@ export function createEngine(env) {
     jumpToChapter: jumpToChapter,
     setSpeed: setSpeed,
     setSkip: setSkip,
+    applyPrefs: applyPrefs,
+    setVolume: setVolume,
+    parts: parts,
     retry: retry,
     close: close,
     state: state,

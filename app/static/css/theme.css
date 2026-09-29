@@ -1180,9 +1180,75 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-notice-btn.is-primary:hover { background: rgb(var(--color-primary) / .88); }
 }
 
+/* ---- The listening features' controls (js/player/features.js) ----
+ * The settings, speed and sleep panels. A chosen option takes the primary
+ * fill (as the play button); the sleep timer's button, while it runs, the
+ * current-chapter tint. */
+.wsp-opt-sec { padding: 8px 8px 16px; }
+.wsp-opt-sec + .wsp-opt-sec { padding-top: 16px; border-top: 1px solid rgb(var(--color-text) / .08); }
+.wsp-opt-head { margin: 0; font-size: 15px; font-weight: 600; }
+.wsp-opt-note { margin: 4px 0 0; font-size: 13px; line-height: 1.4; color: rgb(var(--color-text) / .7); }
+.wsp-opt-row { display: flex; align-items: center; gap: 16px; }
+.wsp-opt-row > div { flex: 1; min-width: 0; }
+.wsp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.wsp-chips-center { justify-content: center; }
+.wsp-chip {
+  min-width: 56px; height: 40px; padding: 0 16px; border-radius: 9999px;
+  font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;
+  color: rgb(var(--color-text)); background: rgb(var(--color-text) / .07);
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+.wsp-chip[aria-pressed="true"] { color: rgb(var(--color-text-secondary)); background: rgb(var(--color-primary)); }
+.wsp-chip:focus-visible, .wsp-switch:focus-visible, .wsp-row:focus-visible { outline: 2px solid rgb(var(--color-primary)); outline-offset: 2px; }
+.wsp-switch {
+  position: relative; flex-shrink: 0; width: 52px; height: 32px; border-radius: 9999px;
+  background: rgb(var(--color-text) / .2); transition: background-color 150ms ease-out;
+}
+.wsp-switch::after {
+  content: ""; position: absolute; top: 4px; left: 4px; width: 24px; height: 24px; border-radius: 9999px;
+  background: rgb(var(--color-text)); transition: transform 150ms ease-out;
+}
+.wsp-switch[aria-checked="true"] { background: rgb(var(--color-primary)); }
+.wsp-switch[aria-checked="true"]::after { transform: translateX(20px); background: rgb(var(--color-text-secondary)); }
+.wsp-speed { display: flex; align-items: center; justify-content: center; gap: 24px; padding: 8px 0; }
+.wsp-speed-now { min-width: 4ch; margin: 0; text-align: center; font-size: 32px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.wsp-step { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .07); }
+.wsp-step:disabled { opacity: .4; cursor: default; }
+.wsp-rows { list-style: none; margin: 8px 0 0; padding: 0; }
+.wsp-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 10px 12px;
+  border-radius: 10px; text-align: left; font-size: 15px; color: rgb(var(--color-text));
+  transition: background-color 150ms ease-out;
+}
+.wsp-row-text { flex: 1; min-width: 0; }
+.wsp-row-check { font-size: 20px; color: rgb(var(--color-accent)); visibility: hidden; }
+.wsp-row[aria-pressed="true"] { font-weight: 600; background: rgb(var(--color-primary) / .2); }
+.wsp-row[aria-pressed="true"] .wsp-row-check { visibility: visible; }
+.wsp-row-off { color: rgb(var(--color-text) / .7); }
+.wsp-action.is-on { color: rgb(var(--color-text)); background: rgb(var(--color-primary) / .2); }
+.wsp-slot-sleep .wsp-action-label { font-variant-numeric: tabular-nums; }
+/* The keyboard shortcuts: only where there is a keyboard and a mouse. */
+.wsp-keys { display: none; }
+.wsp-key-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; font-size: 13px; color: rgb(var(--color-text) / .7); }
+.wsp-key-list li { display: flex; align-items: center; gap: 4px; }
+.wsp-key-list span { margin-left: 8px; }
+.wsp-kbd {
+  min-width: 28px; padding: 2px 8px; border-radius: 6px; text-align: center; font: inherit; font-weight: 600;
+  color: rgb(var(--color-text)); background: rgb(var(--color-text) / .07); border: 1px solid rgb(var(--color-text) / .12);
+}
+@media (hover: hover) and (pointer: fine) {
+  .wsp-keys { display: block; }
+  .wsp-chip:hover, .wsp-step:hover:not(:disabled) { background: rgb(var(--color-text) / .12); }
+  .wsp-chip[aria-pressed="true"]:hover { background: rgb(var(--color-primary) / .88); }
+  .wsp-row:hover { background: rgb(var(--color-text) / .06); }
+  .wsp-row[aria-pressed="true"]:hover { background: rgb(var(--color-primary) / .26); }
+  .wsp-action.is-on:hover { background: rgb(var(--color-primary) / .26); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wsp-bar, .wsp-notice, .wsp-spin { animation: none; }
   .wsp-sheet, .wsp-bar-open, .wsp-play, .wsp-icon-btn, .wsp-skip, .wsp-action, .wsp-chapter-item, .wsp-notice-btn { transition: none; }
+  .wsp-chip, .wsp-switch, .wsp-switch::after, .wsp-row { transition: none; }
   .wsp-play:active, .wsp-skip:active { transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -1278,6 +1278,50 @@ await run('boot: once per document, in #wsPlayer, beside the engine\'s audio', (
   check('no engine: nothing', U.boot(noEngine) === null);
 });
 
+// Task 8: the features' shortcuts listen inside the full player.
+await run('onKey hears the keys pressed in the full player, and only those', () => {
+  const t = setup({ closeWatcher: false });
+  t.engine.set(BOOK, 'open');
+  const got = [];
+  const off = t.ui.onKey((e) => got.push(e.key));
+  const onPage = [];
+  t.doc.addEventListener('keydown', (e) => onPage.push(e.key));
+  t.key(t.doc.body, ' ');
+  check('closed: nothing', got.length === 0 && onPage.length === 1);
+  t.ui.open();
+  const sheet = t.q('.wsp-sheet');
+  t.key(sheet, ' ');
+  t.key(sheet, ']');
+  t.key(t.q('.wsp-range'), ' ');
+  check('keys in the player', got.join('|') === ' |]| ', got);
+  t.key(t.q('.wsp-range'), 'ArrowRight');
+  check('not a key the scrubber handled', got.length === 3 && JSON.stringify(t.engine.calls.slice(-1)) === '[["skip",10]]', got);
+  t.key(sheet, 'Tab');
+  check('not Tab', got.length === 3);
+  const esc = new t.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  sheet.dispatchEvent(esc);
+  check('not Escape (it closes the player)', got.length === 3 && !t.ui.isOpen());
+  t.ui.open();
+  t.env.dialog = true;
+  t.key(t.q('.wsp-sheet'), ' ');
+  check('not under a dialog', got.length === 3);
+  t.env.dialog = false;
+  t.key(t.doc.body, ' ');
+  check('not a key aimed outside while open (swallowed)', got.length === 3 && onPage.length === 1);
+  off();
+  t.key(t.q('.wsp-sheet'), ' ');
+  check('unsubscribed', got.length === 3);
+  const bad = t.ui.onKey(() => { throw new Error('boom'); });
+  const real = console.error;
+  const logged = [];
+  console.error = (...a) => logged.push(a.join(' '));
+  t.key(t.q('.wsp-sheet'), ' ');
+  console.error = real;
+  check('a failing listener is logged, not thrown', logged.length === 1);
+  bad();
+  check('a non-function is ignored', typeof t.ui.onKey(null) === 'function');
+});
+
 await run('no markup from strings', () => {
   const src = readFileSync(UI_PATH, 'utf8');
   check('no innerHTML or insertAdjacentHTML', !/innerHTML|insertAdjacentHTML|outerHTML/.test(src));

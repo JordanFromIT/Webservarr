@@ -75,6 +75,13 @@
  *                     still closes it first, but Back closes the player.
  *   open(), close(), isOpen()        the full player
  *   on('open' | 'close', fn) -> unsubscribe
+ *   onKey(fn) -> unsubscribe
+ *                     fn(event) for each key pressed inside the full player
+ *                     while it is open (the features' shortcuts), except
+ *                     Escape and Tab, a key a control there has already
+ *                     handled (defaultPrevented), and any key while a WSUI
+ *                     dialog is over it. A key aimed outside the player while
+ *                     it is open is swallowed and never reaches fn.
  *
  * Closing: Escape and, on a phone, Back close the innermost layer first (a
  * panel over the player, then the player). Where the browser has CloseWatcher,
@@ -204,6 +211,7 @@ export function createUI(env) {
     return !el.closest('[hidden]') && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   };
   const handlers = { open: new Set(), close: new Set() };
+  const keyFns = new Set();
 
   // What is drawn, and the full player's own state.
   let lastState = null;
@@ -1001,7 +1009,17 @@ export function createUI(env) {
       escapeInnermost(e);
       return;
     }
-    if (e.key !== 'Tab') return;
+    if (e.key !== 'Tab') {
+      // The features' shortcuts (features.js): keys pressed in the player.
+      keyFns.forEach(function (fn) {
+        try {
+          fn(e);
+        } catch (err) {
+          logError(err);
+        }
+      });
+      return;
+    }
     const f = focusables();
     if (!f.length) {
       e.preventDefault();
@@ -1286,6 +1304,11 @@ export function createUI(env) {
       if (!set || typeof fn !== 'function') return function () {};
       set.add(fn);
       return function () { set.delete(fn); };
+    },
+    onKey: function (fn) {
+      if (typeof fn !== 'function') return function () {};
+      keyFns.add(fn);
+      return function () { keyFns.delete(fn); };
     }
   };
 }

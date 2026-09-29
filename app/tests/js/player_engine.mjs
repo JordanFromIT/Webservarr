@@ -1199,6 +1199,41 @@ current = 'setSkip sets the Media Session seek length, 5 to 60 s';
   t.engine.close();
 }
 
+// Task 8: the listener's settings reach the engine with one 'prefs' change
+// (so the view follows while paused); the fade's volume; the parts in book
+// time with what can play.
+current = 'prefs changes, applyPrefs, setVolume and parts()';
+{
+  const t = setup();
+  await openPlaying(t, MIXED.key, { at: at('901', 1000) });
+  t.engine.pause();
+  const n = t.log.change.length;
+  t.engine.setSkip(25);
+  check('a new skip length is one prefs change', t.log.change.length === n + 1 && t.log.change[n].reason === 'prefs' &&
+    t.log.change[n].state.playing === false, t.log.change.slice(n).map((c) => c.reason));
+  t.engine.setSkip(25);
+  t.engine.setSkip();
+  t.engine.setSkip('40');
+  check('the same, a read or a string: none', t.log.change.length === n + 1);
+  const got = t.engine.applyPrefs({ skip: 45, speed: 1.35 });
+  check('applyPrefs sets both', got.skip === 45 && got.speed === 1.35 && t.engine.setSkip() === 45 && t.engine.state().speed === 1.35);
+  check('then one prefs change', t.log.change.length === n + 2 && t.log.change[n + 1].reason === 'prefs');
+  check('the element plays at it', t.main.playbackRate === 1.35 && t.main.defaultPlaybackRate === 1.35);
+  t.engine.applyPrefs({ skip: null, speed: null });
+  t.engine.applyPrefs({ speed: '2' });
+  check('only numbers change them', t.engine.setSkip() === 45 && t.engine.state().speed === 1.35, [t.engine.setSkip(), t.engine.state().speed]);
+  check('setVolume clamps', t.engine.setVolume(0.4) === 0.4 && t.main.volume === 0.4 && t.engine.setVolume(-1) === 0 && t.engine.setVolume(3) === 1);
+  check('setVolume() only reads', t.engine.setVolume() === 1 && t.engine.setVolume(NaN) === 1);
+  const parts = t.engine.parts();
+  check('parts() in book time', JSON.stringify(parts) === JSON.stringify([
+    { start_ms: 0, duration_ms: 600000, playable: true },
+    { start_ms: 600000, duration_ms: 900000, playable: false },
+    { start_ms: 1500000, duration_ms: 300000, playable: true }
+  ]), parts);
+  t.engine.close();
+  check('no book, no parts', t.engine.parts().length === 0);
+}
+
 // T5E5: a failed open clears the lock screen.
 current = 'a failed open of another book clears the Media Session';
 {
