@@ -1081,5 +1081,78 @@ class LimitsAcrossKeys(PlayerApiBase):
         self.assertEqual(self.checkin(book="100:1", track="101", seq=100).status_code, 429)
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class LauncherPage(unittest.TestCase):
+    """The player's test launcher (/player-test, Task 10): a page, not an API
+    route, for admins only and only while the player is on. Everyone else,
+    signed in or not, gets the same 404 as an address that does not exist,
+    so the page is not there for them at all. Nothing in the navigation
+    links to it."""
+
+    ADMIN = {"username": "admin", "display_name": "Admin", "is_admin": "true",
+             "auth_method": "plex", "plex_account_id": "1001", "avatar_url": ""}
+    MEMBER = {"username": "sam", "display_name": "Sam", "is_admin": "false",
+              "auth_method": "plex", "plex_account_id": "1002", "avatar_url": ""}
+
+    def setUp(self):
+        from fastapi.testclient import TestClient
+        from app import pages
+        from app.auth import session_manager
+        from app.routers.branding import EMPTY_WIKI_HOOKS, build_branding
+        self.pages, self.session_manager = pages, session_manager
+        self.branding = build_branding({}, {}, None, dict(EMPTY_WIKI_HOOKS))
+        for p in (mock.patch("app.routers.setup.is_setup_completed", return_value=True),
+                  mock.patch.object(pages, "SessionLocal", helpers.make_sessionmaker())):
+            p.start()
+            self.addCleanup(p.stop)
+        helpers.set_rate_limits(False)
+        self.addCleanup(helpers.set_rate_limits, True)
+        self.client = TestClient(app)
+        self.client.cookies.set(settings.session_cookie_name, "test-session")
+
+    def get(self, session, on=True, path="/player-test"):
+        with mock.patch.object(self.session_manager, "get_session", mock.AsyncMock(return_value=session)), \
+             mock.patch.object(self.pages, "load_context", return_value=(self.branding, {"netdata": False})), \
+             mock.patch.object(pp, "player_on", mock.Mock(return_value=on)):
+            return self.client.get(path, follow_redirects=False)
+
+    def test_an_admin_gets_the_page_while_the_player_is_on(self):
+        r = self.get(self.ADMIN)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('data-ws-module="/static/js/pages/player-test.js?v=', r.text)
+        self.assertIn('data-page="player-test"', r.text)
+
+    def test_404_for_anyone_who_is_not_an_admin(self):
+        for who, session in (("member", self.MEMBER), ("signed out", None),
+                             ("local non-admin", {"username": "x", "is_admin": "false", "auth_method": "simple"})):
+            with self.subTest(who):
+                r = self.get(session)
+                self.assertEqual(r.status_code, 404)
+                self.assertNotIn("player-test", r.text)
+
+    def test_404_while_the_player_is_off_even_for_an_admin(self):
+        for session in (self.ADMIN, self.MEMBER, None):
+            with self.subTest(session=bool(session)):
+                self.assertEqual(self.get(session, on=False).status_code, 404)
+
+    def test_the_404_is_the_one_an_unknown_address_gets(self):
+        unknown = self.get(None, path="/no-such-page-here")
+        for session, on in ((self.MEMBER, True), (None, True), (self.ADMIN, False)):
+            r = self.get(session, on=on)
+            self.assertEqual((r.status_code, r.json()), (unknown.status_code, unknown.json()))
+
+    def test_nothing_in_the_navigation_links_to_it(self):
+        from app.settings_registry import PAGE_ADDRESSES
+        self.assertNotIn("/player-test", PAGE_ADDRESSES.values())
+        # No link to its address on it or on any other page an admin sees: in
+        # the sidebar, the drawer or anywhere else ("/static/js/pages/
+        # player-test.js", its own module, is not its address).
+        for path in ("/player-test", "/", "/settings", "/news"):
+            with self.subTest(path):
+                r = self.get(self.ADMIN, path=path)
+                self.assertEqual(r.status_code, 200)
+                self.assertNotRegex(r.text, r"""["'(]/player-test""")
+
+
 if __name__ == "__main__":
     unittest.main()

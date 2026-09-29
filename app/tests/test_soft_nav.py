@@ -15,7 +15,7 @@ from app.tests.test_shell_contract import STATIC, js_code_only, live_matches, ma
 
 # Pages converted to soft navigation, in conversion order.
 CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index", "library", "reader",
-             "requests", "requests-embed"]
+             "requests", "requests-embed", "player-test"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -549,7 +549,8 @@ class HomePage(unittest.TestCase):
         self.assertNotIn("statusAt = Date.now()", body)
         self.assertNotRegex(body, r"\bsetTimeout\(")
         leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
-        self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus'];", leaks)
+        self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'engine.js', 'saves.js', "
+                      "'features.js'];", leaks)
 
     def test_the_clock_test_runs_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file
@@ -1695,6 +1696,67 @@ class PlayerView(unittest.TestCase):
         for z in re.findall(r"z-\[(\d+)\]", ui):
             self.assertLess(lifted, int(z), "the shared toasts and dialogs stay on top")
         self.assertIn("html[data-player-full] body { overflow: hidden; }", theme)
+
+
+class PlayerTestPage(unittest.TestCase):
+    """The player's test launcher (js/pages/player-test.js, Task 10): its
+    one read is on the page's signal; it opens books through WS.player and
+    watches the player only for the visit; covers are fitted whole, and one
+    that fails gives way to an icon without an inline handler; theme
+    colours only. The player it starts is the shell's in the leak tool."""
+
+    def code(self):
+        return js_code_only(module_source("player-test"))
+
+    def test_every_request_is_on_the_pages_signal(self):
+        code = self.code()
+        fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
+        self.assertEqual(len(fetches), 1, "the book list")
+        self.assertIn("signal: signal", ",".join(call_args(code, fetches[0] + len("fetch"))))
+        self.assertIn("fetch('/api/player/books', { signal: signal })",
+                      module_source("player-test"))
+        self.assertNotRegex(code, r"\bgetJSON\(")
+        self.assertNotRegex(code, r"(?<![.\w])setTimeout\(|\bsetInterval\(|\bWS\.poll\(")
+
+    def test_it_plays_through_the_player_and_watches_it_for_the_visit(self):
+        src = module_source("player-test")
+        code = js_code_only(src)
+        self.assertIn("p.open(key, { autoplay: true })", code)
+        self.assertIn("p.toggle();", code)
+        # One subscription, ended when the visit's signal aborts.
+        self.assertEqual(len(re.findall(r"\bp\.on\(", code)), 1)
+        watch = function_body(code, "watch")
+        self.assertIn("unwatch = p.on('      ', sync);", watch)
+        self.assertRegex(watch, r"signal\.addEventListener\('     ', function \(\) \{\s*unwatch\(\);\s*done\.abort\(\);\s*\}, \{ once: true, signal: done\.signal \}\);")
+        self.assertIn("if (unwatch || !p || signal.aborted) return;", watch)
+
+    def test_covers_are_fitted_whole_and_a_failed_one_needs_no_handler(self):
+        src = module_source("player-test")
+        self.assertIn("absolute inset-0 size-full object-contain", src)
+        self.assertNotIn("object-cover", src)
+        self.assertIn("root.addEventListener('error', function (e) {", src)
+        self.assertIn("}, { capture: true, signal: signal });", src)
+
+    def test_it_is_not_a_navigation_destination(self):
+        from app.settings_registry import PAGE_ADDRESSES
+        self.assertNotIn("/player-test", PAGE_ADDRESSES.values())
+        for path in html_files() + js_files():
+            with self.subTest(str(path.relative_to(STATIC))):
+                self.assertNotRegex(path.read_text(encoding="utf-8"), r"""["'(]/player-test""")
+
+    def test_its_text_colours_are_theme_classes(self):
+        for text in (read("player-test"), module_source("player-test")):
+            self.assertNotRegex(text, r"\btext-(?:slate|gray|zinc|neutral|stone|red|green|blue|yellow|white|black)(?:-\d+)?\b")
+            self.assertNotRegex(text, r"#[0-9a-fA-F]{3,8}\b")
+
+    def test_the_player_is_the_shells_in_the_leak_tool(self):
+        leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
+        shell = re.search(r"export const SHELL_FILES = \[([^\]]*)\];", leaks).group(1)
+        owned = re.search(r"export const SELF_OWNED_FILES = \[([^\]]*)\];", leaks).group(1)
+        for p in sorted((STATIC / "js" / "player").glob("*.js")):
+            with self.subTest(p.name):
+                self.assertIn(f"'{p.name}'", shell)
+                self.assertIn(f"'{p.name}'", owned)
 
 
 class PlayerFeatures(unittest.TestCase):

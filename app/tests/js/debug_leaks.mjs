@@ -418,6 +418,69 @@ const UI = 'https://host.example/static/js/ui.js?v=abc';
   g.clearTimeout(lateT);
 }
 
+// The audiobook player (js/player/) lives as long as the document: a book a
+// page's Play button opened streams, saves and times its sleep on every page
+// after. What it makes is the player's, even from inside the page's click;
+// and its later work, with no page to name (a timer after a native await, a
+// timeupdate), is nobody's, never 'unattributed'. The page's own work is
+// still the page's.
+{
+  const PLAYER = (f) => `https://host.example/static/js/player/${f}?v=abc`;
+  const LAUNCH = 'https://host.example/static/js/pages/player-test.js?v=abc';
+  tr.stop();
+  nowStack = stack(SELF, LAUNCH);
+  tr.start('player-test');
+  const ctl = new AbortController();
+  const btn = new Target();
+  const made = [];
+  btn.addEventListener('click', () => {
+    // Play: open() fetches the book and its place, starts the save loop,
+    // listens to its <audio>; features.js arms a sleep timer; saves.js a beacon.
+    nowStack = stack(SELF, PLAYER('engine.js'), LAUNCH);
+    g.fetch('/api/player/book/1:1').catch(() => {});
+    made.push(g.setTimeout(() => {}, 60000));
+    new Target().addEventListener('timeupdate', () => {});
+    nowStack = stack(SELF, PLAYER('saves.js'), PLAYER('engine.js'), LAUNCH);
+    made.push(g.setTimeout(() => {}, 60000));
+    g.fetch('/api/player/checkin').catch(() => {});
+    nowStack = stack(SELF, PLAYER('features.js'), SHELL, PLAYER('engine.js'), LAUNCH);
+    made.push(g.setTimeout(() => {}, 60000));
+    nowStack = stack(SELF, PLAYER('ui.js'), PLAYER('engine.js'), LAUNCH);
+    new Target().addEventListener('keydown', () => {});
+  }, { signal: ctl.signal });
+  nowStack = stack(SELF, LAUNCH);
+  btn.dispatchEvent(new Event('click'));
+  ctl.abort();
+  const out = tr.stop();
+  check('the player a page\'s Play opened is not that page\'s leak', out.length === 0 && made.length === 3, out);
+  // After the launcher was left, the player's own work goes on.
+  nowStack = stack(SELF, OTHER);
+  tr.start('wiki');
+  const before = tr.reports.length;
+  const afterBefore = tr.requestsAfterLeave;
+  nowStack = stack(SELF, PLAYER('saves.js'), PLAYER('engine.js'));
+  made.push(g.setTimeout(() => {}, 60000));
+  g.fetch('/api/player/checkin').catch(() => {});
+  nowStack = stack(SELF, PLAYER('features.js'));
+  made.push(g.setTimeout(() => {}, 60000));
+  nowStack = stack(SELF, OTHER);
+  const wikiOut = tr.stop();
+  check('the player\'s work after the page left is nobody\'s, not unattributed',
+    wikiOut.length === 0 && tr.reports.length === before && tr.requestsAfterLeave === afterBefore,
+    tr.reports.slice(before));
+  // A page that leaks beside the player is still charged.
+  nowStack = stack(SELF, LAUNCH);
+  tr.start('player-test');
+  nowStack = stack(SELF, PLAYER('engine.js'), LAUNCH);
+  made.push(g.setTimeout(() => {}, 60000));
+  nowStack = stack(SELF, LAUNCH);
+  made.push(g.setTimeout(() => {}, 60000));
+  const own = tr.stop();
+  check('...and the page\'s own timer beside it still is its leak',
+    own.length === 1 && own[0].page === 'player-test' && own[0].kind === 'timer', own);
+  made.forEach((id) => g.clearTimeout(id));
+}
+
 // A signal already aborted: the DOM adds nothing, so neither does the tracker.
 {
   nowStack = stack(SELF, PAGE);
