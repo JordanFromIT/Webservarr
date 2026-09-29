@@ -23,8 +23,8 @@
  * opening place never is), and only while it is under 2 minutes old: an
  * older unsaved place (a phone paused offline, back online hours later)
  * stays in the local copy, stamped when it was reached, for the next open's
- * merge to weigh. A newer local copy the book opens at is the exception: it
- * is sent at once whatever its age. A 401 means
+ * merge to weigh. A newer local copy the book opens at counts as reached
+ * when it opens: it is sent at once, then under the same 2 minutes. A 401 means
  * the session ended: nothing more is sent, the local copy keeps the place,
  * and the listener is sent to sign in (shell.js WS.leaveTo, through the
  * router, so ws:before-hard-nav runs first).
@@ -61,7 +61,8 @@
  *   start(book, { push, savedAt, held })
  *                                   push: the place the book opens at is newer
  *                                   than the server's (a local copy): send it at
- *                                   once. savedAt: the server's last save of it
+ *                                   once (it counts as reached now, so after 2
+ *                                   minutes unsaved it stays local). savedAt: the server's last save of it
  *                                   (ISO), "Last saved" until this page saves.
  *                                   held: { track, offset_ms } the server holds
  *                                   already (the book resumed from it).
@@ -332,7 +333,6 @@ export function createSaver(o) {
       playing: false,
       reachedWall: null,      // when the place was last reached (played to, moved to, acted on);
       reachedMono: null,      // null: untouched since the book opened
-      push: false,            // the opening place is a newer local copy: send it whatever its age
       event: null,            // what the next save is for, if not a plain checkin
       urgent: false,          // save as soon as the gap allows
       acked: null,            // the place the server last took
@@ -358,11 +358,10 @@ export function createSaver(o) {
      to (never an untouched opening place), and only while it is recent: a
      place reached over 2 minutes ago and still unsaved stays in the local
      copy, stamped when it was reached, and the next open's merge decides.
-     A newer local copy the book opened at is sent whatever its age. */
+     A newer local copy the book opens at counts as reached when it opens
+     (start({ push })): sent at once, and under the same 2 minutes. */
   function sendable(r) {
-    if (!r.latest) return false;
-    if (r.push) return true;
-    if (r.reachedMono === null) return false;
+    if (!r.latest || r.reachedMono === null) return false;
     return mono() - r.reachedMono <= FRESH_MS && now() - r.reachedWall <= FRESH_MS;
   }
 
@@ -419,7 +418,6 @@ export function createSaver(o) {
     const status = res && typeof res.status === 'number' ? res.status : 0;
     if (status >= 200 && status < 300) {
       r.acked = sent.place;
-      r.push = false;
       r.failures = 0;
       r.failedSinceOk = false;
       r.backoffUntil = 0;
@@ -550,8 +548,9 @@ export function createSaver(o) {
         if (r.dirtySince === null && !samePlace(place, r.acked)) r.dirtySince = t;
       }
       // Reached by the listener: an act of theirs, or playback moving on.
-      // Opening at a place (and the element settling there) is neither.
-      if (EVENTS[change.reason] || (r.playing && moved)) {
+      // Opening at a place (and the element settling there) is neither, and
+      // nor is an error: the place it holds was reached by playback, if at all.
+      if ((EVENTS[change.reason] && change.reason !== 'error') || (r.playing && moved)) {
         r.reachedMono = t;
         r.reachedWall = now();
       }
@@ -579,9 +578,12 @@ export function createSaver(o) {
     lastSavedAt = isFinite(saved) ? saved - skew : null;
     // The place the server already holds needs no save until it moves.
     run.acked = placeOf(opts.held);
+    // A newer local copy the book opens at is sent at once: opening from it
+    // counts as reaching it, so it obeys the same 2 minutes as any place.
     if (opts.push) {
-      run.push = true;
       run.urgent = true;
+      run.reachedMono = mono();
+      run.reachedWall = now();
     }
   }
 

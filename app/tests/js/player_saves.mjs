@@ -1003,7 +1003,7 @@ function withEngine(o = {}) {
       got.push(url);
       const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(JSON.stringify(body)) });
       let m = /^\/api\/player\/book\/([^?]+)/.exec(url);
-      if (m) return reply(200, Object.assign({}, BOOK, { stream: { token: 'tok', uris: { local: [], remote: [REMOTE] } } }));
+      if (m) return reply(200, Object.assign({}, BOOK, { stream: { token: 'tok', uris: { local: [], remote: o.noStream ? [] : [REMOTE] } } }));
       m = /^\/api\/player\/position\/(.+)$/.exec(url);
       if (m) return o.positionStatus ? reply(o.positionStatus, { detail: 'down' })
         : reply(200, Object.assign({ now: new Date(clock.now + server.skewMs).toISOString() }, places));
@@ -1602,6 +1602,89 @@ current = 'T6T2: a real track with no usable offset is never saved or written';
     await t.clock.advance(1000);
     check(`offset ${String(bad)}: nothing sent, nothing written`, t.server.calls.length === 0 && localOf(t) === null, t.server.calls.map((c) => c.body));
   }
+}
+
+// ---- 13. Fix round 2 ----
+
+for (const variant of ['untouched-autoplay-off', 'played-then-paused', 'pagehide-only', 'control-from-web']) {
+  current = 'T6S7: a pushed local copy obeys the 2-minute rule too (' + variant + ')';
+  const storage = fakeStorage();
+  const fromWeb = variant === 'control-from-web';
+  if (!fromWeb) {
+    setLocal(storage, { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-3600), device: 'Chrome on Android' });
+  }
+  const t = withEngine({ storage, places: { web: { track: fromWeb ? '502' : '501', offset_ms: fromWeb ? 300000 : 100000, duration_ms: 900000, updated_at: iso(fromWeb ? -60 : -7200), device: 'Chrome on Windows' }, plex: null } });
+  t.server.mode = 'offline';                     // the push save fails: the network drops after /position
+  const opened = t.engine.open('500:1', variant === 'played-then-paused' ? {} : { autoplay: false });
+  await t.clock.advance(1000); await opened;
+  check('opened where expected', t.engine.state().resumedFrom.source === (fromWeb ? 'web' : 'local'), t.engine.state().resumedFrom);
+  if (variant === 'played-then-paused') {
+    await t.clock.advance(60000);
+    t.engine.pause();
+    await t.clock.advance(1000);
+  }
+  await t.clock.advance(3600000);
+  // The desktop listens on and saves a later place (another psid).
+  t.server.row = { book: '500:1', track: '503', offset_ms: 200000, duration_ms: 300000, event: 'pause', device: 'Chrome on Windows',
+    psid: 'desk-psid', seq: 50, updated_at: new Date(t.clock.now).toISOString() };
+  await t.clock.advance(9 * 3600000);
+  const n = t.server.calls.length;
+  t.server.mode = 200;                           // the phone is back on a network
+  if (variant === 'pagehide-only') t.saver.flush('beacon', 'leave');
+  else { t.saver.flush('fetch'); await t.clock.advance(35000); }
+  check('nothing sent 10 h later: no retry, flush or beacon', t.server.calls.length === n, t.server.calls.slice(n).map((c) => [c.kind, c.body.event, c.body.track, c.body.offset_ms]));
+  check('the desktop\'s place stands', t.server.row.psid === 'desk-psid' && t.server.row.offset_ms === 200000, t.server.row);
+  t.engine.close();
+  await t.clock.advance(1000);
+  check('no final on close either', t.server.calls.length === n, t.server.calls.slice(n).map((c) => [c.kind, c.body.event]));
+}
+
+current = 'T6S7: the push itself still goes at once, and is retried while it is under 2 minutes old';
+{
+  const storage = fakeStorage();
+  setLocal(storage, { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-3600), device: 'Chrome on Android' });
+  const t = withEngine({ storage, places: { web: { track: '501', offset_ms: 100000, duration_ms: 600000, updated_at: iso(-7200) }, plex: null } });
+  t.server.mode = 'offline';
+  const opened = t.engine.open('500:1', { autoplay: false });
+  await t.clock.advance(500); await opened;
+  check('sent at once', t.server.fetches().length === 1 && t.server.fetches()[0].body.offset_ms === 300000);
+  t.server.mode = 200;
+  await t.clock.advance(40000);                  // the retries at 10 and 30 s
+  check('retried and stored within the 2 minutes', t.server.row && t.server.row.offset_ms === 300000 && t.server.row.psid === t.saver.psid, t.server.row);
+  t.engine.close();
+}
+
+current = 'T6S8: an error on an untouched open is not a reach: nothing sent';
+{
+  // Saver level: opened at the server's place, never played, then playback stops on an error.
+  const t = makeSaver();
+  t.saver.start('500:1', { held: { track: '502', offset_ms: 300000 } });
+  const st = { book: '500:1', playing: false, position: { track: '502', offset_ms: 300000, duration_ms: 900000 } };
+  t.saver.note({ reason: 'open', state: st });
+  t.saver.note({ reason: 'error', state: st });
+  await t.clock.advance(60000);
+  t.saver.flush('beacon', 'leave');
+  t.saver.stop();
+  await t.clock.advance(1000);
+  check('saver: nothing sent', t.server.calls.length === 0, t.server.calls.map((c) => c.body));
+  // Engine level: autoplay off, and no connection to stream from.
+  const places = { web: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-3600), device: 'Chrome on Android' }, plex: null };
+  const u = withEngine({ places, noStream: true });
+  const op = u.engine.open('500:1', { autoplay: false });
+  await u.clock.advance(20000); await op;
+  check('engine: the open failed', u.engine.state().error && u.engine.state().error.code === 'unreachable', u.engine.state().error);
+  u.engine.close();
+  await u.clock.advance(1000);
+  check('engine: nothing sent, so the server\'s stamp is untouched', u.server.calls.length === 0, u.server.calls.map((c) => [c.body.event, c.body.offset_ms]));
+  // The place a playing listener was frozen at is still saved on an error (the T5E1 hold).
+  const w = makeSaver();
+  const p = listener(w);
+  w.saver.start(p.book); p.open(); p.play();
+  await p.listen(4000);
+  p.playing = false; p.emit('error');
+  await w.clock.advance(1100);
+  check('played within 2 minutes: the error saves its place as a pause', w.server.fetches().pop().body.event === 'pause');
+  w.saver.stop();
 }
 
 current = 'the saver never lets a failing listener or storage break the engine';
