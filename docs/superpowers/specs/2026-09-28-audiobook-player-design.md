@@ -239,6 +239,25 @@ files are converted in the library instead (an operator task outside the app).
 - An undecodable track is not loaded. The listener sees "This book's audio format can't play in
   this browser", never "Can't reach the media server", and the saved place is untouched.
 
+## 11b. Addendum (2026-09-29): cross-device writes are compare-and-swap
+
+Found during the build: with "the most recently received check-in wins" across devices, a stale
+page (a question left open, a phone asleep with the screen off, a retry after an outage, a
+lock-screen Play) can post an old place over a newer one saved from another device. Client-side
+re-checks cannot cover every entry point, so the server enforces it. This replaces the
+cross-device sentence in 5.3.
+
+- Every check-in carries `base`: the server timestamp this page last saw for the book (from the
+  position read at open, or from its last acknowledged save).
+- The server stores the check-in when no position exists yet, when the stored position came from
+  the same device, or when the stored timestamp equals `base`. Otherwise it answers 409 with the
+  stored place, device and timestamp, and stores nothing. Within one page session the `seq` rule
+  in 5.3 is unchanged.
+- On a 409 the player pauses, keeps its place in the local copy, and asks "Continue from <time>
+  (<device>, <ago>)?": Continue moves to the stored place; "Keep listening here" sends again
+  with the new `base`, a deliberate override. A refused beacon is dropped.
+- The question at open (section 8) stays. Background re-checks are not needed.
+
 ## 12. How it is built
 
 The same loop as sub-project 1: `ws-coder` implements each plan task on `dev`; one
