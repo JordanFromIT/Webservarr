@@ -580,6 +580,56 @@ class Checkins(PlayerApiBase):
         with self.assertRaises(ValidationError):
             player.Checkin(**{**base, "device": "x\ud800"})
 
+    def nested(self, levels):
+        """A beacon body whose extra field nests arrays so the whole body is
+        `levels` deep (the body object itself is level 1)."""
+        inner = "1"
+        for _ in range(levels - 1):
+            inner = "[" + inner + "]"
+        return ('{"book": "200:1", "track": "202", "offset_ms": 1, "duration_ms": 2, "event": "leave", '
+                '"device": "d", "psid": "deep", "seq": 1, "x": ' + inner + "}").encode()
+
+    def test_a_body_nested_too_deep_is_422_without_echo(self):
+        for levels in (33, 400, 900, 950):
+            with self.subTest(levels=levels):
+                r = self.client.post("/api/player/checkin", content=self.nested(levels),
+                                     headers={"Origin": ORIGIN, "Content-Type": "application/json"})
+                self.assertEqual(r.status_code, 422)
+                self.assertEqual(r.json(), {"detail": "The request is nested too deeply"})
+                r = self.client.put("/api/player/prefs", content=b'{"x": ' + b"[" * (levels - 1) + b"1" +
+                                    b"]" * (levels - 1) + b"}",
+                                    headers={"Origin": ORIGIN, "Content-Type": "application/json"})
+                self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.db.query(ListeningPosition).count(), 0)
+        self.timeline.assert_not_awaited()
+        # 32 levels is the most taken: the extra field is ignored and it stores.
+        r = self.client.post("/api/player/checkin", content=self.nested(32),
+                             headers={"Origin": ORIGIN, "Content-Type": "application/json"})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["stored"])
+
+    def test_the_walk_is_not_recursive(self):
+        deep = value = []
+        for _ in range(50_000):
+            value.append([])
+            value = value[0]
+        self.assertEqual(player._body_problem({"x": deep}), "depth")
+        self.assertEqual(player._body_problem({"a": [{"b": ["ok", "\ud800"]}]}), "text")
+        self.assertEqual(player._body_problem({"\udfff": 1}), "text")
+        self.assertIsNone(player._body_problem({"a": [{"b": ["ok", 1, None, 2.5]}]}))
+
+    def test_a_recursion_error_is_a_422_backstop(self):
+        with mock.patch.object(player, "_body_problem", side_effect=RecursionError):
+            r = self.checkin()
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.db.query(ListeningPosition).count(), 0)
+
+    def test_a_plain_beacon_body_still_stores(self):
+        r = self.client.post("/api/player/checkin", content=SameOrigin.BODY.encode(),
+                             headers={"Origin": ORIGIN, "Content-Type": "application/json"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["stored"])
+
     def test_a_slow_plex_timeline_runs_after_the_response_is_built(self):
         # The forward is a background task: the stored result is already
         # committed when it runs, so a slow or failing Plex cannot undo it.

@@ -71,41 +71,75 @@ EVENT_STATES = {
 
 # --- Text the database can store --------------------------------------------------
 
-def _encodable(value) -> bool:
-    """False for a string holding a lone surrogate ("\\ud800" in JSON), which
-    UTF-8 and so the database cannot store; walks lists and dicts."""
-    if isinstance(value, str):
-        try:
-            value.encode("utf-8")
-        except UnicodeEncodeError:
-            return False
-        return True
-    if isinstance(value, dict):
-        return all(_encodable(k) and _encodable(v) for k, v in value.items())
-    if isinstance(value, list):
-        return all(_encodable(v) for v in value)
+# How deep a request body may nest. The player's bodies are flat; this only
+# bounds the walk below, which a crafted body could otherwise drive into
+# Python's recursion limit.
+MAX_DEPTH = 32
+
+
+def _text_ok(value: str) -> bool:
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
     return True
 
 
+def _body_problem(value) -> Optional[str]:
+    """Why a parsed JSON body cannot be taken, or None: "text" for a string
+    (key or value) holding a lone surrogate ("\\ud800" in JSON), which UTF-8
+    and so the database cannot store; "depth" for lists and objects nested
+    deeper than MAX_DEPTH. Walked with an explicit stack, not recursion."""
+    stack = [(value, 0)]
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, str):
+            if not _text_ok(item):
+                return "text"
+        elif isinstance(item, (dict, list)):
+            if depth >= MAX_DEPTH:
+                return "depth"
+            if isinstance(item, dict):
+                for k, v in item.items():
+                    if not _text_ok(k):
+                        return "text"
+                    stack.append((v, depth + 1))
+            else:
+                stack.extend((v, depth + 1) for v in item)
+    return None
+
+
 def _utf8(value: str) -> str:
-    if not _encodable(value):
+    if not _text_ok(value):
         raise ValueError("must be valid Unicode text")
     return value
 
 
 Text = Annotated[str, AfterValidator(_utf8)]
 
+_BODY_ERRORS = {
+    "text": "The request holds text that is not valid Unicode",
+    "depth": "The request is nested too deeply",
+}
+
 
 async def require_encodable_body(request: Request) -> None:
-    """422 when the JSON body holds text that is not valid Unicode, before the
-    body is validated: FastAPI's own 422 echoes the offending input, and a
-    lone surrogate cannot be encoded into that response (a 500)."""
+    """422 when the JSON body holds text that is not valid Unicode or nests
+    deeper than MAX_DEPTH, before the body is validated. FastAPI's own 422
+    echoes the offending input, and a lone surrogate cannot be encoded into
+    that response (a 500); nothing here echoes it."""
     try:
         data = await request.json()
     except ValueError:
         return          # not JSON: body validation answers 422 itself
-    if not _encodable(data):
-        raise HTTPException(status_code=422, detail="The request holds text that is not valid Unicode")
+    except RecursionError:
+        raise HTTPException(status_code=422, detail=_BODY_ERRORS["depth"]) from None
+    try:
+        problem = _body_problem(data)
+    except RecursionError:  # the walk has no recursion; a backstop all the same
+        problem = "depth"
+    if problem:
+        raise HTTPException(status_code=422, detail=_BODY_ERRORS[problem])
 
 
 # Upper bounds that only refuse nonsense (a week of audio; JavaScript's
