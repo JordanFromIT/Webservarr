@@ -615,6 +615,19 @@ class Series(BridgeBase):
     def test_any_edition_when_the_narrators_lacks_the_next_number(self):
         self.assertEqual(self.next("1300:1"), "2400:1")      # 3 (the sort title), then Fay's 4 ("Vol. 4")
 
+    def test_the_same_narrator_wins_even_when_another_sorts_first(self):
+        # Fay's Cycle One: the second book exists as Dan's ("dan" sorts before
+        # "fay") and as Fay's; Fay's is next.
+        self.assertEqual(self.next("2100:1"), "2200:1")
+        entries = [
+            {"series": ("jo", "cycle"), "title": "one", "narrator": "zed reader", "number": 1, "book": {"key": "9:1"}},
+            {"series": ("jo", "cycle"), "title": "two", "narrator": "amy voice", "number": 2, "book": {"key": "7:1"}},
+            {"series": ("jo", "cycle"), "title": "two", "narrator": "zed reader", "number": 2, "book": {"key": "8:1"}},
+        ]
+        self.assertEqual(pp.pick_next(entries, "9:1")["key"], "8:1")
+        entries[0]["narrator"] = ""          # a narrator we don't know: any edition, in order
+        self.assertEqual(pp.pick_next(entries, "9:1")["key"], "7:1")
+
     def test_the_last_book_an_unnumbered_one_and_a_standalone_have_none(self):
         self.assertIsNone(self.next("2400:1"))
         self.assertIsNone(self.next("3000:1"))

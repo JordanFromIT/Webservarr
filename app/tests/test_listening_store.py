@@ -100,20 +100,24 @@ class Positions(StoreBase):
         self.assertEqual(listening.get_position(self.db, ME, BOOK)["offset_ms"], 5000)
         self.assertEqual(self.log_count(), 1, "a refused check-in is not logged")
 
-    def test_a_different_psid_always_stores(self):
-        checkin(self.db, offset_ms=900000, psid="phone", seq=40, device="Chrome on Android")
-        # Another tab or device, even with a lower seq and an earlier offset:
-        # the most recently received check-in wins.
-        out = checkin(self.db, offset_ms=10000, psid="laptop", seq=1, device="Firefox on Linux")
+    def test_another_page_stores_over_the_row_it_saw(self):
+        first = checkin(self.db, offset_ms=900000, psid="phone", seq=40, device="Chrome on Android")
+        # Another page that saw that row (its base), even with a lower seq and
+        # an earlier offset: stored.
+        out = checkin(self.db, offset_ms=10000, psid="laptop", seq=1, device="Firefox on Linux",
+                      base=first["updated_at"])
         self.assertTrue(out["stored"])
         pos = listening.get_position(self.db, ME, BOOK)
         self.assertEqual((pos["offset_ms"], pos["device"]), (10000, "Firefox on Linux"))
         # The stored row now belongs to "laptop": its own older seq is refused...
         self.assertFalse(checkin(self.db, offset_ms=5, psid="laptop", seq=0)["stored"])
-        # ...and "phone" coming back stores again.
-        self.assertTrue(checkin(self.db, offset_ms=950000, psid="phone", seq=41)["stored"])
+        # ...and "phone" coming back with the row it last saw is a conflict...
+        stale = checkin(self.db, offset_ms=950000, psid="phone", seq=41, base=first["updated_at"])
+        self.assertEqual(stale["conflict"]["offset_ms"], 10000)
+        # ...until it sends the row it has now been shown.
+        self.assertTrue(checkin(self.db, offset_ms=950000, psid="phone", seq=42, base=out["updated_at"])["stored"])
         self.assertEqual(listening.get_position(self.db, ME, BOOK)["offset_ms"], 950000)
-        self.assertEqual(self.log_count(), 3)
+        self.assertEqual(self.log_count(), 4, "the refused older seq is not logged; the conflict is")
 
     def test_identities_are_isolated(self):
         checkin(self.db, identity=ME, offset_ms=1111, psid="same", seq=5)
@@ -181,10 +185,10 @@ class DeviceIds(StoreBase):
         self.assertEqual(page["entries"][0]["device_id"], self.ID_A)
 
     def test_the_newest_checkin_sets_it_and_none_clears_it(self):
-        checkin(self.db, device_id=self.ID_A, psid="p-a", seq=1)
-        checkin(self.db, device_id=self.ID_B, psid="p-b", seq=1)
+        a = checkin(self.db, device_id=self.ID_A, psid="p-a", seq=1)
+        b = checkin(self.db, device_id=self.ID_B, psid="p-b", seq=1, base=a["updated_at"])
         self.assertEqual(listening.get_position(self.db, ME, BOOK)["device_id"], self.ID_B)
-        checkin(self.db, psid="p-c", seq=1)      # an older player that sends none
+        checkin(self.db, psid="p-c", seq=1, base=b["updated_at"])      # an older player that sends none
         self.assertIsNone(listening.get_position(self.db, ME, BOOK)["device_id"])
         self.assertEqual([e["device_id"] for e in listening.get_history(self.db, ME, BOOK)],
                          [None, self.ID_B, self.ID_A])
@@ -201,6 +205,101 @@ class DeviceIds(StoreBase):
                     checkin(self.db, device_id=bad)
         self.assertIsNone(listening.get_position(self.db, ME, BOOK))
         self.assertEqual(self.log_count(), 0)
+
+
+class CompareAndSwap(StoreBase):
+    """Spec 11b: across devices a check-in is stored only over the row its
+    page last saw (base); the same device, or no row yet, always stores."""
+
+    PHONE = "p" * 20
+    DESK = "d" * 20
+
+    def row(self):
+        return listening.get_position(self.db, ME, BOOK)
+
+    def test_no_row_stores_whatever_the_base(self):
+        self.assertTrue(checkin(self.db, device_id=self.PHONE, base="2026-01-01T00:00:00.000Z")["stored"])
+        self.assertTrue(checkin(self.db, book="5002", device_id=self.PHONE)["stored"])
+
+    def test_the_same_device_stores_from_a_new_page(self):
+        checkin(self.db, device_id=self.PHONE, psid="tab-1", offset_ms=1000)
+        # A reload: a new psid, no or an old base, the same device.
+        self.assertTrue(checkin(self.db, device_id=self.PHONE, psid="tab-2", seq=1, offset_ms=2000)["stored"])
+        self.assertTrue(checkin(self.db, device_id=self.PHONE, psid="tab-3", seq=1, offset_ms=3000,
+                                base="2020-01-01T00:00:00.000Z")["stored"])
+        self.assertEqual(self.row()["offset_ms"], 3000)
+
+    def test_another_device_without_the_rows_time_is_a_conflict(self):
+        desk = checkin(self.db, device_id=self.DESK, psid="desk", offset_ms=600000, device="Chrome on Linux")
+        for base in (None, "2026-01-01T00:00:00.000Z"):
+            with self.subTest(base=base):
+                out = checkin(self.db, device_id=self.PHONE, psid="phone", offset_ms=100000, base=base,
+                              device="Chrome on Android")
+                self.assertFalse(out["stored"])
+                self.assertEqual(out["conflict"], {"track": "6001", "offset_ms": 600000, "device": "Chrome on Linux",
+                                                   "updated_at": desk["updated_at"]})
+                self.assertEqual(out["updated_at"], desk["updated_at"])
+        # Nothing stored; each attempt logged.
+        self.assertEqual((self.row()["offset_ms"], self.row()["device_id"]), (600000, self.DESK))
+        hist = listening.get_history(self.db, ME, BOOK)
+        self.assertEqual([(h["offset_ms"], h["device_id"]) for h in hist],
+                         [(100000, self.PHONE), (100000, self.PHONE), (600000, self.DESK)])
+
+    def test_another_device_with_the_rows_time_stores(self):
+        desk = checkin(self.db, device_id=self.DESK, psid="desk", offset_ms=600000)
+        out = checkin(self.db, device_id=self.PHONE, psid="phone", offset_ms=100000, base=desk["updated_at"])
+        self.assertTrue(out["stored"])
+        self.assertEqual((self.row()["offset_ms"], self.row()["device_id"]), (100000, self.PHONE))
+        # The desk's base is now stale.
+        self.assertIn("conflict", checkin(self.db, device_id=self.DESK, psid="desk", seq=2, offset_ms=700000,
+                                          base=desk["updated_at"]))
+
+    def test_the_rows_time_matches_to_the_millisecond(self):
+        from app.models import ListeningPosition
+        checkin(self.db, device_id=self.DESK, psid="desk", offset_ms=600000)
+        row = self.db.query(ListeningPosition).one()
+        row.updated_at = datetime(2026, 9, 29, 12, 0, 0, 123456)
+        self.db.commit()
+        self.assertIn("conflict", checkin(self.db, device_id=self.PHONE, psid="phone", base="2026-09-29T12:00:00.122Z"))
+        self.assertIn("conflict", checkin(self.db, device_id=self.PHONE, psid="phone", base="2026-09-29T12:00:00.124Z"))
+        self.assertTrue(checkin(self.db, device_id=self.PHONE, psid="phone", base="2026-09-29T12:00:00.123Z")["stored"])
+
+    def test_without_ids_the_psid_is_the_device(self):
+        first = checkin(self.db, psid="page-1", offset_ms=1000)
+        self.assertTrue(checkin(self.db, psid="page-1", seq=2, offset_ms=2000)["stored"])
+        self.assertIn("conflict", checkin(self.db, psid="page-2", offset_ms=9000))
+        self.assertIn("conflict", checkin(self.db, psid="page-2", offset_ms=9000, base=first["updated_at"]))
+        now = self.row()["updated_at"]
+        self.assertTrue(checkin(self.db, psid="page-2", offset_ms=9000, base=now)["stored"])
+
+    def test_one_side_without_an_id_falls_back_to_the_psid(self):
+        checkin(self.db, device_id=self.DESK, psid="desk", offset_ms=1000)
+        self.assertTrue(checkin(self.db, psid="desk", seq=2, offset_ms=2000)["stored"])       # an older page script
+        self.assertTrue(checkin(self.db, device_id=self.DESK, psid="desk", seq=3, offset_ms=3000)["stored"])
+        self.assertIn("conflict", checkin(self.db, psid="other", offset_ms=4000))
+        # A row from a page without an id takes the same psid with an id.
+        checkin(self.db, book="5002", psid="old-page", offset_ms=1)
+        self.assertTrue(checkin(self.db, book="5002", device_id=self.PHONE, psid="old-page", seq=2, offset_ms=2)["stored"])
+
+    def test_an_older_seq_is_still_refused_not_a_conflict(self):
+        checkin(self.db, device_id=self.PHONE, psid="phone", seq=5, offset_ms=5000)
+        out = checkin(self.db, device_id=self.PHONE, psid="phone", seq=4, offset_ms=4000)
+        self.assertEqual(set(out), {"stored", "updated_at"})
+        self.assertFalse(out["stored"])
+        self.assertEqual(self.log_count(), 1)
+
+    def test_the_conflict_is_only_ever_the_listeners_own_row(self):
+        checkin(self.db, identity=THEM, device_id=self.DESK, psid="desk", offset_ms=600000)
+        # ME has no row for the book: another identity's never counts.
+        self.assertTrue(checkin(self.db, identity=ME, device_id=self.PHONE, psid="phone", offset_ms=100)["stored"])
+        self.assertEqual(listening.get_position(self.db, THEM, BOOK)["offset_ms"], 600000)
+
+    def test_a_bad_base_is_refused(self):
+        for bad in ("yesterday", "", "2026-13-01T00:00:00Z", "x" * 41, 12, ["2026-01-01"]):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    checkin(self.db, base=bad)
+        self.assertIsNone(self.row())
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

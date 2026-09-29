@@ -75,7 +75,6 @@
  *       fails like a failed book fetch (with a retry), so nothing ever
  *       starts from 0 over a place it did not see.
  *   play(), pause(), toggle()
- *       play() asks the play gate first, if one is set (setPlayGate).
  *   seek(bookMs), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters
  *   rewind(bookMs)    smart rewind's seek (features.js): a 'seek' change marked
  *                     { rewind: true }; the saves keep the place it went back
@@ -106,12 +105,10 @@
  *                     bookMs } or null), now (the server's clock, ISO, or
  *                     null), me: { device_id, device } }. A truthy answer
  *                     holds the autoplay: the book loads at the resumed place,
- *                     paused, for play() or a seek to decide.
- *   setPlayGate(fn)   fn() is asked by play() before it starts: null (or
- *                     nothing) plays at once; a promise plays when it
- *                     resolves, unless it resolves false (held: the gate's
- *                     owner asks the listener) or another book opened
- *                     meanwhile. A promise that rejects plays.
+ *                     paused, for play() or a seek to decide, and this
+ *                     browser's local copy is left as it was until then.
+ *   resolveConflict() the listener answered a 409 (saves.js 'conflict'
+ *                     warning): saves go again. Returns the conflict or null.
  *   placeMs(track, offsetMs)  the book time of a place in the loaded book, or null
  *   own()             this browser's own copy of the loaded book's place (as
  *                     in setOpenGate's info), or null
@@ -368,7 +365,6 @@ export function createEngine(env) {
   let lastOpen = null;        // { key, opts } of the last open(), for its retry
   let openGen = 0;
   let openGate = null;        // setOpenGate
-  let playGate = null;        // setPlayGate
   let resumedFrom = null;     // { source, device, updated_at } the open resumed from
   let unchosen = false;       // the book opened into an undecodable part: no connection chosen yet
 
@@ -1210,7 +1206,10 @@ export function createEngine(env) {
           // (not for a part that can't play here: nothing is saved then).
           push: !!(resumed && resumed.source === 'local') && !cannot,
           savedAt: places && places.web ? places.web.updated_at : null,
-          held: resumed && resumed.source === 'web' ? resumed : null
+          held: resumed && resumed.source === 'web' ? resumed : null,
+          // The handoff question is showing: this browser's own place stays
+          // in the local copy until the listener answers.
+          keepLocal: held
         });
       } catch (e) {
         console.error('[player] saving failed', e);
@@ -1257,29 +1256,6 @@ export function createEngine(env) {
   }
 
   function play() {
-    if (!book) return Promise.resolve();
-    if (error) return retry();
-    if (wantPlay) return Promise.resolve();
-    let wait = null;
-    if (playGate) {
-      try {
-        wait = playGate();
-      } catch (e) {
-        console.error('[player] the play gate failed', e);
-        wait = null;
-      }
-    }
-    if (!wait || typeof wait.then !== 'function') return playNow();
-    const my = openGen;
-    const key = book.key;
-    const go = function (ok) {
-      if (ok === false || my !== openGen || !book || book.key !== key) return undefined;
-      return playNow();
-    };
-    return Promise.resolve(wait).then(go, function () { return go(true); });
-  }
-
-  function playNow() {
     if (!book) return Promise.resolve();
     if (error) return retry();
     if (wantPlay) return Promise.resolve();
@@ -1596,7 +1572,15 @@ export function createEngine(env) {
     state: state,
     on: on,
     setOpenGate: function (fn) { openGate = typeof fn === 'function' ? fn : null; },
-    setPlayGate: function (fn) { playGate = typeof fn === 'function' ? fn : null; },
+    resolveConflict: function () {
+      if (!saver || typeof saver.resolveConflict !== 'function') return null;
+      try {
+        return saver.resolveConflict();
+      } catch (e) {
+        console.error('[player] saving failed', e);
+        return null;
+      }
+    },
     placeMs: placeMs,
     own: own,
     me: me

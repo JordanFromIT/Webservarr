@@ -520,27 +520,33 @@ class Checkins(PlayerApiBase):
         self.assertEqual(self.db.query(ListeningLog).count(), 1)
 
     def test_two_page_sessions_interleaving(self):
-        # Review Focus 2: the same book open on two devices. The stored
-        # position is the most recently received check-in, and a page session
-        # never regresses its own stored position with a late, older seq.
-        def send(psid, seq, offset):
-            return self.checkin(psid=psid, seq=seq, offset_ms=offset, device=psid).json()["stored"]
+        # Review Focus 2: the same book open on two devices. A device stores
+        # over the row it last saw (base), never over one it hasn't seen
+        # (409), and a page session never regresses its own stored position
+        # with a late, older seq.
+        seen = {}
 
-        self.assertTrue(send("phone", 1, 10_000))
-        self.assertTrue(send("laptop", 1, 90_000))
+        def send(psid, seq, offset):
+            r = self.checkin(psid=psid, seq=seq, offset_ms=offset, device=psid, base=seen.get(psid))
+            if r.status_code == 200 and r.json()["stored"]:
+                seen[psid] = r.json()["updated_at"]
+            return r.status_code, r.json().get("stored")
+
+        self.assertEqual(send("phone", 1, 10_000), (200, True))
+        seen["laptop"] = self.position()["updated_at"]            # the laptop opens: it sees the phone's row
+        self.assertEqual(send("laptop", 1, 90_000), (200, True))
         self.assertEqual(self.position()["offset_ms"], 90_000)
-        self.assertTrue(send("phone", 2, 11_000))           # most recently received wins
-        self.assertEqual(self.position()["device"], "phone")
-        self.assertEqual(self.position()["offset_ms"], 11_000)
-        self.assertFalse(send("phone", 1, 10_000))          # phone's own late retry: refused
-        self.assertEqual(self.position()["offset_ms"], 11_000)
-        self.assertTrue(send("laptop", 2, 95_000))
-        self.assertFalse(send("laptop", 1, 90_000))         # laptop's own late retry: refused
+        self.assertEqual(send("phone", 2, 11_000)[0], 409)         # the phone hasn't seen the laptop's
+        self.assertEqual(self.position()["offset_ms"], 90_000)
+        self.assertEqual(send("laptop", 2, 95_000), (200, True))
+        self.assertEqual(send("laptop", 1, 90_000), (200, False))  # laptop's own late retry: refused
         self.assertEqual(self.position()["offset_ms"], 95_000)
-        self.assertEqual(self.position()["device"], "laptop")
+        seen["phone"] = self.position()["updated_at"]              # the phone is shown it, and goes on
+        self.assertEqual(send("phone", 3, 12_000), (200, True))
+        self.assertEqual(self.position()["device"], "phone")
         # Only stored check-ins were forwarded to Plex, in order.
         forwarded = [c.args[3] for c in self.timeline.await_args_list]
-        self.assertEqual(forwarded, [10_000, 90_000, 11_000, 95_000])
+        self.assertEqual(forwarded, [10_000, 90_000, 95_000, 12_000])
 
     def test_body_validation(self):
         bad = [
@@ -677,8 +683,8 @@ class DeviceIds(PlayerApiBase):
         self.assertEqual(self.db.query(ListeningLog).one().device_id, self.PHONE)
 
     def test_two_devices_with_one_label_stay_apart(self):
-        self.checkin(device_id=self.PHONE, psid="p1", seq=1, device="Chrome on Android")
-        self.checkin(device_id=self.TABLET, psid="p2", seq=1, device="Chrome on Android")
+        first = self.checkin(device_id=self.PHONE, psid="p1", seq=1, device="Chrome on Android").json()
+        self.checkin(device_id=self.TABLET, psid="p2", seq=1, device="Chrome on Android", base=first["updated_at"])
         web = self.position()
         self.assertEqual((web["device"], web["device_id"]), ("Chrome on Android", self.TABLET))
         ids = [e["device_id"] for e in self.client.get("/api/player/history/200:1").json()["entries"]]
@@ -706,7 +712,10 @@ class PlexEchoes(PlayerApiBase):
     leaves such a copy out (plex: null); only a place we never logged, real
     listening in a Plex app, competes on its time."""
 
-    def plex_at(self, track, offset, stamped="2099-01-01T00:00:00.000Z"):
+    def plex_at(self, track, offset, stamped=None):
+        if stamped is None:
+            from datetime import datetime, timezone
+            stamped = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         self.plex_position.return_value = {
             "track": track, "offset_ms": offset, "duration_ms": 300_000, "book_ms": 0,
             "book_duration_ms": 600_000, "updated_at": stamped, "device": "Plex", "source": "plex"}
@@ -760,17 +769,45 @@ class PlexEchoes(PlayerApiBase):
 
     def test_a_log_row_over_a_day_old_does_not_count(self):
         from datetime import datetime, timedelta
+        iso = lambda d: d.isoformat(timespec="milliseconds") + "Z"   # noqa: E731
         old = datetime.utcnow() - timedelta(hours=24, minutes=1)
         recent = datetime.utcnow() - timedelta(hours=23, minutes=59)
-        self.db.add(ListeningLog(identity="plex:1001", book_key="200:1", track_key="202", offset_ms=150_000,
-                                 device="d", event="pause", at=old))
+        for at in (old, recent):
+            self.db.add(ListeningLog(identity="plex:1001", book_key="200:1", track_key="202", offset_ms=150_000,
+                                     device="d", event="pause", at=at))
         self.db.commit()
-        plex = self.plex_at("202", 150_000)
+        plex = self.plex_at("202", 150_000, stamped=iso(old))
         self.assertEqual(self.plex(), plex)
-        self.db.add(ListeningLog(identity="plex:1001", book_key="200:1", track_key="202", offset_ms=150_000,
-                                 device="d", event="pause", at=recent))
-        self.db.commit()
+        self.plex_at("202", 150_000, stamped=iso(recent))
         self.assertIsNone(self.plex())
+
+    def test_plex_at_a_logged_place_but_at_another_time_is_real_listening(self):
+        # Plexamp went back to a place we logged, 5 minutes after we logged it.
+        from datetime import datetime, timedelta
+        iso = lambda d: d.isoformat(timespec="milliseconds") + "Z"   # noqa: E731
+        at = datetime.utcnow() - timedelta(minutes=10)
+        self.db.add(ListeningLog(identity="plex:1001", book_key="200:1", track_key="202", offset_ms=150_000,
+                                 device="d", event="pause", at=at))
+        self.db.commit()
+        for delta, echo in ((29, True), (-29, True), (31, False), (-31, False), (300, False)):
+            with self.subTest(delta=delta):
+                self.plex_at("202", 150_000, stamped=iso(at + timedelta(seconds=delta)))
+                self.assertEqual(self.plex() is None, echo)
+        self.plex_at("202", 150_000, stamped="not a time")
+        self.assertIsNotNone(self.plex())
+
+    def test_web_is_read_after_the_echo_check(self):
+        # A save that lands while Plex is being read is in `web`.
+        self.checkin(track="202", offset_ms=150_000, event="pause")
+        test = self
+
+        async def plex_then_save(*a, **kw):
+            test.checkin(track="202", offset_ms=160_000, event="pause", seq=2)
+            return test.plex_at("202", 150_000)
+        self.plex_position.side_effect = plex_then_save
+        body = self.client.get("/api/player/position/200:1").json()
+        self.assertIsNone(body["plex"])
+        self.assertEqual(body["web"]["offset_ms"], 160_000)
 
     def test_the_query_uses_the_log_index(self):
         from sqlalchemy import text
@@ -781,8 +818,65 @@ class PlexEchoes(PlayerApiBase):
             "AND at >= :since AND track_key = 't' AND offset_ms BETWEEN 1 AND 2 LIMIT 1"),
             {"since": datetime(2026, 1, 1)}).all()
         self.assertIn("ix_listening_log_identity_book_at", " ".join(str(r) for r in plan))
-        self.assertFalse(listening.is_logged_place(self.db, "plex:1001", "200:1", None, 5))
-        self.assertFalse(listening.is_logged_place(self.db, "plex:1001", "200:1", "202", True))
+        self.assertFalse(listening.is_logged_place(self.db, "plex:1001", "200:1", None, 5, datetime(2026, 1, 1)))
+        self.assertFalse(listening.is_logged_place(self.db, "plex:1001", "200:1", "202", True, datetime(2026, 1, 1)))
+        self.assertFalse(listening.is_logged_place(self.db, "plex:1001", "200:1", "202", 5, None))
+
+
+class Conflicts(PlayerApiBase):
+    """Spec 11b over HTTP: a check-in from another device that hasn't seen the
+    stored row is 409 with that row, stores and forwards nothing, and is
+    logged."""
+
+    PHONE = "p" * 20
+    DESK = "d" * 20
+
+    def test_a_stale_device_gets_409_with_the_stored_place(self):
+        desk = self.checkin(device_id=self.DESK, psid="desk", offset_ms=150_000, device="Chrome on Linux").json()
+        self.timeline.reset_mock()
+        r = self.checkin(device_id=self.PHONE, psid="phone", offset_ms=10_000, device="Chrome on Android")
+        self.assertEqual(r.status_code, 409)
+        body = r.json()
+        self.assertEqual(set(body), {"conflict", "now"})
+        self.assertEqual(body["conflict"], {"track": "202", "offset_ms": 150_000, "device": "Chrome on Linux",
+                                            "updated_at": desk["updated_at"]})
+        self.assertRegex(body["now"], r"Z$")
+        self.assertEqual(self.position()["offset_ms"], 150_000)
+        self.timeline.assert_not_awaited()
+        self.assertEqual(self.db.query(ListeningLog).count(), 2)
+
+    def test_the_base_it_was_shown_stores(self):
+        desk = self.checkin(device_id=self.DESK, psid="desk", offset_ms=150_000).json()
+        r = self.checkin(device_id=self.PHONE, psid="phone", offset_ms=10_000, base=desk["updated_at"])
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["stored"])
+        self.assertEqual(self.position()["device_id"], self.PHONE)
+
+    def test_a_beacon_is_refused_the_same_way(self):
+        self.checkin(device_id=self.DESK, psid="desk", offset_ms=150_000)
+        body = {"book": "200:1", "track": "202", "offset_ms": 1, "duration_ms": 200_000, "event": "leave",
+                "device": "x", "psid": "phone", "seq": 9, "device_id": self.PHONE}
+        r = self.client.post("/api/player/checkin", content=json.dumps(body),
+                             headers={"Origin": ORIGIN, "Content-Type": "application/json"})
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(self.position()["offset_ms"], 150_000)
+
+    def test_the_conflict_is_never_another_listeners_row(self):
+        self.as_user(B)
+        self.checkin(device_id=self.DESK, psid="desk", offset_ms=150_000)
+        self.as_user(A)
+        r = self.checkin(device_id=self.PHONE, psid="phone", offset_ms=10_000)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["stored"])
+
+    def test_base_is_validated(self):
+        for bad in ("yesterday", "2026-99-01T00:00:00Z", "2" * 41, 12, ["x"], "\ud800"):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.checkin(base=bad).status_code, 422)
+        self.assertEqual(self.db.query(ListeningPosition).count(), 0)
+        for good in (None, "2026-09-29T12:00:00.123Z", "2026-09-29T12:00:00+00:00"):
+            with self.subTest(good=good):
+                self.assertEqual(self.checkin(base=good, seq=5).status_code, 200)
 
 
 class NextInSeries(PlayerApiBase):

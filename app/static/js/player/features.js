@@ -9,7 +9,7 @@
  * script right after ui.js (so it carries its own asset stamp); nothing
  * imports it. Like the engine it lives as long as the document: its
  * listeners are added once, and its timers run only while a sleep timer, a
- * settings save or a place check is pending. Design:
+ * settings save is pending. Design:
  * docs/superpowers/specs/2026-09-28-audiobook-player-design.md, section 8.
  * Styles: theme.css "Audiobook player" (theme variables only).
  *
@@ -69,15 +69,17 @@
  *   device_id, else its label when either side has no id) in the last 24
  *   hours, when this browser has its own place in the book (one the listener
  *   played or moved to here) more than 30 s from it, opens paused and asks
- *   "Continue from <time> (<device>, <ago>)?". Continue plays from there;
- *   Start from here moves to this browser's place (a seek, so it is saved as
- *   the newest) and plays. Play pressed instead is Continue. The place is
- *   checked again when Play is pressed after 5 minutes or more without
- *   playing, and when the page is shown again while paused: if another device
- *   has saved a place since this one (more than 30 s from here), Play is held
- *   and the same question asked (Continue moves there; Start from here plays
- *   on from here), so a tab left open never saves its old place over a newer
- *   one without asking. A check that fails or takes over 4 s lets Play go on.
+ *   "Continue from <time> (<device>, <ago>)?", keeping this browser's own
+ *   place in the local copy meanwhile. Continue moves to the other device's
+ *   place (a seek) and plays; Start from here moves to this browser's place
+ *   and plays; either is saved as the newest place. Play pressed instead, or
+ *   any move, is the listener's answer: the question goes.
+ * - Conflict (spec 11b): the server refuses a save over another device's
+ *   newer place (409). Playback pauses there and the same question is asked:
+ *   Continue moves to the stored place and plays; Keep listening here saves
+ *   this place over it (a deliberate override) and plays. Until then nothing
+ *   is saved to the server (the local copy follows the place); playing on
+ *   without answering is allowed and still saves nothing.
  * - Up next: at the end of the book, the next in its series
  *   (GET /api/player/next/<book>): "Up next: <title>" with Play, which opens
  *   it where the listener left off. It never starts by itself.
@@ -92,7 +94,7 @@
  *   chapterEnd(state)                     the current chapter's end, book ms
  *   otherDevice(copy, me)                 another device's copy (by id, else by label)
  *   handoffOffer(info)                    the open's handoff question (engine setOpenGate info), or null
- *   recheckOffer({ web, webMs, own, atMs, now, me })   the same when Play comes back to a paused book
+ *   conflictOffer(warning, me, placeMs)   the question for a 409 (saves.js 'conflict' warning)
  *   handoffMessage(offer)                 "Continue from 1:02:03 (Chrome on Android, 3 min ago)?",
  *                                         "(another Chrome on Linux, ...)" for this device's own label
  *   formatAgo(ms)                         "just now", "3 min ago", "2 h ago", "3 days ago"
@@ -123,13 +125,9 @@ export const HEARD_MS = 1000;          // real progress that counts as listening
 export const PREFS_URL = '/api/player/prefs';
 export const HISTORY_URL = '/api/player/history/';
 export const NEXT_URL = '/api/player/next/';
-export const POSITION_URL = '/api/player/position/';
 export const SESSION_GAP_MS = 600000;     // a longer gap in the log starts a new session
 export const HANDOFF_WITHIN_MS = 86400000; // another device's place this recent is offered on open
 export const HANDOFF_APART_MS = 30000;    // places closer than this are the same place
-export const RECHECK_AFTER_MS = 300000;   // Play after this long without playing checks the place again
-export const RECHECK_TIMEOUT_MS = 4000;   // a check that takes longer lets Play go on
-export const VISIBLE_CHECK_MS = 10000;    // at most one check a page shown again this often
 export const DEFAULTS = Object.freeze({ skip_s: 10, speed: 1, smart_rewind: true });
 
 const WIDE = '(min-width: 1024px)';
@@ -298,24 +296,18 @@ function sameLabel(copy, me) {
   return !!a && !!me && a === me.device;
 }
 
-/* The question when Play comes back to a paused book (or the page is shown
-   again): WebServarr's copy (web) is another device's and newer than this
-   browser's own place (own), and more than 30 s from where the player is
-   (atMs). webMs: web's place in book time (null: not in this book). */
-export function recheckOffer(o) {
-  const x = o || {};
-  const web = x.web;
-  if (!web || typeof x.webMs !== 'number' || typeof x.atMs !== 'number' || !otherDevice(web, x.me)) return null;
-  const webAt = Date.parse(web.updated_at);
-  if (!isFinite(webAt)) return null;
-  const ownAt = x.own ? Date.parse(x.own.updated_at) : NaN;
-  if (isFinite(ownAt) && webAt <= ownAt) return null;
-  if (Math.abs(x.webMs - x.atMs) <= HANDOFF_APART_MS) return null;
-  const age = ageOf(x.now, web.updated_at);
-  return {
-    other: { bookMs: x.webMs, device: web.device || '', agoMs: isFinite(age) ? age : null, sameLabel: sameLabel(web, x.me) },
-    own: { bookMs: x.atMs }
-  };
+/* The question for a 409 (saves.js { kind: 'conflict', conflict, now }):
+   the stored place, whose device and how long ago. placeMs(track, offset)
+   is its book time (null: not in this book, so there is nowhere to go). */
+export function conflictOffer(w, me, placeMs) {
+  const c = (w && w.conflict) || {};
+  let at = null;
+  if (typeof placeMs === 'function' && c.track) {
+    const b = placeMs(String(c.track), Number(c.offset_ms));
+    if (typeof b === 'number' && isFinite(b)) at = b;
+  }
+  const age = ageOf(w && w.now, c.updated_at);
+  return { other: { bookMs: at, device: c.device || '', agoMs: isFinite(age) ? age : null, sameLabel: sameLabel(c, me) } };
 }
 
 export function formatAgo(ms) {
@@ -811,16 +803,10 @@ export function createFeatures(env) {
   // ---- The engine ----
 
   // Handoff (below): the question showing { book, offer, kind ('open' |
-  // 'recheck'), prompt }; the one an open's gate held its book for, asked at
-  // its 'open' { book, offer }; since when (mono) the loaded book has not
-  // been playing; a place check in flight { book, promise }; Play from the
-  // question itself (no gate); the last check for a page shown again.
+  // 'conflict'), prompt }; the one an open's gate held its book for, asked
+  // at its 'open' { book, offer }.
   let handoff = null;
   let pendingOpen = null;
-  let idleSince = null;
-  let checking = null;
-  let bypass = false;
-  let visibleCheckAt = -Infinity;
   let upNext = null;           // { book, prompt }: the next book offered at the end
   let hist = null;             // the history loaded (see History)
 
@@ -854,16 +840,14 @@ export function createFeatures(env) {
       openRewind = null;
       dropHandoff();
       dropUpNext();
-      idleSince = null;
       bookChanged();
     }
-    // How long the book has gone without playing (the place check on Play).
-    if (s.playing) idleSince = null;
-    else if (s.book && idleSince === null) idleSince = mono();
-    // Playing again, or a stop: a question about where to play is over.
-    if (s.playing || s.error) dropHandoff();
-    if (s.playing) dropUpNext();
+    // Playing, a stop, or a move of the listener's own: the open's question
+    // is answered. (A conflict's stays until it is answered: nothing is
+    // saved meanwhile.)
     const moved = r === 'seek' || r === 'skip' || r === 'jump';
+    if (handoff && handoff.kind === 'open' && (s.playing || s.error || (moved && !ownSeek))) dropHandoff();
+    if (s.playing) dropUpNext();
     if (moved && !ownSeek) {
       // A place the listener chose while paused is theirs: no rewind from it,
       // nor from the place the book opened at once they have moved.
@@ -953,7 +937,7 @@ export function createFeatures(env) {
     });
   }
 
-  // ---- Handoff ----
+  // ---- Handoff and conflicts ----
 
   function dropHandoff() {
     const h = handoff;
@@ -967,40 +951,40 @@ export function createFeatures(env) {
     if (!book) return;
     const entry = { book: book, offer: offer, kind: kind, prompt: null };
     handoff = entry;
-    entry.prompt = ui.prompt({
-      id: 'handoff',
-      message: handoffMessage(offer),
-      actions: [
-        { label: 'Continue', primary: true, run: function () { chooseHandoff(entry, 'other'); } },
-        { label: 'Start from here', run: function () { chooseHandoff(entry, 'own'); } }
-      ]
-    });
+    const actions = [];
+    if (typeof offer.other.bookMs === 'number' && offer.other.canGo !== false) {
+      actions.push({ label: 'Continue', primary: true, run: function () { chooseHandoff(entry, 'other'); } });
+    }
+    actions.push({ label: kind === 'conflict' ? 'Keep listening here' : 'Start from here',
+      primary: !actions.length, run: function () { chooseHandoff(entry, 'own'); } });
+    entry.prompt = ui.prompt({ id: 'handoff', message: handoffMessage(offer), actions: actions });
   }
 
-  function playFromChoice() {
-    bypass = true;
+  function playNow() {
     let r;
     try {
       r = player.play();
-    } finally {
-      bypass = false;
+    } catch (e) {
+      logError(e);
+      return;
     }
     if (r && typeof r.catch === 'function') r.catch(logError);
   }
 
-  /* The listener's answer. Continue: the other device's place (where an
-     open already is; after a check, a seek there). Start from here: this
-     browser's place, as a move of the listener's own at an open (so it is
-     saved as the newest place, and nothing rewinds from the other's), and
-     at a check simply Play where the player is (the play is saved). */
+  /* The listener's answer, each a move of their own (saved as the newest
+     place). Continue: to the other device's place. At an open, Start from
+     here: to this browser's place. At a conflict, Keep listening here: the
+     place here is saved over the stored one. Then play. */
   function chooseHandoff(entry, which) {
     if (handoff !== entry) return;
     handoff = null;
     const s = player.state();
     if (s.book !== entry.book) return;
-    if (which === 'other' && entry.kind === 'recheck') player.seek(entry.offer.other.bookMs);
-    else if (which === 'own' && entry.kind === 'open') player.seek(entry.offer.own.bookMs);
-    playFromChoice();
+    if (which === 'other') player.seek(entry.offer.other.bookMs);
+    else if (entry.kind === 'open') player.seek(entry.offer.own.bookMs);
+    // After the move: the save that resumes carries the place chosen.
+    if (entry.kind === 'conflict' && typeof player.resolveConflict === 'function') player.resolveConflict();
+    playNow();
   }
 
   if (typeof player.setOpenGate === 'function') {
@@ -1011,76 +995,25 @@ export function createFeatures(env) {
     });
   }
 
-  // WebServarr's copy of the place, for a check: { web, now } or null (a
-  // failure, or no answer within RECHECK_TIMEOUT_MS).
-  function fetchPlace(book) {
-    return new Promise(function (resolve) {
-      let done = false;
-      const timer = setT(function () { finish(null); }, RECHECK_TIMEOUT_MS);
-      function finish(v) {
-        if (done) return;
-        done = true;
-        clearT(timer);
-        resolve(v);
-      }
-      getJSON(POSITION_URL + encodeURIComponent(book)).then(function (data) {
-        finish(data && typeof data === 'object' ? { web: data.web || null, now: typeof data.now === 'string' ? data.now : null } : null);
-      }, function () { finish(null); });
-    });
-  }
-
-  /* Has another device saved a place in this book since this browser's own?
-     Asks the server; if so, shows the question. Resolves true when it did
-     (Play is held), false otherwise. One check at a time per book. */
-  function recheck(book) {
-    if (checking && checking.book === book) return checking.promise;
-    const entry = { book: book, promise: null };
-    checking = entry;
-    entry.promise = fetchPlace(book).then(function (got) {
-      if (checking === entry) checking = null;
-      const s = player.state();
-      if (!got || s.book !== book || s.playing || s.error || handoff) return false;
-      const web = got.web;
-      const offer = recheckOffer({
-        web: web,
-        webMs: web ? player.placeMs(web.track, web.offset_ms) : null,
-        own: player.own(),
-        atMs: s.bookMs,
-        now: got.now,
-        me: player.me()
-      });
-      if (!offer) return false;
-      showHandoff(offer, 'recheck');
-      return true;
-    });
-    return entry.promise;
-  }
-
-  if (typeof player.setPlayGate === 'function') {
-    player.setPlayGate(function () {
-      if (bypass) return null;
-      const s = player.state();
-      if (!s.book || s.playing) return null;
-      // Play while the question shows: from where the player is.
-      if (handoff && handoff.book === s.book) {
-        dropHandoff();
-        return null;
-      }
-      if (checking && checking.book === s.book) return checking.promise.then(function (held) { return !held; });
-      if (idleSince === null || mono() - idleSince < RECHECK_AFTER_MS) return null;
-      return recheck(s.book).then(function (held) { return !held; });
-    });
-  }
-
-  // Shown again while paused: another device may have gone on meanwhile.
-  doc.addEventListener('visibilitychange', function () {
+  // The server refused a save over another device's newer place: pause
+  // there and ask.
+  player.on('warning', function (w) {
     try {
-      if (doc.visibilityState !== 'visible') return;
+      if (!w || w.kind !== 'conflict') return;
       const s = player.state();
-      if (!s.book || s.playing || s.loading || s.error || handoff) return;
-      if (mono() - visibleCheckAt < VISIBLE_CHECK_MS) return;
-      visibleCheckAt = mono();
-      recheck(s.book);
+      if (!s.book || w.book !== s.book) return;
+      if (s.playing) player.pause();
+      const offer = conflictOffer(w, player.me(), function (t, o) { return player.placeMs(t, o); });
+      // A place in a part this browser can't play is nowhere to go.
+      if (typeof offer.other.bookMs === 'number') {
+        let parts = [];
+        try {
+          parts = player.parts();
+        } catch (e) { /* none known */ }
+        const i = partAt(parts, offer.other.bookMs);
+        if (i !== -1 && !parts[i].playable) offer.other.canGo = false;
+      }
+      showHandoff(offer, 'conflict');
     } catch (e) {
       logError(e);
     }

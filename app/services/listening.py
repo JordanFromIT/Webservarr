@@ -9,10 +9,16 @@ write their own rows. Never the username.
 Positions. Each page session sends a random id (psid) and numbers its
 check-ins (seq). An older seq from the page session that wrote the stored row
 never overwrites it: check-ins can land out of order (a retry, two workers).
-Across page sessions or devices the most recently received check-in wins, and
-the player's handoff prompt makes that choice visible to the listener. The
-rule is one conditional UPDATE, so two workers racing on the same book can't
-both read the old row and let the older write land last.
+Across devices a write is a compare-and-swap (spec 11b): a check-in carries
+`base`, the stored timestamp its page last saw, and is stored only when there
+is no row yet, when the row came from the same device (its device_id; the
+same psid when either side has none), or when the row's timestamp is still
+`base`. Otherwise it is a conflict: nothing is stored, the attempt is logged,
+and the caller gets the stored place back, so a stale page (a phone asleep,
+a retry after an outage, a question left open) can never post an old place
+over a newer one from another device. The rule is one conditional UPDATE, so
+two workers racing on the same book can't both read the old row and let the
+older write land last.
 
 The log keeps every stored check-in for the history view and is pruned after
 LOG_DAYS. Pruning runs at startup and then at most once a day, piggybacked on
@@ -84,17 +90,38 @@ def _count(name: str, value) -> int:
     return value
 
 
+BASE_MAX = 40
+
+
+def parse_base(base) -> Optional[datetime]:
+    """A check-in's `base` (ISO 8601, as utc_iso gives it) as naive UTC, or
+    None for none. Raises ValueError for anything else."""
+    if base is None:
+        return None
+    if not isinstance(base, str) or not base or len(base) > BASE_MAX:
+        raise ValueError("base must be an ISO 8601 time")
+    try:
+        return _naive_utc(datetime.fromisoformat(base.replace("Z", "+00:00")))
+    except ValueError:
+        raise ValueError("base must be an ISO 8601 time") from None
+
+
 def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: int, duration_ms: int,
                  event: str, device: str, psid: str, seq: int, source: str = "web",
-                 device_id: Optional[str] = None) -> dict:
+                 device_id: Optional[str] = None, base: Optional[str] = None) -> dict:
     """Store a check-in as this listener's position in the book and log it.
 
     `device_id` is the sending browser's own random id (DEVICE_ID), or None
     from a player that sends none; the row keeps what the check-in carried.
+    `base` is the stored timestamp the sending page last saw (ISO 8601, or
+    None when it saw no position).
 
     Returns {"stored": bool, "updated_at": iso8601}. `stored` is False when
     the stored row was written by the same psid with a higher seq; nothing is
-    written or logged then, and `updated_at` is the stored row's. Raises
+    written or logged then, and `updated_at` is the stored row's. A conflict
+    (another device's row, and `base` is not its timestamp) is
+    {"stored": False, "updated_at", "conflict": {track, offset_ms, device,
+    updated_at}}: the position is left alone, the attempt is logged. Raises
     ValueError for input the caller should have refused."""
     identity = _text("identity", identity, IDENTITY_MAX)
     book = _text("book", book, KEY_MAX)
@@ -110,6 +137,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     device = (device if isinstance(device, str) else "")[:DEVICE_MAX]
     if device_id is not None and not (isinstance(device_id, str) and DEVICE_ID.fullmatch(device_id)):
         raise ValueError("device_id must be 16 to 40 lower-case letters and digits")
+    base_at = parse_base(base)
 
     now = _utcnow()
     values = {"track_key": track, "offset_ms": offset_ms, "duration_ms": duration_ms, "updated_at": now,
@@ -119,14 +147,33 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     # Overwrite unless the row is this psid's own and newer. A row written
     # without a psid (a Plex import, say) is always overwritten.
     not_newer_self = or_(P.psid.is_(None), P.seq.is_(None), P.psid != psid, P.seq <= seq)
+    # And, across devices, only over the row the page last saw: the same
+    # device (by id; by psid when either side has none), or a row still at
+    # `base` (to the millisecond utc_iso gives it).
+    if device_id is not None:
+        same_device = or_(P.device_id == device_id, and_(P.device_id.is_(None), P.psid == psid))
+    else:
+        same_device = P.psid == psid
+    allowed = [P.psid.is_(None), same_device]
+    if base_at is not None:
+        allowed.append(and_(P.updated_at >= base_at, P.updated_at < base_at + timedelta(milliseconds=1)))
+    swap = or_(*allowed)
     for _attempt in range(3):
-        if db.query(P).filter(*mine, not_newer_self).update(values, synchronize_session=False):
+        if db.query(P).filter(*mine, not_newer_self, swap).update(values, synchronize_session=False):
             break
         row = db.query(P).filter(*mine).first()
         if row is not None:
             stored_at = row.updated_at
+            if row.psid == psid and row.seq is not None and row.seq > seq:
+                db.rollback()
+                return {"stored": False, "updated_at": utc_iso(stored_at)}
+            conflict = {"track": row.track_key, "offset_ms": row.offset_ms, "device": row.device,
+                        "updated_at": utc_iso(stored_at)}
             db.rollback()
-            return {"stored": False, "updated_at": utc_iso(stored_at)}
+            db.add(ListeningLog(identity=identity, book_key=book, track_key=track, offset_ms=offset_ms,
+                                device=device, device_id=device_id, event=event, at=now))
+            db.commit()
+            return {"stored": False, "updated_at": utc_iso(stored_at), "conflict": conflict}
         db.add(P(identity=identity, book_key=book, **values))
         try:
             db.flush()
@@ -183,19 +230,29 @@ ECHO_MS = 5000
 ECHO_WINDOW = timedelta(hours=24)
 
 
+ECHO_AT = timedelta(seconds=30)
+
+
 def is_logged_place(db: Session, identity: str, book: str, track: str, offset_ms: int,
-                    now: Optional[datetime] = None) -> bool:
+                    stamped_at, now: Optional[datetime] = None) -> bool:
     """True when this listener's own log for the book has a place on `track`
-    within ECHO_MS of `offset_ms` in the last ECHO_WINDOW: Plex's copy of that
-    place is an echo of a save of ours, not listening done in Plex. One
-    bounded query on ix_listening_log_identity_book_at (identity, book, at)."""
+    within ECHO_MS of `offset_ms`, logged in the last ECHO_WINDOW and within
+    ECHO_AT of `stamped_at` (Plex's timestamp for that place, ISO 8601 or a
+    datetime): Plex's copy of that place is an echo of a save of ours, not
+    listening done in Plex. A place logged at another time (a listener who
+    went back in Plexamp to somewhere we logged earlier) is not. One bounded
+    query on ix_listening_log_identity_book_at (identity, book, at)."""
     if not isinstance(track, str) or isinstance(offset_ms, bool) or not isinstance(offset_ms, int):
         return False
-    since = _naive_utc(now) - ECHO_WINDOW
+    stamp = _parse_stamp(stamped_at) if isinstance(stamped_at, str) else (
+        _naive_utc(stamped_at) if isinstance(stamped_at, datetime) else None)
+    if stamp is None:
+        return False
+    since = max(_naive_utc(now) - ECHO_WINDOW, stamp - ECHO_AT)
     L = ListeningLog
     row = (db.query(L.id)
-           .filter(L.identity == identity, L.book_key == book, L.at >= since, L.track_key == track,
-                   L.offset_ms >= offset_ms - ECHO_MS, L.offset_ms <= offset_ms + ECHO_MS)
+           .filter(L.identity == identity, L.book_key == book, L.at >= since, L.at <= stamp + ECHO_AT,
+                   L.track_key == track, L.offset_ms >= offset_ms - ECHO_MS, L.offset_ms <= offset_ms + ECHO_MS)
            .first())
     return row is not None
 

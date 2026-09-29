@@ -109,6 +109,7 @@ function fakeServer(clock) {
           call.done = clock.now;
           if (mode === 'offline') { call.status = 0; reject(new TypeError('Failed to fetch')); return; }
           call.status = mode;
+          if (mode === 409) { resolve({ status: 409, data: { conflict: s.conflict, now: new Date(clock.now).toISOString() } }); return; }
           if (mode !== 200) { resolve({ status: mode, data: { detail: 'no' } }); return; }
           resolve({ status: 200, data: s.store(b) });
         }, s.latency);
@@ -256,7 +257,7 @@ current = 'a save every 10 s while playing';
   check('7 saves in 60 s (at play, then every 10 s)', f.length === 7, f.length);
   check('10 s apart', gaps(f).every((g) => g >= 10000 && g <= 10250), gaps(f));
   check('each carries the place at the time', f.every((c) => c.body.offset_ms >= c.at - T0 - 250 && c.body.offset_ms <= c.at - T0), f.map((c) => [c.at - T0, c.body.offset_ms]));
-  check('body fields', JSON.stringify(Object.keys(f[1].body).sort()) === JSON.stringify(['book', 'device', 'duration_ms', 'event', 'offset_ms', 'psid', 'seq', 'track']), Object.keys(f[1].body));
+  check('body fields', JSON.stringify(Object.keys(f[1].body).sort()) === JSON.stringify(['base', 'book', 'device', 'duration_ms', 'event', 'offset_ms', 'psid', 'seq', 'track']), Object.keys(f[1].body));
   check('book, track and duration', f[1].body.book === '500:1' && f[1].body.track === '501' && f[1].body.duration_ms === 3600000);
   check('the device label', f[1].body.device === 'Chrome on Android');
   const answeredOk = f.filter((c) => c.status === 200);
@@ -2115,6 +2116,215 @@ current = 'playing again after the drift saves as ever';
   t.saver.stop();
   await t.clock.advance(2000);
   check('and a close while playing sends its leave', t.server.calls.length === before + 1 && t.server.calls[before].body.event === 'leave');
+}
+
+// ---- Spec 11b: base, and a 409 from the server ----
+current = 'every save carries the base: the place read at open, then each save the server took';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1', { savedAt: '2026-09-29T10:00:00.000Z' });
+  p.open();
+  p.play();
+  await p.listen(1000);
+  const f = t.server.fetches();
+  check('the first save: the place read at open', f[0].body.base === '2026-09-29T10:00:00.000Z', f[0].body);
+  const taken = t.server.row.updated_at;
+  await p.listen(10000);
+  const f2 = t.server.fetches();
+  check('the next: the timestamp of the save taken before it', f2.length === 2 && f2[1].body.base === taken, f2.map((c) => c.body.base));
+  const last = t.server.row.updated_at;
+  await p.listen(500);
+  t.saver.flush('beacon');
+  const b = t.server.beacons();
+  check('a beacon too', b.length === 1 && b[0].body.base === last, b.map((c) => c.body.base));
+  t.saver.stop();
+  const t2 = makeSaver();
+  const p2 = listener(t2);
+  t2.saver.start('500:1');
+  p2.open();
+  p2.play();
+  await p2.listen(500);
+  check('none read at open: null', t2.server.fetches()[0].body.base === null);
+  t2.saver.stop();
+}
+
+current = 'a 409: one conflict warning, nothing more sent until the listener answers, no failure warning';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1', { savedAt: '2026-09-29T10:00:00.000Z' });
+  p.open();
+  t.server.mode = 409;
+  t.server.conflict = { track: '503', offset_ms: 100000, device: 'Chrome on Linux', updated_at: '2026-09-29T11:00:00.000Z' };
+  p.play();
+  await p.listen(1000);
+  const conflicts = t.warnings.filter((w) => w.kind === 'conflict');
+  check('one conflict warning, with the stored place', conflicts.length === 1 && conflicts[0].book === '500:1' && conflicts[0].conflict.track === '503' &&
+    conflicts[0].conflict.updated_at === '2026-09-29T11:00:00.000Z' && typeof conflicts[0].now === 'string', conflicts);
+  const n = t.server.calls.length;
+  p.pause();
+  await p.listen(1000);
+  p.play();
+  await p.listen(60000);
+  t.saver.flush('beacon');
+  t.saver.flush('beacon', 'leave');
+  t.saver.flush('fetch');
+  check('nothing more is sent while it is unanswered', t.server.calls.length === n, t.server.calls.slice(n).map((c) => [c.kind, c.body.event]));
+  check('no "not saved" warning for it', !t.warnings.some((w) => w.kind === 'not-saved' && w.active));
+  check('the local copy follows the place', localOf(t).offset_ms === p.offset, [localOf(t).offset_ms, p.offset]);
+  t.server.mode = 200;
+  const c = t.saver.resolveConflict();
+  check('resolveConflict returns it', c && c.updated_at === '2026-09-29T11:00:00.000Z');
+  check('a second resolve is nothing', t.saver.resolveConflict() === null);
+  await p.listen(1500);
+  const after = t.server.calls.slice(n);
+  check('then saves go again, with the stored timestamp as the base', after.length >= 1 && after[0].body.base === '2026-09-29T11:00:00.000Z', after.map((c) => [c.body.event, c.body.base]));
+  t.saver.stop();
+}
+
+current = 'a 409 on a closing page: its last save is dropped, and a paused, answered-nothing close sends nothing';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1');
+  p.open();
+  p.play();
+  await p.listen(3000);
+  t.server.mode = 409;
+  t.server.conflict = { track: '503', offset_ms: 1, device: 'x', updated_at: '2026-09-29T11:00:00.000Z' };
+  t.server.latency = 3000;
+  p.pause();
+  await t.clock.advance(100);
+  const n = t.server.calls.length;
+  t.saver.stop();                  // the pause is in flight; it will be refused
+  await t.clock.advance(20000);
+  check('the last save is not sent after the refusal', t.server.calls.length === n, t.server.calls.slice(n).map((c) => c.body.event));
+}
+
+current = 'the 2-minute rule holds across a conflict';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1');
+  p.open();
+  t.server.mode = 409;
+  t.server.conflict = { track: '503', offset_ms: 1, device: 'x', updated_at: '2026-09-29T11:00:00.000Z' };
+  p.play();
+  await p.listen(1000);
+  p.pause();
+  await t.clock.advance(3 * 60000);
+  t.server.mode = 200;
+  const n = t.server.calls.length;
+  t.saver.resolveConflict();
+  await t.clock.advance(5000);
+  check('a place reached over 2 minutes ago is not sent by the answer alone', t.server.calls.length === n, t.server.calls.slice(n).map((c) => c.body.event));
+  p.play();
+  await p.listen(1000);
+  check('playing sends it, with the new base', t.server.calls.length > n && t.server.calls[n].body.base === '2026-09-29T11:00:00.000Z');
+  t.saver.stop();
+}
+
+current = 'stop() with a pause in flight: a fallback leave of its place goes only if that save fails';
+for (const outcome of ['fails', 'succeeds']) {
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1', { savedAt: '2026-09-29T10:00:00.000Z' });
+  p.open();
+  p.play();
+  await p.listen(750);            // the play is taken; under 1 s of listening
+  t.server.mode = outcome === 'fails' ? 'offline' : 200;
+  t.server.latency = 3000;
+  p.pause();
+  const paused = p.offset;
+  await t.clock.advance(400);      // the pause is sent, 1 s after the play (in flight)
+  p.offset += 200;                 // the element's drift
+  p.emit('time');
+  const n = t.server.calls.length;
+  t.saver.stop();
+  t.server.mode = 200;
+  t.server.latency = 80;
+  await t.clock.advance(20000);
+  const after = t.server.calls.slice(n);
+  if (outcome === 'fails') {
+    check('fails: one leave of the paused place', after.length === 1 && after[0].body.event === 'leave' && after[0].body.offset_ms === paused && typeof after[0].body.base === 'string', after.map((c) => [c.body.event, c.body.offset_ms]));
+    check('fails: stored', t.server.row.offset_ms === paused && t.server.row.event === 'leave');
+  } else {
+    check('succeeds: nothing more', after.length === 0, after.map((c) => [c.body.event, c.body.offset_ms]));
+    check('succeeds: the pause is stored', t.server.row.offset_ms === paused && t.server.row.event === 'pause');
+  }
+}
+
+current = 'the page going while a pause is in flight: its place goes as the beacon';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1');
+  p.open();
+  p.play();
+  await p.listen(750);
+  t.server.mode = 'hang';
+  p.pause();
+  const paused = p.offset;
+  await t.clock.advance(400);
+  p.offset += 200;
+  p.emit('time');
+  const sent = t.saver.flush('beacon', 'leave');
+  const b = t.server.beacons();
+  check('a beacon leave of the paused place', sent && b.length === 1 && b[0].body.event === 'leave' && b[0].body.offset_ms === paused, b.map((c) => [c.body.event, c.body.offset_ms]));
+  t.saver.stop();
+}
+
+current = 'playing, a place under 1 s past the last save is still a new place';
+{
+  // The drift allowance is for a paused player only: while playing, the
+  // place moving on is listening, and a flush sends it.
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1');
+  p.open();
+  p.play();
+  await p.listen(3000);
+  p.pause();
+  await t.clock.advance(1500);
+  p.play();                        // saved at once, at the paused place
+  await t.clock.advance(1500);
+  const played = t.server.row;
+  check('the play is taken', played.event === 'play' && played.offset_ms === p.offset, played);
+  const n = t.server.calls.length;
+  p.offset += 500;                 // half a second of listening since
+  p.emit('time');
+  check('a flush sends it', t.saver.flush('fetch') === true);
+  await t.clock.advance(1500);
+  check('sent', t.server.calls.length === n + 1 && t.server.calls[n].body.offset_ms === p.offset, t.server.calls.slice(n).map((c) => [c.body.event, c.body.offset_ms]));
+  const m = t.server.calls.length;
+  p.offset += 400;
+  p.emit('time');
+  t.saver.stop();                  // a close while playing, 0.4 s past the last save
+  await t.clock.advance(1500);
+  check('and a close while playing sends its leave', t.server.calls.length === m + 1 && t.server.calls[m].body.event === 'leave' && t.server.calls[m].body.offset_ms === p.offset, t.server.calls.slice(m).map((c) => [c.body.event, c.body.offset_ms]));
+}
+
+current = 'keepLocal: the local copy is left as it was until the listener acts';
+{
+  const t = makeSaver();
+  t.storage.map.set('ws-player:place:' + IDENTITY + ':500:1', JSON.stringify({ track: '501', offset_ms: 5000, duration_ms: 3600000, updated_at: new Date(T0).toISOString(), device: 'Chrome on Android', own: true }));
+  const p = listener(t);
+  p.offset = 900000;
+  t.saver.start('500:1', { keepLocal: true });
+  p.open();
+  p.emit('ready');
+  check('opening elsewhere leaves it', localOf(t).offset_ms === 5000 && localOf(t).own === true, localOf(t));
+  p.seek(910000);
+  check('a move of the listener\'s writes it', localOf(t).offset_ms === 910000, localOf(t));
+  t.saver.stop();
 }
 
 if (failed) {

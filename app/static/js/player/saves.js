@@ -32,6 +32,16 @@
  * A paused place within 1 s of the one the server took (the element's last
  * timeupdate lands just past a saved pause) is that saved place: it is not
  * sent again, by a save, a beacon or stop()'s last save.
+ *
+ * Other devices (spec 11b): every save carries `base`, the server's
+ * timestamp of the place this page last saw (the position read at open,
+ * then each save the server took). The server refuses a save over another
+ * device's newer place with 409 and that place. Then nothing more is sent:
+ * onWarning gets { kind: 'conflict', book, conflict: { track, offset_ms,
+ * device, updated_at }, now }, the local copy keeps following the place,
+ * and resolveConflict() (the listener's answer) takes the stored timestamp
+ * as the new base and lets saves go again. A beacon or last save refused
+ * that way is dropped.
  * Smart rewind (a change the engine marks { rewind: true }) never moves the
  * saved place back: until playback passes the place it went back from, that
  * place is what every save (and the local copy) carries; the listener's own
@@ -75,7 +85,7 @@
  *               now (wall clock), mono (monotonic; default performance.now),
  *               storage, identity (the identity key: string or function), device,
  *               deviceId, setTimeout, clearTimeout, onSignedOut, formatTime, psid })
- *   start(book, { push, savedAt, held })
+ *   start(book, { push, savedAt, held, keepLocal })
  *                                   push: the place the book opens at is newer
  *                                   than the server's (a local copy): send it at
  *                                   once (it counts as reached now, so after 2
@@ -83,10 +93,18 @@
  *                                   (ISO), "Last saved" until this page saves.
  *                                   held: { track, offset_ms } the server holds
  *                                   already (the book resumed from it).
+ *                                   savedAt is also the first `base`.
+ *                                   keepLocal: leave this browser's local copy
+ *                                   as it is until the listener plays or moves
+ *                                   (the open's handoff question is showing).
  *   stop()                          saves the last place once (if it needs it; its
  *                                   seq is taken at once, so whatever opens next
  *                                   outranks it), ends an active warning with
- *                                   active: false, then no timers are left
+ *                                   active: false, then no timers are left.
+ *                                   A pause or move still in flight gets a last
+ *                                   'leave' of its place, sent only if it fails.
+ *   resolveConflict() -> conflict | null   the listener answered a 409: saves go
+ *                                   again, over the place it showed
  *   note(change)                    each engine change { reason, state, rewind }
  *   flush('beacon' | 'fetch', event) send now: a beacon, or a fetch past the backoff
  *   wake()                          back from frozen or hidden: the save in flight
@@ -416,7 +434,11 @@ export function createSaver(o) {
       timer: null,
       timerAt: Infinity,      // mono
       stopped: false,
-      final: null             // the body stop() still owes
+      final: null,            // the body stop() still owes
+      fallback: null,         // the body stop() owes only if the save in flight fails
+      base: null,             // the server's timestamp of the place this page last saw
+      conflict: null,         // a 409 not yet answered: nothing is sent meanwhile
+      keepLocal: false        // leave the local copy alone until the listener acts
     };
   }
 
@@ -445,7 +467,7 @@ export function createSaver(o) {
     return mono() - r.reachedMono <= FRESH_MS && now() - r.reachedWall <= FRESH_MS;
   }
 
-  function body(book, place, event) {
+  function body(book, place, event, base) {
     seq += 1;
     const b = {
       book: book,
@@ -455,7 +477,8 @@ export function createSaver(o) {
       event: event,
       device: device,
       psid: psid,
-      seq: seq
+      seq: seq,
+      base: typeof base === 'string' && base ? base : null
     };
     if (deviceId) b.device_id = deviceId;
     return b;
@@ -463,7 +486,7 @@ export function createSaver(o) {
 
   // When (mono) the next save is due: Infinity for none.
   function dueAt(r) {
-    if (r.stopped || r.inFlight || signedOut || !dirty(r) || !sendable(r)) return Infinity;
+    if (r.stopped || r.inFlight || signedOut || r.conflict || !dirty(r) || !sendable(r)) return Infinity;
     let at;
     if (r.failures > 0) at = r.backoffUntil;          // what happens meanwhile waits for the retry
     else if (r.urgent) at = -Infinity;
@@ -484,7 +507,7 @@ export function createSaver(o) {
     r.lastSendAt = at;
     let p;
     try {
-      p = Promise.resolve(post(body(r.book, place, event), 'fetch'));
+      p = Promise.resolve(post(body(r.book, place, event, r.base), 'fetch'));
     } catch (e) {
       p = Promise.reject(e);
     }
@@ -509,7 +532,22 @@ export function createSaver(o) {
       if (data && data.stored === true && typeof data.updated_at === 'string') {
         const at = Date.parse(data.updated_at);
         if (isFinite(at)) measureSkew(at, sent.wall, now());
+        r.base = data.updated_at;
       }
+      return true;
+    }
+    // Another device's newer place: not a failure (no backoff, no warning).
+    // Nothing more is sent until the listener answers (resolveConflict).
+    const c = status === 409 && res.data && res.data.conflict;
+    if (c && typeof c === 'object') {
+      if (r.event === null && sent.event !== 'checkin') r.event = sent.event;
+      r.conflict = {
+        track: String(c.track == null ? '' : c.track),
+        offset_ms: Number(c.offset_ms),
+        device: typeof c.device === 'string' ? c.device : '',
+        updated_at: typeof c.updated_at === 'string' ? c.updated_at : null,
+        now: typeof res.data.now === 'string' ? res.data.now : null
+      };
       return true;
     }
     // Keep what the failed save was for (a pause, the end), unless something
@@ -523,10 +561,21 @@ export function createSaver(o) {
   }
 
   function answered(r, id, res) {
+    const before = r.conflict;
     if (!settle(r, id, res)) return;
+    const status = res && typeof res.status === 'number' ? res.status : 0;
     if (r.stopped) {
-      sendFinal(r);
+      // Refused for another device's newer place: the last save would be too.
+      if (r.conflict) {
+        r.final = null;
+        r.fallback = null;
+      }
+      sendFinal(r, !(status >= 200 && status < 300));
       return;
+    }
+    if (r.conflict && r.conflict !== before) {
+      const c = r.conflict;
+      tell({ kind: 'conflict', book: r.book, conflict: { track: c.track, offset_ms: c.offset_ms, device: c.device, updated_at: c.updated_at }, now: c.now });
     }
     step();
   }
@@ -645,8 +694,13 @@ export function createSaver(o) {
       // Opening at a place (and the element settling there) is neither, and
       // nor is an error: the place it holds was reached by playback, if at all.
       const reached = (EVENTS[change.reason] && change.reason !== 'error' && !change.rewind) || (r.playing && moved);
-      if (moved) {
+      // The open's handoff question keeps this browser's own place in the
+      // local copy until the listener acts.
+      if (reached) r.keepLocal = false;
+      if (moved && !r.keepLocal) {
         writeLocal(r.book, place, reached || r.reachedMono !== null);
+      }
+      if (moved) {
         if (r.dirtySince === null && !samePlace(place, r.acked)) r.dirtySince = t;
       }
       if (reached) {
@@ -678,6 +732,8 @@ export function createSaver(o) {
     lastSavedAt = isFinite(saved) ? saved - skew : null;
     // The place the server already holds needs no save until it moves.
     run.acked = placeOf(opts.held);
+    run.base = typeof opts.savedAt === 'string' && opts.savedAt ? opts.savedAt : null;
+    run.keepLocal = !!opts.keepLocal;
     // A newer local copy the book opens at is sent at once: opening from it
     // counts as reaching it, so it obeys the same 2 minutes as any place.
     if (opts.push) {
@@ -700,13 +756,20 @@ export function createSaver(o) {
     lastSavedAt = null;
     // Listeners hear the warning end, not just stop being told about it.
     if (was) tell({ kind: 'not-saved', active: false, lastSavedAt: savedAt, message: '' });
-    if (signedOut || !r.latest || !sendable(r) || !(r.playing || dirty(r))) return;
+    if (signedOut || r.conflict) return;
     // Its seq is taken now: every save of whatever opens next outranks it,
     // so the server never takes this place over a later one (a late final
     // from the same psid is refused).
-    r.final = body(r.book, r.latest, r.event === 'end' ? 'end' : 'leave');
+    if (r.latest && sendable(r) && (r.playing || dirty(r))) {
+      r.final = body(r.book, r.latest, r.event === 'end' ? 'end' : 'leave', r.base);
+    } else if (r.inFlight && r.inFlight.event !== 'checkin') {
+      // A pause or a move still in flight is the last word, unless it fails:
+      // then this 'leave' of its place goes instead (Plex is told it stopped).
+      r.fallback = body(r.book, r.inFlight.place, r.inFlight.event === 'end' ? 'end' : 'leave', r.base);
+    }
+    if (!r.final && !r.fallback) return;
     if (!r.inFlight) {
-      sendFinal(r);
+      sendFinal(r, false);
       return;
     }
     // One in flight at a time: the final save waits for it, as long as a
@@ -714,17 +777,18 @@ export function createSaver(o) {
     r.timer = setT(function () {
       r.timer = null;
       r.inFlight = null;
-      sendFinal(r);
+      sendFinal(r, true);
     }, Math.max(0, r.inFlight.from + POST_TIMEOUT_MS - mono()));
   }
 
-  function sendFinal(r) {
-    if (!r.final) return;
-    const b = r.final;
+  // failed: the save that was in flight did not get through.
+  function sendFinal(r, failed) {
+    const b = r.final || (failed ? r.fallback : null);
     r.final = null;
+    r.fallback = null;
     if (r.timer !== null) clearT(r.timer);
     r.timer = null;
-    if (signedOut) return;
+    if (!b || signedOut) return;
     try {
       Promise.resolve(post(b, 'fetch')).catch(noop);
     } catch (e) { /* the local copy has it */ }
@@ -732,10 +796,16 @@ export function createSaver(o) {
 
   function flush(kind, event) {
     const r = run;
-    if (!r || r.stopped || signedOut || !r.latest || !sendable(r)) return false;
+    if (!r || r.stopped || signedOut || r.conflict || !r.latest || !sendable(r)) return false;
     if (kind === 'beacon') {
-      if (!r.playing && !dirty(r)) return false;
-      const at = r.book + '|' + r.latest.track + '|' + r.latest.offset_ms;
+      let place = r.latest;
+      if (!r.playing && !dirty(r)) {
+        // A pause or a move still in flight: the page may not live to hear
+        // its answer, so its place goes as the beacon.
+        if (!r.inFlight || r.inFlight.event === 'checkin') return false;
+        place = r.inFlight.place;
+      }
+      const at = r.book + '|' + place.track + '|' + place.offset_ms;
       // Leaving, Chrome fires pagehide and then visibilitychange: after the
       // leave, a hidden page's checkin would tell Plex it still plays.
       if (!event && at === leftAt) return false;
@@ -745,7 +815,7 @@ export function createSaver(o) {
       lastBeacon = key;
       if (ev === 'leave') leftAt = at;
       try {
-        post(body(r.book, r.latest, ev), 'beacon');
+        post(body(r.book, place, ev, r.base), 'beacon');
       } catch (e) {
         return false;
       }
@@ -756,6 +826,19 @@ export function createSaver(o) {
     r.urgent = true;
     step();
     return true;
+  }
+
+  /* The listener answered a 409 (Continue, or Keep listening here): the
+     place it showed is the one this page has now seen, so saves go again
+     with its timestamp as the base. Returns the conflict, or null. */
+  function resolveConflict() {
+    const r = run;
+    if (!r || !r.conflict) return null;
+    const c = r.conflict;
+    r.conflict = null;
+    if (c.updated_at) r.base = c.updated_at;
+    step();
+    return { track: c.track, offset_ms: c.offset_ms, device: c.device, updated_at: c.updated_at };
   }
 
   function resumeFrom(book, copies) {
@@ -775,6 +858,7 @@ export function createSaver(o) {
     clockProbe: clockProbe,
     readLocal: readLocal,
     resumeFrom: resumeFrom,
+    resolveConflict: resolveConflict,
     onWarning: function (fn) {
       if (typeof fn !== 'function') return noop;
       warnFns.add(fn);

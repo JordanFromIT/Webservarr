@@ -322,7 +322,8 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
     and WebServarr's still resumes the book.
 
     Plex's copy is null too when it is an echo: a place this listener's own
-    log has (listening.is_logged_place). Plex stamps a part again when it
+    log has, logged within 30 s of Plex's timestamp for it
+    (listening.is_logged_place). Plex stamps a part again when it
     ends a session our save started, so such a copy looks newer than our
     later saves while holding an older place; only a place we never logged
     (listening in Plexamp or a Plex app) competes on its time.
@@ -331,7 +332,6 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
     its own clock against it before it compares these copies with its local
     one, which it stamps in the server's time."""
     await _book_access(who, key)
-    web = listening.get_position(db, who.identity, key)
     try:
         plex_pos = await pp.plex_position(who.session(), key, session_id=who.session_id)
     except pp.NotInLibrary as exc:
@@ -340,8 +340,11 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
         logger.info("Plex position unavailable: %s", type(exc).__name__)
         plex_pos = None
     if plex_pos and listening.is_logged_place(db, who.identity, key, plex_pos.get("track"),
-                                              plex_pos.get("offset_ms")):
+                                              plex_pos.get("offset_ms"), plex_pos.get("updated_at")):
         plex_pos = None
+    # Read after the echo check, so a save landing meanwhile is in `web` (the
+    # newer copy) rather than only in the log the check just read.
+    web = listening.get_position(db, who.identity, key)
     return {"web": web, "plex": plex_pos, "now": utc_iso(datetime.now(timezone.utc))}
 
 
@@ -396,6 +399,9 @@ class Checkin(BaseModel):
     device: Text = Field(default="", max_length=listening.DEVICE_MAX)
     # The browser's own random id for itself; optional (older players send none).
     device_id: Optional[str] = Field(default=None, pattern=r"^[a-z0-9]{16,40}$")
+    # The stored timestamp this page last saw for the book (spec 11b); null
+    # when it saw no position. Checked as ISO 8601 by the store.
+    base: Optional[Text] = Field(default=None, max_length=listening.BASE_MAX)
     psid: Text = Field(min_length=1, max_length=listening.PSID_MAX)
     seq: StrictInt = Field(ge=0, le=MAX_SEQ)
 
@@ -419,7 +425,12 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     are still checked as belonging to the library.
 
     {"stored": false} when an older seq from the page session that wrote the
-    stored position arrived late: nothing is stored, logged or forwarded."""
+    stored position arrived late: nothing is stored, logged or forwarded.
+
+    409 {"conflict": {track, offset_ms, device, updated_at}, "now"} when the
+    stored position is another device's and `base` is not its timestamp
+    (spec 11b): nothing is stored or forwarded; the attempt is logged. The
+    body is only ever this listener's own row."""
     try:
         await pp.assert_in_library(body.book, body.track)
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
@@ -427,9 +438,12 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     try:
         result = listening.save_checkin(db, who.identity, body.book, body.track, body.offset_ms,
                                         body.duration_ms, body.event, body.device, body.psid, body.seq,
-                                        device_id=body.device_id)
+                                        device_id=body.device_id, base=body.base)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    if result.get("conflict"):
+        return JSONResponse({"conflict": result["conflict"], "now": utc_iso(datetime.now(timezone.utc))},
+                            status_code=status.HTTP_409_CONFLICT)
     if result["stored"]:
         background.add_task(pp.timeline, who.session(), body.track, EVENT_STATES[body.event],
                             body.offset_ms, body.duration_ms, session_id=who.session_id)

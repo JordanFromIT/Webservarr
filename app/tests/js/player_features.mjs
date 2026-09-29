@@ -287,10 +287,44 @@ function memoryStorage() {
   };
 }
 
+/* The check-in server as app/services/listening.save_checkin keeps it
+   (spec 11b): per book one row; the same psid's older seq is refused (200,
+   stored false); the same device (device_id, else psid) or a base equal to
+   the row's timestamp stores; anything else is 409 with the row. A beacon
+   gets the same rule and no answer. `down`: every check-in fails (the
+   network). Shared by the pages of several "devices" on one clock. */
+function casServer(clock) {
+  const srv = { rows: {}, log: [], down: false };
+  srv.at = () => new Date(NOW0 + clock.now).toISOString();
+  srv.web = (book) => {
+    const r = srv.rows[book];
+    return r ? { track: r.track, offset_ms: r.offset_ms, duration_ms: r.duration_ms, updated_at: r.updated_at, device: r.device, device_id: r.device_id || null } : null;
+  };
+  srv.store = (b, kind) => {
+    const row = srv.rows[b.book];
+    const entry = { kind, event: b.event, track: b.track, offset_ms: b.offset_ms, psid: b.psid, device_id: b.device_id, base: b.base, t: clock.now };
+    if (row && row.psid === b.psid && row.seq > b.seq) {
+      srv.log.push(Object.assign(entry, { result: 'stale' }));
+      return { status: 200, data: { stored: false, updated_at: row.updated_at } };
+    }
+    const same = b.device_id && row && row.device_id ? b.device_id === row.device_id : !!row && row.psid === b.psid;
+    if (row && !same && b.base !== row.updated_at) {
+      srv.log.push(Object.assign(entry, { result: 'conflict' }));
+      return { status: 409, data: { conflict: { track: row.track, offset_ms: row.offset_ms, device: row.device, updated_at: row.updated_at }, now: srv.at() } };
+    }
+    const at = srv.at();
+    srv.rows[b.book] = { track: b.track, offset_ms: b.offset_ms, duration_ms: b.duration_ms, updated_at: at, device: b.device, device_id: b.device_id || null, psid: b.psid, seq: b.seq };
+    srv.log.push(Object.assign(entry, { result: 'stored' }));
+    return { status: 200, data: { stored: true, updated_at: at } };
+  };
+  return srv;
+}
+
 /* One page: the real engine, saves, view and features. o: { path, prefs
    (the GET's answer; a number is its status), places ({ web } for the
    resume), wide, noFeatures, storage and identity (the local copy),
-   deviceId (this browser's id) }. */
+   deviceId (this browser's id), and for two devices on one server: clock
+   (shared), server (casServer), psid, device (the label) }. */
 async function setup(o = {}) {
   const win = new Window({ url: 'https://ws.test' + (o.path || '/news') });
   const doc = win.document;
@@ -298,8 +332,8 @@ async function setup(o = {}) {
     '<input id="field" type="text"><input id="box" type="checkbox"><textarea id="area"></textarea>' +
     '<select id="sel"><option>a</option></select><div id="editor" contenteditable="true"><p id="para">x</p></div>' +
     '<div id="tabs" role="tab" tabindex="0">Tab</div></main><div id="wsPlayer" hidden></div>';
-  const clock = fakeClock();
-  const t = { win, doc, clock, loads: [], posts: [], fetches: [], puts: [], path: o.path || '/news' };
+  const clock = o.clock || fakeClock();
+  const t = { win, doc, clock, loads: [], posts: [], fetches: [], puts: [], path: o.path || '/news', server: o.server || null };
   t.now = () => NOW0 + clock.now;
   // The server's clock: o.skewMs ahead of this device's (negative: behind).
   t.skew = o.skewMs || 0;
@@ -358,7 +392,9 @@ async function setup(o = {}) {
       t.positionCalls += 1;
       if (t.positionMode === 'down') throw new TypeError('Failed to fetch');
       if (t.positionMode === 'hang') return new Promise(() => {});
-      const reply = { web: t.places.web, plex: t.places.plex || null };
+      const reply = t.server
+        ? { web: t.server.web(decodeURIComponent(m[1])), plex: null }
+        : { web: t.places.web, plex: t.places.plex || null };
       if (!t.noNow) reply.now = new Date(t.serverNow()).toISOString();
       return response(200, reply);
     }
@@ -366,8 +402,13 @@ async function setup(o = {}) {
   }
   t.fetch = fetchFn;
   const saver = S.createSaver({
-    post: (body) => {
+    post: (body, kind) => {
       t.posts.push(body);
+      if (t.server) {
+        if (t.server.down || t.offline) return kind === 'beacon' ? false : Promise.reject(new TypeError('Failed to fetch'));
+        const res = t.server.store(body, kind);
+        return kind === 'beacon' ? true : Promise.resolve(res);
+      }
       const at = new Date(t.serverNow()).toISOString();
       // o.stateful: the server keeps what it is sent, as WebServarr's copy.
       if (o.stateful) t.places = { web: { track: body.track, offset_ms: body.offset_ms, duration_ms: body.duration_ms, updated_at: at, device: 'Test on Linux', device_id: body.device_id || null }, plex: null };
@@ -377,11 +418,11 @@ async function setup(o = {}) {
     mono: () => clock.now,
     storage: o.storage || null,
     identity: o.identity || '',
-    device: 'Test on Linux',
+    device: o.device || 'Test on Linux',
     deviceId: o.deviceId,
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
-    psid: 'test-psid'
+    psid: o.psid || 'test-psid'
   });
   const ms = {
     metadata: null, playbackState: 'none', handlers: new Map(),
@@ -1714,23 +1755,6 @@ await run('handoff: only another device, within 24 h, with a place of its own he
     F.formatAgo(3600000) === '1 h ago' && F.formatAgo(86400000) === '1 day ago' && F.formatAgo(3 * 86400000) === '3 days ago' && F.formatAgo(NaN) === 'just now');
 });
 
-await run('the check on Play: another device newer than this one, and more than 30 s away', () => {
-  const web = { track: '503', offset_ms: 100000, updated_at: '2026-09-29T20:00:00.000Z', device: 'Chrome on Android', device_id: OTHER };
-  const base = () => ({ web: Object.assign({}, web), webMs: 1600000, own: { updated_at: '2026-09-29T19:50:00.000Z' }, atMs: 900000, now: '2026-09-29T20:06:00.000Z', me: { device_id: ME, device: 'Chrome on Linux' } });
-  const got = F.recheckOffer(base());
-  check('offered', got && got.other.bookMs === 1600000 && got.other.agoMs === 6 * MIN && got.own.bookMs === 900000, got);
-  const with_ = (fn) => { const i = base(); fn(i); return F.recheckOffer(i); };
-  check('this device: none', with_((i) => { i.web.device_id = ME; }) === null);
-  check('older than this one: none', with_((i) => { i.own.updated_at = '2026-09-29T20:00:00.001Z'; }) === null);
-  check('the same instant: none', with_((i) => { i.own.updated_at = i.web.updated_at; }) === null);
-  check('no copy here: offered', with_((i) => { i.own = null; }) !== null);
-  check('within 30 s: none', with_((i) => { i.webMs = 930000; }) === null);
-  check('not in this book: none', with_((i) => { i.webMs = null; }) === null);
-  check('no web copy: none', with_((i) => { i.web = null; }) === null);
-  const twin = with_((i) => { i.web.device = 'Chrome on Linux'; });
-  check('the same label here too: "another <label>"', F.handoffMessage(twin) === 'Continue from 26:40 (another Chrome on Linux, 6 min ago)?', F.handoffMessage(twin));
-});
-
 // A page with a local copy of its own and an id: the handoff's surroundings.
 async function handoffSetup(o = {}) {
   const storage = memoryStorage();
@@ -1818,130 +1842,294 @@ for (const [what, arrange] of [
   });
 }
 
-await run('a place check on Play after 5 minutes paused holds for another device\'s newer place', async () => {
-  for (const choice of ['Continue', 'Start from here']) {
-    const t = await handoffSetup({ stateful: true });
-    await t.openAt(MULTI.key, '502', 300000);
-    await t.clock.advance(3000);
-    t.engine.pause();
-    await t.clock.advance(100);
-    const here = bookMs(t);
-    check(`${choice}: saved here first`, t.places.web.device_id === ME, t.places.web);
-    await t.clock.advance(F.RECHECK_AFTER_MS);
-    // Another device went on meanwhile, a minute ago.
-    t.places = { web: t.other('503', 100000, 60000) };
-    const calls = t.positionCalls;
-    const posts = t.posts.length;
-    t.q('.wsp-play-sm').click();
-    await t.clock.advance(100);
-    check(`${choice}: asked the server`, t.positionCalls === calls + 1, t.positionCalls - calls);
-    check(`${choice}: held`, !t.st().playing && bookMs(t) === here, [t.st().playing, bookMs(t)]);
-    check(`${choice}: nothing saved over it`, t.posts.length === posts, t.posts.slice(posts));
-    check(`${choice}: the question`, t.prompts().join() === 'Continue from 26:40 (Chrome on Android, 1 min ago)?', t.prompts());
-    t.button(choice).click();
-    await t.clock.advance(1500);
-    check(`${choice}: playing`, t.st().playing);
-    if (choice === 'Continue') {
-      check('Continue: from the other device\'s place', bookMs(t) >= 1600000 && bookMs(t) < 1602000, bookMs(t));
-      check('Continue: saved there', t.places.web.track === '503' && t.places.web.offset_ms >= 100000 && t.places.web.device_id === ME, t.places.web);
-    } else {
-      check('Start from here: from here, less the pause\'s rewind', bookMs(t) >= here - 10000 && bookMs(t) < here, bookMs(t) - here);
-      check('Start from here: saved as the newest place', t.places.web.track === '502' && t.places.web.device_id === ME, t.places.web);
-    }
-    t.engine.close();
+// ---------------------------------------------------------------------------
+// Two devices on one server (spec 11b: the server refuses a stale place)
+// ---------------------------------------------------------------------------
+
+const PHONE_ID = 'a'.repeat(20);
+const DESK_ID = 'b'.repeat(20);
+async function twoDevices() {
+  const clock = fakeClock();
+  const server = casServer(clock);
+  const page = async (psid, device, deviceId, storage) => {
+    const store = storage || memoryStorage();
+    const t = await setup({ clock, server, psid, device, deviceId, storage: store, identity: ID });
+    t.storage = store;
+    t.prompts = () => t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
+    t.buttons = () => t.qa('.wsp-prompt .wsp-notice-btn').map((b) => b.textContent);
+    t.button = (label) => t.qa('.wsp-notice-btn').find((b) => b.textContent === label) || null;
+    t.open = async (key = MULTI.key, extra) => {
+      const p = t.engine.open(key, extra);
+      await clock.advance(300);
+      await p;
+    };
+    return t;
+  };
+  const phone = await page('psid-phone', 'Chrome on Android', PHONE_ID);
+  const desk = await page('psid-desk', 'Chrome on Linux', DESK_ID);
+  const row = (book = MULTI.key) => server.rows[book] || null;
+  const since = (n) => server.log.slice(n).map((e) => [e.result, e.kind, e.event, e.track, e.offset_ms, e.device_id && e.device_id[0]]);
+  return { clock, server, phone, desk, page, row, since };
+}
+
+for (const how of ['Play', 'Retry', 'lock-screen Play']) {
+  for (const whilePlaying of [true, false]) {
+    await run(`a phone back from an outage 10 h later (${how}, ${whilePlaying ? 'playing' : 'paused'} when it failed) is refused: the desktop's place survives`, async () => {
+      const { clock, phone, desk, row, since } = await twoDevices();
+      await phone.openAt(MULTI.key, '501', 100000);
+      await clock.advance(20000);
+      if (!whilePlaying) { phone.engine.pause(); await clock.advance(1500); }
+      check('the phone\'s place is stored', row().device_id === PHONE_ID, row());
+      // The phone loses the network: saves fail and the stream stops.
+      phone.offline = true;
+      phone.down = true;
+      phone.audioEl.error = { code: 2 };
+      phone.audioEl.fire('error');
+      await clock.advance(30000);
+      check('the phone is in its error state', !!phone.st().error, phone.st().error);
+      await clock.advance(3 * MIN);
+      // The desktop resumes the phone's place and listens on to 20:00, then pauses.
+      await desk.open();
+      desk.engine.seek(1200000);
+      await clock.advance(5000);
+      desk.engine.pause();
+      await clock.advance(2000);
+      const deskRow = Object.assign({}, row());
+      check('the desktop\'s place is stored', deskRow.device_id === DESK_ID && deskRow.track === '502', deskRow);
+      await clock.advance(10 * 3600000);
+      phone.offline = false;
+      phone.down = false;
+      const n = desk.server.log.length;
+      if (how === 'Play') phone.engine.play();
+      else if (how === 'Retry') { const b = phone.qa('.wsp-notice-btn').find((x) => x.textContent === 'Retry'); check('a Retry button', !!b); if (b) b.click(); }
+      else phone.ms.handlers.get('play')();
+      await clock.advance(6000);
+      check('the server refused the phone', since(n).some((e) => e[0] === 'conflict') && since(n).every((e) => e[0] !== 'stored'), since(n));
+      check('the desktop\'s place survives', row().device_id === DESK_ID && row().offset_ms === deskRow.offset_ms && row().updated_at === deskRow.updated_at, row());
+      check('the phone paused there', !phone.st().playing, phone.st().playing);
+      check('and asks', /^Continue from 20:0\d \(Chrome on Linux, 10 h ago\)\?$/.test(phone.prompts().join()), phone.prompts());
+      check('Continue or keep listening here', phone.buttons().join() === 'Continue,Keep listening here', phone.buttons());
+      phone.engine.close();
+      desk.engine.close();
+    });
   }
+}
+
+async function questionLeftOpen() {
+  const d = await twoDevices();
+  const { clock, phone, desk } = d;
+  // The phone listened at 1:40 of part 1 and paused.
+  await phone.openAt(MULTI.key, '501', 100000);
+  await clock.advance(3000);
+  phone.engine.pause();
+  await clock.advance(1500);
+  phone.engine.close();
+  await clock.advance(3600000);
+  // The desktop went on to 15:00 (part 2), then paused.
+  await desk.open();
+  desk.engine.seek(900000);
+  await clock.advance(2000);
+  desk.engine.pause();
+  await clock.advance(1500);
+  await clock.advance(2 * MIN);
+  return d;
+}
+
+await run('the open question: asked, and the phone\'s own place stays in its local copy until it answers', async () => {
+  const { phone, row } = await questionLeftOpen();
+  const own = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+  check('the phone\'s own copy', own.track === '501' && own.own === true, own);
+  await phone.open();
+  check('asked', /^Continue from 15:0\d \(Chrome on Linux, 2 min ago\)\?$/.test(phone.prompts().join()), phone.prompts());
+  const kept = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+  check('the local copy is still the phone\'s own place', kept.track === '501' && kept.offset_ms === own.offset_ms && kept.own === true, kept);
+  // The tab is killed while it asks: the next open asks again, Start from here still there.
+  phone.engine.close();
+  await phone.clock.advance(1000);
+  await phone.open();
+  check('asked again', phone.prompts().length === 1 && phone.buttons().join() === 'Continue,Start from here', [phone.prompts(), phone.buttons()]);
+  phone.button('Start from here').click();
+  await phone.clock.advance(1500);
+  check('back at its own place, saved', row().device_id === PHONE_ID && row().track === '501', row());
+  phone.engine.close();
 });
 
-await run('no place check on Play under 5 minutes, or when this device is the newest', async () => {
-  const t = await handoffSetup({ stateful: true });
-  await t.openAt(MULTI.key, '502', 300000);
-  await t.clock.advance(3000);
-  t.engine.pause();
-  await t.clock.advance(F.RECHECK_AFTER_MS - 1000);
-  const calls = t.positionCalls;
-  await t.engine.play();
-  check('under 5 minutes: plays at once, no check', t.st().playing && t.positionCalls === calls);
-  await t.clock.advance(3000);
-  t.engine.pause();
-  await t.clock.advance(F.RECHECK_AFTER_MS + 1000);
-  t.q('.wsp-play-sm').click();
-  await t.clock.advance(100);
-  check('the newest is this device\'s: checked, then plays', t.positionCalls === calls + 1 && t.st().playing && t.prompts().length === 0, [t.positionCalls - calls, t.st().playing]);
-  t.engine.close();
+for (const how of ['Continue', 'Play button', 'lock-screen Play']) {
+  await run(`the open question left showing while the desktop goes on, then ${how}: refused, the newer place survives`, async () => {
+    const { clock, phone, desk, row, since } = await questionLeftOpen();
+    await phone.open();
+    check('asked', phone.prompts().length === 1);
+    // Half an hour with the question showing; the desktop goes on to 26:40.
+    await clock.advance(30 * MIN);
+    desk.engine.seek(1600000);
+    await desk.engine.play();
+    await clock.advance(2000);
+    desk.engine.pause();
+    await clock.advance(1500);
+    const deskRow = Object.assign({}, row());
+    const n = phone.server.log.length;
+    if (how === 'Continue') phone.button('Continue').click();
+    else if (how === 'Play button') phone.q('.wsp-play-sm').click();
+    else phone.ms.handlers.get('play')();
+    await clock.advance(3000);
+    check('refused', since(n).some((e) => e[0] === 'conflict') && since(n).every((e) => e[0] !== 'stored'), since(n));
+    check('the desktop\'s newer place survives', row().updated_at === deskRow.updated_at && row().device_id === DESK_ID, row());
+    check('the phone pauses and asks about the newer place', !phone.st().playing && /^Continue from 26:4\d \(Chrome on Linux, just now\)\?$/.test(phone.prompts().join()), [phone.st().playing, phone.prompts()]);
+    phone.engine.close();
+    desk.engine.close();
+  });
+}
+
+async function staleAfterPause() {
+  const d = await twoDevices();
+  const { clock, phone, desk } = d;
+  await phone.openAt(MULTI.key, '502', 300000);
+  await clock.advance(3000);
+  phone.engine.pause();
+  await clock.advance(1500);
+  // The desktop picks it up and goes on to 26:40, then pauses.
+  await desk.open();
+  desk.engine.seek(1600000);
+  await clock.advance(2000);
+  desk.engine.pause();
+  await clock.advance(1500);
+  await clock.advance(6 * MIN);
+  return d;
+}
+
+await run('a lock-screen Play on a stale page: refused and asked; a second one plays but saves nothing', async () => {
+  const { clock, phone, row, since } = await staleAfterPause();
+  const deskRow = Object.assign({}, row());
+  const n = phone.server.log.length;
+  phone.ms.handlers.get('play')();
+  await clock.advance(1500);
+  check('refused, paused, asked', since(n).map((e) => e[0]).join() === 'conflict' && !phone.st().playing && phone.prompts().length === 1, [since(n), phone.st().playing, phone.prompts()]);
+  const local0 = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+  phone.ms.handlers.get('play')();
+  await clock.advance(20000);
+  check('the second plays', phone.st().playing);
+  check('and nothing more goes to the server', phone.server.log.length === n + 1, since(n));
+  const local1 = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+  check('the local copy follows the place', local1.offset_ms > local0.offset_ms, [local0.offset_ms, local1.offset_ms]);
+  check('the question stays', phone.prompts().length === 1);
+  check('the desktop\'s place survives', row().updated_at === deskRow.updated_at, row());
+  phone.engine.close();
+  check('closing sends nothing either', phone.server.log.length === n + 1, since(n));
 });
 
-await run('a place check that fails or takes over 4 s lets Play go on', async () => {
-  for (const mode of ['down', 'hang']) {
-    const t = await handoffSetup({ stateful: true });
-    await t.openAt(MULTI.key, '502', 300000);
-    await t.clock.advance(3000);
-    t.engine.pause();
-    await t.clock.advance(F.RECHECK_AFTER_MS);
-    t.positionMode = mode;
-    t.q('.wsp-play-sm').click();
-    await t.clock.advance(100);
-    if (mode === 'hang') {
-      check('hang: waiting', !t.st().playing);
-      await t.clock.advance(F.RECHECK_TIMEOUT_MS);
-    }
-    await t.clock.advance(100);
-    check(`${mode}: plays`, t.st().playing && t.prompts().length === 0);
-    t.engine.close();
+await run('Continue at a conflict moves to the stored place and saves it as this device\'s', async () => {
+  const { clock, phone, row, since } = await staleAfterPause();
+  phone.engine.play();
+  await clock.advance(1500);
+  const n = phone.server.log.length;
+  phone.button('Continue').click();
+  await clock.advance(2500);
+  check('at the desktop\'s place, playing', phone.st().playing && bookMs(phone) >= 1600000 && bookMs(phone) < 1605000, bookMs(phone));
+  check('saved as the phone\'s own move, there', since(n)[0][0] === 'stored' && since(n)[0][3] === '503' && since(n)[0][4] >= 100000 && since(n)[0][4] < 105000, since(n));
+  check('the row is the phone\'s now', row().device_id === PHONE_ID, row());
+  check('the question is gone', phone.prompts().length === 0);
+  phone.engine.close();
+});
+
+await run('Keep listening here at a conflict saves this place over the stored one', async () => {
+  const { clock, phone, row, since } = await staleAfterPause();
+  phone.engine.play();
+  await clock.advance(1500);
+  const here = bookMs(phone);
+  const n = phone.server.log.length;
+  phone.button('Keep listening here').click();
+  await clock.advance(2500);
+  check('playing on from here', phone.st().playing && bookMs(phone) >= here - 11000 && bookMs(phone) < here + 3000, [here, bookMs(phone)]);
+  check('stored over the desktop\'s', since(n).length >= 1 && since(n).every((e) => e[0] === 'stored') && row().device_id === PHONE_ID && row().track === '502', [since(n), row()]);
+  check('the question is gone', phone.prompts().length === 0);
+  phone.engine.close();
+});
+
+await run('a conflict whose place is in a part this browser can\'t play offers only Keep listening here', async () => {
+  const { clock, server, phone, row, since } = await twoDevices();
+  await phone.openAt(MIXED.key, '523', 100000);
+  await clock.advance(3000);
+  phone.engine.pause();
+  await clock.advance(1500);
+  // Another device (Safari, which decodes it) saved a place in the E-AC3 part.
+  server.rows[MIXED.key] = { track: '522', offset_ms: 10000, duration_ms: 20000, updated_at: server.at(), device: 'Safari on macOS', device_id: 'c'.repeat(20), psid: 'psid-mac', seq: 3 };
+  await clock.advance(MIN);
+  const n = server.log.length;
+  await phone.engine.play();
+  await clock.advance(1500);
+  check('refused and asked, with no Continue', since(n)[0][0] === 'conflict' && phone.buttons().join() === 'Keep listening here', [since(n), phone.buttons()]);
+  check('the other place survives', row(MIXED.key).device_id === 'c'.repeat(20));
+  phone.engine.close();
+});
+
+await run('the same device reloaded carries on saving', async () => {
+  const { clock, phone, page, row, since } = await twoDevices();
+  await phone.openAt(MULTI.key, '502', 300000);
+  await clock.advance(3000);
+  phone.engine.pause();
+  await clock.advance(1500);
+  phone.engine.close();
+  // A reload: a new page session, the same browser (id and local copy).
+  const again = await page('psid-phone-2', 'Chrome on Android', PHONE_ID, phone.storage);
+  const n = again.server.log.length;
+  await again.open();
+  check('no question', again.prompts().length === 0 && again.st().playing);
+  await clock.advance(12000);
+  check('every save stored', since(n).length >= 2 && since(n).every((e) => e[0] === 'stored'), since(n));
+  again.engine.close();
+});
+
+await run('two tabs of one browser both save', async () => {
+  const { clock, phone, page, row, since } = await twoDevices();
+  const tab2 = await page('psid-phone-tab2', 'Chrome on Android', PHONE_ID, phone.storage);
+  await phone.openAt(MULTI.key, '501', 100000);
+  await tab2.openAt(MULTI.key, '502', 300000);
+  await clock.advance(25000);
+  check('both tabs\' saves stored, no conflict', phone.server.log.length > 4 && phone.server.log.every((e) => e.result === 'stored'), since(0));
+  phone.engine.close();
+  tab2.engine.close();
+});
+
+await run('no row yet: the first save stores', async () => {
+  const { clock, phone, row, since } = await twoDevices();
+  await phone.open();
+  await clock.advance(1000);
+  check('stored with no base', since(0)[0][0] === 'stored' && phone.posts[0].base === null && row().device_id === PHONE_ID, [since(0), phone.posts[0]]);
+  phone.engine.close();
+});
+
+await run('a refused beacon or last save is dropped quietly', async () => {
+  const { clock, phone, row, since } = await staleAfterPause();
+  const deskRow = Object.assign({}, row());
+  // The phone moves while paused, with its save failing, then the page is hidden and closed.
+  phone.offline = true;
+  phone.engine.seek(200000);
+  await clock.advance(1500);
+  phone.offline = false;
+  const n = phone.server.log.length;
+  phone.saver && phone.saver.flush && phone.saver.flush('beacon');
+  phone.win.dispatchEvent(new phone.win.Event('pagehide'));
+  phone.engine.close();
+  await clock.advance(20000);
+  check('refused', since(n).length >= 1 && since(n).every((e) => e[0] === 'conflict'), since(n));
+  check('the desktop\'s place survives', row().updated_at === deskRow.updated_at);
+  check('no question for a closed player, and nothing logged', phone.prompts().length === 0);
+});
+
+await run('a move while the open question shows answers it; Continue there is a move to the other place', async () => {
+  for (const which of ['move', 'Continue']) {
+    const { clock, phone, row, since } = await questionLeftOpen();
+    await phone.open();
+    const n = phone.server.log.length;
+    if (which === 'move') phone.engine.seek(1000000);
+    else phone.button('Continue').click();
+    await clock.advance(1500);
+    check(`${which}: the question is gone`, phone.prompts().length === 0);
+    const first = since(n)[0];
+    if (which === 'move') check('the move is saved as the newest place', first && first[0] === 'stored' && first[3] === '502' && first[4] === 400000 && row().device_id === PHONE_ID, since(n));
+    else check('Continue saves the other place as this device\'s', first && first[0] === 'stored' && first[2] === 'pause' && first[3] === '502' && row().device_id === PHONE_ID, since(n));
+    phone.engine.close();
   }
-});
-
-await run('the page shown again while paused asks too; Play then plays from here', async () => {
-  const t = await handoffSetup({ stateful: true });
-  await t.openAt(MULTI.key, '502', 300000);
-  await t.clock.advance(3000);
-  t.engine.pause();
-  await t.clock.advance(100);
-  const here = bookMs(t);
-  await t.clock.advance(60000);
-  t.places = { web: t.other('503', 100000, 30000) };
-  t.doc.dispatchEvent(new t.win.Event('visibilitychange'));
-  await t.clock.advance(100);
-  check('asked', t.prompts().length === 1 && t.prompts()[0].startsWith('Continue from 26:40 (Chrome on Android'), t.prompts());
-  const calls = t.positionCalls;
-  t.doc.dispatchEvent(new t.win.Event('visibilitychange'));
-  await t.clock.advance(100);
-  check('not asked twice', t.positionCalls === calls && t.prompts().length === 1);
-  t.q('.wsp-play-sm').click();
-  await t.clock.advance(1500);
-  check('Play instead: from here (less the pause\'s rewind), the question gone', t.st().playing && bookMs(t) >= here - 10000 && bookMs(t) < here && t.prompts().length === 0, bookMs(t) - here);
-  t.engine.close();
-});
-
-await run('the play gate: held, a failure plays, another book meanwhile does not', async () => {
-  const t = await setup({ noFeatures: true });
-  await t.openAt(MULTI.key, '502', 300000, { autoplay: false });
-  let answer;
-  t.engine.setPlayGate(() => new Promise((r) => { answer = r; }));
-  const p1 = t.engine.play();
-  await t.clock.advance(100);
-  check('waits', !t.st().playing);
-  answer(false);
-  await p1;
-  await t.clock.advance(100);
-  check('false holds', !t.st().playing);
-  t.engine.setPlayGate(() => Promise.reject(new Error('x')));
-  await t.engine.play();
-  await t.clock.advance(100);
-  check('a rejection plays', t.st().playing);
-  t.engine.pause();
-  t.engine.setPlayGate(() => new Promise((r) => { answer = r; }));
-  const p2 = t.engine.play();
-  const o = t.engine.open(SPAN.key, { at: { track: '511', offset_ms: 1000 }, autoplay: false });
-  await t.clock.advance(200);
-  await o;
-  answer(true);
-  await p2;
-  await t.clock.advance(100);
-  check('another book opened meanwhile: not played', t.st().book === SPAN.key && !t.st().playing);
-  t.engine.setPlayGate(null);
-  await t.engine.play();
-  check('no gate: plays', t.st().playing);
-  t.engine.close();
 });
 
 await run('history: sessions from the log, and a tap goes to where one ended', async () => {
@@ -1999,6 +2187,7 @@ await run('history: Show older loads the next page, and a session across the pag
   const rows = t.qa('.wsp-hist-row');
   check('the session runs on into the older page, then an older one', rows.length === 2, rows.length);
   check('the first covers both pages', rows[0].querySelector('.wsp-hist-what').textContent.startsWith('Part 2 of 3'), rows[0].querySelector('.wsp-hist-what').textContent);
+  check('it still ends where the first page\'s newest place is', rows[0].querySelector('.wsp-hist-at').textContent === '18:20', rows[0].querySelector('.wsp-hist-at').textContent);
   check('no more pages', t.q('.wsp-hist-more').hidden);
   t.engine.close();
 });
