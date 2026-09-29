@@ -1110,6 +1110,27 @@ current = 'the engine resumes at WebServarr\'s place when it is newest, and save
   t.engine.close();
 }
 
+current = 'a seek refused because the part can\'t play: saving carries on';
+{
+  const mixed = JSON.parse(JSON.stringify(BOOK));
+  Object.assign(mixed.tracks[1], { container: 'mp4', codec: 'eac3', profile: '' });
+  const t = withEngine({ book: mixed, places: {
+    web: { track: '501', offset_ms: 100000, duration_ms: 600000, updated_at: iso(-5), device: 'Chrome on Windows', source: 'web' },
+    plex: null
+  } });
+  const opened = t.engine.open('500:1');
+  await t.clock.advance(1500);
+  await opened;
+  t.engine.seek(700000);                    // into the undecodable part 2
+  await t.clock.advance(60000);
+  const f = t.server.fetches();
+  check('refused with a notice, no error', t.log.warning.some((w) => w.kind === 'part-format') && t.log.error.length === 0 &&
+    t.engine.state().playing, t.log.error);
+  check('saves go on every 10 s from part 1', f.length >= 6 && f.every((c) => c.body.track === '501') &&
+    f[f.length - 1].body.offset_ms > 155000, f.map((c) => [c.body.event, c.body.offset_ms]));
+  t.engine.close();
+}
+
 current = 'an undecodable book saves nothing, not even a newer local copy';
 {
   const storage = fakeStorage();

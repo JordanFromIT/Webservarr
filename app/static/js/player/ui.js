@@ -1215,7 +1215,7 @@ export function createUI(env) {
   player.on('warning', function (w) {
     if (!w) return;
     if (w.kind === 'not-saved') setWarn(w.active ? w.message : '');
-    else if (w.kind === 'part-skipped' || w.kind === 'resume-lost') notify(w.message, { id: w.kind });
+    else if (w.kind === 'part-skipped' || w.kind === 'resume-lost' || w.kind === 'part-format') notify(w.message, { id: w.kind });
   });
   player.on('error', function (e) {
     if (!e) return;

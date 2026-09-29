@@ -43,9 +43,10 @@
  * where it was. A format the engine does not know (an unknown or empty
  * codec) plays as before. In a book where only some parts are undecodable,
  * playback stops where such a part begins (the end of the part before, or
- * the place it opened at) and never passes over it; a seek or chapter jump
- * into one leaves the place where it was. Only decodable parts are ever
- * played, probed or saved.
+ * the place it opened at) and never passes over it. A seek or chapter jump
+ * into one is refused with a 'warning' { kind: 'part-format' } ("This part's
+ * format can't play in this browser"); playback, the place and saving go on
+ * as they were. Only decodable parts are ever played, probed or saved.
  *
  * Pure (importable by Node, no DOM at import time):
  *   toTrackOffset(tracks, bookMs)  -> { index, track, offset_ms } | null
@@ -108,6 +109,7 @@
  *                'busy', 'empty'
  *     'warning'  { kind: 'part-skipped', message }
  *                { kind: 'resume-lost', message } (see open)
+ *                { kind: 'part-format', message } (a seek into a part that can't play)
  *                { kind: 'not-saved', active, lastSavedAt, message } (saves.js):
  *                active true: "Your place isn't being saved. Last saved <time>."
  *                to show; false: it cleared (a save succeeded, or the book was
@@ -130,6 +132,7 @@ export const SKIP_MAX_S = 60;
 export const UNREACHABLE = "Can't reach the media server";
 export const RESUME_LOST = "Couldn't find your saved place in this book";
 export const FORMAT_UNSUPPORTED = "This book's audio format can't play in this browser";
+export const PART_FORMAT = "This part's format can't play in this browser";
 
 const MEDIA_ERR_ABORTED = 1;
 const MEDIA_ERR_NETWORK = 2;
@@ -304,10 +307,13 @@ export function createEngine(env) {
     return !!(book && book.tracks[index] && book.tracks[index].undecodable);
   }
 
-  /* Playback cannot go into an undecodable part: stop at `at` (a place in a
-     decodable part the listener reached, or the place the book opened at),
-     never loading or probing the part, with no retry. */
+  /* Playback has reached an undecodable part (or the book opened into one):
+     stop at `at` (a place in a decodable part the listener reached, or the
+     place the book opened at), never loading or probing the part, with no
+     retry. Everything still pending (a load, a probe, a step of the failure
+     ladder) is superseded, so nothing plays under the message. */
   function formatStop(at) {
+    gen += 1;
     if (at) {
       playhead = { index: at.index, offset: at.offset };
       target = { index: at.index, offset: at.offset };
@@ -324,6 +330,7 @@ export function createEngine(env) {
   let lastOpen = null;        // { key, opts } of the last open(), for its retry
   let openGen = 0;
   let resumedFrom = null;     // { source, device, updated_at } the open resumed from
+  let unchosen = false;       // the book opened into an undecodable part: no connection chosen yet
 
   // Where: the loaded part and its connection, the playhead, where the load
   // is heading, and the place held after a skipped part.
@@ -1017,6 +1024,7 @@ export function createEngine(env) {
       }
     }
     resumedFrom = null;
+    unchosen = false;
     gen += 1;
     wantPlay = false;
     pending = true;
@@ -1152,6 +1160,7 @@ export function createEngine(env) {
     changed('open');
     if (lost) emit('warning', { kind: 'resume-lost', message: RESUME_LOST });
     if (cannot) {
+      unchosen = true;
       // The place as it was given: a saved place at the very end of the part
       // before stays there, rather than becoming the start of this one.
       const given = opts.at && typeof opts.at === 'object' ? opts.at : resumed;
@@ -1197,6 +1206,10 @@ export function createEngine(env) {
       return Promise.resolve();
     }
     if (atEnd()) {
+      if (blocked(0)) {
+        formatStop(null);
+        return Promise.resolve();
+      }
       hold = null;
       load(0, 0, cur.side);
     } else {
@@ -1230,8 +1243,9 @@ export function createEngine(env) {
     const from = bookMsNow();
     const to = toTrackOffset(book.tracks, clampNumber(v, 0, book.durationMs));
     if (blocked(to.index)) {
-      // Not into a part that can't play here: the place stays where it was.
-      formatStop(null);
+      // Not into a part that can't play here: refused. Playback, the place
+      // and saving carry on as they were.
+      emit('warning', { kind: 'part-format', message: PART_FORMAT });
       return;
     }
     hold = null;
@@ -1294,6 +1308,13 @@ export function createEngine(env) {
       return Promise.resolve();
     }
     if (!error || !playhead) return Promise.resolve();
+    // From the place held after a skipped part, else the playhead.
+    const from = hold || playhead;
+    if (blocked(from.index)) {
+      formatStop(null);
+      return Promise.resolve();
+    }
+    if (unchosen) return retryChoosing(from);
     const side = preferredSide();
     partSuspect = null;
     error = null;
@@ -1306,16 +1327,36 @@ export function createEngine(env) {
       stopWith('unreachable', UNREACHABLE, retry);
       return Promise.resolve();
     }
-    // From the place held after a skipped part, else the playhead.
-    const from = hold || playhead;
-    if (blocked(from.index)) {
-      formatStop(null);
-      return Promise.resolve();
-    }
     load(from.index, from.offset, side);
     sessionState();
     changed('retry');
     return Promise.resolve();
+  }
+
+  /* Retry in a book that opened into an undecodable part: no connection was
+     ever chosen, so choose one now, as open() does (the local gate and
+     probe included), then load the place. */
+  async function retryChoosing(from) {
+    const my = openGen;
+    const g = ++gen;
+    partSuspect = null;
+    error = null;
+    errorRetry = null;
+    failedGen = -1;
+    wantPlay = true;
+    setLoading(true);
+    changed('retry');
+    const side = await chooseSide(from.index);
+    if (my !== openGen || g !== gen || !book || error) return;
+    unchosen = false;
+    if (!side) {
+      stopWith('unreachable', UNREACHABLE, retry);
+      return;
+    }
+    chosen = side;
+    load(from.index, from.offset, side);
+    sessionState();
+    changed('play');
   }
 
   function close() {

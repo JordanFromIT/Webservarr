@@ -666,11 +666,24 @@ class Detail(BridgeBase):
     def test_each_track_carries_its_container_codec_and_profile(self):
         parts = self.run_async(pp.book_detail("200:1"))["tracks"]
         self.assertEqual([(t["container"], t["codec"], t["profile"]) for t in parts], [("mp3", "mp3", "")] * 3)
-        aac = self.run_async(pp.book_detail("700:1"))["tracks"][0]
-        self.assertEqual((aac["container"], aac["codec"], aac["profile"]), ("mp4", "aac", "lc"))
+        # Each track its own: the first part is AAC, the second says nothing.
+        halves = self.run_async(pp.book_detail("700:1"))["tracks"]
+        self.assertEqual([(t["key"], t["container"], t["codec"], t["profile"]) for t in halves],
+                         [("701", "mp4", "aac", "lc"), ("702", "", "", "")])
         # Plex saying nothing is three empty strings (the player then plays it direct).
         quiet = self.run_async(pp.book_detail("500:1"))["tracks"][0]
         self.assertEqual((quiet["container"], quiet["codec"], quiet["profile"]), ("", "", ""))
+
+    def test_the_first_media_and_part_are_the_tracks(self):
+        two = dict(TRACKS["500"][0], Media=[
+            {"container": "mp4", "audioCodec": "aac", "audioProfile": "lc",
+             "Part": [{"key": "/library/parts/5019/1/first.m4b"}, {"key": "/library/parts/5019/2/second.m4b"}]},
+            {"container": "mp4", "audioCodec": "eac3", "Part": [{"key": "/library/parts/5019/3/other.m4b"}]},
+        ])
+        with mock.patch.dict(TRACKS, {"500": [two]}):
+            t = self.run_async(pp.book_detail("500:1"))["tracks"][0]
+        self.assertEqual((t["part_path"], t["container"], t["codec"], t["profile"]),
+                         ("/library/parts/5019/1/first.m4b", "mp4", "aac", "lc"))
 
     def test_titled_chapters_keep_their_title(self):
         d = self.run_async(pp.book_detail("400:2"))

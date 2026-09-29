@@ -146,7 +146,21 @@ const FOUR = {
   ],
   chapters: []
 };
-const BOOKS = { [MULTI.key]: MULTI, [SINGLE.key]: SINGLE, [OTHER.key]: OTHER, [ATMOS.key]: ATMOS, [MIXED.key]: MIXED, [FOUR.key]: FOUR };
+// The first part undecodable, the rest mp3.
+const FIRSTBAD = {
+  key: '920:1', title: 'Bad Start', author: 'F. Writer', narrator: '', series: '', cover: '', duration_ms: 900000, shape: 'parts',
+  tracks: [
+    { key: '921', part_path: '/library/parts/921/1/file.m4b', duration_ms: 300000, index: 1, ...EAC3 },
+    { key: '922', part_path: '/library/parts/922/1/file.mp3', duration_ms: 300000, index: 2, container: 'mp3', codec: 'mp3', profile: '' },
+    { key: '923', part_path: '/library/parts/923/1/file.mp3', duration_ms: 300000, index: 3, container: 'mp3', codec: 'mp3', profile: '' }
+  ],
+  chapters: [
+    { index: 1, label: 'Part 1 of 3', start_ms: 0, end_ms: 300000, track: '921', track_start_ms: 0, track_end_ms: 300000 },
+    { index: 2, label: 'Part 2 of 3', start_ms: 300000, end_ms: 600000, track: '922', track_start_ms: 0, track_end_ms: 300000 },
+    { index: 3, label: 'Part 3 of 3', start_ms: 600000, end_ms: 900000, track: '923', track_start_ms: 0, track_end_ms: 300000 }
+  ]
+};
+const BOOKS = { [MULTI.key]: MULTI, [SINGLE.key]: SINGLE, [OTHER.key]: OTHER, [ATMOS.key]: ATMOS, [MIXED.key]: MIXED, [FOUR.key]: FOUR, [FIRSTBAD.key]: FIRSTBAD };
 const trackByPath = new Map();
 for (const b of Object.values(BOOKS)) for (const t of b.tracks) trackByPath.set(t.part_path, t);
 // What a browser like Chrome answers canPlayType: '' for E-AC3 and AC-3,
@@ -171,6 +185,7 @@ function makeNet() {
     glitchOnce: new Map(), // part path -> second at which decoding fails once
     statusFor: {},      // book key -> the status /api/player/book answers
     noLocal: false,
+    noRemote: false,    // no remote connection (Plex's remote access off)
     bookStatus: 200,
     bookDetail: '',
     canPlayAsked: [],   // every type canPlayType was asked about
@@ -377,7 +392,7 @@ function makeFetch(net, clock) {
     if (net.bookStatus !== 200) return response(net.bookStatus, { detail: net.bookDetail });
     const book = BOOKS[decodeURIComponent(m[1])];
     if (!book) return response(404, { detail: 'Not in the audiobook library' });
-    return response(200, { ...book, stream: { token: net.token, uris: { local: net.noLocal ? [] : [LOCAL], remote: [REMOTE] } } });
+    return response(200, { ...book, stream: { token: net.token, uris: { local: net.noLocal ? [] : [LOCAL], remote: net.noRemote ? [] : [REMOTE] } } });
   };
 }
 
@@ -1499,26 +1514,141 @@ current = 'a mixed book stops where an undecodable part begins, and never passes
   t.engine.close();
 }
 
-current = 'a seek or chapter jump into an undecodable part leaves the place where it was';
+current = 'a seek or chapter jump into an undecodable part is refused; playback goes on';
 {
   const t = setup({ net: { noLocal: true } });
   await openPlaying(t, MIXED.key, { at: at('901', 100000) });
   await t.clock.advance(2000);
-  const before = t.engine.state().position;
+  const before = t.engine.state().position.offset_ms;
   t.engine.seek(700000);                              // into part 2
   let s = t.engine.state();
-  check('seek: the format message, the place unchanged', s.error && s.error.code === 'format' &&
-    s.position.track === before.track && Math.abs(s.position.offset_ms - before.offset_ms) <= 250, [s.error, s.position, before]);
-  check('part 2 never loaded', loadsOf(t, MIXED.tracks[1].part_path).length === 0);
-  await t.engine.play();
-  await t.clock.advance(2000);
-  check('play goes on from the place in part 1', partOf(t.main) === MIXED.tracks[0].part_path && !t.main.paused &&
-    t.engine.state().position.offset_ms > before.offset_ms, t.engine.state().position);
+  const w = t.log.warning[t.log.warning.length - 1];
+  check('seek: a passing notice, no error', w && w.kind === 'part-format' && w.message === E.PART_FORMAT &&
+    E.PART_FORMAT === "This part's format can't play in this browser" && s.error === null && t.log.error.length === 0, [w, s.error]);
+  check('still playing part 1 from where it was', s.playing && !t.main.paused && partOf(t.main) === MIXED.tracks[0].part_path &&
+    s.position.track === '901' && Math.abs(s.position.offset_ms - before) <= 250, s.position);
+  check('no seek change reported', !reasons(t).includes('seek'));
   t.engine.jumpToChapter(1);                          // Part 2 of 3
   s = t.engine.state();
-  check('jump: the format message, still in part 1', s.error && s.error.code === 'format' && s.position.track === '901');
-  check('part 2 still never loaded', loadsOf(t, MIXED.tracks[1].part_path).length === 0);
+  check('jump: refused the same way', t.log.warning.filter((x) => x.kind === 'part-format').length === 2 && s.error === null &&
+    s.playing && !reasons(t).includes('jump'));
+  await t.clock.advance(5000);
+  check('playback carries on in part 1', t.engine.state().position.track === '901' && t.engine.state().position.offset_ms > before + 4000);
+  check('part 2 never loaded or probed', loadsOf(t, MIXED.tracks[1].part_path).length === 0);
   t.engine.close();
+}
+
+current = 'a chapter tap into an undecodable part during the opening probe is refused; part 1 plays';
+{
+  const t = setup({ permissions: { query: async () => ({ state: 'granted' }) }, net: { hang: new Set(['local']) } });
+  const p = t.engine.open(MIXED.key, { at: at('901', 100000) });
+  await t.clock.advance(500);                          // the local probe is in flight
+  t.engine.jumpToChapter(1);
+  await t.clock.advance(3000);
+  await p;
+  const s = t.engine.state();
+  check('refused with the notice, no error', t.log.warning.some((w) => w.kind === 'part-format') && s.error === null, s.error);
+  check('part 1 plays on the remote side', s.playing && !t.main.paused && partOf(t.main) === MIXED.tracks[0].part_path &&
+    s.connection === 'remote' && s.position.offset_ms > 100000, s.position);
+  t.engine.close();
+}
+
+current = 'a chapter tap into an undecodable part during the failure ladder is refused; the ladder recovers';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, MIXED.key, { at: at('901', 100000) });
+  await t.clock.advance(2000);
+  const held = t.engine.state().position.offset_ms;
+  t.net.fetchDelay[MIXED.key] = 3000;                  // the refresh takes a while
+  t.net.down.add('remote');
+  await t.clock.advance(400);                          // the stream drops; the ladder waits on the refresh
+  t.net.down.delete('remote');
+  t.engine.jumpToChapter(1);
+  await t.clock.advance(6000);
+  const s = t.engine.state();
+  check('refused, and the ladder brought part 1 back', t.log.warning.some((w) => w.kind === 'part-format') && s.error === null &&
+    s.playing && !t.main.paused && partOf(t.main) === MIXED.tracks[0].part_path, [s.error, partOf(t.main)]);
+  check('from the held place, never part 2', s.position.track === '901' && s.position.offset_ms >= held &&
+    loadsOf(t, MIXED.tracks[1].part_path).length === 0, s.position);
+  delete t.net.fetchDelay[MIXED.key];
+  t.engine.close();
+}
+
+current = 'reaching an undecodable part while ladder steps are pending: nothing loads after';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, MIXED.key, { at: at('901', 597000) });
+  t.net.fetchDelay[MIXED.key] = 5000;
+  t.net.hang.add('remote');                            // the stream stalls: the ladder starts, waiting on the refresh
+  await t.clock.advance(E.STALL_MS + 500);
+  const loadsBefore = t.net.loads.length;
+  // Part 1's audio ends meanwhile, and part 2 is undecodable.
+  t.main.ended = true;
+  t.main.fire('ended');
+  const s = t.engine.state();
+  check('the format message at the end of part 1', s.error && s.error.code === 'format' && s.position.track === '901' &&
+    s.position.offset_ms === 600000, [s.error, s.position]);
+  t.net.hang.delete('remote');
+  await t.clock.advance(15000);
+  check('the pending refresh loads nothing afterwards', t.net.loads.length === loadsBefore && !t.main.src &&
+    t.engine.state().error && t.engine.state().error.code === 'format', t.net.loads.slice(loadsBefore));
+  check('nothing plays under the message', t.main.paused && !t.engine.state().playing);
+  delete t.net.fetchDelay[MIXED.key];
+  t.engine.close();
+}
+
+current = 'play at the end of a book whose first part is undecodable: the format message, part 1 never loaded';
+{
+  const t = setup({ net: { noLocal: true } });
+  await openPlaying(t, FIRSTBAD.key, { at: at('923', 297000) });
+  await t.clock.advance(5000);
+  check('the book ended', t.log.ended.length === 1);
+  await t.engine.play();
+  await t.clock.advance(3000);
+  const s = t.engine.state();
+  check('the format message, no skip notice', s.error && s.error.code === 'format' && t.log.warning.length === 0, [s.error, t.log.warning]);
+  check('part 1 never loaded, part 2 not played', loadsOf(t, FIRSTBAD.tracks[0].part_path).length === 0 &&
+    partOf(t.main) !== FIRSTBAD.tracks[1].part_path, partOf(t.main));
+  check('the place stays at the end', s.position.track === '923' && s.position.offset_ms === 300000, s.position);
+  t.engine.close();
+}
+
+current = 'play and retry check the format first (no connection is not the message)';
+{
+  const t = setup({ net: { noLocal: true, noRemote: true } });
+  await openPlaying(t, ATMOS.key, { at: at('801', 36000000) });
+  await t.engine.play();
+  await t.engine.retry();
+  await t.clock.advance(2000);
+  check('still the format message, never unreachable', t.engine.state().error.code === 'format' &&
+    !t.log.error.some((e) => e.code === 'unreachable'), t.log.error.map((e) => e.code));
+  t.engine.close();
+}
+
+current = 'opened into an undecodable part, back to a playable one: play chooses the connection first';
+{
+  const t = setup({ permissions: { query: async () => ({ state: 'granted' }) } });
+  await openPlaying(t, MIXED.key, { at: at('902', 450000) });
+  check('opened: the format message, nothing probed', t.engine.state().error.code === 'format' && t.net.loads.length === 0);
+  t.engine.seek(300000);                               // back into part 1
+  const played = t.engine.play();
+  await t.clock.advance(3000);
+  await played;
+  const s = t.engine.state();
+  check('the local connection was probed and used', t.net.loads.some((l) => l.probe && l.side === 'local') &&
+    s.connection === 'local' && s.playing && !t.main.paused && partOf(t.main) === MIXED.tracks[0].part_path, [s.connection, t.net.loads]);
+  check('from the place it was moved to', s.position.track === '901' && s.position.offset_ms >= 300000 && s.error === null, s.position);
+  t.engine.close();
+  // Without the permission: straight to remote, no probe, no prompt.
+  const u = setup({ permissions: { query: async () => ({ state: 'prompt' }) } });
+  await openPlaying(u, MIXED.key, { at: at('902', 450000) });
+  u.engine.seek(300000);
+  const played2 = u.engine.play();
+  await u.clock.advance(3000);
+  await played2;
+  check('prompt: remote, no local load', u.engine.state().connection === 'remote' && !u.net.loads.some((l) => l.side === 'local') &&
+    u.engine.state().playing, u.net.loads);
+  u.engine.close();
 }
 
 current = 'opening at a saved place at the very end of the part before an undecodable one keeps it';

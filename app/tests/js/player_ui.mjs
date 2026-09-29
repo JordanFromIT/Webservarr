@@ -1171,6 +1171,17 @@ await run('a skipped part and a lost place are notices', async () => {
   check('they go by themselves', t.qa('.wsp-notice').length === 0);
 });
 
+await run('a refused seek into a part that can\'t play is a passing notice', async () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  t.engine.emit('warning', { kind: 'part-format', message: "This part's format can't play in this browser" });
+  const texts = t.qa('.wsp-notice-text').map((n) => n.textContent);
+  check('the copy', texts.length === 1 && texts[0] === "This part's format can't play in this browser", texts);
+  check('no button, not an error', t.qa('.wsp-notice-btn').length === 0 && t.qa('.wsp-notice.is-err').length === 0);
+  await t.clock.advance(U.NOTICE_MS + 10);
+  check('it goes by itself', t.qa('.wsp-notice').length === 0);
+});
+
 await run('notices: the API for the features', async () => {
   const t = setup();
   t.engine.set(BOOK, 'open');
