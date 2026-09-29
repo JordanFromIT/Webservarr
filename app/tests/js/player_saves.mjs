@@ -139,7 +139,8 @@ function makeSaver(o = {}) {
   const warnings = [];
   const saver = S.createSaver({
     post: (body, kind) => server.post(body, kind),
-    now: () => clock.now,
+    now: o.now || (() => clock.now),
+    mono: () => clock.now,
     storage,
     identity: o.identity === undefined ? IDENTITY : o.identity,
     device: 'Chrome on Android',
@@ -471,8 +472,10 @@ current = 'pagehide, ws:before-hard-nav and a hidden page send a beacon';
   });
   s2.start('500:1');
   s2.note({ reason: 'open', state: st(false, 100) });
+  s2.note({ reason: 'play', state: st(true, 100) });
   win2.dispatchEvent(new win2.Event('pagehide'));
-  check('a refused beacon falls back to a keepalive fetch', kept.length === 1 && kept[0].keepalive === true && JSON.parse(kept[0].body).event === 'leave', kept);
+  const keptAlive = kept.filter((k) => k.keepalive === true);
+  check('a refused beacon falls back to a keepalive fetch', keptAlive.length === 1 && JSON.parse(keptAlive[0].body).event === 'leave', kept);
   // The device label comes from the browser's user agent.
   check('device from the user agent', typeof body0.device === 'string' && body0.device.length > 0 && body0.device.length <= 80, body0.device);
   saver.stop();
@@ -639,11 +642,11 @@ current = 'warning after 30 s without a successful save while playing; backoff 1
   const lastOk = t.server.fetches().length;
   t.server.mode = 'offline';
   const offAt = t.clock.now;
-  await p.listen(90000);
+  await p.listen(160000);
   const fails = t.server.fetches().slice(lastOk);
   check('the saves failed', fails.length >= 4 && fails.every((c) => c.status === 0), fails.map((c) => c.status));
   const g = gaps(fails);
-  check('backoff 10, 20, 30, 30 s', g.length >= 3 && Math.abs(g[0] - 10000) <= 300 && Math.abs(g[1] - 20000) <= 300 &&
+  check('backoff 10, 20, then 30 s capped (5 retries and more)', g.length >= 5 && Math.abs(g[0] - 10000) <= 300 && Math.abs(g[1] - 20000) <= 300 &&
     g.slice(2).every((x) => Math.abs(x - 30000) <= 300), g);
   const on = t.warnings.filter((w) => w.active);
   check('one warning', on.length === 1 && t.warnings.length === 1, t.warnings);
@@ -727,11 +730,11 @@ current = 'paused: no warning, but the retries go on';
   await p.listen(2000);
   t.server.mode = 'offline';
   p.pause();
-  await t.clock.advance(120000);
+  await t.clock.advance(65000);                   // retries at 10, 30 and 60 s
   check('no warning while paused', t.warnings.length === 0, t.warnings);
-  check('the pause kept being retried', t.server.fetches().filter((c) => c.status === 0).length >= 4);
+  check('the pause kept being retried', t.server.fetches().filter((c) => c.status === 0).length >= 3);
   t.server.mode = 200;
-  await t.clock.advance(31000);
+  await t.clock.advance(31000);                   // the next, at 90 s: still under 2 minutes old
   const last = t.server.fetches().pop();
   check('the retry landed, still a pause at the paused place', last.status === 200 && last.body.event === 'pause' && last.body.offset_ms === p.offset, last.body);
   t.saver.stop();
@@ -1002,7 +1005,8 @@ function withEngine(o = {}) {
       let m = /^\/api\/player\/book\/([^?]+)/.exec(url);
       if (m) return reply(200, Object.assign({}, BOOK, { stream: { token: 'tok', uris: { local: [], remote: [REMOTE] } } }));
       m = /^\/api\/player\/position\/(.+)$/.exec(url);
-      if (m) return o.positionStatus ? reply(o.positionStatus, { detail: 'down' }) : reply(200, places);
+      if (m) return o.positionStatus ? reply(o.positionStatus, { detail: 'down' })
+        : reply(200, Object.assign({ now: new Date(clock.now + server.skewMs).toISOString() }, places));
       return reply(404, { detail: 'Not Found' });
     },
     setTimeout: (fn, ms) => clock.setTimeout(fn, ms),
@@ -1225,6 +1229,379 @@ current = 'Review Focus 5 end to end: signed out mid-listen, back in, resumed fr
     Math.abs(b.engine.state().position.offset_ms - place) <= 500, [b.engine.state().position, place]);
   check('which the server now holds', server.row.offset_ms === place && server.row.psid === b.saver.psid, server.row);
   b.engine.close();
+}
+
+// ---- 12. Fix round 1 (the hunters' probes as regression cases) ----
+
+current = 'T6E1: reopening mid-save, the old run\'s final never outranks the new place';
+{
+  const t = makeSaver();
+  t.server.latency = 3000;                       // a cold first check-in (~3.9 s on dev)
+  const a = listener(t);
+  t.saver.start(a.book); a.open(); a.play();
+  await a.listen(10100);                         // the 10 s save is in flight
+  t.saver.stop();                                // the same book opened again, at another place
+  t.saver.start('500:1');
+  const b = listener(t);
+  b.offset = 2400000; b.open(); b.playing = true; b.emit('play');
+  await t.clock.advance(8000);                   // the old save answers, the old final follows
+  const fin = t.server.calls.find((c) => c.body.event === 'leave');
+  const newer = t.server.calls.filter((c) => c.body.offset_ms >= 2400000);
+  check('the old final took its seq at stop, below the new run\'s', fin && newer.length && newer.every((c) => c.body.seq > fin.body.seq),
+    t.server.calls.map((c) => [c.body.seq, c.body.event, c.body.offset_ms]));
+  check('the server holds the new place', t.server.row.offset_ms >= 2400000, t.server.row);
+  t.saver.stop();
+}
+
+for (const variant of ['at-then-pause', 'close-reopen-seek-pause']) {
+  current = 'T6E1 with the engine: ' + variant + ' while a slow first save is in flight';
+  const t = withEngine({ places: { web: { track: '503', offset_ms: 250000, duration_ms: 300000, updated_at: iso(-60), device: 'Chrome on Windows' }, plex: null } });
+  let n = 0;
+  const orig = t.server.post;
+  t.server.post = (b, k) => { n += 1; t.server.latency = n === 1 ? 3900 : 120; return orig(b, k); };
+  const pa = t.engine.open('500:1');
+  await t.clock.advance(400); await pa;
+  if (variant === 'at-then-pause') {
+    const pb = t.engine.open('500:1', { at: { track: '501', offset_ms: 50000 } });
+    await t.clock.advance(1500); await pb;
+  } else {
+    t.engine.close();
+    const pb = t.engine.open('500:1');
+    await t.clock.advance(600); await pb;
+    t.engine.seek(100000); await t.clock.advance(1200);
+  }
+  t.engine.pause();
+  const mine = t.engine.state().position;
+  await t.clock.advance(30000);
+  check('the server holds the engine\'s place', t.server.row.track === mine.track && t.server.row.offset_ms === mine.offset_ms,
+    [mine, t.server.row, t.server.calls.map((c) => [c.body.seq, c.body.event, c.body.track, c.body.offset_ms])]);
+  t.engine.close();
+}
+
+current = 'T6S1: a place unsaved for over 2 minutes is never sent later; the merge decides';
+{
+  const clock = fakeClock();
+  const server = fakeServer(clock);
+  let phoneOffline = false;
+  const win = new Window({ url: 'https://ws.test/news' });
+  win.WS = { user: { identity_key: IDENTITY } };
+  const phoneStorage = fakeStorage();
+  const phone = S.browserSaver(win, {
+    sendBeacon: (url, blob) => { server.calls.push({ kind: 'beacon', body: {}, at: clock.now }); return true; },
+    fetch: (url, init) => phoneOffline ? Promise.reject(new TypeError('Failed to fetch'))
+      : server.post(JSON.parse(init.body), 'fetch').then((r) => ({ status: r.status, json: async () => r.data })),
+    now: () => clock.now, storage: phoneStorage,
+    setTimeout: (fn, ms) => clock.setTimeout(fn, ms, 'page'), clearTimeout: (id) => clock.clearTimeout(id)
+  });
+  phone.start('500:1');
+  let off = 1000000, playing = false;
+  const note = (reason) => phone.note({ reason, state: { book: '500:1', playing, position: { track: '501', offset_ms: off, duration_ms: 36000000 } } });
+  note('open'); playing = true; note('play');
+  for (let i = 0; i < 80; i++) { await clock.advance(250); off += 250; note('time'); }
+  phoneOffline = true;                            // the subway
+  for (let i = 0; i < 1200; i++) { await clock.advance(250); off += 250; note('time'); }
+  playing = false; note('pause');
+  const pausedAt = off;
+  const pausedWall = clock.now;
+  await clock.advance(30 * 60000);                // the desktop resumes from the server and plays on
+  const desk = makeSaver({ clock, server });
+  const d = listener(desk);
+  d.offset = server.row.offset_ms;
+  d.duration = 36000000;
+  desk.saver.start('500:1', { held: { track: '501', offset_ms: d.offset } });
+  d.open(); d.play();
+  await d.listen(3600000);
+  d.pause(); await clock.advance(2000); desk.saver.stop();
+  const deskPlace = d.offset;
+  check('the desktop\'s place is stored', server.row.offset_ms === deskPlace, server.row.offset_ms);
+  await clock.advance(10 * 3600000);              // next morning the phone is back on a network
+  const before = server.calls.length;
+  phoneOffline = false;
+  win.dispatchEvent(new win.Event('online'));
+  await clock.advance(60000);
+  win.dispatchEvent(new win.Event('pagehide'));
+  check('the phone sends nothing: not a retry, not a beacon', server.calls.length === before, server.calls.slice(before).map((c) => [c.kind, c.body.offset_ms]));
+  check('the desktop\'s place stands', server.row.offset_ms === deskPlace, server.row.offset_ms);
+  const kept = JSON.parse(phoneStorage.map.get('ws-player:place:' + IDENTITY + ':500:1'));
+  check('the phone\'s local copy keeps its place, stamped when it was reached', kept.offset_ms === pausedAt &&
+    Math.abs(Date.parse(kept.updated_at) - pausedWall) <= 1000, kept);
+  const pick = S.resolveResume({ web: { track: '501', offset_ms: server.row.offset_ms, updated_at: server.row.updated_at }, local: kept });
+  check('the next open on the phone resumes at the desktop\'s place', pick.source === 'web' && pick.offset_ms === deskPlace, pick);
+  // Pressing play on the stale tab makes its place current again: it is sent.
+  playing = true; note('play');
+  await clock.advance(1500);
+  check('a place the listener acts on again is current: sent', server.row.offset_ms === pausedAt && server.row.psid === phone.psid, server.row.offset_ms);
+  phone.stop();
+  await win.happyDOM.close();
+}
+
+current = 'T6S1: a stale unsaved place gets no final save on stop';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  t.saver.start(p.book); p.open(); p.play();
+  await p.listen(3000);
+  t.server.mode = 'offline';
+  p.pause();
+  await t.clock.advance(180000);
+  t.server.mode = 200;
+  const n = t.server.calls.length;
+  t.saver.stop();
+  await t.clock.advance(1000);
+  check('no final for a place 3 minutes old', t.server.calls.length === n, t.server.calls.slice(n).map((c) => c.body));
+}
+
+current = 'T6S1: an untouched opening place is never sent (only a newer local copy is)';
+{
+  for (const label of ['plex-resume', 'no-copies']) {
+    const places = label === 'plex-resume'
+      ? { web: null, plex: { track: '502', offset_ms: 50000, duration_ms: 900000, updated_at: iso(-60), device: 'Plex', source: 'plex' } }
+      : { web: null, plex: null };
+    const b = withEngine({ places });
+    const opened = b.engine.open('500:1', { autoplay: false });
+    await b.clock.advance(2000); await opened;
+    await b.clock.advance(20 * 60000);
+    const sent = b.saver.flush('beacon');
+    b.engine.close();
+    await b.clock.advance(1000);
+    check(label + ': no beacon, no save, no final', sent === false && b.server.calls.length === 0, b.server.calls.map((c) => c.body));
+  }
+}
+
+current = 'T6S2: any measured skew is kept (a device 8 days fast)';
+{
+  const clock = fakeClock();
+  const server = fakeServer(clock);
+  const fastBy = 8 * 86400000;
+  server.skewMs = -fastBy;
+  const t = makeSaver({ clock, server });
+  const p = listener(t);
+  t.saver.start(p.book); p.open(); p.play();
+  await p.listen(25000);
+  t.saver.stop();
+  const stored = Number(t.storage.map.get('ws-player:clock'));
+  check('stored', Math.abs(stored + fastBy) <= 1000, stored);
+  const local = localOf(t);
+  check('the local copy is in server time', Math.abs(Date.parse(local.updated_at) - (clock.now - fastBy)) <= 1000, local.updated_at);
+  const web = { track: '501', offset_ms: local.offset_ms + 1200000, updated_at: new Date(clock.now - fastBy + 3600000).toISOString() };
+  check('a later save elsewhere wins the merge', S.resolveResume({ web, local: t.saver.readLocal('500:1') }).source === 'web');
+  const u = makeSaver({ clock, server, storage: t.storage });
+  const q = listener(u, '700:1');
+  u.saver.start('700:1'); q.open();
+  check('the next page session stamps with it before any save', Math.abs(Date.parse(localOf(u, '700:1').updated_at) - (clock.now - fastBy)) <= 1000);
+  u.saver.stop();
+}
+
+current = 'T6S2: a tab with no successful save measures its clock from GET /position before the merge';
+{
+  const clock = fakeClock();
+  const server = fakeServer(clock);
+  server.skewMs = 3 * 3600000;                    // this device is 3 h slow
+  const storage = fakeStorage();
+  const t = withEngine({ clock, server, storage, places: { web: null, plex: null } });
+  server.mode = 503;                              // no check-in will succeed
+  const opened = t.engine.open('500:1', { autoplay: false });
+  await clock.advance(1000); await opened;
+  const c = localOf(t);
+  check('the local copy is in server time', c && Math.abs(Date.parse(c.updated_at) - (clock.now + server.skewMs)) <= 1000, c && c.updated_at);
+  check('and the clock is kept', Math.abs(Number(storage.map.get('ws-player:clock')) - server.skewMs) <= 1000, storage.map.get('ws-player:clock'));
+  t.engine.close();
+  // Measured before the copies are weighed: a local copy the next open sends
+  // was written in server time.
+  const order = [];
+  const probe = S.createSaver({ post: () => Promise.resolve({ status: 200 }), now: () => clock.now, mono: () => clock.now, storage: fakeStorage(), identity: IDENTITY,
+    setTimeout: (fn, ms) => clock.setTimeout(fn, ms), clearTimeout: (id) => clock.clearTimeout(id) });
+  const wrapped = Object.assign({}, probe, {
+    clockProbe() { const done = probe.clockProbe(); return (v) => { order.push('clock'); done(v); }; },
+    resumeFrom(b, c) { order.push('merge'); return probe.resumeFrom(b, c); },
+    onWarning: probe.onWarning, start: probe.start, stop: probe.stop, note: probe.note, flush: probe.flush,
+    get lastSavedAt() { return probe.lastSavedAt; }, get warning() { return probe.warning; }
+  });
+  const eng = E.createEngine({
+    host: { appendChild() {} }, createAudio: () => new MiniAudio(clock),
+    fetch: async (url) => ({ ok: true, status: 200, json: async () => (/position/.test(url)
+      ? { web: null, plex: null, now: new Date(clock.now).toISOString() }
+      : Object.assign({}, BOOK, { stream: { token: 'tok', uris: { local: [], remote: [REMOTE] } } })) }),
+    setTimeout: (fn, ms) => clock.setTimeout(fn, ms), clearTimeout: (id) => clock.clearTimeout(id),
+    mediaSession: null, MediaMetadata: null, baseUrl: 'https://ws.test/', saver: wrapped
+  });
+  const op = eng.open('500:1', { autoplay: false });
+  await clock.advance(1000); await op;
+  check('clock, then merge', order.join() === 'clock,merge', order);
+  eng.close();
+}
+
+current = 'T6E2: closing or switching while the warning shows ends it for listeners';
+{
+  for (const how of ['switch', 'close']) {
+    const t = withEngine({ places: { web: null, plex: null } });
+    const opened = t.engine.open('500:1');
+    await t.clock.advance(12000); await opened;
+    t.server.mode = 'offline';
+    await t.clock.advance(45000);
+    check(how + ': warning on', t.engine.state().saveError === true);
+    const w0 = t.log.warning.length;
+    const c0 = t.log.change.length;
+    if (how === 'switch') {
+      t.server.mode = 200;
+      const q = t.engine.open('500:1', { at: { track: '502', offset_ms: 1000 } });
+      await t.clock.advance(2000); await q;
+    } else {
+      t.engine.close();
+    }
+    const w = t.log.warning.slice(w0).filter((x) => x.kind === 'not-saved');
+    check(how + ': an active:false event', w.length === 1 && w[0].active === false, t.log.warning.slice(w0));
+    const firstSave = t.log.change.slice(c0).find((c) => c.reason === 'save');
+    check(how + ': a save change with saveError false', firstSave && firstSave.saveError === false, t.log.change.slice(c0, c0 + 3));
+    check(how + ': every later change says false', t.log.change.slice(c0).every((c) => c.saveError === false));
+    t.engine.close();
+  }
+}
+
+current = 'T6S4: time frozen with a save in flight does not count against it';
+{
+  // Frozen while playing: no timers, no timeupdate; the answer comes after the thaw.
+  const t = makeSaver();
+  const p = listener(t);
+  t.saver.start(p.book); p.open(); p.play();
+  await p.listen(9750);
+  t.server.latency = 5 * 60000 + 300;
+  await p.listen(250);
+  const pending = t.server.fetches().pop();
+  t.clock.throttled = true;
+  await t.clock.advance(5 * 60000);
+  t.clock.throttled = false; t.server.latency = 80;
+  p.offset += 250; p.emit('time');               // the first timeupdate after the thaw, before any timer
+  await p.listen(1250);
+  await p.listen(15000);
+  check('the answer landed', pending.status === 200);
+  check('no false warning after the thaw', t.warnings.length === 0, t.warnings);
+  t.saver.stop();
+  // Paused and frozen (no timeupdate to tell): the lifecycle's resume event restarts the 15 s.
+  const win = new Window({ url: 'https://ws.test/news' });
+  win.WS = { user: { identity_key: IDENTITY } };
+  const clock = fakeClock();
+  const server = fakeServer(clock);
+  const warned = [];
+  const s2 = S.browserSaver(win, {
+    sendBeacon: () => true,
+    fetch: (url, init) => server.post(JSON.parse(init.body), 'fetch').then((r) => ({ status: r.status, json: async () => r.data })),
+    now: () => clock.now, storage: fakeStorage(),
+    setTimeout: (fn, ms) => clock.setTimeout(fn, ms, 'page'), clearTimeout: (id) => clock.clearTimeout(id)
+  });
+  s2.onWarning((w) => warned.push(w));
+  s2.start('500:1');
+  let off = 0;
+  const st = (playing) => ({ book: '500:1', playing, position: { track: '501', offset_ms: off, duration_ms: 3600000 } });
+  s2.note({ reason: 'play', state: st(true) });
+  await clock.advance(500);
+  server.latency = 3 * 60000;
+  off = 5000;
+  s2.note({ reason: 'pause', state: st(false) });
+  await clock.advance(600);                       // the pause save goes; the page freezes
+  const pauseCall = server.fetches().pop();
+  check('the pause is in flight', pauseCall.body.event === 'pause' && pauseCall.done === null);
+  clock.throttled = true;
+  await clock.advance(3 * 60000 - 1000);
+  clock.throttled = false;
+  win.document.dispatchEvent(new win.Event('resume'));
+  await clock.advance(15000);                     // past the backoff a false failure would start
+  check('resume: the in-flight pause was not given up on (no retry, no warning)', pauseCall.status === 200 && server.fetches().length === 2 && warned.length === 0,
+    server.fetches().map((c) => [c.body.event, c.status]));
+  // A short freeze (12 s of a save's 15): the timer fires on time after it,
+  // so only the lifecycle's resume event can say the page was frozen.
+  server.latency = 20000;
+  off = 9000;
+  s2.note({ reason: 'seek', state: st(false) });
+  await clock.advance(1100);
+  const seekCall = server.fetches().pop();
+  clock.throttled = true;
+  await clock.advance(12000);
+  clock.throttled = false;
+  win.document.dispatchEvent(new win.Event('resume'));
+  await clock.advance(20000);
+  check('a short freeze: the save lands, nothing retried', seekCall.status === 200 && server.fetches().length === 3,
+    server.fetches().map((c) => [c.body.event, c.body.offset_ms, c.status]));
+  s2.stop();
+  await win.happyDOM.close();
+}
+
+current = 'T6S4: a timer that fires minutes late (throttled, paused, no event) does not fail the save in flight';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  t.saver.start(p.book); p.open(); p.play();
+  await p.listen(2000);
+  t.server.latency = 3 * 60000;
+  p.pause();
+  await t.clock.advance(1100);
+  const call = t.server.fetches().pop();
+  t.clock.throttled = true;
+  await t.clock.advance(3 * 60000 - 2000);
+  t.clock.throttled = false;
+  await t.clock.advance(20000);
+  check('no retry: the late timer counted as frozen time', call.status === 200 && t.server.fetches().length === 2,
+    t.server.fetches().map((c) => [c.body.event, c.status]));
+  check('its answer was taken, not dropped as given up on', t.saver.lastSavedAt === call.done, [t.saver.lastSavedAt, call.done]);
+  t.saver.stop();
+}
+
+current = 'T6S5: a system clock stepped back never holds a save';
+{
+  for (const stepMs of [60000, 600000]) {
+    const clock = fakeClock();
+    let jump = 0;
+    const t = makeSaver({ clock, now: () => clock.now - jump });
+    const p = listener(t);
+    t.saver.start(p.book); p.open(); p.play();
+    await p.listen(30000);
+    const before = t.server.fetches().length;
+    jump = stepMs;
+    await p.listen(60000);
+    const during = t.server.fetches().slice(before);
+    check(`stepped back ${stepMs / 1000} s: still every 10 s`, during.length >= 6 && gaps(during).every((g) => g >= 10000 && g <= 10250), gaps(during));
+    p.pause();
+    await t.clock.advance(1100);
+    check(`stepped back ${stepMs / 1000} s: the pause saved at once`, t.server.fetches().pop().body.event === 'pause');
+    check(`stepped back ${stepMs / 1000} s: no warning`, t.warnings.length === 0);
+    t.saver.stop();
+  }
+}
+
+current = 'T6S6: a seek or jump while paused goes as a pause';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  t.saver.start(p.book); p.open(); p.play();
+  await p.listen(2000);
+  p.pause();
+  await t.clock.advance(1100);
+  p.seek(300000, 'seek'); await t.clock.advance(1100);
+  p.seek(330000, 'skip'); await t.clock.advance(1100);
+  p.seek(600000, 'jump'); await t.clock.advance(1100);
+  const f = t.server.fetches().slice(-3);
+  check('paused: all three as pause, at their places', f.map((c) => c.body.event).join() === 'pause,pause,pause' &&
+    f.map((c) => c.body.offset_ms).join() === '300000,330000,600000', f.map((c) => [c.body.event, c.body.offset_ms]));
+  p.playing = true;
+  p.seek(700000, 'jump'); await t.clock.advance(1100);
+  check('playing: a jump is a jump', t.server.fetches().pop().body.event === 'jump');
+  t.saver.stop();
+}
+
+current = 'T6T2: a real track with no usable offset is never saved or written';
+{
+  for (const bad of [undefined, NaN, null, 'x', -5, Infinity]) {
+    const t = makeSaver();
+    t.saver.start('500:1');
+    for (const reason of ['open', 'play', 'pause', 'seek', 'time']) {
+      t.saver.note({ reason, state: { book: '500:1', playing: reason !== 'pause', position: { track: '501', offset_ms: bad, duration_ms: 600000 } } });
+    }
+    await t.clock.advance(30000);
+    t.saver.flush('beacon', 'leave');
+    t.saver.stop();
+    await t.clock.advance(1000);
+    check(`offset ${String(bad)}: nothing sent, nothing written`, t.server.calls.length === 0 && localOf(t) === null, t.server.calls.map((c) => c.body));
+  }
 }
 
 current = 'the saver never lets a failing listener or storage break the engine';

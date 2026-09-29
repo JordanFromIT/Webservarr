@@ -96,7 +96,8 @@
  *                { kind: 'resume-lost', message } (see open)
  *                { kind: 'not-saved', active, lastSavedAt, message } (saves.js):
  *                active true: "Your place isn't being saved. Last saved <time>."
- *                to show; false: it cleared
+ *                to show; false: it cleared (a save succeeded, or the book was
+ *                closed or switched while it showed), with a 'save' change
  *
  * Saving (saves.js) is injected as env.saver: the engine hands it every
  * change and opens and stops it with each book. Without one (the engine's
@@ -841,6 +842,10 @@ export function createEngine(env) {
      Fails like fetchBook, so the open fails rather than starting from 0 over
      a place it could not see. */
   async function fetchPlaces(key) {
+    let clockDone = null;
+    try {
+      clockDone = typeof saver.clockProbe === 'function' ? saver.clockProbe() : null;
+    } catch (e) { /* no clock measure */ }
     let resp;
     try {
       resp = await fetchFn('/api/player/position/' + encodeURIComponent(key), {
@@ -859,6 +864,10 @@ export function createEngine(env) {
       throw { status: 0, detail: '' };
     }
     if (!data || typeof data !== 'object') throw { status: 0, detail: '' };
+    // The clock first, so the local copy is weighed in the server's time.
+    try {
+      if (clockDone) clockDone(data.now);
+    } catch (e) { /* no clock measure */ }
     return { web: data.web || null, plex: data.plex || null };
   }
 

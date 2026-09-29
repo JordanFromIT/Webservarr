@@ -11,12 +11,20 @@
  * engine reports (the element's timeupdate goes on in a background tab where
  * timers are throttled); a timer is only the fallback. Play, pause, seek,
  * skip, chapter jump, the end of the book and playback stopping on an error
- * are saved at once. One save is
+ * are saved at once (a seek or jump while paused goes as a pause). One save is
  * in flight per book: whatever happens meanwhile folds into one follow-up
  * with the place as it is then, and saves are at least 1 s apart. Every save
  * carries the current place and a fresh seq (never a stale body), under one
  * psid for the page session. A failure (a network error, no answer in 15 s,
- * any status but 2xx, 429 included) backs off 10, 20, then 30 s. A 401 means
+ * any status but 2xx, 429 included) backs off 10, 20, then 30 s; time the
+ * page spent frozen or hidden does not count against the 15 s. Scheduling
+ * runs on performance.now, so a stepped system clock never holds a save.
+ * Only a place the listener played or moved to is sent (an untouched
+ * opening place never is), and only while it is under 2 minutes old: an
+ * older unsaved place (a phone paused offline, back online hours later)
+ * stays in the local copy, stamped when it was reached, for the next open's
+ * merge to weigh. A newer local copy the book opens at is the exception: it
+ * is sent at once whatever its age. A 401 means
  * the session ended: nothing more is sent, the local copy keeps the place,
  * and the listener is sent to sign in (shell.js WS.leaveTo, through the
  * router, so ws:before-hard-nav runs first).
@@ -25,8 +33,11 @@
  * Local copy: every change of place is written to localStorage under the
  * listener's identity key (WS.user.identity_key, from #ws-data: an opaque
  * HMAC of the account identity, so no account id sits in storage) and the
- * book, stamped in the server's clock as last measured, so it compares
- * fairly with the server's copies from a fast or slow device. Storage can
+ * book, stamped when the place is reached, in the server's clock as last
+ * measured (from a stored check-in, or the server's `now` on GET /position,
+ * measured before the resume merge compares copies; kept across page
+ * sessions), so it compares fairly with the server's copies from a fast or
+ * slow device. Storage can
  * throw (a private window): every call is guarded, and saves go on without.
  *
  * Warning: while playing, once saves have failed and the place has gone
@@ -44,7 +55,8 @@
  *                                     localStorage, WS.user, pagehide and friends)
  *
  * createSaver({ post(body, kind) -> Promise<{ status, data }> | boolean (a beacon),
- *               now, storage, identity (the identity key: string or function), device,
+ *               now (wall clock), mono (monotonic; default performance.now),
+ *               storage, identity (the identity key: string or function), device,
  *               setTimeout, clearTimeout, onSignedOut, formatTime, psid })
  *   start(book, { push, savedAt, held })
  *                                   push: the place the book opens at is newer
@@ -53,10 +65,15 @@
  *                                   (ISO), "Last saved" until this page saves.
  *                                   held: { track, offset_ms } the server holds
  *                                   already (the book resumed from it).
- *   stop()                          saves the last place once (if it needs it),
- *                                   then no timers are left
+ *   stop()                          saves the last place once (if it needs it; its
+ *                                   seq is taken at once, so whatever opens next
+ *                                   outranks it), ends an active warning with
+ *                                   active: false, then no timers are left
  *   note(change)                    each engine change { reason, state }
  *   flush('beacon' | 'fetch', event) send now: a beacon, or a fetch past the backoff
+ *   wake()                          back from frozen or hidden: the save in flight
+ *                                   gets its full 15 s again
+ *   clockProbe() -> done(serverNow) measure the clock against a server answer
  *   readLocal(book), resumeFrom(book, { web, plex }) -> resumeOrder with the local copy
  *   onWarning(fn) -> unsubscribe
  *   lastSavedAt (ms, this page's clock, or null), warning (bool), psid
@@ -71,13 +88,14 @@ export const WARN_AFTER_MS = 30000;     // unsaved this long while playing, with
 export const BACKOFF_MS = [10000, 20000, 30000];
 export const POST_TIMEOUT_MS = 15000;   // a save not answered by then has failed
 export const PLEX_ECHO_MS = 2000;       // Plex's copy of a save forwarded to it is stamped a moment later
+export const FRESH_MS = 120000;         // an unsaved place older than this stays local (see sendable)
+export const FREEZE_MS = 5000;          // a silence this long while playing: the page was frozen
 export const NOT_SAVED = "Your place isn't being saved.";
 
 const CHECKIN_URL = '/api/player/checkin';
 const STORE_PREFIX = 'ws-player:';
 const CLOCK_KEY = STORE_PREFIX + 'clock';
 const DEVICE_MAX = 80;
-const SKEW_MAX_MS = 7 * 24 * 3600 * 1000;
 
 // The check-in event for an engine change, and whether it is saved at once.
 const EVENTS = {
@@ -169,7 +187,9 @@ export function resolveResume(copies) {
 
 function placeOf(p) {
   if (!p || typeof p !== 'object' || p.track == null || p.track === '') return null;
-  let offset = Math.round(Number(p.offset_ms));
+  // Only a number is an offset (Number(null) would be 0: the start of the part).
+  if (typeof p.offset_ms !== 'number') return null;
+  let offset = Math.round(p.offset_ms);
   let duration = Math.round(Number(p.duration_ms));
   if (!isFinite(offset) || offset < 0) return null;
   if (!isFinite(duration) || duration < 0) duration = 0;
@@ -192,6 +212,13 @@ function newPsid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 }
 
+// A clock the system never steps (performance.now), for scheduling.
+function monotonic() {
+  const perf = typeof performance !== 'undefined' ? performance : null;
+  if (perf && typeof perf.now === 'function') return function () { return perf.now(); };
+  return Date.now;
+}
+
 function clockTime(ms) {
   try {
     return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -202,7 +229,8 @@ function clockTime(ms) {
 
 export function createSaver(o) {
   const post = o.post;
-  const now = o.now || Date.now;
+  const now = o.now || Date.now;          // wall clock: stamps, "Last saved", the age of a place
+  const mono = o.mono || monotonic();     // scheduling: never stepped by the system clock
   const storage = o.storage || null;
   const identityOf = typeof o.identity === 'function' ? o.identity : function () { return o.identity; };
   const device = typeof o.device === 'string' ? o.device.slice(0, DEVICE_MAX) : '';
@@ -238,17 +266,31 @@ export function createSaver(o) {
     return typeof v === 'string' ? v : '';
   }
 
-  // How far the server's clock is ahead of this one, as last measured.
+  // How far the server's clock is ahead of this one, as last measured (by a
+  // stored check-in, or the server's `now` on GET /position), kept for the
+  // next page session. Any measured value is kept: a device days out is
+  // exactly the one that needs it.
   let skew = (function () {
-    const v = Number(stored(function (s) { return s.getItem(CLOCK_KEY); }));
-    return isFinite(v) && Math.abs(v) < SKEW_MAX_MS ? v : 0;
+    const raw = stored(function (s) { return s.getItem(CLOCK_KEY); });
+    const v = raw === null || raw === '' ? NaN : Number(raw);
+    return isFinite(v) ? v : 0;
   })();
 
-  function measureSkew(serverAt, sentAt) {
-    const v = Math.round(serverAt - (sentAt + now()) / 2);
-    if (!isFinite(v) || Math.abs(v) >= SKEW_MAX_MS) return;
+  function measureSkew(serverAt, sentWall, receivedWall) {
+    const v = Math.round(serverAt - (sentWall + receivedWall) / 2);
+    if (!isFinite(v)) return;
     skew = v;
     stored(function (s) { s.setItem(CLOCK_KEY, String(v)); });
+  }
+
+  /* Starts a clock measurement against a server answer: call it before the
+     request, and the function it returns with the server's `now` (ISO). */
+  function clockProbe() {
+    const sent = now();
+    return function (serverNow) {
+      const at = timeOf(serverNow);
+      if (isFinite(at)) measureSkew(at, sent, now());
+    };
   }
 
   function localKey(id, book) {
@@ -267,6 +309,7 @@ export function createSaver(o) {
     return { track: c.track, offset_ms: c.offset_ms, duration_ms: c.duration_ms, updated_at: c.updated_at, device: c.device };
   }
 
+  // Stamped when the place is reached, in the server's clock.
   function writeLocal(book, place) {
     const id = identity();
     if (!id) return;
@@ -287,24 +330,40 @@ export function createSaver(o) {
       book: book,
       latest: null,           // the place, as last reported
       playing: false,
+      reachedWall: null,      // when the place was last reached (played to, moved to, acted on);
+      reachedMono: null,      // null: untouched since the book opened
+      push: false,            // the opening place is a newer local copy: send it whatever its age
       event: null,            // what the next save is for, if not a plain checkin
       urgent: false,          // save as soon as the gap allows
       acked: null,            // the place the server last took
-      dirtySince: null,       // when the place first differed from that
-      lastSendAt: -Infinity,
-      inFlight: null,         // { id, at, place, event }
+      dirtySince: null,       // when (mono) the place first differed from that
+      lastSendAt: -Infinity,  // mono
+      lastNoteAt: null,       // mono, of the last change reported while playing
+      inFlight: null,         // { id, at, from (its timeout counts from), wall, place, event }
       failures: 0,
       failedSinceOk: false,
-      backoffUntil: 0,
+      backoffUntil: 0,        // mono
       timer: null,
-      timerAt: Infinity,
+      timerAt: Infinity,      // mono
       stopped: false,
-      final: null             // the save stop() still owes
+      final: null             // the body stop() still owes
     };
   }
 
   function dirty(r) {
     return !!r.latest && (r.event !== null || !samePlace(r.latest, r.acked));
+  }
+
+  /* May this place go to the server? Only one the listener played or moved
+     to (never an untouched opening place), and only while it is recent: a
+     place reached over 2 minutes ago and still unsaved stays in the local
+     copy, stamped when it was reached, and the next open's merge decides.
+     A newer local copy the book opened at is sent whatever its age. */
+  function sendable(r) {
+    if (!r.latest) return false;
+    if (r.push) return true;
+    if (r.reachedMono === null) return false;
+    return mono() - r.reachedMono <= FRESH_MS && now() - r.reachedWall <= FRESH_MS;
   }
 
   function body(book, place, event) {
@@ -321,9 +380,9 @@ export function createSaver(o) {
     };
   }
 
-  // When the next save is due: Infinity for none.
+  // When (mono) the next save is due: Infinity for none.
   function dueAt(r) {
-    if (r.stopped || r.inFlight || signedOut || !dirty(r)) return Infinity;
+    if (r.stopped || r.inFlight || signedOut || !dirty(r) || !sendable(r)) return Infinity;
     let at;
     if (r.failures > 0) at = r.backoffUntil;          // what happens meanwhile waits for the retry
     else if (r.urgent) at = -Infinity;
@@ -339,8 +398,8 @@ export function createSaver(o) {
     r.urgent = false;
     requests += 1;
     const id = requests;
-    const at = now();
-    r.inFlight = { id: id, at: at, place: place, event: event };
+    const at = mono();
+    r.inFlight = { id: id, at: at, from: at, wall: now(), place: place, event: event };
     r.lastSendAt = at;
     let p;
     try {
@@ -360,6 +419,7 @@ export function createSaver(o) {
     const status = res && typeof res.status === 'number' ? res.status : 0;
     if (status >= 200 && status < 300) {
       r.acked = sent.place;
+      r.push = false;
       r.failures = 0;
       r.failedSinceOk = false;
       r.backoffUntil = 0;
@@ -368,7 +428,7 @@ export function createSaver(o) {
       const data = res.data;
       if (data && data.stored === true && typeof data.updated_at === 'string') {
         const at = Date.parse(data.updated_at);
-        if (isFinite(at)) measureSkew(at, sent.at);
+        if (isFinite(at)) measureSkew(at, sent.wall, now());
       }
       return true;
     }
@@ -377,7 +437,7 @@ export function createSaver(o) {
     if (r.event === null && sent.event !== 'checkin') r.event = sent.event;
     r.failures += 1;
     r.failedSinceOk = true;
-    r.backoffUntil = now() + BACKOFF_MS[Math.min(r.failures, BACKOFF_MS.length) - 1];
+    r.backoffUntil = mono() + BACKOFF_MS[Math.min(r.failures, BACKOFF_MS.length) - 1];
     if (status === 401) signOut();
     return true;
   }
@@ -403,11 +463,17 @@ export function createSaver(o) {
     }
   }
 
+  // The page was frozen or hidden: that time does not count against the
+  // save in flight. Its 15 s start again.
+  function wakeRun(r) {
+    if (r && r.inFlight) r.inFlight.from = mono();
+  }
+
   function step() {
     const r = run;
     if (!r || r.stopped) return;
-    if (r.inFlight && now() - r.inFlight.at >= POST_TIMEOUT_MS) settle(r, r.inFlight.id, null);
-    if (now() >= dueAt(r)) send(r);
+    if (r.inFlight && mono() - r.inFlight.from >= POST_TIMEOUT_MS) settle(r, r.inFlight.id, null);
+    if (mono() >= dueAt(r)) send(r);
     checkWarning();
     arm(r);
   }
@@ -416,7 +482,7 @@ export function createSaver(o) {
   // tab it may not fire for a minute, and the engine's changes drive step().
   function arm(r) {
     let next = dueAt(r);
-    if (r.inFlight) next = Math.min(next, r.inFlight.at + POST_TIMEOUT_MS);
+    if (r.inFlight) next = Math.min(next, r.inFlight.from + POST_TIMEOUT_MS);
     if (!warning && r.playing && r.failedSinceOk && r.dirtySince !== null) {
       next = Math.min(next, r.dirtySince + WARN_AFTER_MS);
     }
@@ -426,10 +492,13 @@ export function createSaver(o) {
     r.timerAt = next;
     if (next === Infinity) return;
     r.timer = setT(function () {
+      const late = mono() - r.timerAt;
       r.timer = null;
       r.timerAt = Infinity;
+      // Far later than asked: the page was frozen or throttled meanwhile.
+      if (late > FREEZE_MS) wakeRun(r);
       step();
-    }, Math.max(0, next - now()));
+    }, Math.max(0, next - mono()));
   }
 
   // ---- The warning ----
@@ -438,14 +507,7 @@ export function createSaver(o) {
     return lastSavedAt === null ? NOT_SAVED : NOT_SAVED + ' Last saved ' + formatTime(lastSavedAt) + '.';
   }
 
-  function checkWarning() {
-    const r = run;
-    let on = warning;
-    if (!r || r.stopped || !r.failedSinceOk) on = false;
-    else if (!warning && r.playing && r.dirtySince !== null && now() - r.dirtySince >= WARN_AFTER_MS) on = true;
-    if (on === warning) return;
-    warning = on;
-    const w = { kind: 'not-saved', active: on, lastSavedAt: lastSavedAt, message: on ? message() : '' };
+  function tell(w) {
     Array.from(warnFns).forEach(function (fn) {
       try {
         fn(w);
@@ -455,6 +517,16 @@ export function createSaver(o) {
     });
   }
 
+  function checkWarning() {
+    const r = run;
+    let on = warning;
+    if (!r || r.stopped || !r.failedSinceOk) on = false;
+    else if (!warning && r.playing && r.dirtySince !== null && mono() - r.dirtySince >= WARN_AFTER_MS) on = true;
+    if (on === warning) return;
+    warning = on;
+    tell({ kind: 'not-saved', active: on, lastSavedAt: lastSavedAt, message: on ? message() : '' });
+  }
+
   // ---- The engine's side ----
 
   function note(change) {
@@ -462,20 +534,35 @@ export function createSaver(o) {
     if (!r || r.stopped || !change || !change.state || change.state.book !== r.book) return;
     const st = change.state;
     const wasPlaying = r.playing;
+    // Playing, the engine reports several changes a second: a long silence
+    // means the page was frozen, which does not count against a save.
+    const t = mono();
+    if (wasPlaying && r.lastNoteAt !== null && t - r.lastNoteAt > FREEZE_MS) wakeRun(r);
     r.playing = !!st.playing;
+    r.lastNoteAt = r.playing ? t : null;
     const place = placeOf(st.position);
+    // The engine reports a start more than once (asked, then playing): one save.
+    const ev = change.reason === 'play' && wasPlaying ? null : EVENTS[change.reason];
     if (place) {
-      if (!samePlace(place, r.latest)) {
+      const moved = !samePlace(place, r.latest);
+      if (moved) {
         writeLocal(r.book, place);
-        if (r.dirtySince === null && !samePlace(place, r.acked)) r.dirtySince = now();
+        if (r.dirtySince === null && !samePlace(place, r.acked)) r.dirtySince = t;
+      }
+      // Reached by the listener: an act of theirs, or playback moving on.
+      // Opening at a place (and the element settling there) is neither.
+      if (EVENTS[change.reason] || (r.playing && moved)) {
+        r.reachedMono = t;
+        r.reachedWall = now();
       }
       r.latest = place;
     }
-    // The engine reports a start more than once (asked, then playing): one save.
-    const ev = change.reason === 'play' && wasPlaying ? null : EVENTS[change.reason];
     // A change whose position is null is never saved.
     if (ev && place) {
-      r.event = ev[0];
+      let name = ev[0];
+      // A seek or jump while paused is not playback (Plex would show it playing).
+      if ((name === 'seek' || name === 'jump') && !r.playing) name = 'pause';
+      r.event = name;
       if (ev[1]) r.urgent = true;
     }
     step();
@@ -492,7 +579,10 @@ export function createSaver(o) {
     lastSavedAt = isFinite(saved) ? saved - skew : null;
     // The place the server already holds needs no save until it moves.
     run.acked = placeOf(opts.held);
-    if (opts.push) run.urgent = true;
+    if (opts.push) {
+      run.push = true;
+      run.urgent = true;
+    }
   }
 
   function stop() {
@@ -502,10 +592,17 @@ export function createSaver(o) {
     r.stopped = true;
     if (r.timer !== null) clearT(r.timer);
     r.timer = null;
+    const was = warning;
+    const savedAt = lastSavedAt;
     warning = false;
     lastSavedAt = null;
-    if (signedOut || !r.latest || !(r.playing || dirty(r))) return;
-    r.final = { event: r.event === 'end' ? 'end' : 'leave' };
+    // Listeners hear the warning end, not just stop being told about it.
+    if (was) tell({ kind: 'not-saved', active: false, lastSavedAt: savedAt, message: '' });
+    if (signedOut || !r.latest || !sendable(r) || !(r.playing || dirty(r))) return;
+    // Its seq is taken now: every save of whatever opens next outranks it,
+    // so the server never takes this place over a later one (a late final
+    // from the same psid is refused).
+    r.final = body(r.book, r.latest, r.event === 'end' ? 'end' : 'leave');
     if (!r.inFlight) {
       sendFinal(r);
       return;
@@ -516,24 +613,24 @@ export function createSaver(o) {
       r.timer = null;
       r.inFlight = null;
       sendFinal(r);
-    }, Math.max(0, r.inFlight.at + POST_TIMEOUT_MS - now()));
+    }, Math.max(0, r.inFlight.from + POST_TIMEOUT_MS - mono()));
   }
 
   function sendFinal(r) {
     if (!r.final) return;
-    const f = r.final;
+    const b = r.final;
     r.final = null;
     if (r.timer !== null) clearT(r.timer);
     r.timer = null;
     if (signedOut) return;
     try {
-      Promise.resolve(post(body(r.book, r.latest, f.event), 'fetch')).catch(noop);
+      Promise.resolve(post(b, 'fetch')).catch(noop);
     } catch (e) { /* the local copy has it */ }
   }
 
   function flush(kind, event) {
     const r = run;
-    if (!r || r.stopped || signedOut || !r.latest) return false;
+    if (!r || r.stopped || signedOut || !r.latest || !sendable(r)) return false;
     if (kind === 'beacon') {
       if (!r.playing && !dirty(r)) return false;
       const at = r.book + '|' + r.latest.track + '|' + r.latest.offset_ms;
@@ -569,6 +666,11 @@ export function createSaver(o) {
     stop: stop,
     note: note,
     flush: flush,
+    wake: function () {
+      wakeRun(run);
+      if (run) step();
+    },
+    clockProbe: clockProbe,
     readLocal: readLocal,
     resumeFrom: resumeFrom,
     onWarning: function (fn) {
@@ -649,6 +751,8 @@ export function browserSaver(win, o) {
   const saver = createSaver({
     post: post,
     now: o.now || Date.now,
+    mono: o.mono || o.now || (win.performance && typeof win.performance.now === 'function'
+      ? function () { return win.performance.now(); } : undefined),
     storage: storage,
     identity: function () {
       const u = win.WS && win.WS.user;
@@ -669,10 +773,14 @@ export function browserSaver(win, o) {
   win.addEventListener('ws:before-hard-nav', function () { saver.flush('beacon', 'leave'); });
   win.addEventListener('pagehide', function () { saver.flush('beacon', 'leave'); });
   win.addEventListener('online', function () { saver.flush('fetch'); });
+  // Back from frozen or hidden: that time does not count against a save.
+  win.addEventListener('pageshow', function () { saver.wake(); });
   if (doc) {
     doc.addEventListener('visibilitychange', function () {
       if (doc.visibilityState === 'hidden') saver.flush('beacon');
+      else saver.wake();
     });
+    doc.addEventListener('resume', function () { saver.wake(); });
   }
   return saver;
 }
