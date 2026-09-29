@@ -321,6 +321,12 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
     reading their Plex state (a refused token, plex.tv down) makes it null,
     and WebServarr's still resumes the book.
 
+    Plex's copy is null too when it is an echo: a place this listener's own
+    log has (listening.is_logged_place). Plex stamps a part again when it
+    ends a session our save started, so such a copy looks newer than our
+    later saves while holding an older place; only a place we never logged
+    (listening in Plexamp or a Plex app) competes on its time.
+
     `now` is the server's clock (ISO UTC) as it answers: the player measures
     its own clock against it before it compares these copies with its local
     one, which it stamps in the server's time."""
@@ -332,6 +338,9 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
         raise _http_error(exc) from None
     except pp.PlayerUnavailable as exc:
         logger.info("Plex position unavailable: %s", type(exc).__name__)
+        plex_pos = None
+    if plex_pos and listening.is_logged_place(db, who.identity, key, plex_pos.get("track"),
+                                              plex_pos.get("offset_ms")):
         plex_pos = None
     return {"web": web, "plex": plex_pos, "now": utc_iso(datetime.now(timezone.utc))}
 

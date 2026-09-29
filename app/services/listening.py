@@ -176,6 +176,30 @@ def get_history(db: Session, identity: str, book: str, limit: int = 200) -> list
     return [_entry(r) for r in rows]
 
 
+# Plex stamps a part again when it ends the session a save of ours started
+# (about 75 s after a pause, about 10 s after a move to another part), so its
+# copy of a place WebServarr already logged can look newer than a later save.
+ECHO_MS = 5000
+ECHO_WINDOW = timedelta(hours=24)
+
+
+def is_logged_place(db: Session, identity: str, book: str, track: str, offset_ms: int,
+                    now: Optional[datetime] = None) -> bool:
+    """True when this listener's own log for the book has a place on `track`
+    within ECHO_MS of `offset_ms` in the last ECHO_WINDOW: Plex's copy of that
+    place is an echo of a save of ours, not listening done in Plex. One
+    bounded query on ix_listening_log_identity_book_at (identity, book, at)."""
+    if not isinstance(track, str) or isinstance(offset_ms, bool) or not isinstance(offset_ms, int):
+        return False
+    since = _naive_utc(now) - ECHO_WINDOW
+    L = ListeningLog
+    row = (db.query(L.id)
+           .filter(L.identity == identity, L.book_key == book, L.at >= since, L.track_key == track,
+                   L.offset_ms >= offset_ms - ECHO_MS, L.offset_ms <= offset_ms + ECHO_MS)
+           .first())
+    return row is not None
+
+
 # A history cursor: an ISO 8601 instant, optionally followed by "~" and a log
 # row id that breaks ties between rows logged at the same instant.
 _CURSOR = re.compile(r"(?P<at>[0-9T:.+\-]{10,40}Z?)(?:~(?P<id>[0-9]{1,18}))?", re.ASCII)

@@ -1704,20 +1704,11 @@ await run('handoff: only another device, within 24 h, with a place of its own he
   check('no copy here: none', with_((i) => { i.own = null; }) === null);
   check('a copy never played or moved to here: none', with_((i) => { i.own.own = false; }) === null);
   check('resumed from the local copy or Plex: none', with_((i) => { i.resumed.source = 'local'; }) === null && with_((i) => { i.resumed.source = 'plex'; }) === null);
-  // Plex stamps a paused part again when it ends the session a minute later:
-  // its copy at WebServarr's place is that save, not a newer one.
-  const echo = (fn) => with_((i) => {
-    i.web = { track: '502', offset_ms: 300000, updated_at: ago(5 * MIN), device: 'Chrome on Android', device_id: OTHER };
-    i.resumed = { source: 'plex', track: '502', offset_ms: 300000, updated_at: ago(3 * MIN), device: 'Plex', device_id: '', bookMs: 900000 };
-    if (fn) fn(i);
-  });
-  const e1 = echo();
-  check('Plex echoing the other device\'s save: offered, as that device, from that save\'s time', e1 && e1.other.device === 'Chrome on Android' && e1.other.agoMs === 5 * MIN, e1);
-  check('an echo up to 30 s off (a playing session ended late) counts', echo((i) => { i.resumed.offset_ms = 330000; }) !== null);
-  check('Plex further on: its own place, none', echo((i) => { i.resumed.offset_ms = 330001; }) === null);
-  check('Plex in another part: none', echo((i) => { i.resumed.track = '503'; }) === null);
-  check('Plex echoing this device\'s save: none', echo((i) => { i.web.device_id = ME; }) === null);
   check('the question', F.handoffMessage(offer) === 'Continue from 15:00 (Chrome on Android, 5 min ago)?', F.handoffMessage(offer));
+  const twin = with_((i) => { i.resumed.device = 'Chrome on Linux'; });
+  check('another device with this one\'s label is "another <label>"', twin.other.sameLabel === true &&
+    F.handoffMessage(twin) === 'Continue from 15:00 (another Chrome on Linux, 5 min ago)?', F.handoffMessage(twin));
+  check('a different label is as it is', offer.other.sameLabel === false);
   check('an unnamed device', F.handoffMessage({ other: { bookMs: 3723000, device: '', agoMs: 30000 } }) === 'Continue from 1:02:03 (another device, just now)?');
   check('ago', F.formatAgo(59999) === 'just now' && F.formatAgo(60000) === '1 min ago' && F.formatAgo(3599999) === '59 min ago' &&
     F.formatAgo(3600000) === '1 h ago' && F.formatAgo(86400000) === '1 day ago' && F.formatAgo(3 * 86400000) === '3 days ago' && F.formatAgo(NaN) === 'just now');
@@ -1736,6 +1727,8 @@ await run('the check on Play: another device newer than this one, and more than 
   check('within 30 s: none', with_((i) => { i.webMs = 930000; }) === null);
   check('not in this book: none', with_((i) => { i.webMs = null; }) === null);
   check('no web copy: none', with_((i) => { i.web = null; }) === null);
+  const twin = with_((i) => { i.web.device = 'Chrome on Linux'; });
+  check('the same label here too: "another <label>"', F.handoffMessage(twin) === 'Continue from 26:40 (another Chrome on Linux, 6 min ago)?', F.handoffMessage(twin));
 });
 
 // A page with a local copy of its own and an id: the handoff's surroundings.
@@ -1787,19 +1780,6 @@ await run('handoff at open: Start from here moves to this device\'s place and sa
   check('every save from here on', t.posts.every((b) => b.track === '501' && b.offset_ms >= 100000), t.posts.map((b) => [b.event, b.track, b.offset_ms]));
   check('the question is gone', t.prompts().length === 0);
   check('Undo can take it back to the other device\'s place', !!t.undoBtn() && t.notices().indexOf('Jumped back 13 min.') !== -1, t.notices());
-  t.engine.close();
-});
-
-await run('handoff at open: Plex\'s later stamp of the same place still asks', async () => {
-  const t = await handoffSetup();
-  t.setOwn('501', 100000, 3600000);
-  t.places = {
-    web: t.other('502', 300000, 5 * MIN),
-    plex: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(t.serverNow() - 4 * MIN).toISOString(), device: 'Plex', source: 'plex' }
-  };
-  await t.open();
-  check('resumed from Plex\'s copy', t.st().resumedFrom && t.st().resumedFrom.source === 'plex');
-  check('held, and asked as the other device', !t.st().playing && t.prompts().join() === 'Continue from 15:00 (Chrome on Android, 5 min ago)?', t.prompts());
   t.engine.close();
 });
 

@@ -101,8 +101,7 @@
  *                     listener left off, before anything plays (features.js:
  *                     the handoff prompt). info: { book, resumed: the copy it
  *                     resumes from ({ source, track, offset_ms, updated_at,
- *                     device, device_id, bookMs }), web: WebServarr's copy as
- *                     GET /position gave it (or null), own: this browser's own
+ *                     device, device_id, bookMs }), own: this browser's own
  *                     copy ({ track, offset_ms, updated_at, device, own,
  *                     bookMs } or null), now (the server's clock, ISO, or
  *                     null), me: { device_id, device } }. A truthy answer
@@ -1195,7 +1194,6 @@ export function createEngine(env) {
         held = !!openGate({
           book: key,
           resumed: Object.assign({}, resumed, { bookMs: startMs }),
-          web: places.web || null,
           own: own(),
           now: places.now || null,
           me: me()

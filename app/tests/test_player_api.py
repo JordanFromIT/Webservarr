@@ -699,6 +699,92 @@ class DeviceIds(PlayerApiBase):
         self.timeline.assert_not_awaited()
 
 
+class PlexEchoes(PlayerApiBase):
+    """Plex stamps a part again when it ends a session a save of ours began
+    (about 75 s after a pause, about 10 s after a part change), so its copy
+    of a place we logged looks newer while holding an older place. /position
+    leaves such a copy out (plex: null); only a place we never logged, real
+    listening in a Plex app, competes on its time."""
+
+    def plex_at(self, track, offset, stamped="2099-01-01T00:00:00.000Z"):
+        self.plex_position.return_value = {
+            "track": track, "offset_ms": offset, "duration_ms": 300_000, "book_ms": 0,
+            "book_duration_ms": 600_000, "updated_at": stamped, "device": "Plex", "source": "plex"}
+        return self.plex_position.return_value
+
+    def plex(self, key="200:1"):
+        r = self.client.get(f"/api/player/position/{key}")
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["plex"]
+
+    def test_a_restamp_after_a_pause_is_left_out(self):
+        self.checkin(track="202", offset_ms=150_000, event="pause")
+        self.plex_at("202", 150_000)
+        self.assertIsNone(self.plex())
+
+    def test_a_restamp_of_the_old_part_after_a_part_change_is_left_out(self):
+        self.checkin(track="201", offset_ms=90_000, seq=1)
+        self.checkin(track="202", offset_ms=1_000, event="seek", seq=2)
+        # Plex ran part 1 on a few seconds before its session ended.
+        self.plex_at("201", 93_500)
+        self.assertIsNone(self.plex())
+        self.assertEqual(self.position()["track"], "202")
+
+    def test_within_five_seconds_only(self):
+        self.checkin(track="202", offset_ms=150_000, event="pause")
+        for offset, echo in ((145_000, True), (155_000, True), (144_999, False), (155_001, False)):
+            with self.subTest(offset=offset):
+                self.plex_at("202", offset)
+                self.assertEqual(self.plex() is None, echo)
+        self.plex_at("203", 150_000)      # the same offset in another part
+        self.assertIsNotNone(self.plex())
+
+    def test_genuine_plex_listening_still_competes(self):
+        self.checkin(track="202", offset_ms=150_000, event="pause")
+        plex = self.plex_at("203", 50_000)
+        self.assertEqual(self.plex(), plex)
+
+    def test_no_log_is_the_old_behaviour(self):
+        plex = self.plex_at("202", 150_000)
+        self.assertEqual(self.plex(), plex)
+
+    def test_only_the_listeners_own_log_counts(self):
+        self.as_user(B)
+        self.checkin(track="202", offset_ms=150_000, event="pause")
+        self.as_user(A)
+        plex = self.plex_at("202", 150_000)
+        self.assertEqual(self.plex(), plex)
+        # And only this book's.
+        self.checkin(book="100:1", track="101", offset_ms=150_000, event="pause")
+        self.assertEqual(self.plex(), plex)
+
+    def test_a_log_row_over_a_day_old_does_not_count(self):
+        from datetime import datetime, timedelta
+        old = datetime.utcnow() - timedelta(hours=24, minutes=1)
+        recent = datetime.utcnow() - timedelta(hours=23, minutes=59)
+        self.db.add(ListeningLog(identity="plex:1001", book_key="200:1", track_key="202", offset_ms=150_000,
+                                 device="d", event="pause", at=old))
+        self.db.commit()
+        plex = self.plex_at("202", 150_000)
+        self.assertEqual(self.plex(), plex)
+        self.db.add(ListeningLog(identity="plex:1001", book_key="200:1", track_key="202", offset_ms=150_000,
+                                 device="d", event="pause", at=recent))
+        self.db.commit()
+        self.assertIsNone(self.plex())
+
+    def test_the_query_uses_the_log_index(self):
+        from sqlalchemy import text
+        from datetime import datetime
+        from app.services import listening
+        plan = self.db.execute(text(
+            "EXPLAIN QUERY PLAN SELECT id FROM listening_log WHERE identity = 'x' AND book_key = 'y' "
+            "AND at >= :since AND track_key = 't' AND offset_ms BETWEEN 1 AND 2 LIMIT 1"),
+            {"since": datetime(2026, 1, 1)}).all()
+        self.assertIn("ix_listening_log_identity_book_at", " ".join(str(r) for r in plan))
+        self.assertFalse(listening.is_logged_place(self.db, "plex:1001", "200:1", None, 5))
+        self.assertFalse(listening.is_logged_place(self.db, "plex:1001", "200:1", "202", True))
+
+
 class NextInSeries(PlayerApiBase):
     NEXT = {"key": "100:1", "title": "Single Book", "author": "Ann Author", "series": "Saga",
             "narrator": "Nora", "cover": "/library/metadata/100/thumb/1700000000", "duration_ms": 1_000_000,

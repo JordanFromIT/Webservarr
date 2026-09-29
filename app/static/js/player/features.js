@@ -93,7 +93,8 @@
  *   otherDevice(copy, me)                 another device's copy (by id, else by label)
  *   handoffOffer(info)                    the open's handoff question (engine setOpenGate info), or null
  *   recheckOffer({ web, webMs, own, atMs, now, me })   the same when Play comes back to a paused book
- *   handoffMessage(offer)                 "Continue from 1:02:03 (Chrome on Android, 3 min ago)?"
+ *   handoffMessage(offer)                 "Continue from 1:02:03 (Chrome on Android, 3 min ago)?",
+ *                                         "(another Chrome on Linux, ...)" for this device's own label
  *   formatAgo(ms)                         "just now", "3 min ago", "2 h ago", "3 days ago"
  *   groupSessions(entries, placeMs)       history entries (newest first) as sessions, newest first
  *   sessionWhen(session, now), sessionChapters(session, chapters)   a session's lines
@@ -274,27 +275,27 @@ function ageOf(nowIso, atIso) {
    Only when the book resumes from WebServarr's copy, saved by another device
    in the last 24 hours (in the server's clock), and this browser has its own
    place in the book (played or moved to here) more than 30 s from it.
-   Plex's copy at WebServarr's place (the same part, within 30 s) is that
-   save echoed: Plex stamps a paused part again when it ends the session a
-   minute or so later, so it looks newer. It counts as WebServarr's copy. */
+   (Plex's echoes of our own saves never get here: GET /position leaves out
+   a Plex copy of a place WebServarr logged.) */
 export function handoffOffer(info) {
   const i = info || {};
-  let r = i.resumed;
+  const r = i.resumed;
   const own = i.own;
-  const web = i.web;
-  if (r && r.source === 'plex' && web && typeof web === 'object' && String(web.track) === String(r.track) &&
-      Math.abs(num(web.offset_ms) - num(r.offset_ms)) <= HANDOFF_APART_MS) {
-    r = { source: 'web', device: web.device, device_id: web.device_id, updated_at: web.updated_at, bookMs: r.bookMs };
-  }
   if (!r || r.source !== 'web' || !otherDevice(r, i.me)) return null;
   const age = ageOf(i.now, r.updated_at);
   if (!(age <= HANDOFF_WITHIN_MS)) return null;
   if (!own || own.own !== true || typeof own.bookMs !== 'number' || typeof r.bookMs !== 'number') return null;
   if (Math.abs(own.bookMs - r.bookMs) <= HANDOFF_APART_MS) return null;
   return {
-    other: { bookMs: r.bookMs, device: r.device || '', agoMs: age },
+    other: { bookMs: r.bookMs, device: r.device || '', agoMs: age, sameLabel: sameLabel(r, i.me) },
     own: { bookMs: own.bookMs }
   };
+}
+
+// Another device with this one's label ("Chrome on Linux" twice).
+function sameLabel(copy, me) {
+  const a = copy && typeof copy.device === 'string' ? copy.device : '';
+  return !!a && !!me && a === me.device;
 }
 
 /* The question when Play comes back to a paused book (or the page is shown
@@ -312,7 +313,7 @@ export function recheckOffer(o) {
   if (Math.abs(x.webMs - x.atMs) <= HANDOFF_APART_MS) return null;
   const age = ageOf(x.now, web.updated_at);
   return {
-    other: { bookMs: x.webMs, device: web.device || '', agoMs: isFinite(age) ? age : null },
+    other: { bookMs: x.webMs, device: web.device || '', agoMs: isFinite(age) ? age : null, sameLabel: sameLabel(web, x.me) },
     own: { bookMs: x.atMs }
   };
 }
@@ -328,9 +329,12 @@ export function formatAgo(ms) {
   return days === 1 ? '1 day ago' : days + ' days ago';
 }
 
+/* The question. A device with this one's label is "another <label>", so two
+   phones of one kind don't read as this one. */
 export function handoffMessage(offer) {
   const o = (offer && offer.other) || {};
-  return 'Continue from ' + clock(o.bookMs) + ' (' + (o.device || 'another device') + ', ' + formatAgo(o.agoMs) + ')?';
+  const who = !o.device ? 'another device' : o.sameLabel ? 'another ' + o.device : o.device;
+  return 'Continue from ' + clock(o.bookMs) + ' (' + who + ', ' + formatAgo(o.agoMs) + ')?';
 }
 
 /* History entries (newest first, as GET /history gives them, several pages
