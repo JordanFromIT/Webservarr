@@ -100,13 +100,17 @@
  *                     listener left off, before anything plays (features.js:
  *                     the handoff prompt). info: { book, resumed: the copy it
  *                     resumes from ({ source, track, offset_ms, updated_at,
- *                     device, device_id, bookMs }), own: this browser's own
- *                     copy ({ track, offset_ms, updated_at, device, own,
- *                     bookMs } or null), now (the server's clock, ISO, or
- *                     null), me: { device_id, device } }. A truthy answer
- *                     holds the autoplay: the book loads at the resumed place,
- *                     paused, for play() or a seek to decide, and this
- *                     browser's local copy is left as it was until then.
+ *                     device, device_id, bookMs } or null), web:
+ *                     WebServarr's copy ({ source, track, offset_ms,
+ *                     updated_at, device, device_id, bookMs (null: not in
+ *                     this book), playable } or null), own: this browser's
+ *                     own copy ({ track, offset_ms, updated_at, device, own,
+ *                     acked, bookMs } or null), now (the server's clock, ISO,
+ *                     or null), me: { device_id, device } }. An answer
+ *                     { at: 'web' } holds the open paused at WebServarr's
+ *                     place, { at: 'own' } at this browser's own; nothing is
+ *                     pushed and the local copy is left as it was until the
+ *                     listener plays or moves.
  *   resolveConflict() the listener answered a 409 (saves.js 'conflict'
  *                     warning): saves go again. Returns the conflict or null.
  *   placeMs(track, offsetMs)  the book time of a place in the loaded book, or null
@@ -1173,6 +1177,44 @@ export function createEngine(env) {
       }
       lost = order.length > 0 && !resumed;
     }
+    // The handoff gate sees this browser's own copy before the open can
+    // overwrite it (features.js). A hold opens paused at WebServarr's place
+    // ({ at: 'web' }), or at this browser's own when that place can't play
+    // here ({ at: 'own' }); nothing is pushed then.
+    const mine = places ? own() : null;
+    let webCopy = null;
+    let held = null;
+    if (places && places.web && typeof places.web === 'object') {
+      const w = places.web;
+      webCopy = { source: 'web', track: String(w.track), offset_ms: Number(w.offset_ms), duration_ms: Number(w.duration_ms) || 0,
+        updated_at: w.updated_at, device: typeof w.device === 'string' ? w.device : '', device_id: w.device_id || '' };
+    }
+    if (openGate && places && !opts.at) {
+      const webMs = webCopy ? toBookMs(book.tracks, webCopy.track, webCopy.offset_ms) : null;
+      const playable = webMs !== null && !blocked(toTrackOffset(book.tracks, webMs).index);
+      try {
+        held = openGate({
+          book: key,
+          resumed: resumed ? Object.assign({}, resumed, { bookMs: startMs }) : null,
+          web: webCopy ? Object.assign({}, webCopy, { bookMs: webMs, playable: playable }) : null,
+          own: mine,
+          now: places.now || null,
+          me: me()
+        }) || null;
+      } catch (e) {
+        console.error('[player] the open gate failed', e);
+        held = null;
+      }
+      if (held && held.at === 'own' && mine) {
+        startMs = mine.bookMs;
+        resumed = Object.assign({ source: 'local' }, mine);
+      } else if (held && webMs !== null) {
+        startMs = webMs;
+        resumed = webCopy;
+      } else {
+        held = null;
+      }
+    }
     const to = toTrackOffset(book.tracks, startMs);
     playhead = { index: to.index, offset: to.offset_ms };
     target = { index: to.index, offset: to.offset_ms };
@@ -1183,33 +1225,19 @@ export function createEngine(env) {
       if (isFinite(a)) age = Math.max(0, a);
     }
     resumedFrom = resumed ? { source: resumed.source, device: resumed.device, updated_at: resumed.updated_at, age_ms: age } : null;
-    // The gate sees this browser's own copy before the open overwrites it.
-    let held = false;
-    if (openGate && resumed && !cannot) {
-      try {
-        held = !!openGate({
-          book: key,
-          resumed: Object.assign({}, resumed, { bookMs: startMs }),
-          own: own(),
-          now: places.now || null,
-          me: me()
-        });
-      } catch (e) {
-        console.error('[player] the open gate failed', e);
-        held = false;
-      }
-    }
     if (saver) {
       try {
         saver.start(key, {
           // A local copy newer than the server's goes to the server at once
-          // (not for a part that can't play here: nothing is saved then).
-          push: !!(resumed && resumed.source === 'local') && !cannot,
+          // (not for a part that can't play here, nor while the handoff
+          // question holds the open: nothing is saved then).
+          push: !!(resumed && resumed.source === 'local') && !cannot && !held,
           savedAt: places && places.web ? places.web.updated_at : null,
-          held: resumed && resumed.source === 'web' ? resumed : null,
-          // The handoff question is showing: this browser's own place stays
-          // in the local copy until the listener answers.
-          keepLocal: held
+          held: held ? webCopy : resumed && resumed.source === 'web' ? resumed : null,
+          // This browser's own place stays in the local copy until the
+          // listener answers, plays or moves: while the question shows, and
+          // while that place is one the server never took.
+          keepLocal: !!held || !!(mine && mine.own === true && mine.acked !== true)
         });
       } catch (e) {
         console.error('[player] saving failed', e);

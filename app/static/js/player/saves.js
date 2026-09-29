@@ -392,45 +392,70 @@ export function createSaver(o) {
     try { v = JSON.parse(raw); } catch (e) { return null; }
     const c = copyOf('local', v);
     if (!c) return null;
-    return { track: c.track, offset_ms: c.offset_ms, duration_ms: c.duration_ms, updated_at: c.updated_at, device: c.device, own: v.own === true };
+    return { track: c.track, offset_ms: c.offset_ms, duration_ms: c.duration_ms, updated_at: c.updated_at, device: c.device, own: v.own === true, acked: v.acked === true };
   }
 
   // Stamped when the place is reached, in the server's clock. own: the
   // listener played or moved to it here.
   // A refused save's conflict caps the local copy's stamp: a place played
   // after the server said another device is newer never counts as newer
-  // than that device's (so the next open asks rather than pushing it).
-  function capAt(book) {
-    const r = run;
+  // than that device's (so the next open asks rather than pushing it). r:
+  // the run the 409 answered (it may have been stopped since).
+  function capAt(book, r) {
     const c = r && r.book === book && r.conflict ? Date.parse(r.conflict.updated_at) : NaN;
     return isFinite(c) ? c : Infinity;
   }
 
+  /* acked: the server has this very place (it came from the server, or a
+     save of it was stored). A copy that is not is this browser's alone: the
+     next open never overwrites it without asking (engine.js, features.js). */
   function writeLocal(book, place, own) {
     const id = identity();
     if (!id) return;
+    const r = run;
     const value = JSON.stringify({
       track: place.track,
       offset_ms: place.offset_ms,
       duration_ms: place.duration_ms,
-      updated_at: new Date(Math.min(now() + skew, capAt(book))).toISOString(),
+      updated_at: new Date(Math.min(now() + skew, capAt(book, r))).toISOString(),
       device: device,
-      own: !!own
+      own: !!own,
+      acked: !!(r && r.book === book && samePlace(place, r.acked) && !r.conflict)
     });
     stored(function (s) { s.setItem(localKey(id, book), value); });
   }
 
-  // The local copy, stamped no later than the conflict (see capAt).
-  function capLocal(book) {
+  // Changes the local copy's fields in place (never its place).
+  function editLocal(book, fn) {
     const id = identity();
-    const cap = capAt(book);
-    if (!id || cap === Infinity) return;
+    if (!id) return;
     stored(function (s) {
       const raw = s.getItem(localKey(id, book));
       const v = raw ? JSON.parse(raw) : null;
-      if (!v || typeof v !== 'object' || !(Date.parse(v.updated_at) > cap)) return;
-      v.updated_at = new Date(cap).toISOString();
-      s.setItem(localKey(id, book), JSON.stringify(v));
+      if (v && typeof v === 'object' && fn(v)) s.setItem(localKey(id, book), JSON.stringify(v));
+    });
+  }
+
+  // The local copy after a 409: stamped no later than the conflict (see
+  // capAt), and not acknowledged.
+  function capLocal(book, r) {
+    const cap = capAt(book, r);
+    if (cap === Infinity) return;
+    editLocal(book, function (v) {
+      const later = Date.parse(v.updated_at) > cap;
+      if (later) v.updated_at = new Date(cap).toISOString();
+      const was = v.acked;
+      v.acked = false;
+      return later || was !== false;
+    });
+  }
+
+  // A save of this place was stored: the local copy of it is acknowledged.
+  function ackLocal(book, place) {
+    editLocal(book, function (v) {
+      if (v.acked === true || String(v.track) !== place.track || v.offset_ms !== place.offset_ms) return false;
+      v.acked = true;
+      return true;
     });
   }
 
@@ -557,6 +582,7 @@ export function createSaver(o) {
         const at = Date.parse(data.updated_at);
         if (isFinite(at)) measureSkew(at, sent.wall, now());
         r.base = data.updated_at;
+        ackLocal(r.book, sent.place);
       }
       return true;
     }
@@ -578,7 +604,7 @@ export function createSaver(o) {
         now: typeof res.data.now === 'string' ? res.data.now : null
       };
       // What was played before the answer came is no newer than that place.
-      capLocal(r.book);
+      capLocal(r.book, r);
       return true;
     }
     // Keep what the failed save was for (a pause, the end), unless something
@@ -820,9 +846,21 @@ export function createSaver(o) {
     if (r.timer !== null) clearT(r.timer);
     r.timer = null;
     if (!b || signedOut) return;
+    let p;
     try {
-      Promise.resolve(post(b, 'fetch')).catch(noop);
-    } catch (e) { /* the local copy has it */ }
+      p = Promise.resolve(post(b, 'fetch'));
+    } catch (e) {
+      return;   // the local copy has it
+    }
+    // The last save refused for another device's newer place: the local
+    // copy of this run is capped like any refused save's.
+    p.then(function (res) {
+      const c = res && res.status === 409 && res.data && res.data.conflict;
+      if (!c || typeof c !== 'object' || typeof c.updated_at !== 'string') return;
+      r.conflict = { track: String(c.track == null ? '' : c.track), offset_ms: Number(c.offset_ms),
+        device: typeof c.device === 'string' ? c.device : '', updated_at: c.updated_at, now: null };
+      capLocal(r.book, r);
+    }, noop);
   }
 
   function flush(kind, event) {

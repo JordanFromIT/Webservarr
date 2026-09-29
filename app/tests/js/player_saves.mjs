@@ -2280,6 +2280,73 @@ for (const outcome of ['fails', 'succeeds']) {
   }
 }
 
+current = 'a 409 that lands after stop() or after another book starts still caps its own book\'s local copy';
+for (const then of ['nothing', 'stop()', 'start(another book)']) {
+  let wall = Date.UTC(2026, 8, 29, 18, 6, 0);
+  let mono = 0;
+  const storage = fakeStorage();
+  let answer = null;
+  const saver = S.createSaver({
+    post: (b, kind) => (kind === 'beacon' ? true : new Promise((res) => { answer = res; })),
+    now: () => wall, mono: () => mono, storage, identity: IDENTITY,
+    setTimeout: () => 1, clearTimeout: () => {}, psid: 'p', device: 'Chrome on Android', deviceId: 'a'.repeat(20)
+  });
+  const st = (playing, off) => ({ book: '500:1', playing, position: { track: '502', offset_ms: off, duration_ms: 900000 }, bookMs: 600000 + off });
+  saver.start('500:1', { savedAt: '2026-09-29T18:00:03.220Z', held: { track: '502', offset_ms: 303000 } });
+  saver.note({ reason: 'play', state: st(true, 303000) });
+  wall += 250; mono += 250;
+  saver.note({ reason: 'time', state: st(true, 303250) });
+  if (then === 'stop()') saver.stop();
+  if (then === 'start(another book)') saver.start('510:1', {});
+  answer({ status: 409, data: { conflict: { track: '503', offset_ms: 101250, device: 'Chrome on Linux', updated_at: '2026-09-29T18:00:06.220Z' }, now: new Date(wall).toISOString() } });
+  await new Promise((r) => setTimeout(r, 10));
+  const v = JSON.parse(storage.map.get('ws-player:place:' + IDENTITY + ':500:1'));
+  check(`${then}: capped at the conflict, not acknowledged`, v.updated_at === '2026-09-29T18:00:06.220Z' && v.acked === false, v);
+}
+
+current = 'the local copy says whether the server has that very place';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1', { held: { track: '501', offset_ms: 100000, duration_ms: 3600000 } });
+  p.open();
+  check('opened at the server\'s place: acknowledged', localOf(t).acked === true && t.saver.readLocal('500:1').acked === true, localOf(t));
+  p.play();
+  await p.listen(500);
+  check('played on, not yet saved: not acknowledged', localOf(t).acked === false, localOf(t));
+  p.pause();
+  await t.clock.advance(1500);
+  check('the pause stored: acknowledged', localOf(t).acked === true && localOf(t).offset_ms === p.offset, localOf(t));
+  t.server.mode = 'offline';
+  p.seek(p.offset + 60000);
+  await t.clock.advance(1500);
+  check('a move whose save failed: not acknowledged', localOf(t).acked === false, localOf(t));
+  t.saver.stop();
+  const t2 = makeSaver();
+  t2.storage.map.set('ws-player:place:' + IDENTITY + ':500:1', JSON.stringify({ track: '501', offset_ms: 5, updated_at: new Date(T0).toISOString() }));
+  check('a copy written before the flag: not acknowledged', t2.saver.readLocal('500:1').acked === false);
+}
+
+current = 'a last save refused with 409 caps the local copy too';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1', { savedAt: '2026-09-29T10:00:00.000Z' });
+  p.open();
+  t.server.mode = 'offline';
+  p.play();
+  await p.listen(3000);
+  t.server.mode = 409;
+  t.server.conflict = { track: '503', offset_ms: 1, device: 'x', updated_at: new Date(T0 - 60000).toISOString() };
+  const n = t.server.calls.length;
+  t.saver.stop();
+  await t.clock.advance(2000);
+  check('the last save went and was refused', t.server.calls.length === n + 1 && t.server.calls[n].body.event === 'leave', t.server.calls.slice(n).map((c) => c.body.event));
+  check('the local copy: capped, not acknowledged', localOf(t).updated_at === new Date(T0 - 60000).toISOString() && localOf(t).acked === false, localOf(t));
+}
+
 current = 'the stop() fallback obeys the 2-minute rule: a pause sent before a long suspend is not resent';
 {
   let wall = 0;

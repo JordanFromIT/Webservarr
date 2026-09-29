@@ -270,23 +270,34 @@ function ageOf(nowIso, atIso) {
 }
 
 /* The handoff question for an open (the engine's setOpenGate info), or null.
-   Only when the book resumes from WebServarr's copy, saved by another device
-   in the last 24 hours (in the server's clock), and this browser has its own
-   place in the book (played or moved to here) more than 30 s from it.
-   (Plex's echoes of our own saves never get here: GET /position leaves out
-   a Plex copy of a place WebServarr logged.) */
+   Asked when WebServarr's copy (web) was saved by another device and this
+   browser has its own place in the book (played or moved to here) more than
+   30 s from it, and either
+   - the book resumes from that copy and it is under 24 hours old (server's
+     clock), or
+   - this browser's place is one the server never took (own.acked false: it
+     played on offline, or after a refused save, or its last save's answer
+     never came back), whatever its age or stamp: it is never overwritten or
+     pushed without asking.
+   The open then holds at the web place ({ at: 'web' }), or, when that place
+   is in a part this browser can't play, at this browser's own ({ at: 'own' },
+   other.canGo false). (Plex's echoes of our own saves never get here:
+   GET /position leaves out a Plex copy of a place WebServarr logged.) */
 export function handoffOffer(info) {
   const i = info || {};
-  const r = i.resumed;
+  const web = i.web || (i.resumed && i.resumed.source === 'web' ? i.resumed : null);
   const own = i.own;
-  if (!r || r.source !== 'web' || !otherDevice(r, i.me)) return null;
-  const age = ageOf(i.now, r.updated_at);
-  if (!(age <= HANDOFF_WITHIN_MS)) return null;
-  if (!own || own.own !== true || typeof own.bookMs !== 'number' || typeof r.bookMs !== 'number') return null;
-  if (Math.abs(own.bookMs - r.bookMs) <= HANDOFF_APART_MS) return null;
+  if (!web || typeof web.bookMs !== 'number' || !otherDevice(web, i.me)) return null;
+  if (!own || own.own !== true || typeof own.bookMs !== 'number') return null;
+  if (Math.abs(own.bookMs - web.bookMs) <= HANDOFF_APART_MS) return null;
+  const age = ageOf(i.now, web.updated_at);
+  const recent = !!i.resumed && i.resumed.source === 'web' && age <= HANDOFF_WITHIN_MS;
+  if (!recent && own.acked === true) return null;
+  const canGo = web.playable !== false;
   return {
-    other: { bookMs: r.bookMs, device: r.device || '', agoMs: age, sameLabel: sameLabel(r, i.me) },
-    own: { bookMs: own.bookMs }
+    other: { bookMs: web.bookMs, device: web.device || '', agoMs: isFinite(age) ? age : null, sameLabel: sameLabel(web, i.me), canGo: canGo },
+    own: { bookMs: own.bookMs },
+    at: canGo ? 'web' : 'own'
   };
 }
 
@@ -952,11 +963,17 @@ export function createFeatures(env) {
     const entry = { book: book, offer: offer, kind: kind, prompt: null };
     handoff = entry;
     const actions = [];
-    if (typeof offer.other.bookMs === 'number' && offer.other.canGo !== false) {
+    const canGo = typeof offer.other.bookMs === 'number' && offer.other.canGo !== false;
+    if (canGo) {
       actions.push({ label: 'Continue', primary: true, run: function () { chooseHandoff(entry, 'other'); } });
     }
     actions.push({ label: kind === 'conflict' ? 'Keep listening here' : 'Start from here',
       primary: !actions.length, run: function () { chooseHandoff(entry, 'own'); } });
+    // At an open where the other place can't play here: the question can
+    // wait (nothing is saved or overwritten until the listener plays or moves).
+    if (!canGo && kind === 'open') {
+      actions.push({ label: 'Not now', run: function () { if (handoff === entry) handoff = null; } });
+    }
     entry.prompt = ui.prompt({ id: 'handoff', message: handoffMessage(offer), actions: actions });
   }
 
@@ -991,7 +1008,7 @@ export function createFeatures(env) {
     player.setOpenGate(function (info) {
       const offer = handoffOffer(info);
       pendingOpen = offer ? { book: info.book, offer: offer } : null;
-      return !!offer;
+      return offer ? { at: offer.at } : null;
     });
   }
 
