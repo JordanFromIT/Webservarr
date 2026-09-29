@@ -541,6 +541,11 @@ export function createSaver(o) {
     const c = status === 409 && res.data && res.data.conflict;
     if (c && typeof c === 'object') {
       if (r.event === null && sent.event !== 'checkin') r.event = sent.event;
+      // The server answered: whatever failed before is over (the question
+      // says what happens next, not the "not saved" warning).
+      r.failures = 0;
+      r.failedSinceOk = false;
+      r.backoffUntil = 0;
       r.conflict = {
         track: String(c.track == null ? '' : c.track),
         offset_ms: Number(c.offset_ms),

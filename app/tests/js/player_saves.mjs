@@ -2185,6 +2185,26 @@ current = 'a 409: one conflict warning, nothing more sent until the listener ans
   t.saver.stop();
 }
 
+current = 'a 409 after failed saves ends the "not saved" warning: the server answered';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1');
+  p.open();
+  p.play();
+  await p.listen(1000);
+  t.server.mode = 'offline';
+  await p.listen(45000);
+  check('the warning is on while saves fail', t.saver.warning === true);
+  t.server.mode = 409;
+  t.server.conflict = { track: '503', offset_ms: 1, device: 'x', updated_at: '2026-09-29T11:00:00.000Z' };
+  await p.listen(35000);
+  const kinds = t.warnings.map((w) => w.kind + ':' + w.active);
+  check('refused: the question instead, and the warning ends', t.warnings.some((w) => w.kind === 'conflict') && t.saver.warning === false && kinds[kinds.length - 1] === 'not-saved:false', kinds);
+  t.saver.stop();
+}
+
 current = 'a 409 on a closing page: its last save is dropped, and a paused, answered-nothing close sends nothing';
 {
   const t = makeSaver();
