@@ -44,6 +44,9 @@ function byline(book) {
 }
 
 // The skeleton rows in #ptBooks copy this row's geometry (player-test.html).
+// The button keeps one width whatever it says (Play, Pause, Opening…), so the
+// rows' titles line up; on a phone it is the icon alone (its aria-label names
+// the book), which leaves the title the room.
 function bookRow(book) {
   const key = escapeHtml(String(book.key || ''));
   const title = escapeHtml(book.title || 'Untitled');
@@ -63,9 +66,9 @@ function bookRow(book) {
       '<span class="block text-xs text-steel-blue truncate mt-0.5">' + escapeHtml(meta) + '</span>' +
     '</span>' +
     '<button type="button" data-pt-play="' + key + '" aria-label="Play ' + title + '" ' +
-      'class="shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-[10px] bg-primary text-bright text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60">' +
-      '<span class="material-symbols-outlined text-base" aria-hidden="true" data-pt-icon>play_arrow</span>' +
-      '<span data-pt-label>Play</span>' +
+      'class="shrink-0 inline-flex items-center justify-center gap-1 size-11 sm:size-auto sm:min-w-[6.5rem] sm:px-3 sm:py-2 rounded-[10px] bg-primary text-bright text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60">' +
+      '<span class="material-symbols-outlined text-xl sm:text-base" aria-hidden="true" data-pt-icon>play_arrow</span>' +
+      '<span class="hidden sm:inline" data-pt-label>Play</span>' +
     '</button>' +
   '</li>';
 }
