@@ -225,20 +225,19 @@ It is not a page module: it lives for the document, not a page visit.
 
 Found during the build: some audiobook editions use a codec that browsers cannot decode (for
 example E-AC3 "Dolby Digital Plus + Atmos" in `.m4b`, which Chrome and Firefox cannot play and
-Safari can). Decision (operator, 2026-09-29): such tracks are transcoded by Plex on the fly, and
-direct play stays the default for everything the browser can decode.
+Safari can).
+
+Revised decision (operator, 2026-09-29, replacing the same day's "transcode on the fly"): the
+player is direct play only. Live transcoding was built and then withdrawn: Chrome silently
+reconnects a dropped transcode stream, Plex restarts it at its original offset, and the saved
+place runs ahead of what the listener heard. No fix exists within the CSP in 5.4. Undecodable
+files are converted in the library instead (an operator task outside the app).
 
 - The book structure carries each track's container and codec. The engine asks the browser
   (`canPlayType`) before loading a track.
 - A decodable track streams direct, exactly as in section 6.
-- An undecodable track streams from Plex's own transcoder on the same `plex.direct` connection
-  (so the CSP in 5.4 is unchanged), converted to a format every browser plays. Seeking restarts
-  the transcode at the new offset. The engine maps the element's time back to the track offset,
-  so the saved position means the same thing in both modes.
-- If a track can neither be decoded nor transcoded, the listener sees "This book's audio format
-  can't play in this browser", never "Can't reach the media server".
-- Transcode sessions are stopped when the listener leaves the track (best effort; Plex also ends
-  idle sessions itself).
+- An undecodable track is not loaded. The listener sees "This book's audio format can't play in
+  this browser", never "Can't reach the media server", and the saved place is untouched.
 
 ## 12. How it is built
 
