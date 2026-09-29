@@ -221,6 +221,25 @@ It is not a page module: it lives for the document, not a page visit.
   resuming where the browser stopped and the reverse, and the local-versus-remote connection
   switch when leaving home.
 
+## 11a. Addendum (2026-09-29): formats the browser cannot decode
+
+Found during the build: some audiobook editions use a codec that browsers cannot decode (for
+example E-AC3 "Dolby Digital Plus + Atmos" in `.m4b`, which Chrome and Firefox cannot play and
+Safari can). Decision (operator, 2026-09-29): such tracks are transcoded by Plex on the fly, and
+direct play stays the default for everything the browser can decode.
+
+- The book structure carries each track's container and codec. The engine asks the browser
+  (`canPlayType`) before loading a track.
+- A decodable track streams direct, exactly as in section 6.
+- An undecodable track streams from Plex's own transcoder on the same `plex.direct` connection
+  (so the CSP in 5.4 is unchanged), converted to a format every browser plays. Seeking restarts
+  the transcode at the new offset. The engine maps the element's time back to the track offset,
+  so the saved position means the same thing in both modes.
+- If a track can neither be decoded nor transcoded, the listener sees "This book's audio format
+  can't play in this browser", never "Can't reach the media server".
+- Transcode sessions are stopped when the listener leaves the track (best effort; Plex also ends
+  idle sessions itself).
+
 ## 12. How it is built
 
 The same loop as sub-project 1: `ws-coder` implements each plan task on `dev`; one
