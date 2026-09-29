@@ -939,7 +939,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-bar-title { font-size: 15px; font-weight: 600; line-height: 1.3; }
 .wsp-bar-meta { font-size: 13px; line-height: 1.3; color: rgb(var(--color-text) / .7); font-variant-numeric: tabular-nums; }
 @media (min-width: 1024px) {
-  .wsp-bar-row { height: 72px; padding: 0 24px 0 16px; gap: 16px; }
+  .wsp-bar-row { height: 72px; max-width: none; padding: 0 24px 0 12px; gap: 16px; }
 }
 @media (hover: hover) and (pointer: fine) {
   .wsp-bar-open:hover { background: rgb(var(--color-text) / .05); }
@@ -1021,14 +1021,19 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-icon-btn:focus-visible { outline: 2px solid rgb(var(--color-primary)); outline-offset: 0; }
 
 .wsp-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wsp-main, .wsp-panel-body { scrollbar-width: thin; scrollbar-color: rgb(var(--color-text) / .2) transparent; }
 .wsp-main {
   flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   display: flex; flex-direction: column; align-items: center; padding: 4px 24px 24px;
 }
 .wsp-main > * { width: 100%; max-width: 440px; flex-shrink: 0; }
-.wsp-main > .wsp-full-art { width: min(100%, 38vh, 400px); width: min(100%, 38dvh, 400px); aspect-ratio: 1; margin: 4px 0 24px; touch-action: none; }
+.wsp-main > .wsp-full-art {
+  /* The cover takes the height the rest leaves, so everything fits on any
+     screen without scrolling; it keeps its own shape inside it. */
+  flex: 1 1 0; min-height: 140px; max-height: min(400px, 44vh); margin: 4px 0 20px; touch-action: none;
+}
 .wsp-full-art img { border-radius: 12px; box-shadow: 0 18px 40px -16px var(--ws-shade); }
-.wsp-full-art .wsp-art-mark { border-radius: 16px; font-size: 64px; }
+.wsp-full-art .wsp-art-mark { width: auto; max-width: 100%; aspect-ratio: 1; border-radius: 16px; font-size: 64px; }
 .wsp-meta { text-align: center; touch-action: none; }
 .wsp-series, .wsp-byline { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgb(var(--color-text) / .7); }
 .wsp-series { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
@@ -1040,7 +1045,7 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-main > .wsp-warn-live:not(:empty) { margin-top: 16px; }
 .wsp-main .wsp-warn { padding: 8px 12px; border-radius: 10px; }
 
-.wsp-scrub { margin-top: 24px; }
+.wsp-scrub { margin-top: 20px; }
 .wsp-chapter { margin: 0 0 8px; text-align: center; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wsp-range { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; }
 .wsp-range:focus { outline: none; }
@@ -1117,8 +1122,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-grab, .wsp-panel-back { display: none; }
   .wsp-top { padding: 0 24px; height: 64px; }
   .wsp-body { flex-direction: row; justify-content: center; gap: 64px; padding: 0 48px 40px; }
-  .wsp-main { flex: 0 1 440px; justify-content: center; padding: 0; }
-  .wsp-main > .wsp-full-art { width: min(100%, 44vh, 400px); }
+  .wsp-main { flex: 0 1 440px; justify-content: safe center; padding: 0 8px; }
   .wsp-full[data-view] .wsp-main { display: flex; }
   .wsp-full .wsp-side, .wsp-full[data-view] .wsp-side { display: none; }
   .wsp-full[data-side] .wsp-side { display: flex; flex: 0 1 420px; min-height: 0; flex-direction: column; }
