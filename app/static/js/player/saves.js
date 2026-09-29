@@ -38,7 +38,8 @@
  * then each save the server took). The server refuses a save over another
  * device's newer place with 409 and that place. Then nothing more is sent:
  * onWarning gets { kind: 'conflict', book, conflict: { track, offset_ms,
- * device, updated_at }, now }, the local copy keeps following the place,
+ * device, updated_at }, now }, the local copy keeps following the place
+ * but is stamped no later than the stored one (so an open asks, never pushes),
  * and resolveConflict() (the listener's answer) takes the stored timestamp
  * as the new base and lets saves go again. A beacon or last save refused
  * that way is dropped.
@@ -396,6 +397,15 @@ export function createSaver(o) {
 
   // Stamped when the place is reached, in the server's clock. own: the
   // listener played or moved to it here.
+  // A refused save's conflict caps the local copy's stamp: a place played
+  // after the server said another device is newer never counts as newer
+  // than that device's (so the next open asks rather than pushing it).
+  function capAt(book) {
+    const r = run;
+    const c = r && r.book === book && r.conflict ? Date.parse(r.conflict.updated_at) : NaN;
+    return isFinite(c) ? c : Infinity;
+  }
+
   function writeLocal(book, place, own) {
     const id = identity();
     if (!id) return;
@@ -403,11 +413,25 @@ export function createSaver(o) {
       track: place.track,
       offset_ms: place.offset_ms,
       duration_ms: place.duration_ms,
-      updated_at: new Date(now() + skew).toISOString(),
+      updated_at: new Date(Math.min(now() + skew, capAt(book))).toISOString(),
       device: device,
       own: !!own
     });
     stored(function (s) { s.setItem(localKey(id, book), value); });
+  }
+
+  // The local copy, stamped no later than the conflict (see capAt).
+  function capLocal(book) {
+    const id = identity();
+    const cap = capAt(book);
+    if (!id || cap === Infinity) return;
+    stored(function (s) {
+      const raw = s.getItem(localKey(id, book));
+      const v = raw ? JSON.parse(raw) : null;
+      if (!v || typeof v !== 'object' || !(Date.parse(v.updated_at) > cap)) return;
+      v.updated_at = new Date(cap).toISOString();
+      s.setItem(localKey(id, book), JSON.stringify(v));
+    });
   }
 
   // ---- A book being saved ----
@@ -553,6 +577,8 @@ export function createSaver(o) {
         updated_at: typeof c.updated_at === 'string' ? c.updated_at : null,
         now: typeof res.data.now === 'string' ? res.data.now : null
       };
+      // What was played before the answer came is no newer than that place.
+      capLocal(r.book);
       return true;
     }
     // Keep what the failed save was for (a pause, the end), unless something
@@ -767,7 +793,7 @@ export function createSaver(o) {
     // from the same psid is refused).
     if (r.latest && sendable(r) && (r.playing || dirty(r))) {
       r.final = body(r.book, r.latest, r.event === 'end' ? 'end' : 'leave', r.base);
-    } else if (r.inFlight && r.inFlight.event !== 'checkin') {
+    } else if (r.inFlight && r.inFlight.event !== 'checkin' && sendable(r)) {
       // A pause or a move still in flight is the last word, unless it fails:
       // then this 'leave' of its place goes instead (Plex is told it stopped).
       r.fallback = body(r.book, r.inFlight.place, r.inFlight.event === 'end' ? 'end' : 'leave', r.base);

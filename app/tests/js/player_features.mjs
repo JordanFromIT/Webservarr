@@ -406,6 +406,10 @@ async function setup(o = {}) {
       t.posts.push(body);
       if (t.server) {
         if (t.server.down || t.offline) return kind === 'beacon' ? false : Promise.reject(new TypeError('Failed to fetch'));
+        // t.postDelay: the round trip, the server answering at its end.
+        if (kind !== 'beacon' && t.postDelay) {
+          return new Promise((res) => clock.setTimeout(() => res(t.server.store(body, kind)), t.postDelay));
+        }
         const res = t.server.store(body, kind);
         return kind === 'beacon' ? true : Promise.resolve(res);
       }
@@ -1848,12 +1852,12 @@ for (const [what, arrange] of [
 
 const PHONE_ID = 'a'.repeat(20);
 const DESK_ID = 'b'.repeat(20);
-async function twoDevices() {
+async function twoDevices(o = {}) {
   const clock = fakeClock();
   const server = casServer(clock);
-  const page = async (psid, device, deviceId, storage) => {
+  const page = async (psid, device, deviceId, storage, prefs) => {
     const store = storage || memoryStorage();
-    const t = await setup({ clock, server, psid, device, deviceId, storage: store, identity: ID });
+    const t = await setup({ clock, server, psid, device, deviceId, storage: store, identity: ID, prefs });
     t.storage = store;
     t.prompts = () => t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
     t.buttons = () => t.qa('.wsp-prompt .wsp-notice-btn').map((b) => b.textContent);
@@ -1865,7 +1869,7 @@ async function twoDevices() {
     };
     return t;
   };
-  const phone = await page('psid-phone', 'Chrome on Android', PHONE_ID);
+  const phone = await page('psid-phone', 'Chrome on Android', PHONE_ID, null, o.phonePrefs);
   const desk = await page('psid-desk', 'Chrome on Linux', DESK_ID);
   const row = (book = MULTI.key) => server.rows[book] || null;
   const since = (n) => server.log.slice(n).map((e) => [e.result, e.kind, e.event, e.track, e.offset_ms, e.device_id && e.device_id[0]]);
@@ -2015,6 +2019,69 @@ await run('a lock-screen Play on a stale page: refused and asked; a second one p
   check('the desktop\'s place survives', row().updated_at === deskRow.updated_at, row());
   phone.engine.close();
   check('closing sends nothing either', phone.server.log.length === n + 1, since(n));
+});
+
+for (const [label, prefs, gap] of [['smart rewind off, 6 min stale', { skip_s: 10, speed: 1, smart_rewind: false }, 6 * MIN], ['smart rewind on, 6 min stale', undefined, 6 * MIN], ['smart rewind on, just paused', undefined, 0]]) {
+  await run(`a refused stale Play left unanswered (${label}): the next open asks, and the newer place survives`, async () => {
+    const d = await twoDevices({ phonePrefs: prefs });
+    const { clock, phone, desk, row, since, page, server } = d;
+    await phone.openAt(MULTI.key, '502', 300000);
+    await clock.advance(3000);
+    phone.engine.pause();
+    await clock.advance(1500);
+    await desk.open();
+    desk.engine.seek(1600000);
+    await clock.advance(1500);
+    desk.engine.pause();
+    await clock.advance(1500);
+    await clock.advance(gap);
+    const deskRow = Object.assign({}, row());
+    // A stray Play (a headset reconnecting); the answer takes 300 ms, and
+    // playback moves the place meanwhile.
+    phone.postDelay = 300;
+    const n = server.log.length;
+    phone.ms.handlers.get('play')();
+    await clock.advance(1500);
+    check('refused and asked', since(n).map((e) => e[0]).join() === 'conflict' && phone.prompts().length === 1, [since(n), phone.prompts()]);
+    const local = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+    check('the local copy is stamped no later than the desktop\'s place', Date.parse(local.updated_at) <= Date.parse(deskRow.updated_at), [local.updated_at, deskRow.updated_at]);
+    phone.engine.close();                  // never answered
+    await clock.advance(10 * MIN);
+    const again = await page('psid-phone-2', 'Chrome on Android', PHONE_ID, phone.storage, prefs);
+    const m = server.log.length;
+    await again.open();
+    await clock.advance(2000);
+    check('the next open resumes the desktop\'s place and asks', again.st().resumedFrom && again.st().resumedFrom.source === 'web' && !again.st().playing &&
+      again.buttons().join() === 'Continue,Start from here', [again.st().resumedFrom, again.prompts(), again.buttons()]);
+    check('nothing pushed', since(m).length === 0, since(m));
+    check('the desktop\'s place survives', row().updated_at === deskRow.updated_at && row().device_id === DESK_ID, row());
+    again.engine.close();
+    desk.engine.close();
+  });
+}
+
+await run('listening after a conflict is answered counts as newer again', async () => {
+  const { clock, phone, row, since, page, server } = await staleAfterPause();
+  phone.engine.play();
+  await clock.advance(1500);
+  phone.button('Keep listening here').click();
+  await clock.advance(2000);
+  check('answered: the row is the phone\'s', row().device_id === PHONE_ID);
+  // The phone listens on offline: only its local copy has the new place.
+  phone.offline = true;
+  await clock.advance(30000);
+  phone.engine.pause();
+  await clock.advance(1500);
+  const here = phone.st().position;
+  phone.engine.close();
+  phone.offline = false;
+  const again = await page('psid-phone-2', 'Chrome on Android', PHONE_ID, phone.storage);
+  const m = server.log.length;
+  await again.open();
+  await clock.advance(2000);
+  check('the local copy wins the next open', again.st().resumedFrom && again.st().resumedFrom.source === 'local' && again.prompts().length === 0, [again.st().resumedFrom, again.prompts()]);
+  check('and is pushed', since(m).length >= 1 && since(m)[0][0] === 'stored' && since(m)[0][3] === here.track && since(m)[0][4] >= here.offset_ms - 30000, [since(m), here]);
+  again.engine.close();
 });
 
 await run('Continue at a conflict moves to the stored place and saves it as this device\'s', async () => {

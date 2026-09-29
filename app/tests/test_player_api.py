@@ -870,7 +870,8 @@ class Conflicts(PlayerApiBase):
         self.assertTrue(r.json()["stored"])
 
     def test_base_is_validated(self):
-        for bad in ("yesterday", "2026-99-01T00:00:00Z", "2" * 41, 12, ["x"], "\ud800"):
+        for bad in ("yesterday", "2026-99-01T00:00:00Z", "2" * 41, 12, ["x"], "\ud800",
+                    "9999-12-31T23:59:59.999Z", "0001-01-01T00:00:00+01:00"):
             with self.subTest(bad=bad):
                 self.assertEqual(self.checkin(base=bad).status_code, 422)
         self.assertEqual(self.db.query(ListeningPosition).count(), 0)

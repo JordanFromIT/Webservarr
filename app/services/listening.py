@@ -101,8 +101,12 @@ def parse_base(base) -> Optional[datetime]:
     if not isinstance(base, str) or not base or len(base) > BASE_MAX:
         raise ValueError("base must be an ISO 8601 time")
     try:
-        return _naive_utc(datetime.fromisoformat(base.replace("Z", "+00:00")))
-    except ValueError:
+        at = _naive_utc(datetime.fromisoformat(base.replace("Z", "+00:00")))
+        at + timedelta(milliseconds=1)      # the store compares to the millisecond
+        return at
+    except (ValueError, OverflowError):
+        # The ends of the calendar ("9999-12-31T23:59:59.999Z",
+        # "0001-01-01T00:00:00+01:00") overflow in the zone or millisecond sums.
         raise ValueError("base must be an ISO 8601 time") from None
 
 
@@ -223,9 +227,12 @@ def get_history(db: Session, identity: str, book: str, limit: int = 200) -> list
     return [_entry(r) for r in rows]
 
 
-# Plex stamps a part again when it ends the session a save of ours started
-# (about 75 s after a pause, about 10 s after a move to another part), so its
-# copy of a place WebServarr already logged can look newer than a later save.
+# Defence in depth: Plex's copy of a place WebServarr itself saved and
+# forwarded to Plex (logged within ECHO_AT of Plex's stamp for it) is that
+# save, not listening done in a Plex app. On the dev instance Plex was never
+# seen stamping a place of its own accord: every lastViewedAt matched one of
+# our timeline writes. The rule only keeps such an echo from competing with
+# WebServarr's own copy in the resume merge.
 ECHO_MS = 5000
 ECHO_WINDOW = timedelta(hours=24)
 

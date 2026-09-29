@@ -2280,6 +2280,30 @@ for (const outcome of ['fails', 'succeeds']) {
   }
 }
 
+current = 'the stop() fallback obeys the 2-minute rule: a pause sent before a long suspend is not resent';
+{
+  let wall = 0;
+  const t = makeSaver({ now: () => T0 + wall });
+  const clock = t.clock;
+  const p = listener(t);
+  p.offset = 100000;
+  t.saver.start('500:1');
+  p.open();
+  p.play();
+  await p.listen(750);
+  wall = clock.now;
+  t.server.mode = 'offline';
+  t.server.latency = 3000;
+  p.pause();
+  await t.clock.advance(400);      // the pause is in flight
+  wall = clock.now + 3 * 3600000;  // the laptop slept 3 h (the wall clock moved, the page's did not)
+  const n = t.server.calls.length;
+  t.saver.stop();
+  t.server.mode = 200;
+  await t.clock.advance(20000);
+  check('no fallback: the place is 3 h old', t.server.calls.length === n, t.server.calls.slice(n).map((c) => [c.body.event, c.body.offset_ms]));
+}
+
 current = 'the page going while a pause is in flight: its place goes as the beacon';
 {
   const t = makeSaver();

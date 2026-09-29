@@ -295,7 +295,8 @@ class CompareAndSwap(StoreBase):
         self.assertEqual(listening.get_position(self.db, THEM, BOOK)["offset_ms"], 600000)
 
     def test_a_bad_base_is_refused(self):
-        for bad in ("yesterday", "", "2026-13-01T00:00:00Z", "x" * 41, 12, ["2026-01-01"]):
+        for bad in ("yesterday", "", "2026-13-01T00:00:00Z", "x" * 41, 12, ["2026-01-01"],
+                    "9999-12-31T23:59:59.999Z", "0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59.999-01:00"):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
                     checkin(self.db, base=bad)
