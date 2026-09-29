@@ -25,6 +25,7 @@ the same site.
 import hashlib
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Annotated, Literal, Optional
 from urllib.parse import urlsplit
 
@@ -40,6 +41,7 @@ from app.integrations import plex_player as pp
 from app.limiter import _get_client_ip, limiter
 from app.routers.tickets import account_identity
 from app.services import listening
+from app.utils import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -317,7 +319,11 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
 
     Plex's is best effort: once the listener's access is confirmed, a failure
     reading their Plex state (a refused token, plex.tv down) makes it null,
-    and WebServarr's still resumes the book."""
+    and WebServarr's still resumes the book.
+
+    `now` is the server's clock (ISO UTC) as it answers: the player measures
+    its own clock against it before it compares these copies with its local
+    one, which it stamps in the server's time."""
     await _book_access(who, key)
     web = listening.get_position(db, who.identity, key)
     try:
@@ -327,7 +333,7 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
     except pp.PlayerUnavailable as exc:
         logger.info("Plex position unavailable: %s", type(exc).__name__)
         plex_pos = None
-    return {"web": web, "plex": plex_pos}
+    return {"web": web, "plex": plex_pos, "now": utc_iso(datetime.now(timezone.utc))}
 
 
 @router.get("/history/{key}")

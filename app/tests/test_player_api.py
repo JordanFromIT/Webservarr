@@ -329,7 +329,8 @@ class Shapes(PlayerApiBase):
                 "book_duration_ms": 600_000, "updated_at": "2026-09-01T00:00:00.000Z", "device": "Plex",
                 "source": "plex"}
         self.plex_position.return_value = plex
-        self.assertEqual(self.client.get("/api/player/position/200:1").json(), {"web": None, "plex": plex})
+        first = self.client.get("/api/player/position/200:1").json()
+        self.assertEqual({k: first[k] for k in ("web", "plex")}, {"web": None, "plex": plex})
         self.checkin()
         body = self.client.get("/api/player/position/200:1").json()
         self.assertEqual(body["web"]["track"], "202")
@@ -337,6 +338,23 @@ class Shapes(PlayerApiBase):
         self.assertTrue(body["web"]["updated_at"].endswith("Z"))
         self.assertEqual(body["plex"], plex)
         self.assertEqual(self.plex_position.await_args.kwargs["session_id"], "sid-1001")
+
+    def test_position_carries_the_servers_clock(self):
+        # The player measures its clock against `now` before it compares its
+        # local copy (stamped in the server's time) with these.
+        from datetime import datetime, timezone
+        before = datetime.now(timezone.utc)
+        body = self.client.get("/api/player/position/200:1").json()
+        after = datetime.now(timezone.utc)
+        self.assertEqual(set(body), {"web", "plex", "now"})
+        self.assertRegex(body["now"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$")
+        at = datetime.fromisoformat(body["now"].replace("Z", "+00:00"))
+        self.assertLessEqual(before.replace(microsecond=before.microsecond // 1000 * 1000), at)
+        self.assertLessEqual(at, after)
+        # It is the same clock the stored place is stamped with.
+        self.checkin()
+        body = self.client.get("/api/player/position/200:1").json()
+        self.assertLessEqual(body["web"]["updated_at"], body["now"])
 
     def test_position_still_resumes_when_the_listeners_plex_access_fails(self):
         self.checkin()
