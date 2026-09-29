@@ -568,9 +568,11 @@ await run('the chapter list marks the current chapter and jumps', () => {
   check('focus back on the button', t.doc.activeElement === chaptersBtn);
   t.engine.set({ chapterIndex: 2, bookMs: 1500000 }, 'jump');
   check('the mark moves', items[2].getAttribute('aria-current') === 'true' && !items[1].hasAttribute('aria-current'));
+  t.q('.wsp-full .wsp-icon-btn').focus();
   chaptersBtn.click();
   t.q('.wsp-panel-back').click();
   check('the back button returns', !t.q('.wsp-full').hasAttribute('data-view'));
+  check('focus back on the button that showed it, even when the tap did not focus it', t.doc.activeElement === chaptersBtn);
 
   const wide = setup({ wide: true });
   wide.engine.set(BOOK, 'open');

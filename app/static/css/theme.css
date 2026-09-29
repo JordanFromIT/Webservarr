@@ -1128,6 +1128,8 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-full[data-side] .wsp-side { display: flex; flex: 0 1 420px; min-height: 0; flex-direction: column; }
   .wsp-panel { border-radius: 16px; background: rgb(var(--color-text) / .04); padding-top: 8px; }
   .wsp-panel-head { padding: 0 16px; }
+  /* In the top bar's row, clear of the cover and the chapter list. */
+  .wsp-sheet .wsp-notices { top: 8px; }
 }
 
 /* ---- The player's notices and prompts ----

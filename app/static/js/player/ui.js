@@ -62,10 +62,11 @@
  *   actionButton({ icon, text, label }) -> <button>
  *                     a button styled for the row of actions: an icon (or a
  *                     short text such as "1.5×") over its label
- *   panel(name, { title }) -> { body, show(), hide(), shown }
+ *   panel(name, { title }) -> { body, show(opener), hide(), shown }
  *                     a view of the full player like Chapters: beside the
  *                     player on a wide screen, over it (with a back button)
- *                     on a phone. body is where its content goes.
+ *                     on a phone. body is where its content goes; opener, the
+ *                     button that showed it, gets focus back when it hides.
  *   open(), close(), isOpen()        the full player
  *   on('open' | 'close', fn) -> unsubscribe
  */
@@ -388,7 +389,7 @@ export function createUI(env) {
     side.appendChild(section);
     const api = {
       body: body,
-      show: function () { showPanel(name); },
+      show: function (opener) { showPanel(name, opener); },
       hide: function () { hidePanel(name); },
       get shown() { return view === name; }
     };
@@ -405,9 +406,11 @@ export function createUI(env) {
     setAttr(full, 'data-side', shown ? '' : null);
   }
 
-  function showPanel(name) {
+  // opener: the button that showed it, for focus on the way back (a tap does
+  // not focus a button everywhere; Safari's does not).
+  function showPanel(name, opener) {
     if (!panels.has(name)) return;
-    panelFrom = doc.activeElement;
+    panelFrom = opener && opener.nodeType === 1 ? opener : doc.activeElement;
     view = name;
     drawPanels();
     if (name === 'chapters') centreCurrent();
@@ -487,7 +490,7 @@ export function createUI(env) {
     // On a phone the list covers the player: back to it, to see the jump.
     if (!matches(WIDE)) hidePanel('chapters');
   });
-  chaptersBtn.addEventListener('click', function () { showPanel('chapters'); });
+  chaptersBtn.addEventListener('click', function () { showPanel('chapters', chaptersBtn); });
 
   // ---- Slots ----
 
