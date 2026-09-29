@@ -345,6 +345,7 @@ function setup(o = {}) {
     clearTimeout(id) { live.delete(id); clock.clearTimeout(id); },
     mediaSession: ms,
     MediaMetadata: FakeMetadata,
+    permissions: o.permissions,
     baseUrl: 'https://ws.test/news'
   });
   const log = { change: [], ended: [], error: [], warning: [], raw: [] };
@@ -489,6 +490,70 @@ current = 'open uses the local connection when the probe answers';
   await p;
   check('local is used', sideOf(t.main.src) === 'local' && t.engine.state().connection === 'local');
   check('the first part plays from 0', partOf(t.main) === MULTI.tracks[0].part_path && t.engine.state().playing);
+  t.engine.close();
+}
+// ---- 3b. The Local Network Access gate: local only when already granted ----
+// A permissions API answering one state; asked records every name queried.
+function fakePermissions(answer) {
+  const p = { asked: [] };
+  p.query = (desc) => {
+    p.asked.push(desc && desc.name);
+    if (answer === 'throw') return Promise.reject(new TypeError("'local-network-access' is not a valid permission name"));
+    return Promise.resolve({ state: answer });
+  };
+  return p;
+}
+for (const state of ['granted', 'prompt', 'denied', 'throw']) {
+  current = `local network permission: ${state}`;
+  const perms = fakePermissions(state);
+  const t = setup({ permissions: perms });
+  await openPlaying(t, MULTI.key);
+  const localLoads = t.net.loads.filter((l) => l.side === 'local');
+  check('the permission was asked by its name', perms.asked[0] === 'local-network-access', perms.asked);
+  if (state === 'granted' || state === 'throw') {
+    check('local is probed', t.probes().length === 1 && localLoads.some((l) => l.probe));
+    check('and used', t.engine.state().connection === 'local' && t.engine.state().playing);
+  } else {
+    check('no probe element is created', t.probes().length === 0, t.probes().length);
+    check('nothing is loaded from the local connection', localLoads.length === 0, localLoads);
+    check('remote is chosen and plays', t.engine.state().connection === 'remote' && t.engine.state().playing && !t.main.paused);
+    // The failure ladder never falls back to local either.
+    t.net.down.add('remote');
+    await t.clock.advance(20000);
+    check('a remote failure never loads local', t.net.loads.every((l) => l.side !== 'local'));
+    check('it ends in the error instead', t.log.error.length === 1 && t.log.error[0].code === 'unreachable');
+    // The answer is kept for the page session: asked once.
+    t.net.down.clear();
+    t.engine.close();
+    const q = t.engine.open(OTHER.key);
+    await t.clock.advance(400);
+    await q;
+    check('asked once per page session', perms.asked.length === 1, perms.asked.length);
+    check('the next book is remote too, no local load', t.engine.state().connection === 'remote' && t.net.loads.every((l) => l.side !== 'local'));
+  }
+  t.engine.close();
+}
+current = 'a local connection that appears only after a refresh is never loaded unasked';
+{
+  const perms = fakePermissions('prompt');
+  const t = setup({ permissions: perms, net: { noLocal: true } });
+  await openPlaying(t, MULTI.key);
+  check('remote at first', t.engine.state().connection === 'remote');
+  t.net.noLocal = false;                       // the refreshed answer lists a local connection
+  t.net.down.add('remote');
+  await t.clock.advance(20000);
+  check('refreshed', t.net.fetches.some((u) => u.endsWith('?refresh=1')));
+  check('local was never loaded', t.net.loads.every((l) => l.side !== 'local'), t.net.loads.filter((l) => l.side === 'local'));
+  t.engine.close();
+}
+current = 'a permission query that never answers counts as no';
+{
+  const perms = { asked: 0, query() { this.asked += 1; return new Promise(() => {}); } };
+  const t = setup({ permissions: perms });
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(E.PROBE_MS + 400);
+  await p;
+  check('remote, no local load', t.engine.state().connection === 'remote' && t.net.loads.every((l) => l.side !== 'local'));
   t.engine.close();
 }
 current = 'no local connection: remote without a probe';

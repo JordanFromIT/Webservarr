@@ -19,7 +19,9 @@
  * Connection: the local connection is tried first with a throwaway element
  * that loads only metadata (a fetch would be refused: connect-src is 'self'),
  * 1.5 s at most, else the remote one; the choice is kept for the page
- * session. When the stream fails, in order: the other connection at the same
+ * session. Where the browser gates private addresses behind a Local Network
+ * Access prompt, local is tried only if that permission is already granted:
+ * the engine never makes the browser ask. When the stream fails, in order: the other connection at the same
  * offset; then a fresh token (GET /api/player/book/<key>?refresh=1) once;
  * then "Can't reach the media server" with a retry. A stream that stops
  * without an error (8 s waiting with nothing arriving) counts as a failure.
@@ -162,7 +164,8 @@ function roundSpeed(x) {
 // ---------------------------------------------------------------------------
 
 /* env: { host (where the element goes), createAudio(), fetch, setTimeout,
-   clearTimeout, mediaSession, MediaMetadata, baseUrl, skipSeconds }. */
+   clearTimeout, mediaSession, MediaMetadata, permissions, baseUrl,
+   skipSeconds }. */
 export function createEngine(env) {
   const setT = env.setTimeout;
   const clearT = env.clearTimeout;
@@ -211,6 +214,8 @@ export function createEngine(env) {
   // Connection: the choice kept for the page session, what has loaded on
   // each side with the current token, and the failure ladder's progress.
   let chosen = null;
+  let localOk = null;         // may the local side be used (the permission gate), once known
+  let localAsk = null;        // the permission question in flight
   const proven = new Map();   // side -> index of a part that loaded there
   const tried = new Set();
   let refreshed = false;
@@ -285,19 +290,65 @@ export function createEngine(env) {
     return !!(stream && stream.uris && Array.isArray(stream.uris[side]) && stream.uris[side].length);
   }
 
+  // A side the engine may load: the local one only once localAllowed() has
+  // said yes, so it is never loaded where the browser would ask first.
+  function usable(side) {
+    return hasSide(side) && (side !== 'local' || localOk === true);
+  }
+
+  /* May the local connection be tried without a prompt? Chrome asks "access
+     devices on your local network" the first time a public page loads from a
+     private address, and plex.direct names resolve to one from anywhere. So
+     only when that permission is already granted; 'prompt' or 'denied' (or
+     no answer in time) is no. A browser that has no such permission (the
+     query rejects) has no gate: yes. Asked once per page session. */
+  function localAllowed() {
+    if (localOk !== null) return Promise.resolve(localOk);
+    if (!localAsk) {
+      const perms = env.permissions;
+      if (!perms || typeof perms.query !== 'function') {
+        localOk = true;
+        return Promise.resolve(true);
+      }
+      localAsk = new Promise(function (resolve) {
+        let timer = null;
+        function settle(ok) {
+          if (timer === null) return;
+          clearT(timer);
+          timer = null;
+          localOk = ok;
+          localAsk = null;
+          resolve(ok);
+        }
+        timer = setT(function () { settle(false); }, PROBE_MS);
+        let asked;
+        try {
+          asked = Promise.resolve(perms.query({ name: 'local-network-access' }));
+        } catch (e) {
+          asked = Promise.reject(e);
+        }
+        asked.then(function (status) {
+          const st = status && status.state;
+          settle(st === 'granted' ? true : st === 'prompt' || st === 'denied' ? false : true);
+        }, function () { settle(true); });
+      });
+    }
+    return localAsk;
+  }
+
   function otherSide(side) {
     return side === 'local' ? 'remote' : 'local';
   }
 
   function preferredSide() {
-    if (chosen && hasSide(chosen)) return chosen;
-    if (hasSide('local')) return 'local';
-    return hasSide('remote') ? 'remote' : null;
+    if (chosen && usable(chosen)) return chosen;
+    if (usable('local')) return 'local';
+    return usable('remote') ? 'remote' : null;
   }
 
   // Built only to be handed to an element's src, never stored or logged.
   function urlFor(side, index) {
-    if (!hasSide(side) || !book || !book.tracks[index]) return '';
+    if (!usable(side) || !book || !book.tracks[index]) return '';
     const origin = String(stream.uris[side][0]).replace(/\/+$/, '');
     return origin + book.tracks[index].part_path + '?X-Plex-Token=' + encodeURIComponent(stream.token);
   }
@@ -338,13 +389,12 @@ export function createEngine(env) {
   }
 
   async function chooseSide(index) {
-    const kept = preferredSide();
-    if (chosen && kept === chosen) return chosen;
-    if (hasSide('local')) {
+    if (chosen && usable(chosen)) return chosen;
+    if (hasSide('local') && await localAllowed()) {
       if (await probe('local', index)) return 'local';
-      return hasSide('remote') ? 'remote' : 'local';
+      return usable('remote') ? 'remote' : 'local';
     }
-    return kept;
+    return usable('remote') ? 'remote' : null;
   }
 
   // ---- Loading a part ----
@@ -543,7 +593,7 @@ export function createEngine(env) {
     // 1. The other connection, at the same offset.
     tried.add(side);
     const other = otherSide(side);
-    if (hasSide(other) && !tried.has(other)) {
+    if (usable(other) && !tried.has(other)) {
       load(at.index, at.offset, other);
       changed('connection');
       return;
@@ -1030,6 +1080,7 @@ export function boot(win, overrides) {
     setTimeout: win.setTimeout.bind(win),
     clearTimeout: win.clearTimeout.bind(win),
     mediaSession: nav.mediaSession || null,
+    permissions: nav.permissions || null,
     MediaMetadata: win.MediaMetadata || null,
     baseUrl: win.location.href
   }, overrides || {}));
