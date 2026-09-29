@@ -43,7 +43,9 @@
  *   the open's rewind and a pause's never both happen for one break. A place
  *   the listener moves to is theirs: no rewind from it. No
  *   rewind while the listener's settings are unknown (their read failed).
- *   The rewound place is saved like any seek.
+ *   Smart rewind is a playback aid only: it never moves the saved place
+ *   back (engine rewind(), saves.js keeps the place it went back from until
+ *   playback passes it; a move of the listener's own saves as ever).
  * - Undo: a seek of more than 2 minutes (the scrubber, a chapter, a skip, the
  *   lock screen) shows "Jumped back|ahead <delta>." with Undo for 8 s. Undo
  *   goes back to where that jump started, and raises no notice of its own; a
@@ -330,9 +332,12 @@ export function createFeatures(env) {
      503) goes again with the next change, and on leaving. One save at a
      time, so the server never takes an older one after a newer: a change
      made while one is in flight goes when it returns, as the latest of
-     everything unsent. Leaving sends at once (keepalive) whatever is in
-     flight: the page is going. */
-  let putBusy = false;
+     everything unsent. Leaving sends at once (keepalive: the page is going),
+     and that save is in flight like any other. One sent while another was
+     still out may land before it, so its 2xx takes nothing: those keys go
+     again, after the other returns, or when the page comes back from the
+     back-forward cache. */
+  let putsOut = 0;
   let putAgain = false;
   function sendPrefs(leaving) {
     if (putTimer !== null) {
@@ -340,14 +345,15 @@ export function createFeatures(env) {
       putTimer = null;
     }
     if (!unsent.size || !fetchFn) return;
-    if (putBusy && !leaving) {
+    if (putsOut > 0 && !leaving) {
       putAgain = true;
       return;
     }
-    if (!leaving) {
-      putBusy = true;
-      putAgain = false;
-    }
+    const overlapped = putsOut > 0;
+    // Its answer cannot be trusted over the other's: send again after both.
+    if (overlapped) putAgain = true;
+    else putAgain = false;
+    putsOut += 1;
     const sent = new Map(unsent);
     const body = {};
     sent.forEach(function (n, k) { body[k] = prefs[k]; });
@@ -365,16 +371,15 @@ export function createFeatures(env) {
       asked = Promise.reject(e);
     }
     asked.then(function (resp) {
-      if (resp && resp.status >= 200 && resp.status < 300) {
+      if (!overlapped && resp && resp.status >= 200 && resp.status < 300) {
         sent.forEach(function (n, k) {
           if (unsent.get(k) === n) unsent.delete(k);
         });
       }
     }, function () { /* kept: the next change, or leaving, sends it again */ }).then(function () {
-      if (leaving) return;
-      putBusy = false;
-      // Changed meanwhile: now, as the latest state.
-      if (putAgain) {
+      putsOut -= 1;
+      // Changed meanwhile, or overlapped: now, as the latest state.
+      if (putsOut === 0 && putAgain) {
         putAgain = false;
         sendPrefs(false);
       }
@@ -415,7 +420,9 @@ export function createFeatures(env) {
     if (to === null) return;
     ownSeek = true;
     try {
-      player.seek(to);
+      // Marked as a rewind: the saved place is not moved back (saves.js).
+      if (typeof player.rewind === 'function') player.rewind(to);
+      else player.seek(to);
     } finally {
       ownSeek = false;
     }
@@ -598,8 +605,9 @@ export function createFeatures(env) {
       // nor from the place the book opened at once they have moved.
       if (!s.playing) pausedAt = null;
       openRewind = null;
-      // Listening is measured on from the place they moved to.
+      // Listening is measured afresh from the place they moved to.
       startAt = s.bookMs;
+      heard = false;
       if (sleep && sleep.kind === 'chapter') {
         sleep.endMs = chapterEnd(s);
         if (sleep.endMs === null) cancelSleep();
@@ -775,6 +783,10 @@ export function createFeatures(env) {
   if (win && typeof win.addEventListener === 'function') {
     ['pagehide', 'ws:before-hard-nav'].forEach(function (type) {
       win.addEventListener(type, function () { sendPrefs(true); });
+    });
+    // Back from the back-forward cache: what the leave did not get taken goes.
+    win.addEventListener('pageshow', function (e) {
+      if (e && e.persisted) sendPrefs(false);
     });
   }
 

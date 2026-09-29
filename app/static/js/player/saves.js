@@ -29,6 +29,10 @@
  * and the listener is sent to sign in (shell.js WS.leaveTo, through the
  * router, so ws:before-hard-nav runs first).
  * Hard exits (ws:before-hard-nav, pagehide, the page hidden) send a beacon.
+ * Smart rewind (a change the engine marks { rewind: true }) never moves the
+ * saved place back: until playback passes the place it went back from, that
+ * place is what every save (and the local copy) carries; the listener's own
+ * seek, skip or jump, another book or a close ends that.
  *
  * Local copy: every change of place is written to localStorage under the
  * listener's identity key (WS.user.identity_key, from #ws-data: an opaque
@@ -70,7 +74,7 @@
  *                                   seq is taken at once, so whatever opens next
  *                                   outranks it), ends an active warning with
  *                                   active: false, then no timers are left
- *   note(change)                    each engine change { reason, state }
+ *   note(change)                    each engine change { reason, state, rewind }
  *   flush('beacon' | 'fetch', event) send now: a beacon, or a fetch past the backoff
  *   wake()                          back from frozen or hidden: the save in flight
  *                                   gets its full 15 s again
@@ -110,6 +114,8 @@ const EVENTS = {
   // as a pause, so the seconds since the last save are not lost.
   error: ['pause', true]
 };
+// The listener's own moves: they end a smart rewind's floor.
+const MOVES = { seek: true, skip: true, jump: true };
 // Equal times: WebServarr's own copy, then this browser's, then Plex's.
 const RANK = { web: 0, local: 1, plex: 2 };
 
@@ -330,6 +336,8 @@ export function createSaver(o) {
     return {
       book: book,
       latest: null,           // the place, as last reported
+      latestBookMs: NaN,      // its book time
+      floor: null,            // { place, bookMs }: after a smart rewind, the place saved until playback passes it
       playing: false,
       reachedWall: null,      // when the place was last reached (played to, moved to, acted on);
       reachedMono: null,      // null: untouched since the book opened
@@ -541,9 +549,22 @@ export function createSaver(o) {
     // Playback started again (Play, or Retry after an error): a pause still
     // waiting to go (an error's, never sent) is over. The next save is a play.
     if (r.playing && !wasPlaying && r.event === 'pause') r.event = 'play';
-    const place = placeOf(st.position);
-    // The engine reports a start more than once (asked, then playing): one save.
-    const ev = change.reason === 'play' && wasPlaying ? null : EVENTS[change.reason];
+    let place = placeOf(st.position);
+    // Smart rewind (a seek the engine marks { rewind }) is a playback aid: it
+    // never moves the saved place back. From it until playback passes the
+    // place it went back from, that place is what is saved (and kept
+    // locally); a move of the listener's own (seek, skip, jump), another book
+    // or a close ends the floor.
+    const bookMs = Number(st.bookMs);
+    if (change.rewind) {
+      if (!r.floor && r.latest && isFinite(r.latestBookMs)) r.floor = { place: r.latest, bookMs: r.latestBookMs };
+    } else if (r.floor && (MOVES[change.reason] || !(bookMs < r.floor.bookMs))) {
+      r.floor = null;
+    }
+    if (r.floor && place) place = r.floor.place;
+    // The engine reports a start more than once (asked, then playing): one
+    // save. A rewind is not the listener's act: nothing to save for it.
+    const ev = change.rewind || (change.reason === 'play' && wasPlaying) ? null : EVENTS[change.reason];
     if (place) {
       const moved = !samePlace(place, r.latest);
       if (moved) {
@@ -553,11 +574,12 @@ export function createSaver(o) {
       // Reached by the listener: an act of theirs, or playback moving on.
       // Opening at a place (and the element settling there) is neither, and
       // nor is an error: the place it holds was reached by playback, if at all.
-      if ((EVENTS[change.reason] && change.reason !== 'error') || (r.playing && moved)) {
+      if ((EVENTS[change.reason] && change.reason !== 'error' && !change.rewind) || (r.playing && moved)) {
         r.reachedMono = t;
         r.reachedWall = now();
       }
       r.latest = place;
+      r.latestBookMs = r.floor ? r.floor.bookMs : bookMs;
     }
     // A change whose position is null is never saved.
     if (ev && place) {

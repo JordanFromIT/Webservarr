@@ -1828,6 +1828,80 @@ current = 'the saver never lets a failing listener or storage break the engine';
   check('no console errors from the saver', consoleSeen.length === 0, consoleSeen);
 }
 
+// Task 8 (fix round 3): smart rewind is a playback aid. A seek the engine marks
+// { rewind: true } never moves the saved place back: until playback passes the
+// place it went back from, saves (and the local copy) carry that place. A move
+// of the listener's own ends it.
+current = 'a smart rewind never moves the saved place back';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  p.state = () => ({ book: p.book, playing: p.playing, bookMs: Math.round(p.offset),
+    position: { track: p.track, offset_ms: Math.round(p.offset), duration_ms: p.duration } });
+  const rewind = (to) => { const from = p.offset; p.offset = to; p.emit('seek', { from, to, rewind: true }); };
+  const posts = (from) => t.server.calls.slice(from).map((c) => [c.body.event, c.body.offset_ms, c.kind]);
+  p.offset = 60000;
+  t.saver.start('500:1', {});
+  p.open();
+  p.play();
+  await p.listen(5000);
+  p.pause();
+  await t.clock.advance(3000);
+  const reached = p.offset;                     // 65000
+  let n = t.server.calls.length;
+  p.play();
+  rewind(reached - 3000);
+  await t.clock.advance(1500);
+  check('the rewind itself sends nothing behind', t.server.calls.slice(n).every((c) => c.body.offset_ms >= reached), posts(n));
+  check('the local copy keeps the place reached', localOf(t).offset_ms === reached, localOf(t));
+  await p.listen(1000);                          // still short of it
+  n = t.server.calls.length;
+  p.pause();
+  await t.clock.advance(1500);
+  const paused = t.server.calls.slice(n).filter((c) => c.body.event === 'pause');
+  check('a pause in the window saves the place reached', paused.length === 1 && paused[0].body.offset_ms === reached, posts(n));
+  p.play();
+  await p.listen(4000);                          // past it
+  n = t.server.calls.length;
+  p.pause();
+  await t.clock.advance(1500);
+  const past = t.server.calls.slice(n).filter((c) => c.body.event === 'pause');
+  check('past the floor it saves as ever', past.length === 1 && past[0].body.offset_ms > reached, posts(n));
+  // An explicit move inside the window is the listener's: saved, even backwards.
+  const here = p.offset;
+  p.play();
+  rewind(here - 10000);
+  await t.clock.advance(1200);
+  p.seek(here - 20000, 'skip');
+  await t.clock.advance(1200);
+  n = t.server.calls.length;
+  p.pause();
+  await t.clock.advance(1500);
+  const moved = t.server.calls.slice(n).filter((c) => c.body.event === 'pause');
+  check('a skip back inside the window saves the new place', moved.length === 1 && moved[0].body.offset_ms === here - 20000, posts(n));
+  check('and the local copy follows it', localOf(t).offset_ms === here - 20000, localOf(t));
+  // Leave and beacon hold the floor.
+  const top = p.offset;
+  p.play();
+  rewind(top - 10000);
+  await t.clock.advance(1200);
+  n = t.server.calls.length;
+  t.saver.flush('beacon');
+  t.saver.flush('beacon', 'leave');
+  const beacons = t.server.calls.slice(n).filter((c) => c.kind === 'beacon');
+  check('the beacons carry the place reached', beacons.length === 2 && beacons.every((c) => c.body.offset_ms === top), posts(n));
+  n = t.server.calls.length;
+  t.saver.stop();
+  await t.clock.advance(1500);
+  check('the last save on stop too', t.server.calls.slice(n).every((c) => c.body.offset_ms === top) && t.server.calls.length > n, posts(n));
+  // A new book starts with no floor.
+  t.saver.start('500:1', {});
+  p.play();
+  p.seek(top - 30000);
+  await t.clock.advance(1500);
+  check('another run has no floor', t.server.row.offset_ms === top - 30000, t.server.row);
+}
+
 if (failed) {
   realError(`${failed}/${total} player saves cases FAILED`);
   process.exit(1);

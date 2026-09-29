@@ -295,6 +295,7 @@ async function setup(o = {}) {
   t.remote = o.remote || [REMOTE];
   t.putStatus = 200;
   t.putDelays = [];
+  t.putStatuses = [];
   t.serverPrefs = {};
   t.noNow = false;
   t.prefsAnswer = o.prefs === undefined ? { skip_s: 10, speed: 1, smart_rewind: true } : o.prefs;
@@ -310,9 +311,10 @@ async function setup(o = {}) {
         // when it gets to it (t.serverPrefs), so PUTs can land out of order.
         const wait = t.putDelays.length ? t.putDelays.shift() : 0;
         if (wait) await new Promise((r) => clock.setTimeout(r, wait));
-        if (t.putStatus === 0) throw new TypeError('Failed to fetch');
-        if (t.putStatus >= 200 && t.putStatus < 300) Object.assign(t.serverPrefs, body);
-        return response(t.putStatus, {});
+        const status = t.putStatuses.length ? t.putStatuses.shift() : t.putStatus;
+        if (status === 0) throw new TypeError('Failed to fetch');
+        if (status >= 200 && status < 300) Object.assign(t.serverPrefs, body);
+        return response(status, {});
       }
       if (typeof t.prefsAnswer === 'number') return response(t.prefsAnswer, { detail: 'no' });
       return response(200, t.prefsAnswer);
@@ -612,6 +614,63 @@ await run('one settings save at a time: a slow one is never overtaken', async ()
   t.engine.close();
 });
 
+for (const [fail, what] of [[503, 'a 503'], [0, 'the network']]) await run(`a save queued behind one that fails (${what}) still goes`, async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '501', 1000);
+  t.putDelays = [3000];
+  t.putStatuses = [fail];
+  t.q('.wsp-slot-speed button').click();
+  t.q('[data-speed="1.25"]').click();
+  await t.clock.advance(1000);
+  t.q('[data-speed="1.5"]').click();
+  await t.clock.advance(5000);
+  check('sent after the failure returned', t.puts.length === 2 && JSON.stringify(t.puts[1]) === '{"speed":1.5}', t.puts);
+  check('the server has it', t.serverPrefs.speed === 1.5, t.serverPrefs);
+  t.engine.close();
+});
+
+await run('the leave save counts as in flight: a race with it never loses the newest', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '501', 1000);
+  t.putDelays = [3000, 0];
+  t.q('.wsp-slot-speed button').click();
+  t.q('[data-speed="1.25"]').click();
+  await t.clock.advance(1000);         // 1.25 is out, and slow
+  t.q('[data-speed="1.5"]').click();
+  t.win.dispatchEvent(new t.win.Event('pagehide'));
+  await t.clock.advance(10);
+  check('the leave went at once', t.puts.length === 2 && JSON.stringify(t.puts[1]) === '{"speed":1.5}', t.puts);
+  await t.clock.advance(4000);
+  check('the slow one landed last, then the newest went again', t.puts.length === 3 && JSON.stringify(t.puts[2]) === '{"speed":1.5}', t.puts);
+  check('the server ends with the newest', t.serverPrefs.speed === 1.5, t.serverPrefs);
+  t.engine.close();
+});
+
+await run('back from the back-forward cache, a leave that failed is sent again', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '501', 1000);
+  t.q('.wsp-slot-speed button').click();
+  t.q('[data-speed="1.75"]').click();
+  t.putStatus = 0;
+  t.win.dispatchEvent(new t.win.Event('pagehide'));
+  await t.clock.advance(10);
+  check('the leave failed', t.puts.length === 1 && t.serverPrefs.speed === undefined, t.puts);
+  t.putStatus = 200;
+  // happy-dom's PageTransitionEvent drops persisted: set it as the browser does.
+  const show = (persisted) => {
+    const e = new t.win.Event('pageshow');
+    Object.defineProperty(e, 'persisted', { value: persisted });
+    t.win.dispatchEvent(e);
+  };
+  show(false);
+  await t.clock.advance(10);
+  check('an ordinary show sends nothing', t.puts.length === 1, t.puts);
+  show(true);
+  await t.clock.advance(10);
+  check('restored: sent again', t.puts.length === 2 && t.serverPrefs.speed === 1.75, t.puts);
+  t.engine.close();
+});
+
 await run('a change made while its key is being saved is not lost', async () => {
   const t = await setup();
   await t.openAt(MULTI.key, '501', 1000);
@@ -857,13 +916,13 @@ for (const [away, want] of EDGES) {
     t.engine.pause();
     const at = bookMs(t);
     await t.clock.advance(away);
+    const n = t.posts.length;
     await t.engine.play();
     check('went back', bookMs(t) === at - want, bookMs(t) - at);
     await t.clock.advance(1500);
-    // A save carries the place as it is when it goes: the rewound place,
-    // played on for the second saves are kept apart.
-    const off = at - 600000 - want;
-    if (want) check('the rewound place was saved', t.posts.some((b) => b.event === 'seek' && b.track === '502' && b.offset_ms >= off && b.offset_ms <= off + 1250), t.posts.slice(-3).map((b) => [b.event, b.offset_ms]));
+    // Smart rewind is a playback aid: no save goes behind the place reached.
+    check('no save behind the place reached', t.posts.slice(n).every((b) => b.track === '502' && b.offset_ms >= at - 600000), t.posts.slice(n).map((b) => [b.event, b.offset_ms]));
+    check('and no save for the rewind itself', !t.posts.slice(n).some((b) => b.event === 'seek'), t.posts.slice(n).map((b) => b.event));
     t.engine.close();
   });
 }
@@ -943,8 +1002,7 @@ for (const [agoMs, want] of [[5000, 0], [45000, 3000], [2 * 3600000, 30000]]) {
     check('then back by the rule', bookMs(t) >= 900000 - want && bookMs(t) < 900000 - want + 1000, bookMs(t) - 900000);
     await t.clock.advance(1500);
     const seeks = t.posts.filter((b) => b.event === 'seek');
-    if (want) check('the rewound place was saved, as a seek while playing', seeks.length === 1 && seeks[0].offset_ms >= 300000 - want && seeks[0].offset_ms < 300000 - want + 1000, t.posts.map((b) => [b.event, b.offset_ms]));
-    else check('no seek at all', seeks.length === 0, t.posts.map((b) => [b.event, b.offset_ms]));
+    check('no seek saved, nothing behind the opened place', seeks.length === 0 && t.posts.every((b) => b.offset_ms >= 300000), t.posts.map((b) => [b.event, b.offset_ms]));
     const b1 = bookMs(t);
     await t.clock.advance(2000);
     check('once', bookMs(t) > b1, [b1, bookMs(t)]);
@@ -993,7 +1051,7 @@ await run('opens whose autoplay is refused leave the place; the first real play 
   await t.clock.advance(600);
   check('the tap plays from 10 s back, once', bookMs(t) >= 890000 && bookMs(t) < 891000, bookMs(t) - 900000);
   await t.clock.advance(1500);
-  check('and that is saved', t.places.web.offset_ms >= 290000 && t.places.web.offset_ms < 292500, t.places.web);
+  check('the saved place is not moved back', t.places.web.offset_ms >= 300000, t.places.web);
   t.engine.close();
 });
 
@@ -1181,6 +1239,97 @@ await run('no server time on the saved place: no open rewind, never the device c
   await p;
   check('no age', t.st().resumedFrom && t.st().resumedFrom.age_ms === null, t.st().resumedFrom);
   check('played on from the saved place', bookMs(t) > 900000 && bookMs(t) < 901000, bookMs(t) - 900000);
+  t.engine.close();
+});
+
+await run('reopening again and again never walks the saved place back', async () => {
+  const t = await setup({ stateful: true });
+  t.places = { web: webAt(t, '502', 300000, 2 * 3600000) };
+  for (let i = 1; i <= 3; i++) {
+    const p = t.engine.open(MULTI.key);
+    await t.clock.advance(400);
+    await p;
+    check(`open ${i}: it rewound for playback`, bookMs(t) < 900000 - 20000, bookMs(t) - 900000);
+    t.engine.pause();
+    await t.clock.advance(1500);
+    t.engine.close();
+    await t.clock.advance(10);
+    check(`open ${i}: the saved place is where it was`, t.places.web.track === '502' && t.places.web.offset_ms >= 300000 && t.places.web.offset_ms < 301500, t.places.web);
+    await t.clock.advance(2 * 3600000);
+  }
+});
+
+await run('a rewind is for playback only: the saved place moves on once playback passes it', async () => {
+  const t = await setup({ stateful: true });
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(5000);
+  t.engine.pause();
+  await t.clock.advance(1500);
+  const reached = t.places.web.offset_ms;
+  await t.clock.advance(3600000);
+  await t.engine.play();               // back 30 s
+  await t.clock.advance(10000);
+  t.engine.pause();
+  await t.clock.advance(1500);
+  check('a pause in the window saves the place reached', t.places.web.offset_ms === reached, [t.places.web.offset_ms, reached]);
+  await t.engine.play();
+  await t.clock.advance(25000);
+  t.engine.pause();
+  await t.clock.advance(1500);
+  check('past it, saves as ever', t.places.web.offset_ms > reached, [t.places.web.offset_ms, reached]);
+  const here = bookMs(t);
+  await t.clock.advance(3600000);
+  await t.engine.play();               // back 30 s again
+  await t.clock.advance(1000);
+  t.engine.skip(-60);                  // the listener's own move, inside the window
+  await t.clock.advance(1500);
+  t.engine.pause();
+  await t.clock.advance(1500);
+  check('a skip back inside the window saves the new place', t.places.web.offset_ms < here - 600000 - 60000 && t.places.web.offset_ms > here - 600000 - 90000, [t.places.web.offset_ms, here - 600000]);
+  t.engine.close();
+});
+
+await run('a move while playing starts the listening count again', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(5000);
+  t.engine.jumpToChapter(2);           // forward
+  await t.clock.advance(300);
+  t.engine.pause();
+  const at = bookMs(t);
+  await t.clock.advance(2 * 3600000);
+  await t.engine.play();
+  check('300 ms after a jump is no break', bookMs(t) === at, bookMs(t) - at);
+  await t.clock.advance(5000);
+  t.engine.skip(-60);                  // back
+  await t.clock.advance(1500);
+  t.engine.pause();
+  const at2 = bookMs(t);
+  await t.clock.advance(2 * 3600000);
+  await t.engine.play();
+  check('1.5 s heard after a move back is a break', bookMs(t) === at2 - 30000, bookMs(t) - at2);
+  t.engine.close();
+});
+
+await run('under a second of listening is no break, over it is', async () => {
+  const t = await setup();
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(3000);
+  t.engine.pause();
+  await t.clock.advance(2 * 3600000);
+  await t.engine.play();               // back 30 s
+  await t.clock.advance(750);
+  t.engine.pause();
+  const a = bookMs(t);
+  await t.clock.advance(2 * 3600000);
+  await t.engine.play();
+  check('750 ms is no break', bookMs(t) === a, bookMs(t) - a);
+  await t.clock.advance(1250);
+  t.engine.pause();
+  const b = bookMs(t);
+  await t.clock.advance(2 * 3600000);
+  await t.engine.play();
+  check('1250 ms is', bookMs(t) === b - 30000, bookMs(t) - b);
   t.engine.close();
 });
 

@@ -76,6 +76,9 @@
  *       starts from 0 over a place it did not see.
  *   play(), pause(), toggle()
  *   seek(bookMs), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters
+ *   rewind(bookMs)    smart rewind's seek (features.js): a 'seek' change marked
+ *                     { rewind: true }; the saves keep the place it went back
+ *                     from until playback passes it (saves.js)
  *   setSpeed(x)       0.75 to 2 in 0.05 steps (clamped, rounded); returns the speed
  *   setSkip(s)        the skip length (the skip buttons and the Media Session
  *                     seek back and forward), 5 to 60 s (clamped, rounded; a
@@ -412,7 +415,7 @@ export function createEngine(env) {
     if (saver) {
       // First, so this change already carries what saving it changed.
       try {
-        saver.note({ reason: reason, state: state() });
+        saver.note({ reason: reason, state: state(), rewind: !!(extra && extra.rewind) });
       } catch (e) {
         console.error('[player] saving failed', e);
       }
@@ -1256,7 +1259,7 @@ export function createEngine(env) {
     else return play();
   }
 
-  function seek(bookMs, reason) {
+  function seek(bookMs, reason, rewind) {
     if (!book || !playhead) return;
     const v = Number(bookMs);
     if (!isFinite(v)) return;
@@ -1291,7 +1294,7 @@ export function createEngine(env) {
     } else {
       load(next.index, next.offset, cur.side);
     }
-    changed(reason || 'seek', { from: from, to: bookMsNow() });
+    changed(reason || 'seek', rewind ? { from: from, to: bookMsNow(), rewind: true } : { from: from, to: bookMsNow() });
   }
 
   function skip(deltaS) {
@@ -1496,6 +1499,7 @@ export function createEngine(env) {
     pause: pause,
     toggle: toggle,
     seek: function (bookMs) { seek(bookMs, 'seek'); },
+    rewind: function (bookMs) { seek(bookMs, 'seek', true); },
     skip: skip,
     jumpToChapter: jumpToChapter,
     setSpeed: setSpeed,
