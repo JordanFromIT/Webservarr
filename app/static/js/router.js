@@ -45,6 +45,11 @@
  *   hardNavigate(url)           ws:before-hard-nav, then a full navigation (sign-out,
  *                               a page's own, through shell.js WS.leaveTo)
  *   clearPrefetch()             forget hover-prefetched pages (WS.clearPageCache)
+ *   pushOverlay(onClose)        an entry for a view over the page (the full player),
+ *                               so Back closes it: -> { open, close() }. onClose(how)
+ *                               when Back ({ pop }) or a navigation ({ navigate })
+ *                               closes it; close() for its own controls. See
+ *                               "Overlays" below.
  * A page module's ctx (spec 4.2) adds ctx.beforeLeave(guard): every
  * navigation away from the page (a link, navigate(), Back or Forward) first
  * awaits guard(url, { pop }): false stays (Back is stepped back),
@@ -325,7 +330,11 @@ function start() {
   // (The router's other replaceState calls never move the page or the
   // address: saveScroll writes scrollY on the page's own entry, the held
   // Back's relabel and the first load run only with no step on its way.)
+  // The entry of an overlay a navigation closed is taken over, never left
+  // behind (see pushOverlay).
   function record(href, replace) {
+    if (deadLayer !== null && deadLayer === at) replace = true;
+    deadLayer = null;
     if (replace) {
       history.replaceState(mark(0), '', href);
       supersede();
@@ -359,13 +368,89 @@ function start() {
     stepTo(i);
   }
 
+  // ---- Overlays: a view over the page that Back closes ----
+  //
+  // An overlay (the full-screen player; any modal later) gets an entry of its
+  // own, one above the page's, at the page's address: { ws: 1, i, scrollY,
+  // overlay: 1 }. The phone's back gesture steps off it: the overlay closes
+  // (its onClose) and the page under it stays, with no visit. Closed from its
+  // own controls, the router steps back off the entry itself (as a refused
+  // Back does), so none is left behind. A navigation made while one is open
+  // closes it and takes over its entry, so Back from the new page goes to
+  // the page the overlay was over. Overlays stack; stepping below one closes
+  // it and every one above it, the top first. The mounted page's own entry
+  // (current.i) never moves to an overlay's. An overlay's entry that is no
+  // longer open (Forward onto it, or a reload) is stepped off at once.
+  const layers = [];           // open overlays, lowest first: { i, open, onClose }
+  let deadLayer = null;        // the entry of an overlay a navigation closed, until it is taken over
+
+  function closeLayersAbove(i, how) {
+    while (layers.length && layers[layers.length - 1].i > i) {
+      const o = layers.pop();
+      o.open = false;
+      try {
+        o.onClose(how);
+      } catch (e) {
+        console.error('[router] an overlay failed to close', e);
+      }
+    }
+  }
+
+  /* onClose(how) runs when the overlay is closed by anything but its own
+     handle.close(): { pop: true } for Back, { navigate: true } for a
+     navigation. Returns { open, close() }; close() is for the overlay's own
+     controls (a close button, Escape, a swipe) and consumes its entry. On a
+     page the router has not mounted there is no entry: the handle only
+     tracks open. */
+  function pushOverlay(onClose) {
+    const o = { i: -1, open: true, onClose: typeof onClose === 'function' ? onClose : function () {} };
+    const handle = {
+      get open() { return o.open; },
+      close: function () { closeLayer(o); }
+    };
+    if (!current || current.left) return handle;
+    const i = at + 1;
+    try {
+      nativePush.call(history, { ws: 1, i: i, scrollY: Math.round(scroller().scrollTop), overlay: 1 }, '', location.href);
+    } catch (e) {
+      return handle;          // no entry was made: Back will not close it
+    }
+    at = i;
+    entryPushed();
+    o.i = i;
+    layers.push(o);
+    return handle;
+  }
+
+  function closeLayer(o) {
+    if (!o.open) return;
+    o.open = false;
+    const k = layers.indexOf(o);
+    if (k === -1) return;
+    const top = layers[layers.length - 1];
+    // Any overlay opened over this one goes with it.
+    closeLayersAbove(o.i, { base: true });
+    layers.pop();
+    if (at === top.i) returnTo(o.i - 1);
+  }
+
+  // A navigation that took over no entry (it stayed, or a guard kept the
+  // page) steps off the closed overlay's entry instead.
+  function dropDeadLayer() {
+    if (deadLayer === null) return;
+    const i = deadLayer;
+    deadLayer = null;
+    if (at === i) returnTo(i - 1);
+  }
+
   const api = {
     navigate: function (url, opts) {
       return go(url, { replace: !!(opts && opts.replace) });
     },
     current: null,
     hardNavigate: function (url) { return hardNavigate(url); },
-    clearPrefetch: clearPrefetch
+    clearPrefetch: clearPrefetch,
+    pushOverlay: pushOverlay
   };
   WS.router = api;
 
@@ -1117,6 +1202,14 @@ function start() {
     opts = opts || {};
     const url = new URL(href, location.href).href;
     if (!opts.pop && inflight && inflight.token === navToken && inflight.href === url) return inflight.done;
+    // A link inside an overlay (or any navigation while one is open): the
+    // overlays close, and the page this navigation records takes over the
+    // top one's entry.
+    if (!opts.pop && layers.length) {
+      const top = layers[layers.length - 1].i;
+      closeLayersAbove(layers[0].i - 1, { navigate: true });
+      if (at === top) deadLayer = top;
+    }
     const done = begin(url, opts);
     const entry = { href: url, token: navToken, done: done };
     if (!opts.pop) inflight = entry;
@@ -1215,6 +1308,7 @@ function start() {
         fetchCtl = null;
         busyEnd(token);
         if (opts.pop) returnTo(current.i);
+        else dropDeadLayer();
         return;
       }
       if (verdict === 'hard') {
@@ -1267,6 +1361,8 @@ function start() {
           if (current === shown && at === shown.i) stepTo(wanted);
           else go(target.href, {});
         };
+      } else {
+        dropDeadLayer();
       }
       busyEnd(token);
       // The page is still here: one whose guard let this navigation go
@@ -1384,6 +1480,10 @@ function start() {
       at = st.i;
       noteKey(false);
     }
+    // Stepped off an overlay's entry (Back): it closes, and every one above
+    // it. An entry this document did not mark is below them all.
+    if (layers.length) closeLayersAbove(known ? st.i : -1, { pop: true });
+    if (deadLayer !== null && at !== deadLayer) deadLayer = null;
     // The router's own step back (returnTo) has arrived: on its entry, or on
     // another (an embed's steps were in between), from where it steps again.
     if (landing !== null) {
@@ -1416,6 +1516,12 @@ function start() {
       return;
     }
     if (!st || st.ws !== 1) return;
+    // An overlay's entry with no overlay open (Forward onto a closed one):
+    // there is nothing to show on it, so step off it.
+    if (st.overlay && !layers.some(function (o) { return o.i === st.i; })) {
+      returnTo(st.i - 1);
+      return;
+    }
     clearTimeout(scrollTimer);
     if (samePage(location.href, current.url)) {
       current.url = location.href;
@@ -1470,6 +1576,9 @@ function start() {
     const y = st.ws === 1 ? (st.scrollY || 0) : 0;
     // A reload keeps the entry's place; a new document starts counting here.
     at = st.ws === 1 && typeof st.i === 'number' ? st.i : 0;
+    // Reloaded (or come back) onto an overlay's entry: no overlay is open in
+    // this document, so the page steps off it once it is mounted.
+    const staleLayer = st.ws === 1 && st.overlay && at > 0 ? at : null;
     try { history.scrollRestoration = 'manual'; } catch (e) { /* ignore */ }
     history.replaceState(Object.assign({}, st, { ws: 1, i: at, scrollY: y }), '', location.href);
     noteKey(false);
@@ -1488,6 +1597,7 @@ function start() {
       return mountPage(mod, moduleUrl, new URL(location.href)).then(function () {
         restoreScroll(y, firstToken);
         if (!y) scrollToHash(new URL(location.href));
+        if (staleLayer !== null && at === staleLayer && landing === null && !layers.length) returnTo(staleLayer - 1);
       });
     });
   }
