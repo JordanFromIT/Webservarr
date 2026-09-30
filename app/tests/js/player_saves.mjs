@@ -3118,7 +3118,8 @@ current = 'spec 2.5: lock-screen Play while held sends nothing';
   await openBook(t);
   ms.handlers.get('play')();
   await t.clock.advance(20000);
-  check('no preview: Play plays nothing', !t.engine.state().playing && t.engine.state().bookMs === 0);
+  check('no preview: Play plays a bounded preview from the chosen spot (0)', !t.engine.state().playing &&
+    t.engine.state().bookMs >= 15000 && t.engine.state().bookMs <= 15500, t.engine.state().bookMs);
   t.engine.previewAt(700000);
   await t.clock.advance(3000);
   ms.handlers.get('pause')();
@@ -3128,14 +3129,140 @@ current = 'spec 2.5: lock-screen Play while held sends nothing';
   check('it resumes the preview', t.engine.state().playing);
   await t.clock.advance(20000);
   ms.handlers.get('play')();
+  await t.clock.advance(500);
   ms.handlers.get('seekforward')({});
+  const moved = t.engine.state().bookMs;
   await t.clock.advance(20000);
-  check('no further than the preview', !t.engine.state().playing && t.engine.state().bookMs <= 725500, t.engine.state().bookMs);
+  check('a lock-screen move ends the preview: paused where it landed', !t.engine.state().playing && t.engine.state().bookMs === moved, [moved, t.engine.state().bookMs]);
+  ms.handlers.get('play')();
+  await t.clock.advance(60000);
+  check('Play then: 15 s from there, no more', !t.engine.state().playing && t.engine.state().bookMs >= moved + 15000 &&
+    t.engine.state().bookMs <= moved + 15500, [moved, t.engine.state().bookMs]);
   check('nothing sent, no local copy', t.server.calls.length === 0 && !t.storage.map.has(LOCAL_KEY), t.server.calls.map((c) => c.body));
   check('still held', t.engine.state().filesChanged !== null);
   t.engine.close();
   await t.clock.advance(20000);
   check('nothing on close', t.server.calls.length === 0);
+}
+
+// ---- Fix round 1 ----
+// T2S2: releasing the hold forgets the held place, so a confirm where the
+// playhead already is (a startOver at the held 0:00, a nudge then confirm)
+// is a move: the local copy takes it even when its save fails.
+current = 'T2S2: a confirm at the spot the playhead already holds writes the local copy';
+for (const how of ['startOver at the held 0:00', 'a nudge, then confirm there']) {
+  const storage = fakeStorage();
+  setLocal(storage, { track: '599', offset_ms: 120000, duration_ms: 900000, updated_at: iso(-10), own: true, acked: false,
+    book_ms: 720000, book_duration_ms: 1800000, chapter_label: 'Chapter 4' });
+  const clock = fakeClock();
+  const server = fakeServer(clock);
+  const web = { track: '503', offset_ms: 12000, duration_ms: 300000, updated_at: iso(-600), device: 'Chrome on Windows', psid: 'other' };
+  const t = withEngine({ clock, server, storage, book: CHAPTERED, places: { web, plex: null } });
+  await openBook(t);
+  server.mode = 503;                                   // the confirm's save fails
+  const to = how === 'startOver at the held 0:00' ? 0 : 650000;
+  if (to === 0) t.engine.startOver();
+  else { t.engine.seek(650000); await clock.advance(500); t.engine.confirmPlace(650000); }
+  await clock.advance(2000);
+  const l = localOf(t);
+  check(how + ': the local copy is the confirmed place, own and unacked', l && l.book_ms === to && l.own === true && l.acked === false, l);
+  t.engine.close();
+  await clock.advance(20000);
+  server.mode = 200;
+  const u = withEngine({ clock, server, storage, book: CHAPTERED, places: { web, plex: null } });
+  await openBook(u);
+  check(how + ': the reopen resumes there, not held again', u.engine.state().filesChanged === null && u.engine.state().bookMs >= to &&
+    u.engine.state().bookMs < to + 2000, [u.engine.state().filesChanged, u.engine.state().bookMs]);
+  u.engine.close();
+  await clock.advance(20000);
+}
+
+// T2L1: a confirmed link Plex couldn't check before the book closed is
+// kept with the local copy and sent again by the next open until the
+// server says true or false.
+current = 'T2L1: an unsettled link survives a close and is sent again until the server settles it';
+{
+  const clock = fakeClock(); const server = fakeServer(clock); const storage = fakeStorage();
+  const t = withEngine({ clock, server, storage, book: CHAPTERED, places: { web: LINKED_WEB, plex: null } });
+  await openBook(t);
+  server.extra = { linked: null };
+  t.engine.confirmPlace(650000);
+  await clock.advance(2000);
+  await t.engine.play();
+  await clock.advance(25000);
+  check('every save of the run carried it', server.calls.length >= 3 && server.calls.every((c) => c.body.linked_from === '400:1'));
+  t.engine.close();
+  await clock.advance(20000);
+  check('the local copy keeps it', localOf(t) && localOf(t).linked_from === '400:1', localOf(t));
+  check('readLocal gives it', t.saver.readLocal('500:1').linked_from === '400:1');
+  const row = server.row;
+  const web2 = { track: row.track, offset_ms: row.offset_ms, duration_ms: row.duration_ms, updated_at: row.updated_at, device: row.device, psid: row.psid };
+  server.extra = { linked: null };
+  const n = server.calls.length;
+  const u = withEngine({ clock, server, storage, book: CHAPTERED, places: { web: web2, plex: null } });
+  await openBook(u);
+  await clock.advance(12000);
+  const second = server.calls.slice(n);
+  check('the next open sends it again', second.length >= 1 && second.every((c) => c.body.linked_from === '400:1'), second.map((c) => c.body.linked_from));
+  server.extra = { linked: true };
+  u.engine.pause();                                    // settled by the pause's answer; nothing is written after it
+  await clock.advance(2000);
+  check('the pause carried it', server.calls[server.calls.length - 1].body.event === 'pause' && server.calls[server.calls.length - 1].body.linked_from === '400:1');
+  check('settled: gone from the local copy at once', localOf(u) && !('linked_from' in localOf(u)), localOf(u));
+  const m = server.calls.length;
+  await u.engine.play();
+  await clock.advance(21000);
+  check('and from the saves', server.calls.slice(m).length >= 1 && server.calls.slice(m).every((c) => !('linked_from' in c.body)));
+  u.engine.close();
+  await clock.advance(20000);
+  const v = withEngine({ clock, server, storage, book: CHAPTERED, places: { web: web2, plex: null } });
+  await openBook(v);
+  await clock.advance(12000);
+  check('nor at the open after', server.calls.slice(m).every((c) => !('linked_from' in c.body)));
+  v.engine.close();
+  await clock.advance(20000);
+}
+{
+  // A later startOver (the book held again) drops an unsettled link: ruling (c).
+  const clock = fakeClock(); const server = fakeServer(clock); const storage = fakeStorage();
+  setLocal(storage, { track: '599', offset_ms: 120000, duration_ms: 900000, updated_at: iso(-10), own: true, acked: false,
+    book_ms: 720000, linked_from: '400:1' });
+  const t = withEngine({ clock, server, storage, book: CHAPTERED, places: { web: GONE_WEB, plex: null } });
+  await openBook(t);
+  check('held (the local copy names a part the book no longer has)', t.engine.state().filesChanged !== null);
+  t.engine.startOver();
+  await clock.advance(2000);
+  check('startOver sends no link', server.calls.length === 1 && !('linked_from' in server.calls[0].body), server.calls.map((c) => c.body));
+  check('and drops it from the local copy', localOf(t) && !('linked_from' in localOf(t)) && localOf(t).book_ms === 0, localOf(t));
+  await t.engine.play();
+  await clock.advance(12000);
+  check('never sent after', server.calls.every((c) => !('linked_from' in c.body)));
+  t.engine.close();
+}
+
+// T2T1: under a smart rewind's floor, a save carries the floor's place, and
+// that place's own book time and chapter (not the playhead's).
+current = 'T2T1: a floor\'s save carries the floor\'s own book_ms and chapter_label';
+{
+  const t = withEngine({ book: CHAPTERED, places: { web: { track: '501', offset_ms: 295000, duration_ms: 600000, updated_at: iso(-5) }, plex: null } });
+  await openBook(t);
+  await t.clock.advance(8000);                         // past 300 s: The Middle
+  const before = t.engine.state().bookMs;
+  const n = t.server.fetches().length;
+  t.engine.rewind(before - 12000);                     // back into the Opening
+  await t.clock.advance(9500);
+  const f = t.server.fetches().slice(n).map((c) => c.body);
+  const playhead = t.engine.state().bookMs;
+  check('the floor is on (the playhead is behind it)', playhead < before, [playhead, before]);
+  check('saves carry the floor\'s place with its own book time and chapter', f.length >= 1 &&
+    f.every((b) => b.book_ms === STARTS[b.track] + b.offset_ms && b.book_ms >= before - 250 && b.chapter_label === 'The Middle'),
+    f.map((b) => [b.offset_ms, b.book_ms, b.chapter_label]));
+  t.saver.flush('beacon');
+  const bb = beaconBodies(t).pop();
+  check('the beacon too', bb && bb.book_ms === STARTS[bb.track] + bb.offset_ms && bb.chapter_label === 'The Middle', bb);
+  const l = localOf(t);
+  check('and the local copy', l && l.book_ms === STARTS[l.track] + l.offset_ms && l.chapter_label === 'The Middle', l);
+  t.engine.close();
 }
 
 if (failed) {

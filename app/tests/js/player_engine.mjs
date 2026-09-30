@@ -1976,16 +1976,28 @@ current = 'spec 2.5: previewAt plays 15 s from a spot, then pauses; a second cal
   u.engine.close();
 }
 
-current = 'spec 2.5: while held, Play (bar, lock screen, the element\'s own) only resumes a preview';
+// Fix round 1 (T2E1): playback while held is only ever a bounded preview.
+// Play with no live preview starts a fresh one at the helper's chosen spot
+// (0 at the open, then the last preview's start or move's landing); a move
+// ends the preview, pauses and only moves that spot.
+const PREVIEW_END = (t, from) => !t.engine.state().playing && bookMsOf(t) >= from + 15000 && bookMsOf(t) <= from + 15500;
+current = 'spec 2.5: while held, Play (bar, lock screen, the element\'s own) only ever plays a bounded preview';
 {
   const t = await openHeld(MULTI.key, { web: GONE, plex: null });
+  check('the chosen spot starts at the held start', t.engine.state().filesChanged.spot === 0, t.engine.state().filesChanged);
   await t.engine.play();
-  t.ms.handlers.get('play')();
   await t.clock.advance(3000);
-  check('no preview yet: Play plays nothing', !t.engine.state().playing && t.main.paused && t.engine.state().bookMs === 0, [t.engine.state().playing, bookMsOf(t)]);
+  check('Play: a preview from the chosen spot', t.engine.state().playing && bookMsOf(t) > 0 && bookMsOf(t) < 4000, bookMsOf(t));
+  await t.clock.advance(20000);
+  check('which stops after 15 s', PREVIEW_END(t, 0), bookMsOf(t));
+  t.ms.handlers.get('play')();
+  await t.clock.advance(20000);
+  check('lock-screen Play after it: the same 15 s again', PREVIEW_END(t, 0) && t.log.change.filter((c) => c.reason === 'preview').length === 2, bookMsOf(t));
   t.main.play();                                   // the browser's own control
   await t.clock.advance(1000);
-  check('the element started from outside is paused again', t.main.paused && !t.engine.state().playing);
+  check('the element started from outside: a preview too', t.engine.state().playing && bookMsOf(t) < 2000, bookMsOf(t));
+  await t.clock.advance(20000);
+  check('bounded', PREVIEW_END(t, 0), bookMsOf(t));
   t.engine.previewAt(700000);
   await t.clock.advance(3000);
   t.ms.handlers.get('pause')();
@@ -1996,16 +2008,65 @@ current = 'spec 2.5: while held, Play (bar, lock screen, the element\'s own) onl
   await t.clock.advance(3000);
   check('lock-screen Play resumes it', t.engine.state().playing && bookMsOf(t) > paused, bookMsOf(t));
   await t.clock.advance(20000);
-  check('to its end, and no further', !t.engine.state().playing && bookMsOf(t) >= 715000 && bookMsOf(t) <= 715500, bookMsOf(t));
-  t.ms.handlers.get('play')();
+  check('to its end, and no further', PREVIEW_END(t, 700000), bookMsOf(t));
   t.engine.toggle();
-  await t.clock.advance(3000);
-  check('a finished preview is not resumed', !t.engine.state().playing && bookMsOf(t) <= 715500, bookMsOf(t));
+  await t.clock.advance(20000);
+  check('toggle after it: the 15 s from its start again', PREVIEW_END(t, 700000) && t.engine.state().filesChanged.spot === 700000, bookMsOf(t));
   check('still held', t.engine.state().filesChanged !== null);
   t.engine.close();
 }
 
-current = 'spec 2.5: while held, Retry after an outage only resumes a preview';
+current = 'spec 2.5 T2E1: a move while a preview is paused, then Play, stays a bounded preview (bar, lock screen, Retry)';
+for (const how of ['bar', 'lock screen', 'toggle']) {
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null });
+  t.engine.previewAt(700000);
+  await t.clock.advance(3000);
+  t.engine.pause();
+  if (how === 'lock screen') t.ms.handlers.get('seekto')({ seekTime: 100 });
+  else t.engine.jumpToChapter(2);                  // Part 3 of 3: 1 500 000
+  const to = how === 'lock screen' ? 100000 : 1500000;
+  await t.clock.advance(500);
+  check(how + ': the move is the chosen spot', t.engine.state().filesChanged.spot === to && bookMsOf(t) === to, t.engine.state().filesChanged);
+  if (how === 'bar') await t.engine.play();
+  else if (how === 'lock screen') t.ms.handlers.get('play')();
+  else t.engine.toggle();
+  await t.clock.advance(60000);
+  check(how + ': Play previews 15 s from the moved-to spot, no more', PREVIEW_END(t, to), [to, bookMsOf(t)]);
+  check(how + ': still held', t.engine.state().filesChanged !== null);
+  t.engine.close();
+}
+{
+  // The same through the error state: an outage mid-preview, a move back, Retry.
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null });
+  t.engine.previewAt(700000);
+  await t.clock.advance(3000);
+  t.net.down.add('remote');
+  await t.clock.advance(15000);
+  check('an outage mid-preview stops it', !t.engine.state().playing && t.engine.state().error !== null);
+  t.engine.seek(0);
+  t.net.down.clear();
+  await t.engine.retry();
+  await t.clock.advance(120000);
+  check('Retry after the move: 15 s from 0, no more (not 120 s)', PREVIEW_END(t, 0), bookMsOf(t));
+  t.engine.close();
+}
+
+current = 'spec 2.5 T2E1: a move while a preview plays ends it: paused, at the new spot';
+for (const how of ['seek', 'skip', 'chapter', 'seekforward']) {
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null });
+  t.engine.previewAt(700000);
+  await t.clock.advance(5000);
+  if (how === 'seek') t.engine.seek(1000000);
+  else if (how === 'skip') t.engine.skip(30);
+  else if (how === 'chapter') t.engine.jumpToChapter(0);
+  else t.ms.handlers.get('seekforward')({});
+  const at = bookMsOf(t);
+  await t.clock.advance(20000);
+  check(how + ': paused where it landed', !t.engine.state().playing && bookMsOf(t) === at && t.engine.state().filesChanged.spot === at, [at, bookMsOf(t)]);
+  t.engine.close();
+}
+
+current = 'spec 2.5: while held, Retry after an outage only ever plays a bounded preview';
 {
   // The held open can't load its start: "Can't reach the media server".
   const t = await openHeld(MULTI.key, { web: GONE, plex: null }, { net: { down: new Set(['remote']) } });
@@ -2013,14 +2074,11 @@ current = 'spec 2.5: while held, Retry after an outage only resumes a preview';
   check('unreachable, with a retry', err && err[1].code === 'unreachable' && typeof err[1].retry === 'function', t.log.error);
   t.net.down.clear();
   await err[1].retry();
-  await t.engine.retry();
-  await t.engine.play();
-  await t.clock.advance(5000);
-  check('no preview: Retry and Play play nothing', !t.engine.state().playing && t.main.paused && bookMsOf(t) === 0, [t.engine.state().playing, bookMsOf(t)]);
-  check('still held, still the error', t.engine.state().filesChanged !== null && t.engine.state().error !== null);
-  check('a preview plays from the error state', t.engine.previewAt(700000) === true);
+  await t.clock.advance(60000);
+  check('the error\'s Retry: a preview from the chosen spot (0), bounded', PREVIEW_END(t, 0) && t.engine.state().error === null, [bookMsOf(t), t.engine.state().error]);
+  check('a preview plays', t.engine.previewAt(700000) === true);
   await t.clock.advance(3000);
-  check('it plays', t.engine.state().playing && bookMsOf(t) > 700000 && t.engine.state().error === null, [bookMsOf(t), t.engine.state().error]);
+  check('it plays', t.engine.state().playing && bookMsOf(t) > 700000, bookMsOf(t));
   t.net.down.add('remote');
   await t.clock.advance(15000);
   check('an outage mid-preview stops it', !t.engine.state().playing && t.engine.state().error !== null);
@@ -2028,11 +2086,12 @@ current = 'spec 2.5: while held, Retry after an outage only resumes a preview';
   const at = bookMsOf(t);
   await t.engine.retry();
   await t.clock.advance(20000);
-  check('Retry resumes the unfinished preview, to its end only', !t.engine.state().playing && bookMsOf(t) > at && bookMsOf(t) <= 715500, [at, bookMsOf(t)]);
+  check('Retry resumes the unfinished preview, to its end only', PREVIEW_END(t, 700000) && bookMsOf(t) > at, [at, bookMsOf(t)]);
+  check('still held', t.engine.state().filesChanged !== null);
   t.engine.close();
 }
 
-current = 'spec 2.5: while held, smart rewind does nothing and a move while previewing previews from there';
+current = 'spec 2.5: while held, smart rewind does nothing';
 {
   const t = await openHeld(MULTI.key, { web: GONE, plex: null });
   t.engine.previewAt(700000);
@@ -2040,10 +2099,45 @@ current = 'spec 2.5: while held, smart rewind does nothing and a move while prev
   const here = bookMsOf(t);
   t.engine.rewind(here - 30000);
   await t.clock.advance(500);
-  check('rewind ignored', bookMsOf(t) >= here && !t.saver.notes.some((n) => n.reason === 'seek'), bookMsOf(t));
-  t.engine.seek(1000000);
-  await t.clock.advance(20000);
-  check('a seek while previewing previews 15 s from there', !t.engine.state().playing && bookMsOf(t) >= 1015000 && bookMsOf(t) <= 1015500, bookMsOf(t));
+  check('rewind ignored', bookMsOf(t) >= here && t.engine.state().playing && !t.saver.notes.some((n) => n.reason === 'seek'), bookMsOf(t));
+  t.engine.close();
+}
+
+current = 'spec 2.5 T2E3: a preview stops short of a part this browser can\'t decode';
+{
+  // MIXED: part 2 (600 000 to 1 500 000) is E-AC3.
+  const t = await openHeld(MIXED.key, { web: Object.assign({}, GONE, { track: '999' }), plex: null });
+  check('previewAt 5 s before the undecodable part', t.engine.previewAt(595000) === true);
+  await t.clock.advance(30000);
+  let s = t.engine.state();
+  check('it stops 1 s short of it: no format error', !s.playing && !s.error && t.log.error.length === 0 &&
+    bookMsOf(t) >= 599000 && bookMsOf(t) < 600000 && s.filesChanged.spot === 595000, [bookMsOf(t), s.error, s.filesChanged.spot]);
+  t.engine.previewAt(599800);
+  await t.clock.advance(30000);
+  s = t.engine.state();
+  check('a spot within 1 s of it: the 15 s before it', !s.playing && !s.error && s.filesChanged.spot === 585000 &&
+    bookMsOf(t) >= 599000 && bookMsOf(t) < 600000, [bookMsOf(t), s.filesChanged.spot]);
+  t.engine.previewAt(580000);
+  await t.clock.advance(30000);
+  s = t.engine.state();
+  check('from further back: up to the same place', !s.playing && !s.error && bookMsOf(t) >= 594000 && bookMsOf(t) < 600000, bookMsOf(t));
+  check('still held, part 2 never loaded', s.filesChanged !== null && !t.net.loads.some((l) => l.part === MIXED.tracks[1].part_path));
+  t.engine.close();
+}
+
+current = 'spec 2.5 T2E2: a confirm or startOver during the open\'s connection choice does not autoplay';
+for (const how of ['confirmPlace', 'startOver']) {
+  const saver = heldSaver();
+  const t = setup({ saver, net: { positions: { web: GONE, plex: null }, hang: new Set(['local']) } });
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(300);                      // the local probe is still waiting
+  check(how + ' during the choice', how === 'confirmPlace' ? t.engine.confirmPlace(650000) === true : t.engine.startOver() === true);
+  await t.clock.advance(3000);
+  await p;
+  await t.clock.advance(5000);
+  const s = t.engine.state();
+  check(how + ': loaded, not playing, at the spot', !s.playing && t.main.paused && bookMsOf(t) === (how === 'confirmPlace' ? 650000 : 0) &&
+    s.filesChanged === null, [s.playing, bookMsOf(t)]);
   t.engine.close();
 }
 
@@ -2114,12 +2208,15 @@ current = 'boot mounts one audio element in #wsPlayer and sets WS.player';
   win.WS = {};
   const clock = fakeClock();
   const net = makeNet();
+  // The engine's own cases run without saves (saver: null given); boot with
+  // no saves at all refuses to open (the next case).
   const overrides = {
     fetch: makeFetch(net),
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
     mediaSession: null,
-    MediaMetadata: null
+    MediaMetadata: null,
+    saver: null
   };
   check('boot is exported', typeof E.boot === 'function');
   const engine = E.boot(win, overrides);
@@ -2138,6 +2235,49 @@ current = 'boot mounts one audio element in #wsPlayer and sets WS.player';
   check('a page without #wsPlayer boots nothing', E.boot(Object.assign(new Window({ url: 'https://ws.test/' }), { WS: {} }), overrides) === null);
   engine.close();
   await win.happyDOM.close();
+}
+
+// Fix round 1 (T2S1): saves.js that fails to load or run (a syntax an old
+// Safari can't parse) leaves no WS.playerSaves. The engine must never then
+// open a book at 0:00 with nothing saved: it refuses, with a clear message.
+current = 'boot without the saves refuses to open any book: "The player couldn\'t start. Please update your browser."';
+for (const how of ['no WS.playerSaves', 'browserSaver throws']) {
+  const win = new Window({ url: 'https://ws.test/news' });
+  win.document.write('<!DOCTYPE html><html><body><main></main><div id="wsPlayer" hidden></div></body></html>');
+  win.WS = how === 'no WS.playerSaves' ? {} : { playerSaves: { browserSaver() { throw new SyntaxError('bad'); } } };
+  const clock = fakeClock();
+  const net = makeNet();
+  net.positions = { web: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: '2026-09-30T11:00:00.000Z' }, plex: null };
+  const engine = E.boot(win, { fetch: makeFetch(net), setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout, mediaSession: null, MediaMetadata: null });
+  const errors = [];
+  engine.on('error', (e) => errors.push(e));
+  const p = engine.open(MULTI.key);
+  await clock.advance(3000);
+  await p;
+  const s = engine.state();
+  check(how + ': the message', errors.length === 1 && errors[0].code === 'unsupported' && errors[0].retry === null &&
+    errors[0].message === "The player couldn't start. Please update your browser." && s.error && s.error.code === 'unsupported', errors);
+  check(how + ': nothing fetched, loaded or played', net.fetches.length === 0 && !win.document.querySelector('audio').getAttribute('src') &&
+    s.book === null && s.position === null && !s.playing, net.fetches);
+  await engine.play();
+  await engine.retry();
+  await clock.advance(3000);
+  check(how + ': Play and Retry do nothing', net.fetches.length === 0 && !engine.state().playing);
+  engine.close();
+  await win.happyDOM.close();
+}
+
+current = 'fix round 1 (T2S1): the player\'s code parses on Safari before 16.4 (no lookbehind, no newer syntax)';
+{
+  const dir = join(here, '../../static/js/player');
+  const paths = { 'engine.js': ENGINE, 'saves.js': process.env.SAVES_JS || join(dir, 'saves.js'),
+    'features.js': process.env.FEATURES_JS || join(dir, 'features.js'), 'ui.js': process.env.UI_JS || join(dir, 'ui.js') };
+  for (const f of Object.keys(paths)) {
+    const code = readFileSync(paths[f], 'utf8');
+    const hits = code.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) =>
+      /\(\?<[=!]|\(\?<[A-Za-z]|\.at\(|\.findLast|Object\.hasOwn|structuredClone|toWellFormed|\?\?=|\|\|=|&&=|static \{/.test(l));
+    check(f + ': none', hits.length === 0, hits.map(([n]) => n));
+  }
 }
 
 if (failed) {

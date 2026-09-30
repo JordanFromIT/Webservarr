@@ -78,11 +78,17 @@
  *       loaded and paused, with state().filesChanged set and a 'warning'
  *       { kind: 'files-changed' }. It never jumps on its own (not to an
  *       older copy either). Held, nothing is saved (no check-in, beacon or
- *       last save) and the local copy keeps the old place; Play (the bar,
- *       the keyboard, the lock screen, the element's own controls) and Retry
- *       only resume a preview paused before its end; smart rewind does
- *       nothing; a move just moves (while a preview plays, it previews from
- *       there). previewAt, confirmPlace and startOver are the way out.
+ *       last save) and the local copy keeps the old place. Playback while
+ *       held is only ever a bounded preview: Play (the bar, the keyboard,
+ *       the lock screen, the element's own controls) and Retry resume a
+ *       preview paused before its end, else start a fresh one at the
+ *       helper's chosen spot (state().filesChanged.spot). A move (seek,
+ *       skip, chapter jump, seekto, the scrubber) ends the preview, pauses,
+ *       and only moves that spot; smart rewind does nothing. previewAt,
+ *       confirmPlace and startOver are the way out.
+ *       Booted without its saves (saves.js failed to load or run), open()
+ *       never opens a book: an 'unsupported' error, "The player couldn't
+ *       start. Please update your browser." (no retry).
  *   play(), pause(), toggle()
  *       A late Play (spec 11b): play() or retry() after 5 minutes or more
  *       without playing, by the wall clock (a device asleep counts), first
@@ -107,8 +113,9 @@
  *   previewAt(bookMs) -> bool   held for the book's changed files: plays
  *                     PREVIEW_MS (15 s) from bookMs without saving (a
  *                     'preview' change), then pauses; a second call replaces
- *                     the first. Near the book's end, the 15 s before it,
- *                     stopping 1 s short (a preview never ends the book).
+ *                     the first. It stops 1 s short of the book's end or of
+ *                     a part this browser can't decode (near one, it is the
+ *                     15 s before it, within the part).
  *                     false: not held, or a part this browser can't decode
  *                     (with a 'part-format' warning).
  *   confirmPlace(bookMs) -> bool  held: the listener places the book at bookMs.
@@ -169,10 +176,12 @@
  *                       resumedFrom: { source, device, updated_at, age_ms } | null,
  *                       filesChanged: { old: { track, offset_ms, book_ms,
  *                         book_duration_ms, chapter_label, updated_at, source,
- *                         linked_from, book_title, narrator } } | null }
+ *                         linked_from, book_title, narrator }, spot } | null }
  *       filesChanged: the book's files changed (see open): the place saved
  *       before (source 'web', 'plex' or 'local'; a field that copy lacks is
- *       null; linked_from: the earlier copy's key when it came from one).
+ *       null; linked_from: the earlier copy's key when it came from one);
+ *       spot: the helper's chosen spot in book ms (0 at the open, then the
+ *       last preview's start or move's landing), where Play previews.
  *       bookMs is the playhead (what to show); position is the place to save.
  *       They differ only while a skipped part's successor has not played yet.
  *       lastSavedAt: ms (this device's clock) of the last save the server
@@ -199,7 +208,7 @@
  *     'ended'    { state } at the end of the last part
  *     'error'    { code, message, retry: function | null }; code 'unreachable',
  *                'part', 'format' (no retry), 'forbidden', 'not-found', 'signed-out',
- *                'busy', 'empty'
+ *                'busy', 'empty', 'unsupported' (no saves: see open; no retry)
  *     'warning'  { kind: 'part-skipped', message }
  *                { kind: 'files-changed', book, old } (see open; old as in
  *                  state().filesChanged)
@@ -228,6 +237,7 @@ export const SKIP_S = 10;              // Media Session seek back and forward: t
 export const SKIP_MIN_S = 5;
 export const SKIP_MAX_S = 60;
 export const UNREACHABLE = "Can't reach the media server";
+export const PLAYER_BROKEN = "The player couldn't start. Please update your browser.";
 export const PREVIEW_MS = 15000;       // previewAt plays this much of the book from a spot
 const PREVIEW_END_GAP_MS = 1000;       // ... stopping this short of the book's end (never ending it)
 export const FORMAT_UNSUPPORTED = "This book's audio format can't play in this browser";
@@ -411,6 +421,8 @@ export function createEngine(env) {
   const Metadata = env.MediaMetadata || null;
   const baseUrl = env.baseUrl || '';
   const saver = env.saver || null;
+  // The page booted without its saves (boot): no book is ever opened.
+  const noSaver = !!env.noSaver && !saver;
   // The wall clock: a late Play is measured with it, so time the device
   // spent asleep counts (a monotonic clock stands still then).
   const wallNow = typeof env.now === 'function' ? env.now : Date.now;
@@ -606,7 +618,7 @@ export function createEngine(env) {
       lastSavedAt: saver ? saver.lastSavedAt : null,
       saveError: saver ? !!saver.warning : false,
       resumedFrom: resumedFrom,
-      filesChanged: book && files ? { old: Object.assign({}, files.old) } : null
+      filesChanged: book && files ? { old: Object.assign({}, files.old), spot: files.spot } : null
     };
   }
 
@@ -867,12 +879,17 @@ export function createEngine(env) {
   audio.addEventListener('play', function () {
     // Started from outside the engine (the browser's own controls).
     if (!book) return;
-    // Held for the book's changed files: only a preview plays (the engine
-    // starting one has wantPlay set already).
-    if (files && !wantPlay && !previewPaused()) {
+    // Held for the book's changed files: only a bounded preview plays. The
+    // element is stopped and Play goes the engine's way (the engine starting
+    // a preview has wantPlay set already).
+    if (files && !wantPlay) {
       try {
         audio.pause();
       } catch (e) { /* already */ }
+      if (!pending && !error) {
+        const p = play();
+        if (p && typeof p.catch === 'function') p.catch(function (e) { console.error('[player] the preview failed', e); });
+      }
       return;
     }
     if (pending || wantPlay || error) return;
@@ -1255,6 +1272,15 @@ export function createEngine(env) {
     }
     const my = ++openGen;
     teardown();
+    if (noSaver) {
+      // Never play from 0:00 over a place it can't read or save.
+      lastOpen = null;
+      error = { code: 'unsupported', message: PLAYER_BROKEN };
+      errorRetry = null;
+      emit('error', { code: 'unsupported', message: PLAYER_BROKEN, retry: null });
+      changed('error');
+      return;
+    }
     lastOpen = { key: key, opts: opts };
     setLoading(true);
     changed('loading');
@@ -1396,7 +1422,8 @@ export function createEngine(env) {
       if (isFinite(a)) age = Math.max(0, a);
     }
     resumedFrom = resumed ? { source: resumed.source, device: resumed.device, updated_at: resumed.updated_at, age_ms: age } : null;
-    files = changedFrom ? { old: changedFrom } : null;
+    // spot: the helper's chosen spot (book ms), where Play previews while held.
+    files = changedFrom ? { old: changedFrom, spot: startMs } : null;
     if (saver) {
       try {
         saver.start(key, {
@@ -1456,7 +1483,9 @@ export function createEngine(env) {
     }
     chosen = side;
     // Held (the handoff question, or the files changed): loaded, not played.
-    wantPlay = (autoplay && !held && !files) || wantPlay;
+    // The open's own finding, not `files`: a confirm or startOver during the
+    // connection choice has ended the hold, and is no Play either.
+    wantPlay = (autoplay && !held && !changedFrom) || wantPlay;
     load(playhead.index, playhead.offset, side);
     sessionState();
     changed(wantPlay ? 'play' : 'ready');
@@ -1469,12 +1498,21 @@ export function createEngine(env) {
       playhead.offset >= durationOf(book.tracks[playhead.index]));
   }
 
-  /* Play. Held for the book's changed files, it only resumes a preview
-     paused before its end (the bar, the keyboard and the lock screen come
-     here): nothing else plays until the listener places the book. */
+  /* Play. Held for the book's changed files (the bar, the keyboard, the
+     lock screen and Retry all come here), it only ever plays a bounded
+     preview: it resumes one paused before its end, else starts a fresh one
+     at the helper's chosen spot. Nothing else plays until the listener
+     places the book. */
   function play() {
-    if (files && book) return previewPaused() ? playOn() : Promise.resolve();
+    if (files && book) return heldPlay(playOn);
     return playOn();
+  }
+
+  function heldPlay(resume) {
+    if (previewPaused()) return resume();
+    if (wantPlay) return Promise.resolve();
+    startPreview(files.spot);
+    return Promise.resolve();
   }
 
   // A preview stopped (paused, or by a failure) before its end.
@@ -1557,6 +1595,14 @@ export function createEngine(env) {
       emit('warning', { kind: 'part-format', message: PART_FORMAT });
       return;
     }
+    // Held for the book's changed files, a move (a seek, skip, chapter jump,
+    // the lock screen's seekto, the scrubber) only moves the helper's chosen
+    // spot: it ends the preview, and playback with it. Playback while held
+    // is only ever a bounded preview.
+    if (files && reason !== 'preview') {
+      if (preview) preview.done = true;
+      if (wantPlay) pause();
+    }
     hold = null;
     partSuspect = null;
     const next = { index: to.index, offset: to.offset_ms };
@@ -1580,16 +1626,50 @@ export function createEngine(env) {
     } else {
       load(next.index, next.offset, cur.side);
     }
-    // Held for the book's changed files, a move while a preview plays
-    // previews from where it lands.
-    if (files && preview && wantPlay && reason !== 'preview') preview = previewFrom(bookMsNow());
+    // Held for the book's changed files, the listener's move is the helper's
+    // chosen spot (a preview's own move already set it).
+    if (files && reason !== 'preview') files.spot = bookMsNow();
     const detail = rewind ? { from: from, to: bookMsNow(), rewind: true } : { from: from, to: bookMsNow() };
     changed(reason || 'seek', Object.assign(detail, extra || {}));
   }
 
-  // A preview from a book time: PREVIEW_MS of it, ending short of the book's end.
+  // Where a preview from a book time must stop before: the start of the
+  // next part this browser can't decode, else the book's end.
+  function previewWall(ms) {
+    const i = toTrackOffset(book.tracks, ms).index;
+    for (let j = i + 1; j < book.tracks.length; j++) {
+      if (blocked(j)) return book.starts[j];
+    }
+    return book.durationMs;
+  }
+
+  // A preview from a book time: PREVIEW_MS of it, stopping PREVIEW_END_GAP_MS
+  // short of that wall (so it never ends the book or reaches a part that
+  // can't play: the element's end of a part would go on into it).
   function previewFrom(ms) {
-    return { start: ms, end: Math.min(ms + PREVIEW_MS, book.durationMs - PREVIEW_END_GAP_MS), done: false };
+    return { start: ms, end: Math.min(ms + PREVIEW_MS, previewWall(ms) - PREVIEW_END_GAP_MS), done: false };
+  }
+
+  /* Starts a preview at a book time (see previewAt); false when it is in a
+     part this browser can't decode. Too close to the wall, it is the
+     PREVIEW_MS before it (within the part). */
+  function startPreview(ms) {
+    let start = clampNumber(ms, 0, book.durationMs);
+    const at = toTrackOffset(book.tracks, start);
+    if (blocked(at.index)) {
+      emit('warning', { kind: 'part-format', message: PART_FORMAT });
+      return false;
+    }
+    const wall = previewWall(start);
+    if (start > wall - PREVIEW_END_GAP_MS) start = Math.max(book.starts[at.index], wall - PREVIEW_MS);
+    preview = previewFrom(start);
+    files.spot = start;
+    seek(start, 'preview');
+    if (!wantPlay) {
+      const p = playOn();
+      if (p && typeof p.catch === 'function') p.catch(function (e) { console.error('[player] the preview failed', e); });
+    }
+    return true;
   }
 
   /* The book's files changed (spec 2.5): play PREVIEW_MS from a spot without
@@ -1601,19 +1681,7 @@ export function createEngine(env) {
     if (!files || !book || !playhead) return false;
     const v = Number(bookMs);
     if (!isFinite(v)) return false;
-    let start = clampNumber(v, 0, book.durationMs);
-    if (start > book.durationMs - PREVIEW_END_GAP_MS) start = Math.max(0, book.durationMs - PREVIEW_MS);
-    if (blocked(toTrackOffset(book.tracks, start).index)) {
-      emit('warning', { kind: 'part-format', message: PART_FORMAT });
-      return false;
-    }
-    preview = previewFrom(start);
-    seek(start, 'preview');
-    if (!wantPlay) {
-      const p = playOn();
-      if (p && typeof p.catch === 'function') p.catch(function (e) { console.error('[player] the preview failed', e); });
-    }
-    return true;
+    return startPreview(v);
   }
 
   /* The book's files changed: the listener places it at bookMs. An explicit
@@ -1721,9 +1789,9 @@ export function createEngine(env) {
     return speed;
   }
 
-  // Held for the book's changed files, Retry (as Play) only resumes a preview.
+  // Held for the book's changed files, Retry (as Play) only plays a preview.
   function retry() {
-    if (files && book) return previewPaused() ? retryOn() : Promise.resolve();
+    if (files && book) return heldPlay(retryOn);
     return retryOn();
   }
 
@@ -2080,6 +2148,20 @@ export function boot(win, overrides) {
   // Saving comes from saves.js, loaded as its own module just before this
   // one (WS.playerSaves), so each file keeps its own asset stamp.
   const saves = WS.playerSaves;
+  // No saves (saves.js failed to load or run, as a syntax an old browser
+  // can't parse would make it): the engine refuses to open books rather than
+  // play from 0:00 with nothing saved. A test passing its own saver (even
+  // null) decides for itself.
+  let saver = null;
+  const given = !!(overrides && 'saver' in overrides);
+  if (!given) {
+    try {
+      saver = saves && typeof saves.browserSaver === 'function' ? saves.browserSaver(win) : null;
+    } catch (e) {
+      console.error('[player] saving could not start', e);
+      saver = null;
+    }
+  }
   const engine = createEngine(Object.assign({
     host: host,
     createAudio: function () { return doc.createElement('audio'); },
@@ -2090,8 +2172,8 @@ export function boot(win, overrides) {
     permissions: nav.permissions || null,
     MediaMetadata: win.MediaMetadata || null,
     baseUrl: win.location.href,
-    saver: overrides && 'saver' in overrides ? null
-      : saves && typeof saves.browserSaver === 'function' ? saves.browserSaver(win) : null
+    saver: saver,
+    noSaver: !given && !saver
   }, overrides || {}));
   WS.player = engine;
   return engine;

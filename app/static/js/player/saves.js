@@ -191,7 +191,6 @@ const DEVICE_KEY = STORE_PREFIX + 'device';
 const DEVICE_MAX = 80;
 const DEVICE_ID = /^[a-z0-9]{16,40}$/;
 const BOOK_KEY = /^[0-9]{1,20}:[0-9]{1,6}$/;   // an earlier copy's book key (linked_from), as the server checks it
-const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
 // The check-in event for an engine change, and whether it is saved at once.
 const EVENTS = {
@@ -345,9 +344,28 @@ function samePlace(a, b) {
    LABEL_MAX characters, never cut inside one. '' when there is none. */
 function labelOf(v) {
   if (typeof v !== 'string' || !v) return '';
-  const s = v.replace(LONE_SURROGATE, '\uFFFD');
-  const chars = Array.from(s);
-  return chars.length > LABEL_MAX ? chars.slice(0, LABEL_MAX).join('') : s;
+  // A loop, not a regex: a lookbehind is a syntax error before Safari 16.4,
+  // and one in this file would stop the whole module (and every save).
+  let out = '';
+  let n = 0;
+  for (let i = 0; i < v.length && n < LABEL_MAX; i++) {
+    const c = v.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF) {
+      const d = i + 1 < v.length ? v.charCodeAt(i + 1) : 0;
+      if (d >= 0xDC00 && d <= 0xDFFF) {
+        out += v[i] + v[i + 1];
+        i += 1;
+      } else {
+        out += '\uFFFD';
+      }
+    } else if (c >= 0xDC00 && c <= 0xDFFF) {
+      out += '\uFFFD';
+    } else {
+      out += v[i];
+    }
+    n += 1;
+  }
+  return out;
 }
 
 // A book time the server takes (a whole number in its bounds), else NaN.
@@ -469,6 +487,9 @@ export function createSaver(o) {
     if (isFinite(bookMsOf(v.book_ms))) out.book_ms = bookMsOf(v.book_ms);
     if (isFinite(bookMsOf(v.book_duration_ms))) out.book_duration_ms = bookMsOf(v.book_duration_ms);
     if (labelOf(v.chapter_label)) out.chapter_label = labelOf(v.chapter_label);
+    // A link to an earlier copy the listener confirmed, not yet settled by
+    // the server (see releaseFiles).
+    if (typeof v.linked_from === 'string' && BOOK_KEY.test(v.linked_from)) out.linked_from = v.linked_from;
     return out;
   }
 
@@ -533,6 +554,8 @@ export function createSaver(o) {
     if (isFinite(place.bookMs)) v.book_ms = place.bookMs;
     if (isFinite(place.bookDurationMs)) v.book_duration_ms = place.bookDurationMs;
     if (place.label) v.chapter_label = place.label;
+    // A link still unsettled goes with the copy, so a later open sends it.
+    if (r && r.book === book && r.linkedFrom) v.linked_from = r.linkedFrom;
     const value = JSON.stringify(v);
     stored(function (s) { s.setItem(localKey(id, book), value); });
   }
@@ -700,7 +723,15 @@ export function createSaver(o) {
     // that is settled, so it is sent no more. null (it could not check) or
     // no answer: it goes again with the next save.
     const linked = res && res.data && typeof res.data === 'object' ? res.data.linked : undefined;
-    if (r.linkedFrom && (linked === true || linked === false)) r.linkedFrom = null;
+    if (r.linkedFrom && (linked === true || linked === false)) {
+      const link = r.linkedFrom;
+      r.linkedFrom = null;
+      editLocal(r.book, function (v) {
+        if (v.linked_from !== link) return false;
+        delete v.linked_from;
+        return true;
+      });
+    }
     if (status >= 200 && status < 300) {
       r.acked = sent.place;
       r.failures = 0;
@@ -943,6 +974,11 @@ export function createSaver(o) {
     // The book's files changed (spec 2.5): held like an unanswered 409 until
     // the listener places it (releaseFiles).
     if (opts.files) run.conflict = { files: true };
+    // A link to an earlier copy confirmed in an earlier page session and not
+    // yet settled by the server: sent again with the saves until it is (a
+    // startOver while held drops it).
+    const kept = readLocal(run.book);
+    if (kept && kept.linked_from) run.linkedFrom = kept.linked_from;
     // A newer local copy the book opens at is sent at once: opening from it
     // counts as reaching it, so it obeys the same 2 minutes as any place.
     if (opts.push) {
@@ -1124,6 +1160,11 @@ export function createSaver(o) {
     r.reachedMono = null;
     r.reachedWall = null;
     r.keepLocal = false;
+    // The place held was never the listener's: the move that follows is a
+    // new place even where the playhead already is (a startOver at the held
+    // 0:00), so it is written to the local copy too.
+    r.latest = null;
+    r.latestBookMs = NaN;
     r.linkedFrom = typeof link === 'string' && BOOK_KEY.test(link) ? link : null;
     return true;
   }
