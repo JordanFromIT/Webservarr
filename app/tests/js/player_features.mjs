@@ -289,16 +289,17 @@ function memoryStorage() {
 
 /* The check-in server as app/services/listening.save_checkin keeps it
    (spec 11b): per book one row; the same psid's older seq is refused (200,
-   stored false); the same device (device_id, else psid) or a base equal to
-   the row's timestamp stores; anything else is 409 with the row. A beacon
-   gets the same rule and no answer. `down`: every check-in fails (the
+   stored false); the same page session (psid) or a base equal to the row's
+   timestamp stores (a device id alone does not: another tab of the same
+   browser is another page session); anything else is 409 with the row. A
+   beacon gets the same rule and no answer. `down`: every check-in fails (the
    network). Shared by the pages of several "devices" on one clock. */
 function casServer(clock) {
   const srv = { rows: {}, log: [], down: false };
   srv.at = () => new Date(NOW0 + clock.now).toISOString();
   srv.web = (book) => {
     const r = srv.rows[book];
-    return r ? { track: r.track, offset_ms: r.offset_ms, duration_ms: r.duration_ms, updated_at: r.updated_at, device: r.device, device_id: r.device_id || null } : null;
+    return r ? { track: r.track, offset_ms: r.offset_ms, duration_ms: r.duration_ms, updated_at: r.updated_at, device: r.device, device_id: r.device_id || null, psid: r.psid } : null;
   };
   srv.store = (b, kind) => {
     const row = srv.rows[b.book];
@@ -307,7 +308,7 @@ function casServer(clock) {
       srv.log.push(Object.assign(entry, { result: 'stale' }));
       return { status: 200, data: { stored: false, updated_at: row.updated_at } };
     }
-    const same = b.device_id && row && row.device_id ? b.device_id === row.device_id : !!row && row.psid === b.psid;
+    const same = !!row && row.psid === b.psid;
     if (row && !same && b.base !== row.updated_at) {
       srv.log.push(Object.assign(entry, { result: 'conflict' }));
       return { status: 409, data: { conflict: { track: row.track, offset_ms: row.offset_ms, device: row.device, updated_at: row.updated_at }, now: srv.at() } };
@@ -442,7 +443,11 @@ async function setup(o = {}) {
   t.ms = ms;
   const host = doc.getElementById('wsPlayer');
   // The engine's element is the fake one, kept aside (it is no DOM node).
+  // o.wall: the engine's wall clock is this clock (plus t.wallExtra, time a
+  // device spent asleep: its timers stood still); else the real Date.now.
+  t.wallExtra = 0;
   t.engine = E.createEngine({
+    now: o.wall ? () => t.now() + t.wallExtra : undefined,
     host: { appendChild(el) { t.audioEl = el; return el; } },
     createAudio: () => new FakeAudio(t),
     fetch: fetchFn,
@@ -1913,7 +1918,7 @@ async function twoDevices(o = {}) {
   const server = casServer(clock);
   const page = async (psid, device, deviceId, storage, prefs) => {
     const store = storage || memoryStorage();
-    const t = await setup({ clock, server, psid, device, deviceId, storage: store, identity: ID, prefs });
+    const t = await setup({ clock, server, psid, device, deviceId, storage: store, identity: ID, prefs, wall: o.wall });
     t.storage = store;
     t.prompts = () => t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
     t.buttons = () => t.qa('.wsp-prompt .wsp-notice-btn').map((b) => b.textContent);
@@ -2590,6 +2595,314 @@ await run('a conflict whose place is in a part this browser can\'t play offers o
   phone.engine.close();
 });
 
+// ---- Final review F1: an untouched open never takes the row ----
+
+// The desk listens on offline; the phone opens the book twice without
+// listening (it can't reach Plex). The phone's opens must not push the copy
+// of the desk's old place they left (it would take the row, and the desk's
+// real listening would get a false 409).
+await run('F1: untouched opens on another device never take the row; the offline listener\'s save still lands', async () => {
+  const { clock, phone, desk, row, since } = await twoDevices();
+  await desk.openAt(MULTI.key, '502', 300000);
+  await clock.advance(5000);
+  desk.offline = true;                       // the desk's saves fail from here; it keeps playing
+  await clock.advance(90000);
+  desk.engine.pause();
+  await clock.advance(2000);
+  const heard = desk.st().position.offset_ms;
+  check('the desk heard on offline', heard >= 390000, heard);
+  phone.remote = [];
+  let n = phone.server.log.length;
+  await phone.open(MULTI.key); phone.engine.close(); await clock.advance(20000);
+  await phone.open(MULTI.key); await clock.advance(2000); phone.engine.close();
+  check('the phone sent nothing', since(n).length === 0, since(n));
+  check('the row is still the desk\'s', row().device_id === DESK_ID, row());
+  const local = JSON.parse(phone.storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+  check('the phone\'s copy of the opening place keeps the desk\'s stamp', local.own === false && local.updated_at === row().updated_at, [local, row()]);
+  desk.offline = false;
+  n = phone.server.log.length;
+  await clock.advance(30000);                // the desk's retry goes out
+  check('the desk\'s save is stored, no 409', since(n).length >= 1 && since(n).every((e) => e[0] === 'stored'), since(n));
+  check('at the place the desk reached', row().device_id === DESK_ID && row().offset_ms === heard, [row(), heard]);
+  check('no question on the desk', desk.prompts().length === 0, desk.prompts());
+  desk.engine.close();
+});
+
+await run('F1: a device that only opened the book leaves the listener\'s next Play alone', async () => {
+  const { clock, phone, desk, row, since } = await twoDevices();
+  await desk.openAt(MULTI.key, '502', 300000);
+  await clock.advance(20000);
+  desk.engine.pause();
+  await clock.advance(2000);
+  await clock.advance(10 * MIN);
+  phone.remote = [];
+  let n = phone.server.log.length;
+  await phone.open(MULTI.key);
+  phone.engine.close();
+  await clock.advance(MIN);
+  await phone.open(MULTI.key);
+  await clock.advance(3000);
+  check('the second open resumes from the desk\'s row', phone.st().resumedFrom && phone.st().resumedFrom.source === 'web', phone.st().resumedFrom);
+  check('and sends nothing', since(n).length === 0, since(n));
+  phone.engine.close();
+  await clock.advance(MIN);
+  n = phone.server.log.length;
+  desk.engine.play();
+  await clock.advance(3000);
+  check('the desk plays on and is stored', desk.st().playing && since(n).length >= 1 && since(n).every((e) => e[0] === 'stored'), since(n));
+  check('no question', desk.prompts().length === 0, desk.prompts());
+  desk.engine.close();
+});
+
+// ---- Final review F2 (client): a late Play reads the saved places first ----
+
+// A tab of this browser left paused while a second tab listened on (probe_tab).
+async function staleTab() {
+  const d = await twoDevices({ wall: true });
+  const { clock, phone, page, row } = d;
+  await phone.openAt(MULTI.key, '502', 300000);
+  await clock.advance(20000);
+  phone.engine.pause();
+  await clock.advance(2000);
+  await clock.advance(30 * MIN);
+  const tab2 = await page('psid-phone-tab2', 'Chrome on Android', PHONE_ID, phone.storage);
+  await tab2.open(MULTI.key);
+  await clock.advance(5 * MIN);
+  tab2.engine.pause();
+  await clock.advance(2000);
+  d.newer = Object.assign({}, row());
+  d.tab2 = tab2;
+  await clock.advance(60 * MIN);
+  return d;
+}
+
+await run('F2: a stale tab\'s late Play re-reads the saved places, sends nothing and asks', async () => {
+  for (const how of ['Play', 'lock-screen Play', 'the play button']) {
+    const d = await staleTab();
+    const { clock, phone, row, since } = d;
+    const reads = phone.positionCalls;
+    const n = phone.server.log.length;
+    if (how === 'Play') phone.engine.play();
+    else if (how === 'lock-screen Play') phone.ms.handlers.get('play')();
+    else phone.q('.wsp-bar .wsp-play, .wsp-play').click();
+    await clock.advance(5000);
+    check(how + ': read again', phone.positionCalls === reads + 1, phone.positionCalls - reads);
+    check(how + ': nothing sent', since(n).length === 0, since(n));
+    check(how + ': held, not playing', !phone.st().playing && !phone.st().checking);
+    check(how + ': asked about the other tab\'s place', phone.prompts().length === 1 && /^Continue from 20:1\d \(another Chrome on Android, 1 h ago\)\?$/.test(phone.prompts()[0]) &&
+      phone.buttons().join() === 'Continue,Keep listening here', [phone.prompts(), phone.buttons()]);
+    check(how + ': the newer place stands', row().offset_ms === d.newer.offset_ms && row().psid === d.newer.psid, row());
+    phone.engine.close();
+    d.tab2.engine.close();
+  }
+});
+
+await run('F2: the stale tab\'s answer: Continue moves there and saves; Keep listening here overrides', async () => {
+  for (const which of ['Continue', 'Keep listening here']) {
+    const d = await staleTab();
+    const { clock, phone, row, since } = d;
+    const here = phone.st().position.offset_ms;
+    phone.engine.play();
+    await clock.advance(5000);
+    const n = phone.server.log.length;
+    phone.button(which).click();
+    await clock.advance(3000);
+    check(which + ': playing', phone.st().playing);
+    check(which + ': stored, no 409', since(n).length >= 1 && since(n).every((e) => e[0] === 'stored'), since(n));
+    if (which === 'Continue') check('from the other tab\'s place', row().psid === 'psid-phone' && row().track === d.newer.track && row().offset_ms >= d.newer.offset_ms, [row(), d.newer]);
+    else check('from here, over it', row().psid === 'psid-phone' && row().track === '502' && row().offset_ms < d.newer.offset_ms && row().offset_ms >= here - 31000, [row(), here]);
+    phone.engine.close();
+    d.tab2.engine.close();
+  }
+});
+
+await run('F2: without the re-check the server still refuses the stale tab (psid, not device id)', async () => {
+  // The engine on the real clock: a Play is never "late" here, so the save goes and the server decides.
+  const d = await twoDevices();
+  const { clock, phone, page, row, since } = d;
+  await phone.openAt(MULTI.key, '502', 300000);
+  await clock.advance(20000);
+  phone.engine.pause();
+  await clock.advance(2000);
+  await clock.advance(30 * MIN);
+  const tab2 = await page('psid-phone-tab2', 'Chrome on Android', PHONE_ID, phone.storage);
+  await tab2.open(MULTI.key);
+  await clock.advance(5 * MIN);
+  tab2.engine.pause();
+  await clock.advance(2000);
+  const newer = Object.assign({}, row());
+  await clock.advance(60 * MIN);
+  const n = phone.server.log.length;
+  phone.engine.play();
+  await clock.advance(5000);
+  check('refused', since(n).length === 1 && since(n)[0][0] === 'conflict', since(n));
+  check('the newer place stands', row().offset_ms === newer.offset_ms && row().psid === 'psid-phone-tab2', row());
+  check('asked', phone.prompts().length === 1 && !phone.st().playing, phone.prompts());
+  phone.engine.close();
+  tab2.engine.close();
+});
+
+// Listening in a Plex app while this page sat paused (probe_plex).
+async function pausedThenPlex(o = {}) {
+  const storage = memoryStorage();
+  const t = await setup(Object.assign({ storage, identity: ID, deviceId: PHONE_ID, wall: true,
+    places: { web: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(NOW0 - 60000).toISOString(), device: 'Test on Linux', device_id: PHONE_ID, psid: 'test-psid' }, plex: null } }, o));
+  await t.engine.open(MULTI.key);
+  await t.clock.advance(3000);
+  t.engine.pause();
+  await t.clock.advance(2000);
+  t.readsBefore = t.positionCalls;
+  // Two hours in Plexamp: Plex now holds part 3, 2:00, stamped after this page's last save.
+  t.places = { web: t.places.web, plex: { track: '503', offset_ms: 120000, duration_ms: 300000, updated_at: new Date(t.now() + 7200000 - 60000).toISOString(), device: 'Plexamp', source: 'plex' } };
+  await t.clock.advance(2 * 3600000);
+  t.prompts = () => t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
+  t.button = (label) => t.qa('.wsp-notice-btn').find((b) => b.textContent === label) || null;
+  return t;
+}
+
+await run('F2: a late Play after listening in a Plex app asks before posting the old place', async () => {
+  const t = await pausedThenPlex();
+  const n = t.posts.length;
+  t.engine.play();
+  await t.clock.advance(3000);
+  check('read again', t.positionCalls - t.readsBefore === 1, t.positionCalls - t.readsBefore);
+  check('nothing posted', t.posts.length === n, t.posts.slice(n).map((b) => [b.event, b.track, b.offset_ms]));
+  check('held and asked', !t.st().playing && /^Continue from 27:00 \(Plexamp, 1 min ago\)\?$/.test(t.prompts().join()), t.prompts());
+  t.button('Continue').click();
+  await t.clock.advance(3000);
+  check('Continue: plays from the Plex place and saves it', t.st().playing && t.st().position.track === '503' &&
+    t.posts.slice(n).length >= 1 && t.posts.slice(n).every((b) => b.track === '503' && b.offset_ms >= 120000), t.posts.slice(n).map((b) => [b.event, b.track, b.offset_ms]));
+  t.engine.close();
+  const u = await pausedThenPlex();
+  const m = u.posts.length;
+  u.engine.play();
+  await u.clock.advance(3000);
+  u.button('Keep listening here').click();
+  await u.clock.advance(3000);
+  check('Keep listening here: plays from here', u.st().playing && u.st().position.track === '502' &&
+    u.posts.slice(m).length >= 1 && u.posts.slice(m).every((b) => b.track === '502'), u.posts.slice(m).map((b) => [b.event, b.track, b.offset_ms]));
+  u.engine.close();
+});
+
+await run('F2: of two newer places, the one somewhere else is asked about', async () => {
+  const t = await pausedThenPlex();
+  const here = t.st().position;
+  // Plex's newer copy is this very place (a stray echo); another tab's newer row is elsewhere.
+  t.places = {
+    web: { track: '501', offset_ms: 60000, duration_ms: 600000, updated_at: new Date(t.now() - MIN).toISOString(), device: 'Chrome on Linux', device_id: DESK_ID, psid: 'psid-desk' },
+    plex: { track: here.track, offset_ms: here.offset_ms + 300, duration_ms: 900000, updated_at: new Date(t.now()).toISOString(), device: 'Plexamp', source: 'plex' }
+  };
+  const n = t.posts.length;
+  t.engine.play();
+  await t.clock.advance(3000);
+  check('asked about the other device\'s place, nothing posted', /^Continue from 1:00 \(Chrome on Linux, 1 min ago\)\?$/.test(t.prompts().join()) &&
+    t.posts.length === n && !t.st().playing, [t.prompts(), t.posts.slice(n)]);
+  t.engine.close();
+});
+
+await run('F2: the late Play is measured on the wall clock, so time asleep counts', async () => {
+  const t = await pausedThenPlex();
+  t.engine.close();
+  // A fresh page: paused, then the device sleeps 10 minutes (its timers stood still).
+  const u = await setup({ identity: ID, deviceId: PHONE_ID, wall: true, places: { web: null, plex: null } });
+  await u.engine.open(MULTI.key);
+  await u.clock.advance(3000);
+  u.engine.pause();
+  await u.clock.advance(2000);
+  const reads = u.positionCalls;
+  u.wallExtra = 4 * MIN;
+  u.engine.play();
+  await u.clock.advance(1000);
+  check('under 5 minutes: no read, plays at once', u.positionCalls === reads && u.st().playing, [u.positionCalls - reads, u.st().playing]);
+  u.engine.pause();
+  await u.clock.advance(1000);
+  u.wallExtra += 10 * MIN;                   // asleep: only the wall clock moved
+  u.engine.play();
+  await u.clock.advance(1000);
+  check('after a sleep: read again first', u.positionCalls === reads + 1, u.positionCalls - reads);
+  check('then plays (nothing newer)', u.st().playing, u.st());
+  u.engine.close();
+});
+
+await run('F2: a failed or slow read plays on; Pause during it cancels the Play', async () => {
+  for (const mode of ['down', 'hang']) {
+    const t = await pausedThenPlex();
+    t.positionMode = mode;
+    t.engine.play();
+    if (mode === 'hang') {
+      await t.clock.advance(100);
+      check('hang: waiting meanwhile, shown as busy', !t.st().playing && t.st().checking && t.q('.wsp-spin') !== null, t.st().checking);
+      await t.clock.advance(3800);
+      check('hang: still waiting under 4 s', !t.st().playing);
+    }
+    await t.clock.advance(600);
+    check(mode + ': plays on', t.st().playing && !t.st().checking);
+    check(mode + ': no question', t.prompts().length === 0);
+    t.engine.close();
+  }
+  const t = await pausedThenPlex();
+  t.positionMode = 'hang';
+  const n = t.posts.length;
+  t.engine.play();
+  await t.clock.advance(500);
+  t.engine.toggle();                          // the listener taps again: no Play after all
+  await t.clock.advance(5000);
+  check('cancelled: not playing, nothing posted', !t.st().playing && !t.st().checking && t.posts.length === n, t.posts.slice(n));
+  t.engine.close();
+});
+
+await run('F2: Retry after an error that came 5 minutes ago re-reads too', async () => {
+  const t = await pausedThenPlex();
+  // The stream fails while paused-then-played? Simplest: the error state now, the quiet time already over 5 minutes.
+  t.engine.play();
+  await t.clock.advance(3000);
+  t.button('Keep listening here').click();
+  await t.clock.advance(3000);
+  check('playing', t.st().playing);
+  t.down = true;
+  t.audioEl.error = { code: 2 };
+  t.audioEl.fire('error');
+  await t.clock.advance(20000);
+  check('in the error state', !!t.st().error, t.st().error);
+  const reads = t.positionCalls;
+  t.down = false;
+  // Listening in Plexamp again meanwhile.
+  t.places = { web: t.places.web, plex: { track: '501', offset_ms: 50000, duration_ms: 600000, updated_at: new Date(t.now() + 10 * MIN).toISOString(), device: 'Plexamp', source: 'plex' } };
+  await t.clock.advance(11 * MIN);
+  const n = t.posts.length;
+  t.engine.retry();
+  await t.clock.advance(3000);
+  check('read again, nothing posted, asked', t.positionCalls === reads + 1 && t.posts.length === n && t.prompts().length === 1 && !t.st().playing,
+    [t.positionCalls - reads, t.posts.slice(n), t.prompts()]);
+  t.engine.close();
+});
+
+await run('F2: nothing newer elsewhere, this page\'s own newer save, or the same place: no question', async () => {
+  // This page's own save stored after its last ack (the answer never came back): its psid.
+  const t = await pausedThenPlex();
+  t.places = { web: Object.assign({}, t.places.web, { updated_at: new Date(t.now()).toISOString(), psid: 'test-psid' }), plex: null };
+  t.engine.play();
+  await t.clock.advance(2000);
+  check('own save: plays, no question', t.st().playing && t.prompts().length === 0, t.prompts());
+  t.engine.close();
+  // Another tab saved this very place (within 1 s): its time is taken as the base, and the Play is stored.
+  const d = await twoDevices({ wall: true });
+  const { clock, phone, server, row, since } = d;
+  await phone.openAt(MULTI.key, '502', 300000);
+  await clock.advance(20000);
+  phone.engine.pause();
+  await clock.advance(2000);
+  const r = row();
+  server.rows[MULTI.key] = Object.assign({}, r, { psid: 'psid-phone-tab2', offset_ms: r.offset_ms + 400, updated_at: server.at() });
+  await clock.advance(20 * MIN);
+  const n = server.log.length;
+  phone.engine.play();
+  await clock.advance(2000);
+  check('same place: plays, no question', phone.st().playing && phone.prompts().length === 0, phone.prompts());
+  check('and is stored (no 409)', since(n).length >= 1 && since(n).every((e) => e[0] === 'stored'), since(n));
+  phone.engine.close();
+});
+
 await run('the same device reloaded carries on saving', async () => {
   const { clock, phone, page, row, since } = await twoDevices();
   await phone.openAt(MULTI.key, '502', 300000);
@@ -2607,13 +2920,22 @@ await run('the same device reloaded carries on saving', async () => {
   again.engine.close();
 });
 
-await run('two tabs of one browser both save', async () => {
+// Final review F2 (server): "the same device" is the same page session
+// (psid) or a matching base, not the device id. Two tabs of one browser are
+// two page sessions: the one that has not seen the other's save is refused
+// and asked, never silently written over it (this used to store both).
+await run('two tabs of one browser: the one that has not seen the other\'s save is refused and asked', async () => {
   const { clock, phone, page, row, since } = await twoDevices();
   const tab2 = await page('psid-phone-tab2', 'Chrome on Android', PHONE_ID, phone.storage);
   await phone.openAt(MULTI.key, '501', 100000);
   await tab2.openAt(MULTI.key, '502', 300000);
   await clock.advance(25000);
-  check('both tabs\' saves stored, no conflict', phone.server.log.length > 4 && phone.server.log.every((e) => e.result === 'stored'), since(0));
+  const log = since(0);
+  const tab2Saves = phone.server.log.filter((e) => e.psid === 'psid-phone-tab2');
+  check('tab 2 was refused', tab2Saves.length === 1 && tab2Saves[0].result === 'conflict', log);
+  check('tab 1 saves on', phone.server.log.filter((e) => e.psid === 'psid-phone').every((e) => e.result === 'stored') &&
+    row().track === '501' && row().psid === 'psid-phone', [log, row()]);
+  check('tab 2 paused and asks', !tab2.st().playing && tab2.prompts().length === 1 && /another Chrome on Android/.test(tab2.prompts()[0]), tab2.prompts());
   phone.engine.close();
   tab2.engine.close();
 });

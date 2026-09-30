@@ -428,7 +428,8 @@ function setup(o = {}) {
     mediaSession: ms,
     MediaMetadata: FakeMetadata,
     permissions: o.permissions,
-    baseUrl: 'https://ws.test/news'
+    baseUrl: 'https://ws.test/news',
+    saver: o.saver
   });
   const log = { change: [], ended: [], error: [], warning: [], raw: [] };
   // Every place a change reported, with what the element was doing then:
@@ -818,6 +819,29 @@ current = 'a part that 404s is skipped with a notice; the place stays until the 
   check('once part 3 plays, it is the place', t.engine.state().position.track === '503' && t.engine.state().position.offset_ms >= 1000);
   t.engine.close();
 }
+// Final review (parked T8L1): the saves are told the place's own book time
+// (placeMs), which is the held place's while the playhead runs ahead into
+// the part after a skipped one; the moves carry where they went from and to.
+current = 'the saves get the place\'s own book time and a move\'s from and to';
+{
+  const notes = [];
+  const saver = { note(c) { notes.push(JSON.parse(JSON.stringify(c))); }, start() {}, stop() {}, onWarning() { return () => {}; }, lastSavedAt: null, warning: false };
+  const t = setup({ saver });
+  await openPlaying(t, MULTI.key, { at: at('501', 595000) });
+  t.net.missing.add(MULTI.tracks[1].part_path);
+  await t.clock.advance(6000);                 // part 2 404s and is skipped; part 3 starts
+  const skipped = notes.find((c) => c.reason === 'part-skipped');
+  check('while part 3 starts: the place is part 2\'s start, its book time too', skipped && skipped.state.position.track === '502' &&
+    skipped.placeMs === 600000 && skipped.state.bookMs === 1500000, skipped && [skipped.placeMs, skipped.state.bookMs]);
+  await t.clock.advance(3000);
+  const last = notes[notes.length - 1];
+  check('once part 3 plays: the same as the playhead', last.placeMs === last.state.bookMs && last.state.position.track === '503', last);
+  t.engine.skip(-20);
+  const sk = notes[notes.length - 1];
+  check('a skip carries from and to', sk.reason === 'skip' && sk.to === sk.from - 20000 && sk.placeMs === sk.to, sk);
+  t.engine.close();
+}
+
 current = 'two failing parts in a row never move the place past the first';
 {
   const t = setup();
@@ -1715,7 +1739,84 @@ current = 'a failed part before an undecodable one: never skipped into it';
   check('parts 3 and 4 never loaded or probed', loadsOf(t, FOUR.tracks[2].part_path).length === 0 &&
     loadsOf(t, FOUR.tracks[3].part_path).length === 0, t.net.loads.map((l) => l.part));
   check('never the network message', !t.log.error.some((e) => e.code === 'unreachable'));
+  // Final review (parked copy LOW): nothing was skipped, so no "skipped" notice.
+  check('no "was skipped" notice: nothing was skipped', !t.log.warning.some((w) => w.kind === 'part-skipped'), t.log.warning);
   t.engine.close();
+}
+
+// Final review (parked T5b3L2): Play (Retry) at a format stop held at the
+// end of a part whose next part can't play here, or at the end of a book
+// whose first part can't, stays at the format message: it loads nothing,
+// never ends the book again and never says the server is unreachable.
+current = 'Play at a format stop at the end of a part loads nothing and stays the format message';
+{
+  for (const down of [false, true]) {
+    const t = setup({ net: { noLocal: true } });
+    await openPlaying(t, MIXED.key, { at: at('901', 598000) });
+    await t.clock.advance(5000);
+    check('stopped at the end of part 1', t.engine.state().error.code === 'format' && t.engine.state().position.offset_ms === 600000);
+    if (down) t.net.down.add('remote');
+    const loads = t.net.loads.length;
+    const ends = t.log.ended.length;
+    for (let i = 0; i < 3; i++) {
+      await t.engine.play();
+      await t.clock.advance(3000);
+    }
+    const s = t.engine.state();
+    check((down ? 'server down: ' : '') + 'still the format message, the place kept', s.error && s.error.code === 'format' &&
+      s.position.track === '901' && s.position.offset_ms === 600000, [s.error, s.position]);
+    check((down ? 'server down: ' : '') + 'nothing loaded, no end, never unreachable', t.net.loads.length === loads &&
+      t.log.ended.length === ends && !reasons(t).slice(-6).includes('ended') && !t.log.error.some((e) => e.code === 'unreachable'),
+    [t.net.loads.slice(loads), t.log.error.map((e) => e.code)]);
+    t.engine.close();
+  }
+  // At the end of the book, with part 1 undecodable: the same.
+  const u = setup({ net: { noLocal: true } });
+  await openPlaying(u, FIRSTBAD.key, { at: at('923', 297000) });
+  await u.clock.advance(5000);
+  await u.engine.play();
+  await u.clock.advance(3000);
+  check('book end: the format message', u.engine.state().error && u.engine.state().error.code === 'format');
+  const loads = u.net.loads.length;
+  const ends = u.log.ended.length;
+  await u.engine.play();
+  await u.clock.advance(3000);
+  await u.engine.retry();
+  await u.clock.advance(3000);
+  check('book end: Play and Retry again load nothing and end nothing', u.net.loads.length === loads && u.log.ended.length === ends &&
+    u.engine.state().error.code === 'format' && u.engine.state().position.offset_ms === 300000, [u.net.loads.slice(loads), u.log.ended.length]);
+  u.engine.close();
+}
+
+// Final review (parked T5b3L1): a Retry in a book that opened into an
+// undecodable part chooses the connection first; a move or a pause made
+// while it chooses is what it loads, and a pause means no 'play'.
+current = 'Retry that chooses the connection loads where the place is then, playing only if still wanted';
+{
+  for (const act of ['seek', 'pause']) {
+    const t = setup({ permissions: { query: async () => ({ state: 'granted' }) }, net: { hang: new Set(['local']) } });
+    await openPlaying(t, MIXED.key, { at: at('902', 450000) });
+    check(act + ': opened into part 2: the format message', t.engine.state().error.code === 'format');
+    t.engine.seek(300000);                            // back into part 1
+    const n = t.log.change.length;
+    const played = t.engine.play();                   // the local probe hangs: 1.5 s to choose
+    await t.clock.advance(500);
+    if (act === 'seek') t.engine.seek(200000);
+    else t.engine.pause();
+    await t.clock.advance(3000);
+    await played;
+    const s = t.engine.state();
+    const after = t.log.change.slice(n).map((c) => c.reason);
+    if (act === 'seek') {
+      check('seek: loaded and playing from the place moved to', s.playing && !t.main.paused && partOf(t.main) === MIXED.tracks[0].part_path &&
+        s.position.track === '901' && s.position.offset_ms >= 200000 && s.position.offset_ms < 205000, s.position);
+    } else {
+      check('pause: not playing, loaded at the place, paused', !s.playing && t.main.paused && partOf(t.main) === MIXED.tracks[0].part_path &&
+        s.position.offset_ms === 300000, [s.playing, s.position]);
+      check('pause: no \'play\' after the pause', after.lastIndexOf('play') < after.indexOf('pause') && after.includes('ready'), after);
+    }
+    t.engine.close();
+  }
 }
 
 current = 'probes never test the connection with an undecodable part';

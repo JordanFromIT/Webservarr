@@ -1065,8 +1065,9 @@ current = 'the engine resumes at the newest copy and sends a newer local copy at
 
 current = 'a newer local copy is sent at once even when the book only loads (autoplay off)';
 {
+  // This browser's own place (played here), never taken by the server.
   const storage = fakeStorage();
-  setLocal(storage, { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-10), device: 'Chrome on Android' });
+  setLocal(storage, { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-10), device: 'Chrome on Android', own: true, acked: false });
   const t = withEngine({ storage, places: { web: { track: '501', offset_ms: 100000, duration_ms: 600000, updated_at: iso(-600) }, plex: null } });
   const opened = t.engine.open('500:1', { autoplay: false });
   await t.clock.advance(1000);
@@ -1083,6 +1084,58 @@ current = 'a newer local copy is sent at once even when the book only loads (aut
   check('the server\'s own place, loaded only: nothing to send', u.server.calls.length === 0, u.server.calls.map((c) => c.body));
   u.engine.close();
   check('and nothing on close', u.server.calls.length === 0);
+}
+
+// Final review F1: only this browser's own place the server never took is
+// newer listening to send. A copy of an opening place nobody listened from
+// (own false), or one the server already has (acked), is not pushed: it
+// would take the row from the device that saved it.
+current = 'F1: a newer local copy that is not this browser\'s own unsent place is not pushed';
+for (const [label, extra] of [['untouched (own false)', { own: false, acked: true }], ['an old copy with no own flag', {}],
+  ['own but acknowledged', { own: true, acked: true }]]) {
+  const storage = fakeStorage();
+  setLocal(storage, Object.assign({ track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-10), device: 'Chrome on Android' }, extra));
+  const t = withEngine({ storage, places: { web: { track: '501', offset_ms: 100000, duration_ms: 600000, updated_at: iso(-600) }, plex: null } });
+  const opened = t.engine.open('500:1', { autoplay: false });
+  await t.clock.advance(15000);
+  await opened;
+  check(label + ': nothing sent', t.server.calls.length === 0, t.server.calls.map((c) => c.body));
+  t.engine.close();
+  await t.clock.advance(1000);
+  check(label + ': nothing on close either', t.server.calls.length === 0, t.server.calls.map((c) => c.body));
+}
+
+current = 'F1: an untouched open keeps the stamp of the copy it opened at';
+{
+  // Opened at the server's place, never played, closed: the local copy of
+  // it is stamped as that copy was, not "now", so the next open does not
+  // take it for newer listening.
+  const web = { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-600), device: 'Chrome on Linux' };
+  const storage = fakeStorage();
+  const t = withEngine({ storage, places: { web, plex: null } });
+  const opened = t.engine.open('500:1', { autoplay: false });
+  await t.clock.advance(3000);
+  await opened;
+  const l = JSON.parse(storage.map.get('ws-player:place:' + IDENTITY + ':500:1'));
+  check('the opening place, stamped as the web copy', l.track === '502' && l.offset_ms === 300000 && l.updated_at === web.updated_at && l.own === false, l);
+  t.engine.close();
+  await t.clock.advance(60000);
+  // The next open: the web copy (equal stamp) is the one resumed from; nothing is pushed.
+  const u = withEngine({ storage, places: { web, plex: null } });
+  const opened2 = u.engine.open('500:1', { autoplay: false });
+  await u.clock.advance(15000);
+  await opened2;
+  check('resumed from the web copy', u.engine.state().resumedFrom.source === 'web', u.engine.state().resumedFrom);
+  check('nothing sent', u.server.calls.length === 0, u.server.calls.map((c) => c.body));
+  u.engine.close();
+  // Played here, it is this browser's own place, stamped when reached.
+  const v = withEngine({ storage, places: { web, plex: null } });
+  const opened3 = v.engine.open('500:1');
+  await v.clock.advance(3000);
+  await opened3;
+  const l2 = JSON.parse(storage.map.get('ws-player:place:' + IDENTITY + ':500:1'));
+  check('played: its own place, stamped now', l2.own === true && Date.parse(l2.updated_at) > Date.parse(web.updated_at), l2);
+  v.engine.close();
 }
 
 current = 'the engine resumes at WebServarr\'s place when it is newest, and saves as it plays';
@@ -1706,7 +1759,7 @@ for (const variant of ['untouched-autoplay-off', 'played-then-paused', 'pagehide
 current = 'T6S7: the push itself still goes at once, and is retried while it is under 2 minutes old';
 {
   const storage = fakeStorage();
-  setLocal(storage, { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-3600), device: 'Chrome on Android' });
+  setLocal(storage, { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-3600), device: 'Chrome on Android', own: true, acked: false });
   const t = withEngine({ storage, places: { web: { track: '501', offset_ms: 100000, duration_ms: 600000, updated_at: iso(-7200) }, plex: null } });
   t.server.mode = 'offline';
   const opened = t.engine.open('500:1', { autoplay: false });
@@ -1901,6 +1954,141 @@ current = 'a smart rewind never moves the saved place back';
   p.seek(top - 30000);
   await t.clock.advance(1500);
   check('another run has no floor', t.server.row.offset_ms === top - 30000, t.server.row);
+}
+
+// Final review (parked T8L1-L3): the floor follows the place to save.
+// placeMs is the position's book time (the engine passes it: the position
+// holds where a failed part stopped while the playhead runs on into the next
+// part); a move forward short of the floor keeps it; only a move back ends
+// it; and no other change ends it, nor does it outlive its run.
+function floorRig() {
+  const t = makeSaver();
+  // One book of three 600 s parts: book ms = part start + offset.
+  const starts = { '501': 0, '502': 600000, '503': 1200000 };
+  const at = { track: '501', offset: 0, head: null, playing: false };
+  const bm = (track, off) => starts[track] + off;
+  const state = () => ({ book: '500:1', playing: at.playing, bookMs: at.head === null ? bm(at.track, at.offset) : at.head,
+    position: { track: at.track, offset_ms: Math.round(at.offset), duration_ms: 600000 } });
+  const note = (reason, extra) => t.saver.note(Object.assign({ reason, state: state(), placeMs: bm(at.track, at.offset) }, extra || {}));
+  const saved = (n) => t.server.calls.slice(n).map((c) => [c.body.event, c.body.track, c.body.offset_ms, c.kind]);
+  // Puts the place at a book ms.
+  const go = (ms) => {
+    const track = ms >= 1200000 ? '503' : ms >= 600000 ? '502' : '501';
+    Object.assign(at, { track, offset: ms - starts[track] });
+  };
+  return { t, at, bm, note, saved, go };
+}
+async function floorAt(r, track, offset) {
+  // Listened up to (track, offset), paused an hour, then Play rewinds 30 s.
+  const { t, at, note } = r;
+  t.saver.start('500:1', {});
+  Object.assign(at, { track, offset: offset - 5000, playing: false });
+  note('open');
+  at.playing = true;
+  note('play');
+  for (let k = 0; k < 20; k++) { await t.clock.advance(250); at.offset += 250; note('time'); }
+  at.playing = false;
+  note('pause');
+  await t.clock.advance(3600000);
+  at.playing = true;
+  note('play');
+  const from = r.bm(at.track, at.offset);
+  r.go(from - 30000);                                   // may cross back into the part before
+  note('seek', { rewind: true, from, to: from - 30000 });
+  await t.clock.advance(1500);
+  return { track, offset };
+}
+
+current = 'T8L1: the floor is released by the place to save, not the playhead';
+{
+  const r = floorRig();
+  const { t, at, note, saved } = r;
+  const floor = await floorAt(r, '502', 595000);       // the floor: 502 @ 595000, the part ends at 600000
+  // Part 502 fails twice at 570 s and is skipped: the playhead moves on to
+  // part 503 (past the floor), the position holds 502 @ 570000.
+  at.offset = 570000;
+  at.head = r.bm('503', 0);
+  note('part-skipped');
+  // Part 503 fails too, before it has played: the error holds 502 @ 570000.
+  let n = t.server.calls.length;
+  at.playing = false;
+  note('error');
+  await t.clock.advance(1500);
+  check('the error\'s save is the floor, not the hold behind it', saved(n).length === 1 && saved(n)[0][1] === '502' && saved(n)[0][2] === floor.offset, saved(n));
+  n = t.server.calls.length;
+  t.saver.stop();
+  await t.clock.advance(1500);
+  check('and so is anything after it', saved(n).every((c) => c[2] === floor.offset), saved(n));
+  const l = localOf(t);
+  check('the local copy keeps the floor', l.track === '502' && l.offset_ms === floor.offset, l);
+}
+
+current = 'T8L2: a move forward that lands short of the floor keeps it; past it, or back, the move is saved';
+{
+  for (const [label, delta, want] of [['forward, short of the floor', 10000, 'floor'], ['forward, past the floor', 45000, 'target'],
+    ['back', -10000, 'target']]) {
+    const r = floorRig();
+    const { t, at, bm, note, saved } = r;
+    const floor = await floorAt(r, '501', 300000);     // floor 501 @ 300000; now at 270000, playing
+    const from = bm(at.track, at.offset);
+    at.offset += delta;
+    note('skip', { from, to: from + delta });
+    await t.clock.advance(1500);
+    let n = t.server.calls.length;
+    at.playing = false;
+    note('pause');
+    await t.clock.advance(1500);
+    const expect = want === 'floor' ? floor.offset : at.offset;
+    check(label + ': the pause saves ' + want, saved(n).length === 1 && saved(n)[0][2] === expect, [saved(n), expect]);
+    check(label + ': the local copy too', localOf(t).offset_ms === expect, localOf(t));
+  }
+}
+
+current = 'T8L3: error, part, play, retry and connection changes never end the floor';
+{
+  for (const reason of ['error', 'part', 'play', 'retry', 'connection']) {
+    const r = floorRig();
+    const { t, at, note, saved } = r;
+    const floor = await floorAt(r, '502', 20000);      // floor 502 @ 20000
+    check(reason + ': the rewind crossed back into part 1', at.track === '501' && at.offset === 590000, at);
+    if (reason === 'part') Object.assign(at, { track: '502', offset: 0 });
+    if (reason === 'error' || reason === 'retry') at.playing = false;
+    note(reason);
+    if (reason === 'retry') { at.playing = true; note('play'); }
+    await t.clock.advance(1500);
+    const n = t.server.calls.length;
+    at.playing = false;
+    note('pause');
+    await t.clock.advance(1500);
+    const all = saved(n);
+    check(reason + ': still the floor', localOf(t).track === '502' && localOf(t).offset_ms === floor.offset &&
+      (all.length === 0 || all.every((c) => c[1] === '502' && c[2] === floor.offset)), [all, localOf(t)]);
+  }
+}
+
+current = 'T8L3: a floor never outlives its run';
+{
+  for (const next of ['the same book again', 'another book']) {
+    const r = floorRig();
+    const { t, at, note, saved } = r;
+    const floor = await floorAt(r, '501', 300000);
+    t.saver.stop();
+    await t.clock.advance(1500);
+    // A new run, playing on from a place behind the old floor (no move of the listener's).
+    const book = next === 'another book' ? '700:1' : '500:1';
+    t.saver.start(book, {});
+    const st = (off, playing) => ({ book, playing, bookMs: off, position: { track: '501', offset_ms: off, duration_ms: 600000 } });
+    t.saver.note({ reason: 'open', state: st(250000, false), placeMs: 250000 });
+    t.saver.note({ reason: 'play', state: st(250000, true), placeMs: 250000 });
+    let off = 250000;
+    for (let k = 0; k < 8; k++) { await t.clock.advance(250); off += 250; t.saver.note({ reason: 'time', state: st(off, true), placeMs: off }); }
+    await t.clock.advance(1000);
+    const n = t.server.calls.length;
+    t.saver.note({ reason: 'pause', state: st(off, false), placeMs: off });
+    await t.clock.advance(1500);
+    check(next + ': the new run saves where it plays', saved(n).length === 1 && saved(n)[0][2] === off && off < floor.offset, saved(n));
+    t.saver.stop();
+  }
 }
 
 // ---- Device ids: one per browser, on every save ----

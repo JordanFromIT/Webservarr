@@ -44,9 +44,17 @@
  * as the new base and lets saves go again. A beacon or last save refused
  * that way is dropped.
  * Smart rewind (a change the engine marks { rewind: true }) never moves the
- * saved place back: until playback passes the place it went back from, that
- * place is what every save (and the local copy) carries; the listener's own
- * seek, skip or jump, another book or a close ends that.
+ * saved place back: until the place to save (the playhead, or the place
+ * held after a skipped part) passes the place it went back from, that place
+ * is what every save (and the local copy) carries. The listener's own move
+ * back (a seek, skip or jump to an earlier place), another book or a close
+ * ends that; a move forward that lands short of it keeps it.
+ *
+ * A late Play (engine.js, spec 11b): before playback starts again after 5
+ * minutes or more, the engine re-reads the saved places. lastSeen() gives
+ * it this page's psid and base; a newer place another page saved is taken
+ * like a 409 (otherSaved: nothing is sent until the listener answers), and
+ * one at this very place just becomes the base (adoptBase).
  *
  * Device: every save carries the device label ("Chrome on Android") and this
  * browser's own random id (device_id), made once and kept in localStorage
@@ -62,7 +70,9 @@
  * sessions), so it compares fairly with the server's copies from a fast or
  * slow device, and marked `own` once the listener has played or moved to it
  * here (an untouched opening place, taken from another device, is not this
- * device's own place). Storage can
+ * device's own place). An untouched opening place keeps the stamp of the
+ * copy it came from (start({ openedAt })): opening a book without listening
+ * never makes that place look newer than it is. Storage can
  * throw (a private window): every call is guarded, and saves go on without.
  *
  * Warning: while playing, once saves have failed and the place has gone
@@ -86,11 +96,16 @@
  *               now (wall clock), mono (monotonic; default performance.now),
  *               storage, identity (the identity key: string or function), device,
  *               deviceId, setTimeout, clearTimeout, onSignedOut, formatTime, psid })
- *   start(book, { push, savedAt, held, keepLocal })
+ *   start(book, { push, savedAt, held, keepLocal, openedAt })
  *                                   push: the place the book opens at is newer
- *                                   than the server's (a local copy): send it at
- *                                   once (it counts as reached now, so after 2
- *                                   minutes unsaved it stays local). savedAt: the server's last save of it
+ *                                   than the server's and this browser's own,
+ *                                   never taken by the server (a local copy):
+ *                                   send it at once (it counts as reached now,
+ *                                   so after 2 minutes unsaved it stays local).
+ *                                   openedAt: the stamp (ISO) of the copy the
+ *                                   book opens at, which the local copy keeps
+ *                                   until the listener plays or moves.
+ *                                   savedAt: the server's last save of it
  *                                   (ISO), "Last saved" until this page saves.
  *                                   held: { track, offset_ms } the server holds
  *                                   already (the book resumed from it).
@@ -106,7 +121,16 @@
  *                                   'leave' of its place, sent only if it fails.
  *   resolveConflict() -> conflict | null   the listener answered a 409: saves go
  *                                   again, over the place it showed
- *   note(change)                    each engine change { reason, state, rewind }
+ *   note(change)                    each engine change { reason, state, rewind,
+ *                                   from, to (a move's book ms), placeMs (the
+ *                                   book ms of state.position) }
+ *   lastSeen(book) -> { base, psid, conflict } | null   what this page last saw
+ *   otherSaved(book, { track, offset_ms, device, updated_at }, now)
+ *                                   a newer place another page saved, found
+ *                                   before a late Play: as a 409 (the 'conflict'
+ *                                   warning, nothing sent until answered)
+ *   adoptBase(book, updated_at)     another page saved this very place: its
+ *                                   timestamp is the base from now on
  *   flush('beacon' | 'fetch', event) send now: a beacon, or a fetch past the backoff
  *   wake()                          back from frozen or hidden: the save in flight
  *                                   gets its full 15 s again
@@ -434,11 +458,16 @@ export function createSaver(o) {
     const id = identity();
     if (!id) return;
     const r = run;
+    // An untouched opening place is only a copy of the place it opened at:
+    // it keeps that copy's stamp, so opening a book without listening never
+    // makes it look newer than it is (the next open would push it).
+    const opened = !own && r && r.book === book ? r.openedAt : NaN;
+    const stamp = isFinite(opened) ? opened : now() + skew;
     const value = JSON.stringify({
       track: place.track,
       offset_ms: place.offset_ms,
       duration_ms: place.duration_ms,
-      updated_at: new Date(Math.min(now() + skew, capAt(book, r))).toISOString(),
+      updated_at: new Date(Math.min(stamp, capAt(book, r))).toISOString(),
       device: device,
       own: !!own,
       acked: !!(r && r.book === book && !sending && ackedPlace(r, place)),
@@ -509,7 +538,8 @@ export function createSaver(o) {
       fallback: null,         // the body stop() owes only if the save in flight fails
       base: null,             // the server's timestamp of the place this page last saw
       conflict: null,         // a 409 not yet answered: nothing is sent meanwhile
-      keepLocal: false        // leave the local copy alone until the listener acts
+      keepLocal: false,       // leave the local copy alone until the listener acts
+      openedAt: NaN           // the stamp (ms) of the copy the book opened at
     };
   }
 
@@ -753,15 +783,22 @@ export function createSaver(o) {
     if (r.playing && !wasPlaying && r.event === 'pause') r.event = 'play';
     let place = placeOf(st.position);
     // Smart rewind (a seek the engine marks { rewind }) is a playback aid: it
-    // never moves the saved place back. From it until playback passes the
-    // place it went back from, that place is what is saved (and kept
-    // locally); a move of the listener's own (seek, skip, jump), another book
-    // or a close ends the floor.
-    const bookMs = Number(st.bookMs);
+    // never moves the saved place back. From it until the place to save
+    // passes the place it went back from, that place is what is saved (and
+    // kept locally). The place to save is the position, not the playhead:
+    // after a skipped part the playhead runs ahead while the position holds
+    // where the failed part stopped. The listener's own move back (seek,
+    // skip, jump), another book or a close ends the floor; a move forward
+    // that lands short of it keeps it (the later of the two is saved).
+    const placeMs = typeof change.placeMs === 'number' && isFinite(change.placeMs) ? change.placeMs : Number(st.bookMs);
     if (change.rewind) {
       if (!r.floor && r.latest && isFinite(r.latestBookMs)) r.floor = { place: r.latest, bookMs: r.latestBookMs };
-    } else if (r.floor && (MOVES[change.reason] || !(bookMs < r.floor.bookMs))) {
-      r.floor = null;
+    } else if (r.floor) {
+      const from = Number(change.from);
+      const to = Number(change.to);
+      // A move whose direction is not known counts as a move back.
+      const back = !!MOVES[change.reason] && !(isFinite(from) && isFinite(to) && to >= from);
+      if (back || !(placeMs < r.floor.bookMs)) r.floor = null;
     }
     if (r.floor && place) place = r.floor.place;
     // The engine reports a start more than once (asked, then playing): one
@@ -787,7 +824,7 @@ export function createSaver(o) {
         r.reachedWall = now();
       }
       r.latest = place;
-      r.latestBookMs = r.floor ? r.floor.bookMs : bookMs;
+      r.latestBookMs = r.floor ? r.floor.bookMs : placeMs;
     }
     // A change whose position is null is never saved.
     if (ev && place) {
@@ -813,6 +850,7 @@ export function createSaver(o) {
     run.acked = placeOf(opts.held);
     run.base = typeof opts.savedAt === 'string' && opts.savedAt ? opts.savedAt : null;
     run.keepLocal = !!opts.keepLocal;
+    run.openedAt = timeOf(opts.openedAt);
     // A newer local copy the book opens at is sent at once: opening from it
     // counts as reaching it, so it obeys the same 2 minutes as any place.
     if (opts.push) {
@@ -932,6 +970,46 @@ export function createSaver(o) {
     return { track: c.track, offset_ms: c.offset_ms, device: c.device, updated_at: c.updated_at };
   }
 
+  /* What this page last saw of the book on the server: its base (the
+     stored timestamp of its last acknowledged save, or of the place read at
+     open), its psid, and whether a 409 is still unanswered. null when the
+     book is not the one being saved. */
+  function lastSeen(book) {
+    const r = run;
+    if (!r || r.book !== String(book)) return null;
+    return { base: r.base, psid: psid, conflict: !!r.conflict };
+  }
+
+  /* Before a late Play the engine found a newer place another page saved:
+     taken like a 409 for it. Nothing is sent until the listener answers
+     (resolveConflict), the local copy is capped at it, and the 'conflict'
+     warning asks the question. */
+  function otherSaved(book, c, serverNow) {
+    const r = run;
+    if (!r || r.stopped || r.book !== String(book) || !c || typeof c.updated_at !== 'string') return false;
+    r.conflict = {
+      track: String(c.track == null ? '' : c.track),
+      offset_ms: Number(c.offset_ms),
+      device: typeof c.device === 'string' ? c.device : '',
+      updated_at: c.updated_at,
+      now: typeof serverNow === 'string' ? serverNow : null
+    };
+    capLocal(r.book, r);
+    const k = r.conflict;
+    tell({ kind: 'conflict', book: r.book, conflict: { track: k.track, offset_ms: k.offset_ms, device: k.device, updated_at: k.updated_at }, now: k.now });
+    step();
+    return true;
+  }
+
+  /* Another page saved this page's very place: nothing to ask, and its
+     timestamp is what this page has now seen (the next save is not refused). */
+  function adoptBase(book, updatedAt) {
+    const r = run;
+    if (!r || r.stopped || r.book !== String(book) || r.conflict || typeof updatedAt !== 'string' || !updatedAt) return false;
+    r.base = updatedAt;
+    return true;
+  }
+
   function resumeFrom(book, copies) {
     const c = copies || {};
     return resumeOrder({ web: c.web, plex: c.plex, local: readLocal(book) });
@@ -950,6 +1028,9 @@ export function createSaver(o) {
     readLocal: readLocal,
     resumeFrom: resumeFrom,
     resolveConflict: resolveConflict,
+    lastSeen: lastSeen,
+    otherSaved: otherSaved,
+    adoptBase: adoptBase,
     onWarning: function (fn) {
       if (typeof fn !== 'function') return noop;
       warnFns.add(fn);

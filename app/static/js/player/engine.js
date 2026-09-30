@@ -75,6 +75,17 @@
  *       fails like a failed book fetch (with a retry), so nothing ever
  *       starts from 0 over a place it did not see.
  *   play(), pause(), toggle()
+ *       A late Play (spec 11b): play() or retry() after 5 minutes or more
+ *       without playing, by the wall clock (a device asleep counts), first
+ *       reads the saved places again (GET /api/player/position/<key>, 4 s at
+ *       most; state().checking meanwhile). If WebServarr's copy was saved
+ *       since by another page session (another device, or another tab of
+ *       this browser), or Plex holds a place from a Plex app newer than what
+ *       this page last saw, somewhere else, playback stays paused and a
+ *       'warning' { kind: 'conflict' } asks where to go on (as a 409 does);
+ *       the listener's answer plays. A failed or slow read plays on. The
+ *       lock screen's Play takes the same path. pause() or toggle() during
+ *       the read cancels the Play.
  *   seek(bookMs), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters
  *   rewind(bookMs)    smart rewind's seek (features.js): a 'seek' change marked
  *                     { rewind: true }; the saves keep the place it went back
@@ -129,6 +140,7 @@
  *       They differ only while a skipped part's successor has not played yet.
  *       lastSavedAt: ms (this device's clock) of the last save the server
  *       took, or null; saveError: the "not saved" warning is showing.
+ *       checking: a late Play is reading the saved places first (see play()).
  *       resumedFrom: which copy open() resumed from ('web', 'plex', 'local');
  *       age_ms: how old that place was when it was read, in the server's
  *       clock (its `now` on GET /position less the copy's updated_at, which
@@ -143,7 +155,8 @@
  *                'connection' (switched, or refreshed its token), 'speed',
  *                'ready' (loaded, not playing), 'retry', 'error', 'ended', 'close',
  *                'save' (state().saveError changed), 'prefs' (the skip length or
- *                the listener's settings changed)
+ *                the listener's settings changed), 'checking' (a late Play's read
+ *                of the saved places started or ended)
  *     'ended'    { state } at the end of the last part
  *     'error'    { code, message, retry: function | null }; code 'unreachable',
  *                'part', 'format' (no retry), 'forbidden', 'not-found', 'signed-out',
@@ -151,6 +164,9 @@
  *     'warning'  { kind: 'part-skipped', message }
  *                { kind: 'resume-lost', message } (see open)
  *                { kind: 'part-format', message } (a seek into a part that can't play)
+ *                { kind: 'conflict', book, conflict: { track, offset_ms, device,
+ *                  updated_at }, now } (saves.js on a 409, or a late Play's
+ *                  re-read: another page's or Plex's newer place)
  *                { kind: 'not-saved', active, lastSavedAt, message } (saves.js):
  *                active true: "Your place isn't being saved. Last saved <time>."
  *                to show; false: it cleared (a save succeeded, or the book was
@@ -174,6 +190,10 @@ export const UNREACHABLE = "Can't reach the media server";
 export const RESUME_LOST = "Couldn't find your saved place in this book";
 export const FORMAT_UNSUPPORTED = "This book's audio format can't play in this browser";
 export const PART_FORMAT = "This part's format can't play in this browser";
+export const RECHECK_AFTER_MS = 300000;  // a Play after this long without playing re-reads the saved places
+export const RECHECK_WAIT_MS = 4000;     // ... waiting this long at most, then playing on
+const PLEX_LATER_MS = 2000;              // Plex's copy of a save of ours is stamped a moment after it
+const SAME_PLACE_MS = 1000;              // another page's place this close to this one is this one
 
 const MEDIA_ERR_ABORTED = 1;
 const MEDIA_ERR_NETWORK = 2;
@@ -324,6 +344,9 @@ export function createEngine(env) {
   const Metadata = env.MediaMetadata || null;
   const baseUrl = env.baseUrl || '';
   const saver = env.saver || null;
+  // The wall clock: a late Play is measured with it, so time the device
+  // spent asleep counts (a monotonic clock stands still then).
+  const wallNow = typeof env.now === 'function' ? env.now : Date.now;
   let skipS = roundSkip(env.skipSeconds) || SKIP_S;
 
   const audio = env.createAudio();
@@ -395,6 +418,13 @@ export function createEngine(env) {
 
   let wantPlay = false;
   let loading = false;
+  // A late Play (see play()): since when (wall ms) this page has neither
+  // played nor read the saved places (null: no book), the read in progress,
+  // and the newest Plex stamp this page has seen.
+  let quietSince = null;
+  let checking = null;
+  let plexSeenAt = -Infinity;
+  let wasPlaying = false;
   let speed = 1;
   let error = null;           // { code, message }
   let errorRetry = null;
@@ -436,10 +466,19 @@ export function createEngine(env) {
 
   function changed(reason, extra) {
     const detail = Object.assign({ reason: reason }, extra || {});
+    // Playback stopped: the quiet time a late Play measures starts now.
+    const on = !!(book && wantPlay && !error);
+    if (wasPlaying && !on) quietSince = wallNow();
+    wasPlaying = on;
     if (saver) {
-      // First, so this change already carries what saving it changed.
+      // First, so this change already carries what saving it changed. The
+      // place's own book time too: it differs from the playhead's while a
+      // skipped part's successor has not played yet.
+      const place = hold || playhead;
       try {
-        saver.note({ reason: reason, state: state(), rewind: !!(extra && extra.rewind) });
+        saver.note({ reason: reason, state: state(), rewind: !!(extra && extra.rewind),
+          from: extra ? extra.from : undefined, to: extra ? extra.to : undefined,
+          placeMs: book && place ? book.starts[place.index] + place.offset : NaN });
       } catch (e) {
         console.error('[player] saving failed', e);
       }
@@ -485,6 +524,7 @@ export function createEngine(env) {
       speed: speed,
       connection: book && cur ? cur.side : null,
       error: error ? { code: error.code, message: error.message } : null,
+      checking: !!checking,
       lastSavedAt: saver ? saver.lastSavedAt : null,
       saveError: saver ? !!saver.warning : false,
       resumedFrom: resumedFrom
@@ -895,10 +935,14 @@ export function createEngine(env) {
   function skipPart(at, side) {
     if (!hold) hold = { index: at.index, offset: at.offset };
     const n = book.tracks.length;
-    emit('warning', {
-      kind: 'part-skipped',
-      message: 'Part ' + (at.index + 1) + ' of ' + n + " couldn't be played, so it was skipped."
-    });
+    // Before a part this browser can't decode nothing is skipped (playback
+    // stops there, and the error below says so): no "skipped" notice.
+    if (!(at.index + 1 < n && blocked(at.index + 1))) {
+      emit('warning', {
+        kind: 'part-skipped',
+        message: 'Part ' + (at.index + 1) + ' of ' + n + " couldn't be played, so it was skipped."
+      });
+    }
     // Never into a part this browser can't decode: that is the end of what
     // can play, as after the last part.
     if (at.index + 1 < n && !blocked(at.index + 1)) {
@@ -1067,6 +1111,10 @@ export function createEngine(env) {
     }
     resumedFrom = null;
     unchosen = false;
+    checking = null;
+    quietSince = null;
+    plexSeenAt = -Infinity;
+    wasPlaying = false;
     gen += 1;
     wantPlay = false;
     pending = true;
@@ -1162,6 +1210,10 @@ export function createEngine(env) {
     // Where the listener left off: the newest copy whose part the book has.
     let resumed = null;
     let lost = false;
+    if (places && places.plex && typeof places.plex === 'object') {
+      const t = Date.parse(places.plex.updated_at);
+      if (isFinite(t)) plexSeenAt = t;
+    }
     if (places) {
       let order = [];
       try {
@@ -1232,8 +1284,15 @@ export function createEngine(env) {
         saver.start(key, {
           // A local copy newer than the server's goes to the server at once
           // (not for a part that can't play here, nor while the handoff
-          // question holds the open: nothing is saved then).
-          push: !!(resumed && resumed.source === 'local') && !cannot && !held,
+          // question holds the open: nothing is saved then), but only this
+          // browser's own place the server never took: a copy of an opening
+          // place nobody listened from, or one the server has, is no newer
+          // listening to send (it would take the row from the device that
+          // saved it, which then gets a false 409).
+          push: !!(resumed && resumed.source === 'local' && mine && mine.own === true && mine.acked !== true) &&
+            !cannot && !held,
+          // The local copy of an untouched opening place keeps this stamp.
+          openedAt: resumed ? resumed.updated_at : null,
           savedAt: places && places.web ? places.web.updated_at : null,
           held: held ? webCopy : resumed && resumed.source === 'web' ? resumed : null,
           // This browser's own place stays in the local copy until the
@@ -1247,6 +1306,9 @@ export function createEngine(env) {
     }
     installSession();
     sessionMetadata();
+    // The saved places were just read (or the place was given): a Play from
+    // here is not late until RECHECK_AFTER_MS of not playing.
+    quietSince = wallNow();
     changed('open');
     if (lost) emit('warning', { kind: 'resume-lost', message: RESUME_LOST });
     if (cannot) {
@@ -1289,6 +1351,13 @@ export function createEngine(env) {
     if (!book) return Promise.resolve();
     if (error) return retry();
     if (wantPlay) return Promise.resolve();
+    // The format first: at the end of a book whose first part can't play
+    // here there is nothing to re-check.
+    if (cur && atEnd() && blocked(0)) {
+      formatStop(null);
+      return Promise.resolve();
+    }
+    if (lateCheck(play)) return Promise.resolve();
     wantPlay = true;
     if (!cur) {
       // Still choosing a connection: open() starts it.
@@ -1311,6 +1380,12 @@ export function createEngine(env) {
   }
 
   function pause() {
+    if (checking) {
+      // A late Play still reading the saved places: it does not happen.
+      checking = null;
+      changed('checking');
+      return;
+    }
     if (!book || !wantPlay) return;
     wantPlay = false;
     disarm();
@@ -1322,7 +1397,7 @@ export function createEngine(env) {
   }
 
   function toggle() {
-    if (wantPlay) pause();
+    if (wantPlay || checking) pause();
     else return play();
   }
 
@@ -1441,10 +1516,13 @@ export function createEngine(env) {
     if (!error || !playhead) return Promise.resolve();
     // From the place held after a skipped part, else the playhead.
     const from = hold || playhead;
-    if (blocked(from.index)) {
+    // Not in, nor at the end of a part just before, a part that can't play
+    // here (at the book's end: its first part, where Play starts again).
+    if (blocked(from.index) || beforeBlocked(from)) {
       formatStop(null);
       return Promise.resolve();
     }
+    if (lateCheck(retry)) return Promise.resolve();
     if (unchosen) return retryChoosing(from);
     const side = preferredSide();
     partSuspect = null;
@@ -1485,9 +1563,120 @@ export function createEngine(env) {
       return;
     }
     chosen = side;
-    load(from.index, from.offset, side);
+    // Where the place is now (the listener may have moved while the
+    // connection was chosen), playing only if they have not paused meanwhile.
+    load(playhead.index, playhead.offset, side);
     sessionState();
-    changed('play');
+    changed(wantPlay ? 'play' : 'ready');
+  }
+
+  // At the end of a part whose next part can't play here (or, at the end of
+  // the book, whose first part can't): nowhere to go on to.
+  function beforeBlocked(at) {
+    if (!book || at.offset < durationOf(book.tracks[at.index])) return false;
+    return at.index + 1 < book.tracks.length ? blocked(at.index + 1) : blocked(0);
+  }
+
+  /* A late Play: after RECHECK_AFTER_MS without playing (wall clock), the
+     saved places are read again before `then` (play or retry) goes on. true:
+     it goes on later, from the read (or not at all: another place is newer
+     and the listener is asked, or they paused meanwhile). */
+  function lateCheck(then) {
+    if (checking) return true;
+    if (!saver || !book || quietSince === null || !(wallNow() - quietSince >= RECHECK_AFTER_MS)) return false;
+    let seen = null;
+    try {
+      seen = typeof saver.lastSeen === 'function' ? saver.lastSeen(book.key) : null;
+    } catch (e) {
+      seen = null;
+    }
+    // A 409 not yet answered: its question is the one to answer.
+    if (!seen || seen.conflict) return false;
+    const key = book.key;
+    const my = { open: openGen };
+    checking = my;
+    let timer = null;
+    function finish(places) {
+      if (timer !== null) {
+        clearT(timer);
+        timer = null;
+      }
+      if (checking !== my) return;
+      checking = null;
+      if (my.open !== openGen || !book || book.key !== key) return;
+      quietSince = wallNow();
+      let asked = false;
+      try {
+        asked = !!places && askIfElsewhere(places, seen);
+      } catch (e) {
+        console.error('[player] the re-check failed', e);
+      }
+      if (asked) {
+        changed('checking');
+        return;
+      }
+      then();
+    }
+    timer = setT(function () {
+      timer = null;
+      finish(null);
+    }, RECHECK_WAIT_MS);
+    let asking;
+    try {
+      asking = fetchPlaces(key);
+    } catch (e) {
+      asking = Promise.reject(e);
+    }
+    asking.then(finish, function () { finish(null); });
+    changed('checking');
+    return true;
+  }
+
+  /* The places read before a late Play. Another place saved since this page
+     last saw the book, and not this very place, holds the Play and asks:
+     WebServarr's copy saved by another page session (another device, or
+     another tab of this browser), or Plex's copy (not an echo of ours:
+     GET /position leaves those out) newer than anything this page saw. The
+     newer of the two that is somewhere else is asked about. true: asked. */
+  function askIfElsewhere(places, seen) {
+    const at = hold || playhead;
+    if (!book || !at) return false;
+    const base = typeof seen.base === 'string' ? Date.parse(seen.base) : NaN;
+    const found = [];
+    const w = places.web;
+    if (w && typeof w === 'object' && !(typeof w.psid === 'string' && w.psid === seen.psid)) {
+      const t = Date.parse(w.updated_at);
+      if (isFinite(t) && !(t <= base)) found.push({ web: true, copy: w, t: t });
+    }
+    const p = places.plex;
+    if (p && typeof p === 'object') {
+      const t = Date.parse(p.updated_at);
+      if (isFinite(t)) {
+        const since = Math.max(isFinite(base) ? base : -Infinity, plexSeenAt);
+        plexSeenAt = Math.max(plexSeenAt, t);
+        if (t - PLEX_LATER_MS > since) found.push({ web: false, copy: p, t: t });
+      }
+    }
+    found.sort(function (a, b) { return b.t - a.t; });
+    const hereMs = book.starts[at.index] + at.offset;
+    const now = typeof places.now === 'string' ? places.now : null;
+    for (const f of found) {
+      const c = f.copy;
+      const otherMs = toBookMs(book.tracks, c.track, c.offset_ms);
+      if (otherMs !== null && Math.abs(otherMs - hereMs) <= SAME_PLACE_MS) {
+        // This very place: nothing to ask. Its time is what this page has seen.
+        if (f.web && typeof saver.adoptBase === 'function') saver.adoptBase(book.key, c.updated_at);
+        continue;
+      }
+      const conflict = { track: String(c.track), offset_ms: Number(c.offset_ms),
+        device: typeof c.device === 'string' ? c.device : '', updated_at: String(c.updated_at) };
+      // WebServarr's: as a 409 (nothing is saved until the listener answers).
+      if (f.web) return typeof saver.otherSaved === 'function' && !!saver.otherSaved(book.key, conflict, now);
+      // Plex's: the same question; answering it plays (and saves) as usual.
+      emit('warning', { kind: 'conflict', book: book.key, conflict: conflict, now: now });
+      return true;
+    }
+    return false;
   }
 
   function placeMs(track, offsetMs) {

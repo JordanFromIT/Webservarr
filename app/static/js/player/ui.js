@@ -775,7 +775,8 @@ export function createUI(env) {
   function playing(s) { return !!(s && s.playing); }
 
   function drawPlay(btn, s) {
-    const busy = !!(s.loading && s.playing);
+    // Loading while asked to play, or a late Play reading the saved places first.
+    const busy = !!((s.loading && s.playing) || s.checking);
     const name = busy ? 'progress_activity' : playing(s) ? 'pause' : 'play_arrow';
     const label = busy ? 'Loading' : playing(s) ? 'Pause' : 'Play';
     const ic = btn.firstChild;
