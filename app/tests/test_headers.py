@@ -54,9 +54,10 @@ class StaticHeaders(unittest.TestCase):
 
     def test_csp_media_src_is_self_and_plex_direct_only(self):
         # The audiobook player streams from the listener's Plex server over
-        # its plex.direct https addresses. That is the only thing the player
-        # adds: covers are served same-origin, so img-src is unchanged, and
-        # no other directive names plex.direct.
+        # its plex.direct https addresses, on any port (a server's remote
+        # port is whatever its operator mapped). That is the only thing the
+        # player adds: covers are served same-origin, so img-src is
+        # unchanged, and no other directive names plex.direct.
         from app.config import settings
         r = self.client.get("/static/css/theme.css?v=1")
         directives = {}
@@ -64,7 +65,7 @@ class StaticHeaders(unittest.TestCase):
             name, _, value = d.strip().partition(" ")
             self.assertNotIn(name, directives, f"{name} appears twice")
             directives[name] = value
-        self.assertEqual(directives["media-src"], "'self' https://*.plex.direct:32400")
+        self.assertEqual(directives["media-src"], "'self' https://*.plex.direct:*")
         expected = {
             "default-src": "'self'",
             "script-src": "'self'",
@@ -72,7 +73,7 @@ class StaticHeaders(unittest.TestCase):
             "font-src": "'self' https://fonts.gstatic.com",
             "img-src": "'self' data: https:",
             "worker-src": "'self'",
-            "media-src": "'self' https://*.plex.direct:32400",
+            "media-src": "'self' https://*.plex.direct:*",
             "frame-ancestors": "'self'",
             "base-uri": "'self'",
             "object-src": "'none'",

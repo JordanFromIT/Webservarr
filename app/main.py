@@ -316,8 +316,9 @@ async def add_security_headers(request: Request, call_next):
         "img-src 'self' data: https:",
         "worker-src 'self'",
         # The audiobook player streams straight from the listener's Plex
-        # server over its plex.direct https addresses, on Plex's port.
-        "media-src 'self' https://*.plex.direct:32400",
+        # server over its plex.direct https addresses, on any port: a
+        # server's remote port is whatever its operator mapped (spec 5.4).
+        "media-src 'self' https://*.plex.direct:*",
         # Standards-compliant clickjacking defense (supersedes X-Frame-Options).
         "frame-ancestors 'self'",
         "base-uri 'self'",
