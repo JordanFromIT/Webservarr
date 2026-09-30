@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request, Cookie
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from typing import Optional
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
@@ -630,9 +631,27 @@ async def settings_next_redirect():
     return RedirectResponse(url="/settings", status_code=301)
 
 
+class _StaticFiles(StaticFiles):
+    """StaticFiles that never serves the files a gated route owns.
+
+    The player's test launcher (/player-test) is admins-only, but its page
+    file lives with the others so the page contract, the shell and the CSS
+    build see it. Served raw from /static, the router would mount its module
+    for anyone. `path` here is already normalised (StaticFiles.get_path), so
+    every spelling that would reach the file ("//", "./", "js/../", an
+    encoded character) is caught, and gets the 404 a missing file gets."""
+
+    GATED = frozenset({"player-test.html"})
+
+    async def get_response(self, path: str, scope):
+        if path in self.GATED:
+            raise StarletteHTTPException(status_code=404)
+        return await super().get_response(path, scope)
+
+
 # Mount static files (CSS, JS, images, etc.)
 # This should be last to avoid catching API routes
-app.mount("/static", StaticFiles(directory="/app/app/static"), name="static")
+app.mount("/static", _StaticFiles(directory="/app/app/static"), name="static")
 
 
 if __name__ == "__main__":
