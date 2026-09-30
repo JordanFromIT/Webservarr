@@ -137,9 +137,11 @@ It is not a page module: it lives for the document, not a page visit.
   `sendBeacon`. Saves are serialised per book with an increasing `seq`, so a later save always
   wins.
 - **Local copy:** every position change is written to `localStorage` per identity and book, with
-  a timestamp.
+  a timestamp. An opening place nobody has listened from yet keeps the timestamp of the copy it
+  came from, so opening a book never makes that place look newer.
 - **Resume:** on opening a book, take the newest of WebServarr, Plex and the local copy. A local
-  copy newer than the server's is sent as a check-in immediately.
+  copy newer than the server's is sent as a check-in immediately when it is this browser's own
+  listening that the server never took.
 - **Warning:** while playing, if the last successful save is over 30 s old, show "Your place isn't
   being saved. Last saved <time>." in the mini bar and the full player. It clears on the next
   success. Retries back off (10 s, 20 s, 30 s cap).
@@ -251,13 +253,20 @@ cross-device sentence in 5.3.
 - Every check-in carries `base`: the server timestamp this page last saw for the book (from the
   position read at open, or from its last acknowledged save).
 - The server stores the check-in when no position exists yet, when the stored position came from
-  the same device, or when the stored timestamp equals `base`. Otherwise it answers 409 with the
-  stored place, device and timestamp, and stores nothing. Within one page session the `seq` rule
-  in 5.3 is unchanged.
+  the same page session (`psid`), or when the stored timestamp equals `base`. Otherwise it answers
+  409 with the stored place, device and timestamp, and stores nothing. Within one page session the
+  `seq` rule in 5.3 is unchanged. Another tab or a reload of the same browser is another page
+  session: it stores over the position it read at open, and never over a newer one.
 - On a 409 the player pauses, keeps its place in the local copy, and asks "Continue from <time>
   (<device>, <ago>)?": Continue moves to the stored place; "Keep listening here" sends again
   with the new `base`, a deliberate override. A refused beacon is dropped.
-- The question at open (section 8) stays. Background re-checks are not needed.
+- The question at open (section 8) stays.
+- A late Play (final review, 2026-09-29): Play or Retry after 5 minutes or more without playing,
+  by the wall clock so a device asleep counts, first reads the position again (4 s at most, then
+  it plays on). If WebServarr's position was saved since by another page session, or Plex holds
+  a newer place from a Plex app, somewhere else, playback stays paused and the same question is
+  asked. The server cannot see Plex app listening, so this is the only guard for it. The lock
+  screen's Play takes the same path.
 
 ## 12. How it is built
 
