@@ -405,39 +405,18 @@ _READ_BY = (
 _PART_SUFFIX = re.compile(r"[\s,\-]+Part\s*[0-9]+\s*$", re.IGNORECASE)
 
 
-# A book-number phrase on its own ("Book 2", "Vol. 3", "Part IV", "#5") set
-# off after the narrator's name by a comma, semicolon, spaced dash or
-# brackets: "Name, Book 2", "Name; Vol. 3", "Name - Book 2", "Name (Book 2)".
-_NUMBER_PHRASE = r"(?:book|vol(?:ume)?\.?|part|no\.?|number|#)\s*#?\s*(?:[0-9]{1,4}|[ivxlc]{1,7})"
-_NAME_THEN_NUMBER = re.compile(
-    rf"^(?P<name>.*?\S)\s*(?:[,;]\s*(?P<a>{_NUMBER_PHRASE})|\s[-\u2013\u2014]\s+(?P<b>{_NUMBER_PHRASE})"
-    rf"|\(\s*(?P<c>{_NUMBER_PHRASE})\s*\))\s*$", re.IGNORECASE)
-
-
 def _split_narrator(title: str) -> tuple:
     """("Title", "Narrator") from "Title - Read by Narrator" or
     "Title (Narrated by Narrator)"; the narrator is "" when not named.
 
-    A book-number phrase standing on its own after the name ("Title - Read
-    by Name, Book 2", "... Name (Vol. 3)") belongs to the title: it goes
-    there ("Title, Book 2", "Name"), so book 2 and book 3 are never told
-    apart only by a narrator field that the work key leaves out. Anything
-    else stays with the name ("BBC Radio 4 Full Cast", "Name, Other
-    Name"), and the name itself is never moved: the narrator is never left
-    empty by this."""
+    This names the book for display only. The work key does not depend on
+    where a book number falls here: it takes the numbers from the whole
+    title (see the Work key notes)."""
     title = (title or "").strip()
     for pattern in _READ_BY:
         m = pattern.match(title)
         if m and m.group("title").strip():
-            head, name, numbers = m.group("title").strip(), m.group("narrator").strip(), []
-            while True:
-                n = _NAME_THEN_NUMBER.match(name)
-                rest = n.group("name").strip().rstrip(",;").strip() if n else ""
-                if not rest:
-                    break
-                name = rest
-                numbers.insert(0, n.group("a") or n.group("b") or n.group("c"))
-            return ", ".join([head, *numbers]), name
+            return m.group("title").strip(), m.group("narrator").strip()
     return title, ""
 
 
@@ -591,9 +570,14 @@ def _discs(tracks: list) -> dict:
     return {disc: _pick_copy(ts) for disc, ts in discs.items()}
 
 
+def _album_title(album: dict) -> str:
+    """The album's whole title as Plex gives it, narration and all."""
+    return album.get("title") or album.get("parentTitle") or ""
+
+
 def _describe(album: dict, disc: int, tracks: list, disc_count: int) -> dict:
     """The fields a book shows, from its album and its tracks."""
-    album_title, narrator = _split_narrator(album.get("title") or album.get("parentTitle") or "")
+    album_title, narrator = _split_narrator(_album_title(album))
     collection = next((c.get("tag") for c in (album.get("Collection") or [])
                        if isinstance(c, dict) and c.get("tag")), "")
     series, series_narrator = _split_narrator(collection)
@@ -740,10 +724,18 @@ def _title_key(title: str) -> str:
 # "[Unabridged]", "- Read by X", "(Narrated by X)", ": A Novel"), and
 # " - <narrator>" when that name is the book's narrator as Plex's metadata
 # gives it. A dash part is never guessed to be a name: "Saga - Iron Crown"
-# stays its own work. A part that holds the book's number ("(Book 2,
-# Unabridged)", "- Radio Drama, Part 2") keeps it and loses only its copy
-# words: book 2 and book 3 are two works. Accents, full-width letters, "&"
-# and apostrophe variants are folded so one book spelt two ways is one work.
+# stays its own work. Accents, full-width letters, "&" and apostrophe
+# variants are folded so one book spelt two ways is one work.
+#
+# The book's number is taken apart from all that, so no way of writing it
+# can lose it: every book-number phrase anywhere in the whole title ("Book
+# 2", "Vol. 2", "Volume II", "Part 2", "No. 2", "#2", "Book 2 of 5"), inside
+# any brackets, after any separator, even inside the narrator's part ("-
+# Read by X, Book 2"), is taken out and its numbers become tokens (Vol. 2 =
+# Volume 2, II = 2). The key is the title that is left, normalised, then
+# the sorted distinct tokens: book 2 and book 3 are two works whatever the
+# format. "Book 2 of 5" gives 2 and 5, so it is not "Book 2" (a split only
+# loses a link; a collision would link the wrong book's place).
 # Two editions side by side share a key; they are kept apart by the caller,
 # which links only a copy whose album is gone.
 
@@ -758,8 +750,19 @@ _TRAILING_COPY_WORD = re.compile(
     r"|\s*[,:;\-\u2013\u2014]\s*a\s+novel)\s*$", re.IGNORECASE)
 # The last " - " (or en or em dash) and what follows it.
 _DASH_TAIL = re.compile(r"^(?P<head>.*\S)\s+[-\u2013\u2014]\s+(?P<tail>\S.*?)\s*$")
-# What marks a book's number in a part of its title.
+# What marks a number in a part of its title: such a part is not dropped
+# whole with its copy words ("Series 2, Unabridged" keeps "Series 2").
 _NUMBER_MARK = re.compile(r"[0-9#]|\b(?:book|vol|volume|part)\b", re.IGNORECASE)
+# A book-number phrase: book, volume, vol, part, number or "no." then a
+# number or a Roman numeral; "no" or "#" then a number; each may go on
+# "of M". Not inside a word ("Notebook 2", "Book 2nd" are not).
+_DECIMAL = r"[0-9]{1,4}(?:\.[0-9]{1,3})?"
+_BOOK_NUMBER = re.compile(
+    rf"(?<![^\W\d_])(?:(?:book|volume|vol\.?|part|number|no\.)\s*#?\s*(?P<n>{_DECIMAL}|[ivxl]{{1,7}})"
+    rf"|(?:no\s*|#\s*)(?P<d>{_DECIMAL}))(?:\s+of\s+(?P<of>{_DECIMAL}))?(?![^\W_])", re.IGNORECASE)
+# A bracket pair with nothing left in it once its number phrase is out.
+_EMPTY_GROUP = re.compile(r"[(\[{][\s,;:.\-–—]*[)\]}]")
+_TRAILING_SEPARATORS = re.compile(r"[\s,;:\-–—]+$")
 # Apostrophe look-alikes, folded before NFKD (which would split the acute
 # accent into a space and a combining mark).
 _APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "\u00b4": "'", "`": "'"})
@@ -783,19 +786,50 @@ def _without_copy_words(part: str) -> str:
     return " ".join(_COPY_WORDS.sub(" ", part).split())
 
 
+def _number_token(text: str) -> Optional[str]:
+    """A book number as a token: "02" is "2", "2.50" is "2.5", "II" is "2";
+    None for a Roman numeral that isn't one."""
+    if text[0].isdigit():
+        whole, _, part = text.partition(".")
+        part = part.rstrip("0")
+        return str(int(whole)) + (f".{part}" if part else "")
+    n = _roman(text.casefold())
+    return str(n) if n else None
+
+
+def _book_numbers(text: str) -> tuple:
+    """(`text` with every book-number phrase taken out, the phrases' number
+    tokens sorted by value and distinct)."""
+    tokens = set()
+
+    def take(m):
+        found = [_number_token(v) for v in (m.group("n"), m.group("d"), m.group("of")) if v]
+        if None in found:
+            return m.group(0)       # "Part Lil" is words, not a number
+        tokens.update(found)
+        return " "
+    return _BOOK_NUMBER.sub(take, text), sorted(tokens, key=float)
+
+
 def _work_title(title: str, narrator: str = "") -> str:
-    """The title with every trailing edition, format or narration part taken
-    off, normalised: casefolded, punctuation gone, spaces collapsed. A
-    trailing " - <name>" goes only when the name is `narrator`. A part that
-    holds a book number stays, less its copy words. Nothing is taken off
-    that would leave it empty."""
-    text = " ".join(_normal(title).split())
+    """The normalised work title a work key is made from: the title's words
+    with its book-number phrases taken out and every trailing edition,
+    format or narration part taken off (casefolded, punctuation gone,
+    spaces collapsed), then "#<n>" for each of its book numbers ("tide mill
+    #2"). A trailing " - <name>" goes only when the name is `narrator`. A
+    part that holds some other number ("Series 2") stays, less its copy
+    words. Nothing is taken off that would leave it empty."""
+    text, numbers = _book_numbers(" ".join(_normal(title).split()))
+    text = " ".join(_EMPTY_GROUP.sub(" ", text).split())
     named = _work_words(narrator or "")
     while True:
         before = text
+        stripped = _TRAILING_SEPARATORS.sub("", text)
+        if stripped:
+            text = stripped
         head, reader = _split_narrator(text)
         if reader:
-            text = f"{head} {reader}" if _numbered(reader) else head
+            text = head
         m = _TRAILING_GROUP.search(text)
         head = text[:m.start()].strip() if m else ""
         if m and head:
@@ -817,7 +851,7 @@ def _work_title(title: str, narrator: str = "") -> str:
         text = " ".join(text.split())
         if text == before:
             break
-    return _work_words(text)
+    return " ".join([_work_words(text), *(f"#{n}" for n in numbers)]).strip()
 
 
 def _work_words(text: str) -> str:
@@ -826,10 +860,19 @@ def _work_words(text: str) -> str:
     return " ".join(re.sub(r"[\W_]+", " ", _fold(_normal(text)).replace("'", "")).split())
 
 
+def _narrator_key(narrator: str) -> str:
+    """A narrator as /next compares two editions' narrators: without any
+    book-number phrase the list view leaves in it ("Tamsin Ashby, Book 2,
+    Unabridged" is the narrator of "Tamsin Ashby, Book 3, Unabridged")."""
+    return _work_words(_book_numbers(_normal(narrator))[0])
+
+
 def work_key(author: str, title: str, narrator: str = "") -> str:
     """The book's work key: sha256 of its normalised author and title (see
-    the notes above), as 32 hex digits. `narrator` is the book's narrator
-    from Plex's metadata ("" when not named). Pure: the same on both workers."""
+    the notes above), as 32 hex digits. `title` is the whole title as Plex
+    gives it, narration and all, so no book number in it is missed.
+    `narrator` is the book's narrator from Plex's metadata ("" when not
+    named). Pure: the same on both workers."""
     return _hash_work(author, _work_title(title, narrator))
 
 
@@ -854,7 +897,7 @@ def _series_entries(library: list) -> list:
             number = _series_number((album.get("titleSort"), _split_narrator(album.get("title") or "")[0],
                                      first.get("title"), folder), summary["series"])
         entries.append({"series": (_fold(summary["author"]), _fold(summary["series"])),
-                        "title": _title_key(summary["title"]), "narrator": _fold(summary["narrator"]),
+                        "title": _title_key(summary["title"]), "narrator": _narrator_key(summary["narrator"]),
                         "number": number, "book": summary})
     # An edition without a number takes the one the same title has in another
     # edition of the series (the most common, the lowest on a tie).
@@ -1061,15 +1104,18 @@ def _disc_work_title(album: dict, disc: int, discs: dict) -> str:
     another disc of the album shares ("01 - Chapter 1", "Part 1 of 12",
     tracks named after the album) is kept; both then get " disc N". The
     suffix goes on after normalising, so what normalising takes off
-    ("(Unabridged)", "- Read by X") still comes off first."""
+    ("(Unabridged)", "- Read by X") still comes off first. The album's
+    title is used whole, narration and all, so its book numbers count."""
     def own(d):
         return _describe(album, d, discs[d], len(discs))
     about = own(disc)
+    if len(discs) < 2:
+        return _work_title(_album_title(album), about["narrator"])
     mine = _work_title(about["title"], about["narrator"])
-    if len(discs) < 2 or not mine:
+    if not mine:
         return mine
     if _GENERIC_TRACK.fullmatch(_work_words(about["title"])):
-        base = _work_title(_split_narrator(album.get("title") or "")[0], about["narrator"])
+        base = _work_title(_album_title(album), about["narrator"])
         return f"{base} disc {disc}".strip()
     shared = any(_work_title(o["title"], o["narrator"]) == mine
                  for o in (own(d) for d in discs if d != disc))
@@ -1097,17 +1143,20 @@ def album_work_key(album: dict) -> Optional[str]:
     holding several books as discs it is not their key: only its tracks
     can say that."""
     about = _describe(album, 1, [], 1)
-    if not about["author"] or not _work_title(about["title"]):
+    title = _work_title(_album_title(album), about["narrator"])
+    if not about["author"] or not title:
         return None
-    return work_key(about["author"], about["title"], about["narrator"])
+    return _hash_work(about["author"], title)
 
 
 async def book_identity(key: str, album: Optional[dict] = None) -> dict:
     """What a save records about the copy of the book it was made in:
     {"work_key", "narrator", "duration_ms"}. `work_key` is work_key() of the
-    book's author, title and narrator as list_books names them (None when
-    the title is empty; a disc of a several-book album whose first track
-    has a generic title is named "<album> disc N"), `narrator` the book's
+    book's author and narrator as list_books names them and its whole title:
+    the album's title as Plex gives it for an album of one book, the disc's
+    title for a disc of an album of several (None when the title is empty;
+    a disc whose first track has a generic title is named "<album> disc
+    N"), `narrator` the book's
     narrator (None when not named) and `duration_ms` the book's length, its
     tracks in play order put together (None when Plex gives no durations).
 

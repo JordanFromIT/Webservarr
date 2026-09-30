@@ -1041,6 +1041,46 @@ class WorkKeys(unittest.TestCase):
             with self.subTest(title=title):
                 self.assertEqual(pp.work_key(self.AUTHOR, title), pp.work_key(self.AUTHOR, "Tide Mill (Book 2)"))
 
+    def test_the_books_number_is_taken_from_anywhere_in_the_title(self):
+        # T1R8: every book-number phrase, in any bracket or after any
+        # separator, narrator's part included, is one normalised token.
+        book2 = pp.work_key(self.AUTHOR, "Tide Mill (Book 2)")
+        for title in ("Tide Mill, Book 2", "Tide Mill - Read by Tamsin Ashby, Book 2, Unabridged",
+                      "Tide Mill - Read by Tamsin Ashby [Book 2]", "Tide Mill - Read by Tamsin Ashby #2",
+                      "Tide Mill (Narrated by Tamsin Ashby, Book 2)", "Tide Mill, Book 2 - Read by Tamsin Ashby",
+                      "Tide Mill, Vol. 2", "Tide Mill, Vol 2", "Tide Mill, Volume 2", "Tide Mill, Volume II",
+                      "Tide Mill, Book II", "Tide Mill Part 2", "Tide Mill No. 2", "Tide Mill, Number 2",
+                      "Tide Mill #2", "Tide Mill, Book #2", "Tide Mill, Book 02", "Tide Mill {Book 2}",
+                      "Tide Mill (Unabridged) (Book 2)", "Tide Mill (Book 2) (Unabridged)"):
+            with self.subTest(title=title):
+                self.assertEqual(pp.work_key(self.AUTHOR, title), book2)
+        self.assertEqual(pp._work_title("Tide Mill - Read by Tamsin Ashby, Vol. II, Unabridged"), "tide mill #2")
+        self.assertEqual(pp._work_title("Tide Mill, Book 3 [Part 1]"), "tide mill #1 #3")
+        # Not a book number: inside a word, a bare number, or letters that
+        # aren't a Roman numeral. Those stay as words.
+        for a, b in (("Tide Mill Notebook 2", "Tide Mill Notebook 3"), ("Tide Mill 2", "Tide Mill 3"),
+                     ("Tide Mill, Book 2.5", "Tide Mill, Book 2"), ("Tide Mill Part Lil", "Tide Mill"),
+                     ("Tide Mill, Book 2nd Edition", "Tide Mill, Book 3rd Edition")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+
+    def test_book_n_of_m_is_not_book_n(self):
+        # Accepted split, kept deliberate: "Book 2 of 5" gives 2 and 5, so a
+        # copy that writes it that way does not link to "Book 2" (a split
+        # only loses a link; it never links the wrong book's place).
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill, Book 2 of 5"), pp.work_key(self.AUTHOR, "Tide Mill, Book 2"))
+        self.assertEqual(pp._work_title("Tide Mill, Book 2 of 5"), "tide mill #2 #5")
+        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill - Read by Tamsin Ashby, Book 2 of 5"),
+                         pp.work_key(self.AUTHOR, "Tide Mill (Book 2 of 5, Unabridged)"))
+
+    def test_copy_variants_of_a_numbered_book_share_its_key(self):
+        for base in ("Tide Mill", "Tide Mill, Book 2"):
+            key = pp.work_key(self.AUTHOR, base)
+            for suffix in (" (Unabridged)", " - Read by Tamsin Ashby", " (Full-Cast Edition)", " [m4b]", ": A Novel",
+                           " (Narrated by Tamsin Ashby)", " - Read by BBC Radio 4 Full Cast"):
+                with self.subTest(title=base + suffix):
+                    self.assertEqual(pp.work_key(self.AUTHOR, base + suffix), key)
+
     def test_spellings_of_one_title_are_folded(self):
         # T1B2: accents, full-width forms, "&", "A Novel" and apostrophe variants.
         import unicodedata
@@ -1133,50 +1173,103 @@ class BookIdentity(BridgeBase):
         self.assertIsNone(pp.album_work_key({"title": "Tide Mill"}))                 # no author
         self.assertIsNone(pp.album_work_key({"parentTitle": "", "title": ""}))
 
-    def test_a_number_after_the_narrators_name_stays_on_the_title(self):
-        # T1R1: through the album's own fields, as a save and the pre-check
-        # make the key, not only work_key on a raw title.
-        for fmt in ("Tide Mill - Read by Tamsin Ashby, Book {n}", "Tide Mill (Narrated by Tamsin Ashby, Book {n})",
-                    "Tide Mill - Read by Tamsin Ashby; Vol. {n}"):
+    # Every way of writing a book's number the reviewers tried: wherever it
+    # falls (the title, the narrator's part, brackets), books 1, 2 and 3
+    # never share a key.
+    NUMBER_FORMATS = (
+        "Tide Mill - Read by Tamsin Ashby, Book {n}", "Tide Mill (Narrated by Tamsin Ashby, Book {n})",
+        "Tide Mill (Read by Tamsin Ashby, Book {n})", "Tide Mill - Read by Tamsin Ashby; Vol. {n}",
+        "Tide Mill - Read by Tamsin Ashby, Part {n}", "Tide Mill - Read by Tamsin Ashby, #{n}",
+        "Tide Mill - Read by Tamsin Ashby, Book {n}, Unabridged",
+        "Tide Mill (Narrated by Tamsin Ashby, Book {n}, Unabridged)",
+        "Tide Mill - Read by Tamsin Ashby, Book {n} (Unabridged)", "Tide Mill - Read by Tamsin Ashby (Book {n})",
+        "Tide Mill - Read by Tamsin Ashby - Book {n}", "Tide Mill - Read by Tamsin Ashby – Volume {n}",
+        "Tide Mill - Read by Tamsin Ashby [Book {n}]", "Tide Mill - Read by Tamsin Ashby {{No. {n}}}",
+        "Tide Mill - Read by Tamsin Ashby #{n}", "Tide Mill - Read by Tamsin Ashby: Book {n}",
+        "Tide Mill - Read by Tamsin Ashby, Book {n} of 5", "Tide Mill - Read by Tamsin Ashby, Book {n}.5",
+        "Tide Mill - Read by Tamsin Ashby,Book #{n}", "Tide Mill - Read by Tamsin Ashby, Dee Lane, Book {n}",
+        "Tide Mill - Read by Tamsin Ashby, Book {n}; Dee Lane", "Tide Mill (Narrated by Tamsin Ashby) Book {n}",
+        "Tide Mill (Narrated by Tamsin Ashby, Book {r})", "Tide Mill - Read by BBC Radio 4 Full Cast, Volume {r}",
+        "Tide Mill - Read by BBC Radio 4 Full Cast [Part {r}]", "Tide Mill, Book {n} - Read by Tamsin Ashby",
+        "Tide Mill (Book {n}, Unabridged)", "Tide Mill: Book {n} (Unabridged)", "Tide Mill (Unabridged) (Book {n})",
+        "Tide Mill Saga Book {n} - Read by BBC Radio 4 Full Cast")
+    ROMAN = {1: "I", 2: "II", 3: "III"}
+
+    def test_every_number_format_keeps_books_one_two_and_three_apart(self):
+        # T1R8: the number is taken from the whole album title, not from
+        # where the narrator split leaves it; through book_identity (a save)
+        # and album_work_key (the pre-check) alike.
+        owner = {}
+        for fmt in self.NUMBER_FORMATS:
             keys = []
-            for n in (2, 3):
-                album = dict(ALBUMS["500"], title=fmt.format(n=n))
+            for n in (1, 2, 3):
+                album = dict(ALBUMS["500"], title=fmt.format(n=n, r=self.ROMAN[n]))
                 album.pop("Collection", None)
                 with self.subTest(title=album["title"]):
-                    self.assertEqual(pp._describe(album, 1, [], 1)["narrator"], "Tamsin Ashby")
                     with mock.patch.dict(ALBUMS, {"500": album}):
                         out = self.run_async(pp.book_identity("500:1"))
-                        book = next(b for b in self.run_async(pp.list_books()) if b["key"] == "500:1")
-                    self.assertEqual(out["narrator"], "Tamsin Ashby")
                     self.assertEqual(out["work_key"], pp.album_work_key(album))
-                    self.assertEqual(book["narrator"], "Tamsin Ashby")
-                    self.assertIn(str(n), book["title"])
+                    self.assertEqual(out["work_key"], pp.work_key("Ann Author", album["title"], out["narrator"] or ""))
                     keys.append(out["work_key"])
-            self.assertNotEqual(keys[0], keys[1], fmt)
-        self.assertEqual(pp._split_narrator("Tide Mill - Read by Tamsin Ashby, Book 2"),
-                         ("Tide Mill, Book 2", "Tamsin Ashby"))
-        self.assertEqual(pp._split_narrator("Tide Mill - Read by Tamsin Ashby, Dee Lane"),
-                         ("Tide Mill", "Tamsin Ashby, Dee Lane"))
+                    # A key never belongs to two different book numbers,
+                    # whatever the format.
+                    self.assertEqual(owner.setdefault(out["work_key"], n), n)
+            self.assertEqual(len(set(keys)), 3, fmt)
 
-    def test_only_a_standalone_number_phrase_leaves_the_narrator(self):
-        # T1R5: a name that holds a digit or a word like "Part" stays the
-        # narrator; only "..., Book 2" and the like go to the title, and the
-        # narrator is never left empty.
+    def test_the_list_view_names_books_as_before_the_number_moves(self):
+        # The display is decoupled from the key: titles, narrators and series
+        # are what they were at c06d33e, and the narrator is never emptied
+        # ("BBC Radio 4 Full Cast" and "Read by X, Book 2" stay as written).
         cases = {
+            "Tide Mill - Read by Tamsin Ashby, Book 2": ("Tide Mill", "Tamsin Ashby, Book 2"),
+            "Tide Mill (Narrated by Tamsin Ashby, Book 2)": ("Tide Mill", "Tamsin Ashby, Book 2"),
+            "Tide Mill - Read by Tamsin Ashby; Vol. 3": ("Tide Mill", "Tamsin Ashby; Vol. 3"),
+            "Tide Mill - Read by Tamsin Ashby (Book 2)": ("Tide Mill", "Tamsin Ashby (Book 2)"),
+            "Tide Mill - Read by Tamsin Ashby - Book 2": ("Tide Mill", "Tamsin Ashby - Book 2"),
+            "Tide Mill - Read by Tamsin Ashby [Book 2]": ("Tide Mill", "Tamsin Ashby [Book 2]"),
+            "Tide Mill - Read by Tamsin Ashby #2": ("Tide Mill", "Tamsin Ashby #2"),
+            "Tide Mill - Read by Tamsin Ashby, Book 2, Unabridged": ("Tide Mill", "Tamsin Ashby, Book 2, Unabridged"),
+            "Tide Mill (Narrated by Tamsin Ashby, Book II)": ("Tide Mill", "Tamsin Ashby, Book II"),
             "Tide Mill Saga Book 1 - Read by BBC Radio 4 Full Cast": ("Tide Mill Saga Book 1", "BBC Radio 4 Full Cast"),
             "Tide Mill - Read by 50 Voices": ("Tide Mill", "50 Voices"),
             "Tide Mill - Read by Part Time Players": ("Tide Mill", "Part Time Players"),
-            "Tide Mill - Read by Tamsin Ashby (Book 2)": ("Tide Mill, Book 2", "Tamsin Ashby"),
-            "Tide Mill - Read by Tamsin Ashby - Book 2": ("Tide Mill, Book 2", "Tamsin Ashby"),
-            "Tide Mill - Read by Tamsin Ashby, Book 2": ("Tide Mill, Book 2", "Tamsin Ashby"),
-            "Tide Mill - Read by Tamsin Ashby; Vol. 3": ("Tide Mill, Vol. 3", "Tamsin Ashby"),
-            "Tide Mill (Narrated by Tamsin Ashby, Book II)": ("Tide Mill, Book II", "Tamsin Ashby"),
-            "Tide Mill - Read by Tamsin Ashby, Dee Lane": ("Tide Mill", "Tamsin Ashby, Dee Lane"),
             "Tide Mill - Read by Book 2": ("Tide Mill", "Book 2"),
+            "Tide Mill - Read by Tamsin Ashby, Dee Lane": ("Tide Mill", "Tamsin Ashby, Dee Lane"),
+            "Tide Mill, Book 2 - Read by Tamsin Ashby": ("Tide Mill, Book 2", "Tamsin Ashby"),
+            "Tide Mill (Book 2)": ("Tide Mill (Book 2)", "Tamsin Ashby, Book 9"),
         }
-        for title, expected in cases.items():
+        for title, (shown, narrator) in cases.items():
+            album = dict(ALBUMS["500"], title=title, Collection=[{"tag": "Tide Mill Saga - Read by Tamsin Ashby, Book 9"}])
             with self.subTest(title=title):
-                self.assertEqual(pp._split_narrator(title), expected)
+                with mock.patch.dict(ALBUMS, {"500": album}):
+                    book = next(b for b in self.run_async(pp.list_books()) if b["key"] == "500:1")
+                self.assertEqual((book["title"], book["narrator"], book["series"]),
+                                 (shown, narrator, "Tide Mill Saga"))
+        self.assertEqual(pp._split_narrator("Tide Mill Saga (Narrated by Tamsin Ashby; Vol. 1)"),
+                         ("Tide Mill Saga", "Tamsin Ashby; Vol. 1"))
+
+    def test_next_keeps_to_the_narrator_when_the_number_rides_in_the_narrator(self):
+        # T1R8, as /next sees it: "Read by X, Book N, Unabridged" with a
+        # second narrator's edition of book 2; book 1's narrator is kept.
+        def book(key, title):
+            album = {"ratingKey": key, "type": "album", "title": title, "titleSort": title,
+                     "parentTitle": "Wren Hollis", "Collection": [{"tag": "Tide Mill Saga"}],
+                     "thumb": f"/library/metadata/{key}/thumb/1"}
+            tracks = [{"ratingKey": str(int(key) * 10), "type": "track", "parentRatingKey": key, "parentIndex": 1,
+                       "index": 1, "duration": 60_000, "title": "Part 1",
+                       "Media": [{"Part": [{"file": f"/m/{key}/1.mp3"}]}]}]
+            return (album, 1, tracks, 1, pp._summary(album, 1, tracks, 1))
+        for fmt in ("Tide Mill Saga - Read by {who}, Book {n}, Unabridged", "Tide Mill Saga - Read by {who} [Book {n}]",
+                    "Tide Mill Saga - Read by {who} #{n}", "Tide Mill Saga - Read by {who}, Book {n} of 5"):
+            with self.subTest(fmt=fmt):
+                lib = [book("100", fmt.format(who="Tamsin Ashby", n=1)), book("200", fmt.format(who="Tamsin Ashby", n=2)),
+                       book("250", fmt.format(who="Dee Lane", n=2)), book("300", fmt.format(who="Tamsin Ashby", n=3))]
+                entries = pp._series_entries(lib)
+                self.assertEqual(pp.pick_next(entries, "100:1")["key"], "200:1")
+                self.assertEqual(pp.pick_next(entries, "250:1")["key"], "300:1")
+                keys = [pp._identity(b[0], 1, {"Metadata": b[2]})["work_key"] for b in lib]
+                self.assertEqual(len({keys[0], keys[1], keys[3]}), 3)
+                self.assertEqual(keys[1], keys[2])      # two editions of book 2 side by side
 
     def test_next_keeps_to_a_narrator_whose_name_holds_a_digit(self):
         # T1R5, as /next sees it: book 1's narrator is kept, so the same
