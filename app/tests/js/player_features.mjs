@@ -393,6 +393,8 @@ async function setup(o = {}) {
       t.positionCalls += 1;
       if (t.positionMode === 'down') throw new TypeError('Failed to fetch');
       if (t.positionMode === 'hang') return new Promise(() => {});
+      // t.positionDelay: a slow read, answered that much later.
+      if (t.positionDelay) await new Promise((r) => clock.setTimeout(r, t.positionDelay));
       const reply = t.server
         ? { web: t.server.web(decodeURIComponent(m[1])), plex: null }
         : { web: t.places.web, plex: t.places.plex || null };
@@ -2932,6 +2934,133 @@ await run('FR1 control: the web-row question still holds through a second lock-s
   phone.engine.pause(); await clock.advance(2000); phone.engine.close(); await clock.advance(2000);
   check('nothing on close, the other tab\'s row stands', since(n).length === 0 && row().updated_at === d.newer.updated_at, [since(n), row()]);
   d.tab2.engine.close();
+});
+
+// Final re-review FR2: the lock-screen listener never sees the Plex question
+// and plays on (held, unsaved) past the Plexamp place, then closes. At the
+// reopen Plex's copy wins the merge over that unsaved listening: the open
+// asks, exactly as for another device's WebServarr copy (s1_heldlost).
+async function heldPastOther(kind) {
+  const storage = memoryStorage();
+  const t = await setup({ storage, identity: ID, deviceId: PHONE_ID, wall: true, stateful: true,
+    places: { web: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(NOW0 - 60000).toISOString(), device: 'Test on Linux', device_id: PHONE_ID, psid: 'test-psid' }, plex: null } });
+  t.prompts = () => t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
+  t.buttons = () => t.qa('.wsp-prompt .wsp-notice-btn').map((b) => b.textContent);
+  t.button = (label) => t.qa('.wsp-notice-btn').find((b) => b.textContent === label) || null;
+  await t.engine.open(MULTI.key);
+  await t.clock.advance(3000);
+  t.engine.pause();
+  await t.clock.advance(2000);
+  await t.clock.advance(2 * 3600000);
+  // The other place: 502 @ 7:00 (book 17:00), 1 min ago.
+  const other = { track: '502', offset_ms: 420000, duration_ms: 900000, updated_at: new Date(t.now() - 60000).toISOString() };
+  if (kind === 'plex') t.places = { web: t.places.web, plex: Object.assign({ device: 'Plexamp', source: 'plex' }, other) };
+  else t.places = { web: Object.assign({ device: 'Chrome on Linux', device_id: DESK_ID, psid: 'desk-psid' }, other), plex: null };
+  const n = t.posts.length;
+  t.ms.handlers.get('play')();
+  await t.clock.advance(3000);
+  t.ms.handlers.get('play')();                // lock screen again: plays on, held
+  await t.clock.advance(9 * MIN);
+  t.engine.pause();
+  await t.clock.advance(2000);
+  t.reached = t.st().position;
+  t.heldSent = t.posts.length - n;
+  t.engine.close();
+  await t.clock.advance(MIN);
+  const p = t.engine.open(MULTI.key, { autoplay: false });
+  await t.clock.advance(1000);
+  await p;
+  return t;
+}
+
+await run('FR2: at the reopen, a Plex app\'s place that beats this browser\'s unsaved listening asks', async () => {
+  for (const kind of ['plex', 'web']) {
+    const t = await heldPastOther(kind);
+    const who = kind === 'plex' ? 'Plexamp' : 'Chrome on Linux';
+    check(kind + ': nothing was saved while held', t.heldSent === 0, t.heldSent);
+    check(kind + ': held at the other place, paused', !t.st().playing && t.st().position.track === '502' && t.st().position.offset_ms === 420000, t.st().position);
+    check(kind + ': asked, Continue or Start from here', new RegExp('^Continue from 17:00 \\(' + who + ', 11 min ago\\)\\?$').test(t.prompts().join()) &&
+      t.buttons().join() === 'Continue,Start from here', [t.prompts(), t.buttons()]);
+    const n = t.posts.length;
+    t.button('Start from here').click();
+    await t.clock.advance(3000);
+    const sent = t.posts.slice(n);
+    check(kind + ': Start from here goes to this browser\'s place and saves it', t.st().playing && sent.length >= 1 &&
+      sent.every((b) => b.track === t.reached.track && Math.abs(b.offset_ms - t.reached.offset_ms) < 5000), [t.reached, sent.map((b) => [b.event, b.track, b.offset_ms])]);
+    t.engine.close();
+  }
+  const u = await heldPastOther('plex');
+  const n = u.posts.length;
+  u.button('Continue').click();
+  await u.clock.advance(3000);
+  check('plex: Continue goes to the Plex place and saves it', u.st().playing && u.posts.slice(n).length >= 1 &&
+    u.posts.slice(n).every((b) => b.track === '502' && b.offset_ms >= 420000 && b.offset_ms < 430000), u.posts.slice(n).map((b) => [b.event, b.offset_ms]));
+  u.engine.close();
+});
+
+await run('FR2: no Plex question when this browser\'s place was saved, or is the same place', async () => {
+  // Saved (acked) and then Plexamp listening: Plex's newer place resumes, no question (as before).
+  const storage = memoryStorage();
+  const t = await setup({ storage, identity: ID, deviceId: PHONE_ID, stateful: true, places: { web: null, plex: null } });
+  t.prompts = () => t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(3000);
+  t.engine.pause();
+  await t.clock.advance(2000);
+  t.engine.close();
+  await t.clock.advance(3600000);
+  t.places = { web: t.places.web, plex: { track: '503', offset_ms: 120000, duration_ms: 300000, updated_at: new Date(t.now() - MIN).toISOString(), device: 'Plexamp', source: 'plex' } };
+  const p = t.engine.open(MULTI.key, { autoplay: false });
+  await t.clock.advance(1000);
+  await p;
+  check('resumes the Plex place without a question', t.st().resumedFrom.source === 'plex' && t.st().position.track === '503' && t.prompts().length === 0, [t.st().resumedFrom, t.prompts()]);
+  t.engine.close();
+  // The pure rule: within 30 s, or acked, or Plex not the one resumed: no question.
+  const base = { resumed: { source: 'plex' }, plex: { bookMs: 1000000, updated_at: new Date(NOW0).toISOString(), device: 'Plexamp', playable: true },
+    own: { own: true, acked: false, bookMs: 1400000, updated_at: new Date(NOW0 - MIN).toISOString() }, now: new Date(NOW0).toISOString(), me: { device_id: PHONE_ID, device: 'Chrome on Android' } };
+  check('asked: plex beats own unsaved, far apart', F.handoffOffer(base) && F.handoffOffer(base).at === 'plex');
+  check('same place (30 s): no', F.handoffOffer(Object.assign({}, base, { own: Object.assign({}, base.own, { bookMs: 1029000 }) })) === null);
+  check('own acked: no', F.handoffOffer(Object.assign({}, base, { own: Object.assign({}, base.own, { acked: true }) })) === null);
+  check('the own copy won the merge: no', F.handoffOffer(Object.assign({}, base, { resumed: { source: 'local' } })) === null);
+  check('Plex place unplayable here: holds at own', F.handoffOffer(Object.assign({}, base, { plex: Object.assign({}, base.plex, { playable: false }) })).at === 'own');
+});
+
+// Final re-review FR3: skips queued behind one late read stay relative.
+await run('FR3: three lock-screen skip-backs behind one late read go back three times', async () => {
+  const t = await setup({ identity: ID, deviceId: PHONE_ID, wall: true, places: { web: null, plex: null } });
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(3000);
+  t.engine.pause();
+  await t.clock.advance(2000);
+  await t.clock.advance(2 * 3600000);
+  t.positionDelay = 2000;
+  const before = t.st().bookMs;
+  for (let i = 0; i < 3; i++) {
+    t.ms.handlers.get('seekbackward')({});
+    await t.clock.advance(300);
+  }
+  await t.clock.advance(4000);
+  check('moved back 30 s', t.st().bookMs === before - 30000, (t.st().bookMs - before) / 1000);
+  t.engine.close();
+});
+
+// Final re-review FR4: a late move that changes nothing (refused into a part
+// this browser can't play) still ends the read: the button is not left spinning.
+await run('FR4: a late move refused into an undecodable part leaves no spinner', async () => {
+  const t = await setup({ identity: ID, deviceId: PHONE_ID, wall: true, places: { web: null, plex: null } });
+  await t.openAt(MIXED.key, '521', 500000);
+  await t.clock.advance(3000);
+  t.engine.pause();
+  await t.clock.advance(2000);
+  await t.clock.advance(2 * 3600000);
+  t.engine.seek(600000 + 5000);                 // into the undecodable part 2
+  await t.clock.advance(100);
+  check('the refusal notice', t.notices().some((m) => /format can't play/.test(m)), t.notices());
+  await t.clock.advance(5000);
+  check('the read ended', t.st().checking === false);
+  check('no spinner on any play button', t.qa('.wsp-spin').length === 0 && t.qa('.wsp-play').every((b) => b.getAttribute('aria-label') === 'Play'),
+    t.qa('.wsp-play').map((b) => b.getAttribute('aria-label')));
+  t.engine.close();
 });
 
 await run('F2: the late Play is measured on the wall clock, so time asleep counts', async () => {

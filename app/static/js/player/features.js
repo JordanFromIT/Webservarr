@@ -76,6 +76,11 @@
  *   place (a seek) and plays; Start from here moves to this browser's place
  *   and plays; either is saved as the newest place. Play pressed instead, or
  *   any move, is the listener's answer: the question goes.
+ * - The same question at open for a Plex app's place (Plexamp, the Plex
+ *   app) that beats this browser's own place when that place was never
+ *   saved (played on without answering a question, or offline) and is more
+ *   than 30 s away: Continue goes to Plex's place, Start from here to this
+ *   browser's own.
  * - Conflict (spec 11b): the server refuses a save over another device's
  *   newer place (409). Playback pauses there and the same question is asked:
  *   Continue moves to the stored place and plays; Keep listening here saves
@@ -95,7 +100,8 @@
  *   formatCountdown(ms)                   "14:32", "1:00:00"
  *   chapterEnd(state)                     the current chapter's end, book ms
  *   otherDevice(copy, me)                 another device's copy (by id, else by label)
- *   handoffOffer(info)                    the open's handoff question (engine setOpenGate info), or null
+ *   handoffOffer(info)                    the open's handoff question (engine setOpenGate info): another
+ *                                         device's WebServarr copy, else a Plex app's place; or null
  *   conflictOffer(warning, me, placeMs)   the question for a 409 (saves.js 'conflict' warning)
  *   handoffMessage(offer)                 "Continue from 1:02:03 (Chrome on Android, 3 min ago)?",
  *                                         "(another Chrome on Linux, ...)" for this device's own label
@@ -293,6 +299,9 @@ function ageOf(nowIso, atIso) {
    copy of a place WebServarr logged.) */
 export function handoffOffer(info) {
   const i = info || {};
+  const web0 = i.web || (i.resumed && i.resumed.source === 'web' ? i.resumed : null);
+  // WebServarr's copy from another device asks first; else a Plex app's place.
+  if (!web0 || typeof web0.bookMs !== 'number' || !otherDevice(web0, i.me)) return plexOffer(i);
   const web = i.web || (i.resumed && i.resumed.source === 'web' ? i.resumed : null);
   const own = i.own;
   if (!web || typeof web.bookMs !== 'number' || !otherDevice(web, i.me)) return null;
@@ -311,6 +320,28 @@ export function handoffOffer(info) {
     other: { bookMs: web.bookMs, device: web.device || '', agoMs: isFinite(age) ? age : null, sameLabel: sameLabel(web, i.me), canGo: canGo },
     own: { bookMs: own.bookMs },
     at: canGo && !ownNewer ? 'web' : 'own'
+  };
+}
+
+/* The open's question for a Plex app's place (Plexamp, the Plex app): asked
+   when the book resumes from Plex's copy (it beat this browser's own) while
+   this browser holds its own place the server never took (played on after a
+   question it did not answer, or offline), more than 30 s from it. Holds at
+   Plex's place ({ at: 'plex' }; at this browser's own when Plex's can't
+   play here). Continue goes to Plex's place, Start from here to this
+   browser's own; either is saved as the newest place. */
+function plexOffer(i) {
+  const plex = i.plex || (i.resumed && i.resumed.source === 'plex' ? i.resumed : null);
+  const own = i.own;
+  if (!plex || typeof plex.bookMs !== 'number' || !i.resumed || i.resumed.source !== 'plex') return null;
+  if (!own || own.own !== true || own.acked === true || typeof own.bookMs !== 'number') return null;
+  if (Math.abs(own.bookMs - plex.bookMs) <= HANDOFF_APART_MS) return null;
+  const age = ageOf(i.now, plex.updated_at);
+  const canGo = plex.playable !== false;
+  return {
+    other: { bookMs: plex.bookMs, device: plex.device || '', agoMs: isFinite(age) ? age : null, sameLabel: false, canGo: canGo },
+    own: { bookMs: own.bookMs },
+    at: canGo ? 'plex' : 'own'
   };
 }
 

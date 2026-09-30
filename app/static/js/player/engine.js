@@ -119,11 +119,13 @@
  *                     this book), playable } or null), own: this browser's
  *                     own copy ({ track, offset_ms, updated_at, device, own,
  *                     acked, bookMs, ackedBookMs (its last acked place, or
- *                     null) } or null), now (the server's clock, ISO, or
- *                     null), me: { device_id, device } }. An answer
+ *                     null) } or null), plex: Plex's copy (a Plex app's
+ *                     place, as web) or null, now (the server's clock, ISO,
+ *                     or null), me: { device_id, device } }. An answer
  *                     { at: 'web' } holds the open paused at WebServarr's
- *                     place, { at: 'own' } at this browser's own (the newer
- *                     by stamp, or the only one that can play here);
+ *                     place, { at: 'plex' } at Plex's, { at: 'own' } at this
+ *                     browser's own (the newer by stamp, or the only one
+ *                     that can play here);
  *                     nothing is pushed and the local copy is left as it was
  *                     until the listener plays or moves.
  *   resolveConflict() the listener answered a 409 (saves.js 'conflict'
@@ -1235,24 +1237,32 @@ export function createEngine(env) {
     }
     // The handoff gate sees this browser's own copy before the open can
     // overwrite it (features.js). A hold opens paused at WebServarr's place
-    // ({ at: 'web' }), or at this browser's own ({ at: 'own' }: stamped
-    // later, or that place can't play here); nothing is pushed then.
+    // ({ at: 'web' }), at Plex's ({ at: 'plex' }: a Plex app's place that
+    // beats this browser's own unsaved one), or at this browser's own
+    // ({ at: 'own' }: stamped later, or that place can't play here);
+    // nothing is pushed then.
     const mine = places ? own() : null;
     let webCopy = null;
+    let plexCopy = null;
     let held = null;
-    if (places && places.web && typeof places.web === 'object') {
-      const w = places.web;
-      webCopy = { source: 'web', track: String(w.track), offset_ms: Number(w.offset_ms), duration_ms: Number(w.duration_ms) || 0,
+    const copyFrom = function (source, w) {
+      return { source: source, track: String(w.track), offset_ms: Number(w.offset_ms), duration_ms: Number(w.duration_ms) || 0,
         updated_at: w.updated_at, device: typeof w.device === 'string' ? w.device : '', device_id: w.device_id || '' };
-    }
+    };
+    if (places && places.web && typeof places.web === 'object') webCopy = copyFrom('web', places.web);
+    if (places && places.plex && typeof places.plex === 'object') plexCopy = copyFrom('plex', places.plex);
     if (openGate && places && !opts.at) {
-      const webMs = webCopy ? toBookMs(book.tracks, webCopy.track, webCopy.offset_ms) : null;
-      const playable = webMs !== null && !blocked(toTrackOffset(book.tracks, webMs).index);
+      const msOf = function (c) { return c ? toBookMs(book.tracks, c.track, c.offset_ms) : null; };
+      const canPlay = function (ms) { return ms !== null && !blocked(toTrackOffset(book.tracks, ms).index); };
+      const webMs = msOf(webCopy);
+      const plexMs = msOf(plexCopy);
+      const playable = canPlay(webMs);
       try {
         held = openGate({
           book: key,
           resumed: resumed ? Object.assign({}, resumed, { bookMs: startMs }) : null,
           web: webCopy ? Object.assign({}, webCopy, { bookMs: webMs, playable: playable }) : null,
+          plex: plexCopy ? Object.assign({}, plexCopy, { bookMs: plexMs, playable: canPlay(plexMs) }) : null,
           own: mine,
           now: places.now || null,
           me: me()
@@ -1264,7 +1274,10 @@ export function createEngine(env) {
       if (held && held.at === 'own' && mine) {
         startMs = mine.bookMs;
         resumed = Object.assign({ source: 'local' }, mine);
-      } else if (held && webMs !== null) {
+      } else if (held && held.at === 'plex' && plexMs !== null) {
+        startMs = plexMs;
+        resumed = plexCopy;
+      } else if (held && held.at !== 'plex' && webMs !== null) {
         startMs = webMs;
         resumed = webCopy;
       } else {
@@ -1448,6 +1461,9 @@ export function createEngine(env) {
   function skip(deltaS) {
     const d = Number(deltaS);
     if (!book || !isFinite(d)) return;
+    // Waiting on a late move's read, a skip stays relative: three skips back
+    // queued behind one read go back three times, from wherever it is then.
+    if (!wantPlay && lateCheck(function () { skip(d); }, false)) return;
     seek(bookMsNow() + d * 1000, 'skip');
   }
 
@@ -1629,6 +1645,9 @@ export function createEngine(env) {
         return;
       }
       quietSince = wallNow();
+      // The read is over (state().checking false) even when nothing queued
+      // changes anything (a move refused into a part that can't play).
+      changed('checking');
       my.queue.forEach(function (fn) { fn(); });
     }
     timer = setT(function () {
