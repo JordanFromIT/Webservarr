@@ -396,7 +396,7 @@ async function setup(o = {}) {
       // t.positionDelay: a slow read, answered that much later.
       if (t.positionDelay) await new Promise((r) => clock.setTimeout(r, t.positionDelay));
       const reply = t.server
-        ? { web: t.server.web(decodeURIComponent(m[1])), plex: null }
+        ? { web: t.server.web(decodeURIComponent(m[1])), plex: t.plexCopy || null }
         : { web: t.places.web, plex: t.places.plex || null };
       if (!t.noNow) reply.now = new Date(t.serverNow()).toISOString();
       return response(200, reply);
@@ -3023,6 +3023,144 @@ await run('FR2: no Plex question when this browser\'s place was saved, or is the
   check('own acked: no', F.handoffOffer(Object.assign({}, base, { own: Object.assign({}, base.own, { acked: true }) })) === null);
   check('the own copy won the merge: no', F.handoffOffer(Object.assign({}, base, { resumed: { source: 'local' } })) === null);
   check('Plex place unplayable here: holds at own', F.handoffOffer(Object.assign({}, base, { plex: Object.assign({}, base.plex, { playable: false }) })).at === 'own');
+});
+
+// Final re-review FR5: in a three-way split (another device's WebServarr
+// row, this browser's unsaved listening, a Plex app's newer place) the open
+// offers the newest other place: the Plex app's (a_fr2 A1, A2, and a desk row
+// within 30 s of this browser's place, which asks nothing on its own).
+const plexCopyAt = (track, offset, atMs, dur) => ({ track, offset_ms: offset, duration_ms: dur, updated_at: new Date(atMs).toISOString(), device: 'Plexamp', source: 'plex' });
+const bookMsOf = (track, off) => { let s = 0; for (const x of MULTI.tracks) { if (x.key === track) return s + off; s += x.duration_ms; } return null; };
+async function reopenAndPlay(d, phone) {
+  const n = d.server.log.length;
+  const p = phone.engine.open(MULTI.key, { autoplay: false });
+  await d.clock.advance(1000);
+  await p;
+  const at = phone.st().position;
+  const asked = { prompts: phone.prompts(), buttons: phone.buttons(), sent: d.since(n) };
+  const n2 = d.server.log.length;
+  phone.ms.handlers.get('play')();            // a lock-screen Play at the reopened place
+  await d.clock.advance(5000);
+  phone.engine.pause();
+  await d.clock.advance(2000);
+  return { at, asked, played: d.since(n2) };
+}
+
+await run('FR5: three-way split: the reopen offers the Plex app\'s newer place, and a Play never stores an older one', async () => {
+  for (const variant of ['desk far', 'desk within 30 s']) {
+    const d = await twoDevices({ wall: true });
+    const { clock, server, phone, desk, row } = d;
+    await desk.openAt(MULTI.key, '501', variant === 'desk far' ? 0 : 290000);
+    await clock.advance(60000);                 // the desk saves 1:00 (or 5:50)
+    desk.engine.pause(); await clock.advance(2000);
+    desk.engine.close(); await clock.advance(10 * MIN);
+    server.down = true;                         // the phone's saves fail from here
+    await phone.open(MULTI.key);
+    if (variant === 'desk within 30 s') { phone.engine.seek(bookMsOf('501', 330000)); await clock.advance(1000); }
+    await clock.advance(5 * MIN);
+    phone.engine.pause(); await clock.advance(2000);
+    phone.engine.close(); await clock.advance(20000);
+    server.down = false;
+    await clock.advance(30 * MIN);
+    phone.plexCopy = plexCopyAt('502', 300000, NOW0 + clock.now - 60000, 900000);   // Plexamp: 15:00, newest
+    const r = await reopenAndPlay(d, phone);
+    check(variant + ': held at the Plexamp place, asked about it', r.at.track === '502' && r.at.offset_ms === 300000 &&
+      /^Continue from 15:00 \(Plexamp, 1 min ago\)\?$/.test(r.asked.prompts.join()) && r.asked.buttons.join() === 'Continue,Start from here' && r.asked.sent.length === 0,
+    [r.at, r.asked]);
+    check(variant + ': the Play stores no place before 15:00', r.played.length >= 1 && r.played.every((e) => e[0] === 'stored' && e[3] === '502' && e[4] >= 300000) &&
+      bookMsOf(row().track, row().offset_ms) >= bookMsOf('502', 300000), [r.played, row()]);
+    phone.engine.close(); desk.engine.close();
+  }
+});
+
+await run('FR5: the FR1-held phone, then the desk, then Plexamp: the reopen offers Plexamp\'s newest place (A2)', async () => {
+  const d = await twoDevices({ wall: true });
+  const { clock, phone, desk, row } = d;
+  await phone.openAt(MULTI.key, '502', 300000);
+  await clock.advance(3000);
+  phone.engine.pause(); await clock.advance(2000);
+  await clock.advance(2 * 3600000);
+  const plex1 = plexCopyAt('502', 420000, NOW0 + clock.now - 60000, 900000);
+  phone.plexCopy = plex1; desk.plexCopy = plex1;
+  phone.ms.handlers.get('play')(); await clock.advance(3000);
+  check('the late Play asked (FR1)', /Plexamp/.test(phone.prompts().join()), phone.prompts());
+  phone.ms.handlers.get('play')(); await clock.advance(9 * MIN);     // played on, held
+  phone.engine.pause(); await clock.advance(2000);
+  phone.engine.close(); await clock.advance(60000);
+  await desk.open(MULTI.key);                    // the desk resumes 17:00, listens a minute
+  await clock.advance(60000);
+  desk.engine.pause(); await clock.advance(2000);
+  desk.engine.close();
+  phone.plexCopy = null; desk.plexCopy = null;   // Plex's copy is an echo of the desk's save now
+  await clock.advance(30 * MIN);
+  phone.plexCopy = plexCopyAt('503', 120000, NOW0 + clock.now - 60000, 300000);   // Plexamp: 27:00, newest
+  const r = await reopenAndPlay(d, phone);
+  check('held at 27:00 and asked about it, not the desk\'s 17:50', r.at.track === '503' && r.at.offset_ms === 120000 &&
+    /^Continue from 27:00 \(Plexamp, 1 min ago\)\?$/.test(r.asked.prompts.join()), [r.at, r.asked]);
+  check('the Play keeps 27:00', r.played.every((e) => e[3] === '503' && e[4] >= 120000) && row().track === '503', [r.played, row()]);
+  phone.engine.close();
+});
+
+// Final re-review FR6: an answer to the open's question given after 5
+// minutes, when the other place moved meanwhile, is not lost: the move
+// happens (unsaved: the new question holds saves), "Keep listening here"
+// saves the place the listener chose, and a close instead keeps it in the
+// local copy for the next question (d_drop).
+async function lateAnswer(kind) {
+  const storage = memoryStorage();
+  const ISO = (d) => new Date(NOW0 + d).toISOString();
+  const places = kind === 'web'
+    ? { web: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: ISO(-3600000), device: 'Chrome on Linux', device_id: DESK_ID, psid: 'desk-psid' }, plex: null }
+    : { web: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: ISO(-3600000), device: 'Test on Linux', device_id: PHONE_ID, psid: 'old-psid' },
+      plex: plexCopyAt('503', 100000, NOW0 - 60000, 300000) };
+  const t = await setup({ storage, identity: ID, deviceId: PHONE_ID, wall: true, places });
+  t.prompts = () => t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
+  t.button = (label) => t.qa('.wsp-notice-btn').find((b) => b.textContent === label) || null;
+  t.local = () => JSON.parse(storage.getItem('ws-player:place:' + ID + ':' + MULTI.key));
+  storage.setItem('ws-player:place:' + ID + ':' + MULTI.key, JSON.stringify({ track: '502', offset_ms: 800000, duration_ms: 900000, device: 'Test on Linux', updated_at: ISO(-7200000), own: true, acked: false }));
+  const p = t.engine.open(MULTI.key, { autoplay: false });
+  await t.clock.advance(1000);
+  await p;
+  t.asked0 = t.prompts();
+  await t.clock.advance(6 * MIN);
+  // Meanwhile the other place moved on to 503 @ 3:20.
+  if (kind === 'web') t.places = { web: Object.assign({}, places.web, { track: '503', offset_ms: 200000, duration_ms: 300000, updated_at: new Date(t.now() - 30000).toISOString() }), plex: null };
+  else t.places = { web: places.web, plex: plexCopyAt('503', 200000, t.now() - 30000, 300000) };
+  t.n = t.posts.length;
+  t.button('Start from here').click();
+  await t.clock.advance(3000);
+  return t;
+}
+
+await run('FR6: a late answer to the open\'s question is kept when the other place moved meanwhile', async () => {
+  for (const kind of ['web', 'plex']) {
+    const t = await lateAnswer(kind);
+    check(kind + ': asked at the open', t.asked0.length === 1, t.asked0);
+    check(kind + ': asked again about the moved place, nothing sent', /^Continue from 28:20 /.test(t.prompts().join()) && t.posts.length === t.n, [t.prompts(), t.posts.slice(t.n)]);
+    check(kind + ': the chosen place is where the player is, not playing', t.st().position.track === '502' && t.st().position.offset_ms === 800000 && !t.st().playing, t.st().position);
+    check(kind + ': the local copy keeps it, unacked', t.local().track === '502' && t.local().offset_ms === 800000 && t.local().own === true && t.local().acked === false, t.local());
+    t.button('Keep listening here').click();
+    await t.clock.advance(3000);
+    t.engine.pause();
+    await t.clock.advance(2000);
+    const sent = t.posts.slice(t.n);
+    check(kind + ': Keep listening here saves the chosen place', sent.length >= 1 && sent.every((b) => b.track === '502' && b.offset_ms >= 800000), sent.map((b) => [b.event, b.track, b.offset_ms]));
+    check(kind + ': and the local copy follows it', t.local().track === '502' && t.local().offset_ms >= 800000, t.local());
+    t.engine.close();
+  }
+  // Closed instead of answering: the next open asks again, offering the chosen place.
+  const u = await lateAnswer('plex');
+  u.engine.close();
+  await u.clock.advance(MIN);
+  const p = u.engine.open(MULTI.key, { autoplay: false });
+  await u.clock.advance(1000);
+  await p;
+  check('closed: the next open offers the chosen place again', /^Continue from 28:20 \(Plexamp/.test(u.prompts().join()) && u.local().offset_ms === 800000 &&
+    u.qa('.wsp-notice-btn').some((b) => b.textContent === 'Start from here'), [u.prompts(), u.local()]);
+  u.button('Start from here').click();
+  await u.clock.advance(3000);
+  check('and Start from here goes there', u.st().position.track === '502' && u.st().position.offset_ms >= 800000, u.st().position);
+  u.engine.close();
 });
 
 // Final re-review FR3: skips queued behind one late read stay relative.

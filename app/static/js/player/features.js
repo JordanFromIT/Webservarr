@@ -100,8 +100,9 @@
  *   formatCountdown(ms)                   "14:32", "1:00:00"
  *   chapterEnd(state)                     the current chapter's end, book ms
  *   otherDevice(copy, me)                 another device's copy (by id, else by label)
- *   handoffOffer(info)                    the open's handoff question (engine setOpenGate info): another
- *                                         device's WebServarr copy, else a Plex app's place; or null
+ *   handoffOffer(info)                    the open's handoff question (engine setOpenGate info): a Plex
+ *                                         app's place when the book resumes from it, else another
+ *                                         device's WebServarr copy; or null
  *   conflictOffer(warning, me, placeMs)   the question for a 409 (saves.js 'conflict' warning)
  *   handoffMessage(offer)                 "Continue from 1:02:03 (Chrome on Android, 3 min ago)?",
  *                                         "(another Chrome on Linux, ...)" for this device's own label
@@ -299,9 +300,14 @@ function ageOf(nowIso, atIso) {
    copy of a place WebServarr logged.) */
 export function handoffOffer(info) {
   const i = info || {};
-  const web0 = i.web || (i.resumed && i.resumed.source === 'web' ? i.resumed : null);
-  // WebServarr's copy from another device asks first; else a Plex app's place.
-  if (!web0 || typeof web0.bookMs !== 'number' || !otherDevice(web0, i.me)) return plexOffer(i);
+  // The newest other place is the one offered: a Plex app's, when the book
+  // resumes from it, before another device's older WebServarr copy.
+  const viaPlex = plexOffer(i);
+  if (viaPlex) return viaPlex;
+  return webOffer(i);
+}
+
+function webOffer(i) {
   const web = i.web || (i.resumed && i.resumed.source === 'web' ? i.resumed : null);
   const own = i.own;
   if (!web || typeof web.bookMs !== 'number' || !otherDevice(web, i.me)) return null;
@@ -1043,8 +1049,11 @@ export function createFeatures(env) {
     handoff = null;
     const s = player.state();
     if (s.book !== entry.book) return;
-    if (which === 'other') player.seek(entry.offer.other.bookMs);
-    else if (entry.kind === 'open') player.seek(entry.offer.own.bookMs);
+    // At the open, the move is the answer: kept (unsaved) even if a late
+    // read finds the other place has moved on and asks again.
+    const answer = { answer: entry.kind === 'open' };
+    if (which === 'other') player.seek(entry.offer.other.bookMs, answer);
+    else if (entry.kind === 'open') player.seek(entry.offer.own.bookMs, answer);
     // After the move: the save that resumes carries the place chosen.
     if (entry.kind === 'conflict' && typeof player.resolveConflict === 'function') player.resolveConflict();
     playNow();

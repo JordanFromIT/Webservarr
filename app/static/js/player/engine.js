@@ -88,7 +88,9 @@
  *       (resolveConflict), and a Play meanwhile plays without saving. A
  *       failed or slow read goes on. The lock screen's Play takes the same
  *       path. pause() or toggle() during a Play's read cancels it.
- *   seek(bookMs), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters
+ *   seek(bookMs, { answer }), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters;
+ *       answer: the move answers the open's question (features.js): if a
+ *       late read then asks again, it still happens, unsaved
  *   rewind(bookMs)    smart rewind's seek (features.js): a 'seek' change marked
  *                     { rewind: true }; the saves keep the place it went back
  *                     from until playback passes it (saves.js)
@@ -1416,14 +1418,18 @@ export function createEngine(env) {
     else return play();
   }
 
-  function seek(bookMs, reason, rewind) {
+  function seek(bookMs, reason, rewind, answer) {
     if (!book || !playhead) return;
     const v = Number(bookMs);
     if (!isFinite(v)) return;
     // A move while paused, after RECHECK_AFTER_MS quiet, is saved at once:
     // like a late Play it reads the saved places first (smart rewind is no
     // move of the listener's, and only follows a Play).
-    if (!wantPlay && !rewind && lateCheck(function () { seek(v, reason, rewind); }, false)) return;
+    if (!wantPlay && !rewind) {
+      const again = function () { seek(v, reason, rewind); };
+      again.answer = !!answer;
+      if (lateCheck(again, false)) return;
+    }
     const from = bookMsNow();
     const to = toTrackOffset(book.tracks, clampNumber(v, 0, book.durationMs));
     if (blocked(to.index)) {
@@ -1640,8 +1646,13 @@ export function createEngine(env) {
       }
       if (asked) {
         // Held: nothing it was asked for happens, and the quiet time goes
-        // on until the listener answers (resolveConflict).
+        // on until the listener answers (resolveConflict). Except the move
+        // that answered the open's question: it still happens, unsaved (the
+        // new question holds saves), so "Keep listening here" means the
+        // place the listener chose, and the local copy keeps it (unacked)
+        // if they close instead.
         changed('checking');
+        my.queue.forEach(function (fn) { if (fn.answer) fn(); });
         return;
       }
       quietSince = wallNow();
@@ -1809,7 +1820,7 @@ export function createEngine(env) {
     play: play,
     pause: pause,
     toggle: toggle,
-    seek: function (bookMs) { seek(bookMs, 'seek'); },
+    seek: function (bookMs, o) { seek(bookMs, 'seek', false, !!(o && o.answer)); },
     rewind: function (bookMs) { seek(bookMs, 'seek', true); },
     skip: skip,
     jumpToChapter: jumpToChapter,
