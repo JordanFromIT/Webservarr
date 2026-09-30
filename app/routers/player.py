@@ -330,7 +330,9 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
 
     `now` is the server's clock (ISO UTC) as it answers: the player measures
     its own clock against it before it compares these copies with its local
-    one, which it stamps in the server's time."""
+    one, which it stamps in the server's time. WebServarr's copy carries the
+    psid of the page session that saved it, so a page re-checking before a
+    late Play can tell its own saves from another tab's or device's."""
     await _book_access(who, key)
     try:
         plex_pos = await pp.plex_position(who.session(), key, session_id=who.session_id)
@@ -428,9 +430,10 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     stored position arrived late: nothing is stored, logged or forwarded.
 
     409 {"conflict": {track, offset_ms, device, updated_at}, "now"} when the
-    stored position is another device's and `base` is not its timestamp
-    (spec 11b): nothing is stored or forwarded; the attempt is logged. The
-    body is only ever this listener's own row."""
+    stored position is another page session's (another device, or another
+    tab or a reload of this browser) and `base` is not its timestamp (spec
+    11b): nothing is stored or forwarded; the attempt is logged. The body is
+    only ever this listener's own row."""
     try:
         await pp.assert_in_library(body.book, body.track)
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:

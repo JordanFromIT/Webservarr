@@ -9,14 +9,16 @@ write their own rows. Never the username.
 Positions. Each page session sends a random id (psid) and numbers its
 check-ins (seq). An older seq from the page session that wrote the stored row
 never overwrites it: check-ins can land out of order (a retry, two workers).
-Across devices a write is a compare-and-swap (spec 11b): a check-in carries
-`base`, the stored timestamp its page last saw, and is stored only when there
-is no row yet, when the row came from the same device (its device_id; the
-same psid when either side has none), or when the row's timestamp is still
-`base`. Otherwise it is a conflict: nothing is stored, the attempt is logged,
-and the caller gets the stored place back, so a stale page (a phone asleep,
-a retry after an outage, a question left open) can never post an old place
-over a newer one from another device. The rule is one conditional UPDATE, so
+Across page sessions a write is a compare-and-swap (spec 11b): a check-in
+carries `base`, the stored timestamp its page last saw, and is stored only
+when there is no row yet, when the row came from the same page session (its
+psid), or when the row's timestamp is still `base`. Otherwise it is a
+conflict: nothing is stored, the attempt is logged, and the caller gets the
+stored place back, so a stale page (a phone asleep, a retry after an outage,
+a question left open, another tab of the same browser left paused) can never
+post an old place over a newer one. A reload or another tab of the same
+browser is a new page session: it saw the row at open (its base), so it
+stores unless something newer has been saved since. The rule is one conditional UPDATE, so
 two workers racing on the same book can't both read the old row and let the
 older write land last.
 
@@ -123,7 +125,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     Returns {"stored": bool, "updated_at": iso8601}. `stored` is False when
     the stored row was written by the same psid with a higher seq; nothing is
     written or logged then, and `updated_at` is the stored row's. A conflict
-    (another device's row, and `base` is not its timestamp) is
+    (another page session's row, and `base` is not its timestamp) is
     {"stored": False, "updated_at", "conflict": {track, offset_ms, device,
     updated_at}}: the position is left alone, the attempt is logged. Raises
     ValueError for input the caller should have refused."""
@@ -151,14 +153,12 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     # Overwrite unless the row is this psid's own and newer. A row written
     # without a psid (a Plex import, say) is always overwritten.
     not_newer_self = or_(P.psid.is_(None), P.seq.is_(None), P.psid != psid, P.seq <= seq)
-    # And, across devices, only over the row the page last saw: the same
-    # device (by id; by psid when either side has none), or a row still at
-    # `base` (to the millisecond utc_iso gives it).
-    if device_id is not None:
-        same_device = or_(P.device_id == device_id, and_(P.device_id.is_(None), P.psid == psid))
-    else:
-        same_device = P.psid == psid
-    allowed = [P.psid.is_(None), same_device]
+    # And, across page sessions, only over the row the page last saw: its
+    # own (the same psid), or a row still at `base` (to the millisecond
+    # utc_iso gives it). The device id alone is not enough: another tab of
+    # the same browser, left paused, must not post its old place over the
+    # newer one a second tab saved.
+    allowed = [P.psid.is_(None), P.psid == psid]
     if base_at is not None:
         allowed.append(and_(P.updated_at >= base_at, P.updated_at < base_at + timedelta(milliseconds=1)))
     swap = or_(*allowed)
@@ -202,14 +202,16 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
 
 
 def get_position(db: Session, identity: str, book: str) -> Optional[dict]:
-    """This listener's stored position in the book, or None."""
+    """This listener's stored position in the book, or None. `psid` is the
+    page session that saved it, so a page can tell its own saves from
+    another tab's or device's (the player's re-check before a late Play)."""
     row = (db.query(ListeningPosition)
            .filter(ListeningPosition.identity == identity, ListeningPosition.book_key == book).first())
     if row is None:
         return None
     return {"track": row.track_key, "offset_ms": row.offset_ms, "duration_ms": row.duration_ms,
             "updated_at": utc_iso(row.updated_at), "device": row.device, "device_id": row.device_id,
-            "source": row.source}
+            "source": row.source, "psid": row.psid}
 
 
 def _entry(r: ListeningLog) -> dict:

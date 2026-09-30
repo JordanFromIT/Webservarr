@@ -338,6 +338,8 @@ class Shapes(PlayerApiBase):
         self.assertEqual(body["web"]["track"], "202")
         self.assertEqual(body["web"]["offset_ms"], 5_000)
         self.assertTrue(body["web"]["updated_at"].endswith("Z"))
+        # The page session that saved it: a page tells its own saves from another's.
+        self.assertEqual(body["web"]["psid"], "psid-a")
         self.assertEqual(body["plex"], plex)
         self.assertEqual(self.plex_position.await_args.kwargs["session_id"], "sid-1001")
 
@@ -844,6 +846,18 @@ class Conflicts(PlayerApiBase):
         self.assertEqual(self.position()["offset_ms"], 150_000)
         self.timeline.assert_not_awaited()
         self.assertEqual(self.db.query(ListeningLog).count(), 2)
+
+    def test_another_tab_of_the_same_browser_needs_the_rows_time(self):
+        first = self.checkin(device_id=self.PHONE, psid="tab-1", offset_ms=20_000).json()
+        second = self.checkin(device_id=self.PHONE, psid="tab-2", offset_ms=90_000, base=first["updated_at"])
+        self.assertEqual(second.status_code, 200)
+        self.timeline.reset_mock()
+        # Tab 1, left paused, plays on from its old place: refused, nothing forwarded.
+        r = self.checkin(device_id=self.PHONE, psid="tab-1", seq=2, offset_ms=20_250, base=first["updated_at"])
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.json()["conflict"]["offset_ms"], 90_000)
+        self.assertEqual(self.position()["offset_ms"], 90_000)
+        self.timeline.assert_not_awaited()
 
     def test_the_base_it_was_shown_stores(self):
         desk = self.checkin(device_id=self.DESK, psid="desk", offset_ms=150_000).json()

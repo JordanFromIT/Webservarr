@@ -75,7 +75,7 @@ class Positions(StoreBase):
         pos = listening.get_position(self.db, ME, BOOK)
         self.assertEqual(pos, {"track": "6002", "offset_ms": 123456, "duration_ms": 3600000,
                                "updated_at": out["updated_at"], "device": "Safari on iPhone", "device_id": None,
-                               "source": "web"})
+                               "source": "web", "psid": "p-one"})
         hist = listening.get_history(self.db, ME, BOOK)
         self.assertEqual(len(hist), 1)
         self.assertEqual(hist[0]["event"], "checkin")
@@ -208,8 +208,10 @@ class DeviceIds(StoreBase):
 
 
 class CompareAndSwap(StoreBase):
-    """Spec 11b: across devices a check-in is stored only over the row its
-    page last saw (base); the same device, or no row yet, always stores."""
+    """Spec 11b: across page sessions a check-in is stored only over the row
+    its page last saw (base); the same page session (psid), or no row yet,
+    always stores. A device id alone is not enough: another tab or a reload
+    of the same browser is another page session."""
 
     PHONE = "p" * 20
     DESK = "d" * 20
@@ -221,13 +223,30 @@ class CompareAndSwap(StoreBase):
         self.assertTrue(checkin(self.db, device_id=self.PHONE, base="2026-01-01T00:00:00.000Z")["stored"])
         self.assertTrue(checkin(self.db, book="5002", device_id=self.PHONE)["stored"])
 
-    def test_the_same_device_stores_from_a_new_page(self):
-        checkin(self.db, device_id=self.PHONE, psid="tab-1", offset_ms=1000)
-        # A reload: a new psid, no or an old base, the same device.
-        self.assertTrue(checkin(self.db, device_id=self.PHONE, psid="tab-2", seq=1, offset_ms=2000)["stored"])
-        self.assertTrue(checkin(self.db, device_id=self.PHONE, psid="tab-3", seq=1, offset_ms=3000,
-                                base="2020-01-01T00:00:00.000Z")["stored"])
-        self.assertEqual(self.row()["offset_ms"], 3000)
+    def test_a_new_page_of_the_same_device_stores_over_the_row_it_saw(self):
+        first = checkin(self.db, device_id=self.PHONE, psid="tab-1", offset_ms=1000)
+        # A reload: a new psid, the same device, and the row's time from its open.
+        self.assertTrue(checkin(self.db, device_id=self.PHONE, psid="tab-2", seq=1, offset_ms=2000,
+                                base=first["updated_at"])["stored"])
+        self.assertEqual(self.row()["offset_ms"], 2000)
+
+    def test_a_stale_tab_of_the_same_browser_is_a_conflict(self):
+        # Two tabs of one browser (one device id): tab 1 saved and sat paused;
+        # tab 2 opened from that row and listened on.
+        tab1 = checkin(self.db, device_id=self.PHONE, psid="tab-1", offset_ms=320000)
+        tab2 = checkin(self.db, device_id=self.PHONE, psid="tab-2", seq=1, offset_ms=610000,
+                       base=tab1["updated_at"])
+        self.assertTrue(tab2["stored"])
+        # Tab 1's Play, with the row it last saw (or none, or an old one): refused.
+        for base in (tab1["updated_at"], None, "2020-01-01T00:00:00.000Z"):
+            with self.subTest(base=base):
+                out = checkin(self.db, device_id=self.PHONE, psid="tab-1", seq=2, offset_ms=320250, base=base)
+                self.assertFalse(out["stored"])
+                self.assertEqual(out["conflict"]["offset_ms"], 610000)
+        self.assertEqual(self.row()["offset_ms"], 610000)
+        # Shown tab 2's row, tab 1 may go on.
+        self.assertTrue(checkin(self.db, device_id=self.PHONE, psid="tab-1", seq=3, offset_ms=320500,
+                                base=tab2["updated_at"])["stored"])
 
     def test_another_device_without_the_rows_time_is_a_conflict(self):
         desk = checkin(self.db, device_id=self.DESK, psid="desk", offset_ms=600000, device="Chrome on Linux")
