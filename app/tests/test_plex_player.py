@@ -786,8 +786,8 @@ class Copies(unittest.TestCase):
                 self.assertTrue(pp._disc_siblings(a, b))
         for a, b in (("Book Title", "Book Title (1)"), ("CD 01", "CD1"), ("CD1", "CD1"),
                      ("Title, Book 7", "Title, Book 8"), ("Alpha CD1", "Beta CD2"), ("Title 1", "Title 2"),
-                     ("Harry Potter and the Deathly Hallows - Jim Dale",
-                      "Harry Potter and the Deathly Hallows, Book 7 - Jim Dale")):
+                     ("The Lantern Keeper and the Last Door - Ann Reader",
+                      "The Lantern Keeper and the Last Door, Book 7 - Ann Reader")):
             with self.subTest(a=a, b=b):
                 self.assertFalse(pp._disc_siblings(a, b))
 
