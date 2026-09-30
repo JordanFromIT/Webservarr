@@ -39,7 +39,7 @@ answered with a stale place.
 
 ## 3. Data
 
-Four more nullable columns go on `listening_positions` and `listening_log`, following the
+Five more nullable columns go on `listening_positions` and `listening_log`, following the
 project's migration style:
 
 | Column | Meaning | Written by |
@@ -95,7 +95,7 @@ conflict question does.
 - **Other choices:**
   - "Show history" opens the history list.
   - "Start from the beginning" is also an explicit move.
-- **Undecodable candidates.** If the old place data has no `book_ms`, which is the case for rows
+- **Missing data, undecodable spots.** If the old place data has no `book_ms`, which is the case for rows
   saved before this change, the helper shows only history and "Start from the beginning". A
   candidate in a part this browser cannot decode is shown as unavailable.
 - **Order with other questions.** The helper comes first. Once it has been answered, the handoff
