@@ -1141,6 +1141,31 @@ class LauncherPage(unittest.TestCase):
             r = self.get(session, on=on)
             self.assertEqual((r.status_code, r.json()), (unknown.status_code, unknown.json()))
 
+    def test_its_file_is_never_served_from_static(self):
+        # T10H1: the router mounts whatever a page's #wsPage names, so the raw
+        # file would be a working launcher for anyone. Only the route serves it:
+        # under /static it is the 404 a missing file gets, for everyone, in
+        # every spelling of its path the static files would have resolved.
+        missing = self.get(None, path="/static/no-such-file.html")
+        self.assertEqual(missing.status_code, 404)
+        spellings = ("/static/player-test.html", "/static//player-test.html", "/static/./player-test.html",
+                     "/static/js/../player-test.html", "/static/player-test.html?v=1",
+                     "/static/player%2Dtest.html")
+        for who, session in (("signed out", None), ("member", self.MEMBER), ("admin", self.ADMIN)):
+            for path in spellings:
+                with self.subTest(who=who, path=path):
+                    r = self.get(session, path=path)
+                    self.assertEqual((r.status_code, r.content), (404, missing.content))
+        self.assertEqual(self.client.head("/static/player-test.html").status_code, 404)
+        # The route still serves it to an admin.
+        self.assertEqual(self.get(self.ADMIN).status_code, 200)
+
+    def test_every_other_static_file_is_served_as_before(self):
+        for path in ("/static/news.html", "/static/js/pages/player-test.js", "/static/css/app.css",
+                     "/static/webservarr.svg"):
+            with self.subTest(path):
+                self.assertEqual(self.get(None, path=path).status_code, 200)
+
     def test_nothing_in_the_navigation_links_to_it(self):
         from app.settings_registry import PAGE_ADDRESSES
         self.assertNotIn("/player-test", PAGE_ADDRESSES.values())
