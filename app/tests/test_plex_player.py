@@ -1016,6 +1016,50 @@ class WorkKeys(unittest.TestCase):
             with self.subTest(a=a, b=b):
                 self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
 
+    def test_a_copy_part_that_holds_the_books_number_keeps_it(self):
+        # T1B1: book 2 and book 3 never share a key, whatever copy words
+        # ride in the same part.
+        for a, b in (("Tide Mill (Book 2, Unabridged)", "Tide Mill (Book 3, Unabridged)"),
+                     ("Tide Mill (Book 2 - Full-Cast Edition)", "Tide Mill (Book 3 - Full-Cast Edition)"),
+                     ("Tide Mill [Dramatized, Book 2]", "Tide Mill [Dramatized, Book 3]"),
+                     ("Tide Mill - Book 2, Dramatized", "Tide Mill - Book 3, Dramatized"),
+                     ("Tide Mill - Book 2 Full Cast Edition", "Tide Mill - Book 3 Full Cast Edition"),
+                     ("Tide Mill - Radio Drama, Part 1", "Tide Mill - Radio Drama, Part 2"),
+                     ("Tide Mill - The Complete Radio Drama Series 1", "Tide Mill - The Complete Radio Drama Series 2"),
+                     ("Tide Mill (Volume 1: Full Cast Audio Drama)", "Tide Mill (Volume 2: Full Cast Audio Drama)"),
+                     ("Tide Mill (Mp3 Book 1)", "Tide Mill (Mp3 Book 2)"),
+                     ("Tide Mill (Part II, Unabridged)", "Tide Mill (Part III, Unabridged)"),
+                     ("Tide Mill (Unabridged #3)", "Tide Mill (Unabridged #4)"),
+                     ("Tide Mill - Read by Tamsin Ashby, Book 2", "Tide Mill - Read by Tamsin Ashby, Book 3"),
+                     ("Tide Mill (Narrated by Tamsin Ashby, Book 2)", "Tide Mill (Narrated by Tamsin Ashby, Book 3)"),
+                     ("Tide Mill 1 (Unabridged)", "Tide Mill 2 (Unabridged)")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        # Only the copy words go: the numbered part matches the plain title's.
+        for title in ("Tide Mill (Book 2, Unabridged)", "Tide Mill - Book 2, Dramatized",
+                      "Tide Mill [Full Cast, Book 2]"):
+            with self.subTest(title=title):
+                self.assertEqual(pp.work_key(self.AUTHOR, title), pp.work_key(self.AUTHOR, "Tide Mill (Book 2)"))
+
+    def test_spellings_of_one_title_are_folded(self):
+        # T1B2: accents, full-width forms, "&", "A Novel" and apostrophe variants.
+        import unicodedata
+        for a, b in (("Les Mis\u00e9rables", "Les Miserables"),
+                     ("Les Mis\u00e9rables", unicodedata.normalize("NFD", "Les Mis\u00e9rables")),
+                     ("Tide Mill", "\uff34\uff49\uff44\uff45 \uff2d\uff49\uff4c\uff4c"),
+                     ("Tide Mill, Book 2", "Tide Mill, Book \uff12"),
+                     ("Salt & Pepper", "Salt and Pepper"),
+                     ("Tide Mill", "Tide Mill: A Novel"), ("Tide Mill", "Tide Mill (A Novel)"),
+                     ("Tide Mill", "Tide Mill - A Novel"),
+                     ("Keeper's Daughter", "Keeper\u02bcs Daughter"), ("Keeper's Daughter", "Keeper\u00b4s Daughter"),
+                     ("Keeper's Daughter", "Keeper`s Daughter"), ("Keeper's Daughter", "Keeper\u2019s Daughter")):
+            with self.subTest(a=a, b=b):
+                self.assertEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        self.assertEqual(pp.work_key("Ren\u00e9e Ash & Co", "Tide Mill"), pp.work_key("Renee Ash and Co", "Tide Mill"))
+        # "A Novel" goes only as the whole part.
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill - A Novel Approach"),
+                            pp.work_key(self.AUTHOR, "Tide Mill - A Novel Beginning"))
+
     def test_nothing_is_taken_off_that_would_leave_the_title_empty(self):
         self.assertEqual(pp._work_title("Unabridged"), "unabridged")
         self.assertEqual(pp._work_title("(Full-Cast Edition)"), "full cast edition")
@@ -1055,6 +1099,31 @@ class BookIdentity(BridgeBase):
         self.assertIsNone(out["narrator"])
         self.assertNotEqual(out["work_key"], pp.work_key("Ann Author", "Quiet Book"))
 
+    def test_generic_disc_titles_of_a_several_book_album_stay_apart(self):
+        # T1S6: discs whose first tracks say nothing ("Track 1", "Chapter 1",
+        # "Opening Credits", "Part 1", "01") are named by the album and disc.
+        for generic in ("Track 1", "Chapter 1", "Opening Credits", "Part 1", "01"):
+            with self.subTest(generic=generic):
+                album = {"ratingKey": "650", "type": "album", "title": "Harbour Tales", "titleSort": "Harbour Tales",
+                         "parentTitle": "Cal Penn", "thumb": "/library/metadata/650/thumb/1"}
+                with mock.patch.dict(ALBUMS, {"650": album}), mock.patch.dict(TRACKS):
+                    TRACKS["650"] = [track(651, 650, 1, 1, 10_000, "E/Box1", title=generic),
+                                     track(652, 650, 2, 1, 20_000, "E/Box2", title=generic),
+                                     track(653, 650, 3, 1, 30_000, "E/Box3", title=generic)]
+                    keys = [self.run_async(pp.book_identity(f"650:{d}"))["work_key"] for d in (1, 2, 3)]
+                self.assertEqual(len(set(keys)), 3)
+                self.assertEqual(keys[1], pp.work_key("Cal Penn", "Harbour Tales disc 2"))
+        # A disc titled by its own track keeps that title.
+        self.assertEqual(self.run_async(pp.book_identity("400:2"))["work_key"], pp.work_key("Cal Penn", "Second Tale"))
+
+    def test_the_album_level_key_is_the_single_book_albums_key(self):
+        # T1S5: an album of one book gives its key from the album alone.
+        for rk in ("100", "200", "300", "500", "600", "700", "800"):
+            with self.subTest(album=rk):
+                self.assertEqual(pp.album_work_key(ALBUMS[rk]), self.run_async(pp.book_identity(f"{rk}:1"))["work_key"])
+        self.assertIsNone(pp.album_work_key({"title": "Tide Mill"}))                 # no author
+        self.assertIsNone(pp.album_work_key({"parentTitle": "", "title": ""}))
+
     def test_a_duplicate_copy_is_not_counted_in_the_length(self):
         self.assertEqual(self.run_async(pp.book_identity("300:1"))["duration_ms"], 510_000)
 
@@ -1082,6 +1151,80 @@ class BookIdentity(BridgeBase):
         self.plex.pms_down = 503
         with self.assertRaises(pp.PlayerUnavailable):
             self.run_async(pp.book_identity("200:1"))
+
+
+class CheckinBook(BridgeBase):
+    """The check-in's reads: the album, the track and the album's tracks,
+    made at once."""
+
+    def concurrent(self):
+        """Wrap the fake Plex so each request waits a moment; returns the
+        most requests seen in flight at once."""
+        state = {"now": 0, "most": 0}
+        plex = self.plex
+
+        async def handle(request):
+            state["now"] += 1
+            state["most"] = max(state["most"], state["now"])
+            await asyncio.sleep(0.02)
+            state["now"] -= 1
+            return plex.handle(request)
+
+        def factory(*args, **kwargs):
+            kwargs.pop("verify", None)
+            return RealAsyncClient(*args, transport=httpx.MockTransport(handle), **kwargs)
+        p = mock.patch.object(pp.httpx, "AsyncClient", factory)
+        p.start()
+        self.addCleanup(p.stop)
+        return state
+
+    def test_the_three_reads_are_made_at_once(self):
+        state = self.concurrent()
+        album, about = self.run_async(pp.checkin_book("200:1", "202"))
+        self.assertEqual(album["ratingKey"], "200")
+        self.assertEqual(about, self.run_async(pp.book_identity("200:1")))
+        self.assertEqual(state["most"], 3)
+        self.assertEqual(sorted(self.plex.paths()[:3]), ["/library/metadata/200", "/library/metadata/200/children",
+                                                          "/library/metadata/202"])
+
+    def test_book_identity_reads_the_album_and_tracks_at_once(self):
+        state = self.concurrent()
+        self.run_async(pp.book_identity("200:1"))
+        self.assertEqual(state["most"], 2)
+
+    def test_it_checks_the_book_and_track_as_assert_in_library_does(self):
+        for key, track_key in (("200:1", "101"), ("200:1", "901"), ("200:1", "411"), ("200:1", "999"),
+                               ("400:2", "401"), ("999:1", "202"), ("900:1", "901")):
+            with self.subTest(key=key, track=track_key):
+                with self.assertRaises(pp.NotInLibrary):
+                    self.run_async(pp.checkin_book(key, track_key))
+        self.plex.calls.clear()
+        for key, track_key in (("junk", "202"), ("200:1", "abc"), ("200:1", None)):
+            with self.subTest(key=key, track=track_key):
+                with self.assertRaises(pp.NotInLibrary):
+                    self.run_async(pp.checkin_book(key, track_key))
+        self.assertEqual(self.plex.calls, [])
+        self.plex.pms_down = 503
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.checkin_book("200:1", "202"))
+
+    def test_a_failed_tracks_read_still_checks_in_without_identity(self):
+        for body in ({"MediaContainer": {"Metadata": "odd"}}, None):
+            with self.subTest(body=body):
+                orig = self.plex.handle
+
+                def handle(request, orig=orig, body=body):
+                    if request.url.path == "/library/metadata/200/children":
+                        self.plex.calls.append(request)
+                        return httpx.Response(503) if body is None else httpx.Response(200, json=body)
+                    return orig(request)
+                self.plex.handle = handle
+                try:
+                    album, about = self.run_async(pp.checkin_book("200:1", "202"))
+                finally:
+                    self.plex.handle = orig
+                self.assertEqual(album["ratingKey"], "200")
+                self.assertIsNone(about)
 
 
 class Position(BridgeBase):

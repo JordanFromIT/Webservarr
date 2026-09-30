@@ -22,6 +22,7 @@ no Origin) instead: a Lax cookie still rides along from another subdomain of
 the same site.
 """
 
+import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -321,6 +322,14 @@ async def cover(request: Request, key: str, who: Listener = Depends(listener)):
 # work key and handed back instead, marked linked_from, but only when that
 # copy's album is gone from the library: two editions side by side (two
 # narrators of one title) share a work key and must never share a place.
+#
+# The lookup either completes or answers 503 (the player's Retry, which never
+# falls back to 0:00): a lookup that gave up on a Plex error would open the
+# book at the start, the first save would create a row for it, and the link
+# would be lost for good.
+
+PLEX_DOWN = "Plex is unavailable right now. Try again in a moment."
+
 
 async def _album_gone(key: str) -> Optional[bool]:
     """True when assert_in_library no longer finds the book's album
@@ -338,24 +347,42 @@ async def _album_gone(key: str) -> Optional[bool]:
     return False
 
 
+def _lookup_failed() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=PLEX_DOWN)
+
+
 async def _earlier_copy(db: Session, who: "Listener", key: str, album: Optional[dict] = None):
     """This listener's position row in an earlier copy of the book, or None.
 
     Only for a listener with no row of their own for `key` (the caller
     checks), and only a copy whose album assert_in_library no longer finds
     (NotInLibrary). A copy still in the library is passed over for the next
-    newest, at most listening.LINK_TRIES of them. The database is asked
-    first: a listener with no work-keyed row under another key costs no Plex
-    read at all. `album` is the album's metadata the request already read,
-    so only its tracks are read for the work key. Best effort: Plex failing
-    means no link, never an error."""
-    if not listening.has_work_keys(db, who.identity, key):
+    newest, at most listening.LINK_TRIES of them.
+
+    The database is asked first, so a listener with no candidate costs no
+    Plex read. For disc 1 the book's exact key is known from `album` alone
+    when the album holds one book (plex_player.album_work_key): only a row
+    with that key is a candidate. The tracks are read (for the key an album
+    of several books gives each disc) only when there is a candidate, or,
+    for a later disc, when the listener has any work-keyed row under another
+    key. `album` is the album's metadata the request already read.
+
+    Raises 503 when Plex fails before the lookup can finish, and the HTTP
+    error for the book itself being gone."""
+    _album_key, disc = pp.parse_key(key)
+    album_key = pp.album_work_key(album) if (album and disc == 1) else None
+    if album_key is not None:
+        if listening.find_linked(db, who.identity, album_key, key) is None:
+            return None
+    elif not listening.has_work_keys(db, who.identity, key):
         return None
     try:
         about = await pp.book_identity(key, album=album)
-    except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
+    except pp.PlayerUnavailable as exc:
         logger.info("No work key for the earlier-copy lookup: %s", type(exc).__name__)
-        return None
+        raise _lookup_failed() from None
+    except pp.NotInLibrary as exc:
+        raise _http_error(exc) from None
     skip = []
     for _attempt in range(listening.LINK_TRIES):
         row = listening.find_linked(db, who.identity, about.get("work_key"), key, skip=skip)
@@ -363,25 +390,11 @@ async def _earlier_copy(db: Session, who: "Listener", key: str, album: Optional[
             return None
         gone = await _album_gone(row.book_key)
         if gone is None:
-            return None
+            raise _lookup_failed()
         if gone:
             return row          # that copy's album is gone: this is the book it became
         skip.append(row.book_key)   # still in the library: an edition side by side
     return None
-
-
-async def _verified_link(db: Session, who: "Listener", key: str, linked_from: Optional[str],
-                         work_key: Optional[str]) -> Optional[str]:
-    """`linked_from` from a check-in body when it is a link the server itself
-    would make for `key`: another book key, the listener's own row under it,
-    with the book's work key, and that album gone. Otherwise None (the
-    claim is ignored, never an error)."""
-    if not linked_from or linked_from == key or not work_key:
-        return None
-    row = listening.get_position_row(db, who.identity, linked_from)
-    if row is None or row.work_key != work_key:
-        return None
-    return linked_from if await _album_gone(linked_from) is True else None
 
 
 @router.get("/position/{key}")
@@ -410,7 +423,10 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
 
     With no row of the listener's own for `key`, `web` may be their place in
     an earlier copy of the book, with `linked_from` its book key (see
-    _earlier_copy); the player then helps them find the spot in this copy."""
+    _earlier_copy); the player then helps them find the spot in this copy,
+    and sends linked_from with its saves until a check-in answers
+    "linked" true or false. 503 when Plex fails before that lookup can
+    finish (never a null that would open the book at 0:00)."""
     album, _access = await _checked_book(who, key)
     try:
         plex_pos = await pp.plex_position(who.session(), key, session_id=who.session_id)
@@ -442,10 +458,12 @@ async def history(request: Request, key: str,
     time: {"entries", "next_before"}. Pass next_before back as `before` for
     the next page; null means there are no more.
 
-    An earlier copy's entries are included, each marked "earlier_copy":
-    true: under the same rule as /position while the listener has no row of
-    their own for `key`, and after that for as long as their row keeps the
-    link its first save carried (Checkin.linked_from)."""
+    Earlier copies' entries are included, each marked "earlier_copy": true:
+    under the same rule as /position while the listener has no row of their
+    own for `key`, and after that for as long as their row keeps its link
+    (Checkin.linked_from). A link is followed on through the earlier copy's
+    own link, up to listening.LINK_HOPS copies (A became B became C). 503
+    when Plex fails before the lookup can finish."""
     if before is not None:
         try:
             listening.parse_cursor(before)
@@ -454,10 +472,11 @@ async def history(request: Request, key: str,
     album, _access = await _checked_book(who, key)
     own = listening.get_position_row(db, who.identity, key)
     if own is not None:
-        linked = own.linked_from
+        first = own.linked_from
     else:
         row = await _earlier_copy(db, who, key, album=album)
-        linked = row.book_key if row is not None else None
+        first = row.book_key if row is not None else None
+    linked = listening.link_chain(db, who.identity, key, first)
     try:
         return listening.get_history_page(db, who.identity, key, limit=limit, before=before, linked=linked)
     except ValueError as exc:
@@ -505,8 +524,9 @@ class Checkin(BaseModel):
     book_ms: Optional[StrictInt] = Field(default=None, ge=0, le=listening.BOOK_MS_MAX)
     chapter_label: Optional[Text] = Field(default=None, max_length=listening.LABEL_MAX)
     # The earlier copy's book key when this place came from one (/position
-    # gave linked_from). Kept on the row only when the server would make the
-    # same link itself; otherwise ignored.
+    # gave linked_from). The player sends it with its saves until a response
+    # says "linked" true or false; the server keeps it only when it would
+    # make the same link itself.
     linked_from: Optional[str] = Field(default=None, pattern=r"^[0-9]{1,20}:[0-9]{1,6}$")
 
     @model_validator(mode="after")
@@ -514,6 +534,16 @@ class Checkin(BaseModel):
         if self.offset_ms > self.duration_ms:
             raise ValueError("offset_ms must not be past duration_ms")
         return self
+
+
+async def _claimed_link(db: Session, who: "Listener", key: str, claim: Optional[str]):
+    """The listener's own row under a check-in's claimed earlier copy when
+    the claim can be checked at all (another key, a row of theirs there that
+    has a work key), else None. Database only."""
+    if not claim or claim == key:
+        return None
+    row = listening.get_position_row(db, who.identity, claim)
+    return row if row is not None and row.work_key else None
 
 
 @router.post("/checkin", dependencies=[Depends(require_same_origin)])
@@ -538,40 +568,68 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     only ever this listener's own row.
 
     The book's length, work key and narrator are stored with the place
-    (spec 2.5), from the album read that checks the book plus one read of
-    its tracks (plex_player.book_identity). That read is best effort: Plex
-    failing there stores the place without them. A `linked_from` in the body
-    is kept on the row only when _verified_link confirms it (one more album
-    read, only on a check-in that carries one)."""
-    try:
-        album = await pp.assert_in_library(body.book, body.track)
-    except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
-        raise _http_error(exc) from None
-    try:
-        about = await pp.book_identity(body.book, album=album)
-    except pp.NotInLibrary as exc:
-        raise _http_error(exc) from None
-    except pp.PlayerUnavailable as exc:
-        logger.info("Book identity unavailable for a check-in: %s", type(exc).__name__)
-        about = {}
-    linked = await _verified_link(db, who, body.book, body.linked_from, about.get("work_key"))
+    (spec 2.5), from the reads that check the book (plex_player.checkin_book:
+    the album, the track and the album's tracks, all at once). The tracks
+    read is best effort: when it fails the place is stored and the row keeps
+    the values it had.
+
+    `linked_from` (spec 2.5 s4): the earlier copy /position linked this book
+    to. Every response to a check-in that carries one says "linked":
+    - true: the link is kept on the listener's row for the book (set once,
+      whatever the save's own outcome, a refused seq or a 409 included), so
+      the earlier copy's history stays with it;
+    - false: it is not a link the server would make (not the listener's own
+      copy, another work, or its album still in the library), or the row
+      already has another link; stop sending it;
+    - null: it could not be checked now (Plex failed); send it again with
+      the next save.
+    Its album check runs at the same time as the book's reads."""
+    claimed = await _claimed_link(db, who, body.book, body.linked_from)
+    reads = [pp.checkin_book(body.book, body.track)]
+    if claimed is not None:
+        reads.append(_album_gone(body.linked_from))
+    results = await asyncio.gather(*reads, return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException) and not isinstance(result, Exception):
+            raise result
+    if isinstance(results[0], (pp.PlayerUnavailable, pp.NotInLibrary)):
+        raise _http_error(results[0]) from None
+    if isinstance(results[0], Exception):
+        raise results[0]
+    _album, about = results[0]
+    about = about or {}
+
+    linked = None
+    if body.linked_from is not None:
+        if claimed is None:
+            linked = False
+        elif not about.get("work_key"):
+            linked = None                   # the book's own key is unknown: check again later
+        elif claimed.work_key != about["work_key"]:
+            linked = False
+        else:
+            # _album_gone: True, False, or None when Plex can't say.
+            linked = results[1] if not isinstance(results[1], Exception) else None
+
     try:
         result = listening.save_checkin(db, who.identity, body.book, body.track, body.offset_ms,
                                         body.duration_ms, body.event, body.device, body.psid, body.seq,
                                         device_id=body.device_id, base=body.base, book_ms=body.book_ms,
                                         chapter_label=body.chapter_label,
                                         book_duration_ms=about.get("duration_ms"),
-                                        work_key=about.get("work_key"), narrator=about.get("narrator"),
-                                        linked_from=linked)
+                                        work_key=about.get("work_key"), narrator=about.get("narrator"))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    if linked:
+        linked = listening.set_link(db, who.identity, body.book, body.linked_from)
+    extra = {} if body.linked_from is None else {"linked": linked}
     if result.get("conflict"):
-        return JSONResponse({"conflict": result["conflict"], "now": utc_iso(datetime.now(timezone.utc))},
+        return JSONResponse({"conflict": result["conflict"], "now": utc_iso(datetime.now(timezone.utc)), **extra},
                             status_code=status.HTTP_409_CONFLICT)
     if result["stored"]:
         background.add_task(pp.timeline, who.session(), body.track, EVENT_STATES[body.event],
                             body.offset_ms, body.duration_ms, session_id=who.session_id)
-    return result
+    return {**result, **extra}
 
 
 # --- Preferences --------------------------------------------------------------------

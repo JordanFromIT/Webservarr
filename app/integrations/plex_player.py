@@ -21,11 +21,13 @@ no URL in a log line or an exception can carry one. Nothing here logs a
 response body.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
 import re
 import time
+import unicodedata
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlsplit
@@ -710,42 +712,81 @@ def _title_key(title: str) -> str:
 # same key, so the listener's place in the earlier copy can be found. It is
 # the author and the title with what names a copy rather than the work
 # taken off the end: an edition, format or narration ("(Full-Cast Edition)",
-# "[Unabridged]", "- Read by X", "(Narrated by X)"), and " - <narrator>" when
-# that name is the book's narrator as Plex's metadata gives it. A dash part
-# is never guessed to be a name: "Saga - Iron Crown" stays its own work.
-# Unlike _title_key it keeps the book's number: book 1 and book 2 are two
-# works. Two editions side by side share a key; they are kept apart by the
-# caller, which links only a copy whose album is gone.
+# "[Unabridged]", "- Read by X", "(Narrated by X)", ": A Novel"), and
+# " - <narrator>" when that name is the book's narrator as Plex's metadata
+# gives it. A dash part is never guessed to be a name: "Saga - Iron Crown"
+# stays its own work. A part that holds the book's number ("(Book 2,
+# Unabridged)", "- Radio Drama, Part 2") keeps it and loses only its copy
+# words: book 2 and book 3 are two works. Accents, full-width letters, "&"
+# and apostrophe variants are folded so one book spelt two ways is one work.
+# Two editions side by side share a key; they are kept apart by the caller,
+# which links only a copy whose album is gone.
 
 _COPY_WORDS = re.compile(
     r"\b(?:edition|unabridged|abridged|full[\s-]*cast|dramati[sz](?:ed|ation)|narrated|read\s+by|"
     r"audio\s*books?|audio\s+drama|radio\s+drama|mp3|m4b|aac|flac|retail|remaster(?:ed)?)\b", re.IGNORECASE)
 _TRAILING_GROUP = re.compile(r"\s*[(\[{]([^()\[\]{}]*)[)\]}]\s*$")
-_TRAILING_COPY_WORD = re.compile(r"[\s,:;\-\u2013\u2014]*\b(?:unabridged|abridged|audio\s*book)\s*$",
-                                 re.IGNORECASE)
+_TRAILING_COPY_WORD = re.compile(
+    r"[\s,:;\-\u2013\u2014]*\b(?:unabridged|abridged|audio\s*book|a\s+novel)\s*$", re.IGNORECASE)
 # The last " - " (or en or em dash) and what follows it.
 _DASH_TAIL = re.compile(r"^(?P<head>.*\S)\s+[-\u2013\u2014]\s+(?P<tail>\S.*?)\s*$")
+# What marks a book's number in a part of its title.
+_NUMBER_MARK = re.compile(r"[0-9#]|\b(?:book|vol|volume|part)\b", re.IGNORECASE)
+# Apostrophe look-alikes, folded before NFKD (which would split the acute
+# accent into a space and a combining mark).
+_APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "\u00b4": "'", "`": "'"})
+
+
+def _normal(text) -> str:
+    """Text with apostrophe variants made plain, then NFKD with the
+    combining marks dropped (accents, full-width forms), and "&" as "and"."""
+    text = str(text or "").translate(_APOSTROPHES)
+    text = "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch))
+    return text.replace("&", " and ")
+
+
+def _numbered(part: str) -> bool:
+    """True when a part of a title holds a book number: a digit, "#", a
+    book/vol/part marker, or a Roman numeral word."""
+    return bool(_NUMBER_MARK.search(part)) or any(_roman(w) for w in re.findall(r"[a-z]+", part.casefold()))
+
+
+def _without_copy_words(part: str) -> str:
+    return " ".join(_COPY_WORDS.sub(" ", part).split())
 
 
 def _work_title(title: str, narrator: str = "") -> str:
     """The title with every trailing edition, format or narration part taken
     off, normalised: casefolded, punctuation gone, spaces collapsed. A
-    trailing " - <name>" goes only when the name is `narrator`. Nothing is
-    taken off that would leave it empty."""
-    text = " ".join(str(title or "").split())
+    trailing " - <name>" goes only when the name is `narrator`. A part that
+    holds a book number stays, less its copy words. Nothing is taken off
+    that would leave it empty."""
+    text = " ".join(_normal(title).split())
     named = _work_words(narrator or "")
     while True:
         before = text
-        text = _split_narrator(text)[0]
+        head, reader = _split_narrator(text)
+        if reader:
+            text = f"{head} {reader}" if _numbered(reader) else head
         m = _TRAILING_GROUP.search(text)
-        if m and _COPY_WORDS.search(m.group(1)) and text[:m.start()].strip():
-            text = text[:m.start()].strip()
+        head = text[:m.start()].strip() if m else ""
+        if m and head:
+            inner = m.group(1)
+            if _work_words(inner) == "a novel":
+                text = head
+            elif _COPY_WORDS.search(inner):
+                text = f"{head} {_without_copy_words(inner)}" if _numbered(inner) else head
         stripped = _TRAILING_COPY_WORD.sub("", text).strip()
         if stripped:
             text = stripped
         m = _DASH_TAIL.match(text)
-        if m and (_COPY_WORDS.search(m.group("tail")) or (named and _work_words(m.group("tail")) == named)):
-            text = m.group("head").strip()
+        if m:
+            tail = m.group("tail")
+            if _COPY_WORDS.search(tail):
+                text = f"{m.group('head')} {_without_copy_words(tail)}" if _numbered(tail) else m.group("head")
+            elif named and _work_words(tail) == named:
+                text = m.group("head")
+        text = " ".join(text.split())
         if text == before:
             break
     return _work_words(text)
@@ -753,8 +794,8 @@ def _work_title(title: str, narrator: str = "") -> str:
 
 def _work_words(text: str) -> str:
     """Casefolded words with punctuation gone: an apostrophe joins its word
-    ("Keeper's" is "keepers"), anything else splits."""
-    return " ".join(re.sub(r"[\W_]+", " ", _fold(text).replace("'", "")).split())
+    ("Keeper's" is "keepers"), anything else splits. Folded as _normal does."""
+    return " ".join(re.sub(r"[\W_]+", " ", _fold(_normal(text)).replace("'", "")).split())
 
 
 def work_key(author: str, title: str, narrator: str = "") -> str:
@@ -971,33 +1012,108 @@ async def assert_in_library(key: str, track_key: Optional[str] = None) -> dict:
     return album
 
 
-async def book_identity(key: str, album: Optional[dict] = None) -> dict:
-    """What a save records about the copy of the book it was made in:
-    {"work_key", "narrator", "duration_ms"}. `work_key` is work_key() of the
-    book's author, title and narrator as list_books names them (None when
-    the title is empty), `narrator` the book's narrator (None when not named) and
-    `duration_ms` the book's length, its tracks in play order put together
-    (None when Plex gives no durations).
+# A disc's first track title that names nothing of the book ("Track 1",
+# "Chapter 1", "Part 1", "01", "Opening Credits"): a disc of an album holding
+# several books is then named by the album and its disc number instead.
+_GENERIC_TRACK = re.compile(
+    r"(?:(?:track|chapter|part|disc|disk|cd|side|file)\s*)?(?:[0-9]+|[ivxl]+)"
+    r"|(?:opening|closing|end)\s+credits|intro|introduction|prologue|preface|foreword|untitled", re.ASCII)
 
-    `album` is the album's metadata when the caller already read it
-    (assert_in_library returns it); only the album's tracks are read then,
-    one Plex call. Nothing is cached. Raises NotInLibrary, PlayerOff or
-    PlayerUnavailable."""
-    album_key, disc = parse_key(key)
-    admin = _configured()
-    async with _pms_client() as client:
-        if album is None:
-            album = await _album(client, admin, album_key)
-        children = await _pms_get(client, admin, admin["token"], f"/library/metadata/{album_key}/children")
+
+def _identity(album: dict, disc: int, children) -> dict:
+    """book_identity's fields from the album and its children container."""
     discs = _discs(_items(children))
     if disc not in discs:
         raise NotInLibrary("Not in the audiobook library")
     tracks = discs[disc]
     about = _describe(album, disc, tracks, len(discs))
-    return {"work_key": (work_key(about["author"], about["title"], about["narrator"])
-                         if _work_title(about["title"]) else None),
+    title = about["title"]
+    if len(discs) > 1 and _GENERIC_TRACK.fullmatch(_work_words(title)):
+        title = f"{_split_narrator(album.get('title') or '')[0]} disc {disc}"
+    return {"work_key": work_key(about["author"], title, about["narrator"]) if _work_title(title) else None,
             "narrator": about["narrator"] or None,
             "duration_ms": sum(_track_duration(t) for t in tracks) or None}
+
+
+def album_work_key(album: dict) -> Optional[str]:
+    """The work key of the album's book read from the album alone, as
+    book_identity gives it when the album holds one book (one disc): its
+    author, title and narrator come from the album then, not its tracks.
+    None when the album doesn't name its author or title. For an album
+    holding several books as discs it is not their key: only its tracks
+    can say that."""
+    about = _describe(album, 1, [], 1)
+    if not about["author"] or not _work_title(about["title"]):
+        return None
+    return work_key(about["author"], about["title"], about["narrator"])
+
+
+async def book_identity(key: str, album: Optional[dict] = None) -> dict:
+    """What a save records about the copy of the book it was made in:
+    {"work_key", "narrator", "duration_ms"}. `work_key` is work_key() of the
+    book's author, title and narrator as list_books names them (None when
+    the title is empty; a disc of a several-book album whose first track
+    has a generic title is named "<album> disc N"), `narrator` the book's
+    narrator (None when not named) and `duration_ms` the book's length, its
+    tracks in play order put together (None when Plex gives no durations).
+
+    `album` is the album's metadata when the caller already read it
+    (assert_in_library returns it); only the album's tracks are read then,
+    one Plex call. Otherwise the album and its tracks are read at once.
+    Nothing is cached. Raises NotInLibrary, PlayerOff or PlayerUnavailable."""
+    album_key, disc = parse_key(key)
+    admin = _configured()
+    children_path = f"/library/metadata/{album_key}/children"
+    async with _pms_client() as client:
+        if album is None:
+            album, children = await asyncio.gather(
+                _album(client, admin, album_key), _pms_get(client, admin, admin["token"], children_path))
+        else:
+            children = await _pms_get(client, admin, admin["token"], children_path)
+    return _identity(album, disc, children)
+
+
+async def checkin_book(key: str, track_key: str) -> tuple:
+    """A check-in's reads, made at once: assert_in_library(key, track_key)
+    and book_identity(key) from the album, the track and the album's tracks
+    (three reads in flight together, not one after another).
+
+    Returns (album, identity): identity is book_identity's dict, or None
+    when the tracks read failed (the check-in stores the place without it).
+    Raises what assert_in_library raises: NotInLibrary (malformed keys
+    before any Plex call, an album outside the library, a track of another
+    book), PlayerOff, PlayerUnavailable."""
+    album_key, disc = parse_key(key)
+    if not (isinstance(track_key, str) and _RATING_KEY.fullmatch(track_key)):
+        raise NotInLibrary("Malformed track key")
+    admin = _configured()
+    async with _pms_client() as client:
+        album, track, children = await asyncio.gather(
+            _album(client, admin, album_key),
+            _pms_get(client, admin, admin["token"], f"/library/metadata/{track_key}"),
+            _pms_get(client, admin, admin["token"], f"/library/metadata/{album_key}/children"),
+            return_exceptions=True)
+    for result in (album, track, children):
+        if isinstance(result, BaseException) and not isinstance(result, Exception):
+            raise result        # cancellation and the like: never swallowed
+    for result in (album, track):
+        if isinstance(result, Exception):
+            raise result
+    items = _items(track)
+    t = items[0] if items else {}
+    if (t.get("type") != "track" or str(t.get("parentRatingKey")) != album_key
+            or (_int(t.get("parentIndex")) or 1) != disc):
+        raise NotInLibrary("Not in this book")
+    if isinstance(children, PlayerUnavailable):
+        logger.info("The book's tracks could not be read for its identity: %s", type(children).__name__)
+        return album, None
+    if isinstance(children, Exception):
+        raise children
+    try:
+        return album, _identity(album, disc, children)
+    except PlayerUnavailable as exc:
+        logger.info("The book's tracks could not be read for its identity: %s", type(exc).__name__)
+        return album, None
 
 
 # The album thumbnail paths a cover may come from, and the square a cover is

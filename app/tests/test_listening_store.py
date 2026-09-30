@@ -373,11 +373,29 @@ class BookFields(StoreBase):
         self.assertIsNone(listening.get_position(self.db, ME, BOOK)["chapter_label"])
         self.assertIsNone(listening.get_history(self.db, ME, BOOK)[0]["chapter_label"])
 
-    def test_a_checkin_without_them_leaves_them_null(self):
+    def test_a_checkin_without_the_players_fields_leaves_them_null(self):
         checkin(self.db, **self.FIELDS)
         checkin(self.db, seq=2)          # an older player: the place it saved carries none
         pos = listening.get_position(self.db, ME, BOOK)
-        self.assertEqual((pos["book_ms"], pos["chapter_label"], pos["narrator"]), (None, None, None))
+        self.assertEqual((pos["book_ms"], pos["chapter_label"]), (None, None))
+
+    def test_unknown_server_fields_keep_the_rows_values(self):
+        # T1B3: a save whose album read failed carries None for the server's
+        # three; the row keeps what it had rather than blanking it.
+        from app.models import ListeningLog, ListeningPosition
+        checkin(self.db, **self.FIELDS)
+        checkin(self.db, seq=2, book_ms=5_000, chapter_label="Chapter 10")
+        row = self.db.query(ListeningPosition).one()
+        self.assertEqual((row.book_duration_ms, row.work_key, row.narrator), (36_000_000, WORK_A, "Tamsin Ashby"))
+        self.assertEqual((row.book_ms, row.chapter_label), (5_000, "Chapter 10"))
+        # The log row keeps what that check-in carried.
+        last = self.db.query(ListeningLog).order_by(ListeningLog.id.desc()).first()
+        self.assertEqual((last.work_key, last.narrator), (None, None))
+        # Known values still replace them.
+        checkin(self.db, seq=3, book_duration_ms=40_000_000, work_key=WORK_B, narrator="Dee Lane")
+        self.db.expire_all()
+        row = self.db.query(ListeningPosition).one()
+        self.assertEqual((row.book_duration_ms, row.work_key, row.narrator), (40_000_000, WORK_B, "Dee Lane"))
 
     def test_a_conflict_logs_them_too(self):
         first = checkin(self.db, psid="desk")
@@ -463,30 +481,66 @@ class LinkedFrom(StoreBase):
 
     def row(self, book="400:1"):
         from app.models import ListeningPosition
-        return self.db.query(ListeningPosition).filter_by(identity=ME, book_key=book).one()
+        row = self.db.query(ListeningPosition).filter_by(identity=ME, book_key=book).one()
+        self.db.refresh(row)
+        return row
 
-    def test_set_by_the_save_that_carries_it_and_kept_by_later_ones(self):
-        checkin(self.db, book="400:1", seq=1, linked_from="300:1")
+    def test_set_once_and_kept_by_later_saves(self):
+        checkin(self.db, book="400:1", seq=1)
+        self.assertIsNone(self.row().linked_from)
+        self.assertIs(listening.set_link(self.db, ME, "400:1", "300:1"), True)
         self.assertEqual(self.row().linked_from, "300:1")
         checkin(self.db, book="400:1", seq=2)
+        self.assertEqual(self.row().linked_from, "300:1")
+        # The same link again is still true; another one is refused.
+        self.assertIs(listening.set_link(self.db, ME, "400:1", "300:1"), True)
+        self.assertIs(listening.set_link(self.db, ME, "400:1", "310:1"), False)
         self.assertEqual(self.row().linked_from, "300:1")
         # Not part of the position the player reads (its linked_from means
         # "the files changed").
         self.assertNotIn("linked_from", listening.get_position(self.db, ME, "400:1"))
-        # A refused older seq changes nothing.
-        checkin(self.db, book="400:1", seq=1, linked_from="310:1")
-        self.assertEqual(self.row().linked_from, "300:1")
 
-    def test_a_row_saved_without_one_has_none(self):
-        checkin(self.db, book="400:1")
-        self.assertIsNone(self.row().linked_from)
+    def test_no_row_no_link(self):
+        self.assertIsNone(listening.set_link(self.db, ME, "400:1", "300:1"))
+        self.assertIsNone(listening.get_position(self.db, ME, "400:1"))
+
+    def test_only_the_listeners_own_row(self):
+        checkin(self.db, identity=THEM, book="400:1", psid="them")
+        self.assertIsNone(listening.set_link(self.db, ME, "400:1", "300:1"))
+        from app.models import ListeningPosition
+        self.assertIsNone(self.db.query(ListeningPosition).filter_by(identity=THEM).one().linked_from)
 
     def test_a_bad_one_is_refused(self):
-        for bad in ("", "junk", "300", "300:1:2", "400:1", 300, "a" * 70):
+        checkin(self.db, book="400:1")
+        for bad in ("", "junk", "300", "300:1:2", "400:1", 300, "a" * 70, None):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
-                    checkin(self.db, book="400:1", linked_from=bad)
-        self.assertIsNone(listening.get_position(self.db, ME, "400:1"))
+                    listening.set_link(self.db, ME, "400:1", bad)
+        self.assertIsNone(self.row().linked_from)
+
+    def test_the_chain_follows_each_copys_own_link(self):
+        # T1S4: A became B became C: C's history reaches A through B.
+        for book, link in (("100:1", None), ("200:1", "100:1"), ("300:1", "200:1")):
+            checkin(self.db, book=book, psid="p-" + book)
+            if link:
+                listening.set_link(self.db, ME, book, link)
+        self.assertEqual(listening.link_chain(self.db, ME, "300:1", "200:1"), ["200:1", "100:1"])
+        self.assertEqual(listening.link_chain(self.db, ME, "300:1", None), [])
+        # Another listener's rows are never followed.
+        self.assertEqual(listening.link_chain(self.db, THEM, "300:1", "200:1"), ["200:1"])
+
+    def test_the_chain_stops_at_a_loop_and_after_five(self):
+        checkin(self.db, book="1:1", psid="a")
+        checkin(self.db, book="2:1", psid="b")
+        listening.set_link(self.db, ME, "1:1", "2:1")
+        listening.set_link(self.db, ME, "2:1", "1:1")
+        self.assertEqual(listening.link_chain(self.db, ME, "9:1", "1:1"), ["1:1", "2:1"])
+        self.assertEqual(listening.link_chain(self.db, ME, "1:1", "2:1"), ["2:1"])
+        for n in range(10, 20):
+            checkin(self.db, book=f"{n}:1", psid=f"p{n}")
+            listening.set_link(self.db, ME, f"{n}:1", f"{n + 1}:1")
+        self.assertEqual(listening.link_chain(self.db, ME, "9:1", "10:1"), ["10:1", "11:1", "12:1", "13:1", "14:1"])
+        self.assertEqual(listening.LINK_HOPS, 5)
 
     def test_has_work_keys_is_the_listeners_own_under_another_key(self):
         self.assertFalse(listening.has_work_keys(self.db, ME, "400:1"))
@@ -518,6 +572,11 @@ class EarlierCopyHistory(StoreBase):
             if before is None:
                 break
         self.assertEqual(got, [3, 2, 1])
+        # A list of earlier copies (a chain): every one of them, marked.
+        checkin(self.db, book="290:1", offset_ms=0, psid="oldest")
+        page = listening.get_history_page(self.db, ME, "400:1", linked=["300:1", "290:1", "400:1"])
+        self.assertEqual([(e["offset_ms"], e.get("earlier_copy")) for e in page["entries"]],
+                         [(0, True), (3, None), (2, True), (1, True)])
         # Without a link, only the book's own rows.
         self.assertEqual([e["offset_ms"] for e in listening.get_history_page(self.db, ME, "400:1")["entries"]], [3])
 

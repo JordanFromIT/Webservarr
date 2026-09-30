@@ -74,6 +74,10 @@ NARRATOR_MAX = 200
 WORK_KEY = re.compile(r"[0-9a-f]{32}", re.ASCII)
 # A book key, "<album>:<disc>", as plex_player.parse_key takes it.
 BOOK_KEY = re.compile(r"[0-9]{1,20}:[0-9]{1,6}", re.ASCII)
+# The book-time fields the server reads from Plex, not the player.
+SERVER_FIELDS = ("book_duration_ms", "work_key", "narrator")
+# How many earlier copies a history follows through their own links.
+LINK_HOPS = 5
 
 PREF_DEFAULTS = {"skip_s": 10, "speed": 1.0, "smart_rewind": True}
 SKIP_MIN, SKIP_MAX = 5, 60
@@ -156,7 +160,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
                  device_id: Optional[str] = None, base: Optional[str] = None,
                  book_ms: Optional[int] = None, chapter_label: Optional[str] = None,
                  book_duration_ms: Optional[int] = None, work_key: Optional[str] = None,
-                 narrator: Optional[str] = None, linked_from: Optional[str] = None) -> dict:
+                 narrator: Optional[str] = None) -> dict:
     """Store a check-in as this listener's position in the book and log it.
 
     `device_id` is the sending browser's own random id (DEVICE_ID), or None
@@ -167,16 +171,12 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     `book_ms` (the player's book time) and `chapter_label` (that copy's
     chapter name) come from the player; `book_duration_ms`, `work_key` and
     `narrator` from the server's read of the album (plex_player.book_identity).
-    Each may be None; the position row and the log row keep what this
-    check-in carried. `book_ms` is clamped to `book_duration_ms` when both are
-    known. An empty chapter name is stored as null.
-
-    `linked_from` is the book key of an earlier copy this place came from,
-    which the caller has verified (the router's rule: the listener's own row
-    under that key, the same work key, and its album gone). It is set on the
-    position row when given and kept by later check-ins that carry none, so
-    the earlier copy's history stays with the book; the log rows don't carry
-    it.
+    Each may be None. The log row keeps what this check-in carried. The
+    position row takes the player's two as they are (they describe this
+    place), but a server field that is None (the album read failed) leaves
+    the row's value as it was rather than blanking it. `book_ms` is clamped
+    to `book_duration_ms` when both are known. An empty chapter name is
+    stored as null. The link to an earlier copy is set apart (set_link).
 
     Returns {"stored": bool, "updated_at": iso8601}. `stored` is False when
     the stored row was written by the same psid with a higher seq; nothing is
@@ -201,15 +201,13 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
         raise ValueError("device_id must be 16 to 40 lower-case letters and digits")
     base_at = parse_base(base)
     about = _book_fields(book_ms, chapter_label, book_duration_ms, work_key, narrator)
-    if linked_from is not None and not (isinstance(linked_from, str) and BOOK_KEY.fullmatch(linked_from)
-                                        and linked_from != book):
-        raise ValueError("linked_from must be another book's key")
 
     now = _utcnow()
     values = {"track_key": track, "offset_ms": offset_ms, "duration_ms": duration_ms, "updated_at": now,
               "device": device, "device_id": device_id, "source": source, "psid": psid, "seq": seq, **about}
-    if linked_from is not None:
-        values["linked_from"] = linked_from
+    for name in SERVER_FIELDS:
+        if values[name] is None:
+            del values[name]        # unknown this time: the row keeps what it had
     P = ListeningPosition
     mine = (P.identity == identity, P.book_key == book)
     # Overwrite unless the row is this psid's own and newer. A row written
@@ -304,6 +302,43 @@ def has_work_keys(db: Session, identity: str, exclude_key: str) -> bool:
 
 # How many earlier copies a lookup may pass over (each still in the library).
 LINK_TRIES = 3
+
+
+def set_link(db: Session, identity: str, book: str, linked_from: str) -> Optional[bool]:
+    """Keep `linked_from`, an earlier copy the caller has verified (the
+    router's rule: the listener's own row under that key, the same work key,
+    and its album gone), on this listener's row for `book`, so the earlier
+    copy's history stays with the book. Set once: a row that already has a
+    link keeps it. Independent of the check-in's own outcome (a refused
+    older seq or a conflict still leaves a row, so the link is still set).
+
+    True when the row now holds `linked_from`, False when it holds another
+    link, None when there is no row (a check-in always leaves one; nothing
+    is created without a place). Raises ValueError for a key that is not
+    another book's."""
+    if not (isinstance(linked_from, str) and BOOK_KEY.fullmatch(linked_from) and linked_from != book):
+        raise ValueError("linked_from must be another book's key")
+    P = ListeningPosition
+    (db.query(P).filter(P.identity == identity, P.book_key == book, P.linked_from.is_(None))
+     .update({"linked_from": linked_from}, synchronize_session=False))
+    db.commit()
+    row = get_position_row(db, identity, book)
+    if row is None:
+        return None
+    db.refresh(row)
+    return row.linked_from == linked_from
+
+
+def link_chain(db: Session, identity: str, book: str, first: Optional[str]) -> list:
+    """The earlier copies behind `book`: `first`, then the copy that one's
+    own row links to, and so on, at most LINK_HOPS keys, never `book` and
+    never a key twice (a loop ends the walk). This listener's rows only."""
+    chain, key = [], first
+    while key and len(chain) < LINK_HOPS and key != book and key not in chain:
+        chain.append(key)
+        row = get_position_row(db, identity, key)
+        key = row.linked_from if row is not None else None
+    return chain
 
 
 def find_linked(db: Session, identity: str, work_key: Optional[str], exclude_key: str,
@@ -402,20 +437,22 @@ def parse_cursor(value: str) -> tuple:
 
 
 def get_history_page(db: Session, identity: str, book: str, limit: int = HISTORY_PAGE,
-                     before: Optional[str] = None, linked: Optional[str] = None) -> dict:
+                     before: Optional[str] = None, linked=None) -> dict:
     """One page of this listener's log for the book, newest first:
     {"entries": [...], "next_before": cursor or None}.
 
     Pass next_before back as `before` for the next page; None means there
     are no more. Rows are ordered by (at, id), and the cursor carries both,
     so rows logged at the same instant are never skipped or repeated across
-    pages. `linked` is the book key of an earlier copy (find_linked): its
-    rows are merged in, each marked "earlier_copy": true. Raises ValueError
-    for a bad limit or cursor."""
+    pages. `linked` is the book key of an earlier copy, or a list of them
+    (link_chain): their rows are merged in, each marked "earlier_copy":
+    true. Raises ValueError for a bad limit or cursor."""
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= HISTORY_MAX:
         raise ValueError(f"limit must be from 1 to {HISTORY_MAX}")
     L = ListeningLog
-    same_book = L.book_key == book if linked is None or linked == book else L.book_key.in_([book, linked])
+    others = [linked] if isinstance(linked, str) else list(linked or ())
+    others = [k for k in dict.fromkeys(others) if isinstance(k, str) and k != book]
+    same_book = L.book_key == book if not others else L.book_key.in_([book, *others])
     q = db.query(L).filter(L.identity == identity, same_book)
     if before is not None:
         at, row_id = parse_cursor(before)

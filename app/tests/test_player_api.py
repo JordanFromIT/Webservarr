@@ -74,6 +74,17 @@ async def fake_assert_in_library(key, track_key=None):
     return {"ratingKey": key.split(":")[0], "type": "album"}
 
 
+async def fake_checkin_book(key, track_key):
+    """plex_player.checkin_book at its boundary: the book check, then the
+    identity (None when the tracks read fails), through the module's own
+    (patchable) assert_in_library and book_identity."""
+    album = await pp.assert_in_library(key, track_key)
+    try:
+        return album, await pp.book_identity(key, album=album)
+    except pp.PlayerUnavailable:
+        return album, None
+
+
 async def fake_book_identity(key, album=None):
     pp.parse_key(key)
     if key not in LIBRARY:
@@ -120,6 +131,7 @@ class PlayerApiBase(unittest.TestCase):
             mock.patch.object(pp, "cover_image", self.cover_image),
             mock.patch.object(pp, "next_in_series", self.next_in_series),
             mock.patch.object(pp, "book_identity", self.book_identity),
+            mock.patch.object(pp, "checkin_book", side_effect=fake_checkin_book),
             mock.patch.object(settings, "app_domain", "localhost"),
             mock.patch.object(settings, "app_scheme", "https"),
         ]
@@ -734,6 +746,17 @@ class BookTime(PlayerApiBase):
         self.book_identity.side_effect = pp.NotInLibrary("gone")
         self.assertEqual(self.checkin(seq=2).status_code, 404)
 
+    def test_a_failed_identity_read_keeps_the_rows_server_fields(self):
+        # T1B3: the row keeps the length, work key and narrator it had.
+        self.checkin(book="100:1", track="101", duration_ms=1_000_000, seq=1)
+        self.book_identity.side_effect = pp.PlayerUnavailable("down")
+        self.assertEqual(self.checkin(book="100:1", track="101", duration_ms=1_000_000, seq=2,
+                                      book_ms=7_000).status_code, 200)
+        row = self.db.query(ListeningPosition).one()
+        self.db.refresh(row)
+        self.assertEqual((row.book_ms, row.book_duration_ms, row.work_key, row.narrator),
+                         (7_000, 1_000_000, WORKS["100:1"], "Nora"))
+
     def test_they_are_optional(self):
         self.assertEqual(self.checkin().status_code, 200)
         web = self.position()
@@ -924,10 +947,14 @@ class EarlierCopies(PlayerApiBase):
         self.db.refresh(row)
         self.assertIsNone(row.linked_from)
 
-    def test_plex_failing_means_no_link_not_an_error(self):
+    def test_plex_failing_during_the_lookup_is_503_not_a_null_place(self):
+        # T1S1: a null would open the book at 0:00 and the first save would
+        # lose the link for good; 503 is the player's Retry.
         self.seed(self.GONE)
         self.book_identity.side_effect = pp.PlayerUnavailable("down")
-        self.assertIsNone(self.position(self.NEW))
+        for path in (f"/api/player/position/{self.NEW}", f"/api/player/history/{self.NEW}"):
+            with self.subTest(path=path, failing="work key"):
+                self.assertEqual(self.client.get(path).status_code, 503)
         self.book_identity.side_effect = fake_book_identity
 
         async def check(key, track_key=None):
@@ -935,8 +962,143 @@ class EarlierCopies(PlayerApiBase):
                 raise pp.PlayerUnavailable("down")
             return await fake_assert_in_library(key, track_key)
         with mock.patch.object(pp, "assert_in_library", side_effect=check):
-            self.assertIsNone(self.position(self.NEW))
-            self.assertEqual(self.history(), [])
+            for path in (f"/api/player/position/{self.NEW}", f"/api/player/history/{self.NEW}"):
+                with self.subTest(path=path, failing="the earlier copy's check"):
+                    self.assertEqual(self.client.get(path).status_code, 503)
+        self.assertEqual(self.db.query(ListeningPosition).filter_by(book_key=self.NEW).count(), 0)
+        # Once Plex answers, the link is there.
+        self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+
+    def test_a_listener_with_no_candidate_never_sees_a_503(self):
+        self.book_identity.side_effect = pp.PlayerUnavailable("down")
+        self.assertIsNone(self.position(self.NEW))
+
+    # --- The exact album-level key is the pre-check (T1S5) ---
+
+    def album_key(self, work_key):
+        fake = mock.Mock(side_effect=lambda album: work_key if album and album.get("ratingKey") == "400" else None)
+        p = mock.patch.object(pp, "album_work_key", fake)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_a_row_of_another_work_costs_no_plex_read(self):
+        self.album_key(self.WORK)
+        self.seed(self.GONE, work_key="f6" * 16)     # some other book: has_work_keys alone would say yes
+        self.assertIsNone(self.position(self.NEW))
+        self.assertEqual(self.calls(), (1, 0))
+
+    def test_a_row_with_the_exact_key_is_confirmed_from_the_tracks(self):
+        self.album_key(self.WORK)
+        self.seed(self.GONE)
+        self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+        self.assertEqual(self.calls(), (2, 1))
+
+    def test_a_later_disc_still_uses_the_tracks(self):
+        self.album_key(self.WORK)
+        with mock.patch.dict(LIBRARY, {"400:2": {"402": 1_000}}), mock.patch.dict(WORKS, {"400:2": self.WORK}):
+            self.seed(self.GONE)
+            self.assertEqual(self.position("400:2")["linked_from"], self.GONE)
+        self.assertEqual(self.book_identity.await_count, 1)
+
+    # --- The link is set whatever the save's outcome (T1S2) ---
+
+    def test_a_save_that_is_not_stored_still_sets_the_link(self):
+        self.seed(self.GONE)
+        self.save_new(seq=5)                                      # e.g. a leave beacon without the link
+        r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=4,
+                         linked_from=self.GONE)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json(), {"stored": False, "updated_at": r.json()["updated_at"], "linked": True})
+        row = self.db.query(ListeningPosition).filter_by(identity="plex:1001", book_key=self.NEW).one()
+        self.db.refresh(row)
+        self.assertEqual(row.linked_from, self.GONE)
+
+    def test_a_conflict_still_sets_the_link(self):
+        self.seed(self.GONE)
+        self.save_new(seq=1, psid="other-device")
+        r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="this-device", seq=1,
+                         linked_from=self.GONE)
+        self.assertEqual(r.status_code, 409)
+        self.assertIs(r.json()["linked"], True)
+        row = self.db.query(ListeningPosition).filter_by(identity="plex:1001", book_key=self.NEW).one()
+        self.db.refresh(row)
+        self.assertEqual(row.linked_from, self.GONE)
+
+    def test_the_response_says_whether_the_link_was_kept(self):
+        self.seed(self.GONE)
+        self.seed("100:1")                                     # same work, still in the library
+        r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=1)
+        self.assertNotIn("linked", r.json())                   # nothing claimed, nothing said
+        r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=2,
+                         linked_from="100:1")
+        self.assertIs(r.json()["linked"], False)
+        # Plex can't confirm: null, send it again.
+
+        async def check(key, track_key=None):
+            if key == self.GONE:
+                raise pp.PlayerUnavailable("down")
+            return await fake_assert_in_library(key, track_key)
+        with mock.patch.object(pp, "assert_in_library", side_effect=check):
+            r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=3,
+                             linked_from=self.GONE)
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.json()["linked"])
+        self.book_identity.side_effect = pp.PlayerUnavailable("down")
+        r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=4,
+                         linked_from=self.GONE)
+        self.assertIsNone(r.json()["linked"])
+        self.book_identity.side_effect = fake_book_identity
+        r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=5,
+                         linked_from=self.GONE)
+        self.assertIs(r.json()["linked"], True)
+        # Once set, another copy is not a link to make.
+        self.seed("310:1")
+
+        async def gone_too(key, track_key=None):
+            if key == "310:1":
+                raise pp.NotInLibrary("gone")
+            return await fake_assert_in_library(key, track_key)
+        with mock.patch.object(pp, "assert_in_library", side_effect=gone_too):
+            r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=6,
+                             linked_from="310:1")
+        self.assertIs(r.json()["linked"], False)
+
+    def test_the_old_albums_check_runs_alongside_the_books_reads(self):
+        import asyncio
+        self.seed(self.GONE)
+        seen = {"book": "idle", "overlap": False}
+
+        async def slow_book(key, track_key):
+            seen["book"] = "reading"
+            await asyncio.sleep(0.05)
+            seen["book"] = "done"
+            return await fake_checkin_book(key, track_key)
+
+        async def check(key, track_key=None):
+            if key == self.GONE:
+                seen["overlap"] = seen["book"] == "reading"
+                await asyncio.sleep(0.05)
+            return await fake_assert_in_library(key, track_key)
+        with mock.patch.object(pp, "checkin_book", side_effect=slow_book), \
+                mock.patch.object(pp, "assert_in_library", side_effect=check):
+            r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=1,
+                             linked_from=self.GONE)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(seen["overlap"])
+
+    # --- History follows a chain of copies (T1S4) ---
+
+    def test_history_follows_a_chain_of_copies(self):
+        from datetime import datetime
+        self.seed("290:1", at=datetime(2026, 8, 1), logs=1, offset=11)     # the first copy
+        self.seed(self.GONE, offset=22, logs=1)
+        gone = self.db.query(ListeningPosition).filter_by(identity="plex:1001", book_key=self.GONE).one()
+        gone.linked_from = "290:1"
+        self.db.commit()
+        self.save_new(seq=1, linked_from=self.GONE)
+        entries = self.history()
+        self.assertEqual([(e["book_key"], e.get("earlier_copy")) for e in entries],
+                         [(self.NEW, None), (self.GONE, True), ("290:1", True)])
 
 
 class DeviceIds(PlayerApiBase):
