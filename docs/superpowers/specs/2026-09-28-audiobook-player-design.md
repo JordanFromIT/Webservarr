@@ -275,7 +275,11 @@ cross-device sentence in 5.3.
 - At open, a Plex app's place that wins the resume over this browser's own place, when that place
   was never saved (played on without answering, or offline) and is more than 30 s away, is asked
   about exactly like another device's place: Continue goes to the Plex place, Start from here to
-  this browser's own.
+  this browser's own. The newest other place is always the one offered: a Plex app's place that
+  wins the resume comes before another device's older WebServarr copy.
+- An answer to the open's question given after 5 minutes, when the late read finds the other
+  place has moved on, still moves (unsaved, while the new question holds saves): "Keep listening
+  here" then saves the place the listener chose, and a close keeps it in the local copy.
 
 ## 12. How it is built
 
