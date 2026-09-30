@@ -422,7 +422,8 @@ async function setup(o = {}) {
       }
       const at = new Date(t.serverNow()).toISOString();
       // o.stateful: the server keeps what it is sent, as WebServarr's copy.
-      if (o.stateful) t.places = { web: { track: body.track, offset_ms: body.offset_ms, duration_ms: body.duration_ms, updated_at: at, device: 'Test on Linux', device_id: body.device_id || null }, plex: null };
+      // Plex's copy of a stored save is an echo of it: GET /position leaves it out.
+      if (o.stateful) t.places = { web: { track: body.track, offset_ms: body.offset_ms, duration_ms: body.duration_ms, updated_at: at, device: 'Test on Linux', device_id: body.device_id || null, psid: body.psid }, plex: null };
       return Promise.resolve({ status: 200, data: { stored: true, updated_at: at } });
     },
     now: t.now,
@@ -2798,6 +2799,139 @@ await run('F2: of two newer places, the one somewhere else is asked about', asyn
   check('asked about the other device\'s place, nothing posted', /^Continue from 1:00 \(Chrome on Linux, 1 min ago\)\?$/.test(t.prompts().join()) &&
     t.posts.length === n && !t.st().playing, [t.prompts(), t.posts.slice(n)]);
   t.engine.close();
+});
+
+// Final re-review FR1: the Plex question holds saves like a web row's. Every
+// save is forwarded to Plex's timeline, which turns Plex's copy into an echo
+// of it: a stale place saved once would lose the Plexamp place everywhere.
+// stateful: each stored save becomes WebServarr's row and Plex's copy an echo.
+async function plexElsewhere(o = {}) {
+  const t = await pausedThenPlex(Object.assign({ stateful: true }, o));
+  t.places.plex = Object.assign({}, t.places.plex, { updated_at: new Date(t.now() - MIN).toISOString() });
+  t.plexPlace = () => t.places.plex;
+  t.stored = (n) => t.posts.slice(n).map((b) => [b.event, b.track, b.offset_ms]);
+  t.reopen = async () => {
+    t.engine.close();
+    await t.clock.advance(MIN);
+    const p = t.engine.open(MULTI.key, { autoplay: false });
+    await t.clock.advance(1000);
+    await p;
+    return t.st();
+  };
+  return t;
+}
+
+await run('FR1: two lock-screen Plays and an unanswered close: nothing saved, the Plexamp place survives', async () => {
+  const t = await plexElsewhere();
+  const n = t.posts.length;
+  t.ms.handlers.get('play')();
+  await t.clock.advance(3000);
+  check('asked about the Plexamp place', /^Continue from 27:00 \(Plexamp, 1 min ago\)\?$/.test(t.prompts().join()), t.prompts());
+  t.ms.handlers.get('play')();                // "nothing happened": again
+  await t.clock.advance(60000);
+  check('the second Play plays', t.st().playing);
+  t.engine.pause();
+  await t.clock.advance(2000);
+  check('nothing saved (so nothing forwarded to Plex)', t.posts.length === n, t.stored(n));
+  check('Plex still holds its place', t.plexPlace() && t.plexPlace().track === '503', t.plexPlace());
+  const s = await t.reopen();
+  check('the next open resumes the Plexamp place', s.resumedFrom.source === 'plex' && s.position.track === '503' && s.position.offset_ms === 120000, [s.resumedFrom, s.position]);
+  check('and the local copy ranks below it', Date.parse(t.saver.readLocal(MULTI.key).updated_at) < Date.parse(t.plexPlace().updated_at) - 2000, t.saver.readLocal(MULTI.key));
+  t.engine.close();
+});
+
+await run('FR1: every other way on while the Plex question shows saves nothing', async () => {
+  for (const how of ['the bar button', 'a seek', 'a chapter jump', 'a lock-screen skip', 'a Play 6 min later']) {
+    const t = await plexElsewhere();
+    const n = t.posts.length;
+    t.engine.play();
+    await t.clock.advance(3000);
+    check(how + ': asked', t.prompts().length === 1 && !t.st().playing, t.prompts());
+    if (how === 'the bar button') t.q('.wsp-play').click();
+    else if (how === 'a seek') t.engine.seek(100000);
+    else if (how === 'a chapter jump') t.engine.jumpToChapter(0);
+    else if (how === 'a lock-screen skip') t.ms.handlers.get('seekbackward')({});
+    else { await t.clock.advance(6 * MIN); t.ms.handlers.get('play')(); }
+    await t.clock.advance(15000);
+    t.engine.pause();
+    await t.clock.advance(2000);
+    check(how + ': nothing saved', t.posts.length === n, t.stored(n));
+    check(how + ': the question still shows', t.prompts().length === 1, t.prompts());
+    const s = await t.reopen();
+    check(how + ': the next open resumes the Plexamp place', s.resumedFrom.source === 'plex' && s.position.track === '503', [s.resumedFrom, s.position]);
+    t.engine.close();
+  }
+});
+
+await run('FR1: a paused move after 5 minutes re-reads first (a lock-screen skip before any Play)', async () => {
+  for (const how of ['lock-screen skip back', 'lock-screen seekto', 'seek', 'chapter jump']) {
+    const t = await plexElsewhere();
+    const n = t.posts.length;
+    const reads = t.positionCalls;
+    if (how === 'lock-screen skip back') t.ms.handlers.get('seekbackward')({});
+    else if (how === 'lock-screen seekto') t.ms.handlers.get('seekto')({ seekTime: 100 });
+    else if (how === 'seek') t.engine.seek(100000);
+    else t.engine.jumpToChapter(0);
+    await t.clock.advance(3000);
+    check(how + ': read again', t.positionCalls === reads + 1, t.positionCalls - reads);
+    check(how + ': the move held, nothing saved', t.posts.length === n && t.st().position.track === '502', [t.stored(n), t.st().position]);
+    check(how + ': asked', /Plexamp/.test(t.prompts().join()), t.prompts());
+    t.engine.close();
+  }
+  // Nothing newer anywhere: the move goes on after the read, and is saved.
+  const u = await plexElsewhere();
+  u.places.plex = null;
+  const n = u.posts.length;
+  u.engine.seek(100000);
+  await u.clock.advance(3000);
+  check('nothing newer: moved and saved', u.st().position.track === '501' && u.st().position.offset_ms === 100000 &&
+    u.stored(n).length === 1 && u.stored(n)[0][1] === '501', u.stored(n));
+  u.engine.close();
+});
+
+await run('FR1: the answers. Continue saves the Plexamp place; Keep listening here plays and saves here', async () => {
+  const t = await plexElsewhere();
+  const n = t.posts.length;
+  t.engine.play();
+  await t.clock.advance(3000);
+  t.button('Continue').click();
+  await t.clock.advance(12000);
+  check('Continue: playing from the Plexamp place, saved', t.st().playing && t.st().position.track === '503' &&
+    t.stored(n).length >= 1 && t.stored(n).every((b) => b[1] === '503' && b[2] >= 120000), t.stored(n));
+  const reads = t.positionCalls;
+  t.engine.pause();
+  await t.clock.advance(2000);
+  t.engine.play();
+  await t.clock.advance(2000);
+  check('Continue: no second read or question', t.positionCalls === reads && t.prompts().length === 0 && t.st().playing);
+  t.engine.close();
+  const u = await plexElsewhere();
+  const m = u.posts.length;
+  const base = u.places.web.updated_at;
+  u.engine.play();
+  await u.clock.advance(3000);
+  u.button('Keep listening here').click();
+  await u.clock.advance(45000);                // past smart rewind's 30 s floor: check-ins again
+  const sent = u.posts.slice(m);
+  check('Keep listening here: plays and saves here', u.st().playing && sent.length >= 2 && sent.every((b) => b.track === '502'), u.stored(m));
+  check('with the web base kept (there was no 409)', sent[0].base === base, [sent[0].base, base]);
+  check('no question left, no second read', u.prompts().length === 0);
+  u.engine.close();
+});
+
+await run('FR1 control: the web-row question still holds through a second lock-screen Play and a close', async () => {
+  const d = await staleTab();
+  const { clock, phone, row, since } = d;
+  const n = phone.server.log.length;
+  phone.ms.handlers.get('play')();
+  await clock.advance(5000);
+  check('asked, nothing sent', phone.prompts().length === 1 && since(n).length === 0 && !phone.st().playing, [phone.prompts(), since(n)]);
+  phone.ms.handlers.get('play')();
+  await clock.advance(20000);
+  check('the second Play plays, nothing sent', phone.st().playing && since(n).length === 0, since(n));
+  phone.engine.pause(); await clock.advance(2000); phone.engine.close(); await clock.advance(2000);
+  check('nothing on close, the other tab\'s row stands', since(n).length === 0 && row().updated_at === d.newer.updated_at, [since(n), row()]);
+  d.tab2.engine.close();
 });
 
 await run('F2: the late Play is measured on the wall clock, so time asleep counts', async () => {

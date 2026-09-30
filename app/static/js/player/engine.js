@@ -78,14 +78,16 @@
  *       A late Play (spec 11b): play() or retry() after 5 minutes or more
  *       without playing, by the wall clock (a device asleep counts), first
  *       reads the saved places again (GET /api/player/position/<key>, 4 s at
- *       most; state().checking meanwhile). If WebServarr's copy was saved
- *       since by another page session (another device, or another tab of
- *       this browser), or Plex holds a place from a Plex app newer than what
- *       this page last saw, somewhere else, playback stays paused and a
- *       'warning' { kind: 'conflict' } asks where to go on (as a 409 does);
- *       the listener's answer plays. A failed or slow read plays on. The
- *       lock screen's Play takes the same path. pause() or toggle() during
- *       the read cancels the Play.
+ *       most; state().checking meanwhile), and so does a move made while
+ *       paused (seek, skip, chapter jump, the lock screen's). If WebServarr's
+ *       copy was saved since by another page session (another device, or
+ *       another tab of this browser), or Plex holds a place from a Plex app
+ *       newer than what this page last saw, somewhere else, the Play or move
+ *       does not happen and a 'warning' { kind: 'conflict' } asks where to go
+ *       on (as a 409 does): nothing is saved until the listener answers
+ *       (resolveConflict), and a Play meanwhile plays without saving. A
+ *       failed or slow read goes on. The lock screen's Play takes the same
+ *       path. pause() or toggle() during a Play's read cancels it.
  *   seek(bookMs), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters
  *   rewind(bookMs)    smart rewind's seek (features.js): a 'seek' change marked
  *                     { rewind: true }; the saves keep the place it went back
@@ -1357,7 +1359,7 @@ export function createEngine(env) {
       formatStop(null);
       return Promise.resolve();
     }
-    if (lateCheck(play)) return Promise.resolve();
+    if (lateCheck(play, true)) return Promise.resolve();
     wantPlay = true;
     if (!cur) {
       // Still choosing a connection: open() starts it.
@@ -1380,7 +1382,7 @@ export function createEngine(env) {
   }
 
   function pause() {
-    if (checking) {
+    if (checking && checking.plays) {
       // A late Play still reading the saved places: it does not happen.
       checking = null;
       changed('checking');
@@ -1397,7 +1399,7 @@ export function createEngine(env) {
   }
 
   function toggle() {
-    if (wantPlay || checking) pause();
+    if (wantPlay || (checking && checking.plays)) pause();
     else return play();
   }
 
@@ -1405,6 +1407,10 @@ export function createEngine(env) {
     if (!book || !playhead) return;
     const v = Number(bookMs);
     if (!isFinite(v)) return;
+    // A move while paused, after RECHECK_AFTER_MS quiet, is saved at once:
+    // like a late Play it reads the saved places first (smart rewind is no
+    // move of the listener's, and only follows a Play).
+    if (!wantPlay && !rewind && lateCheck(function () { seek(v, reason, rewind); }, false)) return;
     const from = bookMsNow();
     const to = toTrackOffset(book.tracks, clampNumber(v, 0, book.durationMs));
     if (blocked(to.index)) {
@@ -1522,7 +1528,7 @@ export function createEngine(env) {
       formatStop(null);
       return Promise.resolve();
     }
-    if (lateCheck(retry)) return Promise.resolve();
+    if (lateCheck(retry, true)) return Promise.resolve();
     if (unchosen) return retryChoosing(from);
     const side = preferredSide();
     partSuspect = null;
@@ -1577,12 +1583,18 @@ export function createEngine(env) {
     return at.index + 1 < book.tracks.length ? blocked(at.index + 1) : blocked(0);
   }
 
-  /* A late Play: after RECHECK_AFTER_MS without playing (wall clock), the
-     saved places are read again before `then` (play or retry) goes on. true:
-     it goes on later, from the read (or not at all: another place is newer
-     and the listener is asked, or they paused meanwhile). */
-  function lateCheck(then) {
-    if (checking) return true;
+  /* A late Play or move: after RECHECK_AFTER_MS without playing (wall
+     clock), the saved places are read again before `then` (play, retry, or
+     a move while paused; plays: it starts playback) goes on. true: it goes
+     on later, from the read, in order with anything asked meanwhile (or not
+     at all: another place is newer and the listener is asked, or a Pause
+     cancelled the Play). */
+  function lateCheck(then, plays) {
+    if (checking) {
+      checking.queue.push(then);
+      if (plays) checking.plays = true;
+      return true;
+    }
     if (!saver || !book || quietSince === null || !(wallNow() - quietSince >= RECHECK_AFTER_MS)) return false;
     let seen = null;
     try {
@@ -1593,7 +1605,7 @@ export function createEngine(env) {
     // A 409 not yet answered: its question is the one to answer.
     if (!seen || seen.conflict) return false;
     const key = book.key;
-    const my = { open: openGen };
+    const my = { open: openGen, queue: [then], plays: !!plays };
     checking = my;
     let timer = null;
     function finish(places) {
@@ -1604,7 +1616,6 @@ export function createEngine(env) {
       if (checking !== my) return;
       checking = null;
       if (my.open !== openGen || !book || book.key !== key) return;
-      quietSince = wallNow();
       let asked = false;
       try {
         asked = !!places && askIfElsewhere(places, seen);
@@ -1612,10 +1623,13 @@ export function createEngine(env) {
         console.error('[player] the re-check failed', e);
       }
       if (asked) {
+        // Held: nothing it was asked for happens, and the quiet time goes
+        // on until the listener answers (resolveConflict).
         changed('checking');
         return;
       }
-      then();
+      quietSince = wallNow();
+      my.queue.forEach(function (fn) { fn(); });
     }
     timer = setT(function () {
       timer = null;
@@ -1653,7 +1667,6 @@ export function createEngine(env) {
       const t = Date.parse(p.updated_at);
       if (isFinite(t)) {
         const since = Math.max(isFinite(base) ? base : -Infinity, plexSeenAt);
-        plexSeenAt = Math.max(plexSeenAt, t);
         if (t - PLEX_LATER_MS > since) found.push({ web: false, copy: p, t: t });
       }
     }
@@ -1666,15 +1679,14 @@ export function createEngine(env) {
       if (otherMs !== null && Math.abs(otherMs - hereMs) <= SAME_PLACE_MS) {
         // This very place: nothing to ask. Its time is what this page has seen.
         if (f.web && typeof saver.adoptBase === 'function') saver.adoptBase(book.key, c.updated_at);
+        else if (!f.web) plexSeenAt = Math.max(plexSeenAt, f.t);
         continue;
       }
       const conflict = { track: String(c.track), offset_ms: Number(c.offset_ms),
         device: typeof c.device === 'string' ? c.device : '', updated_at: String(c.updated_at) };
-      // WebServarr's: as a 409 (nothing is saved until the listener answers).
-      if (f.web) return typeof saver.otherSaved === 'function' && !!saver.otherSaved(book.key, conflict, now);
-      // Plex's: the same question; answering it plays (and saves) as usual.
-      emit('warning', { kind: 'conflict', book: book.key, conflict: conflict, now: now });
-      return true;
+      // Either as a 409: nothing is saved until the listener answers. A Plex
+      // app's place keeps the base as it was (the server refused nothing).
+      return typeof saver.otherSaved === 'function' && !!saver.otherSaved(book.key, conflict, now, !f.web);
     }
     return false;
   }
@@ -1794,12 +1806,21 @@ export function createEngine(env) {
     setOpenGate: function (fn) { openGate = typeof fn === 'function' ? fn : null; },
     resolveConflict: function () {
       if (!saver || typeof saver.resolveConflict !== 'function') return null;
+      let c = null;
       try {
-        return saver.resolveConflict();
+        c = saver.resolveConflict();
       } catch (e) {
         console.error('[player] saving failed', e);
         return null;
       }
+      if (c) {
+        // Answered: what was asked about is seen now, so the Play that
+        // follows goes straight on (no second read, no second question).
+        quietSince = wallNow();
+        const t = c.plex ? Date.parse(c.updated_at) : NaN;
+        if (isFinite(t)) plexSeenAt = Math.max(plexSeenAt, t);
+      }
+      return c;
     },
     placeMs: placeMs,
     own: own,

@@ -52,9 +52,10 @@
  *
  * A late Play (engine.js, spec 11b): before playback starts again after 5
  * minutes or more, the engine re-reads the saved places. lastSeen() gives
- * it this page's psid and base; a newer place another page saved is taken
- * like a 409 (otherSaved: nothing is sent until the listener answers), and
- * one at this very place just becomes the base (adoptBase).
+ * it this page's psid and base; a newer place another page or a Plex app
+ * saved is taken like a 409 (otherSaved: nothing is sent until the listener
+ * answers), and another page's at this very place just becomes the base
+ * (adoptBase).
  *
  * Device: every save carries the device label ("Chrome on Android") and this
  * browser's own random id (device_id), made once and kept in localStorage
@@ -120,15 +121,18 @@
  *                                   A pause or move still in flight gets a last
  *                                   'leave' of its place, sent only if it fails.
  *   resolveConflict() -> conflict | null   the listener answered a 409: saves go
- *                                   again, over the place it showed
+ *                                   again, over the place it showed (a Plex
+ *                                   app's place: with the base as it was)
  *   note(change)                    each engine change { reason, state, rewind,
  *                                   from, to (a move's book ms), placeMs (the
  *                                   book ms of state.position) }
  *   lastSeen(book) -> { base, psid, conflict } | null   what this page last saw
- *   otherSaved(book, { track, offset_ms, device, updated_at }, now)
- *                                   a newer place another page saved, found
- *                                   before a late Play: as a 409 (the 'conflict'
- *                                   warning, nothing sent until answered)
+ *   otherSaved(book, { track, offset_ms, device, updated_at }, now, plex)
+ *                                   a newer place saved elsewhere (another page,
+ *                                   or plex: a Plex app), found before a late
+ *                                   Play or move: as a 409 (the 'conflict'
+ *                                   warning, nothing sent until answered; a
+ *                                   Plex place leaves the base as it was)
  *   adoptBase(book, updated_at)     another page saved this very place: its
  *                                   timestamp is the base from now on
  *   flush('beacon' | 'fetch', event) send now: a beacon, or a fetch past the backoff
@@ -428,7 +432,10 @@ export function createSaver(o) {
   // the run the 409 answered (it may have been stopped since).
   function capAt(book, r) {
     const c = r && r.book === book && r.conflict ? Date.parse(r.conflict.updated_at) : NaN;
-    return isFinite(c) ? c : Infinity;
+    if (!isFinite(c)) return Infinity;
+    // Plex's copy ranks PLEX_ECHO_MS below its stamp (resumeOrder), and a
+    // local copy wins a tie: capped just under that, Plex's place wins.
+    return r.conflict.plex ? c - PLEX_ECHO_MS - 1 : c;
   }
 
   /* acked: the server has this place (it came from the server, or a save
@@ -965,9 +972,10 @@ export function createSaver(o) {
     if (!r || !r.conflict) return null;
     const c = r.conflict;
     r.conflict = null;
-    if (c.updated_at) r.base = c.updated_at;
+    // A Plex app's place was never a 409: the base stays WebServarr's own.
+    if (c.updated_at && !c.plex) r.base = c.updated_at;
     step();
-    return { track: c.track, offset_ms: c.offset_ms, device: c.device, updated_at: c.updated_at };
+    return { track: c.track, offset_ms: c.offset_ms, device: c.device, updated_at: c.updated_at, plex: !!c.plex };
   }
 
   /* What this page last saw of the book on the server: its base (the
@@ -980,11 +988,13 @@ export function createSaver(o) {
     return { base: r.base, psid: psid, conflict: !!r.conflict };
   }
 
-  /* Before a late Play the engine found a newer place another page saved:
-     taken like a 409 for it. Nothing is sent until the listener answers
-     (resolveConflict), the local copy is capped at it, and the 'conflict'
-     warning asks the question. */
-  function otherSaved(book, c, serverNow) {
+  /* Before a late Play or move the engine found a newer place saved
+     elsewhere: another page's (WebServarr's copy) or a Plex app's (plex:
+     true). Taken like a 409 for it: nothing is sent until the listener
+     answers (resolveConflict), the local copy is capped below it (so an
+     unanswered close can't make this place win the next open), and the
+     'conflict' warning asks the question. */
+  function otherSaved(book, c, serverNow, plex) {
     const r = run;
     if (!r || r.stopped || r.book !== String(book) || !c || typeof c.updated_at !== 'string') return false;
     r.conflict = {
@@ -992,7 +1002,8 @@ export function createSaver(o) {
       offset_ms: Number(c.offset_ms),
       device: typeof c.device === 'string' ? c.device : '',
       updated_at: c.updated_at,
-      now: typeof serverNow === 'string' ? serverNow : null
+      now: typeof serverNow === 'string' ? serverNow : null,
+      plex: !!plex
     };
     capLocal(r.book, r);
     const k = r.conflict;
