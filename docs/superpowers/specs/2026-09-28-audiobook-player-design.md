@@ -272,6 +272,10 @@ cross-device sentence in 5.3.
   app's place, Continue moves there and "Keep listening here" saves here with the base as it was
   (the server refused nothing). The server cannot see Plex app listening, so this is the only
   guard for it. The lock screen's Play takes the same path.
+- At open, a Plex app's place that wins the resume over this browser's own place, when that place
+  was never saved (played on without answering, or offline) and is more than 30 s away, is asked
+  about exactly like another device's place: Continue goes to the Plex place, Start from here to
+  this browser's own.
 
 ## 12. How it is built
 
