@@ -407,12 +407,23 @@ _PART_SUFFIX = re.compile(r"[\s,\-]+Part\s*[0-9]+\s*$", re.IGNORECASE)
 
 def _split_narrator(title: str) -> tuple:
     """("Title", "Narrator") from "Title - Read by Narrator" or
-    "Title (Narrated by Narrator)"; the narrator is "" when not named."""
+    "Title (Narrated by Narrator)"; the narrator is "" when not named.
+
+    A comma- or semicolon-separated part after the name that holds the
+    book's number ("Title - Read by Name, Book 2") belongs to the title:
+    it stays there ("Title, Book 2", "Name"), so book 2 and book 3 are never
+    told apart only by a narrator field that the work key leaves out."""
     title = (title or "").strip()
     for pattern in _READ_BY:
         m = pattern.match(title)
         if m and m.group("title").strip():
-            return m.group("title").strip(), m.group("narrator").strip()
+            head = m.group("title").strip()
+            parts = [p.strip() for p in re.split(r"[,;]", m.group("narrator")) if p.strip()]
+            numbered = [p for p in parts if _NUMBER_MARK.search(p)]
+            names = [p for p in parts if not _NUMBER_MARK.search(p)]
+            if numbered:
+                head = ", ".join([head, *numbered])
+            return head, ", ".join(names)
     return title, ""
 
 
@@ -726,8 +737,11 @@ _COPY_WORDS = re.compile(
     r"\b(?:edition|unabridged|abridged|full[\s-]*cast|dramati[sz](?:ed|ation)|narrated|read\s+by|"
     r"audio\s*books?|audio\s+drama|radio\s+drama|mp3|m4b|aac|flac|retail|remaster(?:ed)?)\b", re.IGNORECASE)
 _TRAILING_GROUP = re.compile(r"\s*[(\[{]([^()\[\]{}]*)[)\]}]\s*$")
+# "A Novel" only after a comma, colon, semicolon or dash: "How to Write a
+# Novel" is a title, not "How to Write" plus a subtitle.
 _TRAILING_COPY_WORD = re.compile(
-    r"[\s,:;\-\u2013\u2014]*\b(?:unabridged|abridged|audio\s*book|a\s+novel)\s*$", re.IGNORECASE)
+    r"(?:[\s,:;\-\u2013\u2014]*\b(?:unabridged|abridged|audio\s*book)"
+    r"|\s*[,:;\-\u2013\u2014]\s*a\s+novel)\s*$", re.IGNORECASE)
 # The last " - " (or en or em dash) and what follows it.
 _DASH_TAIL = re.compile(r"^(?P<head>.*\S)\s+[-\u2013\u2014]\s+(?P<tail>\S.*?)\s*$")
 # What marks a book's number in a part of its title.
@@ -1020,6 +1034,27 @@ _GENERIC_TRACK = re.compile(
     r"|(?:opening|closing|end)\s+credits|intro|introduction|prologue|preface|foreword|untitled", re.ASCII)
 
 
+def _disc_work_title(album: dict, disc: int, discs: dict) -> str:
+    """The title a disc's work key is made from. For an album holding one
+    book, the book's title. For an album holding several as discs, the
+    disc's own (from its tracks), except: a generic one ("Track 1") is
+    "<album> disc N", and one that another disc of the album shares (the
+    same _work_title: "01 - Chapter 1", "Part 1 of 12", tracks named after
+    the album) has " disc N" added, so no two discs share a key."""
+    def own(d):
+        return _describe(album, d, discs[d], len(discs))
+    about = own(disc)
+    title = about["title"]
+    if len(discs) < 2:
+        return title
+    if _GENERIC_TRACK.fullmatch(_work_words(title)):
+        return f"{_split_narrator(album.get('title') or '')[0]} disc {disc}"
+    mine = _work_title(title, about["narrator"])
+    shared = any(_work_title(o["title"], o["narrator"]) == mine
+                 for o in (own(d) for d in discs if d != disc))
+    return f"{title} disc {disc}" if shared else title
+
+
 def _identity(album: dict, disc: int, children) -> dict:
     """book_identity's fields from the album and its children container."""
     discs = _discs(_items(children))
@@ -1027,9 +1062,7 @@ def _identity(album: dict, disc: int, children) -> dict:
         raise NotInLibrary("Not in the audiobook library")
     tracks = discs[disc]
     about = _describe(album, disc, tracks, len(discs))
-    title = about["title"]
-    if len(discs) > 1 and _GENERIC_TRACK.fullmatch(_work_words(title)):
-        title = f"{_split_narrator(album.get('title') or '')[0]} disc {disc}"
+    title = _disc_work_title(album, disc, discs)
     return {"work_key": work_key(about["author"], title, about["narrator"]) if _work_title(title) else None,
             "narrator": about["narrator"] or None,
             "duration_ms": sum(_track_duration(t) for t in tracks) or None}

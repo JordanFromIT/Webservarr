@@ -41,7 +41,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, case, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -176,7 +176,9 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     place), but a server field that is None (the album read failed) leaves
     the row's value as it was rather than blanking it. `book_ms` is clamped
     to `book_duration_ms` when both are known. An empty chapter name is
-    stored as null. The link to an earlier copy is set apart (set_link).
+    stored as null. When this check-in's length is unknown, `book_ms` is
+    clamped to the length the row keeps. The link to an earlier copy is set
+    apart (set_link).
 
     Returns {"stored": bool, "updated_at": iso8601}. `stored` is False when
     the stored row was written by the same psid with a higher seq; nothing is
@@ -209,6 +211,13 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
         if values[name] is None:
             del values[name]        # unknown this time: the row keeps what it had
     P = ListeningPosition
+    update = dict(values)
+    if about["book_ms"] is not None and about["book_duration_ms"] is None:
+        # The book's length is unknown this time, so the row keeps the one it
+        # had: clamp to that, in the UPDATE itself, so the stored place is
+        # never past the end of the book it describes.
+        update["book_ms"] = case((and_(P.book_duration_ms.isnot(None), P.book_duration_ms < about["book_ms"]),
+                                  P.book_duration_ms), else_=about["book_ms"])
     mine = (P.identity == identity, P.book_key == book)
     # Overwrite unless the row is this psid's own and newer. A row written
     # without a psid (a Plex import, say) is always overwritten.
@@ -223,7 +232,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
         allowed.append(and_(P.updated_at >= base_at, P.updated_at < base_at + timedelta(milliseconds=1)))
     swap = or_(*allowed)
     for _attempt in range(3):
-        if db.query(P).filter(*mine, not_newer_self, swap).update(values, synchronize_session=False):
+        if db.query(P).filter(*mine, not_newer_self, swap).update(update, synchronize_session=False):
             break
         row = db.query(P).filter(*mine).first()
         if row is not None:

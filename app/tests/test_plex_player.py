@@ -1060,6 +1060,15 @@ class WorkKeys(unittest.TestCase):
         self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill - A Novel Approach"),
                             pp.work_key(self.AUTHOR, "Tide Mill - A Novel Beginning"))
 
+    def test_a_novel_goes_only_after_a_separator(self):
+        # T1R2: "How to Write a Novel" is its own title.
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "How to Write a Novel"), pp.work_key(self.AUTHOR, "How to Write"))
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill A Novel"), pp.work_key(self.AUTHOR, "Tide Mill"))
+        for title in ("Tide Mill: A Novel", "Tide Mill, A Novel", "Tide Mill; A Novel", "Tide Mill - A Novel",
+                      "Tide Mill \u2013 A Novel", "Tide Mill (A Novel)"):
+            with self.subTest(title=title):
+                self.assertEqual(pp.work_key(self.AUTHOR, title), pp.work_key(self.AUTHOR, "Tide Mill"))
+
     def test_nothing_is_taken_off_that_would_leave_the_title_empty(self):
         self.assertEqual(pp._work_title("Unabridged"), "unabridged")
         self.assertEqual(pp._work_title("(Full-Cast Edition)"), "full cast edition")
@@ -1123,6 +1132,46 @@ class BookIdentity(BridgeBase):
                 self.assertEqual(pp.album_work_key(ALBUMS[rk]), self.run_async(pp.book_identity(f"{rk}:1"))["work_key"])
         self.assertIsNone(pp.album_work_key({"title": "Tide Mill"}))                 # no author
         self.assertIsNone(pp.album_work_key({"parentTitle": "", "title": ""}))
+
+    def test_a_number_after_the_narrators_name_stays_on_the_title(self):
+        # T1R1: through the album's own fields, as a save and the pre-check
+        # make the key, not only work_key on a raw title.
+        for fmt in ("Tide Mill - Read by Tamsin Ashby, Book {n}", "Tide Mill (Narrated by Tamsin Ashby, Book {n})",
+                    "Tide Mill - Read by Tamsin Ashby; Vol. {n}"):
+            keys = []
+            for n in (2, 3):
+                album = dict(ALBUMS["500"], title=fmt.format(n=n))
+                album.pop("Collection", None)
+                with self.subTest(title=album["title"]):
+                    self.assertEqual(pp._describe(album, 1, [], 1)["narrator"], "Tamsin Ashby")
+                    with mock.patch.dict(ALBUMS, {"500": album}):
+                        out = self.run_async(pp.book_identity("500:1"))
+                        book = next(b for b in self.run_async(pp.list_books()) if b["key"] == "500:1")
+                    self.assertEqual(out["narrator"], "Tamsin Ashby")
+                    self.assertEqual(out["work_key"], pp.album_work_key(album))
+                    self.assertEqual(book["narrator"], "Tamsin Ashby")
+                    self.assertIn(str(n), book["title"])
+                    keys.append(out["work_key"])
+            self.assertNotEqual(keys[0], keys[1], fmt)
+        self.assertEqual(pp._split_narrator("Tide Mill - Read by Tamsin Ashby, Book 2"),
+                         ("Tide Mill, Book 2", "Tamsin Ashby"))
+        self.assertEqual(pp._split_narrator("Tide Mill - Read by Tamsin Ashby, Dee Lane"),
+                         ("Tide Mill", "Tamsin Ashby, Dee Lane"))
+
+    def test_discs_that_share_a_title_stay_apart(self):
+        # T1R3: whatever the shared title, two discs of one album never share
+        # a key; a disc with a title of its own keeps it.
+        album = {"ratingKey": "660", "type": "album", "title": "Harbour Tales", "titleSort": "Harbour Tales",
+                 "parentTitle": "Cal Penn", "thumb": "/library/metadata/660/thumb/1"}
+        for shared in ("01 - Chapter 1", "Chapter One", "Part 1 of 12", "Disc 1 Track 1", "Credits", "Harbour Tales"):
+            with self.subTest(shared=shared):
+                with mock.patch.dict(ALBUMS, {"660": album}), mock.patch.dict(TRACKS):
+                    TRACKS["660"] = [track(661, 660, 1, 1, 10_000, "E/T1", title=shared),
+                                     track(662, 660, 2, 1, 20_000, "E/T2", title=shared),
+                                     track(663, 660, 3, 1, 30_000, "E/T3", title="The Lighthouse")]
+                    keys = [self.run_async(pp.book_identity(f"660:{d}"))["work_key"] for d in (1, 2, 3)]
+                self.assertEqual(len(set(keys)), 3)
+                self.assertEqual(keys[2], pp.work_key("Cal Penn", "The Lighthouse"))
 
     def test_a_duplicate_copy_is_not_counted_in_the_length(self):
         self.assertEqual(self.run_async(pp.book_identity("300:1"))["duration_ms"], 510_000)

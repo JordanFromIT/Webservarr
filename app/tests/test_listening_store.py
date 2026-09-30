@@ -360,18 +360,36 @@ class BookFields(StoreBase):
         checkin(self.db, book_ms=50_000_000, book_duration_ms=36_000_000)
         self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_ms"], 36_000_000)
         self.assertEqual(listening.get_history(self.db, ME, BOOK)[0]["book_ms"], 36_000_000)
-        # The edges, and a length that is not known: nothing to clamp to.
+        # The edges, and a length that is not known this time: the row's
+        # kept length still bounds it (see test_book_ms_is_clamped_to_the_length_the_row_keeps).
         checkin(self.db, seq=2, book_ms=36_000_000, book_duration_ms=36_000_000)
         self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_ms"], 36_000_000)
         checkin(self.db, seq=3, book_ms=0, book_duration_ms=36_000_000)
         self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_ms"], 0)
         checkin(self.db, seq=4, book_ms=50_000_000)
-        self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_ms"], 50_000_000)
+        self.db.expire_all()
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_ms"], 36_000_000)
 
     def test_an_empty_chapter_name_is_stored_as_null(self):
         checkin(self.db, chapter_label="")
         self.assertIsNone(listening.get_position(self.db, ME, BOOK)["chapter_label"])
         self.assertIsNone(listening.get_history(self.db, ME, BOOK)[0]["chapter_label"])
+
+    def test_book_ms_is_clamped_to_the_length_the_row_keeps(self):
+        # T1R4: the album read failed (no length this time), so the row keeps
+        # its length; the place is clamped to it in the UPDATE.
+        from app.models import ListeningPosition
+        checkin(self.db, book_ms=1_000, book_duration_ms=36_000_000, work_key=WORK_A)
+        checkin(self.db, seq=2, book_ms=50_000_000)
+        self.db.expire_all()
+        row = self.db.query(ListeningPosition).one()
+        self.assertEqual((row.book_ms, row.book_duration_ms), (36_000_000, 36_000_000))
+        checkin(self.db, seq=3, book_ms=20_000_000)
+        self.db.expire_all()
+        self.assertEqual(self.db.query(ListeningPosition).one().book_ms, 20_000_000)
+        # With no length anywhere there is nothing to clamp to.
+        checkin(self.db, book="5002", psid="other", book_ms=50_000_000)
+        self.assertEqual(listening.get_position(self.db, ME, "5002")["book_ms"], 50_000_000)
 
     def test_a_checkin_without_the_players_fields_leaves_them_null(self):
         checkin(self.db, **self.FIELDS)
