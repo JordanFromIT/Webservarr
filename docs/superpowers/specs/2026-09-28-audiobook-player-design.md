@@ -263,10 +263,15 @@ cross-device sentence in 5.3.
 - The question at open (section 8) stays.
 - A late Play (final review, 2026-09-29): Play or Retry after 5 minutes or more without playing,
   by the wall clock so a device asleep counts, first reads the position again (4 s at most, then
-  it plays on). If WebServarr's position was saved since by another page session, or Plex holds
-  a newer place from a Plex app, somewhere else, playback stays paused and the same question is
-  asked. The server cannot see Plex app listening, so this is the only guard for it. The lock
-  screen's Play takes the same path.
+  it plays on), and so does a move made while paused (seek, skip, chapter jump, the lock
+  screen's). If WebServarr's position was saved since by another page session, or Plex holds a
+  newer place from a Plex app, somewhere else, the Play or move does not happen and the same
+  question is asked. Either way it is held like a 409: nothing is saved until the listener
+  answers (so nothing reaches Plex's timeline and overwrites the Plex app's place), and the local
+  copy is capped below that place, so closing without answering resumes it next time. For a Plex
+  app's place, Continue moves there and "Keep listening here" saves here with the base as it was
+  (the server refused nothing). The server cannot see Plex app listening, so this is the only
+  guard for it. The lock screen's Play takes the same path.
 
 ## 12. How it is built
 
