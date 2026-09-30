@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.config import settings
@@ -53,13 +54,35 @@ def get_db():
         db.close()
 
 
+def create_tables(bind) -> None:
+    """Create every model's table that is missing.
+
+    uvicorn starts two workers at once, and each runs this at startup. When
+    a table is missing (a fresh install, or an upgrade that adds one), both
+    can see it missing and both issue CREATE TABLE; the second fails with
+    SQLite's "table ... already exists", and a worker that raises at startup
+    is never restarted. So that one error is tried again: create_all then
+    passes over the table the other worker made. With several tables missing
+    the retry can meet the other worker again on the next one, so it goes on
+    as long as each round loses to a table that exists now; every such round
+    means one more table was made, so there are no more rounds than tables."""
+    for _attempt in range(len(Base.metadata.tables)):
+        try:
+            Base.metadata.create_all(bind=bind, checkfirst=True)
+            return
+        except OperationalError as exc:
+            if "already exists" not in str(exc):
+                raise
+    Base.metadata.create_all(bind=bind, checkfirst=True)
+
+
 def init_db():
     """
     Initialize database - create all tables and seed default data.
     Call this on application startup.
     """
     from app import models  # Import models to register them
-    Base.metadata.create_all(bind=engine, checkfirst=True)
+    create_tables(engine)
 
     # Seed defaults
     from app.seed import (

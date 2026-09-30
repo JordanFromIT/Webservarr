@@ -401,6 +401,72 @@ class DeviceIdMigration(unittest.TestCase):
         self.assertIn("migrate_listening_device_id(db)", pyinspect.getsource(database.init_db))
 
 
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class StartupTables(unittest.TestCase):
+    """The two uvicorn workers both create the missing tables at startup (the
+    player's three on an upgrade). The one that loses the race gets SQLite's
+    "table ... already exists"; it tries once more rather than dying, since a
+    worker that raises at startup is never restarted."""
+
+    NEW = ("listening_positions", "listening_log", "player_prefs")
+
+    def upgrade_db(self):
+        import os
+        import tempfile
+        from sqlalchemy import create_engine
+        from app.database import Base
+        from app import models  # noqa: F401  registers the tables
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        engine = create_engine("sqlite:///" + path)
+        self.addCleanup(engine.dispose)
+        # An install from before the player: every table but its three.
+        Base.metadata.create_all(bind=engine, tables=[t for n, t in Base.metadata.tables.items() if n not in self.NEW])
+        return engine, Base
+
+    def test_the_worker_that_loses_the_race_tries_again(self):
+        from sqlalchemy import event, text
+        from app.database import create_tables
+        engine, Base = self.upgrade_db()
+        raced = []
+
+        # The other worker creates each table between this one's check and its
+        # CREATE: first one table, then (on the retry) the next.
+        def other_worker(target, connection, **kw):
+            if target.name in raced:
+                return
+            raced.append(target.name)
+            with engine.connect() as other:
+                other.execute(text(f"CREATE TABLE {target.name} (id INTEGER PRIMARY KEY)"))
+                other.commit()
+
+        for name in ("listening_log", "player_prefs"):
+            table = Base.metadata.tables[name]
+            event.listen(table, "before_create", other_worker)
+            self.addCleanup(event.remove, table, "before_create", other_worker)
+        create_tables(engine)
+        self.assertEqual(sorted(raced), ["listening_log", "player_prefs"])
+        with engine.connect() as conn:
+            names = {r[0] for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+        self.assertTrue(set(self.NEW) <= names, names)
+
+    def test_any_other_error_still_raises(self):
+        from sqlalchemy.exc import OperationalError
+        from app.database import Base, create_tables
+        engine, _ = self.upgrade_db()
+        err = OperationalError("CREATE TABLE x", {}, Exception("disk I/O error"))
+        with mock.patch.object(Base.metadata, "create_all", side_effect=err) as create_all:
+            with self.assertRaises(OperationalError):
+                create_tables(engine)
+        self.assertEqual(create_all.call_count, 1)
+
+    def test_init_db_uses_it(self):
+        import inspect as pyinspect
+        from app import database
+        self.assertIn("create_tables(engine)", pyinspect.getsource(database.init_db))
+
+
 class Prefs(StoreBase):
     def test_defaults(self):
         self.assertEqual(listening.get_prefs(self.db, ME), {"skip_s": 10, "speed": 1.0, "smart_rewind": True})
