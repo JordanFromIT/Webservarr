@@ -53,7 +53,7 @@ class Tables(StoreBase):
         cols = {c["name"] for c in insp.get_columns("listening_positions")}
         self.assertEqual(cols, {"identity", "book_key", "track_key", "offset_ms", "duration_ms", "updated_at",
                                 "device", "device_id", "source", "psid", "seq", "book_ms", "book_duration_ms",
-                                "chapter_label", "work_key", "narrator", "linked_from"})
+                                "chapter_label", "work_key", "narrator", "linked_from", "book_title"})
         pk = insp.get_pk_constraint("listening_positions")["constrained_columns"]
         uniques = [u["column_names"] for u in insp.get_unique_constraints("listening_positions")]
         self.assertTrue(sorted(pk) == ["book_key", "identity"] or ["identity", "book_key"] in uniques,
@@ -80,7 +80,7 @@ class Positions(StoreBase):
         self.assertEqual(pos, {"track": "6002", "offset_ms": 123456, "duration_ms": 3600000,
                                "updated_at": out["updated_at"], "device": "Safari on iPhone", "device_id": None,
                                "source": "web", "psid": "p-one", "book_ms": None, "book_duration_ms": None,
-                               "chapter_label": None, "narrator": None})
+                               "chapter_label": None, "narrator": None, "book_title": None})
         hist = listening.get_history(self.db, ME, BOOK)
         self.assertEqual(len(hist), 1)
         self.assertEqual(hist[0]["event"], "checkin")
@@ -433,6 +433,28 @@ class BookFields(StoreBase):
         row = self.db.query(ListeningPosition).one()
         self.assertEqual((row.book_duration_ms, row.work_key, row.narrator), (40_000_000, WORK_B, "Dee Lane"))
 
+    def test_the_book_title_is_kept_on_the_position_row_only(self):
+        # Ruling (a): the title the library showed at check-in, so a place
+        # offered from this copy can say which copy it was. Unknown leaves
+        # the row's value; the log has no such column.
+        from app.models import ListeningLog, ListeningPosition
+        checkin(self.db, book_title="Tide Mill (Unabridged)")
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_title"], "Tide Mill (Unabridged)")
+        checkin(self.db, seq=2, book_ms=5_000)
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_title"], "Tide Mill (Unabridged)")
+        checkin(self.db, seq=3, book_title="Tide Mill")
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_title"], "Tide Mill")
+        self.assertFalse(hasattr(ListeningLog, "book_title"))
+        self.assertEqual(self.log_count(), 3)
+        # Cut to its column, an empty one is unknown, and it must be text.
+        checkin(self.db, seq=4, book_title="t" * 400)
+        self.assertEqual(len(self.db.query(ListeningPosition).one().book_title), listening.BOOK_TITLE_MAX)
+        checkin(self.db, seq=5, book_title="")
+        self.db.expire_all()
+        self.assertEqual(len(self.db.query(ListeningPosition).one().book_title), listening.BOOK_TITLE_MAX)
+        with self.assertRaises(ValueError):
+            checkin(self.db, seq=6, book_title=7)
+
     def test_a_conflict_logs_them_too(self):
         first = checkin(self.db, psid="desk")
         out = checkin(self.db, psid="phone", base="2020-01-01T00:00:00.000Z", **self.FIELDS)
@@ -676,12 +698,13 @@ class BookFieldsMigration(unittest.TestCase):
                 migrate_listening_book_fields(db)   # idempotent: nothing left to do
             for table in ("listening_positions", "listening_log"):
                 self.assertTrue(set(self.NEW) <= self.columns(db, table), table)
-            self.assertIn("linked_from", self.columns(db, "listening_positions"))
-            self.assertNotIn("linked_from", self.columns(db, "listening_log"))
+            for column in ("linked_from", "book_title"):
+                self.assertIn(column, self.columns(db, "listening_positions"))
+                self.assertNotIn(column, self.columns(db, "listening_log"))
             self.assertIn("ix_listening_positions_identity_work_key", self.indexes(db))
             self.assertEqual(tuple(db.execute(text(
-                "SELECT offset_ms, book_ms, book_duration_ms, chapter_label, work_key, narrator, linked_from "
-                "FROM listening_positions")).one()), (10, None, None, None, None, None, None))
+                "SELECT offset_ms, book_ms, book_duration_ms, chapter_label, work_key, narrator, linked_from, "
+                "book_title FROM listening_positions")).one()), (10, None, None, None, None, None, None, None))
             self.assertEqual(tuple(db.execute(text("SELECT event, book_ms, work_key FROM listening_log")).one()),
                              ("pause", None, None))
             # The store works on the upgraded tables: the old row reads with
@@ -690,6 +713,33 @@ class BookFieldsMigration(unittest.TestCase):
             self.assertEqual((pos["offset_ms"], pos["book_ms"], pos["narrator"]), (10, None, None))
             checkin(db, identity="plex:1", book="7:1", work_key=WORK_A, book_ms=5, book_duration_ms=9)
             self.assertEqual(listening.find_linked(db, "plex:1", WORK_A, "8:1").book_key, "7:1")
+        finally:
+            db.close()
+
+    def test_an_install_with_the_other_columns_gains_book_title(self):
+        # Dev and anything installed before fix round 5: every other book
+        # column is there already, only book_title is added, rows kept.
+        import logging
+        from sqlalchemy import text
+        from sqlalchemy.orm import sessionmaker
+        from app.seed import migrate_listening_book_fields
+        engine = self.old_file_db()
+        with engine.begin() as conn:
+            for name, kind in (("book_ms", "INTEGER"), ("book_duration_ms", "INTEGER"),
+                               ("chapter_label", "VARCHAR(200)"), ("work_key", "VARCHAR(32)"),
+                               ("narrator", "VARCHAR(200)")):
+                conn.execute(text(f"ALTER TABLE listening_positions ADD COLUMN {name} {kind}"))
+                conn.execute(text(f"ALTER TABLE listening_log ADD COLUMN {name} {kind}"))
+            conn.execute(text("ALTER TABLE listening_positions ADD COLUMN linked_from VARCHAR(64)"))
+        db = sessionmaker(bind=engine)()
+        try:
+            self.assertNotIn("book_title", self.columns(db, "listening_positions"))
+            with self.assertLogs("app.seed", level=logging.INFO) as logs:
+                migrate_listening_book_fields(db)
+            self.assertEqual([r.getMessage() for r in logs.records], ["Added listening_positions.book_title"])
+            self.assertIn("book_title", self.columns(db, "listening_positions"))
+            self.assertEqual(tuple(db.execute(text("SELECT offset_ms, book_title FROM listening_positions")).one()),
+                             (10, None))
         finally:
             db.close()
 
@@ -722,6 +772,7 @@ class BookFieldsMigration(unittest.TestCase):
             for table in ("listening_positions", "listening_log"):
                 self.assertTrue(set(self.NEW) <= self.columns(db, table), table)
             self.assertIn("linked_from", self.columns(db, "listening_positions"))
+            self.assertIn("book_title", self.columns(db, "listening_positions"))
             self.assertIn("ix_listening_positions_identity_work_key", self.indexes(db))
         finally:
             db.close()

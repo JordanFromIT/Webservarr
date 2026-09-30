@@ -71,6 +71,7 @@ HISTORY_PAGE = 500
 BOOK_MS_MAX = 10 ** 9
 LABEL_MAX = 200
 NARRATOR_MAX = 200
+BOOK_TITLE_MAX = 300
 WORK_KEY = re.compile(r"[0-9a-f]{32}", re.ASCII)
 # A book key, "<album>:<disc>", as plex_player.parse_key takes it.
 BOOK_KEY = re.compile(r"[0-9]{1,20}:[0-9]{1,6}", re.ASCII)
@@ -160,7 +161,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
                  device_id: Optional[str] = None, base: Optional[str] = None,
                  book_ms: Optional[int] = None, chapter_label: Optional[str] = None,
                  book_duration_ms: Optional[int] = None, work_key: Optional[str] = None,
-                 narrator: Optional[str] = None) -> dict:
+                 narrator: Optional[str] = None, book_title: Optional[str] = None) -> dict:
     """Store a check-in as this listener's position in the book and log it.
 
     `device_id` is the sending browser's own random id (DEVICE_ID), or None
@@ -180,6 +181,11 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     clamped to the length the row keeps, on the position row (in the
     UPDATE) and on the log row alike. The link to an earlier copy is set
     apart (set_link).
+
+    `book_title` is the title the library shows for the book (the server's
+    read, cut to BOOK_TITLE_MAX), kept on the position row only so a place
+    offered from this copy can say which copy it was; like the other
+    server fields, None leaves the row's value as it was.
 
     Returns {"stored": bool, "updated_at": iso8601}. `stored` is False when
     the stored row was written by the same psid with a higher seq; nothing is
@@ -208,8 +214,12 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     now = _utcnow()
     values = {"track_key": track, "offset_ms": offset_ms, "duration_ms": duration_ms, "updated_at": now,
               "device": device, "device_id": device_id, "source": source, "psid": psid, "seq": seq, **about}
-    for name in SERVER_FIELDS:
-        if values[name] is None:
+    if book_title is not None:
+        if not isinstance(book_title, str):
+            raise ValueError("book_title must be text")
+        values["book_title"] = book_title[:BOOK_TITLE_MAX] or None
+    for name in (*SERVER_FIELDS, "book_title"):
+        if values.get(name, "") is None:
             del values[name]        # unknown this time: the row keeps what it had
     P = ListeningPosition
 
@@ -291,7 +301,7 @@ def position_dict(row: ListeningPosition) -> dict:
             "updated_at": utc_iso(row.updated_at), "device": row.device, "device_id": row.device_id,
             "source": row.source, "psid": row.psid, "book_ms": row.book_ms,
             "book_duration_ms": row.book_duration_ms, "chapter_label": row.chapter_label,
-            "narrator": row.narrator}
+            "narrator": row.narrator, "book_title": row.book_title}
 
 
 def get_position_row(db: Session, identity: str, book: str) -> Optional[ListeningPosition]:

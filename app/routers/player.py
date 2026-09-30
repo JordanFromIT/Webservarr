@@ -425,8 +425,11 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
     an earlier copy of the book, with `linked_from` its book key (see
     _earlier_copy); the player then helps them find the spot in this copy,
     and sends linked_from with its saves until a check-in answers
-    "linked" true or false. 503 when Plex fails before that lookup can
-    finish (never a null that would open the book at 0:00)."""
+    "linked" true or false. Its `book_title` and `narrator` name that copy
+    as the library showed it when it was saved (null when not known), so
+    the helper can say which copy the place came from. 503 when Plex fails
+    before that lookup can finish (never a null that would open the book
+    at 0:00)."""
     album, _access = await _checked_book(who, key)
     try:
         plex_pos = await pp.plex_position(who.session(), key, session_id=who.session_id)
@@ -567,7 +570,7 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     11b): nothing is stored or forwarded; the attempt is logged. The body is
     only ever this listener's own row.
 
-    The book's length, work key and narrator are stored with the place
+    The book's length, work key, narrator and title are stored with the place
     (spec 2.5), from the reads that check the book (plex_player.checkin_book:
     the album, the track and the album's tracks, all at once). The tracks
     read is best effort: when it fails the place is stored and the row keeps
@@ -617,7 +620,8 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
                                         device_id=body.device_id, base=body.base, book_ms=body.book_ms,
                                         chapter_label=body.chapter_label,
                                         book_duration_ms=about.get("duration_ms"),
-                                        work_key=about.get("work_key"), narrator=about.get("narrator"))
+                                        work_key=about.get("work_key"), narrator=about.get("narrator"),
+                                        book_title=about.get("title"))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     if linked:

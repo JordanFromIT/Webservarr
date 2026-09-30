@@ -317,6 +317,10 @@ class ListeningPosition(Base):
     # The book key of the earlier copy this place was carried over from (a
     # book re-added as a new album), so its history stays with the book.
     linked_from = Column(String(64), nullable=True)
+    # The book's title as the library showed it at the last check-in that
+    # could read it, so a place offered from this copy can say which copy it
+    # was. Null when not known.
+    book_title = Column(String(300), nullable=True)
 
     def __repr__(self):
         return f"<ListeningPosition(identity='{self.identity}', book='{self.book_key}')>"

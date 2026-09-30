@@ -63,6 +63,7 @@ BOOKS = [
 # The stubbed library's work keys and narrators (plex_player.book_identity).
 WORKS = {"200:1": "c3" * 16, "100:1": "d4" * 16}
 NARRATORS = {"100:1": "Nora"}
+TITLES = {"100:1": "Single Book", "200:1": "Parts Book"}
 
 
 async def fake_assert_in_library(key, track_key=None):
@@ -90,7 +91,7 @@ async def fake_book_identity(key, album=None):
     if key not in LIBRARY:
         raise pp.NotInLibrary("Not in the audiobook library")
     return {"work_key": WORKS.get(key), "narrator": NARRATORS.get(key),
-            "duration_ms": sum(LIBRARY[key].values()) or None}
+            "duration_ms": sum(LIBRARY[key].values()) or None, "title": TITLES.get(key)}
 
 
 async def fake_cover_image(key):
@@ -725,6 +726,18 @@ class BookTime(PlayerApiBase):
         self.checkin(book="100:1", track="101", duration_ms=1_000_000, psid="psid-b")
         self.assertEqual(self.position("100:1")["narrator"], "Nora")
 
+    def test_the_books_title_is_kept_and_shown(self):
+        # Ruling (a): the title the library shows is stored with the place
+        # (not in the log) and /position gives it; a failed identity read
+        # keeps the one the row has.
+        self.assertEqual(self.checkin(book_ms=1_000).status_code, 200)
+        self.assertEqual(self.db.query(ListeningPosition).one().book_title, "Parts Book")
+        self.assertEqual(self.position()["book_title"], "Parts Book")
+        self.book_identity.side_effect = pp.PlayerUnavailable("down")
+        self.assertEqual(self.checkin(seq=2, book_ms=2_000).status_code, 200)
+        self.assertEqual(self.position()["book_title"], "Parts Book")
+        self.assertFalse(hasattr(ListeningLog, "book_title"))
+
     def test_book_ms_past_the_books_length_is_clamped(self):
         self.checkin(book_ms=900_000)
         self.assertEqual(self.position()["book_ms"], 600_000)
@@ -807,7 +820,8 @@ class EarlierCopies(PlayerApiBase):
         self.db.add(ListeningPosition(identity=identity, book_key=book, track_key="301", offset_ms=offset,
                                       duration_ms=400_000, updated_at=at, device="Old phone", source="web",
                                       psid="old", seq=3, book_ms=offset + 400_000, book_duration_ms=900_000,
-                                      chapter_label="Chapter 4", work_key=work_key, narrator="Tamsin Ashby"))
+                                      chapter_label="Chapter 4", work_key=work_key, narrator="Tamsin Ashby",
+                                      book_title="Tide Mill (Unabridged)"))
         for n in range(logs):
             self.db.add(ListeningLog(identity=identity, book_key=book, track_key="301", offset_ms=offset - n,
                                      device="Old phone", event="checkin", at=at, book_ms=offset + 400_000 - n,
@@ -824,8 +838,8 @@ class EarlierCopies(PlayerApiBase):
         web = self.position(self.NEW)
         self.assertEqual(web["linked_from"], self.GONE)
         self.assertEqual((web["track"], web["offset_ms"], web["book_ms"], web["book_duration_ms"],
-                          web["chapter_label"], web["narrator"]),
-                         ("301", 1_234, 401_234, 900_000, "Chapter 4", "Tamsin Ashby"))
+                          web["chapter_label"], web["narrator"], web["book_title"]),
+                         ("301", 1_234, 401_234, 900_000, "Chapter 4", "Tamsin Ashby", "Tide Mill (Unabridged)"))
         entries = self.history()
         self.assertEqual([(e["book_key"], e.get("earlier_copy")) for e in entries],
                          [(self.GONE, True), (self.GONE, True)])

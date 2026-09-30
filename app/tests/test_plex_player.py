@@ -1049,13 +1049,14 @@ class WorkKeys(unittest.TestCase):
                       "Tide Mill - Read by Tamsin Ashby [Book 2]", "Tide Mill - Read by Tamsin Ashby #2",
                       "Tide Mill (Narrated by Tamsin Ashby, Book 2)", "Tide Mill, Book 2 - Read by Tamsin Ashby",
                       "Tide Mill, Vol. 2", "Tide Mill, Vol 2", "Tide Mill, Volume 2", "Tide Mill, Volume II",
-                      "Tide Mill, Book II", "Tide Mill Part 2", "Tide Mill No. 2", "Tide Mill, Number 2",
+                      "Tide Mill, Book II", "Tide Mill, Book Two", "Tide Mill, Bk. 2", "Tide Mill No. 2",
+                      "Tide Mill, Number 2",
                       "Tide Mill #2", "Tide Mill, Book #2", "Tide Mill, Book 02", "Tide Mill {Book 2}",
                       "Tide Mill (Unabridged) (Book 2)", "Tide Mill (Book 2) (Unabridged)"):
             with self.subTest(title=title):
                 self.assertEqual(pp.work_key(self.AUTHOR, title), book2)
         self.assertEqual(pp._work_title("Tide Mill - Read by Tamsin Ashby, Vol. II, Unabridged"), "tide mill #2")
-        self.assertEqual(pp._work_title("Tide Mill, Book 3 [Part 1]"), "tide mill #1 #3")
+        self.assertEqual(pp._work_title("Tide Mill, Book 3 [Part 1]"), "tide mill #3 p1")
         # Not a book number: inside a word, a bare number, or letters that
         # aren't a Roman numeral. Those stay as words.
         for a, b in (("Tide Mill Notebook 2", "Tide Mill Notebook 3"), ("Tide Mill 2", "Tide Mill 3"),
@@ -1069,7 +1070,7 @@ class WorkKeys(unittest.TestCase):
         # copy that writes it that way does not link to "Book 2" (a split
         # only loses a link; it never links the wrong book's place).
         self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill, Book 2 of 5"), pp.work_key(self.AUTHOR, "Tide Mill, Book 2"))
-        self.assertEqual(pp._work_title("Tide Mill, Book 2 of 5"), "tide mill #2 #5")
+        self.assertEqual(pp._work_title("Tide Mill, Book 2 of 5"), "tide mill #2/5")
         self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill - Read by Tamsin Ashby, Book 2 of 5"),
                          pp.work_key(self.AUTHOR, "Tide Mill (Book 2 of 5, Unabridged)"))
 
@@ -1077,9 +1078,93 @@ class WorkKeys(unittest.TestCase):
         for base in ("Tide Mill", "Tide Mill, Book 2"):
             key = pp.work_key(self.AUTHOR, base)
             for suffix in (" (Unabridged)", " - Read by Tamsin Ashby", " (Full-Cast Edition)", " [m4b]", ": A Novel",
-                           " (Narrated by Tamsin Ashby)", " - Read by BBC Radio 4 Full Cast"):
+                           " (Narrated by Tamsin Ashby)", " - Read by Tamsin Ashby, Dee Lane"):
                 with self.subTest(title=base + suffix):
                     self.assertEqual(pp.work_key(self.AUTHOR, base + suffix), key)
+
+    def test_numbers_keep_their_kind_order_and_repeats(self):
+        # T1K1: a token says which phrase it came from ("#" the book's
+        # number: book, bk., vol., no., #; "p" a part; "/M" of M), in order,
+        # repeats kept, so two different books never share a key.
+        for a, b in (("Tide Mill, Book 1, Part 2", "Tide Mill, Book 2, Part 1"),
+                     ("Tide Mill, Book 2 of 5", "Tide Mill, Book 5, Part 2"),
+                     ("Tide Mill, Book 1 of 2", "Tide Mill, Book 2, Part 1"),
+                     ("Tide Mill, Part 1 of 2", "Tide Mill, Book 2 (Part 1)"),
+                     ("Tide Mill, Part 2", "Tide Mill, Book 2"),
+                     ("Tide Mill, Book 2, Part 2", "Tide Mill, Book 2"),
+                     ("Tide Mill, Book 2 (Part 2 of 2)", "Tide Mill, Book 2"),
+                     ("Tide Mill, Vol. 1, Book 2", "Tide Mill, Vol. 2, Book 1"),
+                     ("Tide Mill, Book 2 - Read by Number 3 Players", "Tide Mill, Book 3 - Read by Number 2 Players")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        # Spellings of one number are still one token.
+        for a, b in (("Tide Mill, Vol. 2", "Tide Mill, Volume 2"), ("Tide Mill, Volume II", "Tide Mill, Book 2"),
+                     ("Tide Mill, Book 2, Part 1", "Tide Mill (Vol. II, Pt. 1)"),
+                     ("Tide Mill, Part One of Two", "Tide Mill, Part 1 of 2")):
+            with self.subTest(a=a, b=b):
+                self.assertEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        self.assertEqual(pp._work_title("Tide Mill, Book 2, Part 1"), "tide mill #2 p1")
+        self.assertEqual(pp._work_title("Tide Mill, Book 2 (Part 1 of 2)"), "tide mill #2 p1/2")
+
+    def test_number_words_short_forms_and_narrator_digits_count(self):
+        # T1K2: "Book Two" is a number (one to twenty), Bk. and Pt. are
+        # markers, and digits in the narrator's part that no phrase claims
+        # ("Series 2", "Disc 2", "(2)") become tokens rather than going.
+        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill, Book Two"), pp.work_key(self.AUTHOR, "Tide Mill, Book 2"))
+        for fmt in ("Tide Mill, Book {w}", "Tide Mill - Read by Tamsin Ashby, Book {w}",
+                    "Tide Mill (Narrated by Tamsin Ashby, Book {w})", "Tide Mill - Read by Tamsin Ashby, Part {w}",
+                    "Tide Mill - Read by Tamsin Ashby, Series {n}", "Tide Mill - Read by Tamsin Ashby, Season {n}",
+                    "Tide Mill - Read by Tamsin Ashby, Disc {n}", "Tide Mill - Read by Tamsin Ashby, CD {n}",
+                    "Tide Mill - Read by Tamsin Ashby, Pt. {n}", "Tide Mill - Read by Tamsin Ashby, Bk. {n}",
+                    "Tide Mill - Read by Tamsin Ashby ({n})", "Tide Mill - Read by Tamsin Ashby, {n} of 5",
+                    "Tide Mill - Read by Tamsin Ashby, Episode {n}", "Tide Mill (Read by Tamsin Ashby, Disc {n})",
+                    "Tide Mill, Book {w} - Tamsin Ashby {n}"):
+            with self.subTest(fmt=fmt):
+                two, three = fmt.format(n=2, w="Two"), fmt.format(n=3, w="Three")
+                self.assertNotEqual(pp.work_key(self.AUTHOR, two, "Tamsin Ashby 2"),
+                                    pp.work_key(self.AUTHOR, three, "Tamsin Ashby 3"))
+        self.assertEqual(pp._work_title("Tide Mill - Read by Tamsin Ashby, Series 2"), "tide mill n2")
+        self.assertEqual(pp._work_title("Tide Mill, Bk. 2, Pt. 3"), "tide mill #2 p3")
+        # A narrator whose name holds a digit keeps it in the key, the same
+        # however the narration is written: a split from a copy that doesn't
+        # name them, never a collision.
+        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill - Read by BBC Radio 4 Full Cast"),
+                         pp.work_key(self.AUTHOR, "Tide Mill (Narrated by BBC Radio 4 Full Cast)"))
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill - Read by BBC Radio 4 Full Cast"),
+                            pp.work_key(self.AUTHOR, "Tide Mill"))
+
+    def test_a_part_that_held_a_number_is_kept_less_its_copy_words(self):
+        # T1K3: a phrase taken out leaves a mark, so its bracket or dash part
+        # still counts as numbered: the rest of it stays, only copy words go.
+        for a, b in (("The Iron Crown (Tide Mill Saga, Book 2, Unabridged)", "The Iron Crown (Tide Mill Saga, Book 2)"),
+                     ("The Iron Crown (Tide Mill Saga, Book 2, Unabridged)", "The Iron Crown: Tide Mill Saga, Book 2"),
+                     ("The Iron Crown [Tide Mill Saga, Book 2, Unabridged]",
+                      "The Iron Crown (Tide Mill Saga, Book 2) [Unabridged]"),
+                     ("The Iron Crown - Tide Mill Saga, Book 2, Unabridged Edition",
+                      "The Iron Crown - Tide Mill Saga, Book 2"),
+                     ("The Iron Crown (Tide Mill Saga #2, Unabridged)", "The Iron Crown (Tide Mill Saga #2)"),
+                     ("The Iron Crown (Tide Mill Saga, Book 2, Full-Cast Edition)",
+                      "The Iron Crown (Tide Mill Saga, Book 2)"),
+                     ("Tide Mill (Book 2, Unabridged)", "Tide Mill (Book 2)"),
+                     # A mark left at the very end hides nothing before it.
+                     ("Tide Mill (Narrated by Tamsin Ashby) Book 2", "Tide Mill, Book 2"),
+                     ("Tide Mill (Unabridged) (Book 2, Unabridged)", "Tide Mill, Book 2")):
+            with self.subTest(a=a, b=b):
+                self.assertEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        for a, b in (("Tide Mill (Book 2, Side A, Unabridged)", "Tide Mill (Book 2, Side B, Unabridged)"),
+                     ("Tide Mill (Book 2, Disc One, Unabridged)", "Tide Mill (Book 2, Disc Two, Unabridged)"),
+                     ("Tide Mill (Book 2: The Iron Crown, Unabridged)", "Tide Mill (Book 2: The Silver Tide, Unabridged)")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+
+    def test_decimals_are_kept_exactly(self):
+        # T1K5: "2.1" and "2.10" are two books; a leading zero is not a digit
+        # of the number.
+        for a, b in (("Tide Mill, Book 2.1", "Tide Mill, Book 2.10"), ("Tide Mill, Book 1.5", "Tide Mill, Book 1.50"),
+                     ("Tide Mill, Book 2.5", "Tide Mill, Book 2, Part 5")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill, Book 02.5"), pp.work_key(self.AUTHOR, "Tide Mill, Book 2.5"))
 
     def test_spellings_of_one_title_are_folded(self):
         # T1B2: accents, full-width forms, "&", "A Novel" and apostrophe variants.
@@ -1119,7 +1204,7 @@ class BookIdentity(BridgeBase):
     def test_the_fields_a_save_records(self):
         out = self.run_async(pp.book_identity("200:1"))
         self.assertEqual(out, {"work_key": pp.work_key("Bea Writer", "Parts Book"), "narrator": "Pat Voice",
-                               "duration_ms": 600_000})
+                               "duration_ms": 600_000, "title": "Parts Book"})
 
     def test_it_matches_what_list_books_says_of_every_book(self):
         for book in self.run_async(pp.list_books()):
@@ -1183,7 +1268,7 @@ class BookIdentity(BridgeBase):
         "Tide Mill - Read by Tamsin Ashby, Book {n}, Unabridged",
         "Tide Mill (Narrated by Tamsin Ashby, Book {n}, Unabridged)",
         "Tide Mill - Read by Tamsin Ashby, Book {n} (Unabridged)", "Tide Mill - Read by Tamsin Ashby (Book {n})",
-        "Tide Mill - Read by Tamsin Ashby - Book {n}", "Tide Mill - Read by Tamsin Ashby – Volume {n}",
+        "Tide Mill - Read by Tamsin Ashby - Book {n}", "Tide Mill - Read by Tamsin Ashby \u2013 Volume {n}",
         "Tide Mill - Read by Tamsin Ashby [Book {n}]", "Tide Mill - Read by Tamsin Ashby {{No. {n}}}",
         "Tide Mill - Read by Tamsin Ashby #{n}", "Tide Mill - Read by Tamsin Ashby: Book {n}",
         "Tide Mill - Read by Tamsin Ashby, Book {n} of 5", "Tide Mill - Read by Tamsin Ashby, Book {n}.5",
@@ -1318,6 +1403,21 @@ class BookIdentity(BridgeBase):
                     keys = [self.run_async(pp.book_identity(f"660:{d}"))["work_key"] for d in (1, 2, 3)]
                 self.assertEqual(len(set(keys)), 3)
                 self.assertEqual(keys[2], pp.work_key("Cal Penn", "The Lighthouse"))
+
+    def test_untitled_discs_are_keyed_from_the_albums_whole_title(self):
+        # T1K4: a disc whose first track has no title is named by the album
+        # as Plex gives it, so a book number in its narration still counts.
+        def keys(rk, title):
+            album = {"ratingKey": rk, "type": "album", "title": title, "titleSort": title,
+                     "parentTitle": "Cal Penn", "thumb": f"/library/metadata/{rk}/thumb/1"}
+            with mock.patch.dict(ALBUMS, {rk: album}), mock.patch.dict(TRACKS):
+                TRACKS[rk] = [dict(track(int(rk) + 1, rk, 1, 1, 10_000, f"E/{rk}a"), title=""),
+                              dict(track(int(rk) + 2, rk, 2, 1, 20_000, f"E/{rk}b"), title="")]
+                return [self.run_async(pp.book_identity(f"{rk}:{d}"))["work_key"] for d in (1, 2)]
+        two, three = keys("690", "Harbour Tales - Read by Tamsin Ashby, Book 2"), \
+            keys("695", "Harbour Tales - Read by Tamsin Ashby, Book 3")
+        self.assertEqual(len(set(two + three)), 4)
+        self.assertEqual(two, keys("697", "Harbour Tales, Book 2 (Unabridged)"))
 
     def test_a_duplicate_copy_is_not_counted_in_the_length(self):
         self.assertEqual(self.run_async(pp.book_identity("300:1"))["duration_ms"], 510_000)

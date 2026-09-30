@@ -133,13 +133,13 @@ LISTENING_BOOK_COLUMNS = (
     ("narrator", "VARCHAR(200)"),
 )
 # And on listening_positions only: the earlier copy a place was carried over from.
-LISTENING_POSITION_COLUMNS = (("linked_from", "VARCHAR(64)"),)
+LISTENING_POSITION_COLUMNS = (("linked_from", "VARCHAR(64)"), ("book_title", "VARCHAR(300)"))
 
 
 def migrate_listening_book_fields(db: Session) -> None:
     """One-time migration: add the book-time, book-length, chapter, work-key
     and narrator columns to listening_positions and listening_log,
-    listening_positions.linked_from, and the (identity, work_key) index an
+    listening_positions.linked_from and .book_title, and the (identity, work_key) index an
     earlier copy of a re-added book is found by, in existing databases.
 
     Existing rows keep nulls (the player treats them as saved before these
