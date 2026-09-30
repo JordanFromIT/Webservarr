@@ -57,6 +57,19 @@
  * answers), and another page's at this very place just becomes the base
  * (adoptBase).
  *
+ * The book's files changed (spec 2.5, docs/superpowers/specs/2026-09-30-
+ * audiobook-files-changed-design.md): every save, beacon and last save also
+ * carries the place's book time (book_ms) and its chapter's label
+ * (chapter_label), as the engine gives them, and the local copy keeps them
+ * with the book's length, so the place survives the files being replaced.
+ * When the place the book should open at is in a part it no longer has, or
+ * comes from an earlier copy of the book, the engine starts the saves held
+ * (start({ files })): held as an unanswered 409 is (nothing is sent, no
+ * beacon, no last save) and the local copy is not written, until the
+ * listener places the book (releaseFiles). A place from an earlier copy
+ * then sends linked_from with its saves until the server answers "linked"
+ * true or false.
+ *
  * Device: every save carries the device label ("Chrome on Android") and this
  * browser's own random id (device_id), made once and kept in localStorage
  * (for the page session only where storage throws), so the handoff prompt
@@ -97,7 +110,7 @@
  *               now (wall clock), mono (monotonic; default performance.now),
  *               storage, identity (the identity key: string or function), device,
  *               deviceId, setTimeout, clearTimeout, onSignedOut, formatTime, psid })
- *   start(book, { push, savedAt, held, keepLocal, openedAt })
+ *   start(book, { push, savedAt, held, keepLocal, openedAt, files })
  *                                   push: the place the book opens at is newer
  *                                   than the server's and this browser's own,
  *                                   never taken by the server (a local copy):
@@ -114,6 +127,13 @@
  *                                   keepLocal: leave this browser's local copy
  *                                   as it is until the listener plays or moves
  *                                   (the open's handoff question is showing).
+ *                                   files: the book's files changed: held (see
+ *                                   above) until releaseFiles.
+ *   releaseFiles(book, link) -> bool  the listener placed it: the hold ends and
+ *                                   the move reported next is the one save
+ *                                   (nothing a preview left pending is sent,
+ *                                   no smart rewind's floor survives); link:
+ *                                   the earlier copy's key, or null
  *   stop()                          saves the last place once (if it needs it; its
  *                                   seq is taken at once, so whatever opens next
  *                                   outranks it), ends an active warning with
@@ -125,7 +145,8 @@
  *                                   app's place: with the base as it was)
  *   note(change)                    each engine change { reason, state, rewind,
  *                                   from, to (a move's book ms), placeMs (the
- *                                   book ms of state.position) }
+ *                                   book ms of state.position), placeLabel (the
+ *                                   label of the chapter it is in) }
  *   lastSeen(book) -> { base, psid, conflict } | null   what this page last saw
  *   otherSaved(book, { track, offset_ms, device, updated_at }, now, plex)
  *                                   a newer place saved elsewhere (another page,
@@ -139,7 +160,8 @@
  *   wake()                          back from frozen or hidden: the save in flight
  *                                   gets its full 15 s again
  *   clockProbe() -> done(serverNow) measure the clock against a server answer
- *   readLocal(book) -> { track, offset_ms, duration_ms, updated_at, device, own, acked, ackedAt } | null
+ *   readLocal(book) -> { track, offset_ms, duration_ms, updated_at, device, own, acked, ackedAt,
+ *                        and where the copy has them book_ms, book_duration_ms, chapter_label } | null
  *   resumeFrom(book, { web, plex }) -> resumeOrder with the local copy
  *   onWarning(fn) -> unsubscribe
  *   lastSavedAt (ms, this page's clock, or null), warning (bool), psid,
@@ -158,6 +180,8 @@ export const PLEX_ECHO_MS = 2000;       // Plex's copy of a save forwarded to it
 export const FRESH_MS = 120000;         // an unsaved place older than this stays local (see sendable)
 export const FREEZE_MS = 5000;          // a silence this long while playing: the page was frozen
 export const DRIFT_MS = 1000;           // paused, this close to the saved place is the saved place
+export const LABEL_MAX = 200;           // a chapter label's characters, as the server takes them
+export const BOOK_MS_MAX = 1000000000;  // the server's bound on book_ms
 export const NOT_SAVED = "Your place isn't being saved.";
 
 const CHECKIN_URL = '/api/player/checkin';
@@ -166,6 +190,8 @@ const CLOCK_KEY = STORE_PREFIX + 'clock';
 const DEVICE_KEY = STORE_PREFIX + 'device';
 const DEVICE_MAX = 80;
 const DEVICE_ID = /^[a-z0-9]{16,40}$/;
+const BOOK_KEY = /^[0-9]{1,20}:[0-9]{1,6}$/;   // an earlier copy's book key (linked_from), as the server checks it
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
 // The check-in event for an engine change, and whether it is saved at once.
 const EVENTS = {
@@ -314,6 +340,22 @@ function samePlace(a, b) {
   return !!a && !!b && a.track === b.track && a.offset_ms === b.offset_ms;
 }
 
+/* A chapter label as the server takes it: well formed (a lone surrogate
+   can't be encoded, and the check-in would be refused) and at most
+   LABEL_MAX characters, never cut inside one. '' when there is none. */
+function labelOf(v) {
+  if (typeof v !== 'string' || !v) return '';
+  const s = v.replace(LONE_SURROGATE, '\uFFFD');
+  const chars = Array.from(s);
+  return chars.length > LABEL_MAX ? chars.slice(0, LABEL_MAX).join('') : s;
+}
+
+// A book time the server takes (a whole number in its bounds), else NaN.
+function bookMsOf(v) {
+  const n = typeof v === 'number' ? Math.round(v) : NaN;
+  return isFinite(n) && n >= 0 && n <= BOOK_MS_MAX ? n : NaN;
+}
+
 function newPsid() {
   const c = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
   try {
@@ -420,8 +462,14 @@ export function createSaver(o) {
     try { v = JSON.parse(raw); } catch (e) { return null; }
     const c = copyOf('local', v);
     if (!c) return null;
-    return { track: c.track, offset_ms: c.offset_ms, duration_ms: c.duration_ms, updated_at: c.updated_at, device: c.device, own: v.own === true, acked: v.acked === true,
+    const out = { track: c.track, offset_ms: c.offset_ms, duration_ms: c.duration_ms, updated_at: c.updated_at, device: c.device, own: v.own === true, acked: v.acked === true,
       ackedAt: v.ackedAt && typeof v.ackedAt === 'object' ? { track: String(v.ackedAt.track), offset_ms: Number(v.ackedAt.offset_ms) } : null };
+    // The place in terms that survive the book's files changing (spec 2.5),
+    // where this copy has them.
+    if (isFinite(bookMsOf(v.book_ms))) out.book_ms = bookMsOf(v.book_ms);
+    if (isFinite(bookMsOf(v.book_duration_ms))) out.book_duration_ms = bookMsOf(v.book_duration_ms);
+    if (labelOf(v.chapter_label)) out.chapter_label = labelOf(v.chapter_label);
+    return out;
   }
 
   // Stamped when the place is reached, in the server's clock. own: the
@@ -470,7 +518,7 @@ export function createSaver(o) {
     // makes it look newer than it is (the next open would push it).
     const opened = !own && r && r.book === book ? r.openedAt : NaN;
     const stamp = isFinite(opened) ? opened : now() + skew;
-    const value = JSON.stringify({
+    const v = {
       track: place.track,
       offset_ms: place.offset_ms,
       duration_ms: place.duration_ms,
@@ -479,7 +527,13 @@ export function createSaver(o) {
       own: !!own,
       acked: !!(r && r.book === book && !sending && ackedPlace(r, place)),
       ackedAt: r && r.book === book && r.acked ? { track: String(r.acked.track), offset_ms: r.acked.offset_ms } : null
-    });
+    };
+    // Where known: the place's book time, the book's length and the
+    // chapter, so the place survives the book's files changing (spec 2.5).
+    if (isFinite(place.bookMs)) v.book_ms = place.bookMs;
+    if (isFinite(place.bookDurationMs)) v.book_duration_ms = place.bookDurationMs;
+    if (place.label) v.chapter_label = place.label;
+    const value = JSON.stringify(v);
     stored(function (s) { s.setItem(localKey(id, book), value); });
   }
 
@@ -546,8 +600,16 @@ export function createSaver(o) {
       base: null,             // the server's timestamp of the place this page last saw
       conflict: null,         // a 409 not yet answered: nothing is sent meanwhile
       keepLocal: false,       // leave the local copy alone until the listener acts
-      openedAt: NaN           // the stamp (ms) of the copy the book opened at
+      openedAt: NaN,          // the stamp (ms) of the copy the book opened at
+      linkedFrom: null        // an earlier copy's key, sent until the server says whether it linked it
     };
+  }
+
+  /* The book's files changed (spec 2.5): the place the book opened at is
+     not the listener's until they place it. Held like a 409 (r.conflict),
+     so nothing is sent, and the local copy is not written either. */
+  function filesHeld(r) {
+    return !!(r && r.conflict && r.conflict.files);
   }
 
   /* Paused within DRIFT_MS of the place the server took, on its part: the
@@ -575,7 +637,8 @@ export function createSaver(o) {
     return mono() - r.reachedMono <= FRESH_MS && now() - r.reachedWall <= FRESH_MS;
   }
 
-  function body(book, place, event, base) {
+  // link: an earlier copy's key (linkedFrom), or null.
+  function body(book, place, event, base, link) {
     seq += 1;
     const b = {
       book: book,
@@ -589,6 +652,10 @@ export function createSaver(o) {
       base: typeof base === 'string' && base ? base : null
     };
     if (deviceId) b.device_id = deviceId;
+    // The place's book time and chapter (spec 2.5), where the engine gave them.
+    if (isFinite(place.bookMs)) b.book_ms = place.bookMs;
+    if (place.label) b.chapter_label = place.label;
+    if (link) b.linked_from = link;
     return b;
   }
 
@@ -615,7 +682,7 @@ export function createSaver(o) {
     r.lastSendAt = at;
     let p;
     try {
-      p = Promise.resolve(post(body(r.book, place, event, r.base), 'fetch'));
+      p = Promise.resolve(post(body(r.book, place, event, r.base, r.linkedFrom), 'fetch'));
     } catch (e) {
       p = Promise.reject(e);
     }
@@ -629,6 +696,11 @@ export function createSaver(o) {
     const sent = r.inFlight;
     r.inFlight = null;
     const status = res && typeof res.status === 'number' ? res.status : 0;
+    // The server said whether it linked the earlier copy (true or false):
+    // that is settled, so it is sent no more. null (it could not check) or
+    // no answer: it goes again with the next save.
+    const linked = res && res.data && typeof res.data === 'object' ? res.data.linked : undefined;
+    if (r.linkedFrom && (linked === true || linked === false)) r.linkedFrom = null;
     if (status >= 200 && status < 300) {
       r.acked = sent.place;
       r.failures = 0;
@@ -798,6 +870,14 @@ export function createSaver(o) {
     // skip, jump), another book or a close ends the floor; a move forward
     // that lands short of it keeps it (the later of the two is saved).
     const placeMs = typeof change.placeMs === 'number' && isFinite(change.placeMs) ? change.placeMs : Number(st.bookMs);
+    // The place in terms that survive the book's files changing (spec 2.5):
+    // its book time, the book's length and its chapter's label, carried with
+    // it (a floor's place keeps its own).
+    if (place) {
+      place.bookMs = bookMsOf(placeMs);
+      place.bookDurationMs = bookMsOf(Number(st.bookDurationMs));
+      place.label = labelOf(change.placeLabel);
+    }
     if (change.rewind) {
       if (!r.floor && r.latest && isFinite(r.latestBookMs)) r.floor = { place: r.latest, bookMs: r.latestBookMs };
     } else if (r.floor) {
@@ -820,7 +900,9 @@ export function createSaver(o) {
       // The open's handoff question keeps this browser's own place in the
       // local copy until the listener acts.
       if (reached) r.keepLocal = false;
-      if (moved && !r.keepLocal) {
+      // Held for the book's changed files: the local copy keeps the old
+      // place (a preview, or any move, is not the listener's place yet).
+      if (moved && !r.keepLocal && !filesHeld(r)) {
         writeLocal(r.book, place, reached || r.reachedMono !== null, !!ev);
       }
       if (moved) {
@@ -858,6 +940,9 @@ export function createSaver(o) {
     run.base = typeof opts.savedAt === 'string' && opts.savedAt ? opts.savedAt : null;
     run.keepLocal = !!opts.keepLocal;
     run.openedAt = timeOf(opts.openedAt);
+    // The book's files changed (spec 2.5): held like an unanswered 409 until
+    // the listener places it (releaseFiles).
+    if (opts.files) run.conflict = { files: true };
     // A newer local copy the book opens at is sent at once: opening from it
     // counts as reaching it, so it obeys the same 2 minutes as any place.
     if (opts.push) {
@@ -885,11 +970,11 @@ export function createSaver(o) {
     // so the server never takes this place over a later one (a late final
     // from the same psid is refused).
     if (r.latest && sendable(r) && (r.playing || dirty(r))) {
-      r.final = body(r.book, r.latest, r.event === 'end' ? 'end' : 'leave', r.base);
+      r.final = body(r.book, r.latest, r.event === 'end' ? 'end' : 'leave', r.base, r.linkedFrom);
     } else if (r.inFlight && r.inFlight.event !== 'checkin' && sendable(r)) {
       // A pause or a move still in flight is the last word, unless it fails:
       // then this 'leave' of its place goes instead (Plex is told it stopped).
-      r.fallback = body(r.book, r.inFlight.place, r.inFlight.event === 'end' ? 'end' : 'leave', r.base);
+      r.fallback = body(r.book, r.inFlight.place, r.inFlight.event === 'end' ? 'end' : 'leave', r.base, r.linkedFrom);
     }
     if (!r.final && !r.fallback) return;
     if (!r.inFlight) {
@@ -951,7 +1036,7 @@ export function createSaver(o) {
       lastBeacon = key;
       if (ev === 'leave') leftAt = at;
       try {
-        post(body(r.book, place, ev, r.base), 'beacon');
+        post(body(r.book, place, ev, r.base, r.linkedFrom), 'beacon');
       } catch (e) {
         return false;
       }
@@ -969,7 +1054,8 @@ export function createSaver(o) {
      with its timestamp as the base. Returns the conflict, or null. */
   function resolveConflict() {
     const r = run;
-    if (!r || !r.conflict) return null;
+    // The files-changed hold is released only by placing the book.
+    if (!r || !r.conflict || filesHeld(r)) return null;
     const c = r.conflict;
     r.conflict = null;
     // A Plex app's place was never a 409: the base stays WebServarr's own.
@@ -996,7 +1082,7 @@ export function createSaver(o) {
      'conflict' warning asks the question. */
   function otherSaved(book, c, serverNow, plex) {
     const r = run;
-    if (!r || r.stopped || r.book !== String(book) || !c || typeof c.updated_at !== 'string') return false;
+    if (!r || r.stopped || r.book !== String(book) || !c || typeof c.updated_at !== 'string' || filesHeld(r)) return false;
     r.conflict = {
       track: String(c.track == null ? '' : c.track),
       offset_ms: Number(c.offset_ms),
@@ -1021,6 +1107,27 @@ export function createSaver(o) {
     return true;
   }
 
+  /* The listener placed a book whose files changed (the engine's
+     confirmPlace or startOver): the hold ends, and the move the engine
+     reports next is the one save. Nothing the held time left pending (a
+     preview's play or pause) is sent, and no smart rewind's floor outlives
+     it. link: the earlier copy's key when the place came from one; it rides
+     on the saves until the server says whether it linked it. false when
+     the book is not held. */
+  function releaseFiles(book, link) {
+    const r = run;
+    if (!r || r.stopped || r.book !== String(book) || !filesHeld(r)) return false;
+    r.conflict = null;
+    r.floor = null;
+    r.event = null;
+    r.urgent = false;
+    r.reachedMono = null;
+    r.reachedWall = null;
+    r.keepLocal = false;
+    r.linkedFrom = typeof link === 'string' && BOOK_KEY.test(link) ? link : null;
+    return true;
+  }
+
   function resumeFrom(book, copies) {
     const c = copies || {};
     return resumeOrder({ web: c.web, plex: c.plex, local: readLocal(book) });
@@ -1030,6 +1137,7 @@ export function createSaver(o) {
     start: start,
     stop: stop,
     note: note,
+    releaseFiles: releaseFiles,
     flush: flush,
     wake: function () {
       wakeRun(run);

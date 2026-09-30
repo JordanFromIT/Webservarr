@@ -111,7 +111,8 @@ function fakeServer(clock) {
           call.status = mode;
           if (mode === 409) { resolve({ status: 409, data: { conflict: s.conflict, now: new Date(clock.now).toISOString() } }); return; }
           if (mode !== 200) { resolve({ status: mode, data: { detail: 'no' } }); return; }
-          resolve({ status: 200, data: s.store(b) });
+          // s.extra: more fields on a 2xx answer (spec 2.5's "linked").
+          resolve({ status: 200, data: Object.assign(s.store(b), s.extra || {}) });
         }, s.latency);
       });
     }
@@ -1025,7 +1026,7 @@ function withEngine(o = {}) {
     },
     setTimeout: (fn, ms) => clock.setTimeout(fn, ms),
     clearTimeout: (id) => clock.clearTimeout(id),
-    mediaSession: null,
+    mediaSession: o.mediaSession || null,
     MediaMetadata: null,
     baseUrl: 'https://ws.test/',
     saver: t.saver
@@ -1214,10 +1215,18 @@ current = 'an undecodable book saves nothing, not even a newer local copy';
   check('the local copy keeps the place', copy && copy.track === '801' && copy.offset_ms === 5000000, copy);
 }
 
-current = 'a saved place in a part the book no longer has: the next newest, else the start with a notice';
+// Spec 2.5 s4 (replaces T5E3's fallback: the next newest copy, else 0 with
+// "Couldn't find your saved place in this book"): the newest copy names a
+// part the book no longer has, so the files changed. The open holds at the
+// start, nothing is saved and the local copy is left as it is, until the
+// listener places it (confirmPlace, startOver). An older copy in a part the
+// book has is never jumped to on its own.
+current = 'a saved place in a part the book no longer has: files changed, held at the start, nothing saved';
 {
   const storage = fakeStorage();
-  setLocal(storage, { track: '999', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-10) });
+  setLocal(storage, { track: '999', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-10), device: 'Chrome on Android', own: true, acked: false,
+    book_ms: 900000, book_duration_ms: 1800000, chapter_label: 'Chapter 7' });
+  const kept = storage.map.get('ws-player:place:' + IDENTITY + ':500:1');
   const t = withEngine({ storage, places: {
     web: { track: '503', offset_ms: 12000, duration_ms: 300000, updated_at: iso(-600), device: 'Chrome on Windows', source: 'web' },
     plex: { track: '998', offset_ms: 50000, duration_ms: 900000, updated_at: iso(-300), device: 'Plex', source: 'plex' }
@@ -1228,30 +1237,48 @@ current = 'a saved place in a part the book no longer has: the next newest, else
   await opened;
   check('open does not reject', threw === null, threw && threw.name);
   const s = t.engine.state();
-  check('opened at the newest copy whose part exists (web)', s.position.track === '503' && s.position.offset_ms >= 12000 && s.position.offset_ms <= 13000, s.position);
-  check('no notice', t.log.warning.length === 0, t.log.warning);
-  check('no newer-local send (the local copy was unusable)', t.server.fetches().every((c) => c.body.track === '503'));
+  const old = s.filesChanged && s.filesChanged.old;
+  check('files changed, from the newest copy (local)', old && old.source === 'local' && old.track === '999' && old.offset_ms === 300000 &&
+    old.book_ms === 900000 && old.book_duration_ms === 1800000 && old.chapter_label === 'Chapter 7' && old.updated_at === iso(-10) &&
+    old.linked_from === null, s.filesChanged);
+  check('held at the start, not the older web place', s.position.track === '501' && s.position.offset_ms === 0 && !s.playing, s.position);
+  check('a files-changed warning, no "couldn\'t find" notice', t.log.warning.length === 1 && t.log.warning[0].kind === 'files-changed', t.log.warning);
+  check('resumedFrom null', s.resumedFrom === null);
+  await t.clock.advance(60000);
+  check('nothing sent', t.server.calls.length === 0, t.server.calls.map((c) => c.body));
+  check('the local copy is as it was', storage.map.get('ws-player:place:' + IDENTITY + ':500:1') === kept);
   t.engine.close();
+  await t.clock.advance(20000);
+  check('nothing on close', t.server.calls.length === 0, t.server.calls.map((c) => c.body));
+  check('the local copy is still as it was', storage.map.get('ws-player:place:' + IDENTITY + ':500:1') === kept);
 
-  const storage2 = fakeStorage();
-  setLocal(storage2, { track: '999', offset_ms: 300000, duration_ms: 900000, updated_at: iso(-10) });
-  const u = withEngine({ storage: storage2, places: { web: { track: '997', offset_ms: 1, updated_at: iso(-600) }, plex: null } });
+  const u = withEngine({ places: { web: { track: '997', offset_ms: 1, duration_ms: 900000, updated_at: iso(-600), book_ms: 1200001 }, plex: null } });
   const opened2 = u.engine.open('500:1');
   await u.clock.advance(1000);
   await opened2;
-  const s2 = u.engine.state();
-  check('none usable: the start of the book', s2.position.track === '501' && s2.position.offset_ms < 1500, s2.position);
-  check('with the notice', u.log.warning.length === 1 && u.log.warning[0].kind === 'resume-lost' &&
-    u.log.warning[0].message === "Couldn't find your saved place in this book", u.log.warning);
-  check('resumedFrom null', s2.resumedFrom === null);
+  const old2 = u.engine.state().filesChanged && u.engine.state().filesChanged.old;
+  check('a web copy in a missing part: files changed from it', old2 && old2.source === 'web' && old2.track === '997' && old2.book_ms === 1200001 &&
+    old2.book_duration_ms === null && old2.chapter_label === null, old2);
+  check('not playing, nothing sent, no local copy', !u.engine.state().playing && u.server.calls.length === 0 && localOf(u) === null);
   u.engine.close();
 
   const v = withEngine();
   const opened3 = v.engine.open('500:1');
   await v.clock.advance(1000);
   await opened3;
-  check('no saved place at all: the start, no notice', v.engine.state().position.track === '501' && v.log.warning.length === 0);
+  check('no saved place at all: the start, no warning', v.engine.state().position.track === '501' && v.log.warning.length === 0 &&
+    v.engine.state().filesChanged === null);
   v.engine.close();
+
+  // The newest copy in a part the book has: resumed as ever, whatever an older one names.
+  const w = withEngine({ places: { web: { track: '503', offset_ms: 12000, duration_ms: 300000, updated_at: iso(-5) },
+    plex: { track: '998', offset_ms: 50000, duration_ms: 900000, updated_at: iso(-300) } } });
+  const opened4 = w.engine.open('500:1');
+  await w.clock.advance(1000);
+  await opened4;
+  check('an older copy in a missing part changes nothing', w.engine.state().filesChanged === null && w.engine.state().position.track === '503' &&
+    w.log.warning.length === 0, w.engine.state().position);
+  w.engine.close();
 }
 
 current = 'open() at a place the book does not have still rejects, with a saver too';
@@ -2735,6 +2762,380 @@ current = 'keepLocal: the local copy is left as it was until the listener acts';
   p.seek(910000);
   check('a move of the listener\'s writes it', localOf(t).offset_ms === 910000, localOf(t));
   t.saver.stop();
+}
+
+// ---- Spec 2.5: the place in terms that survive a file change, and the held "files changed" ----
+const CHAPTERED = Object.assign(JSON.parse(JSON.stringify(BOOK)), { chapters: [
+  { index: 1, label: 'Opening', start_ms: 0, end_ms: 300000, track: '501', track_start_ms: 0, track_end_ms: 300000 },
+  { index: 2, label: 'The Middle', start_ms: 300000, end_ms: 1200000, track: '501', track_start_ms: 300000, track_end_ms: 600000 },
+  { index: 3, label: 'The End', start_ms: 1200000, end_ms: 1800000, track: '502', track_start_ms: 600000, track_end_ms: 900000 }
+] });
+const STARTS = { 501: 0, 502: 600000, 503: 1500000 };
+const labelAt = (ms) => (ms >= 1200000 ? 'The End' : ms >= 300000 ? 'The Middle' : 'Opening');
+const bodyOk = (b) => b.book_ms === STARTS[b.track] + b.offset_ms && b.chapter_label === labelAt(b.book_ms);
+const beaconBodies = (t) => t.server.beacons().map((c) => c.body);
+const LOCAL_KEY = 'ws-player:place:' + IDENTITY + ':500:1';
+// The web copy of a place in a part this book no longer has, and one from an earlier copy of the book.
+const GONE_WEB = { track: '599', offset_ms: 120000, duration_ms: 900000, updated_at: iso(-3600), device: 'Chrome on Windows', source: 'web',
+  book_ms: 720000, book_duration_ms: 1800000, chapter_label: 'Chapter 4', narrator: 'N. Reader', book_title: 'Three Parts', psid: 'other' };
+const LINKED_WEB = Object.assign({}, GONE_WEB, { track: '401', linked_from: '400:1', book_title: 'Three Parts (First Edition)' });
+async function openBook(t, key = '500:1') {
+  const p = t.engine.open(key);
+  await t.clock.advance(1000);
+  await p;
+}
+
+current = 'spec 2.5: every save, beacon and last save carries book_ms and chapter_label';
+{
+  const t = withEngine({ book: CHAPTERED, places: { web: { track: '502', offset_ms: 200000, duration_ms: 900000, updated_at: iso(-5) }, plex: null } });
+  await openBook(t);
+  await t.clock.advance(24000);
+  const f = t.server.fetches();
+  check('the play and the checkins', f.length >= 3 && f[0].body.event === 'play', f.map((c) => c.body.event));
+  check('the play: the place\'s book time and chapter', f[0].body.book_ms === 600000 + f[0].body.offset_ms && f[0].body.offset_ms >= 200000 &&
+    f[0].body.chapter_label === 'The Middle', f[0].body);
+  check('every fetch: book_ms and chapter_label of its own place', f.every((c) => bodyOk(c.body)), f.map((c) => [c.body.track, c.body.offset_ms, c.body.book_ms, c.body.chapter_label]));
+  t.engine.seek(1250000);                              // 502 at 650 s: The End
+  await t.clock.advance(1100);
+  const sk = t.server.fetches().pop().body;
+  check('a move carries the new place\'s', sk.event === 'seek' && sk.book_ms === 1250000 && sk.chapter_label === 'The End', sk);
+  await t.clock.advance(2000);
+  t.saver.flush('beacon', 'leave');
+  const bb = beaconBodies(t);
+  check('a beacon carries them', bb.length === 1 && bodyOk(bb[0]) && bb[0].book_ms > 1250000, bb);
+  await t.clock.advance(1000);
+  t.engine.close();
+  await t.clock.advance(1000);
+  const fin = t.server.fetches().pop().body;
+  check('the last save (close) carries them', fin.event === 'leave' && bodyOk(fin) && fin.book_ms > 1250000, fin);
+  const l = localOf(t);
+  check('the local copy keeps book time, length and chapter', l && l.book_ms === STARTS[l.track] + l.offset_ms && l.book_duration_ms === 1800000 &&
+    l.chapter_label === labelAt(l.book_ms), l);
+  check('readLocal gives them back', t.saver.readLocal('500:1').book_ms === l.book_ms && t.saver.readLocal('500:1').chapter_label === l.chapter_label &&
+    t.saver.readLocal('500:1').book_duration_ms === 1800000);
+  check('never a linked_from unasked', t.server.calls.every((c) => !('linked_from' in c.body)));
+}
+
+current = 'spec 2.5: the chapter label is at most 200 characters, well formed; book_ms only when known';
+{
+  const t = makeSaver();
+  t.saver.start('500:1');
+  const st = (off) => ({ book: '500:1', playing: false, position: { track: '501', offset_ms: off, duration_ms: 3600000 }, bookDurationMs: 3600000 });
+  t.saver.note({ reason: 'open', state: st(0), placeMs: 0, placeLabel: 'Opening' });
+  t.saver.note({ reason: 'seek', state: st(5000), from: 0, to: 5000, placeMs: 5000, placeLabel: '😀'.repeat(250) });
+  await t.clock.advance(1500);
+  const b1 = t.server.calls[0].body;
+  check('cut at 200 characters, never inside one', /^(😀){200}$/.test(b1.chapter_label), b1.chapter_label && b1.chapter_label.length);
+  t.saver.note({ reason: 'seek', state: st(6000), from: 5000, to: 6000, placeMs: 6000, placeLabel: 'Ch\uD800apter' });
+  await t.clock.advance(1500);
+  check('a lone surrogate is replaced', t.server.calls[1].body.chapter_label === 'Ch�apter', t.server.calls[1].body.chapter_label);
+  t.saver.note({ reason: 'seek', state: st(7000), from: 6000, to: 7000, placeMs: 7000, placeLabel: '' });
+  await t.clock.advance(1500);
+  const b3 = t.server.calls[2].body;
+  check('no label: no chapter_label', !('chapter_label' in b3) && b3.book_ms === 7000, b3);
+  t.saver.note({ reason: 'seek', state: st(8000), from: 7000, to: 8000, placeMs: 1e9 + 1, placeLabel: 'Late' });
+  await t.clock.advance(1500);
+  const b4 = t.server.calls[3].body;
+  check('a book time past the server\'s bound is left out', !('book_ms' in b4) && b4.chapter_label === 'Late', b4);
+  t.saver.stop();
+}
+
+current = 'spec 2.5: a web copy from an earlier copy of the book (linked_from) enters "files changed"';
+{
+  const t = withEngine({ places: { web: LINKED_WEB, plex: null } });
+  await openBook(t);
+  const old = t.engine.state().filesChanged && t.engine.state().filesChanged.old;
+  check('files changed from it, with its link and names', old && old.source === 'web' && old.track === '401' && old.linked_from === '400:1' &&
+    old.book_ms === 720000 && old.book_duration_ms === 1800000 && old.chapter_label === 'Chapter 4' &&
+    old.book_title === 'Three Parts (First Edition)' && old.narrator === 'N. Reader', old);
+  check('one files-changed warning', t.log.warning.filter((w) => w.kind === 'files-changed').length === 1, t.log.warning);
+  await t.clock.advance(60000);
+  check('nothing sent, no local copy written', t.server.calls.length === 0 && !t.storage.map.has(LOCAL_KEY), t.server.calls.map((c) => c.body));
+  t.engine.close();
+  await t.clock.advance(20000);
+  check('nothing on close', t.server.calls.length === 0);
+}
+
+current = 'spec 2.5: previewAt plays about 15 s with nothing saved';
+{
+  const storage = fakeStorage();
+  setLocal(storage, { track: '599', offset_ms: 120000, duration_ms: 900000, updated_at: iso(-10), own: true, acked: false });
+  const kept = storage.map.get(LOCAL_KEY);
+  const t = withEngine({ storage, book: CHAPTERED, places: { web: GONE_WEB, plex: null } });
+  await openBook(t);
+  check('held', t.engine.state().filesChanged !== null && t.engine.state().filesChanged.old.source === 'local');
+  check('previewAt', t.engine.previewAt(700000) === true);
+  await t.clock.advance(5000);
+  check('playing the preview', t.engine.state().playing === true);
+  await t.clock.advance(15000);
+  const s = t.engine.state();
+  check('paused after about 15 s', !s.playing && s.bookMs >= 715000 && s.bookMs <= 715500, s.bookMs);
+  check('0 check-ins, 0 beacons', t.server.calls.length === 0, t.server.calls.map((c) => c.body));
+  check('the local copy is as it was', storage.map.get(LOCAL_KEY) === kept);
+  check('still held', s.filesChanged !== null);
+  t.engine.close();
+}
+
+current = 'spec 2.5: confirmPlace saves exactly once, as an explicit move, and saving goes on as ever';
+{
+  const storage = fakeStorage();
+  const t = withEngine({ storage, book: CHAPTERED, places: { web: GONE_WEB, plex: null } });
+  await openBook(t);
+  t.engine.previewAt(700000);
+  await t.clock.advance(8000);                         // mid-preview
+  check('confirmPlace', t.engine.confirmPlace(650000) === true);
+  await t.clock.advance(5000);
+  const f = t.server.fetches();
+  check('exactly one save', t.server.calls.length === 1, t.server.calls.map((c) => [c.kind, c.body.event, c.body.offset_ms]));
+  const b = f[0] && f[0].body;
+  check('at the spot, as a paused move', b && b.event === 'pause' && b.track === '502' && b.offset_ms === 50000 && b.book_ms === 650000 &&
+    b.chapter_label === 'The Middle', b);
+  check('with the base the open read (compare-and-swap applies)', b && b.base === GONE_WEB.updated_at, b && b.base);
+  check('no linked_from (the place was not from an earlier copy)', b && !('linked_from' in b));
+  check('held no more', t.engine.state().filesChanged === null && !t.engine.state().playing);
+  const l = localOf(t);
+  check('the local copy is the confirmed place, this browser\'s own', l && l.track === '502' && l.offset_ms === 50000 && l.own === true, l);
+  await t.engine.play();
+  await t.clock.advance(12000);
+  const g = t.server.fetches().slice(1);
+  check('Play then saves as ever', g.length >= 2 && g[0].body.event === 'play' && g[0].body.offset_ms === 50000 && g[1].body.event === 'checkin', g.map((c) => c.body.event));
+  t.engine.close();
+}
+
+current = 'spec 2.5: after a confirm from an earlier copy, linked_from rides on the saves until the server says true or false';
+{
+  const t = withEngine({ book: CHAPTERED, places: { web: LINKED_WEB, plex: null } });
+  await openBook(t);
+  t.server.extra = { linked: null };                   // Plex can't say yet
+  t.engine.confirmPlace(650000);
+  await t.clock.advance(2000);
+  check('the confirm carries it', t.server.calls.length === 1 && t.server.calls[0].body.linked_from === '400:1', t.server.calls.map((c) => c.body));
+  await t.engine.play();
+  await t.clock.advance(11000);
+  const f = t.server.fetches();
+  check('null: sent again', f.length >= 3 && f.every((c) => c.body.linked_from === '400:1'), f.map((c) => [c.body.event, c.body.linked_from]));
+  t.saver.flush('beacon');
+  check('a beacon meanwhile carries it too', beaconBodies(t).pop().linked_from === '400:1');
+  t.server.extra = { linked: true };
+  await t.clock.advance(10500);
+  const n = t.server.fetches().length;
+  await t.clock.advance(21000);
+  const later = t.server.fetches().slice(n);
+  check('true: no more', later.length >= 2 && later.every((c) => !('linked_from' in c.body)), later.map((c) => c.body.linked_from));
+  t.engine.close();
+  // false stops it too.
+  const u = withEngine({ book: CHAPTERED, places: { web: LINKED_WEB, plex: null } });
+  await openBook(u);
+  u.server.extra = { linked: false };
+  u.engine.confirmPlace(650000);
+  await u.clock.advance(2000);
+  await u.engine.play();
+  await u.clock.advance(12000);
+  const uf = u.server.fetches();
+  check('false: only the confirm carried it', uf[0].body.linked_from === '400:1' && uf.slice(1).length >= 1 && uf.slice(1).every((c) => !('linked_from' in c.body)),
+    uf.map((c) => c.body.linked_from));
+  u.engine.close();
+}
+
+current = 'spec 2.5 ruling (c): startOver saves the start and never sends linked_from';
+{
+  const t = withEngine({ book: CHAPTERED, places: { web: LINKED_WEB, plex: null } });
+  await openBook(t);
+  t.server.extra = { linked: null };
+  check('startOver', t.engine.startOver() === true);
+  await t.clock.advance(2000);
+  const b = t.server.calls.length === 1 && t.server.calls[0].body;
+  check('one save at 0', b && b.track === '501' && b.offset_ms === 0 && b.book_ms === 0 && b.chapter_label === 'Opening', t.server.calls.map((c) => c.body));
+  check('no linked_from', b && !('linked_from' in b));
+  await t.engine.play();
+  await t.clock.advance(12000);
+  check('nor later', t.server.calls.every((c) => !('linked_from' in c.body)));
+  t.engine.close();
+  // Dismissing (closing) sends nothing, the link included.
+  const u = withEngine({ book: CHAPTERED, places: { web: LINKED_WEB, plex: null } });
+  await openBook(u);
+  u.engine.previewAt(100000);
+  await u.clock.advance(20000);
+  u.engine.close();
+  await u.clock.advance(20000);
+  check('a dismissed helper: nothing sent', u.server.calls.length === 0, u.server.calls.map((c) => c.body));
+}
+
+current = 'spec 2.5: a confirm is compare-and-swap like any save (409: the conflict question)';
+{
+  const t = withEngine({ book: CHAPTERED, places: { web: GONE_WEB, plex: null } });
+  await openBook(t);
+  t.server.mode = 409;
+  t.server.conflict = { track: '503', offset_ms: 1000, device: 'Chrome on Windows', updated_at: iso(0) };
+  t.engine.confirmPlace(650000);
+  await t.clock.advance(3000);
+  const c = t.log.warning.filter((w) => w.kind === 'conflict');
+  check('one conflict question', c.length === 1 && c[0].conflict.track === '503', t.log.warning);
+  check('one attempt, nothing more', t.server.calls.length === 1);
+  t.engine.close();
+}
+
+current = 'spec 2.5: releasing the hold ends a floor and drops whatever the preview left to send';
+{
+  const t = makeSaver();
+  const em = (reason, playing, off, extra) => t.saver.note(Object.assign({ reason, placeMs: off,
+    state: { book: '500:1', playing, position: { track: '501', offset_ms: off, duration_ms: 3600000 } } }, extra || {}));
+  t.saver.start('500:1', { files: true });
+  em('open', false, 0);
+  em('preview', false, 100000);
+  em('play', true, 100000);
+  for (let off = 100250; off <= 115000; off += 250) { await t.clock.advance(250); em('time', true, off); }
+  // A rewind reaching the saver while held (the engine ignores smart rewind
+  // then): its floor must not outlive the hold.
+  em('seek', true, 85000, { rewind: true, from: 115000, to: 85000 });
+  em('pause', false, 85000);
+  check('nothing sent while held', t.server.calls.length === 0 && localOf(t) === null);
+  check('releaseFiles', typeof t.saver.releaseFiles === 'function' && t.saver.releaseFiles('500:1', null) === true);
+  check('a flush right after sends nothing (the preview\'s pause is not a save)', t.saver.flush('fetch') === false);
+  await t.clock.advance(5000);
+  check('the release alone sends nothing', t.server.calls.length === 0, t.server.calls.map((c) => c.body));
+  em('seek', false, 100000, { from: 85000, to: 100000 });   // forward, short of the would-be floor (115 s)
+  await t.clock.advance(1500);
+  check('one save, at the spot itself (no floor)', t.server.calls.length === 1 && t.server.calls[0].body.offset_ms === 100000 &&
+    t.server.calls[0].body.event === 'pause', t.server.calls.map((c) => [c.body.event, c.body.offset_ms]));
+  check('releasing twice does nothing', t.saver.releaseFiles('500:1', null) === false);
+  t.saver.stop();
+  // A release for another book, or with no hold, does nothing.
+  const u = makeSaver();
+  u.saver.start('500:1');
+  check('no hold: false', u.saver.releaseFiles('500:1', '400:1') === false);
+  u.saver.stop();
+  const v = makeSaver();
+  v.saver.start('500:1', { files: true });
+  check('another book: false', v.saver.releaseFiles('700:1', null) === false);
+  check('a malformed link is not kept', v.saver.releaseFiles('500:1', '../x') === true);
+  const q = listener(v);
+  q.open();
+  q.seek(5000);
+  await v.clock.advance(1500);
+  check('so none is sent', v.server.calls.length === 1 && !('linked_from' in v.server.calls[0].body), v.server.calls.map((c) => c.body));
+  v.saver.stop();
+}
+
+current = 'spec 2.5: while held, a 409 answer, a late re-read or a flush never lets a save out';
+{
+  const t = makeSaver();
+  const p = listener(t);
+  t.saver.start('500:1', { files: true, savedAt: iso(-60) });
+  p.open();
+  p.play();
+  await p.listen(5000);
+  check('resolveConflict leaves the hold', t.saver.resolveConflict() === null);
+  check('otherSaved does not replace it', t.saver.otherSaved('500:1', { track: '501', offset_ms: 1, updated_at: iso(0) }, iso(0), false) === false);
+  check('lastSeen says held (no late re-read)', t.saver.lastSeen('500:1').conflict === true);
+  check('flush fetch: nothing', t.saver.flush('fetch') === false);
+  check('flush beacon: nothing', t.saver.flush('beacon') === false && t.saver.flush('beacon', 'leave') === false);
+  await p.listen(30000);
+  p.pause();
+  await t.clock.advance(30000);
+  t.saver.stop();
+  await t.clock.advance(20000);
+  check('nothing at all', t.server.calls.length === 0 && localOf(t) === null && t.warnings.length === 0, [t.server.calls.length, t.warnings]);
+}
+
+// Review Focus 3: a tab closed, killed or reloaded while the helper is open
+// sends nothing (no beacon, no last save); the old place stays, and the next
+// open is "files changed" again.
+current = 'spec 2.5 Review Focus 3: close, pagehide, a killed page and a reload while held send nothing';
+{
+  const storage = fakeStorage();
+  setLocal(storage, { track: '599', offset_ms: 120000, duration_ms: 900000, updated_at: iso(-10), own: true, acked: false, book_ms: 720000 });
+  const kept = storage.map.get(LOCAL_KEY);
+  const clock = fakeClock();
+  const server = fakeServer(clock);
+  server.row = { track: '503', offset_ms: 12000, updated_at: iso(-600), psid: 'other', seq: 9 };
+  const rowBefore = JSON.stringify(server.row);
+  const web = { track: '503', offset_ms: 12000, duration_ms: 300000, updated_at: iso(-600), device: 'Chrome on Windows' };
+  const t = withEngine({ clock, server, storage, book: CHAPTERED, places: { web, plex: null } });
+  await openBook(t);
+  check('held from the local copy', t.engine.state().filesChanged && t.engine.state().filesChanged.old.track === '599');
+  t.engine.previewAt(300000);
+  await clock.advance(5000);
+  // What pagehide, ws:before-hard-nav, a hidden page and "online" call.
+  check('pagehide / hard nav: no beacon', t.saver.flush('beacon', 'leave') === false);
+  check('hidden: no beacon', t.saver.flush('beacon') === false);
+  check('online: no fetch', t.saver.flush('fetch') === false);
+  // A killed page: its timers never fire; nothing was waiting on them either.
+  await clock.advance(600000);
+  check('10 minutes held: nothing sent', server.calls.length === 0, server.calls.map((c) => c.body));
+  t.engine.close();
+  await clock.advance(30000);
+  check('close: nothing sent', server.calls.length === 0, server.calls.map((c) => c.body));
+  check('the old place stays on the server', JSON.stringify(server.row) === rowBefore);
+  check('and in the local copy', storage.map.get(LOCAL_KEY) === kept);
+  // The reload: the next open is "files changed" again, from the same place.
+  const u = withEngine({ clock, server, storage, book: CHAPTERED, places: { web, plex: null } });
+  await openBook(u);
+  const old = u.engine.state().filesChanged && u.engine.state().filesChanged.old;
+  check('the next open: files changed again', old && old.track === '599' && old.offset_ms === 120000 && old.book_ms === 720000 && old.source === 'local', old);
+  u.engine.close();
+  await clock.advance(20000);
+  check('still nothing sent', server.calls.length === 0);
+}
+
+current = 'spec 2.5 Review Focus 3: the page\'s own exits (browser saver) send nothing while held';
+{
+  const win = new Window({ url: 'https://ws.test/news' });
+  win.WS = { user: { identity_key: IDENTITY } };
+  const clock = fakeClock();
+  const beacons = [];
+  const fetches = [];
+  const storage = fakeStorage();
+  const saver = S.browserSaver(win, {
+    sendBeacon: (url, blob) => { beacons.push(blob); return true; },
+    fetch: async (url, init) => { fetches.push(init); return { status: 200, json: async () => ({ stored: true, updated_at: new Date(clock.now).toISOString() }) }; },
+    now: () => clock.now, storage,
+    setTimeout: (fn, ms) => clock.setTimeout(fn, ms, 'page'), clearTimeout: (id) => clock.clearTimeout(id)
+  });
+  saver.start('500:1', { files: true });
+  const st = (playing, offset) => ({ book: '500:1', playing, position: { track: '501', offset_ms: offset, duration_ms: 600000 } });
+  saver.note({ reason: 'open', state: st(false, 0), placeMs: 0 });
+  saver.note({ reason: 'preview', state: st(false, 90000), placeMs: 90000 });
+  saver.note({ reason: 'play', state: st(true, 90000), placeMs: 90000 });
+  saver.note({ reason: 'time', state: st(true, 90250), placeMs: 90250 });
+  Object.defineProperty(win.document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  win.document.dispatchEvent(new win.Event('visibilitychange'));
+  win.dispatchEvent(new win.CustomEvent('ws:before-hard-nav', { detail: { url: '/login', waitUntil() {} } }));
+  win.dispatchEvent(new win.Event('pagehide'));
+  win.dispatchEvent(new win.Event('online'));
+  await clock.advance(30000);
+  saver.stop();
+  await clock.advance(20000);
+  check('no beacon, no fetch, no local copy', beacons.length === 0 && fetches.length === 0 &&
+    ![...storage.map.keys()].some((k) => k.indexOf('ws-player:place:') === 0), [beacons.length, fetches.length]);
+  await win.happyDOM.close();
+}
+
+current = 'spec 2.5: lock-screen Play while held sends nothing';
+{
+  const ms = { metadata: null, playbackState: 'none', handlers: new Map(), setActionHandler(a, fn) { this.handlers.set(a, fn); }, setPositionState() {} };
+  const t = withEngine({ mediaSession: ms, book: CHAPTERED, places: { web: GONE_WEB, plex: null } });
+  await openBook(t);
+  ms.handlers.get('play')();
+  await t.clock.advance(20000);
+  check('no preview: Play plays nothing', !t.engine.state().playing && t.engine.state().bookMs === 0);
+  t.engine.previewAt(700000);
+  await t.clock.advance(3000);
+  ms.handlers.get('pause')();
+  await t.clock.advance(2000);
+  ms.handlers.get('play')();
+  await t.clock.advance(1000);
+  check('it resumes the preview', t.engine.state().playing);
+  await t.clock.advance(20000);
+  ms.handlers.get('play')();
+  ms.handlers.get('seekforward')({});
+  await t.clock.advance(20000);
+  check('no further than the preview', !t.engine.state().playing && t.engine.state().bookMs <= 725500, t.engine.state().bookMs);
+  check('nothing sent, no local copy', t.server.calls.length === 0 && !t.storage.map.has(LOCAL_KEY), t.server.calls.map((c) => c.body));
+  check('still held', t.engine.state().filesChanged !== null);
+  t.engine.close();
+  await t.clock.advance(20000);
+  check('nothing on close', t.server.calls.length === 0);
 }
 
 if (failed) {

@@ -383,6 +383,10 @@ function response(status, body) {
 function makeFetch(net, clock) {
   return async function (url) {
     net.fetches.push(url);
+    // The saved places (net.positions { web, plex }), for engines given a saver.
+    if (net.positions && /^\/api\/player\/position\//.test(url)) {
+      return response(200, Object.assign({ now: '2026-09-30T12:00:00.000Z' }, net.positions));
+    }
     const m = /^\/api\/player\/book\/([^?]+)(\?refresh=1)?$/.exec(url);
     if (!m) return response(404, { detail: 'Not Found' });
     const wait = net.fetchDelay[decodeURIComponent(m[1])];
@@ -1831,6 +1835,274 @@ current = 'probes never test the connection with an undecodable part';
   check('a probe ran, never on part 2', probes.length >= 1 && probes.every((l) => l.part !== MIXED.tracks[1].part_path),
     probes.map((l) => l.part));
   check('part 3 plays on', partOf(t.main) === MIXED.tracks[2].part_path && !t.main.paused && t.log.error.length === 0);
+  t.engine.close();
+}
+
+// ---- 13b. Spec 2.5: the book's files changed ----
+// A saver as the engine uses it (saves.js has its own cases): it records
+// what the engine hands it, orders the copies newest first, and holds.
+function heldSaver() {
+  const s = {
+    starts: [], notes: [], released: [], stops: 0, lastSavedAt: null, warning: false,
+    note(c) { s.notes.push({ reason: c.reason, playing: c.state.playing, placeMs: c.placeMs, placeLabel: c.placeLabel, place: !!c.place, from: c.from, to: c.to, released: s.released.length }); },
+    start(book, o) { s.starts.push({ book, o: JSON.parse(JSON.stringify(o || {})) }); },
+    stop() { s.stops += 1; },
+    onWarning() { return () => {}; },
+    clockProbe() { return () => {}; },
+    readLocal() { return null; },
+    resumeFrom(key, p) {
+      return ['web', 'plex'].filter((k) => p[k]).map((k) => Object.assign({ source: k }, p[k]))
+        .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+    },
+    releaseFiles(book, link) { s.released.push({ book, link }); return true; },
+    lastSeen() { return null; }
+  };
+  return s;
+}
+// The web copy of a place in a part this book no longer has.
+const GONE = { track: '599', offset_ms: 120000, duration_ms: 900000, updated_at: '2026-09-30T10:00:00.000Z', device: 'Chrome on Windows',
+  book_ms: 720000, book_duration_ms: 1800000, chapter_label: 'Part 2 of 3', narrator: 'N. Reader', book_title: 'Three Parts', psid: 'x' };
+async function openHeld(key, positions, o = {}) {
+  const saver = heldSaver();
+  const t = setup(Object.assign({ saver, net: Object.assign({ noLocal: true, positions }, o.net || {}) }, o.setup || {}));
+  const p = t.engine.open(key, o.opts);
+  await t.clock.advance(1000);
+  await p;
+  return Object.assign(t, { saver });
+}
+const bookMsOf = (t) => t.engine.state().bookMs;
+
+current = 'spec 2.5: a saved place in a part the book no longer has holds the open at its start as "files changed"';
+{
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null });
+  const s = t.engine.state();
+  const old = s.filesChanged && s.filesChanged.old;
+  check('state().filesChanged.old is the saved place', !!old && old.track === '599' && old.offset_ms === 120000 && old.book_ms === 720000 &&
+    old.book_duration_ms === 1800000 && old.chapter_label === 'Part 2 of 3' && old.updated_at === GONE.updated_at &&
+    old.source === 'web' && old.linked_from === null, s.filesChanged);
+  check('it names the copy (title, narrator) for the helper', old && old.book_title === 'Three Parts' && old.narrator === 'N. Reader', old);
+  check('held at the start of the book, loaded, not playing', s.position && s.position.track === '501' && s.position.offset_ms === 0 &&
+    !s.playing && !s.error && partOf(t.main) === MULTI.tracks[0].part_path && t.main.paused, [s.position, s.playing, s.error]);
+  check('no resume was made from it', s.resumedFrom === null, s.resumedFrom);
+  const w = t.log.warning.filter((x) => x.kind === 'files-changed');
+  check('one files-changed warning, after the open, carrying the old place', w.length === 1 && w[0].old && w[0].old.track === '599' &&
+    w[0].book === MULTI.key && t.log.raw.findIndex((x) => x[0] === 'warning') > t.log.raw.findIndex((x) => x[0] === 'change' && x[1].reason === 'open'), t.log.warning);
+  check('no "couldn\'t find your saved place" notice', !t.log.warning.some((x) => x.kind === 'resume-lost'), t.log.warning);
+  check('the saves were started held', t.saver.starts.length === 1 && t.saver.starts[0].o.files === true && !t.saver.starts[0].o.push, t.saver.starts);
+  check('state() with no book: filesChanged null', (() => { t.engine.close(); return t.engine.state().filesChanged === null; })());
+  // A book with nothing saved, or saved in a part it has: no files changed.
+  const u = await openHeld(MULTI.key, { web: null, plex: null });
+  check('nothing saved: no files changed', u.engine.state().filesChanged === null && u.saver.starts[0].o.files !== true);
+  u.engine.close();
+  const v = await openHeld(MULTI.key, { web: Object.assign({}, GONE, { track: '502' }), plex: null });
+  check('a saved place in a part it has: resumed as ever', v.engine.state().filesChanged === null &&
+    v.engine.state().position.track === '502' && v.engine.state().resumedFrom.source === 'web', v.engine.state().position);
+  v.engine.close();
+}
+
+current = 'spec 2.5: the helper comes first: the open\'s handoff gate is not asked while the files changed';
+{
+  const saver = heldSaver();
+  const t = setup({ saver, net: { noLocal: true, positions: { web: Object.assign({}, GONE, { linked_from: '400:1', track: '502' }), plex: null } } });
+  let asked = 0;
+  t.engine.setOpenGate(() => { asked += 1; return { at: 'web' }; });
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(1000);
+  await p;
+  check('the gate was not asked; held at the start', asked === 0 && t.engine.state().filesChanged !== null && bookMsOf(t) === 0, [asked, bookMsOf(t)]);
+  t.engine.close();
+}
+
+current = 'spec 2.5: the newest copy decides; an older copy in a part the book has is never jumped to';
+{
+  const older = { track: '503', offset_ms: 1000, duration_ms: 300000, updated_at: '2026-09-29T10:00:00.000Z', device: 'Plex' };
+  const t = await openHeld(MULTI.key, { web: GONE, plex: older });
+  check('files changed, held at 0 (not the older Plex place)', t.engine.state().filesChanged && t.engine.state().position.track === '501' &&
+    t.engine.state().position.offset_ms === 0, t.engine.state().position);
+  t.engine.close();
+  const newer = Object.assign({}, older, { updated_at: '2026-09-30T11:00:00.000Z' });
+  const u = await openHeld(MULTI.key, { web: GONE, plex: newer });
+  check('a newer copy in a part it has resumes as ever', u.engine.state().filesChanged === null && u.engine.state().position.track === '503', u.engine.state().position);
+  u.engine.close();
+  const plexGone = Object.assign({}, newer, { track: '598', book_ms: 50000, book_duration_ms: 1700000 });
+  const w = await openHeld(MULTI.key, { web: null, plex: plexGone });
+  const old = w.engine.state().filesChanged && w.engine.state().filesChanged.old;
+  check('a Plex copy in a missing part: files changed from it', old && old.source === 'plex' && old.track === '598' && old.book_ms === 50000 &&
+    old.book_duration_ms === 1700000 && old.chapter_label === null, old);
+  w.engine.close();
+}
+
+current = 'spec 2.5: an earlier copy of the book (linked_from) is always "files changed"';
+{
+  // Even when its part key happens to be one this book has.
+  const linked = Object.assign({}, GONE, { track: '501', offset_ms: 5000, linked_from: '400:1', book_title: 'Three Parts (Old)' });
+  const t = await openHeld(MULTI.key, { web: linked, plex: null });
+  const old = t.engine.state().filesChanged && t.engine.state().filesChanged.old;
+  check('files changed, with linked_from', old && old.linked_from === '400:1' && old.book_title === 'Three Parts (Old)' && old.source === 'web', old);
+  check('held at the start', t.engine.state().position.offset_ms === 0 && !t.engine.state().playing);
+  t.engine.close();
+}
+
+current = 'spec 2.5: previewAt plays 15 s from a spot, then pauses; a second call replaces the first';
+{
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null });
+  check('previewAt is a function', typeof t.engine.previewAt === 'function');
+  check('previewAt returns true', t.engine.previewAt(700000) === true);
+  await t.clock.advance(3000);
+  check('playing from the spot', t.engine.state().playing && bookMsOf(t) > 700000 && bookMsOf(t) < 704000, bookMsOf(t));
+  check('the move is a preview, not a seek', reasons(t).includes('preview') && !t.saver.notes.some((n) => n.reason === 'seek'), reasons(t).slice(-6));
+  await t.clock.advance(20000);
+  const s = t.engine.state();
+  check('paused after 15 s', !s.playing && t.main.paused && bookMsOf(t) >= 715000 && bookMsOf(t) <= 715500, bookMsOf(t));
+  check('still held', s.filesChanged !== null);
+  // A second call replaces the first.
+  t.engine.previewAt(100000);
+  await t.clock.advance(5000);
+  t.engine.previewAt(1300000);
+  await t.clock.advance(20000);
+  check('the second preview replaced the first', !t.engine.state().playing && bookMsOf(t) >= 1315000 && bookMsOf(t) <= 1315500, bookMsOf(t));
+  // At the very end of the book: the 15 s before it, stopping short of the end.
+  t.engine.previewAt(1800000);
+  await t.clock.advance(20000);
+  check('a preview of the end plays up to it, never ending the book', !t.engine.state().playing && t.log.ended.length === 0 &&
+    bookMsOf(t) >= 1790000 && bookMsOf(t) < 1800000, bookMsOf(t));
+  check('not a number: refused', t.engine.previewAt('x') === false && t.engine.previewAt(NaN) === false);
+  t.engine.close();
+  // Only while the files changed are held.
+  const u = setup({ net: { noLocal: true } });
+  await openPlaying(u, MULTI.key, { at: at('501', 1000), autoplay: false });
+  check('not held: previewAt refused', u.engine.previewAt(700000) === false && !u.engine.state().playing);
+  check('not held: confirmPlace and startOver refused', u.engine.confirmPlace(700000) === false && u.engine.startOver() === false);
+  u.engine.close();
+}
+
+current = 'spec 2.5: while held, Play (bar, lock screen, the element\'s own) only resumes a preview';
+{
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null });
+  await t.engine.play();
+  t.ms.handlers.get('play')();
+  await t.clock.advance(3000);
+  check('no preview yet: Play plays nothing', !t.engine.state().playing && t.main.paused && t.engine.state().bookMs === 0, [t.engine.state().playing, bookMsOf(t)]);
+  t.main.play();                                   // the browser's own control
+  await t.clock.advance(1000);
+  check('the element started from outside is paused again', t.main.paused && !t.engine.state().playing);
+  t.engine.previewAt(700000);
+  await t.clock.advance(3000);
+  t.ms.handlers.get('pause')();
+  const paused = bookMsOf(t);
+  await t.clock.advance(3000);
+  check('lock-screen Pause pauses the preview', !t.engine.state().playing && bookMsOf(t) === paused);
+  t.ms.handlers.get('play')();
+  await t.clock.advance(3000);
+  check('lock-screen Play resumes it', t.engine.state().playing && bookMsOf(t) > paused, bookMsOf(t));
+  await t.clock.advance(20000);
+  check('to its end, and no further', !t.engine.state().playing && bookMsOf(t) >= 715000 && bookMsOf(t) <= 715500, bookMsOf(t));
+  t.ms.handlers.get('play')();
+  t.engine.toggle();
+  await t.clock.advance(3000);
+  check('a finished preview is not resumed', !t.engine.state().playing && bookMsOf(t) <= 715500, bookMsOf(t));
+  check('still held', t.engine.state().filesChanged !== null);
+  t.engine.close();
+}
+
+current = 'spec 2.5: while held, Retry after an outage only resumes a preview';
+{
+  // The held open can't load its start: "Can't reach the media server".
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null }, { net: { down: new Set(['remote']) } });
+  const err = t.log.raw.filter((x) => x[0] === 'error').pop();
+  check('unreachable, with a retry', err && err[1].code === 'unreachable' && typeof err[1].retry === 'function', t.log.error);
+  t.net.down.clear();
+  await err[1].retry();
+  await t.engine.retry();
+  await t.engine.play();
+  await t.clock.advance(5000);
+  check('no preview: Retry and Play play nothing', !t.engine.state().playing && t.main.paused && bookMsOf(t) === 0, [t.engine.state().playing, bookMsOf(t)]);
+  check('still held, still the error', t.engine.state().filesChanged !== null && t.engine.state().error !== null);
+  check('a preview plays from the error state', t.engine.previewAt(700000) === true);
+  await t.clock.advance(3000);
+  check('it plays', t.engine.state().playing && bookMsOf(t) > 700000 && t.engine.state().error === null, [bookMsOf(t), t.engine.state().error]);
+  t.net.down.add('remote');
+  await t.clock.advance(15000);
+  check('an outage mid-preview stops it', !t.engine.state().playing && t.engine.state().error !== null);
+  t.net.down.clear();
+  const at = bookMsOf(t);
+  await t.engine.retry();
+  await t.clock.advance(20000);
+  check('Retry resumes the unfinished preview, to its end only', !t.engine.state().playing && bookMsOf(t) > at && bookMsOf(t) <= 715500, [at, bookMsOf(t)]);
+  t.engine.close();
+}
+
+current = 'spec 2.5: while held, smart rewind does nothing and a move while previewing previews from there';
+{
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null });
+  t.engine.previewAt(700000);
+  await t.clock.advance(5000);
+  const here = bookMsOf(t);
+  t.engine.rewind(here - 30000);
+  await t.clock.advance(500);
+  check('rewind ignored', bookMsOf(t) >= here && !t.saver.notes.some((n) => n.reason === 'seek'), bookMsOf(t));
+  t.engine.seek(1000000);
+  await t.clock.advance(20000);
+  check('a seek while previewing previews 15 s from there', !t.engine.state().playing && bookMsOf(t) >= 1015000 && bookMsOf(t) <= 1015500, bookMsOf(t));
+  t.engine.close();
+}
+
+current = 'spec 2.5 Review Focus 5: previewAt and confirmPlace refuse a spot this browser can\'t decode';
+{
+  const t = await openHeld(MIXED.key, { web: Object.assign({}, GONE, { track: '999' }), plex: null });
+  check('held', t.engine.state().filesChanged !== null);
+  const loads = t.net.loads.length;
+  check('previewAt into part 2 (E-AC3) refused', t.engine.previewAt(700000) === false);
+  await t.clock.advance(3000);
+  check('nothing played or loaded', !t.engine.state().playing && t.net.loads.length === loads && bookMsOf(t) === 0, bookMsOf(t));
+  check('confirmPlace into it refused', t.engine.confirmPlace(700000) === false);
+  check('still held, nothing released', t.engine.state().filesChanged !== null && t.saver.released.length === 0);
+  check('each refusal says the part can\'t play', t.log.warning.filter((w) => w.kind === 'part-format').length === 2, t.log.warning);
+  check('a playable spot previews', t.engine.previewAt(1600000) === true);
+  t.engine.close();
+}
+
+current = 'spec 2.5: confirmPlace is an explicit move that ends the hold; startOver is confirmPlace(0) without the link';
+{
+  const linked = Object.assign({}, GONE, { linked_from: '400:1' });
+  const t = await openHeld(MULTI.key, { web: linked, plex: null });
+  t.engine.previewAt(700000);
+  await t.clock.advance(5000);
+  check('confirmPlace returns true', t.engine.confirmPlace(650000) === true);
+  await t.clock.advance(1000);
+  const s = t.engine.state();
+  check('no longer held', s.filesChanged === null);
+  check('paused at the spot', !s.playing && bookMsOf(t) === 650000 && s.position.track === '502' && s.position.offset_ms === 50000, [s.playing, bookMsOf(t)]);
+  check('the saves were released, with the earlier copy\'s link', t.saver.released.length === 1 && t.saver.released[0].link === '400:1', t.saver.released);
+  const mv = t.saver.notes.filter((n) => n.reason === 'seek');
+  check('then one explicit move (a seek marked place)', mv.length === 1 && mv[0].to === 650000 && mv[0].place === true && mv[0].placeMs === 650000, mv);
+  check('the release came before that move', mv[0] && mv[0].released === 1, mv);
+  check('the preview stopped while still held', t.saver.notes.some((n) => n.reason === 'pause' && n.released === 0));
+  check('not held: previewAt refused now', t.engine.previewAt(100000) === false);
+  await t.engine.play();
+  await t.clock.advance(2000);
+  check('Play plays as ever after it', t.engine.state().playing && bookMsOf(t) > 650000);
+  t.engine.close();
+  const u = await openHeld(MULTI.key, { web: linked, plex: null });
+  check('startOver returns true', typeof u.engine.startOver === 'function' && u.engine.startOver() === true);
+  await u.clock.advance(1000);
+  check('at the start, released without the link', u.engine.state().filesChanged === null && bookMsOf(u) === 0 &&
+    u.saver.released.length === 1 && u.saver.released[0].link === null, u.saver.released);
+  check('startOver is a move too', u.saver.notes.some((n) => n.reason === 'seek' && n.place === true));
+  u.engine.close();
+  // A place with no link: none passed.
+  const v = await openHeld(MULTI.key, { web: GONE, plex: null });
+  v.engine.confirmPlace(100000);
+  check('no link to pass', v.saver.released.length === 1 && v.saver.released[0].link === null, v.saver.released);
+  v.engine.close();
+}
+
+current = 'spec 2.5: the saves get the place\'s chapter label with its book time';
+{
+  const t = await openHeld(MULTI.key, { web: null, plex: null });
+  t.engine.seek(1550000);
+  const last = t.saver.notes[t.saver.notes.length - 1];
+  check('the label of the chapter the place is in', last.placeMs === 1550000 && last.placeLabel === 'Part 3 of 3', last);
   t.engine.close();
 }
 
