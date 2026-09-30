@@ -177,7 +177,8 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     the row's value as it was rather than blanking it. `book_ms` is clamped
     to `book_duration_ms` when both are known. An empty chapter name is
     stored as null. When this check-in's length is unknown, `book_ms` is
-    clamped to the length the row keeps. The link to an earlier copy is set
+    clamped to the length the row keeps, on the position row (in the
+    UPDATE) and on the log row alike. The link to an earlier copy is set
     apart (set_link).
 
     Returns {"stored": bool, "updated_at": iso8601}. `stored` is False when
@@ -211,6 +212,16 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
         if values[name] is None:
             del values[name]        # unknown this time: the row keeps what it had
     P = ListeningPosition
+
+    def logged(kept_ms: Optional[int]) -> dict:
+        """The book fields for a log row: as carried, with book_ms clamped to
+        the length the position row keeps when this check-in has none (the
+        same clamp the UPDATE makes)."""
+        fields = dict(about)
+        if fields["book_ms"] is not None and fields["book_duration_ms"] is None and kept_ms is not None:
+            fields["book_ms"] = min(fields["book_ms"], kept_ms)
+        return fields
+
     update = dict(values)
     if about["book_ms"] is not None and about["book_duration_ms"] is None:
         # The book's length is unknown this time, so the row keeps the one it
@@ -242,9 +253,10 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
                 return {"stored": False, "updated_at": utc_iso(stored_at)}
             conflict = {"track": row.track_key, "offset_ms": row.offset_ms, "device": row.device,
                         "updated_at": utc_iso(stored_at)}
+            kept_ms = row.book_duration_ms
             db.rollback()
             db.add(ListeningLog(identity=identity, book_key=book, track_key=track, offset_ms=offset_ms,
-                                device=device, device_id=device_id, event=event, at=now, **about))
+                                device=device, device_id=device_id, event=event, at=now, **logged(kept_ms)))
             db.commit()
             return {"stored": False, "updated_at": utc_iso(stored_at), "conflict": conflict}
         db.add(P(identity=identity, book_key=book, **values))
@@ -257,8 +269,11 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     else:  # pragma: no cover - needs a row inserted and deleted between every attempt
         raise RuntimeError("could not store the listening position")
 
+    kept_ms = None
+    if about["book_ms"] is not None and about["book_duration_ms"] is None:
+        kept_ms = db.query(P.book_duration_ms).filter(*mine).scalar()
     db.add(ListeningLog(identity=identity, book_key=book, track_key=track, offset_ms=offset_ms,
-                        device=device, device_id=device_id, event=event, at=now, **about))
+                        device=device, device_id=device_id, event=event, at=now, **logged(kept_ms)))
     db.commit()
 
     try:

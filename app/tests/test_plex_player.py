@@ -1158,6 +1158,59 @@ class BookIdentity(BridgeBase):
         self.assertEqual(pp._split_narrator("Tide Mill - Read by Tamsin Ashby, Dee Lane"),
                          ("Tide Mill", "Tamsin Ashby, Dee Lane"))
 
+    def test_only_a_standalone_number_phrase_leaves_the_narrator(self):
+        # T1R5: a name that holds a digit or a word like "Part" stays the
+        # narrator; only "..., Book 2" and the like go to the title, and the
+        # narrator is never left empty.
+        cases = {
+            "Tide Mill Saga Book 1 - Read by BBC Radio 4 Full Cast": ("Tide Mill Saga Book 1", "BBC Radio 4 Full Cast"),
+            "Tide Mill - Read by 50 Voices": ("Tide Mill", "50 Voices"),
+            "Tide Mill - Read by Part Time Players": ("Tide Mill", "Part Time Players"),
+            "Tide Mill - Read by Tamsin Ashby (Book 2)": ("Tide Mill, Book 2", "Tamsin Ashby"),
+            "Tide Mill - Read by Tamsin Ashby - Book 2": ("Tide Mill, Book 2", "Tamsin Ashby"),
+            "Tide Mill - Read by Tamsin Ashby, Book 2": ("Tide Mill, Book 2", "Tamsin Ashby"),
+            "Tide Mill - Read by Tamsin Ashby; Vol. 3": ("Tide Mill, Vol. 3", "Tamsin Ashby"),
+            "Tide Mill (Narrated by Tamsin Ashby, Book II)": ("Tide Mill, Book II", "Tamsin Ashby"),
+            "Tide Mill - Read by Tamsin Ashby, Dee Lane": ("Tide Mill", "Tamsin Ashby, Dee Lane"),
+            "Tide Mill - Read by Book 2": ("Tide Mill", "Book 2"),
+        }
+        for title, expected in cases.items():
+            with self.subTest(title=title):
+                self.assertEqual(pp._split_narrator(title), expected)
+
+    def test_next_keeps_to_a_narrator_whose_name_holds_a_digit(self):
+        # T1R5, as /next sees it: book 1's narrator is kept, so the same
+        # narrator's book 2 is offered, not the other edition.
+        def book(key, title):
+            album = {"ratingKey": key, "type": "album", "title": title, "titleSort": title,
+                     "parentTitle": "Wren Hollis", "Collection": [{"tag": "Tide Mill Saga"}],
+                     "thumb": f"/library/metadata/{key}/thumb/1"}
+            tracks = [{"ratingKey": str(int(key) * 10), "type": "track", "parentRatingKey": key, "parentIndex": 1,
+                       "index": 1, "duration": 60_000, "title": "Part 1",
+                       "Media": [{"Part": [{"file": f"/m/{key}/1.mp3"}]}]}]
+            return (album, 1, tracks, 1, pp._summary(album, 1, tracks, 1))
+        lib = [book("100", "Tide Mill Saga Book 1 - Read by BBC Radio 4 Full Cast"),
+               book("200", "Tide Mill Saga Book 2 - Read by BBC Radio 4 Full Cast"),
+               book("300", "Tide Mill Saga Book 2")]
+        self.assertEqual(lib[0][4]["narrator"], "BBC Radio 4 Full Cast")
+        self.assertEqual(pp.pick_next(pp._series_entries(lib), "100:1")["key"], "200:1")
+
+    def test_a_shared_disc_title_is_normalised_before_its_disc_number(self):
+        # T1R6: two boxes whose shared disc titles differ only by what
+        # normalising takes off give the same key per disc.
+        def box(rk, title):
+            album = {"ratingKey": rk, "type": "album", "title": "Harbour Tales", "titleSort": "Harbour Tales",
+                     "parentTitle": "Cal Penn", "thumb": f"/library/metadata/{rk}/thumb/1"}
+            with mock.patch.dict(ALBUMS, {rk: album}), mock.patch.dict(TRACKS):
+                TRACKS[rk] = [track(int(rk) + 1, rk, 1, 1, 10_000, f"E/{rk}a", title=title),
+                              track(int(rk) + 2, rk, 2, 1, 20_000, f"E/{rk}b", title=title)]
+                return [self.run_async(pp.book_identity(f"{rk}:{d}"))["work_key"] for d in (1, 2)]
+        plain = box("670", "Harbour Tales")
+        self.assertNotEqual(plain[0], plain[1])
+        for title in ("Harbour Tales (Unabridged)", "Harbour Tales - Read by Tamsin Ashby", "Harbour Tales [m4b]"):
+            with self.subTest(title=title):
+                self.assertEqual(box("680", title), plain)
+
     def test_discs_that_share_a_title_stay_apart(self):
         # T1R3: whatever the shared title, two discs of one album never share
         # a key; a disc with a title of its own keeps it.

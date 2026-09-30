@@ -391,6 +391,24 @@ class BookFields(StoreBase):
         checkin(self.db, book="5002", psid="other", book_ms=50_000_000)
         self.assertEqual(listening.get_position(self.db, ME, "5002")["book_ms"], 50_000_000)
 
+    def test_the_log_rows_are_clamped_the_same_way(self):
+        # T1R7: the log row and a conflict's log row take the same clamp as
+        # the position row when the check-in's length is unknown.
+        checkin(self.db, book_ms=1_000, book_duration_ms=36_000_000, psid="p1")
+        checkin(self.db, seq=2, book_ms=50_000_000, psid="p1")
+        self.assertEqual([e["book_ms"] for e in listening.get_history(self.db, ME, BOOK)][0], 36_000_000)
+        out = checkin(self.db, seq=1, book_ms=60_000_000, psid="p2")          # another page, no base
+        self.assertIn("conflict", out)
+        self.assertEqual([e["book_ms"] for e in listening.get_history(self.db, ME, BOOK)][0], 36_000_000)
+        # Below the length, and a length carried this time, are as given.
+        checkin(self.db, seq=3, book_ms=20_000_000, psid="p1")
+        self.assertEqual(listening.get_history(self.db, ME, BOOK)[0]["book_ms"], 20_000_000)
+        checkin(self.db, seq=4, book_ms=40_000_000, book_duration_ms=45_000_000, psid="p1")
+        self.assertEqual(listening.get_history(self.db, ME, BOOK)[0]["book_ms"], 40_000_000)
+        # No kept length: nothing to clamp to.
+        checkin(self.db, book="5002", psid="p9", book_ms=50_000_000)
+        self.assertEqual(listening.get_history(self.db, ME, "5002")[0]["book_ms"], 50_000_000)
+
     def test_a_checkin_without_the_players_fields_leaves_them_null(self):
         checkin(self.db, **self.FIELDS)
         checkin(self.db, seq=2)          # an older player: the place it saved carries none

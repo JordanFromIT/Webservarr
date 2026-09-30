@@ -405,25 +405,39 @@ _READ_BY = (
 _PART_SUFFIX = re.compile(r"[\s,\-]+Part\s*[0-9]+\s*$", re.IGNORECASE)
 
 
+# A book-number phrase on its own ("Book 2", "Vol. 3", "Part IV", "#5") set
+# off after the narrator's name by a comma, semicolon, spaced dash or
+# brackets: "Name, Book 2", "Name; Vol. 3", "Name - Book 2", "Name (Book 2)".
+_NUMBER_PHRASE = r"(?:book|vol(?:ume)?\.?|part|no\.?|number|#)\s*#?\s*(?:[0-9]{1,4}|[ivxlc]{1,7})"
+_NAME_THEN_NUMBER = re.compile(
+    rf"^(?P<name>.*?\S)\s*(?:[,;]\s*(?P<a>{_NUMBER_PHRASE})|\s[-\u2013\u2014]\s+(?P<b>{_NUMBER_PHRASE})"
+    rf"|\(\s*(?P<c>{_NUMBER_PHRASE})\s*\))\s*$", re.IGNORECASE)
+
+
 def _split_narrator(title: str) -> tuple:
     """("Title", "Narrator") from "Title - Read by Narrator" or
     "Title (Narrated by Narrator)"; the narrator is "" when not named.
 
-    A comma- or semicolon-separated part after the name that holds the
-    book's number ("Title - Read by Name, Book 2") belongs to the title:
-    it stays there ("Title, Book 2", "Name"), so book 2 and book 3 are never
-    told apart only by a narrator field that the work key leaves out."""
+    A book-number phrase standing on its own after the name ("Title - Read
+    by Name, Book 2", "... Name (Vol. 3)") belongs to the title: it goes
+    there ("Title, Book 2", "Name"), so book 2 and book 3 are never told
+    apart only by a narrator field that the work key leaves out. Anything
+    else stays with the name ("BBC Radio 4 Full Cast", "Name, Other
+    Name"), and the name itself is never moved: the narrator is never left
+    empty by this."""
     title = (title or "").strip()
     for pattern in _READ_BY:
         m = pattern.match(title)
         if m and m.group("title").strip():
-            head = m.group("title").strip()
-            parts = [p.strip() for p in re.split(r"[,;]", m.group("narrator")) if p.strip()]
-            numbered = [p for p in parts if _NUMBER_MARK.search(p)]
-            names = [p for p in parts if not _NUMBER_MARK.search(p)]
-            if numbered:
-                head = ", ".join([head, *numbered])
-            return head, ", ".join(names)
+            head, name, numbers = m.group("title").strip(), m.group("narrator").strip(), []
+            while True:
+                n = _NAME_THEN_NUMBER.match(name)
+                rest = n.group("name").strip().rstrip(",;").strip() if n else ""
+                if not rest:
+                    break
+                name = rest
+                numbers.insert(0, n.group("a") or n.group("b") or n.group("c"))
+            return ", ".join([head, *numbers]), name
     return title, ""
 
 
@@ -816,7 +830,12 @@ def work_key(author: str, title: str, narrator: str = "") -> str:
     """The book's work key: sha256 of its normalised author and title (see
     the notes above), as 32 hex digits. `narrator` is the book's narrator
     from Plex's metadata ("" when not named). Pure: the same on both workers."""
-    text = _work_words(author) + "\x1f" + _work_title(title, narrator)
+    return _hash_work(author, _work_title(title, narrator))
+
+
+def _hash_work(author: str, work_title: str) -> str:
+    """The key of an author and an already normalised work title."""
+    text = _work_words(author) + "\x1f" + work_title
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
 
 
@@ -1035,24 +1054,26 @@ _GENERIC_TRACK = re.compile(
 
 
 def _disc_work_title(album: dict, disc: int, discs: dict) -> str:
-    """The title a disc's work key is made from. For an album holding one
-    book, the book's title. For an album holding several as discs, the
-    disc's own (from its tracks), except: a generic one ("Track 1") is
-    "<album> disc N", and one that another disc of the album shares (the
-    same _work_title: "01 - Chapter 1", "Part 1 of 12", tracks named after
-    the album) has " disc N" added, so no two discs share a key."""
+    """The normalised work title (_work_title) a disc's work key is made
+    from; "" when there is none. For an album holding one book, the book's.
+    For an album holding several as discs, the disc's own (from its
+    tracks), except: a generic one ("Track 1") is the album's, and one that
+    another disc of the album shares ("01 - Chapter 1", "Part 1 of 12",
+    tracks named after the album) is kept; both then get " disc N". The
+    suffix goes on after normalising, so what normalising takes off
+    ("(Unabridged)", "- Read by X") still comes off first."""
     def own(d):
         return _describe(album, d, discs[d], len(discs))
     about = own(disc)
-    title = about["title"]
-    if len(discs) < 2:
-        return title
-    if _GENERIC_TRACK.fullmatch(_work_words(title)):
-        return f"{_split_narrator(album.get('title') or '')[0]} disc {disc}"
-    mine = _work_title(title, about["narrator"])
+    mine = _work_title(about["title"], about["narrator"])
+    if len(discs) < 2 or not mine:
+        return mine
+    if _GENERIC_TRACK.fullmatch(_work_words(about["title"])):
+        base = _work_title(_split_narrator(album.get("title") or "")[0], about["narrator"])
+        return f"{base} disc {disc}".strip()
     shared = any(_work_title(o["title"], o["narrator"]) == mine
                  for o in (own(d) for d in discs if d != disc))
-    return f"{title} disc {disc}" if shared else title
+    return f"{mine} disc {disc}" if shared else mine
 
 
 def _identity(album: dict, disc: int, children) -> dict:
@@ -1063,7 +1084,7 @@ def _identity(album: dict, disc: int, children) -> dict:
     tracks = discs[disc]
     about = _describe(album, disc, tracks, len(discs))
     title = _disc_work_title(album, disc, discs)
-    return {"work_key": work_key(about["author"], title, about["narrator"]) if _work_title(title) else None,
+    return {"work_key": _hash_work(about["author"], title) if title else None,
             "narrator": about["narrator"] or None,
             "duration_ms": sum(_track_duration(t) for t in tracks) or None}
 
