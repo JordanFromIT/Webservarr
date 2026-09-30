@@ -13,9 +13,11 @@
  * docs/superpowers/specs/2026-09-28-audiobook-player-design.md, section 8.
  * Styles: theme.css "Audiobook player" (theme variables only).
  *
- * Settings (per listener, GET/PUT /api/player/prefs): read once when the page
- * loads, and handed to the engine (applyPrefs, a 'prefs' change, so the skip
- * buttons and the speed follow while paused). Until then, and for an account
+ * Settings (per listener, GET/PUT /api/player/prefs): read once, when the
+ * first book starts loading (so a page where nobody plays never asks, and a
+ * site with the player off sees no request), and handed to the engine
+ * (applyPrefs, a 'prefs' change, so the skip buttons and the speed follow
+ * while paused). Until then, and for an account
  * the player is not for (401, 403, 404), the defaults (10 s, 1x, smart rewind
  * on), with no error; a read that failed otherwise is tried again when the
  * next book opens. A change is sent a moment later (only what changed here,
@@ -898,6 +900,8 @@ export function createFeatures(env) {
       cancelSleep();
       askNext(s.book);
     }
+    // The listener's settings: read when the first book starts loading.
+    if (r === 'loading' && loadState === 'idle') loadPrefs();
     if (r === 'open') {
       // The open's gate held the book for the handoff question: ask it now.
       const p = pendingOpen;
@@ -1486,7 +1490,6 @@ export function createFeatures(env) {
   }
 
   drawAll();
-  loadPrefs();
 
   return {
     sleep: startSleep,

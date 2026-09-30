@@ -621,12 +621,36 @@ for (const status of [401, 403, 404]) {
 await run('settings that could not be read are asked again when a book opens', async () => {
   const t = await setup({ prefs: 503 });
   check('defaults meanwhile', t.engine.setSkip() === 10);
+  const gets = () => t.fetches.filter((f) => f.url === '/api/player/prefs' && f.method === 'GET').length;
+  // Read when the book starts loading (503), and again when it has opened.
+  await t.openAt(MULTI.key, '501', 1000);
+  check('read at the load, asked again at the open', gets() === 2, gets());
+  t.engine.close();
   t.prefsAnswer = { skip_s: 15, speed: 1, smart_rewind: true };
   await t.openAt(MULTI.key, '501', 1000);
-  const gets = t.fetches.filter((f) => f.url === '/api/player/prefs' && f.method === 'GET');
-  check('asked again', gets.length === 2, gets.length);
+  check('asked again at the next open', gets() === 3, gets());
   check('and applied', t.engine.setSkip() === 15);
   check('no notice', t.notices().length === 0);
+  t.engine.close();
+});
+
+// Final review F3: the settings are read when the first book starts
+// loading, not at boot: a page where nobody plays (and a site with the
+// player off, where every such read would be a 404) never asks.
+await run('the settings are read at the first book, never at boot', async () => {
+  const t = await setup({ prefs: { skip_s: 30, speed: 1.5, smart_rewind: false } });
+  const gets = () => t.fetches.filter((f) => f.url === '/api/player/prefs' && f.method === 'GET').length;
+  await t.clock.advance(60000);
+  check('no read while nothing plays', gets() === 0, gets());
+  check('the defaults meanwhile', t.engine.setSkip() === 10 && t.st().speed === 1);
+  const p = t.engine.open(MULTI.key, { at: { track: '501', offset_ms: 1000 } });
+  check('read as the book starts loading', gets() === 1, gets());
+  await t.clock.advance(200);
+  await p;
+  check('applied', t.engine.setSkip() === 30 && t.st().speed === 1.5, [t.engine.setSkip(), t.st().speed]);
+  t.engine.close();
+  await t.openAt(MULTI.key, '502', 1000);
+  check('read once only', gets() === 1, gets());
   t.engine.close();
 });
 
@@ -2777,7 +2801,12 @@ await run('boot sets WS.playerFeatures once, and only with the player', async ()
   check('booted', f && t.win.WS.playerFeatures === f && typeof f.sleep === 'function');
   check('once', F.boot(t.win, over) === f);
   await t.clock.advance(10);
-  check('one GET', t.fetches.filter((x) => x.url === '/api/player/prefs').length === 1);
+  check('no GET at boot', t.fetches.filter((x) => x.url === '/api/player/prefs').length === 0);
+  const p = t.engine.open(MULTI.key, { at: { track: '501', offset_ms: 1000 } });
+  await t.clock.advance(200);
+  await p;
+  check('one GET, at the first book', t.fetches.filter((x) => x.url === '/api/player/prefs').length === 1);
+  t.engine.close();
   const bare = new Window({ url: 'https://ws.test/' });
   bare.WS = {};
   check('no player, nothing', F.boot(bare, over) === null);
