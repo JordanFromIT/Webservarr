@@ -974,16 +974,33 @@ class WorkKeys(unittest.TestCase):
     def test_edition_format_and_narrator_suffixes_give_the_same_key(self):
         base = pp.work_key(self.AUTHOR, self.TITLE)
         self.assertRegex(base, r"^[0-9a-f]{32}$")
-        for title in (f"{self.TITLE} (Full-Cast Edition)", f"{self.TITLE} - Tamsin Ashby",
+        for title in (f"{self.TITLE} (Full-Cast Edition)",
                       f"{self.TITLE} - Read by Tamsin Ashby", f"{self.TITLE} (Narrated by Tamsin Ashby)",
                       f"{self.TITLE} [Unabridged]", f"{self.TITLE}: Unabridged", f"{self.TITLE} Unabridged",
-                      f"{self.TITLE} (Unabridged) - Tamsin Ashby", f"{self.TITLE} – J.R. Oakes-Pell",
                       f"{self.TITLE} (Dramatized Adaptation)", f"{self.TITLE} [m4b]",
                       "the lantern keepers daughter", "THE LANTERN KEEPER’S DAUGHTER",
                       f"  {self.TITLE}  (Full Cast Audio Edition) "):
             with self.subTest(title=title):
                 self.assertEqual(pp.work_key(self.AUTHOR, title), base)
         self.assertEqual(pp.work_key("wren  hollis.", self.TITLE), base)
+
+    def test_a_dash_name_goes_only_when_it_is_the_books_narrator(self):
+        base = pp.work_key(self.AUTHOR, self.TITLE, "Tamsin Ashby")
+        self.assertEqual(base, pp.work_key(self.AUTHOR, self.TITLE))
+        for title, narrator in ((f"{self.TITLE} - Tamsin Ashby", "Tamsin Ashby"),
+                                (f"{self.TITLE} - Tamsin Ashby", "tamsin  ashby."),
+                                (f"{self.TITLE} (Unabridged) - Tamsin Ashby", "Tamsin Ashby"),
+                                (f"{self.TITLE} – J.R. Oakes-Pell", "J.R. Oakes-Pell")):
+            with self.subTest(title=title, narrator=narrator):
+                self.assertEqual(pp.work_key(self.AUTHOR, title, narrator), base)
+        # Not the narrator, or no narrator known: the dash part is title.
+        for narrator in ("", "Other Voice"):
+            with self.subTest(narrator=narrator):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, f"{self.TITLE} - Tamsin Ashby", narrator), base)
+        # A subtitle that looks like a name is never guessed to be one.
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Saga - Iron Crown"), pp.work_key(self.AUTHOR, "Saga - Silver Tide"))
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Saga - Iron Crown", "Dee Lane"),
+                            pp.work_key(self.AUTHOR, "Saga - Silver Tide", "Dee Lane"))
 
     def test_different_authors_or_books_give_different_keys(self):
         base = pp.work_key(self.AUTHOR, self.TITLE)
@@ -1017,7 +1034,7 @@ class BookIdentity(BridgeBase):
                 out = self.run_async(pp.book_identity(book["key"]))
                 self.assertEqual(out["duration_ms"], book["duration_ms"])
                 self.assertEqual(out["narrator"], book["narrator"] or None)
-                self.assertEqual(out["work_key"], pp.work_key(book["author"], book["title"]))
+                self.assertEqual(out["work_key"], pp.work_key(book["author"], book["title"], book["narrator"]))
 
     def test_a_disc_of_a_series_album_is_its_own_work(self):
         first = self.run_async(pp.book_identity("400:1"))
@@ -1025,6 +1042,18 @@ class BookIdentity(BridgeBase):
         self.assertEqual(second["duration_ms"], 70_000)
         self.assertEqual(second["work_key"], pp.work_key("Cal Penn", "Second Tale"))
         self.assertNotEqual(first["work_key"], second["work_key"])
+
+    def test_a_dash_narrator_in_the_album_title_is_taken_off_only_when_plex_names_them(self):
+        named = dict(ALBUMS["500"], title="Quiet Book - Dee Lane", Collection=[{"tag": "Quiet Tales - Read by Dee Lane"}])
+        with mock.patch.dict(ALBUMS, {"500": named}):
+            out = self.run_async(pp.book_identity("500:1"))
+        self.assertEqual(out["narrator"], "Dee Lane")
+        self.assertEqual(out["work_key"], pp.work_key("Ann Author", "Quiet Book"))
+        unnamed = dict(ALBUMS["500"], title="Quiet Book - Dee Lane")
+        with mock.patch.dict(ALBUMS, {"500": unnamed}):
+            out = self.run_async(pp.book_identity("500:1"))
+        self.assertIsNone(out["narrator"])
+        self.assertNotEqual(out["work_key"], pp.work_key("Ann Author", "Quiet Book"))
 
     def test_a_duplicate_copy_is_not_counted_in_the_length(self):
         self.assertEqual(self.run_async(pp.book_identity("300:1"))["duration_ms"], 510_000)

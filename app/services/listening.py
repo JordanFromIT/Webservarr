@@ -72,6 +72,8 @@ BOOK_MS_MAX = 10 ** 9
 LABEL_MAX = 200
 NARRATOR_MAX = 200
 WORK_KEY = re.compile(r"[0-9a-f]{32}", re.ASCII)
+# A book key, "<album>:<disc>", as plex_player.parse_key takes it.
+BOOK_KEY = re.compile(r"[0-9]{1,20}:[0-9]{1,6}", re.ASCII)
 
 PREF_DEFAULTS = {"skip_s": 10, "speed": 1.0, "smart_rewind": True}
 SKIP_MIN, SKIP_MAX = 5, 60
@@ -118,6 +120,7 @@ def _book_fields(book_ms, chapter_label, book_duration_ms, work_key, narrator) -
             book_ms = min(book_ms, book_duration_ms)
     if chapter_label is not None and (not isinstance(chapter_label, str) or len(chapter_label) > LABEL_MAX):
         raise ValueError(f"chapter_label must be text of at most {LABEL_MAX} characters")
+    chapter_label = chapter_label or None
     if work_key is not None and not (isinstance(work_key, str) and WORK_KEY.fullmatch(work_key)):
         raise ValueError("work_key must be 32 lower-case hex digits")
     if narrator is not None:
@@ -153,7 +156,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
                  device_id: Optional[str] = None, base: Optional[str] = None,
                  book_ms: Optional[int] = None, chapter_label: Optional[str] = None,
                  book_duration_ms: Optional[int] = None, work_key: Optional[str] = None,
-                 narrator: Optional[str] = None) -> dict:
+                 narrator: Optional[str] = None, linked_from: Optional[str] = None) -> dict:
     """Store a check-in as this listener's position in the book and log it.
 
     `device_id` is the sending browser's own random id (DEVICE_ID), or None
@@ -166,7 +169,14 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     `narrator` from the server's read of the album (plex_player.book_identity).
     Each may be None; the position row and the log row keep what this
     check-in carried. `book_ms` is clamped to `book_duration_ms` when both are
-    known.
+    known. An empty chapter name is stored as null.
+
+    `linked_from` is the book key of an earlier copy this place came from,
+    which the caller has verified (the router's rule: the listener's own row
+    under that key, the same work key, and its album gone). It is set on the
+    position row when given and kept by later check-ins that carry none, so
+    the earlier copy's history stays with the book; the log rows don't carry
+    it.
 
     Returns {"stored": bool, "updated_at": iso8601}. `stored` is False when
     the stored row was written by the same psid with a higher seq; nothing is
@@ -191,10 +201,15 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
         raise ValueError("device_id must be 16 to 40 lower-case letters and digits")
     base_at = parse_base(base)
     about = _book_fields(book_ms, chapter_label, book_duration_ms, work_key, narrator)
+    if linked_from is not None and not (isinstance(linked_from, str) and BOOK_KEY.fullmatch(linked_from)
+                                        and linked_from != book):
+        raise ValueError("linked_from must be another book's key")
 
     now = _utcnow()
     values = {"track_key": track, "offset_ms": offset_ms, "duration_ms": duration_ms, "updated_at": now,
               "device": device, "device_id": device_id, "source": source, "psid": psid, "seq": seq, **about}
+    if linked_from is not None:
+        values["linked_from"] = linked_from
     P = ListeningPosition
     mine = (P.identity == identity, P.book_key == book)
     # Overwrite unless the row is this psid's own and newer. A row written
@@ -257,16 +272,34 @@ def position_dict(row: ListeningPosition) -> dict:
             "narrator": row.narrator}
 
 
+def get_position_row(db: Session, identity: str, book: str) -> Optional[ListeningPosition]:
+    """This listener's stored position row for the book, or None."""
+    return (db.query(ListeningPosition)
+            .filter(ListeningPosition.identity == identity, ListeningPosition.book_key == book).first())
+
+
 def get_position(db: Session, identity: str, book: str) -> Optional[dict]:
     """This listener's stored position in the book, or None. `psid` is the
     page session that saved it, so a page can tell its own saves from
     another tab's or device's (the player's re-check before a late Play).
-    The book-time fields are null for a row saved before they existed."""
-    row = (db.query(ListeningPosition)
-           .filter(ListeningPosition.identity == identity, ListeningPosition.book_key == book).first())
+    The book-time fields are null for a row saved before they existed. The
+    row's own link to an earlier copy is not part of it (the player reads a
+    linked_from on the web copy as "the files changed")."""
+    row = get_position_row(db, identity, book)
     if row is None:
         return None
     return position_dict(row)
+
+
+def has_work_keys(db: Session, identity: str, exclude_key: str) -> bool:
+    """True when this listener has any stored position with a work key under
+    a book key other than `exclude_key`: only then can an earlier copy be
+    found, so only then is the book's own work key worth reading from Plex.
+    One query on ix_listening_positions_identity_work_key."""
+    P = ListeningPosition
+    return (db.query(P.book_key)
+            .filter(P.identity == identity, P.work_key.isnot(None), P.book_key != exclude_key)
+            .first()) is not None
 
 
 # How many earlier copies a lookup may pass over (each still in the library).

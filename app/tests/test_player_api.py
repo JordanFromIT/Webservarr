@@ -754,8 +754,9 @@ class BookTime(PlayerApiBase):
         self.assertEqual(r.status_code, 422)
         self.assertEqual(self.db.query(ListeningPosition).count(), 0)
         self.timeline.assert_not_awaited()
-        # The edges are taken.
+        # The edges are taken; an empty chapter name is stored as null.
         self.assertEqual(self.checkin(book_ms=0, chapter_label="").status_code, 200)
+        self.assertIsNone(self.db.query(ListeningPosition).one().chapter_label)
         self.assertEqual(self.checkin(seq=2, book_ms=10 ** 9, chapter_label="c" * 200).status_code, 200)
 
 
@@ -842,6 +843,86 @@ class EarlierCopies(PlayerApiBase):
         self.seed("310:1", work_key=None)
         self.assertIsNone(self.position(self.NEW))
         self.assertEqual(self.history(), [])
+
+    # --- The database is asked before Plex (point 3) ---
+
+    def calls(self):
+        return pp.assert_in_library.await_count, self.book_identity.await_count
+
+    def test_no_work_keyed_row_elsewhere_costs_no_plex_read(self):
+        self.seed(self.GONE, work_key=None)          # a row, but saved before work keys
+        self.seed("310:1", identity="plex:1002")     # another listener's
+        self.assertIsNone(self.position(self.NEW))
+        # Only the book check every /position makes; no work-key read.
+        self.assertEqual(self.calls(), (1, 0))
+        self.history()
+        self.assertEqual(self.calls(), (2, 0))
+
+    def test_a_candidate_costs_the_tracks_read_with_the_album_reused(self):
+        self.seed(self.GONE)
+        self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+        # The book check, then the gone copy's check; one work-key read, given
+        # the album the book check read.
+        self.assertEqual(self.calls(), (2, 1))
+        self.assertEqual(self.book_identity.await_args.kwargs, {"album": {"ratingKey": "400", "type": "album"}})
+
+    # --- The link is kept by the first save in the new copy (point 1) ---
+
+    def save_new(self, **fields):
+        body = dict(book=self.NEW, track="401", offset_ms=9_000, duration_ms=500_000, psid="new-page")
+        body.update(fields)
+        r = self.checkin(**body)
+        self.assertEqual(r.status_code, 200, r.text)
+        return self.db.query(ListeningPosition).filter_by(identity="plex:1001", book_key=self.NEW).one()
+
+    def test_the_earlier_copys_history_stays_after_saving_in_the_new_copy(self):
+        self.seed(self.GONE)
+        self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+        row = self.save_new(seq=1, base=None, linked_from=self.GONE)
+        self.assertEqual(row.linked_from, self.GONE)
+        # Later saves carry no link and keep it.
+        row = self.save_new(seq=2, offset_ms=10_000)
+        self.db.refresh(row)
+        self.assertEqual(row.linked_from, self.GONE)
+        # The book now resumes from its own row, and its history keeps the
+        # earlier copy's entries, marked.
+        web = self.position(self.NEW)
+        self.assertNotIn("linked_from", web)
+        self.assertEqual(web["offset_ms"], 10_000)
+        entries = self.history()
+        self.assertEqual([(e["book_key"], e.get("earlier_copy")) for e in entries],
+                         [(self.NEW, None), (self.NEW, None), (self.GONE, True), (self.GONE, True)])
+
+    def test_a_forged_link_is_ignored(self):
+        self.seed("310:1", identity="plex:1002")          # another listener's copy, gone
+        self.seed(self.GONE, work_key="f6" * 16)           # own copy, gone, another work
+        self.seed("100:1")                                 # own copy, same work, still in the library
+        for seq, forged in enumerate(("310:1", self.GONE, "100:1", self.NEW, "999:1"), start=1):
+            with self.subTest(linked_from=forged):
+                row = self.save_new(seq=seq, linked_from=forged)
+                self.db.refresh(row)
+                self.assertIsNone(row.linked_from)
+        self.assertEqual({e["book_key"] for e in self.history()}, {self.NEW})
+        # Not a book key at all: refused like any other bad field.
+        for bad in ("junk", "310", "310:1:1", 310):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page",
+                                              seq=99, linked_from=bad).status_code, 422)
+
+    def test_a_link_plex_cannot_confirm_is_not_kept(self):
+        self.seed(self.GONE)
+
+        async def check(key, track_key=None):
+            if key == self.GONE:
+                raise pp.PlayerUnavailable("down")
+            return await fake_assert_in_library(key, track_key)
+        with mock.patch.object(pp, "assert_in_library", side_effect=check):
+            row = self.save_new(seq=1, linked_from=self.GONE)
+        self.assertIsNone(row.linked_from)
+        self.book_identity.side_effect = pp.PlayerUnavailable("down")
+        row = self.save_new(seq=2, linked_from=self.GONE)
+        self.db.refresh(row)
+        self.assertIsNone(row.linked_from)
 
     def test_plex_failing_means_no_link_not_an_error(self):
         self.seed(self.GONE)

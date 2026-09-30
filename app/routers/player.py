@@ -252,14 +252,20 @@ def _cover_url(key: str, thumb) -> str:
 # out gets 403 everywhere, not only on the list. A book key is checked before
 # any access or refresh work, so a bad key costs no plex.tv call.
 
-async def _book_access(who: "Listener", key: str, force: bool = False) -> dict:
+async def _checked_book(who: "Listener", key: str, force: bool = False) -> tuple:
     """The key checked as a book in the library, then the listener's access to
-    the library: their stream access. Raises the HTTP error."""
+    the library: (the album's metadata that check read, their stream access).
+    Raises the HTTP error."""
     try:
-        await pp.assert_in_library(key)
-        return await pp.library_access(who.session(), session_id=who.session_id, force=force)
+        album = await pp.assert_in_library(key)
+        return album, await pp.library_access(who.session(), session_id=who.session_id, force=force)
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
         raise _http_error(exc, forbid=True) from None
+
+
+async def _book_access(who: "Listener", key: str, force: bool = False) -> dict:
+    """_checked_book's stream access alone."""
+    return (await _checked_book(who, key, force=force))[1]
 
 
 @router.get("/books")
@@ -316,16 +322,37 @@ async def cover(request: Request, key: str, who: Listener = Depends(listener)):
 # copy's album is gone from the library: two editions side by side (two
 # narrators of one title) share a work key and must never share a place.
 
-async def _earlier_copy(db: Session, who: "Listener", key: str):
+async def _album_gone(key: str) -> Optional[bool]:
+    """True when assert_in_library no longer finds the book's album
+    (NotInLibrary), False while it is there, None when Plex can't say (or
+    the player went off meanwhile)."""
+    try:
+        await pp.assert_in_library(key)
+    except pp.PlayerOff:
+        return None
+    except pp.NotInLibrary:
+        return True
+    except pp.PlayerUnavailable as exc:
+        logger.info("Earlier-copy check unavailable: %s", type(exc).__name__)
+        return None
+    return False
+
+
+async def _earlier_copy(db: Session, who: "Listener", key: str, album: Optional[dict] = None):
     """This listener's position row in an earlier copy of the book, or None.
 
     Only for a listener with no row of their own for `key` (the caller
     checks), and only a copy whose album assert_in_library no longer finds
     (NotInLibrary). A copy still in the library is passed over for the next
-    newest, at most listening.LINK_TRIES of them. Best effort: Plex failing
+    newest, at most listening.LINK_TRIES of them. The database is asked
+    first: a listener with no work-keyed row under another key costs no Plex
+    read at all. `album` is the album's metadata the request already read,
+    so only its tracks are read for the work key. Best effort: Plex failing
     means no link, never an error."""
+    if not listening.has_work_keys(db, who.identity, key):
+        return None
     try:
-        about = await pp.book_identity(key)
+        about = await pp.book_identity(key, album=album)
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
         logger.info("No work key for the earlier-copy lookup: %s", type(exc).__name__)
         return None
@@ -334,17 +361,27 @@ async def _earlier_copy(db: Session, who: "Listener", key: str):
         row = listening.find_linked(db, who.identity, about.get("work_key"), key, skip=skip)
         if row is None:
             return None
-        try:
-            await pp.assert_in_library(row.book_key)
-        except pp.PlayerOff:
+        gone = await _album_gone(row.book_key)
+        if gone is None:
             return None
-        except pp.NotInLibrary:
+        if gone:
             return row          # that copy's album is gone: this is the book it became
-        except pp.PlayerUnavailable as exc:
-            logger.info("Earlier-copy check unavailable: %s", type(exc).__name__)
-            return None
         skip.append(row.book_key)   # still in the library: an edition side by side
     return None
+
+
+async def _verified_link(db: Session, who: "Listener", key: str, linked_from: Optional[str],
+                         work_key: Optional[str]) -> Optional[str]:
+    """`linked_from` from a check-in body when it is a link the server itself
+    would make for `key`: another book key, the listener's own row under it,
+    with the book's work key, and that album gone. Otherwise None (the
+    claim is ignored, never an error)."""
+    if not linked_from or linked_from == key or not work_key:
+        return None
+    row = listening.get_position_row(db, who.identity, linked_from)
+    if row is None or row.work_key != work_key:
+        return None
+    return linked_from if await _album_gone(linked_from) is True else None
 
 
 @router.get("/position/{key}")
@@ -374,7 +411,7 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
     With no row of the listener's own for `key`, `web` may be their place in
     an earlier copy of the book, with `linked_from` its book key (see
     _earlier_copy); the player then helps them find the spot in this copy."""
-    await _book_access(who, key)
+    album, _access = await _checked_book(who, key)
     try:
         plex_pos = await pp.plex_position(who.session(), key, session_id=who.session_id)
     except pp.NotInLibrary as exc:
@@ -389,7 +426,7 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
     # newer copy) rather than only in the log the check just read.
     web = listening.get_position(db, who.identity, key)
     if web is None:
-        row = await _earlier_copy(db, who, key)
+        row = await _earlier_copy(db, who, key, album=album)
         if row is not None:
             web = {**listening.position_dict(row), "linked_from": row.book_key}
     return {"web": web, "plex": plex_pos, "now": utc_iso(datetime.now(timezone.utc))}
@@ -405,18 +442,21 @@ async def history(request: Request, key: str,
     time: {"entries", "next_before"}. Pass next_before back as `before` for
     the next page; null means there are no more.
 
-    Under the same rule as /position (no row of the listener's own for
-    `key`, and an earlier copy whose album is gone), that copy's entries are
-    included, each marked "earlier_copy": true."""
+    An earlier copy's entries are included, each marked "earlier_copy":
+    true: under the same rule as /position while the listener has no row of
+    their own for `key`, and after that for as long as their row keeps the
+    link its first save carried (Checkin.linked_from)."""
     if before is not None:
         try:
             listening.parse_cursor(before)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
-    await _book_access(who, key)
-    linked = None
-    if listening.get_position(db, who.identity, key) is None:
-        row = await _earlier_copy(db, who, key)
+    album, _access = await _checked_book(who, key)
+    own = listening.get_position_row(db, who.identity, key)
+    if own is not None:
+        linked = own.linked_from
+    else:
+        row = await _earlier_copy(db, who, key, album=album)
         linked = row.book_key if row is not None else None
     try:
         return listening.get_history_page(db, who.identity, key, limit=limit, before=before, linked=linked)
@@ -464,6 +504,10 @@ class Checkin(BaseModel):
     # neither); the server clamps book_ms to the book's length.
     book_ms: Optional[StrictInt] = Field(default=None, ge=0, le=listening.BOOK_MS_MAX)
     chapter_label: Optional[Text] = Field(default=None, max_length=listening.LABEL_MAX)
+    # The earlier copy's book key when this place came from one (/position
+    # gave linked_from). Kept on the row only when the server would make the
+    # same link itself; otherwise ignored.
+    linked_from: Optional[str] = Field(default=None, pattern=r"^[0-9]{1,20}:[0-9]{1,6}$")
 
     @model_validator(mode="after")
     def _offset_within_track(self):
@@ -496,7 +540,9 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     The book's length, work key and narrator are stored with the place
     (spec 2.5), from the album read that checks the book plus one read of
     its tracks (plex_player.book_identity). That read is best effort: Plex
-    failing there stores the place without them."""
+    failing there stores the place without them. A `linked_from` in the body
+    is kept on the row only when _verified_link confirms it (one more album
+    read, only on a check-in that carries one)."""
     try:
         album = await pp.assert_in_library(body.book, body.track)
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
@@ -508,13 +554,15 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     except pp.PlayerUnavailable as exc:
         logger.info("Book identity unavailable for a check-in: %s", type(exc).__name__)
         about = {}
+    linked = await _verified_link(db, who, body.book, body.linked_from, about.get("work_key"))
     try:
         result = listening.save_checkin(db, who.identity, body.book, body.track, body.offset_ms,
                                         body.duration_ms, body.event, body.device, body.psid, body.seq,
                                         device_id=body.device_id, base=body.base, book_ms=body.book_ms,
                                         chapter_label=body.chapter_label,
                                         book_duration_ms=about.get("duration_ms"),
-                                        work_key=about.get("work_key"), narrator=about.get("narrator"))
+                                        work_key=about.get("work_key"), narrator=about.get("narrator"),
+                                        linked_from=linked)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     if result.get("conflict"):

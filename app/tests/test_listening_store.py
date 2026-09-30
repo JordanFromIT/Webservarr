@@ -53,7 +53,7 @@ class Tables(StoreBase):
         cols = {c["name"] for c in insp.get_columns("listening_positions")}
         self.assertEqual(cols, {"identity", "book_key", "track_key", "offset_ms", "duration_ms", "updated_at",
                                 "device", "device_id", "source", "psid", "seq", "book_ms", "book_duration_ms",
-                                "chapter_label", "work_key", "narrator"})
+                                "chapter_label", "work_key", "narrator", "linked_from"})
         pk = insp.get_pk_constraint("listening_positions")["constrained_columns"]
         uniques = [u["column_names"] for u in insp.get_unique_constraints("listening_positions")]
         self.assertTrue(sorted(pk) == ["book_key", "identity"] or ["identity", "book_key"] in uniques,
@@ -368,6 +368,11 @@ class BookFields(StoreBase):
         checkin(self.db, seq=4, book_ms=50_000_000)
         self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_ms"], 50_000_000)
 
+    def test_an_empty_chapter_name_is_stored_as_null(self):
+        checkin(self.db, chapter_label="")
+        self.assertIsNone(listening.get_position(self.db, ME, BOOK)["chapter_label"])
+        self.assertIsNone(listening.get_history(self.db, ME, BOOK)[0]["chapter_label"])
+
     def test_a_checkin_without_them_leaves_them_null(self):
         checkin(self.db, **self.FIELDS)
         checkin(self.db, seq=2)          # an older player: the place it saved carries none
@@ -440,14 +445,59 @@ class FindLinked(StoreBase):
             if "FROM listening_positions" in statement:
                 seen.append((statement, parameters))
         event.listen(engine, "before_cursor_execute", capture)
-        self.addCleanup(event.remove, engine, "before_cursor_execute", capture)
         listening.find_linked(self.db, ME, WORK_A, "400:1", skip=["310:1"])
-        self.assertEqual(len(seen), 1)
-        statement, parameters = seen[0]
-        with engine.connect() as conn:
-            rows = conn.exec_driver_sql("EXPLAIN QUERY PLAN " + statement, tuple(parameters)).fetchall()
-        plan = " ".join(str(r[-1]) for r in rows)
-        self.assertIn("ix_listening_positions_identity_work_key", plan)
+        listening.has_work_keys(self.db, ME, "400:1")
+        event.remove(engine, "before_cursor_execute", capture)
+        captured = list(seen)
+        self.assertEqual(len(captured), 2)
+        for statement, parameters in captured:
+            with engine.connect() as conn:
+                rows = conn.exec_driver_sql("EXPLAIN QUERY PLAN " + statement, tuple(parameters)).fetchall()
+            plan = " ".join(str(r[-1]) for r in rows)
+            self.assertIn("ix_listening_positions_identity_work_key", plan, statement)
+
+
+class LinkedFrom(StoreBase):
+    """The earlier copy a place was carried over from stays on the row, so
+    its history stays with the book (the router verifies it first)."""
+
+    def row(self, book="400:1"):
+        from app.models import ListeningPosition
+        return self.db.query(ListeningPosition).filter_by(identity=ME, book_key=book).one()
+
+    def test_set_by_the_save_that_carries_it_and_kept_by_later_ones(self):
+        checkin(self.db, book="400:1", seq=1, linked_from="300:1")
+        self.assertEqual(self.row().linked_from, "300:1")
+        checkin(self.db, book="400:1", seq=2)
+        self.assertEqual(self.row().linked_from, "300:1")
+        # Not part of the position the player reads (its linked_from means
+        # "the files changed").
+        self.assertNotIn("linked_from", listening.get_position(self.db, ME, "400:1"))
+        # A refused older seq changes nothing.
+        checkin(self.db, book="400:1", seq=1, linked_from="310:1")
+        self.assertEqual(self.row().linked_from, "300:1")
+
+    def test_a_row_saved_without_one_has_none(self):
+        checkin(self.db, book="400:1")
+        self.assertIsNone(self.row().linked_from)
+
+    def test_a_bad_one_is_refused(self):
+        for bad in ("", "junk", "300", "300:1:2", "400:1", 300, "a" * 70):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    checkin(self.db, book="400:1", linked_from=bad)
+        self.assertIsNone(listening.get_position(self.db, ME, "400:1"))
+
+    def test_has_work_keys_is_the_listeners_own_under_another_key(self):
+        self.assertFalse(listening.has_work_keys(self.db, ME, "400:1"))
+        checkin(self.db, book="300:1", work_key=None)
+        self.assertFalse(listening.has_work_keys(self.db, ME, "400:1"))
+        checkin(self.db, identity=THEM, book="310:1", psid="them", work_key=WORK_A)
+        self.assertFalse(listening.has_work_keys(self.db, ME, "400:1"))
+        checkin(self.db, book="400:1", psid="new", work_key=WORK_A)
+        self.assertFalse(listening.has_work_keys(self.db, ME, "400:1"))
+        checkin(self.db, book="320:1", psid="other", work_key=WORK_B)
+        self.assertTrue(listening.has_work_keys(self.db, ME, "400:1"))
 
 
 class EarlierCopyHistory(StoreBase):
@@ -531,10 +581,12 @@ class BookFieldsMigration(unittest.TestCase):
                 migrate_listening_book_fields(db)   # idempotent: nothing left to do
             for table in ("listening_positions", "listening_log"):
                 self.assertTrue(set(self.NEW) <= self.columns(db, table), table)
+            self.assertIn("linked_from", self.columns(db, "listening_positions"))
+            self.assertNotIn("linked_from", self.columns(db, "listening_log"))
             self.assertIn("ix_listening_positions_identity_work_key", self.indexes(db))
             self.assertEqual(tuple(db.execute(text(
-                "SELECT offset_ms, book_ms, book_duration_ms, chapter_label, work_key, narrator "
-                "FROM listening_positions")).one()), (10, None, None, None, None, None))
+                "SELECT offset_ms, book_ms, book_duration_ms, chapter_label, work_key, narrator, linked_from "
+                "FROM listening_positions")).one()), (10, None, None, None, None, None, None))
             self.assertEqual(tuple(db.execute(text("SELECT event, book_ms, work_key FROM listening_log")).one()),
                              ("pause", None, None))
             # The store works on the upgraded tables: the old row reads with
@@ -574,6 +626,7 @@ class BookFieldsMigration(unittest.TestCase):
             self.assertEqual(len(raced), 1)
             for table in ("listening_positions", "listening_log"):
                 self.assertTrue(set(self.NEW) <= self.columns(db, table), table)
+            self.assertIn("linked_from", self.columns(db, "listening_positions"))
             self.assertIn("ix_listening_positions_identity_work_key", self.indexes(db))
         finally:
             db.close()

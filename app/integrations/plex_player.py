@@ -710,10 +710,12 @@ def _title_key(title: str) -> str:
 # same key, so the listener's place in the earlier copy can be found. It is
 # the author and the title with what names a copy rather than the work
 # taken off the end: an edition, format or narration ("(Full-Cast Edition)",
-# "[Unabridged]", "- Read by X", "(Narrated by X)", "- First Last"). Unlike
-# _title_key it keeps the book's number: book 1 and book 2 are two works.
-# Two editions side by side share a key; they are kept apart by the caller,
-# which links only a copy whose album is gone.
+# "[Unabridged]", "- Read by X", "(Narrated by X)"), and " - <narrator>" when
+# that name is the book's narrator as Plex's metadata gives it. A dash part
+# is never guessed to be a name: "Saga - Iron Crown" stays its own work.
+# Unlike _title_key it keeps the book's number: book 1 and book 2 are two
+# works. Two editions side by side share a key; they are kept apart by the
+# caller, which links only a copy whose album is gone.
 
 _COPY_WORDS = re.compile(
     r"\b(?:edition|unabridged|abridged|full[\s-]*cast|dramati[sz](?:ed|ation)|narrated|read\s+by|"
@@ -723,36 +725,15 @@ _TRAILING_COPY_WORD = re.compile(r"[\s,:;\-\u2013\u2014]*\b(?:unabridged|abridge
                                  re.IGNORECASE)
 # The last " - " (or en or em dash) and what follows it.
 _DASH_TAIL = re.compile(r"^(?P<head>.*\S)\s+[-\u2013\u2014]\s+(?P<tail>\S.*?)\s*$")
-# Words a narrator's name is not made of: a " - Second Book" or " - The Return"
-# tail is part of the title.
-_NOT_A_NAME = frozenset((
-    "a an the and or of in on at to for from with by into over under part parts book books volume vol "
-    "chapter episode season series saga collection trilogy omnibus edition story stories tale tales "
-    "one two three four five six seven eight nine ten eleven twelve first second third fourth fifth "
-    "sixth seventh eighth ninth tenth last final new old complete special"
-).split())
 
 
-def _looks_like_name(text: str) -> bool:
-    """True for two to four capitalised words of letters (a person's name,
-    initials allowed: "J.R. Stone", "Mary-Kate O'Neil") with none of the
-    words in _NOT_A_NAME."""
-    words = text.split()
-    if not 2 <= len(words) <= 4:
-        return False
-    for word in words:
-        core = word.strip(".'\u2019")
-        if (not core or not core[0].isupper() or core.casefold() in _NOT_A_NAME
-                or not all(ch.isalpha() or ch in ".'\u2019-" for ch in word)):
-            return False
-    return True
-
-
-def _work_title(title: str) -> str:
+def _work_title(title: str, narrator: str = "") -> str:
     """The title with every trailing edition, format or narration part taken
-    off, normalised: casefolded, punctuation gone, spaces collapsed. Nothing
-    is taken off that would leave it empty."""
+    off, normalised: casefolded, punctuation gone, spaces collapsed. A
+    trailing " - <name>" goes only when the name is `narrator`. Nothing is
+    taken off that would leave it empty."""
     text = " ".join(str(title or "").split())
+    named = _work_words(narrator or "")
     while True:
         before = text
         text = _split_narrator(text)[0]
@@ -763,7 +744,7 @@ def _work_title(title: str) -> str:
         if stripped:
             text = stripped
         m = _DASH_TAIL.match(text)
-        if m and (_COPY_WORDS.search(m.group("tail")) or _looks_like_name(m.group("tail"))):
+        if m and (_COPY_WORDS.search(m.group("tail")) or (named and _work_words(m.group("tail")) == named)):
             text = m.group("head").strip()
         if text == before:
             break
@@ -776,10 +757,11 @@ def _work_words(text: str) -> str:
     return " ".join(re.sub(r"[\W_]+", " ", _fold(text).replace("'", "")).split())
 
 
-def work_key(author: str, title: str) -> str:
+def work_key(author: str, title: str, narrator: str = "") -> str:
     """The book's work key: sha256 of its normalised author and title (see
-    the notes above), as 32 hex digits. Pure: the same on both workers."""
-    text = _work_words(author) + "\x1f" + _work_title(title)
+    the notes above), as 32 hex digits. `narrator` is the book's narrator
+    from Plex's metadata ("" when not named). Pure: the same on both workers."""
+    text = _work_words(author) + "\x1f" + _work_title(title, narrator)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
 
 
@@ -992,8 +974,8 @@ async def assert_in_library(key: str, track_key: Optional[str] = None) -> dict:
 async def book_identity(key: str, album: Optional[dict] = None) -> dict:
     """What a save records about the copy of the book it was made in:
     {"work_key", "narrator", "duration_ms"}. `work_key` is work_key() of the
-    book's author and title as list_books names them (None when the title is
-    empty), `narrator` the book's narrator (None when not named) and
+    book's author, title and narrator as list_books names them (None when
+    the title is empty), `narrator` the book's narrator (None when not named) and
     `duration_ms` the book's length, its tracks in play order put together
     (None when Plex gives no durations).
 
@@ -1012,7 +994,8 @@ async def book_identity(key: str, album: Optional[dict] = None) -> dict:
         raise NotInLibrary("Not in the audiobook library")
     tracks = discs[disc]
     about = _describe(album, disc, tracks, len(discs))
-    return {"work_key": work_key(about["author"], about["title"]) if _work_title(about["title"]) else None,
+    return {"work_key": (work_key(about["author"], about["title"], about["narrator"])
+                         if _work_title(about["title"]) else None),
             "narrator": about["narrator"] or None,
             "duration_ms": sum(_track_duration(t) for t in tracks) or None}
 

@@ -314,6 +314,9 @@ class ListeningPosition(Base):
     chapter_label = Column(String(200), nullable=True)
     work_key = Column(String(32), nullable=True)
     narrator = Column(String(200), nullable=True)
+    # The book key of the earlier copy this place was carried over from (a
+    # book re-added as a new album), so its history stays with the book.
+    linked_from = Column(String(64), nullable=True)
 
     def __repr__(self):
         return f"<ListeningPosition(identity='{self.identity}', book='{self.book_key}')>"

@@ -132,13 +132,15 @@ LISTENING_BOOK_COLUMNS = (
     ("work_key", "VARCHAR(32)"),
     ("narrator", "VARCHAR(200)"),
 )
+# And on listening_positions only: the earlier copy a place was carried over from.
+LISTENING_POSITION_COLUMNS = (("linked_from", "VARCHAR(64)"),)
 
 
 def migrate_listening_book_fields(db: Session) -> None:
     """One-time migration: add the book-time, book-length, chapter, work-key
-    and narrator columns to listening_positions and listening_log, and the
-    (identity, work_key) index an earlier copy of a re-added book is found
-    by, in existing databases.
+    and narrator columns to listening_positions and listening_log,
+    listening_positions.linked_from, and the (identity, work_key) index an
+    earlier copy of a re-added book is found by, in existing databases.
 
     Existing rows keep nulls (the player treats them as saved before these
     existed). Guarded by PRAGMA table_info and idempotent, like
@@ -153,7 +155,8 @@ def migrate_listening_book_fields(db: Session) -> None:
         columns = {row[1] for row in db.execute(text(f"PRAGMA table_info({table})"))}
         if not columns:
             continue  # no table yet: create_all makes it with the columns and the index
-        for name, kind in LISTENING_BOOK_COLUMNS:
+        added = LISTENING_POSITION_COLUMNS if table == "listening_positions" else ()
+        for name, kind in LISTENING_BOOK_COLUMNS + added:
             if name in columns:
                 continue
             try:
