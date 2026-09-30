@@ -124,6 +124,52 @@ def migrate_listening_device_id(db: Session) -> None:
                 raise
 
 
+# The place in terms that survive a book's files being replaced (spec 2.5 s3).
+LISTENING_BOOK_COLUMNS = (
+    ("book_ms", "INTEGER"),
+    ("book_duration_ms", "INTEGER"),
+    ("chapter_label", "VARCHAR(200)"),
+    ("work_key", "VARCHAR(32)"),
+    ("narrator", "VARCHAR(200)"),
+)
+
+
+def migrate_listening_book_fields(db: Session) -> None:
+    """One-time migration: add the book-time, book-length, chapter, work-key
+    and narrator columns to listening_positions and listening_log, and the
+    (identity, work_key) index an earlier copy of a re-added book is found
+    by, in existing databases.
+
+    Existing rows keep nulls (the player treats them as saved before these
+    existed). Guarded by PRAGMA table_info and idempotent, like
+    migrate_listening_device_id: a worker that loses the race to the other
+    one ignores its "duplicate column" error, and the index is created with
+    IF NOT EXISTS.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    for table in ("listening_positions", "listening_log"):
+        columns = {row[1] for row in db.execute(text(f"PRAGMA table_info({table})"))}
+        if not columns:
+            continue  # no table yet: create_all makes it with the columns and the index
+        for name, kind in LISTENING_BOOK_COLUMNS:
+            if name in columns:
+                continue
+            try:
+                db.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {kind}"))
+                db.commit()
+                logger.info("Added %s.%s", table, name)
+            except OperationalError as exc:
+                db.rollback()
+                if "duplicate column" not in str(exc).lower():
+                    raise
+        if table == "listening_positions":
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_listening_positions_identity_work_key "
+                            "ON listening_positions (identity, work_key)"))
+            db.commit()
+
+
 def migrate_user_uid(db: Session) -> None:
     """One-time migration: add users.uid (unique) and give every existing
     user a permanent random one.

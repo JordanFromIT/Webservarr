@@ -52,16 +52,20 @@ class Tables(StoreBase):
         insp = inspect(self.Session.kw["bind"])
         cols = {c["name"] for c in insp.get_columns("listening_positions")}
         self.assertEqual(cols, {"identity", "book_key", "track_key", "offset_ms", "duration_ms", "updated_at",
-                                "device", "device_id", "source", "psid", "seq"})
+                                "device", "device_id", "source", "psid", "seq", "book_ms", "book_duration_ms",
+                                "chapter_label", "work_key", "narrator"})
         pk = insp.get_pk_constraint("listening_positions")["constrained_columns"]
         uniques = [u["column_names"] for u in insp.get_unique_constraints("listening_positions")]
         self.assertTrue(sorted(pk) == ["book_key", "identity"] or ["identity", "book_key"] in uniques,
                         "one row per identity and book")
         cols = {c["name"] for c in insp.get_columns("listening_log")}
         self.assertEqual(cols, {"id", "identity", "book_key", "track_key", "offset_ms", "device", "device_id",
-                                "event", "at"})
+                                "event", "at", "book_ms", "book_duration_ms", "chapter_label", "work_key",
+                                "narrator"})
         self.assertIn(["identity", "book_key", "at"],
                       [i["column_names"] for i in insp.get_indexes("listening_log")])
+        self.assertIn(["identity", "work_key"],
+                      [i["column_names"] for i in insp.get_indexes("listening_positions")])
         cols = {c["name"] for c in insp.get_columns("player_prefs")}
         self.assertEqual(cols, {"identity", "skip_s", "speed", "smart_rewind"})
         self.assertEqual(insp.get_pk_constraint("player_prefs")["constrained_columns"], ["identity"])
@@ -75,7 +79,8 @@ class Positions(StoreBase):
         pos = listening.get_position(self.db, ME, BOOK)
         self.assertEqual(pos, {"track": "6002", "offset_ms": 123456, "duration_ms": 3600000,
                                "updated_at": out["updated_at"], "device": "Safari on iPhone", "device_id": None,
-                               "source": "web", "psid": "p-one"})
+                               "source": "web", "psid": "p-one", "book_ms": None, "book_duration_ms": None,
+                               "chapter_label": None, "narrator": None})
         hist = listening.get_history(self.db, ME, BOOK)
         self.assertEqual(len(hist), 1)
         self.assertEqual(hist[0]["event"], "checkin")
@@ -142,7 +147,8 @@ class Positions(StoreBase):
             checkin(self.db, offset_ms=i * 1000, seq=i, event="play" if i == 0 else "checkin")
         hist = listening.get_history(self.db, ME, BOOK)
         self.assertEqual([h["offset_ms"] for h in hist], [4000, 3000, 2000, 1000, 0])
-        self.assertEqual(set(hist[0]), {"track", "offset_ms", "device", "device_id", "event", "at"})
+        self.assertEqual(set(hist[0]), {"track", "offset_ms", "device", "device_id", "event", "at", "book_key",
+                                        "book_ms", "book_duration_ms", "chapter_label"})
         self.assertEqual([h["offset_ms"] for h in listening.get_history(self.db, ME, BOOK, limit=2)], [4000, 3000])
 
     def test_source_is_recorded(self):
@@ -322,6 +328,284 @@ class CompareAndSwap(StoreBase):
         self.assertIsNone(self.row())
 
 
+WORK_A = "a1" * 16
+WORK_B = "b2" * 16
+
+
+class BookFields(StoreBase):
+    """Spec 2.5: every save and every log row records the place in terms
+    that survive the book's files being replaced."""
+
+    FIELDS = dict(book_ms=4_000_000, chapter_label="Chapter 9: The Tide Mill", book_duration_ms=36_000_000,
+                  work_key=WORK_A, narrator="Tamsin Ashby")
+
+    def test_they_round_trip_through_the_position_and_the_log(self):
+        checkin(self.db, **self.FIELDS)
+        pos = listening.get_position(self.db, ME, BOOK)
+        self.assertEqual({k: pos[k] for k in ("book_ms", "book_duration_ms", "chapter_label", "narrator")},
+                         {"book_ms": 4_000_000, "book_duration_ms": 36_000_000,
+                          "chapter_label": "Chapter 9: The Tide Mill", "narrator": "Tamsin Ashby"})
+        from app.models import ListeningLog, ListeningPosition
+        self.assertEqual(self.db.query(ListeningPosition).one().work_key, WORK_A)
+        log = self.db.query(ListeningLog).one()
+        self.assertEqual((log.book_ms, log.book_duration_ms, log.chapter_label, log.work_key, log.narrator),
+                         (4_000_000, 36_000_000, "Chapter 9: The Tide Mill", WORK_A, "Tamsin Ashby"))
+        entry = listening.get_history_page(self.db, ME, BOOK)["entries"][0]
+        self.assertEqual({k: entry[k] for k in ("book_key", "book_ms", "book_duration_ms", "chapter_label")},
+                         {"book_key": BOOK, "book_ms": 4_000_000, "book_duration_ms": 36_000_000,
+                          "chapter_label": "Chapter 9: The Tide Mill"})
+        self.assertNotIn("earlier_copy", entry)
+
+    def test_book_ms_past_the_length_stores_the_length(self):
+        checkin(self.db, book_ms=50_000_000, book_duration_ms=36_000_000)
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_ms"], 36_000_000)
+        self.assertEqual(listening.get_history(self.db, ME, BOOK)[0]["book_ms"], 36_000_000)
+        # The edges, and a length that is not known: nothing to clamp to.
+        checkin(self.db, seq=2, book_ms=36_000_000, book_duration_ms=36_000_000)
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_ms"], 36_000_000)
+        checkin(self.db, seq=3, book_ms=0, book_duration_ms=36_000_000)
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_ms"], 0)
+        checkin(self.db, seq=4, book_ms=50_000_000)
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["book_ms"], 50_000_000)
+
+    def test_a_checkin_without_them_leaves_them_null(self):
+        checkin(self.db, **self.FIELDS)
+        checkin(self.db, seq=2)          # an older player: the place it saved carries none
+        pos = listening.get_position(self.db, ME, BOOK)
+        self.assertEqual((pos["book_ms"], pos["chapter_label"], pos["narrator"]), (None, None, None))
+
+    def test_a_conflict_logs_them_too(self):
+        first = checkin(self.db, psid="desk")
+        out = checkin(self.db, psid="phone", base="2020-01-01T00:00:00.000Z", **self.FIELDS)
+        self.assertIn("conflict", out)
+        self.assertEqual(listening.get_history(self.db, ME, BOOK)[0]["book_ms"], 4_000_000)
+        self.assertEqual(listening.get_position(self.db, ME, BOOK)["updated_at"], first["updated_at"])
+
+    def test_bad_values_are_refused(self):
+        bad = [dict(book_ms=-1), dict(book_ms=10 ** 9 + 1), dict(book_ms=1.5), dict(book_ms="5"),
+               dict(book_ms=True), dict(book_duration_ms=-1), dict(book_duration_ms=2.0),
+               dict(chapter_label="x" * 201), dict(chapter_label=7), dict(work_key="xyz"),
+               dict(work_key="A1" * 16), dict(work_key=WORK_A + "0"), dict(narrator=5)]
+        for kw in bad:
+            with self.subTest(kw):
+                with self.assertRaises(ValueError):
+                    checkin(self.db, **kw)
+        self.assertIsNone(listening.get_position(self.db, ME, BOOK))
+        self.assertEqual(self.log_count(), 0)
+        # The largest taken, and a long narrator cut to its column.
+        checkin(self.db, book_ms=10 ** 9, chapter_label="x" * 200, narrator="n" * 500)
+        pos = listening.get_position(self.db, ME, BOOK)
+        self.assertEqual((pos["book_ms"], len(pos["chapter_label"]), len(pos["narrator"])), (10 ** 9, 200, 200))
+
+
+class FindLinked(StoreBase):
+    """A book re-added as a new album finds this listener's place in its
+    earlier copy by work key; the caller decides whether that copy is gone."""
+
+    def save(self, book, identity=ME, work_key=WORK_A, **kw):
+        return checkin(self.db, identity=identity, book=book, psid=f"p-{book}-{identity}", work_key=work_key, **kw)
+
+    def test_the_newest_row_under_another_key(self):
+        self.save("300:1", offset_ms=1)
+        self.save("310:1", offset_ms=2)
+        self.save("320:1", work_key=WORK_B)
+        row = listening.find_linked(self.db, ME, WORK_A, "400:1")
+        self.assertEqual((row.book_key, row.offset_ms), ("310:1", 2))
+        # A copy the caller found still in the library is passed over.
+        self.assertEqual(listening.find_linked(self.db, ME, WORK_A, "400:1", skip=["310:1"]).book_key, "300:1")
+        self.assertIsNone(listening.find_linked(self.db, ME, WORK_A, "400:1", skip=["310:1", "300:1"]))
+
+    def test_never_the_key_itself(self):
+        self.save("400:1")
+        self.assertIsNone(listening.find_linked(self.db, ME, WORK_A, "400:1"))
+
+    def test_never_another_identitys_row(self):
+        self.save("300:1", identity=THEM)
+        self.assertIsNone(listening.find_linked(self.db, ME, WORK_A, "400:1"))
+        self.assertEqual(listening.find_linked(self.db, THEM, WORK_A, "400:1").identity, THEM)
+
+    def test_no_work_key_finds_nothing(self):
+        self.save("300:1", work_key=None)
+        for key in (None, "", "zz", WORK_A.upper()):
+            with self.subTest(key=key):
+                self.assertIsNone(listening.find_linked(self.db, ME, key, "400:1"))
+
+    def test_the_lookup_uses_the_identity_work_key_index(self):
+        from sqlalchemy import event
+        self.save("300:1")
+        engine = self.Session.kw["bind"]
+        seen = []
+
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            if "FROM listening_positions" in statement:
+                seen.append((statement, parameters))
+        event.listen(engine, "before_cursor_execute", capture)
+        self.addCleanup(event.remove, engine, "before_cursor_execute", capture)
+        listening.find_linked(self.db, ME, WORK_A, "400:1", skip=["310:1"])
+        self.assertEqual(len(seen), 1)
+        statement, parameters = seen[0]
+        with engine.connect() as conn:
+            rows = conn.exec_driver_sql("EXPLAIN QUERY PLAN " + statement, tuple(parameters)).fetchall()
+        plan = " ".join(str(r[-1]) for r in rows)
+        self.assertIn("ix_listening_positions_identity_work_key", plan)
+
+
+class EarlierCopyHistory(StoreBase):
+    def test_linked_rows_are_merged_and_marked(self):
+        checkin(self.db, book="300:1", offset_ms=1, psid="old", seq=1)
+        checkin(self.db, book="300:1", offset_ms=2, psid="old", seq=2)
+        checkin(self.db, identity=THEM, book="300:1", offset_ms=99, psid="them")
+        checkin(self.db, book="400:1", offset_ms=3, psid="new", seq=1)
+        page = listening.get_history_page(self.db, ME, "400:1", linked="300:1")
+        self.assertEqual([(e["offset_ms"], e["book_key"], e.get("earlier_copy")) for e in page["entries"]],
+                         [(3, "400:1", None), (2, "300:1", True), (1, "300:1", True)])
+        # Paged one at a time, each row once.
+        got, before = [], None
+        while True:
+            page = listening.get_history_page(self.db, ME, "400:1", limit=1, before=before, linked="300:1")
+            got += [e["offset_ms"] for e in page["entries"]]
+            before = page["next_before"]
+            if before is None:
+                break
+        self.assertEqual(got, [3, 2, 1])
+        # Without a link, only the book's own rows.
+        self.assertEqual([e["offset_ms"] for e in listening.get_history_page(self.db, ME, "400:1")["entries"]], [3])
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class BookFieldsMigration(unittest.TestCase):
+    """An install from before spec 2.5 gets the five columns on both tables
+    and the (identity, work_key) index, once, with its rows kept (nulls),
+    and two workers starting at once both come up."""
+
+    NEW = ("book_ms", "book_duration_ms", "chapter_label", "work_key", "narrator")
+
+    def old_file_db(self):
+        import os
+        import tempfile
+        from sqlalchemy import create_engine, text
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        engine = create_engine("sqlite:///" + path)
+        self.addCleanup(engine.dispose)
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE listening_positions (identity VARCHAR(255) NOT NULL, book_key VARCHAR(64) NOT NULL, "
+                "track_key VARCHAR(64) NOT NULL, offset_ms INTEGER NOT NULL, duration_ms INTEGER NOT NULL, "
+                "updated_at DATETIME NOT NULL, device VARCHAR(80) NOT NULL, device_id VARCHAR(40), "
+                "source VARCHAR(10) NOT NULL, psid VARCHAR(64), seq INTEGER, PRIMARY KEY (identity, book_key))"))
+            conn.execute(text(
+                "CREATE TABLE listening_log (id INTEGER PRIMARY KEY, identity VARCHAR(255) NOT NULL, "
+                "book_key VARCHAR(64) NOT NULL, track_key VARCHAR(64) NOT NULL, offset_ms INTEGER NOT NULL, "
+                "device VARCHAR(80) NOT NULL, device_id VARCHAR(40), event VARCHAR(16) NOT NULL, "
+                "at DATETIME NOT NULL)"))
+            conn.execute(text(
+                "INSERT INTO listening_positions VALUES ('plex:1', '5:1', '6', 10, 20, '2026-09-01 00:00:00', "
+                "'Chrome on Linux', NULL, 'web', 'p', 1)"))
+            conn.execute(text(
+                "INSERT INTO listening_log (identity, book_key, track_key, offset_ms, device, event, at) "
+                "VALUES ('plex:1', '5:1', '6', 10, 'Chrome on Linux', 'pause', '2026-09-01 00:00:00')"))
+        return engine
+
+    @staticmethod
+    def columns(db, table):
+        from sqlalchemy import text
+        return {row[1] for row in db.execute(text(f"PRAGMA table_info({table})"))}
+
+    @staticmethod
+    def indexes(db):
+        from sqlalchemy import text
+        return {row[1] for row in db.execute(text("PRAGMA index_list(listening_positions)"))}
+
+    def test_adds_the_columns_and_index_once_and_keeps_the_rows(self):
+        import logging
+        from sqlalchemy import text
+        from sqlalchemy.orm import sessionmaker
+        from app.seed import migrate_listening_book_fields
+        db = sessionmaker(bind=self.old_file_db())()
+        try:
+            with self.assertLogs("app.seed", level=logging.INFO):
+                migrate_listening_book_fields(db)
+            with self.assertNoLogs("app.seed", level=logging.INFO):
+                migrate_listening_book_fields(db)   # idempotent: nothing left to do
+            for table in ("listening_positions", "listening_log"):
+                self.assertTrue(set(self.NEW) <= self.columns(db, table), table)
+            self.assertIn("ix_listening_positions_identity_work_key", self.indexes(db))
+            self.assertEqual(tuple(db.execute(text(
+                "SELECT offset_ms, book_ms, book_duration_ms, chapter_label, work_key, narrator "
+                "FROM listening_positions")).one()), (10, None, None, None, None, None))
+            self.assertEqual(tuple(db.execute(text("SELECT event, book_ms, work_key FROM listening_log")).one()),
+                             ("pause", None, None))
+            # The store works on the upgraded tables: the old row reads with
+            # nulls, and a new save and a lookup work.
+            pos = listening.get_position(db, "plex:1", "5:1")
+            self.assertEqual((pos["offset_ms"], pos["book_ms"], pos["narrator"]), (10, None, None))
+            checkin(db, identity="plex:1", book="7:1", work_key=WORK_A, book_ms=5, book_duration_ms=9)
+            self.assertEqual(listening.find_linked(db, "plex:1", WORK_A, "8:1").book_key, "7:1")
+        finally:
+            db.close()
+
+    def test_two_workers_at_once_both_come_up(self):
+        # Worker 2 runs the whole migration between worker 1's look at the
+        # table and its first ALTER: worker 1 meets "duplicate column" on
+        # every column it still thought missing, and carries on.
+        from sqlalchemy import create_engine, event
+        from sqlalchemy.orm import sessionmaker
+        from app.seed import migrate_listening_book_fields
+        engine = self.old_file_db()
+        other = create_engine(str(engine.url))
+        self.addCleanup(other.dispose)
+        raced = []
+
+        def other_worker(conn, cursor, statement, parameters, context, executemany):
+            if statement.startswith("ALTER TABLE") and not raced:
+                raced.append(statement)
+                db2 = sessionmaker(bind=other)()
+                try:
+                    migrate_listening_book_fields(db2)
+                finally:
+                    db2.close()
+        event.listen(engine, "before_cursor_execute", other_worker)
+        self.addCleanup(event.remove, engine, "before_cursor_execute", other_worker)
+        db = sessionmaker(bind=engine)()
+        try:
+            migrate_listening_book_fields(db)
+            self.assertEqual(len(raced), 1)
+            for table in ("listening_positions", "listening_log"):
+                self.assertTrue(set(self.NEW) <= self.columns(db, table), table)
+            self.assertIn("ix_listening_positions_identity_work_key", self.indexes(db))
+        finally:
+            db.close()
+
+    def test_no_op_on_a_fresh_schema_and_before_the_tables_exist(self):
+        import logging
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from app.seed import migrate_listening_book_fields
+        db = helpers.make_sessionmaker()()
+        try:
+            with self.assertNoLogs("app.seed", level=logging.INFO):
+                migrate_listening_book_fields(db)
+            self.assertIn("ix_listening_positions_identity_work_key", self.indexes(db))
+        finally:
+            db.close()
+        empty = sessionmaker(bind=create_engine("sqlite://"))()
+        try:
+            migrate_listening_book_fields(empty)     # no tables yet: create_all makes them
+            self.assertEqual(self.columns(empty, "listening_log"), set())
+        finally:
+            empty.close()
+
+    def test_init_db_runs_it_after_the_device_id_columns(self):
+        import inspect as pyinspect
+        from app import database
+        source = pyinspect.getsource(database.init_db)
+        self.assertIn("migrate_listening_book_fields(db)", source)
+        self.assertLess(source.index("migrate_listening_device_id(db)"),
+                        source.index("migrate_listening_book_fields(db)"))
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class DeviceIdMigration(unittest.TestCase):
     """An install from before device ids gets the columns added, once, with
@@ -371,7 +655,10 @@ class DeviceIdMigration(unittest.TestCase):
                              (10, None))
             self.assertEqual(tuple(db.execute(text("SELECT event, device_id FROM listening_log")).one()),
                              ("pause", None))
-            # The store works on the upgraded tables.
+            # The store works on the upgraded tables (once the later
+            # migration init_db also runs has added the book-time columns).
+            from app.seed import migrate_listening_book_fields
+            migrate_listening_book_fields(db)
             self.assertEqual(listening.get_position(db, "plex:1", "5:1")["device_id"], None)
         finally:
             db.close()

@@ -60,12 +60,26 @@ BOOKS = [
 ]
 
 
+# The stubbed library's work keys and narrators (plex_player.book_identity).
+WORKS = {"200:1": "c3" * 16, "100:1": "d4" * 16}
+NARRATORS = {"100:1": "Nora"}
+
+
 async def fake_assert_in_library(key, track_key=None):
     pp.parse_key(key)
     if key not in LIBRARY:
         raise pp.NotInLibrary("Not in the audiobook library")
     if track_key is not None and track_key not in LIBRARY[key]:
         raise pp.NotInLibrary("Not in this book")
+    return {"ratingKey": key.split(":")[0], "type": "album"}
+
+
+async def fake_book_identity(key, album=None):
+    pp.parse_key(key)
+    if key not in LIBRARY:
+        raise pp.NotInLibrary("Not in the audiobook library")
+    return {"work_key": WORKS.get(key), "narrator": NARRATORS.get(key),
+            "duration_ms": sum(LIBRARY[key].values()) or None}
 
 
 async def fake_cover_image(key):
@@ -92,6 +106,7 @@ class PlayerApiBase(unittest.TestCase):
         self.plex_position = mock.AsyncMock(return_value=None)
         self.cover_image = mock.AsyncMock(side_effect=fake_cover_image)
         self.next_in_series = mock.AsyncMock(return_value=None)
+        self.book_identity = mock.AsyncMock(side_effect=fake_book_identity)
         self.on = mock.Mock(return_value=True)
         patches = [
             mock.patch("app.routers.setup.is_setup_completed", return_value=True),
@@ -104,6 +119,7 @@ class PlayerApiBase(unittest.TestCase):
             mock.patch.object(pp, "timeline", self.timeline),
             mock.patch.object(pp, "cover_image", self.cover_image),
             mock.patch.object(pp, "next_in_series", self.next_in_series),
+            mock.patch.object(pp, "book_identity", self.book_identity),
             mock.patch.object(settings, "app_domain", "localhost"),
             mock.patch.object(settings, "app_scheme", "https"),
         ]
@@ -376,7 +392,8 @@ class Shapes(PlayerApiBase):
         entries = body["entries"]
         self.assertIsNone(body["next_before"])
         self.assertEqual([e["offset_ms"] for e in entries], [2_000, 1_000])
-        self.assertEqual(set(entries[0]), {"track", "offset_ms", "device", "device_id", "event", "at"})
+        self.assertEqual(set(entries[0]), {"track", "offset_ms", "device", "device_id", "event", "at", "book_key",
+                                           "book_ms", "book_duration_ms", "chapter_label"})
 
     def test_prefs_default_then_change(self):
         self.assertEqual(self.client.get("/api/player/prefs").json(),
@@ -668,6 +685,177 @@ class Checkins(PlayerApiBase):
         self.timeline.side_effect = slow_timeline
         self.assertTrue(self.checkin().json()["stored"])
         self.assertEqual(seen, [1])
+
+
+class BookTime(PlayerApiBase):
+    """Spec 2.5: a check-in carries the place in book time and that copy's
+    chapter name; the server adds the book's length, work key and narrator
+    from its own read of the album."""
+
+    def test_they_are_stored_on_the_position_and_the_log(self):
+        r = self.checkin(book_ms=305_000, chapter_label="Part 2 of 3")
+        self.assertEqual(r.status_code, 200, r.text)
+        row = self.db.query(ListeningPosition).one()
+        self.assertEqual((row.book_ms, row.chapter_label, row.book_duration_ms, row.work_key, row.narrator),
+                         (305_000, "Part 2 of 3", 600_000, WORKS["200:1"], None))
+        log = self.db.query(ListeningLog).one()
+        self.assertEqual((log.book_ms, log.chapter_label, log.book_duration_ms, log.work_key),
+                         (305_000, "Part 2 of 3", 600_000, WORKS["200:1"]))
+        web = self.position()
+        self.assertEqual({k: web[k] for k in ("book_ms", "book_duration_ms", "chapter_label", "narrator")},
+                         {"book_ms": 305_000, "book_duration_ms": 600_000, "chapter_label": "Part 2 of 3",
+                          "narrator": None})
+        self.assertNotIn("linked_from", web)
+        entry = self.client.get("/api/player/history/200:1").json()["entries"][0]
+        self.assertEqual({k: entry[k] for k in ("book_key", "book_ms", "book_duration_ms", "chapter_label")},
+                         {"book_key": "200:1", "book_ms": 305_000, "book_duration_ms": 600_000,
+                          "chapter_label": "Part 2 of 3"})
+        self.checkin(book="100:1", track="101", duration_ms=1_000_000, psid="psid-b")
+        self.assertEqual(self.position("100:1")["narrator"], "Nora")
+
+    def test_book_ms_past_the_books_length_is_clamped(self):
+        self.checkin(book_ms=900_000)
+        self.assertEqual(self.position()["book_ms"], 600_000)
+
+    def test_book_identity_gets_the_album_the_check_already_read(self):
+        self.checkin()
+        self.book_identity.assert_awaited_once()
+        args, kwargs = self.book_identity.await_args
+        self.assertEqual(args, ("200:1",))
+        self.assertEqual(kwargs, {"album": {"ratingKey": "200", "type": "album"}})
+
+    def test_plex_failing_on_the_identity_read_still_saves(self):
+        self.book_identity.side_effect = pp.PlayerUnavailable("down")
+        r = self.checkin(book_ms=10_000, chapter_label="Part 1 of 3")
+        self.assertEqual(r.status_code, 200)
+        row = self.db.query(ListeningPosition).one()
+        self.assertEqual((row.book_ms, row.chapter_label, row.book_duration_ms, row.work_key, row.narrator),
+                         (10_000, "Part 1 of 3", None, None, None))
+        self.book_identity.side_effect = pp.NotInLibrary("gone")
+        self.assertEqual(self.checkin(seq=2).status_code, 404)
+
+    def test_they_are_optional(self):
+        self.assertEqual(self.checkin().status_code, 200)
+        web = self.position()
+        self.assertEqual((web["book_ms"], web["chapter_label"]), (None, None))
+        self.assertEqual(self.checkin(seq=2, book_ms=None, chapter_label=None).status_code, 200)
+
+    def test_validation(self):
+        for fields in ({"book_ms": -1}, {"book_ms": 10 ** 9 + 1}, {"book_ms": 1.5}, {"book_ms": 1.0},
+                       {"book_ms": "5000"}, {"book_ms": True}, {"chapter_label": "c" * 201},
+                       {"chapter_label": 5}, {"chapter_label": ["x"]}):
+            with self.subTest(fields=fields):
+                self.assertEqual(self.checkin(**fields).status_code, 422)
+        body = json.dumps({"book": "200:1", "track": "202", "offset_ms": 1, "duration_ms": 2, "event": "play",
+                           "psid": "p", "seq": 1, "chapter_label": "Chapter \ud800"})
+        self.assertIn("\\ud800", body)
+        r = self.client.post("/api/player/checkin", content=body.encode(),
+                             headers={"Origin": ORIGIN, "Content-Type": "application/json"})
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.db.query(ListeningPosition).count(), 0)
+        self.timeline.assert_not_awaited()
+        # The edges are taken.
+        self.assertEqual(self.checkin(book_ms=0, chapter_label="").status_code, 200)
+        self.assertEqual(self.checkin(seq=2, book_ms=10 ** 9, chapter_label="c" * 200).status_code, 200)
+
+
+class EarlierCopies(PlayerApiBase):
+    """Spec 2.5 s4: a book re-added as a new album (a new key) inherits the
+    listener's place and history in its earlier copy, only while the listener
+    has no row of their own for the new key and only when the earlier copy's
+    album is gone from the library. Editions side by side (Review Focus 4)
+    never link."""
+
+    NEW = "400:1"       # the re-added copy
+    GONE = "300:1"      # the earlier copy, no longer in the library
+    WORK = "e5" * 16
+
+    def setUp(self):
+        super().setUp()
+        for p in (mock.patch.dict(LIBRARY, {self.NEW: {"401": 500_000}}),
+                  mock.patch.dict(WORKS, {self.NEW: self.WORK})):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def seed(self, book, identity="plex:1001", work_key=WORK, offset=1_234, at=None, logs=2):
+        from datetime import datetime
+        at = at or datetime(2026, 9, 20, 12, 0, 0)
+        self.db.add(ListeningPosition(identity=identity, book_key=book, track_key="301", offset_ms=offset,
+                                      duration_ms=400_000, updated_at=at, device="Old phone", source="web",
+                                      psid="old", seq=3, book_ms=offset + 400_000, book_duration_ms=900_000,
+                                      chapter_label="Chapter 4", work_key=work_key, narrator="Tamsin Ashby"))
+        for n in range(logs):
+            self.db.add(ListeningLog(identity=identity, book_key=book, track_key="301", offset_ms=offset - n,
+                                     device="Old phone", event="checkin", at=at, book_ms=offset + 400_000 - n,
+                                     book_duration_ms=900_000, chapter_label="Chapter 4", work_key=work_key))
+        self.db.commit()
+
+    def history(self, key=NEW):
+        r = self.client.get(f"/api/player/history/{key}")
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["entries"]
+
+    def test_a_copy_whose_album_is_gone_is_linked(self):
+        self.seed(self.GONE)
+        web = self.position(self.NEW)
+        self.assertEqual(web["linked_from"], self.GONE)
+        self.assertEqual((web["track"], web["offset_ms"], web["book_ms"], web["book_duration_ms"],
+                          web["chapter_label"], web["narrator"]),
+                         ("301", 1_234, 401_234, 900_000, "Chapter 4", "Tamsin Ashby"))
+        entries = self.history()
+        self.assertEqual([(e["book_key"], e.get("earlier_copy")) for e in entries],
+                         [(self.GONE, True), (self.GONE, True)])
+        # Nothing was written for the new key: the old place stays as it is.
+        self.assertEqual(self.db.query(ListeningPosition).filter_by(book_key=self.NEW).count(), 0)
+
+    def test_editions_side_by_side_are_never_linked(self):
+        # The same work key under a book still in the library.
+        self.seed("100:1")
+        self.assertIsNone(self.position(self.NEW))
+        self.assertEqual(self.history(), [])
+
+    def test_a_gone_copy_older_than_one_still_there_is_found(self):
+        from datetime import datetime
+        self.seed("100:1", at=datetime(2026, 9, 25))           # newer, but side by side
+        self.seed(self.GONE, at=datetime(2026, 9, 20), offset=777)
+        web = self.position(self.NEW)
+        self.assertEqual((web["linked_from"], web["offset_ms"]), (self.GONE, 777))
+        self.assertEqual({e["book_key"] for e in self.history()}, {self.GONE})
+
+    def test_another_identitys_rows_are_never_linked(self):
+        self.seed(self.GONE, identity="plex:1002")
+        self.assertIsNone(self.position(self.NEW))
+        self.assertEqual(self.history(), [])
+        self.as_user(B)
+        self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+
+    def test_a_row_of_their_own_for_the_new_key_means_no_link(self):
+        self.seed(self.GONE)
+        self.checkin(book=self.NEW, track="401", offset_ms=9_000, duration_ms=500_000)
+        web = self.position(self.NEW)
+        self.assertNotIn("linked_from", web)
+        self.assertEqual((web["track"], web["offset_ms"]), ("401", 9_000))
+        self.assertEqual([(e["book_key"], e.get("earlier_copy")) for e in self.history()], [(self.NEW, None)])
+
+    def test_another_work_or_no_work_key_is_not_linked(self):
+        self.seed(self.GONE, work_key="f6" * 16)
+        self.seed("310:1", work_key=None)
+        self.assertIsNone(self.position(self.NEW))
+        self.assertEqual(self.history(), [])
+
+    def test_plex_failing_means_no_link_not_an_error(self):
+        self.seed(self.GONE)
+        self.book_identity.side_effect = pp.PlayerUnavailable("down")
+        self.assertIsNone(self.position(self.NEW))
+        self.book_identity.side_effect = fake_book_identity
+
+        async def check(key, track_key=None):
+            if key == self.GONE:
+                raise pp.PlayerUnavailable("down")
+            return await fake_assert_in_library(key, track_key)
+        with mock.patch.object(pp, "assert_in_library", side_effect=check):
+            self.assertIsNone(self.position(self.NEW))
+            self.assertEqual(self.history(), [])
 
 
 class DeviceIds(PlayerApiBase):

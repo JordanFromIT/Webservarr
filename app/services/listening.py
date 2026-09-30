@@ -22,6 +22,13 @@ stores unless something newer has been saved since. The rule is one conditional 
 two workers racing on the same book can't both read the old row and let the
 older write land last.
 
+Every row also records the place in terms that survive the book's files
+being replaced (spec 2.5): book time (ms from the start of the book), the
+book's length then, that copy's chapter name and narrator, and a work key
+(plex_player.work_key) that names the book apart from its files. A book
+re-added as a new Plex album finds its earlier copy's row by that key
+(find_linked).
+
 The log keeps every stored check-in for the history view and is pruned after
 LOG_DAYS. Pruning runs at startup and then at most once a day, piggybacked on
 check-ins; the last run is a settings row (PRUNED_AT_KEY) rather than a module
@@ -59,6 +66,12 @@ DEVICE_MAX = 80
 DEVICE_ID = re.compile(r"[a-z0-9]{16,40}", re.ASCII)
 HISTORY_MAX = 1000
 HISTORY_PAGE = 500
+# The book-time fields (spec 2.5). A chapter name or narrator longer than
+# its column is refused (the player's) or cut (the server's own).
+BOOK_MS_MAX = 10 ** 9
+LABEL_MAX = 200
+NARRATOR_MAX = 200
+WORK_KEY = re.compile(r"[0-9a-f]{32}", re.ASCII)
 
 PREF_DEFAULTS = {"skip_s": 10, "speed": 1.0, "smart_rewind": True}
 SKIP_MIN, SKIP_MAX = 5, 60
@@ -92,6 +105,29 @@ def _count(name: str, value) -> int:
     return value
 
 
+def _book_fields(book_ms, chapter_label, book_duration_ms, work_key, narrator) -> dict:
+    """The book-time columns of a check-in, checked, with book_ms clamped to
+    [0, book_duration_ms] when both are known. Each is None when unknown."""
+    if book_ms is not None:
+        book_ms = _count("book_ms", book_ms)
+        if book_ms > BOOK_MS_MAX:
+            raise ValueError(f"book_ms must be at most {BOOK_MS_MAX}")
+    if book_duration_ms is not None:
+        book_duration_ms = _count("book_duration_ms", book_duration_ms)
+        if book_ms is not None:
+            book_ms = min(book_ms, book_duration_ms)
+    if chapter_label is not None and (not isinstance(chapter_label, str) or len(chapter_label) > LABEL_MAX):
+        raise ValueError(f"chapter_label must be text of at most {LABEL_MAX} characters")
+    if work_key is not None and not (isinstance(work_key, str) and WORK_KEY.fullmatch(work_key)):
+        raise ValueError("work_key must be 32 lower-case hex digits")
+    if narrator is not None:
+        if not isinstance(narrator, str):
+            raise ValueError("narrator must be text")
+        narrator = narrator[:NARRATOR_MAX] or None
+    return {"book_ms": book_ms, "book_duration_ms": book_duration_ms, "chapter_label": chapter_label,
+            "work_key": work_key, "narrator": narrator}
+
+
 BASE_MAX = 40
 
 
@@ -114,13 +150,23 @@ def parse_base(base) -> Optional[datetime]:
 
 def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: int, duration_ms: int,
                  event: str, device: str, psid: str, seq: int, source: str = "web",
-                 device_id: Optional[str] = None, base: Optional[str] = None) -> dict:
+                 device_id: Optional[str] = None, base: Optional[str] = None,
+                 book_ms: Optional[int] = None, chapter_label: Optional[str] = None,
+                 book_duration_ms: Optional[int] = None, work_key: Optional[str] = None,
+                 narrator: Optional[str] = None) -> dict:
     """Store a check-in as this listener's position in the book and log it.
 
     `device_id` is the sending browser's own random id (DEVICE_ID), or None
     from a player that sends none; the row keeps what the check-in carried.
     `base` is the stored timestamp the sending page last saw (ISO 8601, or
     None when it saw no position).
+
+    `book_ms` (the player's book time) and `chapter_label` (that copy's
+    chapter name) come from the player; `book_duration_ms`, `work_key` and
+    `narrator` from the server's read of the album (plex_player.book_identity).
+    Each may be None; the position row and the log row keep what this
+    check-in carried. `book_ms` is clamped to `book_duration_ms` when both are
+    known.
 
     Returns {"stored": bool, "updated_at": iso8601}. `stored` is False when
     the stored row was written by the same psid with a higher seq; nothing is
@@ -144,10 +190,11 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     if device_id is not None and not (isinstance(device_id, str) and DEVICE_ID.fullmatch(device_id)):
         raise ValueError("device_id must be 16 to 40 lower-case letters and digits")
     base_at = parse_base(base)
+    about = _book_fields(book_ms, chapter_label, book_duration_ms, work_key, narrator)
 
     now = _utcnow()
     values = {"track_key": track, "offset_ms": offset_ms, "duration_ms": duration_ms, "updated_at": now,
-              "device": device, "device_id": device_id, "source": source, "psid": psid, "seq": seq}
+              "device": device, "device_id": device_id, "source": source, "psid": psid, "seq": seq, **about}
     P = ListeningPosition
     mine = (P.identity == identity, P.book_key == book)
     # Overwrite unless the row is this psid's own and newer. A row written
@@ -175,7 +222,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
                         "updated_at": utc_iso(stored_at)}
             db.rollback()
             db.add(ListeningLog(identity=identity, book_key=book, track_key=track, offset_ms=offset_ms,
-                                device=device, device_id=device_id, event=event, at=now))
+                                device=device, device_id=device_id, event=event, at=now, **about))
             db.commit()
             return {"stored": False, "updated_at": utc_iso(stored_at), "conflict": conflict}
         db.add(P(identity=identity, book_key=book, **values))
@@ -189,7 +236,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
         raise RuntimeError("could not store the listening position")
 
     db.add(ListeningLog(identity=identity, book_key=book, track_key=track, offset_ms=offset_ms,
-                        device=device, device_id=device_id, event=event, at=now))
+                        device=device, device_id=device_id, event=event, at=now, **about))
     db.commit()
 
     try:
@@ -201,22 +248,55 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     return {"stored": True, "updated_at": utc_iso(now)}
 
 
+def position_dict(row: ListeningPosition) -> dict:
+    """A stored position as get_position gives it."""
+    return {"track": row.track_key, "offset_ms": row.offset_ms, "duration_ms": row.duration_ms,
+            "updated_at": utc_iso(row.updated_at), "device": row.device, "device_id": row.device_id,
+            "source": row.source, "psid": row.psid, "book_ms": row.book_ms,
+            "book_duration_ms": row.book_duration_ms, "chapter_label": row.chapter_label,
+            "narrator": row.narrator}
+
+
 def get_position(db: Session, identity: str, book: str) -> Optional[dict]:
     """This listener's stored position in the book, or None. `psid` is the
     page session that saved it, so a page can tell its own saves from
-    another tab's or device's (the player's re-check before a late Play)."""
+    another tab's or device's (the player's re-check before a late Play).
+    The book-time fields are null for a row saved before they existed."""
     row = (db.query(ListeningPosition)
            .filter(ListeningPosition.identity == identity, ListeningPosition.book_key == book).first())
     if row is None:
         return None
-    return {"track": row.track_key, "offset_ms": row.offset_ms, "duration_ms": row.duration_ms,
-            "updated_at": utc_iso(row.updated_at), "device": row.device, "device_id": row.device_id,
-            "source": row.source, "psid": row.psid}
+    return position_dict(row)
+
+
+# How many earlier copies a lookup may pass over (each still in the library).
+LINK_TRIES = 3
+
+
+def find_linked(db: Session, identity: str, work_key: Optional[str], exclude_key: str,
+                skip=()) -> Optional[ListeningPosition]:
+    """The newest of this listener's stored positions with `work_key` under a
+    book key other than `exclude_key` (and none of `skip`), or None: the
+    place in an earlier copy of a book re-added as a new Plex album.
+
+    The caller links it only when that copy's album is gone from the
+    library, so editions side by side never share a place; `skip` names
+    copies it found still there. One query on
+    ix_listening_positions_identity_work_key, scoped by identity."""
+    if not isinstance(work_key, str) or not WORK_KEY.fullmatch(work_key):
+        return None
+    P = ListeningPosition
+    q = db.query(P).filter(P.identity == identity, P.work_key == work_key, P.book_key != exclude_key)
+    skip = [k for k in skip if isinstance(k, str)]
+    if skip:
+        q = q.filter(P.book_key.notin_(skip))
+    return q.order_by(P.updated_at.desc(), P.book_key).first()
 
 
 def _entry(r: ListeningLog) -> dict:
     return {"track": r.track_key, "offset_ms": r.offset_ms, "device": r.device, "device_id": r.device_id,
-            "event": r.event, "at": utc_iso(r.at)}
+            "event": r.event, "at": utc_iso(r.at), "book_key": r.book_key, "book_ms": r.book_ms,
+            "book_duration_ms": r.book_duration_ms, "chapter_label": r.chapter_label}
 
 
 def get_history(db: Session, identity: str, book: str, limit: int = 200) -> list:
@@ -289,25 +369,34 @@ def parse_cursor(value: str) -> tuple:
 
 
 def get_history_page(db: Session, identity: str, book: str, limit: int = HISTORY_PAGE,
-                     before: Optional[str] = None) -> dict:
+                     before: Optional[str] = None, linked: Optional[str] = None) -> dict:
     """One page of this listener's log for the book, newest first:
     {"entries": [...], "next_before": cursor or None}.
 
     Pass next_before back as `before` for the next page; None means there
     are no more. Rows are ordered by (at, id), and the cursor carries both,
     so rows logged at the same instant are never skipped or repeated across
-    pages. Raises ValueError for a bad limit or cursor."""
+    pages. `linked` is the book key of an earlier copy (find_linked): its
+    rows are merged in, each marked "earlier_copy": true. Raises ValueError
+    for a bad limit or cursor."""
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= HISTORY_MAX:
         raise ValueError(f"limit must be from 1 to {HISTORY_MAX}")
     L = ListeningLog
-    q = db.query(L).filter(L.identity == identity, L.book_key == book)
+    same_book = L.book_key == book if linked is None or linked == book else L.book_key.in_([book, linked])
+    q = db.query(L).filter(L.identity == identity, same_book)
     if before is not None:
         at, row_id = parse_cursor(before)
         q = q.filter(L.at < at if row_id is None else or_(L.at < at, and_(L.at == at, L.id < row_id)))
     rows = q.order_by(L.at.desc(), L.id.desc()).limit(limit + 1).all()
     more = len(rows) > limit
     rows = rows[:limit]
-    return {"entries": [_entry(r) for r in rows], "next_before": _cursor(rows[-1]) if more else None}
+    entries = []
+    for r in rows:
+        entry = _entry(r)
+        if r.book_key != book:
+            entry["earlier_copy"] = True
+        entries.append(entry)
+    return {"entries": entries, "next_before": _cursor(rows[-1]) if more else None}
 
 
 def _prefs_dict(row: Optional[PlayerPrefs]) -> dict:

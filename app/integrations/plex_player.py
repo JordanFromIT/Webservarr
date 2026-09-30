@@ -703,6 +703,86 @@ def _title_key(title: str) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", _NUMBER_WORDS.sub(" ", _fold(title))).split())
 
 
+# --- Work key ---------------------------------------------------------------------
+#
+# A book's work key names the book apart from its files (spec 2.5): a copy
+# re-added as a new album, in another format or split another way, has the
+# same key, so the listener's place in the earlier copy can be found. It is
+# the author and the title with what names a copy rather than the work
+# taken off the end: an edition, format or narration ("(Full-Cast Edition)",
+# "[Unabridged]", "- Read by X", "(Narrated by X)", "- First Last"). Unlike
+# _title_key it keeps the book's number: book 1 and book 2 are two works.
+# Two editions side by side share a key; they are kept apart by the caller,
+# which links only a copy whose album is gone.
+
+_COPY_WORDS = re.compile(
+    r"\b(?:edition|unabridged|abridged|full[\s-]*cast|dramati[sz](?:ed|ation)|narrated|read\s+by|"
+    r"audio\s*books?|audio\s+drama|radio\s+drama|mp3|m4b|aac|flac|retail|remaster(?:ed)?)\b", re.IGNORECASE)
+_TRAILING_GROUP = re.compile(r"\s*[(\[{]([^()\[\]{}]*)[)\]}]\s*$")
+_TRAILING_COPY_WORD = re.compile(r"[\s,:;\-\u2013\u2014]*\b(?:unabridged|abridged|audio\s*book)\s*$",
+                                 re.IGNORECASE)
+# The last " - " (or en or em dash) and what follows it.
+_DASH_TAIL = re.compile(r"^(?P<head>.*\S)\s+[-\u2013\u2014]\s+(?P<tail>\S.*?)\s*$")
+# Words a narrator's name is not made of: a " - Second Book" or " - The Return"
+# tail is part of the title.
+_NOT_A_NAME = frozenset((
+    "a an the and or of in on at to for from with by into over under part parts book books volume vol "
+    "chapter episode season series saga collection trilogy omnibus edition story stories tale tales "
+    "one two three four five six seven eight nine ten eleven twelve first second third fourth fifth "
+    "sixth seventh eighth ninth tenth last final new old complete special"
+).split())
+
+
+def _looks_like_name(text: str) -> bool:
+    """True for two to four capitalised words of letters (a person's name,
+    initials allowed: "J.R. Stone", "Mary-Kate O'Neil") with none of the
+    words in _NOT_A_NAME."""
+    words = text.split()
+    if not 2 <= len(words) <= 4:
+        return False
+    for word in words:
+        core = word.strip(".'\u2019")
+        if (not core or not core[0].isupper() or core.casefold() in _NOT_A_NAME
+                or not all(ch.isalpha() or ch in ".'\u2019-" for ch in word)):
+            return False
+    return True
+
+
+def _work_title(title: str) -> str:
+    """The title with every trailing edition, format or narration part taken
+    off, normalised: casefolded, punctuation gone, spaces collapsed. Nothing
+    is taken off that would leave it empty."""
+    text = " ".join(str(title or "").split())
+    while True:
+        before = text
+        text = _split_narrator(text)[0]
+        m = _TRAILING_GROUP.search(text)
+        if m and _COPY_WORDS.search(m.group(1)) and text[:m.start()].strip():
+            text = text[:m.start()].strip()
+        stripped = _TRAILING_COPY_WORD.sub("", text).strip()
+        if stripped:
+            text = stripped
+        m = _DASH_TAIL.match(text)
+        if m and (_COPY_WORDS.search(m.group("tail")) or _looks_like_name(m.group("tail"))):
+            text = m.group("head").strip()
+        if text == before:
+            break
+    return _work_words(text)
+
+
+def _work_words(text: str) -> str:
+    """Casefolded words with punctuation gone: an apostrophe joins its word
+    ("Keeper's" is "keepers"), anything else splits."""
+    return " ".join(re.sub(r"[\W_]+", " ", _fold(text).replace("'", "")).split())
+
+
+def work_key(author: str, title: str) -> str:
+    """The book's work key: sha256 of its normalised author and title (see
+    the notes above), as 32 hex digits. Pure: the same on both workers."""
+    text = _work_words(author) + "\x1f" + _work_title(title)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
+
+
 def _series_entries(library: list) -> list:
     """The library's books that belong to a series, each with its series
     (author and name), narrator, number (None when unknown) and summary."""
@@ -884,25 +964,57 @@ async def book_detail(key: str) -> dict:
             "chapters": _chapters(tracks, embedded)}
 
 
-async def assert_in_library(key: str, track_key: Optional[str] = None) -> None:
+async def assert_in_library(key: str, track_key: Optional[str] = None) -> dict:
     """NotInLibrary unless the book's album is in the audiobook library and,
     when `track_key` is given, that track belongs to this book (album and
     disc). Malformed keys are refused before any Plex call. PlayerOff when
-    no library is configured; PlayerUnavailable when Plex fails."""
+    no library is configured; PlayerUnavailable when Plex fails.
+
+    Returns the album's metadata it read, so a caller can pass it on to
+    book_identity rather than read it again."""
     album_key, disc = parse_key(key)
     if track_key is not None and not (isinstance(track_key, str) and _RATING_KEY.fullmatch(track_key)):
         raise NotInLibrary("Malformed track key")
     admin = _configured()
     async with _pms_client() as client:
-        await _album(client, admin, album_key)
+        album = await _album(client, admin, album_key)
         if track_key is None:
-            return
+            return album
         container = await _pms_get(client, admin, admin["token"], f"/library/metadata/{track_key}")
     items = _items(container)
     t = items[0] if items else {}
     if (t.get("type") != "track" or str(t.get("parentRatingKey")) != album_key
             or (_int(t.get("parentIndex")) or 1) != disc):
         raise NotInLibrary("Not in this book")
+    return album
+
+
+async def book_identity(key: str, album: Optional[dict] = None) -> dict:
+    """What a save records about the copy of the book it was made in:
+    {"work_key", "narrator", "duration_ms"}. `work_key` is work_key() of the
+    book's author and title as list_books names them (None when the title is
+    empty), `narrator` the book's narrator (None when not named) and
+    `duration_ms` the book's length, its tracks in play order put together
+    (None when Plex gives no durations).
+
+    `album` is the album's metadata when the caller already read it
+    (assert_in_library returns it); only the album's tracks are read then,
+    one Plex call. Nothing is cached. Raises NotInLibrary, PlayerOff or
+    PlayerUnavailable."""
+    album_key, disc = parse_key(key)
+    admin = _configured()
+    async with _pms_client() as client:
+        if album is None:
+            album = await _album(client, admin, album_key)
+        children = await _pms_get(client, admin, admin["token"], f"/library/metadata/{album_key}/children")
+    discs = _discs(_items(children))
+    if disc not in discs:
+        raise NotInLibrary("Not in the audiobook library")
+    tracks = discs[disc]
+    about = _describe(album, disc, tracks, len(discs))
+    return {"work_key": work_key(about["author"], about["title"]) if _work_title(about["title"]) else None,
+            "narrator": about["narrator"] or None,
+            "duration_ms": sum(_track_duration(t) for t in tracks) or None}
 
 
 # The album thumbnail paths a cover may come from, and the square a cover is

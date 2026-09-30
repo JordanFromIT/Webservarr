@@ -286,6 +286,8 @@ class WikiPage(Base):
 class ListeningPosition(Base):
     """Where one listener is in one book: the last stored check-in."""
     __tablename__ = "listening_positions"
+    # An earlier copy of a re-added book is found by work key (listening.find_linked).
+    __table_args__ = (Index("ix_listening_positions_identity_work_key", "identity", "work_key"),)
 
     # One row per identity and book.
     identity = Column(String(255), primary_key=True)
@@ -303,6 +305,15 @@ class ListeningPosition(Base):
     # seq from the same page session never overwrites a newer one.
     psid = Column(String(64), nullable=True)
     seq = Column(Integer, nullable=True)
+    # The place in terms that survive the book's files being replaced: ms from
+    # the start of the book, the book's length then, that copy's chapter name,
+    # its narrator, and a key for the work itself (plex_player.work_key). Null
+    # when not known (rows saved before these existed).
+    book_ms = Column(Integer, nullable=True)
+    book_duration_ms = Column(Integer, nullable=True)
+    chapter_label = Column(String(200), nullable=True)
+    work_key = Column(String(32), nullable=True)
+    narrator = Column(String(200), nullable=True)
 
     def __repr__(self):
         return f"<ListeningPosition(identity='{self.identity}', book='{self.book_key}')>"
@@ -322,6 +333,12 @@ class ListeningLog(Base):
     device_id = Column(String(40), nullable=True)
     event = Column(String(16), nullable=False)   # play, pause, checkin, seek, jump, leave, end
     at = Column(DateTime, nullable=False)        # naive UTC
+    # As on ListeningPosition.
+    book_ms = Column(Integer, nullable=True)
+    book_duration_ms = Column(Integer, nullable=True)
+    chapter_label = Column(String(200), nullable=True)
+    work_key = Column(String(32), nullable=True)
+    narrator = Column(String(200), nullable=True)
 
     def __repr__(self):
         return f"<ListeningLog(id={self.id}, event='{self.event}')>"

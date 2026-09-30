@@ -957,6 +957,103 @@ class Membership(BridgeBase):
         with self.assertRaises(pp.PlayerUnavailable):
             self.run_async(pp.assert_in_library("200:1"))
 
+    def test_it_returns_the_album_it_read(self):
+        self.assertEqual(self.run_async(pp.assert_in_library("200:1"))["ratingKey"], "200")
+        self.assertEqual(self.run_async(pp.assert_in_library("200:1", track_key="202"))["title"],
+                         ALBUMS["200"]["title"])
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class WorkKeys(unittest.TestCase):
+    """Spec 2.5: a work key names the book apart from its files, so an edition,
+    format or narration named in the title does not change it."""
+
+    AUTHOR = "Wren Hollis"
+    TITLE = "The Lantern Keeper's Daughter"
+
+    def test_edition_format_and_narrator_suffixes_give_the_same_key(self):
+        base = pp.work_key(self.AUTHOR, self.TITLE)
+        self.assertRegex(base, r"^[0-9a-f]{32}$")
+        for title in (f"{self.TITLE} (Full-Cast Edition)", f"{self.TITLE} - Tamsin Ashby",
+                      f"{self.TITLE} - Read by Tamsin Ashby", f"{self.TITLE} (Narrated by Tamsin Ashby)",
+                      f"{self.TITLE} [Unabridged]", f"{self.TITLE}: Unabridged", f"{self.TITLE} Unabridged",
+                      f"{self.TITLE} (Unabridged) - Tamsin Ashby", f"{self.TITLE} – J.R. Oakes-Pell",
+                      f"{self.TITLE} (Dramatized Adaptation)", f"{self.TITLE} [m4b]",
+                      "the lantern keepers daughter", "THE LANTERN KEEPER’S DAUGHTER",
+                      f"  {self.TITLE}  (Full Cast Audio Edition) "):
+            with self.subTest(title=title):
+                self.assertEqual(pp.work_key(self.AUTHOR, title), base)
+        self.assertEqual(pp.work_key("wren  hollis.", self.TITLE), base)
+
+    def test_different_authors_or_books_give_different_keys(self):
+        base = pp.work_key(self.AUTHOR, self.TITLE)
+        self.assertNotEqual(pp.work_key("Other Pennant", self.TITLE), base)
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "The Lantern Keeper's Son"), base)
+        # The book's number is kept: book 1 and book 2 are two works.
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill, Book 1"), pp.work_key(self.AUTHOR, "Tide Mill, Book 2"))
+        # A subtitle after a dash is part of the title, not a narrator.
+        for a, b in (("Tide Mill - The Return", "Tide Mill - The Arrival"),
+                     ("Tide Mill - Second Voyage", "Tide Mill - Third Voyage"),
+                     ("Tide Mill - Part One", "Tide Mill - Part Two"),
+                     ("Tide Mill (Book 2)", "Tide Mill (Book 3)")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+
+    def test_nothing_is_taken_off_that_would_leave_the_title_empty(self):
+        self.assertEqual(pp._work_title("Unabridged"), "unabridged")
+        self.assertEqual(pp._work_title("(Full-Cast Edition)"), "full cast edition")
+        self.assertEqual(pp._work_title(""), "")
+
+
+class BookIdentity(BridgeBase):
+    def test_the_fields_a_save_records(self):
+        out = self.run_async(pp.book_identity("200:1"))
+        self.assertEqual(out, {"work_key": pp.work_key("Bea Writer", "Parts Book"), "narrator": "Pat Voice",
+                               "duration_ms": 600_000})
+
+    def test_it_matches_what_list_books_says_of_every_book(self):
+        for book in self.run_async(pp.list_books()):
+            with self.subTest(key=book["key"]):
+                out = self.run_async(pp.book_identity(book["key"]))
+                self.assertEqual(out["duration_ms"], book["duration_ms"])
+                self.assertEqual(out["narrator"], book["narrator"] or None)
+                self.assertEqual(out["work_key"], pp.work_key(book["author"], book["title"]))
+
+    def test_a_disc_of_a_series_album_is_its_own_work(self):
+        first = self.run_async(pp.book_identity("400:1"))
+        second = self.run_async(pp.book_identity("400:2"))
+        self.assertEqual(second["duration_ms"], 70_000)
+        self.assertEqual(second["work_key"], pp.work_key("Cal Penn", "Second Tale"))
+        self.assertNotEqual(first["work_key"], second["work_key"])
+
+    def test_a_duplicate_copy_is_not_counted_in_the_length(self):
+        self.assertEqual(self.run_async(pp.book_identity("300:1"))["duration_ms"], 510_000)
+
+    def test_the_checkins_album_read_is_reused(self):
+        # The check-in path: the album and track reads that check the book,
+        # then only the album's tracks.
+        album = self.run_async(pp.assert_in_library("200:1", track_key="202"))
+        self.run_async(pp.book_identity("200:1", album=album))
+        self.assertEqual(self.plex.paths(), ["/library/metadata/200", "/library/metadata/202",
+                                             "/library/metadata/200/children"])
+
+    def test_no_durations_and_no_narrator_are_none(self):
+        silent = [dict(t, duration=0, Media=[{"Part": [{"file": "/data/Audiobooks/A/Quiet/501.mp3"}]}])
+                  for t in TRACKS["500"]]
+        with mock.patch.dict(TRACKS, {"500": silent}):
+            out = self.run_async(pp.book_identity("500:1"))
+        self.assertEqual((out["duration_ms"], out["narrator"]), (None, None))
+        self.assertEqual(out["work_key"], pp.work_key("Ann Author", "Quiet Book"))
+
+    def test_unknown_books_and_outages(self):
+        for key in ("999:1", "900:1", "200:7", "junk"):
+            with self.subTest(key=key):
+                with self.assertRaises(pp.NotInLibrary):
+                    self.run_async(pp.book_identity(key))
+        self.plex.pms_down = 503
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.book_identity("200:1"))
+
 
 class Position(BridgeBase):
     T1 = 1_790_000_000   # epoch seconds
