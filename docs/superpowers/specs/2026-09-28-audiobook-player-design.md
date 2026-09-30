@@ -115,7 +115,8 @@ for this one server, the same one the Plex web app uses.
 
 ### 5.4 Security
 
-- The CSP gains `media-src 'self' https://*.plex.direct:32400`, and the image source for covers if
+- The CSP gains `media-src 'self' https://*.plex.direct:*` (any port, because a server's remote
+  port is whatever its operator mapped; only `plex.direct` hosts are allowed), and the image source for covers if
   they load direct. No other directive loosens.
 - A listener can only read and write their own positions, log and prefs: every query filters by
   the session identity.
