@@ -969,6 +969,57 @@ await run('T3F4: while a confirm waits on a question, Preview waits too and the 
   }
 });
 
+// Spec 2.5 section 7 (PR3), on the held path: a confirm's Plex question left
+// showing is read again before its answer, still held. Moved on: the question
+// shows the new place and the helper still waits on it (a later Continue lands
+// there); a read that fails or takes over 4 s keeps it all as it was.
+await run('PR3 (held): a confirm\'s Plex question left 10 min: Plexamp moved, the question updates, the helper still waits', async () => {
+  const reads = (t) => t.fetches.filter((f) => f.url.indexOf('/api/player/position/') === 0).length;
+  for (const answer of ['Continue', 'Keep listening here']) {
+    const t = await held();
+    t.places.plex = { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(t.now()).toISOString(), device: 'Plexamp' };
+    await t.clock.advance(5000);
+    t.card('percent').querySelector('.wsp-fp-use').click();
+    await t.clock.advance(200);
+    check(answer + ': asked about 15:00', t.prompts().join() === 'Continue from 15:00 (Plexamp, just now)?', t.prompts());
+    await t.clock.advance(10 * MIN);
+    t.places.plex = { track: '503', offset_ms: 120000, duration_ms: 300000, updated_at: new Date(t.now() - 30000).toISOString(), device: 'Plexamp' };
+    const r0 = reads(t);
+    t.promptBtn(answer).click();
+    check(answer + ': reading, nothing to tap meanwhile', t.prompts().join() === 'Checking for a newer place…' && !t.promptBtn('Continue'), t.prompts());
+    check(answer + ': nothing can answer it meanwhile', t.engine.resolveConflict() === null && !!t.st().filesChanged);
+    await t.clock.advance(3000);
+    check(answer + ': read again, once', reads(t) === r0 + 1, reads(t) - r0);
+    check(answer + ': the question shows 27:00', t.prompts().join() === 'Continue from 27:00 (Plexamp, just now)?' && !!t.promptBtn('Continue') && !!t.promptBtn('Keep listening here'), t.prompts());
+    check(answer + ': still held at the chosen spot, nothing saved', !!t.st().filesChanged && t.st().filesChanged.spot === 360000 && t.posts.length === 0, [t.st().filesChanged, t.posts.length]);
+    check(answer + ': the helper still waits', t.txt('.wsp-fp-status') === 'Answer the question above to carry on.' &&
+      t.cards().every((c) => c.querySelector('.wsp-fp-preview').disabled), t.txt('.wsp-fp-status'));
+    // The updated question, answered now: no second read; Continue lands at the new place exactly.
+    t.promptBtn(answer).click();
+    await t.clock.advance(3000);
+    check(answer + ': answered: no second read', reads(t) === r0 + 1, reads(t) - r0);
+    check(answer + ': landed where the answer says', t.st().filesChanged === null && t.posts.length >= 1 &&
+      t.posts[0].book_ms === (answer === 'Continue' ? 1620000 : 360000), t.posts.map((b) => b.book_ms));
+    t.engine.close();
+  }
+  // The read takes over 4 s: the question as it was, still held and waiting, nothing saved.
+  const t = await held();
+  t.places.plex = { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(t.now()).toISOString(), device: 'Plexamp' };
+  await t.clock.advance(5000);
+  t.card('percent').querySelector('.wsp-fp-use').click();
+  await t.clock.advance(200);
+  await t.clock.advance(10 * MIN);
+  t.places.plex = { track: '503', offset_ms: 120000, duration_ms: 300000, updated_at: new Date(t.now() - 30000).toISOString(), device: 'Plexamp' };
+  t.positionDelay = 6000;
+  t.promptBtn('Continue').click();
+  await t.clock.advance(10000);
+  check('slow read: the question as it was', t.prompts().join() === 'Continue from 15:00 (Plexamp, just now)?' && !!t.promptBtn('Continue'), t.prompts());
+  check('slow read: still held at the chosen spot, nothing saved', !!t.st().filesChanged && t.st().filesChanged.spot === 360000 && t.posts.length === 0, [t.st().filesChanged, t.posts.length]);
+  check('slow read: the helper still waits', t.txt('.wsp-fp-status') === 'Answer the question above to carry on.' &&
+    t.cards().every((c) => c.querySelector('.wsp-fp-preview').disabled), t.txt('.wsp-fp-status'));
+  t.engine.close();
+});
+
 await run('T3F5: files changed within the same album name no earlier copy', async () => {
   const t = await held({ old: { linked_from: null, book_title: 'Three Parts', narrator: 'A. Reader' } });
   check('no copy line', t.txt('.wsp-fp-copy') === null);

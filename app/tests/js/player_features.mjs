@@ -479,10 +479,13 @@ async function setup(o = {}) {
     CloseWatcher: null,
     hasActivation: () => true
   });
+  // t.asleepMs: time a device spent asleep, as the features' wall clock
+  // sees it (their timers stood still).
+  t.asleepMs = 0;
   if (!o.noFeatures) {
     t.features = F.createFeatures({
       player: t.engine, ui: t.ui, doc, win, fetch: fetchFn,
-      now: t.now, mono: () => clock.now,
+      now: () => t.now() + t.asleepMs, mono: () => clock.now,
       setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
       matchMedia,
       isDialogOpen: () => t.env.dialog,
@@ -3642,6 +3645,206 @@ await run('spec 2.5 (T2U1): no Undo for placing a book whose files changed, nor 
     t.engine.seek(1600000);
     await t.clock.advance(100);
     check((plex ? 'asked: ' : '') + 'after it, a big jump offers Undo as ever', !!t.undoBtn());
+    t.engine.close();
+  }
+});
+
+// Spec 2.5 section 7 (PR3): a Plex app's question left showing is read again
+// before its answer. Nothing on the server guards a Plex app's place, so an
+// answer given long after the question showed could act on a place the Plex
+// app has since left. The q_stale scenario (scratchpad rr-fr3): this page
+// saved 15:00 and paused; Plexamp then played to 17:00, and the late Play
+// asked about it. The question then stays open while Plexamp moves on.
+const PR3_ASKED = 'Continue from 17:00 (Plexamp, 1 min ago)?';
+async function plexQuestion() {
+  const t = await setup({ storage: memoryStorage(), identity: ID, deviceId: PHONE_ID, wall: true, stateful: true,
+    places: { web: { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(NOW0 - 3600000).toISOString(),
+      device: 'Test on Linux', device_id: PHONE_ID, psid: 'old-psid' }, plex: null } });
+  t.prompts = () => t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
+  t.btns = () => t.qa('.wsp-prompt .wsp-notice-btn').map((b) => b.textContent);
+  t.btn = (label) => t.qa('.wsp-prompt .wsp-notice-btn').find((b) => b.textContent === label) || null;
+  t.stored = (n) => t.posts.slice(n).map((b) => [b.event, b.track, b.offset_ms]);
+  t.seeks = [];
+  t.engine.on('change', (d) => { if (d.reason === 'seek') t.seeks.push(d.to); });
+  const p = t.engine.open(MULTI.key, { autoplay: false });
+  await t.clock.advance(1000);
+  await p;
+  t.engine.play();
+  await t.clock.advance(3000);
+  t.engine.pause();
+  await t.clock.advance(2000);
+  await t.clock.advance(6 * MIN);
+  t.places = { web: t.places.web, plex: plexCopyAt('502', 420000, t.now() - MIN, 900000) };   // Plexamp: 17:00
+  t.ms.handlers.get('play')();
+  await t.clock.advance(3000);
+  check('asked about Plexamp\'s 17:00', t.prompts().join() === PR3_ASKED && !t.st().playing, t.prompts());
+  t.here = t.st().position;
+  return t;
+}
+
+await run('PR3 (q_stale): 10 min later Plexamp has moved on: the answer reads again, the question shows the new place, nothing is saved', async () => {
+  for (const answer of ['Continue', 'Keep listening here']) {
+    const t = await plexQuestion();
+    await t.clock.advance(10 * MIN);                                                       // the question left showing
+    t.places = { web: t.places.web, plex: plexCopyAt('503', 120000, t.now() - 30000, 300000) };   // Plexamp: 27:00
+    const reads = t.positionCalls;
+    const n = t.posts.length;
+    const seeks = t.seeks.length;
+    t.btn(answer).click();
+    await t.clock.advance(3000);
+    check(answer + ': read again, once', t.positionCalls === reads + 1, t.positionCalls - reads);
+    check(answer + ': the question shows Plexamp\'s new place', t.prompts().join() === 'Continue from 27:00 (Plexamp, just now)?' &&
+      t.btns().join() === 'Continue,Keep listening here', [t.prompts(), t.btns()]);
+    check(answer + ': nothing acted on: no move, nothing saved, not playing', t.posts.length === n && t.seeks.length === seeks &&
+      !t.st().playing && t.st().position.track === t.here.track && t.st().position.offset_ms === t.here.offset_ms, [t.stored(n), t.seeks.slice(seeks), t.st().position]);
+    // Answered at once now: no second read, and Continue goes to the new place.
+    t.btn(answer).click();
+    await t.clock.advance(12000);
+    check(answer + ': answered again, no second read', t.positionCalls === reads + 1 && t.prompts().length === 0, [t.positionCalls - reads, t.prompts()]);
+    if (answer === 'Continue') {
+      check('Continue: plays from Plexamp\'s 27:00, saved there', t.st().playing && t.st().position.track === '503' &&
+        t.stored(n).length >= 1 && t.stored(n).every((b) => b[1] === '503' && b[2] >= 120000), t.stored(n));
+    } else {
+      check('Keep listening here: plays and saves here', t.st().playing && t.stored(n).length >= 1 &&
+        t.stored(n).every((b) => b[1] === '502' && b[2] < 420000), t.stored(n));
+    }
+    t.engine.close();
+  }
+  // The updated question left showing too: answered 3 min later it is read
+  // again, and Plexamp still at 27:00 is no move (the place it now asks about).
+  const w = await plexQuestion();
+  await w.clock.advance(10 * MIN);
+  w.places = { web: w.places.web, plex: plexCopyAt('503', 120000, w.now() - 30000, 300000) };
+  const wr = w.positionCalls;
+  const wn = w.posts.length;
+  w.btn('Continue').click();
+  await w.clock.advance(3000);
+  await w.clock.advance(3 * MIN);
+  w.btn('Continue').click();
+  await w.clock.advance(12000);
+  check('left again: read again, then Continue goes to 27:00', w.positionCalls === wr + 2 && w.prompts().length === 0 && w.st().playing &&
+    w.stored(wn).length >= 1 && w.stored(wn).every((b) => b[1] === '503' && b[2] >= 120000), [w.positionCalls - wr, w.prompts(), w.stored(wn)]);
+  w.engine.close();
+  // Playing on (unsaved) under the question: the new place shows, and playback is left as it is.
+  const u = await plexQuestion();
+  u.engine.play();
+  await u.clock.advance(2000);
+  await u.clock.advance(10 * MIN);
+  u.places = { web: u.places.web, plex: plexCopyAt('503', 120000, u.now() - 30000, 300000) };
+  const n = u.posts.length;
+  u.btn('Continue').click();
+  await u.clock.advance(3000);
+  check('playing on: the question shows 27:00, still playing, nothing saved', /^Continue from 27:00/.test(u.prompts().join()) &&
+    u.st().playing && u.posts.length === n, [u.prompts(), u.st().playing, u.stored(n)]);
+  u.engine.close();
+});
+
+await run('PR3: Plexamp has not moved: the answer reads again and goes on', async () => {
+  for (const [answer, how] of [['Continue', ''], ['Keep listening here', ''], ['Continue', 're-stamped'], ['Continue', 'older']]) {
+    const t = await plexQuestion();
+    const askedAt = Date.parse(t.places.plex.updated_at);
+    await t.clock.advance(10 * MIN);
+    // re-stamped: Plexamp reported the same place again (within 1 s), later.
+    // older: a place elsewhere stamped before the one asked about is no move on.
+    if (how === 're-stamped') t.places = { web: t.places.web, plex: plexCopyAt('502', 420500, t.now() - 30000, 900000) };
+    if (how === 'older') t.places = { web: t.places.web, plex: plexCopyAt('503', 120000, askedAt - 5 * MIN, 300000) };
+    const what = answer + (how ? ' (' + how + ')' : '');
+    const reads = t.positionCalls;
+    const n = t.posts.length;
+    t.btn(answer).click();
+    await t.clock.advance(12000);
+    check(what + ': read again, once', t.positionCalls === reads + 1, t.positionCalls - reads);
+    check(what + ': no question left', t.prompts().length === 0, t.prompts());
+    if (answer === 'Continue') {
+      check(what + ': plays from Plexamp\'s 17:00, saved there', t.st().playing && t.stored(n).length >= 1 &&
+        t.stored(n).every((b) => b[1] === '502' && b[2] >= 420000), t.stored(n));
+    } else {
+      check(what + ': plays and saves here', t.st().playing && t.stored(n).length >= 1 &&
+        t.stored(n).every((b) => b[1] === '502' && b[2] < 420000), t.stored(n));
+    }
+    t.engine.close();
+  }
+});
+
+await run('PR3: a read that fails or takes over 4 s keeps the question as it was, and saves nothing; it can be answered again', async () => {
+  for (const mode of ['down', 'hang', 'slow']) {
+    const t = await plexQuestion();
+    await t.clock.advance(10 * MIN);
+    t.places = { web: t.places.web, plex: plexCopyAt('503', 120000, t.now() - 30000, 300000) };   // moved, but unseen
+    if (mode === 'slow') t.positionDelay = 6000;
+    else t.positionMode = mode;
+    const reads = t.positionCalls;
+    const n = t.posts.length;
+    const seeks = t.seeks.length;
+    const local = JSON.stringify(t.saver.readLocal(MULTI.key));
+    t.btn('Continue').click();
+    check(mode + ': reading, nothing to tap meanwhile', t.prompts().join() === 'Checking for a newer place…' && t.btns().length === 0, [t.prompts(), t.btns()]);
+    await t.clock.advance(4500);
+    check(mode + ': after 4 s the question is back as it was', t.prompts().join() === PR3_ASKED && t.btns().join() === 'Continue,Keep listening here', [t.prompts(), t.btns()]);
+    await t.clock.advance(5000);              // a slow read's answer, come too late, changes nothing
+    check(mode + ': still as it was', t.prompts().join() === PR3_ASKED, t.prompts());
+    check(mode + ': nothing acted on, nothing saved', t.positionCalls === reads + 1 && t.posts.length === n && t.seeks.length === seeks &&
+      !t.st().playing && t.st().position.offset_ms === t.here.offset_ms, [t.positionCalls - reads, t.stored(n), t.st().position]);
+    check(mode + ': the local copy is as it was', JSON.stringify(t.saver.readLocal(MULTI.key)) === local, [local, t.saver.readLocal(MULTI.key)]);
+    // Answered again once reads work: read again, and the new place shows.
+    t.positionMode = 'ok';
+    t.positionDelay = 0;
+    t.btn('Continue').click();
+    await t.clock.advance(3000);
+    check(mode + ': answered again: read again, the new place shows', t.positionCalls === reads + 2 &&
+      /^Continue from 27:00/.test(t.prompts().join()) && t.posts.length === n, [t.positionCalls - reads, t.prompts()]);
+    t.engine.close();
+  }
+});
+
+await run('PR3: the 2-minute line is the wall clock\'s: under it no read; over it, a device asleep included, a read', async () => {
+  // Answered 1 min 58 s after it showed (3 s of it in plexQuestion): no read, the answer goes on at once.
+  const t = await plexQuestion();
+  await t.clock.advance(115000);
+  const reads = t.positionCalls;
+  const n = t.posts.length;
+  t.btn('Continue').click();
+  await t.clock.advance(12000);
+  check('under 2 min: no read', t.positionCalls === reads, t.positionCalls - reads);
+  check('under 2 min: plays from Plexamp\'s 17:00, saved', t.st().playing && t.stored(n).length >= 1 && t.stored(n).every((b) => b[1] === '502' && b[2] >= 420000), t.stored(n));
+  t.engine.close();
+  // 30 s on the clock, then the device asleep for 2 min (its timers stood still): read again.
+  const u = await plexQuestion();
+  await u.clock.advance(30000);
+  u.asleepMs += 2 * MIN;
+  u.wallExtra += 2 * MIN;
+  const r2 = u.positionCalls;
+  u.btn('Keep listening here').click();
+  await u.clock.advance(3000);
+  check('asleep past 2 min: read again', u.positionCalls === r2 + 1, u.positionCalls - r2);
+  check('asleep: not moved, so the answer went on', u.prompts().length === 0 && u.st().playing, [u.prompts(), u.st().playing]);
+  u.engine.close();
+});
+
+await run('PR3: a double tap while the place is read again acts once', async () => {
+  for (const moved of [true, false]) {
+    const t = await plexQuestion();
+    await t.clock.advance(10 * MIN);
+    if (moved) t.places = { web: t.places.web, plex: plexCopyAt('503', 120000, t.now() - 30000, 300000) };
+    t.positionDelay = 1000;
+    const reads = t.positionCalls;
+    const n = t.posts.length;
+    const keep = t.btn('Keep listening here');
+    const cont = t.btn('Continue');
+    keep.click();
+    keep.click();                              // the second tap of a double tap, on the same button
+    cont.click();                              // or on the other one
+    await t.clock.advance(100);
+    check((moved ? 'moved' : 'not moved') + ': one read; nothing to tap meanwhile', t.positionCalls === reads + 1 && t.btns().length === 0, [t.positionCalls - reads, t.btns()]);
+    await t.clock.advance(12000);
+    check((moved ? 'moved' : 'not moved') + ': still one read', t.positionCalls === reads + 1, t.positionCalls - reads);
+    if (moved) {
+      check('moved: one question, at the new place; nothing done', t.prompts().join() === 'Continue from 27:00 (Plexamp, just now)?' &&
+        t.posts.length === n && !t.st().playing, [t.prompts(), t.stored(n)]);
+    } else {
+      check('not moved: the first tap\'s answer only (Keep listening here), never Continue\'s', t.prompts().length === 0 && t.st().playing &&
+        t.stored(n).length >= 1 && t.stored(n).every((b) => b[1] === '502' && b[2] < 420000) && t.seeks.every((to) => to < 1020000), [t.stored(n), t.seeks]);
+    }
     t.engine.close();
   }
 });

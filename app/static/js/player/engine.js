@@ -207,7 +207,20 @@
  *                     nothing is pushed and the local copy is left as it was
  *                     until the listener plays or moves.
  *   resolveConflict() the listener answered a 409 (saves.js 'conflict'
- *                     warning): saves go again. Returns the conflict or null.
+ *                     warning): saves go again. Returns the conflict or null
+ *                     (also while recheckPlex reads).
+ *   recheckPlex() -> Promise<'same'|'moved'|'failed'> | null   a Plex app's
+ *                     question (a late Play's or a confirm's read found its
+ *                     newer place) left showing: features.js asks this before
+ *                     an answer given over 2 minutes later (spec 2.5 section
+ *                     7). The saved places are read again (RECHECK_WAIT_MS at
+ *                     most); nothing is saved, landed or released meanwhile.
+ *                     'moved': the Plex app moved on, and the question is
+ *                     asked again at its new place (a 'conflict' warning; a
+ *                     later Continue goes there); nothing else changes.
+ *                     'same': the answer goes on. 'failed' (the read failed
+ *                     or took too long): nothing changes. null: no Plex app's
+ *                     question waits (nothing read). One read at a time.
  *   placeMs(track, offsetMs)  the book time of a place in the loaded book, or null
  *   own()             this browser's own copy of the loaded book's place (as
  *                     in setOpenGate's info), or null
@@ -558,6 +571,11 @@ export function createEngine(env) {
   let quietSince = null;
   let checking = null;
   let plexSeenAt = -Infinity;
+  // The Plex app's place the question waiting asks about ({ track,
+  // offset_ms, t: its stamp }, null when none does), and the read before a
+  // late answer to it in progress (recheckPlex).
+  let plexAsked = null;
+  let rechecking = null;
   let wasPlaying = false;
   let speed = 1;
   let error = null;           // { code, message }
@@ -1298,6 +1316,8 @@ export function createEngine(env) {
     checking = null;
     quietSince = null;
     plexSeenAt = -Infinity;
+    plexAsked = null;
+    if (rechecking) rechecking.stop();
     wasPlaying = false;
     gen += 1;
     wantPlay = false;
@@ -2248,9 +2268,91 @@ export function createEngine(env) {
         device: typeof c.device === 'string' ? c.device : '', updated_at: String(c.updated_at) };
       // Either as a 409: nothing is saved until the listener answers. A Plex
       // app's place keeps the base as it was (the server refused nothing).
-      return typeof saver.otherSaved === 'function' && !!saver.otherSaved(book.key, conflict, now, !f.web);
+      const asked = typeof saver.otherSaved === 'function' && !!saver.otherSaved(book.key, conflict, now, !f.web);
+      // A Plex app's place, which nothing on the server guards, is read
+      // again before a late answer (recheckPlex).
+      plexAsked = asked && !f.web ? { track: conflict.track, offset_ms: conflict.offset_ms, t: f.t } : null;
+      return asked;
     }
     return false;
+  }
+
+  /* A Plex app's question left showing (features.js; spec 2.5 section 7):
+     before its answer, the saved places are read again (RECHECK_WAIT_MS at
+     most). Nothing is saved, landed or released meanwhile: the question
+     holds the saves, and a confirm's hold, as before. null: no Plex app's
+     question waits (nothing to read; the answer goes on). Else a promise
+     of 'same' (the Plex app has not moved on: the answer goes on), 'moved'
+     (it has: the question is asked again at its new place, a 'conflict'
+     warning, and nothing else changes) or 'failed' (the read failed or
+     took too long, or the book went: nothing changes). One read at a time:
+     a call while one is in progress gets its promise. */
+  function recheckPlex() {
+    if (rechecking) return rechecking.promise;
+    if (!saver || !book || !plexAsked) return null;
+    let seen = null;
+    try {
+      seen = typeof saver.lastSeen === 'function' ? saver.lastSeen(book.key) : null;
+    } catch (e) {
+      seen = null;
+    }
+    if (!seen || !seen.conflict) return null;
+    const key = book.key;
+    const gen0 = openGen;
+    const asked = plexAsked;
+    let resolve = null;
+    const my = { promise: new Promise(function (r) { resolve = r; }), timer: null, stop: null };
+    function end(result) {
+      if (rechecking !== my) return;
+      rechecking = null;
+      if (my.timer !== null) clearT(my.timer);
+      my.timer = null;
+      resolve(result);
+    }
+    my.stop = function () { end('failed'); };
+    function finish(places) {
+      if (rechecking !== my) return;
+      if (!places || openGen !== gen0 || !book || book.key !== key || plexAsked !== asked) {
+        end('failed');
+        return;
+      }
+      const p = places.plex && typeof places.plex === 'object' ? places.plex : null;
+      const t = p ? Date.parse(p.updated_at) : NaN;
+      const off = p ? Number(p.offset_ms) : NaN;
+      // Moved on: stamped later than the place asked about, and elsewhere.
+      if (isFinite(t) && t > asked.t && isFinite(off) &&
+          !(String(p.track) === asked.track && Math.abs(off - asked.offset_ms) <= SAME_PLACE_MS)) {
+        const conflict = { track: String(p.track), offset_ms: off,
+          device: typeof p.device === 'string' ? p.device : '', updated_at: String(p.updated_at) };
+        let again = false;
+        try {
+          again = !!saver.otherSaved(key, conflict, typeof places.now === 'string' ? places.now : null, true);
+        } catch (e) {
+          console.error('[player] the re-check failed', e);
+        }
+        if (again) {
+          plexAsked = { track: conflict.track, offset_ms: off, t: t };
+          end('moved');
+          return;
+        }
+        end('failed');
+        return;
+      }
+      end('same');
+    }
+    rechecking = my;
+    my.timer = setT(function () {
+      my.timer = null;
+      finish(null);
+    }, RECHECK_WAIT_MS);
+    let asking;
+    try {
+      asking = fetchPlaces(key);
+    } catch (e) {
+      asking = Promise.reject(e);
+    }
+    asking.then(finish, function () { finish(null); });
+    return my.promise;
   }
 
   function placeMs(track, offsetMs) {
@@ -2380,8 +2482,13 @@ export function createEngine(env) {
     state: state,
     on: on,
     setOpenGate: function (fn) { openGate = typeof fn === 'function' ? fn : null; },
+    recheckPlex: recheckPlex,
     resolveConflict: function () {
       if (!saver || typeof saver.resolveConflict !== 'function') return null;
+      // Not while a late answer's read is in progress: what it finds decides.
+      if (rechecking) return null;
+      // Answered: no question waits now (a later one sets its own).
+      plexAsked = null;
       let c = null;
       try {
         c = saver.resolveConflict();

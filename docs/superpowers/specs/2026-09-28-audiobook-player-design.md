@@ -278,8 +278,9 @@ cross-device sentence in 5.3.
   this browser's own. A Plex app's place that wins the resume is offered before another device's
   older WebServarr copy. Known limits (accepted 2026-09-29): when this browser's own copy is under
   10 s past its last saved place, or within 30 s of the Plex place, the WebServarr rule decides
-  instead; a Plex place in a part this browser cannot decode is not offered; and a Plex question
-  left open while the Plex app moves on is answered without reading the Plex place again.
+  instead; and a Plex place in a part this browser cannot decode is not offered. A Plex question
+  answered more than 2 minutes after it showed reads the Plex place again first, and shows the
+  new place if the Plex app moved on (spec 2026-09-30-audiobook-files-changed-design.md, section 7).
 - An answer to the open's question given after 5 minutes, when the late read finds the other
   place has moved on, still moves (unsaved, while the new question holds saves): "Keep listening
   here" then saves the place the listener chose, and a close keeps it in the local copy.

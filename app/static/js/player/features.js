@@ -95,7 +95,13 @@
  *   Continue moves to the stored place and plays; Keep listening here saves
  *   this place over it (a deliberate override) and plays. Until then nothing
  *   is saved to the server (the local copy follows the place); playing on
- *   without answering is allowed and still saves nothing.
+ *   without answering is allowed and still saves nothing. A Plex app's
+ *   place asked about this way (a late Play's or a confirm's read found it)
+ *   and answered over 2 minutes later, by the wall clock, is read again
+ *   first ("Checking for a newer place…", nothing done meanwhile): moved
+ *   on, the question shows its new place and the answer is not acted on;
+ *   a read that fails or takes over 4 s shows the question again as it
+ *   was (spec 2.5 section 7).
  * - Up next: at the end of the book, the next in its series
  *   (GET /api/player/next/<book>): "Up next: <title>" with Play, which opens
  *   it where the listener left off. It never starts by itself.
@@ -150,10 +156,12 @@ export const SESSION_GAP_MS = 600000;     // a longer gap in the log starts a ne
 export const HANDOFF_WITHIN_MS = 86400000; // another device's place this recent is offered on open
 export const HANDOFF_APART_MS = 30000;    // places closer than this are the same place
 export const OWN_PAST_ACK_MS = 10000;     // the open holds at this browser's copy only this far past its ack
+export const QUESTION_STALE_MS = 120000;  // a Plex app's question showing longer is read again before its answer
 export const DEFAULTS = Object.freeze({ skip_s: 10, speed: 1, smart_rewind: true });
 
 const WIDE = '(min-width: 1024px)';
 const RESUME_LOST = "Couldn't find your saved place in this book";
+const CHECKING_PLACE = 'Checking for a newer place…';
 // Roles whose element takes Space or the arrows itself.
 const CONTROL_ROLES = /^(button|link|textbox|searchbox|combobox|spinbutton|slider|scrollbar|listbox|option|menu|menubar|menuitem|menuitemcheckbox|menuitemradio|tab|tablist|radio|radiogroup|checkbox|switch|gridcell|treeitem|tree|grid)$/;
 // Input types that are no text entry: Space and the arrows mean nothing to them
@@ -1079,8 +1087,16 @@ export function createFeatures(env) {
     dropHandoff();
     const book = player.state().book;
     if (!book) return;
-    const entry = { book: book, offer: offer, kind: kind, prompt: null };
+    // shown: when it was asked, by the wall clock (a tab in the background
+    // or a device asleep counts). reading: its place is being read again.
+    const entry = { book: book, offer: offer, kind: kind, prompt: null, shown: now(), reading: false };
     handoff = entry;
+    drawHandoff(entry);
+  }
+
+  function drawHandoff(entry) {
+    const offer = entry.offer;
+    const kind = entry.kind;
     const actions = [];
     const canGo = typeof offer.other.bookMs === 'number' && offer.other.canGo !== false;
     if (canGo) {
@@ -1110,10 +1126,54 @@ export function createFeatures(env) {
   /* The listener's answer, each a move of their own (saved as the newest
      place). Continue: to the other device's place. At an open, Start from
      here: to this browser's place. At a conflict, Keep listening here: the
-     place here is saved over the stored one. Then play. */
+     place here is saved over the stored one. Then play.
+     A Plex app's question showing for over QUESTION_STALE_MS (spec 2.5
+     section 7) is read again first: nothing on the server guards a Plex
+     app's place, and it may have moved on. Meanwhile "Checking for a newer
+     place…" shows instead, and nothing is done (a second tap does nothing;
+     the saves, and a confirm's hold, stay held). Then the answer goes on if
+     the Plex app has not moved; if it has, the question shows its new place
+     (the engine asks again); if the read failed or took too long, the
+     question shows again as it was, to answer again. */
   function chooseHandoff(entry, which) {
+    if (handoff !== entry || entry.reading) return;
+    if (entry.kind === 'conflict' && now() - entry.shown > QUESTION_STALE_MS && typeof player.recheckPlex === 'function') {
+      let reading = null;
+      try {
+        reading = player.recheckPlex();
+      } catch (e) {
+        logError(e);
+        reading = null;
+      }
+      if (reading && typeof reading.then === 'function') {
+        entry.reading = true;
+        entry.prompt = ui.prompt({ id: 'handoff', message: CHECKING_PLACE, actions: [] });
+        reading.then(function (r) { recheckDone(entry, which, r); }, function (e) {
+          logError(e);
+          recheckDone(entry, which, 'failed');
+        });
+        return;
+      }
+    }
+    answerHandoff(entry, which);
+  }
+
+  function recheckDone(entry, which, result) {
+    entry.reading = false;
+    // Asked again at the Plex app's new place (a question of its own now),
+    // or gone with the book: nothing more for this one.
+    if (handoff !== entry) return;
+    if (result === 'same') {
+      answerHandoff(entry, which);
+      return;
+    }
+    drawHandoff(entry);
+  }
+
+  function answerHandoff(entry, which) {
     if (handoff !== entry) return;
     handoff = null;
+    if (entry.prompt) entry.prompt.remove();
     const s = player.state();
     if (s.book !== entry.book) return;
     // At the open, the move is the answer: kept (unsaved) even if a late
@@ -1149,7 +1209,10 @@ export function createFeatures(env) {
       if (!w || w.kind !== 'conflict') return;
       const s = player.state();
       if (!s.book || w.book !== s.book) return;
-      if (s.playing) player.pause();
+      // A question read again before its answer (chooseHandoff) only shows
+      // the Plex app's new place: nothing else is done, playback included.
+      const update = !!(handoff && handoff.kind === 'conflict' && handoff.reading);
+      if (s.playing && !update) player.pause();
       const offer = conflictOffer(w, player.me(), function (t, o) { return player.placeMs(t, o); });
       // A place in a part this browser can't play is nowhere to go.
       if (typeof offer.other.bookMs === 'number') {
