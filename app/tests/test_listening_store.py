@@ -817,6 +817,31 @@ class Claims(StoreBase):
         self.db.commit()
         self.assertIsNone(listening.pending_claim(self.db, ME, "400:1"))
 
+    def test_another_listeners_pending_claim_is_not_my_successor(self):
+        # THEM holds a pending claim on 300:1 through 410:1; ME has an
+        # unlinked row on the same book key. ME's lookup must not see it.
+        checkin(self.db, identity=THEM, book="410:1", psid="t")
+        listening.claim_link(self.db, THEM, "410:1", "300:1", None)
+        checkin(self.db, identity=ME, book="410:1", psid="m")
+        self.assertEqual(listening.successors(self.db, ME, "300:1"), [])
+        self.assertEqual(listening.successors(self.db, THEM, "300:1"), ["410:1"])
+
+    def test_another_listeners_row_does_not_keep_my_released_claim_alive(self):
+        # ME claimed 300:1 through 400:1 and then lost that row; THEM still
+        # has a row on 400:1. The claim is ME's alone to lose, so another of
+        # ME's books can take it.
+        from app.models import ListeningPosition
+        checkin(self.db, identity=ME, book="400:1", psid="m")
+        checkin(self.db, identity=ME, book="420:1", psid="m2")
+        checkin(self.db, identity=THEM, book="400:1", psid="t")
+        self.assertIs(listening.claim_link(self.db, ME, "400:1", "300:1", True), True)
+        self.assertIs(listening.claim_link(self.db, THEM, "400:1", "300:1", True), True)
+        self.db.query(ListeningPosition).filter_by(identity=ME, book_key="400:1").delete()
+        self.db.commit()
+        self.assertIs(listening.claim_link(self.db, ME, "420:1", "300:1", True), True)
+        self.assertEqual(self.claims(), {("300:1", "420:1", "verified")})
+        self.assertEqual(self.claims(THEM), {("300:1", "400:1", "verified")})
+
     def test_identities_are_isolated(self):
         checkin(self.db, book="400:1", psid="b")
         checkin(self.db, identity=THEM, book="410:1", psid="them")
@@ -1131,13 +1156,42 @@ class ClaimsBackfill(unittest.TestCase):
         finally:
             empty.close()
 
-    def test_init_db_runs_it_after_the_book_fields(self):
-        import inspect as pyinspect
+    def run_init_db(self, engine):
+        from sqlalchemy.orm import sessionmaker
         from app import database
-        source = pyinspect.getsource(database.init_db)
-        self.assertIn("migrate_listening_claims(db)", source)
-        self.assertLess(source.index("migrate_listening_book_fields(db)"),
-                        source.index("migrate_listening_claims(db)"))
+        with mock.patch.object(database, "engine", engine), \
+                mock.patch.object(database, "SessionLocal", sessionmaker(bind=engine)):
+            database.init_db()
+
+    def test_init_db_gives_a_pre_claims_database_its_claims(self):
+        # A real database from before 2.6: the links are there, the claims
+        # table is not. Starting the app fills it (and only once).
+        from sqlalchemy.orm import sessionmaker
+        from app.models import ListeningClaim
+        engine = self.file_db()
+        ListeningClaim.__table__.drop(engine)
+        self.run_init_db(engine)
+        db = sessionmaker(bind=engine)()
+        try:
+            self.assertEqual(self.claims(db), self.EXPECTED)
+            self.run_init_db(engine)                    # the next start: nothing more to do
+            self.assertEqual(self.claims(db), self.EXPECTED)
+        finally:
+            db.close()
+
+    def test_init_db_runs_it_after_the_book_fields_exist(self):
+        # An install from before 2.5 has no linked_from column yet: the claims
+        # back-fill reads it, so it must come after the migration that adds it.
+        from sqlalchemy import text
+        from sqlalchemy.orm import sessionmaker
+        engine = DeviceIdMigration.old_schema(self).get_bind()
+        self.run_init_db(engine)
+        db = sessionmaker(bind=engine)()
+        try:
+            self.assertEqual(self.claims(db), set())
+            self.assertEqual(db.execute(text("SELECT count(*) FROM listening_positions")).scalar(), 1)
+        finally:
+            db.close()
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

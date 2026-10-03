@@ -808,6 +808,14 @@ class Copies(unittest.TestCase):
         self.assertIsNotNone(pp._disc_parts(f"Rip/CD{huge}"))
         self.assertIsNotNone(pp._natural(f"Rip/CD{huge}"))
 
+    def test_digits_that_are_not_ascii_are_text_not_numbers(self):
+        # T1M4: "²" passes str.isdigit() but int() raises on it (a 500 at the
+        # base); "٣" passes both and was read as 3. Only the split's own
+        # ASCII runs are numbers.
+        self.assertEqual(pp._natural("²"), ((1, 0, "²"),))
+        self.assertEqual(pp._natural("٣"), ((1, 0, "٣"),))
+        self.assertEqual(sorted(["٣", "10", "2", "²"], key=pp._natural), ["2", "10", "²", "٣"])
+
     def test_natural_sort_order_for_ordinary_names_is_unchanged(self):
         # T5N1: capping the digit run at 6 must not change how real names sort.
         names = ["Rip/CD2", "Rip/CD10", "Rip/CD1", "Rip/CD9"]

@@ -1425,6 +1425,56 @@ class Claims(PlayerApiBase):
         self.assertIs(self.confirm(self.THERE, self.GONE, seq=2), True)
         self.assertEqual(self.claims("plex:1002"), {(self.GONE, self.THERE, "verified")})
 
+    def commits_during(self, action):
+        """What the database saw while `action` ran: "CLAIM" for each write
+        to the claims table, "COMMIT" for each commit, in order."""
+        from sqlalchemy import event
+        engine = self.Session.kw["bind"]
+        seen = []
+
+        def statement(conn, cursor, sql, parameters, context, executemany):
+            if "listening_claims" in sql and sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
+                seen.append("CLAIM")
+
+        def commit(conn):
+            seen.append("COMMIT")
+        event.listen(engine, "before_cursor_execute", statement)
+        event.listen(engine, "commit", commit)
+        try:
+            action()
+        finally:
+            event.remove(engine, "before_cursor_execute", statement)
+            event.remove(engine, "commit", commit)
+        return seen
+
+    def test_the_claim_and_the_save_commit_together(self):
+        # The claim is written in the check-in's own transaction (spec 2.6 s4),
+        # verified or pending: exactly one COMMIT, after the claim's write.
+        other_gone = "310:1"
+        self.seed(self.GONE)
+        self.seed(other_gone)
+        warm = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="p", seq=1)
+        self.assertEqual(warm.status_code, 200, warm.text)      # the daily housekeeping write goes here
+
+        def confirm(book, earlier, track, duration, psid, seq):
+            r = self.checkin(book=book, track=track, duration_ms=duration, psid=psid, seq=seq,
+                             linked_from=earlier)
+            self.assertEqual(r.status_code, 200, r.text)
+            return r.json()["linked"]
+        for kind, answer, run in (
+                ("verified", True, lambda: confirm(self.NEW, self.GONE, "401", 500_000, "p", 2)),
+                ("pending", None, lambda: confirm(self.THERE, other_gone, "451", 500_000, "q", 1))):
+            with self.subTest(kind=kind):
+                result = []
+                if kind == "pending":
+                    with self.down(other_gone):
+                        seen = self.commits_during(lambda: result.append(run()))
+                else:
+                    seen = self.commits_during(lambda: result.append(run()))
+                self.assertEqual(result, [answer])
+                self.assertEqual(seen.count("COMMIT"), 1, seen)
+                self.assertIn("CLAIM", seen[:seen.index("COMMIT")], seen)
+
     # --- T1P1: a pending claim settles on ANY check-in for its book -------------
 
     def plain_checkin(self, book, seq):
