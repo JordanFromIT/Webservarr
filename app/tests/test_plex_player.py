@@ -1567,6 +1567,41 @@ class WorkKeys(unittest.TestCase):
                 self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
         self.assertEqual(pp.work_key(self.AUTHOR, "Les Mis\u00e9rables"), pp.work_key(self.AUTHOR, "Les Miserables"))
 
+    def test_a_frequency_is_not_a_bitrate_and_a_codec_number_must_be_a_rate(self):
+        # T2K7: "432 Hz" and "528 Hz" are two recordings; "MP3-12" is not a bitrate.
+        A = "Sleep Sounds Co"
+        for a, b in (("Healing Frequencies (432 Hz)", "Healing Frequencies (528 Hz)"),
+                     ("Healing Frequencies [432Hz]", "Healing Frequencies [528Hz]"),
+                     ("Healing Frequencies (432 Hz, Unabridged)", "Healing Frequencies (528 Hz, Unabridged)"),
+                     ("Healing Frequencies (432 Hz)", "Healing Frequencies"),
+                     ("Gamma Focus (40 Hz)", "Gamma Focus (10 Hz)"),
+                     ("Warriors (MP3-12)", "Warriors (MP3-13)"), ("Warriors [m4b_100]", "Warriors [m4b_101]")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(A, a), pp.work_key(A, b))
+        self.assertEqual(pp.work_key(A, "Healing Frequencies (44.1 kHz)"), pp.work_key(A, "Healing Frequencies"))
+        self.assertEqual(pp.work_key(A, "Warriors [mp3-128]"), pp.work_key(A, "Warriors"))
+
+    def test_a_numbers_separator_stays_in_the_key(self):
+        # T2K8: a novella 1.5 is not an omnibus 1-5; "1:05" and "1,005" differ too.
+        titles = ["Tide Mill 1.5", "Tide Mill 1-5", "Tide Mill 1:05", "Tide Mill 1,005", "Tide Mill 1,5",
+                  "Tide Mill 1/5", "Tide Mill 1 5", "Tide Mill 15"]
+        self.assertEqual(len({pp.work_key(self.AUTHOR, t) for t in titles}), len(titles))
+        # Also past ASCII, and where it stays a word separator.
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill \u0e44\u0e21\u0e48 1.5"),
+                            pp.work_key(self.AUTHOR, "Tide Mill \u0e44\u0e21\u0e48 1-5"))
+        self.assertEqual(pp.work_key(self.AUTHOR, "Catch-22"), pp.work_key(self.AUTHOR, "Catch 22"))
+        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill 1 - 5"), pp.work_key(self.AUTHOR, "Tide Mill 1 5"))
+
+    def test_a_part_letter_with_words_after_it_is_kept(self):
+        # T2K9
+        base = "Tide Mill - Read by Tamsin Ashby"
+        for a, b in ((f"{base}, Part A Revisited", f"{base}, Part B Revisited"),
+                     (f"{base}, Book a Revisited", f"{base}, Book b Revisited"),
+                     (f"{base}, Vol. C Remastered Edition", f"{base}, Vol. D Remastered Edition")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        self.assertEqual(pp.work_key(self.AUTHOR, f"{base}, Dee Lane"), pp.work_key(self.AUTHOR, "Tide Mill"))
+
     def test_other_productions_and_other_numbers_still_split(self):
         # T2K3: a year-like or number-like group that is not noise stays.
         plain = pp.work_key(self.AUTHOR, "Tide Mill")

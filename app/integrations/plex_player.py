@@ -1034,10 +1034,11 @@ def _dropped_numbers(part: str) -> list:
         segment = _COPY_WORDS.sub(" ", segment)
         items = _reader_items(segment, name=index == 0)
         last = items[-1] if items else None
-        whole = index > 0 and (own or any(
+        lettered = any(n > 0 and cur[0] == "w" and len(cur[1]) == 1 and items[n - 1][0] == "w"
+                       and items[n - 1][1] in _LETTERED for n, cur in enumerate(items))      # "Part a Revisited"
+        whole = index > 0 and (own or lettered or any(
             i[0] == "n" or _ROMAN_LOOKING.fullmatch(i[2]) or any(c.isdigit() for c in i[2]) for i in items) or (
-            last is not None and last[0] == "w" and len(last[1]) == 1 and (
-                last[2].isupper() or (len(items) > 1 and items[-2][0] == "w" and items[-2][1] in _LETTERED))))
+            last is not None and last[0] == "w" and len(last[1]) == 1 and last[2].isupper()))
         counted = ""
         for item in items:
             if item[0] == "n":
@@ -1064,9 +1065,10 @@ _ROMAN_LOOKING = re.compile(r"[IVXLCDM]+")
 # and "(2020)" of a yearly work are two books (T2K5), and a bare number is
 # a number (T2K4): only a number joined to its format is noise.
 _ASIN = r"(?:asin[\s:#]*)?b0[0-9a-z]{8}"
-_BITRATE = (r"(?:[0-9]{2,3}(?:\.[0-9])?\s*(?:kbps|kb/s|khz|hz)"
+_BITRATE = (r"(?:[0-9]{2,3}(?:\.[0-9])?\s*(?:kbps|kb/s|khz)"
             r"|(?:32|48|56|64|80|96|112|128|160|192|224|256|320)k)(?![a-z])")
-_CODEC_RATE = r"\b(?:mp3|m4b|m4a|aac|flac|ogg|opus|wav|aax|aaxc)[\-_][0-9]{2,3}\b"
+_CODEC_RATE = (r"\b(?:mp3|m4b|m4a|aac|flac|ogg|opus|wav|aax|aaxc)[\-_]"
+               r"(?:32|48|56|64|80|96|112|128|160|192|224|256|320)\b")
 _FORMAT_WORDS = (r"\b(?:mp3|m4b|m4a|aac|flac|ogg|opus|wav|aax|aaxc|cbr|vbr|stereo|mono|retail|"
                  r"unabridged|abridged|audio\s*books?)\b")
 _NOISE_TOKENS = re.compile(f"{_ASIN}|{_BITRATE}|{_CODEC_RATE}", re.IGNORECASE)
@@ -1151,11 +1153,23 @@ def _work_words(text: str) -> str:
     ("Keeper's" is "keepers"), anything else splits. Folded as _normal does."""
     folded = _fold(_normal(text)).replace("'", "")
     if folded.isascii():
-        return " ".join(re.sub(r"[\W_]+", " ", folded).split())
+        return " ".join(re.sub(r"[\W_]+", _keep_number_separator, folded).split())
     # Beyond ASCII a combining mark (a Thai tone, a Hebrew dot) belongs to its
     # letter: it is not punctuation that splits a word.
-    return " ".join("".join(c if c.isalnum() or unicodedata.category(c)[0] == "M" else " "
-                            for c in folded).split())
+    return " ".join("".join(
+        c if c.isalnum() or unicodedata.category(c)[0] == "M" or _between_digits(folded, n, n + 1) else " "
+        for n, c in enumerate(folded)).split())
+
+
+def _between_digits(text: str, start: int, end: int) -> bool:
+    """True when text[start:end] is one of . , : / - with a digit on each
+    side: the separator of a number ("1.5" is not "1-5", "1:05" or "1,005")."""
+    return (end - start == 1 and text[start] in ".,:/-" and start > 0 and end < len(text)
+            and text[start - 1] in "0123456789" and text[end] in "0123456789")
+
+
+def _keep_number_separator(m) -> str:
+    return m.group(0) if _between_digits(m.string, m.start(), m.end()) else " "
 
 
 def _narrator_key(narrator: str) -> str:
