@@ -796,6 +796,24 @@ class Copies(unittest.TestCase):
         tracks = [disc_track(1, 1, 100_000, "B/A"), disc_track(2, 1, 102_500, "B/B")]
         self.assertEqual(self.keys(tracks), ["1", "2"])
 
+    def test_a_huge_digit_run_in_a_folder_name_is_no_error(self):
+        # T5N1: _disc_parts and _natural call int() on digit runs taken from
+        # folder names; a run past int()'s digit limit (4300) would be a
+        # ValueError, a 500 on list_books. Two folders sharing a track index
+        # force _pick_copy through _disc_siblings (_disc_parts) and the
+        # natural sort (_natural).
+        huge = "9" * 5000
+        tracks = [disc_track(1, 1, 100_000, f"Rip/CD{huge}"), disc_track(2, 1, 100_000, f"Rip/CD{huge}2")]
+        self.keys(tracks)  # must not raise
+        self.assertIsNotNone(pp._disc_parts(f"Rip/CD{huge}"))
+        self.assertIsNotNone(pp._natural(f"Rip/CD{huge}"))
+
+    def test_natural_sort_order_for_ordinary_names_is_unchanged(self):
+        # T5N1: capping the digit run at 6 must not change how real names sort.
+        names = ["Rip/CD2", "Rip/CD10", "Rip/CD1", "Rip/CD9"]
+        self.assertEqual(sorted(names, key=pp._natural), ["Rip/CD1", "Rip/CD2", "Rip/CD9", "Rip/CD10"])
+        self.assertTrue(pp._disc_siblings("Book Title - CD3", "Book Title - CD4"))
+
 
 class Detail(BridgeBase):
     def test_single_file_book_chapters(self):

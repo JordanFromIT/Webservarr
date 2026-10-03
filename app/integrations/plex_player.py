@@ -456,9 +456,14 @@ def _track_duration(t: dict) -> int:
 
 
 def _natural(text: str) -> tuple:
-    """A sort key that orders "CD2" before "CD10"."""
+    """A sort key that orders "CD2" before "CD10".
+
+    Digit runs are capped at 6 (T5N1, the same class as T1Z2): a run past
+    int()'s digit limit (4300) would be a ValueError, a 500 on list_books.
+    A folder or track title never has a digit run that long, so this never
+    changes ordering for a real name."""
     return tuple((0, int(p), "") if p.isdigit() else (1, 0, p.casefold())
-                 for p in re.split(r"([0-9]+)", text) if p)
+                 for p in re.split(r"([0-9]{1,6})", text) if p)
 
 
 def _close(a: int, b: int) -> bool:
@@ -466,7 +471,11 @@ def _close(a: int, b: int) -> bool:
     return abs(a - b) <= max(2000, 0.01 * max(a, b))
 
 
-_DISC_NUMBER = re.compile(r"(?<![a-z])(?:cd|disc|disk|part)[\s._-]*([0-9]+)(?![0-9])", re.IGNORECASE)
+# The number is capped at 6 digits (T5N1, the same class as T1Z2): a run
+# past int()'s digit limit (4300) would be a ValueError, a 500 on
+# list_books. A real disc, CD or part number never has a digit run that
+# long, so this never changes ordering for a real name.
+_DISC_NUMBER = re.compile(r"(?<![a-z])(?:cd|disc|disk|part)[\s._-]*([0-9]{1,6})(?![0-9])", re.IGNORECASE)
 
 
 def _disc_parts(folder: str) -> tuple:
