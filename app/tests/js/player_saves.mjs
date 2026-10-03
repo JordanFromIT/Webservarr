@@ -1020,6 +1020,9 @@ function withEngine(o = {}) {
       let m = /^\/api\/player\/book\/([^?]+)/.exec(url);
       if (m) return reply(200, Object.assign({}, o.book || BOOK, { stream: { token: 'tok', uris: { local: [], remote: o.noStream ? [] : [REMOTE] } } }));
       m = /^\/api\/player\/position\/(.+)$/.exec(url);
+      if (m && o.slowPosition && got.filter((u) => u.indexOf('/position/') !== -1).length > 1) {
+        await new Promise((r) => clock.setTimeout(r, o.slowPosition));    // a late re-read that takes a while
+      }
       if (m) return o.positionStatus ? reply(o.positionStatus, { detail: 'down' })
         : reply(200, Object.assign({ now: new Date(clock.now + server.skewMs).toISOString() }, places));
       return reply(404, { detail: 'Not Found' });
@@ -1029,7 +1032,9 @@ function withEngine(o = {}) {
     mediaSession: o.mediaSession || null,
     MediaMetadata: null,
     baseUrl: 'https://ws.test/',
-    saver: t.saver
+    saver: t.saver,
+    // o.wallClock: the engine's wall clock is the fake one (its late Play counts it).
+    now: o.wallClock ? () => clock.now : undefined
   });
   const log = { change: [], warning: [], error: [], order: [] };
   engine.on('change', (d) => {
@@ -3262,6 +3267,60 @@ current = 'T2T1: a floor\'s save carries the floor\'s own book_ms and chapter_la
   check('the beacon too', bb && bb.book_ms === STARTS[bb.track] + bb.offset_ms && bb.chapter_label === 'The Middle', bb);
   const l = localOf(t);
   check('and the local copy', l && l.book_ms === STARTS[l.track] + l.offset_ms && l.chapter_label === 'The Middle', l);
+  t.engine.close();
+}
+
+// ---- Fix round 2 ----
+// T2R2: held again with a link still unsettled in the local copy, a confirm
+// keeps sending it; only startOver drops it.
+current = 'T2R2: held again with an unsettled link, confirmPlace keeps it and startOver drops it';
+for (const act of ['confirmPlace', 'startOver']) {
+  const clock = fakeClock(); const server = fakeServer(clock); const storage = fakeStorage();
+  setLocal(storage, { track: '599', offset_ms: 120000, duration_ms: 900000, updated_at: iso(-10), own: true, acked: false,
+    book_ms: 720000, book_duration_ms: 1800000, linked_from: '400:1' });
+  const t = withEngine({ clock, server, storage, book: CHAPTERED, places: { web: GONE_WEB, plex: null } });
+  await openBook(t);
+  check(act + ': held from the local copy', t.engine.state().filesChanged && t.engine.state().filesChanged.old.source === 'local');
+  server.extra = { linked: null };
+  if (act === 'confirmPlace') t.engine.confirmPlace(650000); else t.engine.startOver();
+  await clock.advance(2000);
+  await t.engine.play();
+  await clock.advance(12000);
+  const links = [...new Set(server.calls.map((c) => c.body.linked_from || '-'))];
+  if (act === 'confirmPlace') {
+    check('confirmPlace: every save carries the kept link', links.join() === '400:1' && server.calls.length >= 2, links);
+    check('confirmPlace: the local copy keeps it', localOf(t).linked_from === '400:1', localOf(t));
+  } else {
+    check('startOver: none sent', links.join() === '-', links);
+    check('startOver: gone from the local copy', !('linked_from' in localOf(t)), localOf(t));
+  }
+  t.engine.close();
+}
+
+// T2R3: a confirm made after 5 minutes or more at the helper is saved at
+// once: its move never waits on the late re-read, so a Play and Pause
+// during that read can't cancel it and leave the book unheld at 0:00.
+current = 'T2R3: a confirm after 5+ minutes held is saved at once; Play and Pause during the late read never cancel it';
+for (const variant of ['Play, then Pause during the read', 'Play only']) {
+  const clock = fakeClock(); const server = fakeServer(clock); const storage = fakeStorage();
+  server.row = { track: '599', offset_ms: 120000, updated_at: GONE_WEB.updated_at, psid: 'other', seq: 9 };
+  const t = withEngine({ clock, server, storage, book: CHAPTERED, places: { web: GONE_WEB, plex: null }, wallClock: true, slowPosition: 3000 });
+  await openBook(t);
+  await clock.advance(6 * 60000);                      // the helper up for 6 minutes
+  check(variant + ': held', t.engine.state().filesChanged !== null && server.calls.length === 0);
+  t.engine.confirmPlace(650000);
+  await clock.advance(200);
+  check(variant + ': the confirm is saved at once, at the spot', server.calls.length === 1 && server.calls[0].body.book_ms === 650000 &&
+    server.calls[0].body.event === 'pause' && server.row.track === '502' && server.row.offset_ms === 50000, server.calls.map((c) => c.body));
+  t.engine.play();
+  await clock.advance(1000);
+  if (variant.indexOf('Pause') !== -1) t.engine.pause();
+  await clock.advance(5000);
+  await t.engine.play();
+  await clock.advance(12000);
+  const bad = server.calls.filter((c) => c.body.book_ms < 650000);
+  check(variant + ': never a save before the confirmed spot (no 0:00)', bad.length === 0 && server.row.book_ms >= 650000, server.calls.map((c) => [c.body.event, c.body.book_ms]));
+  check(variant + ': playing on from it', t.engine.state().playing && t.engine.state().bookMs > 650000 && t.engine.state().filesChanged === null, t.engine.state().bookMs);
   t.engine.close();
 }
 

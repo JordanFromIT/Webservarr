@@ -85,7 +85,10 @@
  *       helper's chosen spot (state().filesChanged.spot). A move (seek,
  *       skip, chapter jump, seekto, the scrubber) ends the preview, pauses,
  *       and only moves that spot; smart rewind does nothing. previewAt,
- *       confirmPlace and startOver are the way out.
+ *       confirmPlace and startOver are the way out. The element played
+ *       from outside while held (no Media Session) adopts a paused preview,
+ *       else becomes a fresh one; it is never paused and played again there.
+ *       confirmPlace's move never waits on a late Play's re-read.
  *       Booted without its saves (saves.js failed to load or run), open()
  *       never opens a book: an 'unsupported' error, "The player couldn't
  *       start. Please update your browser." (no retry).
@@ -103,6 +106,8 @@
  *       (resolveConflict), and a Play meanwhile plays without saving. A
  *       failed or slow read goes on. The lock screen's Play takes the same
  *       path. pause() or toggle() during a Play's read cancels it.
+ *       pause(), and toggle() whenever anything plays, always stop the
+ *       element, even one playing without the engine knowing.
  *   seek(bookMs, { answer }), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters;
  *       answer: the move answers the open's question (features.js): if a
  *       late read then asks again, it still happens, unsaved
@@ -879,17 +884,19 @@ export function createEngine(env) {
   audio.addEventListener('play', function () {
     // Started from outside the engine (the browser's own controls).
     if (!book) return;
-    // Held for the book's changed files: only a bounded preview plays. The
-    // element is stopped and Play goes the engine's way (the engine starting
-    // a preview has wantPlay set already).
-    if (files && !wantPlay) {
-      try {
-        audio.pause();
-      } catch (e) { /* already */ }
-      if (!pending && !error) {
-        const p = play();
-        if (p && typeof p.catch === 'function') p.catch(function (e) { console.error('[player] the preview failed', e); });
-      }
+    // Held for the book's changed files: only a bounded preview plays (the
+    // engine starting one has wantPlay set already). A preview paused before
+    // its end adopts this play as it is (below). Otherwise this play becomes
+    // a fresh preview at the helper's chosen spot, started on the element
+    // as it plays. Never pause the element and then play it here: its
+    // queued 'pause' and 'play' events would answer each other for ever.
+    if (files && !wantPlay && !pending && !error && !previewPaused()) {
+      if (!startPreview(files.spot)) stopElement();
+      return;
+    }
+    if (files && !wantPlay && (pending || error)) {
+      // Nothing to adopt yet (a load, or an error): the element waits.
+      stopElement();
       return;
     }
     if (pending || wantPlay || error) return;
@@ -1559,7 +1566,13 @@ export function createEngine(env) {
       changed('checking');
       return;
     }
-    if (!book || !wantPlay) return;
+    if (!book) return;
+    if (!wantPlay) {
+      // The element playing on its own, unknown to the engine: Pause always
+      // stops it.
+      stopElement();
+      return;
+    }
     wantPlay = false;
     disarm();
     try {
@@ -1569,8 +1582,18 @@ export function createEngine(env) {
     changed('pause');
   }
 
+  // Stops the element where the engine doesn't want it playing. Its queued
+  // 'pause' finds wantPlay off and changes nothing.
+  function stopElement() {
+    if (audio.paused) return;
+    try {
+      audio.pause();
+    } catch (e) { /* already */ }
+  }
+
   function toggle() {
-    if (wantPlay || (checking && checking.plays)) pause();
+    // The bar's button and the keyboard: Pause whenever anything plays.
+    if (wantPlay || (checking && checking.plays) || (book && !audio.paused)) pause();
     else return play();
   }
 
@@ -1582,7 +1605,10 @@ export function createEngine(env) {
     // A move while paused, after RECHECK_AFTER_MS quiet, is saved at once:
     // like a late Play it reads the saved places first (smart rewind is no
     // move of the listener's, and only follows a Play).
-    if (!wantPlay && !rewind) {
+    // The confirm's own move (extra.place) never waits on that read: it is
+    // the listener's explicit choice, and the hold it ends must not end
+    // without it.
+    if (!wantPlay && !rewind && !(extra && extra.place)) {
       const again = function () { seek(v, reason, rewind, false, extra); };
       again.answer = !!answer;
       if (lateCheck(again, false)) return;
@@ -1704,11 +1730,11 @@ export function createEngine(env) {
     const old = files.old;
     // A preview playing stops first, still held (nothing is sent for it).
     preview = null;
-    if (wantPlay) pause();
+    pause();
     files = null;
     if (saver && typeof saver.releaseFiles === 'function') {
       try {
-        saver.releaseFiles(book.key, link && old.linked_from ? old.linked_from : null);
+        saver.releaseFiles(book.key, link && old.linked_from ? old.linked_from : null, { startOver: !link });
       } catch (e) {
         console.error('[player] saving failed', e);
       }

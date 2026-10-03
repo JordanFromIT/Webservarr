@@ -129,11 +129,12 @@
  *                                   (the open's handoff question is showing).
  *                                   files: the book's files changed: held (see
  *                                   above) until releaseFiles.
- *   releaseFiles(book, link) -> bool  the listener placed it: the hold ends and
+ *   releaseFiles(book, link, { startOver }) -> bool  the listener placed it: the hold ends and
  *                                   the move reported next is the one save
  *                                   (nothing a preview left pending is sent,
  *                                   no smart rewind's floor survives); link:
- *                                   the earlier copy's key, or null
+ *                                   the earlier copy's key, or null (a link
+ *                                   still unsettled is kept, unless startOver)
  *   stop()                          saves the last place once (if it needs it; its
  *                                   seq is taken at once, so whatever opens next
  *                                   outranks it), ends an active warning with
@@ -1148,9 +1149,11 @@ export function createSaver(o) {
      reports next is the one save. Nothing the held time left pending (a
      preview's play or pause) is sent, and no smart rewind's floor outlives
      it. link: the earlier copy's key when the place came from one; it rides
-     on the saves until the server says whether it linked it. false when
-     the book is not held. */
-  function releaseFiles(book, link) {
+     on the saves until the server says whether it linked it. Without one, a
+     link still unsettled from an earlier confirm is kept, except for a
+     startOver (opts.startOver), which drops it (ruling (c)). false when the
+     book is not held. */
+  function releaseFiles(book, link, opts) {
     const r = run;
     if (!r || r.stopped || r.book !== String(book) || !filesHeld(r)) return false;
     r.conflict = null;
@@ -1165,7 +1168,8 @@ export function createSaver(o) {
     // 0:00), so it is written to the local copy too.
     r.latest = null;
     r.latestBookMs = NaN;
-    r.linkedFrom = typeof link === 'string' && BOOK_KEY.test(link) ? link : null;
+    if (typeof link === 'string' && BOOK_KEY.test(link)) r.linkedFrom = link;
+    else if (opts && opts.startOver) r.linkedFrom = null;
     return true;
   }
 

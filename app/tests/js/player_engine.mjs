@@ -425,7 +425,7 @@ function setup(o = {}) {
   const live = new Set();
   const engine = E.createEngine({
     host,
-    createAudio: () => new FakeAudio(env),
+    createAudio: () => new (o.Audio || FakeAudio)(env),
     fetch: makeFetch(net, clock),
     setTimeout(fn, t) { const id = clock.setTimeout(() => { live.delete(id); fn(); }, t); live.add(id); return id; },
     clearTimeout(id) { live.delete(id); clock.clearTimeout(id); },
@@ -2064,6 +2064,97 @@ for (const how of ['seek', 'skip', 'chapter', 'seekforward']) {
   await t.clock.advance(20000);
   check(how + ': paused where it landed', !t.engine.state().playing && bookMsOf(t) === at && t.engine.state().filesChanged.spot === at, [at, bookMsOf(t)]);
   t.engine.close();
+}
+
+// Fix round 2 (T2R1): an element whose 'play', 'pause' and 'timeupdate'
+// events are queued (a media element task, 1 ms later), as the HTML spec
+// has them, never fired inside play()/pause(); its time runs on whenever it
+// is not paused (one ticker). Played from outside the engine after a
+// preview (a lock screen or headset where there is no Media Session), the
+// held engine must start one bounded preview, not answer its own queued
+// events for ever; and Pause must always stop it.
+class QueuedAudio extends FakeAudio {
+  constructor(env) { super(env); this.started = false; }
+  later(types) {
+    const env = this.env;
+    env.fired = (env.fired || 0) + types.length;
+    if (env.fired > 200000) { env.capped = true; return; }
+    env.clock.setTimeout(() => { for (const ty of types) this.fire(ty); }, 1);
+  }
+  ticker() {
+    if (this.started) return;
+    this.started = true;
+    const step = () => {
+      this.env.clock.setTimeout(() => {
+        if (!this.paused && this.readyState >= 3 && !this.ended) {
+          this._t = Math.min(this.duration, this._t + 0.25 * this.playbackRate);
+          if (this._t >= this.duration) { this.paused = true; this.ended = true; this.later(['timeupdate', 'pause', 'ended']); }
+          else this.later(['timeupdate']);
+        }
+        if (!this.env.stopTicker) step();
+      }, 250);
+    };
+    step();
+  }
+  play() {
+    if (this.paused) {
+      if (this.ended) { this._t = 0; this.ended = false; }
+      this.paused = false;
+      this.ticker();
+      this.later(['play']);
+      if (this.readyState >= 3) this.later(['playing']);
+    }
+    return Promise.resolve();
+  }
+  pause() {
+    if (this.paused) return;
+    this.paused = true;
+    this.later(['timeupdate', 'pause']);
+  }
+  begin() { if (this.paused) return; this.ticker(); this.later(['playing']); }
+  tick() {}
+}
+current = 'fix round 2 (T2R1): the element played from outside while held: one bounded preview, no event loop, Pause stops it';
+for (const how of ['after a finished preview', 'after a move']) {
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { Audio: QueuedAudio } });
+  t.engine.previewAt(700000);
+  await t.clock.advance(20000);
+  if (how === 'after a move') { t.engine.seek(1000000); await t.clock.advance(1000); }
+  const to = how === 'after a move' ? 1000000 : 700000;
+  check(how + ': the preview ended, held', !t.engine.state().playing && t.main.paused && t.engine.state().filesChanged.spot === to, [bookMsOf(t), t.engine.state().filesChanged]);
+  const f0 = t.env.fired || 0;
+  const c0 = t.log.change.length;
+  t.main.play();                                   // the element itself, from outside the engine
+  await t.clock.advance(2000);
+  const changes = t.log.change.slice(c0).filter((c) => c.reason !== 'time').map((c) => c.reason);
+  check(how + ': a handful of events, not a loop', !t.env.capped && (t.env.fired || 0) - f0 < 30 && changes.length <= 3, [(t.env.fired || 0) - f0, changes]);
+  check(how + ': a preview from the chosen spot', t.engine.state().playing && !t.main.paused && bookMsOf(t) > to && bookMsOf(t) < to + 3000, bookMsOf(t));
+  await t.clock.advance(58000);
+  check(how + ': bounded, then stopped', !t.engine.state().playing && t.main.paused && bookMsOf(t) >= to + 15000 && bookMsOf(t) <= to + 15500 && !t.env.capped, bookMsOf(t));
+  // Pause always stops it: the bar's toggle while a preview plays, and the
+  // engine's pause() even when the element plays without the engine knowing.
+  t.main.play();
+  await t.clock.advance(3000);
+  t.engine.toggle();
+  await t.clock.advance(3000);
+  const a = bookMsOf(t);
+  await t.clock.advance(5000);
+  check(how + ': toggle stops the preview', !t.engine.state().playing && t.main.paused && bookMsOf(t) === a, [t.main.paused, a, bookMsOf(t)]);
+  t.main.paused = false;                           // the element playing with no event at all
+  t.main.ticker();
+  await t.clock.advance(1000);
+  t.engine.pause();
+  await t.clock.advance(5000);
+  check(how + ': engine.pause() stops an element playing on its own', t.main.paused && !t.engine.state().playing);
+  t.main.paused = false;
+  await t.clock.advance(1000);
+  t.engine.toggle();
+  await t.clock.advance(5000);
+  check(how + ': and so does the toggle', t.main.paused && !t.engine.state().playing);
+  check(how + ': still held', t.engine.state().filesChanged !== null && !t.env.capped);
+  t.env.stopTicker = true;
+  t.engine.close();
+  await t.clock.advance(1000);
 }
 
 current = 'spec 2.5: while held, Retry after an outage only ever plays a bounded preview';
