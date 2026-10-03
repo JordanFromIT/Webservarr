@@ -611,13 +611,51 @@ async def _claimed_link(db: Session, who: "Listener", key: str, claim: Optional[
     return row if row is not None and row.work_key else None
 
 
+async def _link_verdict(db: Session, who: "Listener", key: str, earlier: str, claimed, about: dict,
+                        gone, known: dict) -> Optional[bool]:
+    """Whether `key` is the book the earlier copy `earlier` became: True,
+    False, or None when it can't be told now (Plex failed, or the book's own
+    work key is unknown). `claimed` is _claimed_link's row, `gone` the
+    _album_gone answer for `earlier` (or the exception it raised)."""
+    if claimed is None:
+        return False
+    if not about.get("work_key"):
+        return None                         # the book's own key is unknown: check again later
+    if claimed.work_key != about["work_key"]:
+        return False
+    # _album_gone: True, False, or None when Plex can't say.
+    linked = gone if not isinstance(gone, Exception) else None
+    if linked:
+        # Its place already lives on in a copy still in the library: not
+        # this book's to take (_carried_forward).
+        known[earlier] = True
+        carried = await _carried_forward(db, who, earlier, key, known)
+        linked = None if carried is None else not carried
+    return linked
+
+
+async def _settle_pending(db: Session, who: "Listener", key: str, earlier: str, claimed, about: dict,
+                          gone, known: dict) -> None:
+    """Re-verify the book's own pending claim on `earlier` (any check-in, see
+    checkin): verified it becomes a verified claim with the row's link, the old
+    album back drops it, Plex unavailable leaves it pending. Nothing is
+    answered: the response's "linked" is only for the link the request carried."""
+    verdict = await _link_verdict(db, who, key, earlier, claimed, about, gone, known)
+    if verdict is None:
+        return
+    outcome = listening.claim_link(db, who.identity, key, earlier, verdict)
+    await _settle_claim(db, who, key, (earlier, verdict), outcome, known)
+
+
 async def _settle_claim(db: Session, who: "Listener", key: str, link: tuple, outcome, known: dict):
     """The check-in's "linked" from the claim its save wrote
     (listening.claim_link's answer). When another book holds the claim (two
     confirms at once on the two workers, or a copy that claimed it before),
     that book's album decides: still in the library, it keeps the claim and
     this book is refused (false); gone, its claim is released and taken
-    over (a copy that went too blocks nothing, so A to B to C works); Plex
+    over (a copy that went too blocks nothing, so A to B to C works), but
+    only when the holder's own successors don't carry the place on
+    (_carried_forward from the holder), else null and the claim stays; Plex
     can't say, null (sent again with the next save). `known` holds the
     album checks this request already made."""
     if not isinstance(outcome, str):
@@ -626,6 +664,12 @@ async def _settle_claim(db: Session, who: "Listener", key: str, link: tuple, out
     if not gone:
         return None if gone is None else False
     earlier, verdict = link
+    # A pending holder has no link on its row: its claim is the only record
+    # that `earlier` was carried forward. Releasing it is safe only when that
+    # place lives on in none of the holder's own successors either, and
+    # unknown (Plex can't say) is not safe: answer null and let it be asked again.
+    if await _carried_forward(db, who, outcome, key, known) is not False:
+        return None
     outcome = listening.claim_link(db, who.identity, key, earlier, verdict, release=outcome)
     return None if isinstance(outcome, str) else outcome   # yet another copy took it meanwhile: ask again
 
@@ -672,14 +716,30 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
       book won the claim at the same moment; stop sending it. The place is
       saved all the same;
     - null: it could not be checked now (Plex failed), and a pending claim
-      is stored: it blocks other copies until a later check-in carrying the
-      link verifies it (true) or finds the old album back (false, and the
-      claim is dropped). Send it again with the next save.
-    Its album check runs at the same time as the book's reads."""
+      is stored: it blocks other copies until a later check-in verifies it
+      (true) or finds the old album back (false, and the claim is dropped).
+      Send it again with the next save.
+    Its album check runs at the same time as the book's reads.
+
+    A pending claim of the book's own is re-verified on any check-in for the
+    book, with or without linked_from (one more album check, at the same
+    time), so a browser that lost the link, or another device, still settles
+    it. Its outcome is not answered: "linked" is only for the link the
+    request carried."""
     claimed = await _claimed_link(db, who, body.book, body.linked_from)
     reads = [pp.checkin_book(body.book, body.track)]
     if claimed is not None:
         reads.append(_album_gone(body.linked_from))
+    # The book's own pending claim (spec 2.6 s4) is re-verified on any check-in,
+    # whether or not it carries the link: the browser that confirmed it may have
+    # lost it, or the listener moved to another device. One extra album check.
+    pending = listening.pending_claim(db, who.identity, body.book)
+    if pending == body.linked_from:
+        pending = None                      # this request verifies it already
+    pending_row = await _claimed_link(db, who, body.book, pending)
+    pending_read = len(reads)
+    if pending_row is not None:
+        reads.append(_album_gone(pending))
     results = await asyncio.gather(*reads, return_exceptions=True)
     for result in results:
         if isinstance(result, BaseException) and not isinstance(result, Exception):
@@ -691,23 +751,11 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     _album, about = results[0]
     about = about or {}
 
-    linked, known = None, {}
+    known = {}
+    linked = None
     if body.linked_from is not None:
-        if claimed is None:
-            linked = False
-        elif not about.get("work_key"):
-            linked = None                   # the book's own key is unknown: check again later
-        elif claimed.work_key != about["work_key"]:
-            linked = False
-        else:
-            # _album_gone: True, False, or None when Plex can't say.
-            linked = results[1] if not isinstance(results[1], Exception) else None
-        if linked:
-            # Its place already lives on in a copy still in the library: not
-            # this book's to take (_carried_forward).
-            known[body.linked_from] = True
-            carried = await _carried_forward(db, who, body.linked_from, body.book, known)
-            linked = None if carried is None else not carried
+        linked = await _link_verdict(db, who, body.book, body.linked_from, claimed, about,
+                                     results[1] if claimed is not None else None, known)
     # The claim's verdict; nothing to claim for a key that is not another book's.
     link = (body.linked_from, linked) if body.linked_from not in (None, body.book) else None
 
@@ -723,6 +771,9 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
         raise HTTPException(status_code=422, detail=str(exc)) from None
     if link is not None:
         linked = await _settle_claim(db, who, body.book, link, result.pop("link", None), known)
+    if pending is not None:
+        gone = results[pending_read] if pending_row is not None else None
+        await _settle_pending(db, who, body.book, pending, pending_row, about, gone, known)
     extra = {} if body.linked_from is None else {"linked": linked}
     if result.get("conflict"):
         return JSONResponse({"conflict": result["conflict"], "now": utc_iso(datetime.now(timezone.utc)), **extra},

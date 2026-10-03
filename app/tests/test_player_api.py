@@ -1425,6 +1425,149 @@ class Claims(PlayerApiBase):
         self.assertIs(self.confirm(self.THERE, self.GONE, seq=2), True)
         self.assertEqual(self.claims("plex:1002"), {(self.GONE, self.THERE, "verified")})
 
+    # --- T1P1: a pending claim settles on ANY check-in for its book -------------
+
+    def plain_checkin(self, book, seq):
+        """A check-in that carries no linked_from (the browser lost it, or
+        the listener moved to another device)."""
+        track = next(iter(LIBRARY[book]))
+        r = self.checkin(book=book, track=track, duration_ms=LIBRARY[book][track], psid="other-device",
+                         seq=seq, base=None)
+        self.assertIn(r.status_code, (200, 409), r.text)
+        return r
+
+    def album_checks(self):
+        """The album keys checked in the block (assert_in_library calls)."""
+        calls = []
+
+        async def check(k, track_key=None):
+            calls.append(k)
+            return await fake_assert_in_library(k, track_key)
+        return calls, mock.patch.object(pp, "assert_in_library", side_effect=check)
+
+    def test_a_pending_claim_is_verified_by_a_checkin_without_linked_from(self):
+        self.pending_in_b()
+        r = self.plain_checkin(self.THERE, 2)
+        self.assertNotIn("linked", r.json())        # the client sent none: nothing to answer
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "verified")})
+        self.assertEqual(self.link_of(self.THERE), self.GONE)
+        self.assertEqual({e["book_key"] for e in self.history(self.THERE)}, {self.THERE, self.GONE})
+        self.assertIsNone(self.position(self.NEW))      # still never offered to a side-by-side edition
+
+    def test_a_pending_claim_is_dropped_by_a_checkin_without_linked_from_when_the_old_album_is_back(self):
+        self.pending_in_b()
+        with mock.patch.dict(LIBRARY, {self.GONE: {"301": 400_000}}):
+            r = self.plain_checkin(self.THERE, 2)
+        self.assertNotIn("linked", r.json())
+        self.assertEqual(self.claims(), set())
+        self.assertIsNone(self.link_of(self.THERE))
+
+    def test_a_pending_claim_stays_pending_while_plex_cannot_say(self):
+        self.pending_in_b()
+        with self.down(self.GONE):
+            r = self.plain_checkin(self.THERE, 2)
+        self.assertNotIn("linked", r.json())
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "pending")})
+        self.assertIsNone(self.link_of(self.THERE))
+        self.assertIsNone(self.position(self.NEW))
+        self.plain_checkin(self.THERE, 3)               # Plex is back: the next one settles it
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "verified")})
+
+    def test_a_pending_claim_is_settled_even_when_the_checkin_is_a_conflict(self):
+        self.pending_in_b()
+        r = self.checkin(book=self.THERE, track="451", duration_ms=500_000, psid="third-device", seq=1,
+                         base="2001-01-01T00:00:00.000Z")
+        self.assertEqual(r.status_code, 409, r.text)
+        self.assertNotIn("linked", r.json())
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "verified")})
+
+    def test_a_pending_claim_costs_one_extra_album_check_per_checkin(self):
+        self.pending_in_b()
+        with self.down(self.GONE):
+            self.plain_checkin(self.THERE, 2)           # still pending, still unreadable
+        calls, patch = self.album_checks()
+        with patch:
+            self.plain_checkin(self.THERE, 3)
+        self.assertEqual(calls.count(self.GONE), 1)     # the old album, once
+        calls, patch = self.album_checks()
+        with patch:
+            self.plain_checkin(self.THERE, 4)           # verified now: nothing more to check
+        self.assertNotIn(self.GONE, calls)
+
+    def test_a_book_with_no_pending_claim_costs_no_extra_album_check(self):
+        self.seed(self.GONE)
+        calls, patch = self.album_checks()
+        with patch:
+            self.plain_checkin(self.THERE, 1)
+        self.assertNotIn(self.GONE, calls)
+
+    def test_a_checkin_that_sends_a_different_link_gets_only_that_links_answer(self):
+        # The response's "linked" answers the link the request carried, never
+        # the book's own pending claim.
+        self.pending_in_b()
+        r = self.checkin(book=self.THERE, track="451", duration_ms=500_000, psid="page-" + self.THERE, seq=2,
+                         linked_from="999:1")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIs(r.json()["linked"], False)
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "verified")})
+
+    def test_another_listeners_pending_claim_is_not_touched(self):
+        self.seed(self.GONE, identity="plex:1002")
+        self.as_user(B)
+        with self.down(self.GONE):
+            self.assertIsNone(self.confirm(self.THERE, self.GONE))
+        self.as_user(A)
+        self.seed(self.GONE)
+        self.plain_checkin(self.THERE, 1)               # A has no claim: B's stays pending
+        self.assertEqual(self.claims("plex:1002"), {(self.GONE, self.THERE, "pending")})
+        self.assertEqual(self.claims(), set())
+
+    # --- T1R1: a gone holder's claim is released only if A lives on nowhere else --
+
+    X = "460:1"     # took A while pending, then left the library; Y (in the library) took X
+
+    def x_then_y(self):
+        """A (gone) -> X (pending claim, X gone since) -> Y (verified link to X,
+        in the library). C is beside Y and its confirm of A arrives late."""
+        self.seed(self.GONE)
+        with mock.patch.dict(LIBRARY, {self.X: {"461": 500_000}}), mock.patch.dict(WORKS, {self.X: self.WORK}):
+            with self.down(self.GONE):
+                self.assertIsNone(self.confirm(self.X, self.GONE))
+        self.assertIs(self.confirm(self.THERE, self.X), True)
+        self.assertEqual(self.claims(), {(self.GONE, self.X, "pending"), (self.X, self.THERE, "verified")})
+
+    def holder_kept(self, linked):
+        self.assertIsNone(linked)
+        self.assertEqual(self.claims(), {(self.GONE, self.X, "pending"), (self.X, self.THERE, "verified")})
+        # Plex is fine again: A's place lives on in Y, so C is refused.
+        self.assertIs(self.confirm(self.NEW, self.GONE, seq=3), False)
+        self.assertIsNone(self.link_of(self.NEW))
+
+    def test_the_holders_claim_is_kept_when_its_successor_cannot_be_read(self):
+        self.x_then_y()
+        with self.down(self.THERE):
+            linked = self.confirm(self.NEW, self.GONE, seq=2)
+        self.holder_kept(linked)
+
+    def test_the_holders_claim_is_kept_when_the_old_album_cannot_be_read(self):
+        self.x_then_y()
+        with self.down(self.GONE):
+            linked = self.confirm(self.NEW, self.GONE, seq=2)
+        self.holder_kept(linked)
+
+    def test_the_holders_claim_is_kept_when_the_new_books_own_key_cannot_be_read(self):
+        self.x_then_y()
+        self.book_identity.side_effect = pp.PlayerUnavailable("down")
+        linked = self.confirm(self.NEW, self.GONE, seq=2)
+        self.book_identity.side_effect = fake_book_identity
+        self.holder_kept(linked)
+
+    def test_the_holders_claim_is_kept_when_its_successor_is_in_the_library(self):
+        # Control: Plex can say, so C is refused outright and the claim stays.
+        self.x_then_y()
+        self.assertIs(self.confirm(self.NEW, self.GONE, seq=2), False)
+        self.assertEqual(self.claims(), {(self.GONE, self.X, "pending"), (self.X, self.THERE, "verified")})
+
 
 def _race_worker(db_path, book, barrier, out):
     """One uvicorn worker in TwoWorkersClaimOneCopy: its own process, engine

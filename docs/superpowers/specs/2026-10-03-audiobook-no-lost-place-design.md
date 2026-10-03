@@ -72,9 +72,11 @@ The safety net now catches misses, so the matcher is tightened to remove false m
   key can hold the claim.
 - **Unverified claims.** If verification fails (Plex unavailable), the claim is stored as pending
   and the response is `linked: null`. A pending claim blocks other copies exactly like a verified
-  one. It is verified at the next check-in that carries the link: if it verifies, it becomes
-  verified (`linked: true`); if the old album turns out to be present again, it is dropped
-  (`linked: false`).
+  one. It is re-verified at the next check-in for that book, whether or not the request carries
+  the link (the browser may have lost it, or the listener moved to another device): if it
+  verifies, it becomes verified and the row keeps the link; if the old album turns out to be
+  present again, it is dropped; if Plex is unavailable, it stays pending. A request that carries
+  the link is answered `linked` true, false or null as before; one that does not gets no `linked`.
 - **Successor rule.** An earlier copy is offered (automatically or in the safety net) only when no
   other book key holds a claim on it, verified or pending, whose album is still in the library.
   A claim whose holder's album is also gone does not block, so chains keep working (A to B to C).

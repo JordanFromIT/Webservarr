@@ -472,6 +472,17 @@ def claim_link(db: Session, identity: str, book: str, earlier: str, verdict: Opt
     return outcome
 
 
+def pending_claim(db: Session, identity: str, book: str) -> Optional[str]:
+    """The earlier copy this listener's book `book` holds a pending claim on
+    (spec 2.6 s4), or None. The newest one when it holds several. A claim
+    whose row is gone or linked elsewhere holds nothing (_still_held)."""
+    C = ListeningClaim
+    row = (db.query(C.earlier_key)
+           .filter(C.identity == identity, C.holder_key == book, C.state == "pending", _still_held())
+           .order_by(C.claimed_at.desc(), C.earlier_key).first())
+    return row[0] if row is not None else None
+
+
 def link_chain(db: Session, identity: str, book: str, first: Optional[str]) -> list:
     """The earlier copies behind `book`: `first`, then the copy that one's
     own row links to, and so on, at most LINK_HOPS keys, never `book` and

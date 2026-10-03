@@ -796,6 +796,27 @@ class Claims(StoreBase):
         self.assertEqual(listening.successors(self.db, ME, "300:1"), ["400:1"])
         self.assertEqual(listening.successors(self.db, THEM, "310:1"), [])
 
+    def test_pending_claim_is_the_books_own_pending_claim_only(self):
+        checkin(self.db, book="400:1", psid="b")
+        checkin(self.db, book="410:1", psid="c")
+        checkin(self.db, identity=THEM, book="400:1", psid="them")
+        self.assertIsNone(listening.pending_claim(self.db, ME, "400:1"))
+        listening.claim_link(self.db, ME, "400:1", "300:1", None)
+        listening.claim_link(self.db, THEM, "400:1", "310:1", None)
+        self.assertEqual(listening.pending_claim(self.db, ME, "400:1"), "300:1")
+        self.assertIsNone(listening.pending_claim(self.db, ME, "410:1"))        # another book's
+        self.assertEqual(listening.pending_claim(self.db, THEM, "400:1"), "310:1")
+        listening.claim_link(self.db, ME, "400:1", "300:1", True)
+        self.assertIsNone(listening.pending_claim(self.db, ME, "400:1"))        # verified now
+
+    def test_pending_claim_ignores_a_claim_whose_row_is_gone(self):
+        from app.models import ListeningPosition
+        checkin(self.db, book="400:1", psid="b")
+        listening.claim_link(self.db, ME, "400:1", "300:1", None)
+        self.db.query(ListeningPosition).filter_by(identity=ME, book_key="400:1").delete()
+        self.db.commit()
+        self.assertIsNone(listening.pending_claim(self.db, ME, "400:1"))
+
     def test_identities_are_isolated(self):
         checkin(self.db, book="400:1", psid="b")
         checkin(self.db, identity=THEM, book="410:1", psid="them")
