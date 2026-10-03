@@ -91,6 +91,21 @@
  *       from outside while held (no Media Session) adopts a paused preview,
  *       else becomes a fresh one; it is never paused and played again there.
  *       confirmPlace's move never waits on a late Play's re-read.
+ *       The safety net (spec 2.6): a book the listener has no place in at all
+ *       (no copy in WebServarr, Plex or this browser, none a Plex read that
+ *       failed), opened without an `at`, asks the server for their places on
+ *       books that left the library (GET /api/player/orphans/<key>, alongside
+ *       the book, ORPHANS_WAIT_MS at most). With any, the book opens held
+ *       (state().safetyNet, a 'warning' { kind: 'safety-net' }) at its start,
+ *       loaded and paused, the saves held as for the files changed (nothing
+ *       sent, no beacon, no last save, the local copy untouched), and
+ *       stricter: nothing plays, not even a preview. play(), toggle(),
+ *       retry(), the lock screen's Play, the element's own controls, and every
+ *       move (seek, skip, chapter jump, seekto, rewind) do nothing until
+ *       pickOrphan or dismissOrphans answers it. A lookup that fails, is
+ *       empty or is slow gives no question: the book opens as it always did,
+ *       and the question comes at the next open. A reload asks again, since
+ *       nothing was saved.
  *       Booted without its saves (saves.js failed to load or run), open()
  *       never opens a book: an 'unsupported' error, "The player couldn't
  *       start. Please update your browser." (no retry).
@@ -131,9 +146,31 @@
  *                     Buffering does not count: the wall time restarts at
  *                     the first timeupdate after a 'waiting', and each
  *                     timeupdate counts 1 s at most (a stall the element
- *                     reports no 'waiting' for costs under 1 s).
+ *                     reports no 'waiting' for costs under 1 s). But never
+ *                     longer than PREVIEW_CEILING_MS (60 s) of wall clock
+ *                     spent playing, stalls and buffering counted (paused
+ *                     time is not), so a stream that stalls before every
+ *                     timeupdate can't stretch it (spec 2.6).
  *                     false: not held, or a part this browser can't decode
  *                     (with a 'part-format' warning).
+ *   pickOrphan(key) -> bool  the safety net's question is open: the listener
+ *                     picked that place (one of state().safetyNet.orphans) as
+ *                     this book's earlier copy. It leads into the files
+ *                     changed hold with it as the old place (state().filesChanged.old:
+ *                     linked_from key, manual true, source 'orphan', its
+ *                     book_ms, book_duration_ms, chapter_label, book_title,
+ *                     narrator), and the same 'files-changed' warning, so the
+ *                     "Find your place" helper takes it from there. Nothing
+ *                     is saved yet; confirmPlace sends linked_from with
+ *                     link_manual: true (startOver sends no link). false: no
+ *                     question open, or a key that was not offered.
+ *   dismissOrphans() -> bool  "None of these": the server is told
+ *                     (POST /api/player/orphans/<key>/dismiss, in the
+ *                     background; per listener and book, so it holds on every
+ *                     device), the hold ends, and the book is a new book:
+ *                     nothing is saved until it is played (a start-over
+ *                     release of the saves, no place moved), and it plays now
+ *                     when the open was to play. false: no question open.
  *   confirmPlace(bookMs) -> bool  held: the listener places the book at bookMs.
  *                     An explicit move (a 'seek' change marked { place: true })
  *                     that ends the hold and is saved once (it ends any smart
@@ -240,12 +277,18 @@
  *                       resumedFrom: { source, device, updated_at, age_ms } | null,
  *                       filesChanged: { old: { track, offset_ms, book_ms,
  *                         book_duration_ms, chapter_label, updated_at, source,
- *                         linked_from, book_title, narrator }, spot } | null }
+ *                         linked_from, book_title, narrator, manual }, spot } | null,
+ *                       safetyNet: { orphans: [{ key, book_title, narrator,
+ *                         book_ms, book_duration_ms, chapter_label, updated_at }] } | null }
  *       filesChanged: the book's files changed (see open): the place saved
  *       before (source 'web', 'plex' or 'local'; a field that copy lacks is
- *       null; linked_from: the earlier copy's key when it came from one);
+ *       null; linked_from: the earlier copy's key when it came from one;
+ *       source 'orphan' and manual true: the listener picked it from the
+ *       safety net, see pickOrphan);
  *       spot: the helper's chosen spot in book ms (0 at the open, then the
  *       last preview's start or move's landing), where Play previews.
+ *       safetyNet: the book is held while the listener is asked whether one of
+ *       their places on books that left the library was this one (see open).
  *       bookMs is the playhead (what to show); position is the place to save.
  *       They differ only while a skipped part's successor has not played yet.
  *       lastSavedAt: ms (this device's clock) of the last save the server
@@ -277,6 +320,8 @@
  *     'warning'  { kind: 'part-skipped', message }
  *                { kind: 'files-changed', book, old } (see open; old as in
  *                  state().filesChanged)
+ *                { kind: 'safety-net', book, orphans } (see open; orphans as in
+ *                  state().safetyNet)
  *                { kind: 'part-format', message, landing } (a seek, preview or
  *                  confirm into a part that can't play; landing: true when a
  *                  confirm waiting on its read or question could not land,
@@ -306,6 +351,8 @@ export const SKIP_MAX_S = 60;
 export const UNREACHABLE = "Can't reach the media server";
 export const PLAYER_BROKEN = "The player couldn't start. Please update your browser.";
 export const PREVIEW_MS = 15000;       // previewAt plays this much of the book from a spot
+export const PREVIEW_CEILING_MS = 60000; // ... and never longer than this by the wall clock, stalls and all
+export const ORPHANS_WAIT_MS = 5000;   // a new book waits this long at most for the safety net's lookup
 const PREVIEW_END_GAP_MS = 1000;       // ... stopping this short of the book's end (never ending it)
 const PREVIEW_WALL_STEP_MS = 1000;     // ... its wall time counting this much at most per timeupdate
 export const PLACE_END_MS = 30000;     // a confirmed place is never nearer the book's end than this
@@ -320,6 +367,8 @@ const SAME_PLACE_MS = 1000;              // another page's place this close to t
 const MEDIA_ERR_ABORTED = 1;
 const MEDIA_ERR_NETWORK = 2;
 const MP4 = ['mp4', 'm4a', 'm4b', 'mov'];
+const BOOK_KEY = /^[0-9]{1,20}:[0-9]{1,6}$/;   // a book's key, as the server checks an earlier copy's
+const ORPHANS_MAX = 10;                  // the most places the safety net offers
 
 // ---------------------------------------------------------------------------
 // Book time
@@ -425,6 +474,57 @@ function oldPlaceOf(copy, raw, link) {
     // and narrator: the helper shows them, so a wrong match is plain).
     book_title: text(r.book_title),
     narrator: text(r.narrator)
+  };
+}
+
+/* One place the server offered from a book that left the library (GET
+   /api/player/orphans/<key>), cleaned: null for one without a well formed
+   book key. A field it lacks is null. */
+function orphanOf(raw) {
+  if (!raw || typeof raw !== 'object' || typeof raw.key !== 'string' || !BOOK_KEY.test(raw.key)) return null;
+  const ms = function (v) { return typeof v === 'number' && isFinite(v) && v >= 0 ? Math.round(v) : null; };
+  const text = function (v) { return typeof v === 'string' && v ? v : null; };
+  return {
+    key: raw.key,
+    book_title: text(raw.book_title),
+    narrator: text(raw.narrator),
+    book_ms: ms(raw.book_ms),
+    book_duration_ms: ms(raw.book_duration_ms),
+    chapter_label: text(raw.chapter_label),
+    updated_at: text(raw.updated_at)
+  };
+}
+
+/* The places the server offered, cleaned: at most ORPHANS_MAX, one per book. */
+function orphanList(raw) {
+  const out = [];
+  const seen = new Set();
+  (Array.isArray(raw) ? raw : []).forEach(function (r) {
+    const o = out.length < ORPHANS_MAX ? orphanOf(r) : null;
+    if (!o || seen.has(o.key)) return;
+    seen.add(o.key);
+    out.push(o);
+  });
+  return out;
+}
+
+/* A place the listener picked from the safety net, as the "Find your place"
+   helper takes an old place (see oldPlaceOf): from an earlier copy of the
+   book (linked_from), by the listener's own hand (manual). It has no part of
+   its own in this book, only the book time. */
+function oldPlaceOfOrphan(o) {
+  return {
+    track: '',
+    offset_ms: 0,
+    book_ms: o.book_ms,
+    book_duration_ms: o.book_duration_ms,
+    chapter_label: o.chapter_label,
+    updated_at: o.updated_at,
+    source: 'orphan',
+    linked_from: o.key,
+    book_title: o.book_title,
+    narrator: o.narrator,
+    manual: true
   };
 }
 
@@ -550,6 +650,12 @@ export function createEngine(env) {
   // the preview playing meanwhile, { start, end (book ms), done }.
   let files = null;
   let preview = null;
+  let ceilingTimer = null;    // the preview's PREVIEW_CEILING_MS, while it plays
+  // The safety net (spec 2.6): a book the listener has no place in, while
+  // they are asked whether one of their places on books that left the library
+  // was this one. { orphans, autoplay }. Held like the files changed, and
+  // stricter: nothing is saved, and nothing plays, not even a preview.
+  let net = null;
 
   // Where: the loaded part and its connection, the playhead, where the load
   // is heading, and the place held after a skipped part.
@@ -630,7 +736,17 @@ export function createEngine(env) {
     if (wasPlaying && !on) {
       quietSince = wallNow();
       // A preview's wall time counts only while it plays.
-      if (preview) preview.lastWall = null;
+      if (preview) {
+        preview.lastWall = null;
+        if (preview.wallFrom !== null) preview.wallUsed += wallNow() - preview.wallFrom;
+        preview.wallFrom = null;
+      }
+      stopCeiling();
+    }
+    // ... and its ceiling clock runs from the moment it is wanted playing.
+    if (!wasPlaying && on && preview && preview.wallFrom === null) {
+      preview.wallFrom = wallNow();
+      armCeiling(preview);
     }
     wasPlaying = on;
     if (saver) {
@@ -697,7 +813,8 @@ export function createEngine(env) {
       lastSavedAt: saver ? saver.lastSavedAt : null,
       saveError: saver ? !!saver.warning : false,
       resumedFrom: resumedFrom,
-      filesChanged: book && files ? { old: Object.assign({}, files.old), spot: files.spot } : null
+      filesChanged: book && files ? { old: Object.assign({}, files.old), spot: files.spot } : null,
+      safetyNet: book && net ? { orphans: net.orphans.map(function (o) { return Object.assign({}, o); }) } : null
     };
   }
 
@@ -916,10 +1033,12 @@ export function createEngine(env) {
     // Buffering is not playing: a preview's wall time starts again from the
     // next timeupdate (the stall costs it nothing).
     if (preview) preview.lastWall = null;
+    previewCeiling();
   });
 
   audio.addEventListener('playing', function () {
     if (!book || !cur) return;
+    previewCeiling();
     disarm();
     if (pending && seekApplied) pending = false;
     // This connection works: the failure ladder starts afresh next time.
@@ -965,6 +1084,7 @@ export function createEngine(env) {
         pause();
       }
     }
+    previewCeiling();
   });
 
   audio.addEventListener('play', function () {
@@ -976,6 +1096,11 @@ export function createEngine(env) {
     // a fresh preview at the helper's chosen spot, started on the element
     // as it plays. Never pause the element and then play it here: its
     // queued 'pause' and 'play' events would answer each other for ever.
+    // The safety net's question is open: nothing plays, however it started.
+    if (net && !wantPlay) {
+      stopElement();
+      return;
+    }
     if (files && files.reading && !wantPlay) files.play = true;
     if (files && !wantPlay && !pending && !error && !previewPaused()) {
       if (!startPreview(files.spot)) stopElement();
@@ -1321,7 +1446,9 @@ export function createEngine(env) {
     unchosen = false;
     if (files && files.timer !== null && files.timer !== undefined) clearT(files.timer);
     files = null;
+    net = null;
     preview = null;
+    stopCeiling();
     checking = null;
     quietSince = null;
     plexSeenAt = -Infinity;
@@ -1361,6 +1488,35 @@ export function createEngine(env) {
     }
   }
 
+
+  /* The listener's places on books that left the library, which this book
+     might be (GET /api/player/orphans/<key>): a list, or null for none, a
+     failed lookup or one taking ORPHANS_WAIT_MS (the book then opens as it
+     always did, and the question comes at the next open). */
+  async function lookupOrphans(key) {
+    let timer = null;
+    const timeout = new Promise(function (resolve) {
+      timer = setT(function () {
+        timer = null;
+        resolve(null);
+      }, ORPHANS_WAIT_MS);
+    });
+    const asked = (async function () {
+      const resp = await fetchFn('/api/player/orphans/' + encodeURIComponent(key), {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      const list = orphanList(data && data.orphans);
+      return list.length ? list : null;
+    })().catch(function () { return null; });
+    const got = await Promise.race([asked, timeout]);
+    if (timer !== null) clearT(timer);
+    return got;
+  }
+
   async function open(key, opts) {
     opts = opts || {};
     key = key == null ? '' : String(key);
@@ -1389,14 +1545,31 @@ export function createEngine(env) {
       function (v) { return { places: v }; },
       function (e) { return { failed: e }; }
     ) : null;
+    // The safety net (spec 2.6): with no place of the listener's in the book
+    // at all, their places on books that left the library are asked for,
+    // alongside the book. Never an error: a lookup that fails is no question.
+    // The copies are weighed once (the open weighs them again below).
+    let weighed = null;
+    const orphansAsked = placesAsked ? placesAsked.then(function (got) {
+      if (!got.places || opts.at) return null;
+      try {
+        weighed = saver.resumeFrom(key, got.places) || [];
+      } catch (e) {
+        console.error('[player] saving failed', e);
+        return null;
+      }
+      return !weighed.length && !got.places.plexError ? lookupOrphans(key) : null;
+    }) : null;
     let data;
     let places = null;
+    let orphans = null;
     try {
       data = await fetchBook(key, false);
       if (placesAsked) {
         const got = await placesAsked;
         if (got.failed) throw got.failed;
         places = got.places;
+        orphans = await orphansAsked;
       }
     } catch (e) {
       if (my !== openGen) return;
@@ -1443,7 +1616,7 @@ export function createEngine(env) {
     if (places) {
       let order = [];
       try {
-        order = saver.resumeFrom(key, places) || [];
+        order = weighed || saver.resumeFrom(key, places) || [];
       } catch (e) {
         console.error('[player] saving failed', e);
       }
@@ -1479,7 +1652,8 @@ export function createEngine(env) {
     if (places && places.plex && typeof places.plex === 'object') plexCopy = copyFrom('plex', places.plex);
     // The files changed: the listener places the book first; the handoff
     // and conflict rules then apply to that place (through its save).
-    if (openGate && places && !opts.at && !changedFrom) {
+    const asking = !!(orphans && orphans.length && !changedFrom);
+    if (openGate && places && !opts.at && !changedFrom && !asking) {
       const msOf = function (c) { return c ? toBookMs(book.tracks, c.track, c.offset_ms) : null; };
       const canPlay = function (ms) { return ms !== null && !blocked(toTrackOffset(book.tracks, ms).index); };
       const webMs = msOf(webCopy);
@@ -1524,6 +1698,7 @@ export function createEngine(env) {
     resumedFrom = resumed ? { source: resumed.source, device: resumed.device, updated_at: resumed.updated_at, age_ms: age } : null;
     // spot: the helper's chosen spot (book ms), where Play previews while held.
     files = changedFrom ? { old: changedFrom, spot: startMs, pending: null, reading: false, asked: false, timer: null, play: false } : null;
+    net = asking ? { orphans: orphans, autoplay: autoplay } : null;
     if (saver) {
       try {
         saver.start(key, {
@@ -1543,10 +1718,11 @@ export function createEngine(env) {
           // This browser's own place stays in the local copy until the
           // listener answers, plays or moves: while the question shows, and
           // while that place is one the server never took.
-          keepLocal: !!held || !!files || !!(mine && mine.own === true && mine.acked !== true),
-          // The files changed: nothing is saved, and the local copy keeps
-          // the old place, until the listener places the book.
-          files: !!files
+          keepLocal: !!held || !!files || !!net || !!(mine && mine.own === true && mine.acked !== true),
+          // The files changed, or the safety net's question is open: nothing
+          // is saved, and the local copy keeps what it has, until the
+          // listener places the book or answers.
+          files: !!files || !!net
         });
       } catch (e) {
         console.error('[player] saving failed', e);
@@ -1559,6 +1735,7 @@ export function createEngine(env) {
     quietSince = wallNow();
     changed('open');
     if (files) emit('warning', { kind: 'files-changed', book: key, old: Object.assign({}, files.old) });
+    if (net) emit('warning', { kind: 'safety-net', book: key, orphans: net.orphans.map(function (o) { return Object.assign({}, o); }) });
     if (cannot) {
       unchosen = true;
       // The place as it was given: a saved place at the very end of the part
@@ -1585,7 +1762,7 @@ export function createEngine(env) {
     // Held (the handoff question, or the files changed): loaded, not played.
     // The open's own finding, not `files`: a confirm or startOver during the
     // connection choice has ended the hold, and is no Play either.
-    wantPlay = (autoplay && !held && !changedFrom) || wantPlay;
+    wantPlay = (autoplay && !held && !changedFrom && !asking) || wantPlay;
     load(playhead.index, playhead.offset, side);
     sessionState();
     changed(wantPlay ? 'play' : 'ready');
@@ -1604,6 +1781,9 @@ export function createEngine(env) {
      at the helper's chosen spot. Nothing else plays until the listener
      places the book. */
   function play() {
+    // The safety net's question is open (the lock screen's Play included):
+    // nothing plays until the listener answers it.
+    if (net && book) return Promise.resolve();
     // A Play while a Plex app's question is read again: the answer that
     // follows may play (recheckPlex).
     if (rechecking) rechecking.paused = false;
@@ -1711,6 +1891,8 @@ export function createEngine(env) {
   // extra: more for the change (confirmPlace's { place: true }).
   function seek(bookMs, reason, rewind, answer, extra) {
     if (!book || !playhead) return;
+    // The safety net's question is open: the book stays at its start.
+    if (net) return;
     const v = Number(bookMs);
     if (!isFinite(v)) return;
     // A move while paused, after RECHECK_AFTER_MS quiet, is saved at once:
@@ -1784,7 +1966,39 @@ export function createEngine(env) {
   // short of that wall (so it never ends the book or reaches a part that
   // can't play: the element's end of a part would go on into it).
   function previewFrom(ms) {
-    return { start: ms, end: Math.min(ms + PREVIEW_MS, previewWall(ms) - PREVIEW_END_GAP_MS), done: false, played: 0, lastWall: null };
+    return {
+      start: ms, end: Math.min(ms + PREVIEW_MS, previewWall(ms) - PREVIEW_END_GAP_MS), done: false, played: 0, lastWall: null,
+      // The ceiling's clock: wall ms spent wanted playing, stalls and
+      // buffering included (wallFrom: since when it is running, or null).
+      wallUsed: 0, wallFrom: wantPlay ? wallNow() : null
+    };
+  }
+
+  /* A preview never outlasts PREVIEW_CEILING_MS of wall clock spent playing,
+     whatever the element reports: a stream that stalls before every
+     timeupdate (each step counting 1 s at most above) can't stretch it. Asked
+     at every event that tells the time (a timeupdate, waiting, playing). */
+  function stopCeiling() {
+    if (ceilingTimer !== null) clearT(ceilingTimer);
+    ceilingTimer = null;
+  }
+
+  // The ceiling also has a timer of its own, so a stream that reports nothing
+  // at all can't outlast it either.
+  function armCeiling(p) {
+    stopCeiling();
+    ceilingTimer = setT(function () {
+      ceilingTimer = null;
+      if (preview === p) previewCeiling();
+    }, Math.max(0, PREVIEW_CEILING_MS - p.wallUsed));
+  }
+
+  function previewCeiling() {
+    if (!files || !preview || preview.done || !wantPlay || preview.wallFrom === null) return;
+    if (preview.wallUsed + (wallNow() - preview.wallFrom) >= PREVIEW_CEILING_MS) {
+      preview.done = true;
+      pause();
+    }
   }
 
   /* Starts a preview at a book time (see previewAt); false when it is in a
@@ -1800,6 +2014,8 @@ export function createEngine(env) {
     const wall = previewWall(start);
     if (start > wall - PREVIEW_END_GAP_MS) start = Math.max(book.starts[at.index], wall - PREVIEW_MS);
     preview = previewFrom(start);
+    stopCeiling();
+    if (wantPlay) armCeiling(preview);
     files.spot = start;
     seek(start, 'preview');
     if (!wantPlay) {
@@ -1880,6 +2096,65 @@ export function createEngine(env) {
     return true;
   }
 
+  /* The safety net (spec 2.6): the listener picked one of the places offered
+     (state().safetyNet.orphans) as the earlier copy of this book. It goes
+     through the "Find your place" helper exactly as an automatically linked
+     copy does: the book stays held (nothing saved, the saves already held),
+     state().filesChanged is that place, and the same 'files-changed' warning
+     follows; confirming it sends linked_from with link_manual. false when no
+     question is open or the key is not one of the places. */
+  function pickOrphan(orphanKey) {
+    if (!net || !book) return false;
+    const key = String(orphanKey);
+    const picked = net.orphans.find(function (o) { return o.key === key; });
+    if (!picked) return false;
+    net = null;
+    files = { old: oldPlaceOfOrphan(picked), spot: bookMsNow(), pending: null, reading: false, asked: false, timer: null, play: false };
+    changed('safety-net');
+    emit('warning', { kind: 'files-changed', book: book.key, old: Object.assign({}, files.old) });
+    return true;
+  }
+
+  /* "None of these": the server is told (per listener and book, so it holds
+     on every device), the hold ends and the book is a new book: nothing is
+     saved until it is played, and it plays now if the open was to play. The
+     server is told in the background; if that fails the question comes again
+     at the next open, and this open goes on. false when no question is open. */
+  function dismissOrphans() {
+    if (!net || !book) return false;
+    const mine = net;
+    const key = book.key;
+    net = null;
+    try {
+      Promise.resolve(fetchFn('/api/player/orphans/' + encodeURIComponent(key) + '/dismiss', {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      })).then(function (resp) {
+        if (!resp || !resp.ok) console.error('[player] "None of these" was not stored', resp && resp.status);
+      }, function (e) {
+        console.error('[player] "None of these" was not stored', e);
+      });
+    } catch (e) {
+      console.error('[player] "None of these" was not stored', e);
+    }
+    if (saver && typeof saver.releaseFiles === 'function') {
+      try {
+        saver.releaseFiles(key, null, { startOver: true });
+      } catch (e) {
+        console.error('[player] saving failed', e);
+      }
+    }
+    quietSince = wallNow();
+    changed('safety-net');
+    if (mine.autoplay) {
+      const p = play();
+      if (p && typeof p.catch === 'function') p.catch(function (e) { console.error('[player] playing failed', e); });
+    }
+    return true;
+  }
+
   // How far into the book a confirm may place it: PLACE_END_MS short of the
   // end (0 for a shorter book). A place at the very end would make the next
   // Play start the book again from 0:00.
@@ -1956,7 +2231,8 @@ export function createEngine(env) {
     files = null;
     if (saver && typeof saver.releaseFiles === 'function') {
       try {
-        saver.releaseFiles(book.key, p.link && old.linked_from ? old.linked_from : null, { startOver: !p.link });
+        saver.releaseFiles(book.key, p.link && old.linked_from ? old.linked_from : null,
+          { startOver: !p.link, manual: !!old.manual });
       } catch (e) {
         console.error('[player] saving failed', e);
       }
@@ -2095,6 +2371,7 @@ export function createEngine(env) {
 
   // Held for the book's changed files, Retry (as Play) only plays a preview.
   function retry() {
+    if (net && book) return Promise.resolve();
     if (files && book) return heldPlay(retryOn);
     return retryOn();
   }
@@ -2177,7 +2454,7 @@ export function createEngine(env) {
   function lateCheck(then, plays) {
     // Held for the book's changed files nothing is saved, so there is
     // nothing to re-check (a confirm re-reads for itself: confirmRead).
-    if (files) return false;
+    if (files || net) return false;
     if (checking) {
       checking.queue.push(then);
       if (plays) checking.plays = true;
@@ -2507,6 +2784,8 @@ export function createEngine(env) {
     // Smart rewind is a playback aid: a preview (the files changed) plays exactly.
     rewind: function (bookMs) { if (!files) seek(bookMs, 'seek', true); },
     previewAt: previewAt,
+    pickOrphan: pickOrphan,
+    dismissOrphans: dismissOrphans,
     confirmPlace: function (bookMs) { return place(bookMs, true); },
     startOver: function () { return place(0, false); },
     skip: skip,

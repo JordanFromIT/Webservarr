@@ -381,8 +381,22 @@ function response(status, body) {
 }
 
 function makeFetch(net, clock) {
-  return async function (url) {
+  return async function (url, init) {
     net.fetches.push(url);
+    // The safety net (spec 2.6): net.orphans, an array of places or a status
+    // number, answers GET /api/player/orphans/<key>; net.orphansDelay (ms)
+    // holds the answer back; a POST to .../dismiss is recorded in net.dismissals.
+    if (/^\/api\/player\/orphans\//.test(url)) {
+      if (init && init.method === 'POST') {
+        (net.dismissals = net.dismissals || []).push(url);
+        return response(net.dismissStatus || 200, { dismissed: true });
+      }
+      if (net.orphansDelay && clock) await new Promise((r) => clock.setTimeout(r, net.orphansDelay));
+      if (net.orphans === 'throw') throw new TypeError('Failed to fetch');
+      if (typeof net.orphans === 'number') return response(net.orphans, { detail: 'no' });
+      if (net.orphans === undefined) return response(404, { detail: 'Not Found' });
+      return response(200, { orphans: net.orphans, dismissed: false });
+    }
     // The saved places (net.positions { web, plex }), for engines given a saver.
     if (net.positions && /^\/api\/player\/position\//.test(url)) {
       return response(200, Object.assign({ now: '2026-09-30T12:00:00.000Z' }, net.positions));
@@ -1844,7 +1858,7 @@ current = 'probes never test the connection with an undecodable part';
 // what the engine hands it, orders the copies newest first, and holds.
 function heldSaver() {
   const s = {
-    starts: [], notes: [], released: [], stops: 0, lastSavedAt: null, warning: false,
+    starts: [], notes: [], released: [], releasedOpts: [], stops: 0, lastSavedAt: null, warning: false,
     note(c) { s.notes.push({ reason: c.reason, playing: c.state.playing, placeMs: c.placeMs, placeLabel: c.placeLabel, place: !!c.place, from: c.from, to: c.to, released: s.released.length }); },
     start(book, o) { s.starts.push({ book, o: JSON.parse(JSON.stringify(o || {})) }); },
     stop() { s.stops += 1; },
@@ -1855,7 +1869,7 @@ function heldSaver() {
       return ['web', 'plex'].filter((k) => p[k]).map((k) => Object.assign({ source: k }, p[k]))
         .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
     },
-    releaseFiles(book, link) { s.released.push({ book, link }); return true; },
+    releaseFiles(book, link, o) { s.released.push({ book, link }); s.releasedOpts.push(o || null); return true; },
     lastSeen() { return null; }
   };
   return s;
@@ -2550,6 +2564,298 @@ current = 'fix round 1 (T2S1): the player\'s code parses on Safari before 16.4 (
       /\(\?<[=!]|\(\?<[A-Za-z]|\.at\(|\.findLast|Object\.hasOwn|structuredClone|toWellFormed|\?\?=|\|\|=|&&=|static \{/.test(l));
     check(f + ': none', hits.length === 0, hits.map(([n]) => n));
   }
+}
+
+// ---- Spec 2.6: the preview ceiling ----
+// A preview stops after PREVIEW_CEILING_MS (60 s) of wall clock spent
+// playing, whatever the element reports. Every timeupdate here comes after a
+// stall: with a 'waiting' before it (the 15 s budget never counts a stall),
+// or with none reported (each step then counts 1 s at most).
+class StallEvery extends FakeAudio {
+  tick(g) {
+    this.env.clock.setTimeout(() => {
+      if (g !== this.gen || this.paused || !this.ticking) return;
+      if (this.env.waitingFirst) this.fire('waiting');
+      this._t = Math.min(this.duration, this._t + 0.25 * this.playbackRate);
+      this.fire('timeupdate');
+      this.tick(g);
+    }, this.env.stallEvery);
+  }
+}
+
+current = 'spec 2.6: a preview stops at 60 s of wall clock under a stall before every timeupdate';
+check('the ceiling is 60 s', E.PREVIEW_CEILING_MS === 60000);
+for (const [name, waiting, every] of [['a stall and a waiting before every timeupdate', true, 2500], ['a stall the element never reports', false, 5000]]) {
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true, Audio: StallEvery } });
+  t.env.stallEvery = every;
+  t.env.waitingFirst = waiting;
+  t.engine.previewAt(700000);
+  await t.clock.advance(55000);
+  check(name + ': still playing at 55 s', t.engine.state().playing && !t.main.paused, bookMsOf(t));
+  await t.clock.advance(5000);
+  const s = t.engine.state();
+  check(name + ': stopped at 60 s, still held, nothing saved', !s.playing && t.main.paused && s.filesChanged !== null && t.saver.released.length === 0 &&
+    t.saver.notes.every((n) => !n.place), [s.playing, t.main.paused]);
+  check(name + ': it heard well under the 15 s of the book', bookMsOf(t) - 700000 < 12000, bookMsOf(t));
+  await t.clock.advance(60000);
+  check(name + ': and stays stopped', !t.engine.state().playing && t.log.error.length === 0);
+  t.engine.close();
+}
+
+current = 'spec 2.6: a paused preview does not spend the ceiling, and a replaced one starts it again';
+{
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true, Audio: StallEvery } });
+  t.env.stallEvery = 2500;
+  t.env.waitingFirst = true;
+  t.engine.previewAt(700000);
+  await t.clock.advance(30000);
+  t.engine.pause();
+  await t.clock.advance(10 * 60000);
+  check('paused for ten minutes: not playing, the preview still waits', !t.engine.state().playing && t.engine.state().filesChanged !== null);
+  await t.engine.play();
+  await t.clock.advance(25000);
+  check('resumed: 55 s used, still playing', t.engine.state().playing, bookMsOf(t));
+  await t.clock.advance(6000);
+  check('61 s used: stopped', !t.engine.state().playing && t.main.paused, bookMsOf(t));
+  // A new preview (the listener presses Preview on another spot) is a fresh 60 s.
+  t.engine.previewAt(800000);
+  await t.clock.advance(55000);
+  check('a fresh preview: playing at 55 s', t.engine.state().playing);
+  t.engine.previewAt(900000);
+  await t.clock.advance(55000);
+  check('replaced while playing: its own 60 s, playing at 55 s of the second', t.engine.state().playing);
+  await t.clock.advance(6000);
+  check('and stopped after', !t.engine.state().playing);
+  t.engine.close();
+}
+
+// ---- Spec 2.6: the safety net ----
+const ORPHAN_A = { key: '400:1', book_title: 'Three Parts (First Edition)', narrator: 'N. Reader', book_ms: 720000, book_duration_ms: 3600000,
+  chapter_label: 'Chapter 4', updated_at: '2026-09-30T10:00:00.000Z', author_match: true };
+const ORPHAN_B = { key: '410:1', book_title: 'Another Old One', narrator: null, book_ms: 60000, book_duration_ms: null,
+  chapter_label: null, updated_at: '2026-09-20T10:00:00.000Z', author_match: false };
+const ORPHAN_URL = '/api/player/orphans/' + encodeURIComponent(MULTI.key);
+const asked = (t) => t.net.fetches.filter((u) => u.indexOf('/api/player/orphans/') === 0);
+async function openNet(o = {}) {
+  return openHeld(MULTI.key, { web: null, plex: null }, Object.assign({ net: { orphans: [ORPHAN_A, ORPHAN_B] } }, o));
+}
+
+current = 'spec 2.6: a book with no place of the listener\'s asks, and holds while the question is open';
+{
+  const t = await openNet();
+  const s = t.engine.state();
+  check('asked exactly once', asked(t).length === 1 && asked(t)[0] === ORPHAN_URL, asked(t));
+  check('state().safetyNet lists the places', s.safetyNet && s.safetyNet.orphans.length === 2 && s.safetyNet.orphans[0].key === '400:1' &&
+    s.safetyNet.orphans[0].book_title === 'Three Parts (First Edition)' && s.safetyNet.orphans[0].book_ms === 720000 &&
+    s.safetyNet.orphans[1].narrator === null && s.safetyNet.orphans[1].book_duration_ms === null, s.safetyNet);
+  check('it is not the files-changed hold', s.filesChanged === null);
+  const w = t.log.warning.filter((x) => x.kind === 'safety-net');
+  check('one safety-net warning, after the open, for this book', w.length === 1 && w[0].book === MULTI.key && w[0].orphans.length === 2 &&
+    t.log.raw.findIndex((x) => x[0] === 'warning') > t.log.raw.findIndex((x) => x[0] === 'change' && x[1].reason === 'open'), t.log.warning);
+  check('loaded at the start, paused, even though the open was to play', !s.playing && t.main.paused && s.position.track === '501' && s.position.offset_ms === 0 &&
+    partOf(t.main) === MULTI.tracks[0].part_path, [s.playing, s.position]);
+  check('the saves were started held, and the local copy kept', t.saver.starts.length === 1 && t.saver.starts[0].o.files === true &&
+    t.saver.starts[0].o.keepLocal === true && !t.saver.starts[0].o.push, t.saver.starts[0].o);
+  t.engine.close();
+  check('closed: no question, nothing released, no timer left', t.engine.state().safetyNet === null && t.saver.released.length === 0 && t.live.size === 0, t.live.size);
+}
+
+current = 'spec 2.6: it asks only for a book with no place at all, never for a read that failed or a given place';
+{
+  const mid = { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: '2026-09-30T11:00:00.000Z', device: 'Chrome on Windows' };
+  const cases = [
+    ['a WebServarr place in a part the book has', { web: mid, plex: null }, undefined],
+    ['a Plex place alone', { web: null, plex: Object.assign({}, mid, { device: 'Plex' }) }, undefined],
+    ['a place in a part the book no longer has (files changed)', { web: GONE, plex: null }, undefined],
+    ['a place from a linked earlier copy', { web: Object.assign({}, GONE, { linked_from: '400:1' }), plex: null }, undefined],
+    ['Plex could not be read', { web: null, plex: null, plex_error: true }, undefined],
+    ['the place is given (opts.at)', { web: null, plex: null }, { at: { track: '502', offset_ms: 1000 }, autoplay: false }],
+    ['resume turned off', { web: null, plex: null }, { resume: false }]
+  ];
+  for (const [name, positions, opts] of cases) {
+    const t = await openHeld(MULTI.key, positions, { net: { orphans: [ORPHAN_A] }, opts });
+    check(name + ': not asked, no question', asked(t).length === 0 && t.engine.state().safetyNet === null, asked(t));
+    t.engine.close();
+  }
+  const own = await openHeld(MULTI.key, { web: mid, plex: null }, { net: { orphans: [ORPHAN_A] } });
+  check('a place in the book is resumed as ever, not held', own.engine.state().filesChanged === null && own.engine.state().playing &&
+    own.engine.state().position.track === '502', own.engine.state().position);
+  own.engine.close();
+  // No saver (the engine's own test mode): there is nothing to ask for.
+  const bare = setup({ net: { orphans: [ORPHAN_A] } });
+  const p = bare.engine.open(MULTI.key);
+  await bare.clock.advance(1000);
+  await p;
+  check('no saver: not asked', asked(bare).length === 0 && bare.engine.state().safetyNet === null);
+  bare.engine.close();
+}
+
+current = 'spec 2.6: a lookup that fails, is empty, is malformed or is slow opens the book as it always did';
+{
+  const bad = [
+    ['a 503', 503], ['a 500', 500], ['a 404', undefined], ['a network error', 'throw'], ['no places', []],
+    ['only malformed places', [{ key: '../x', book_title: 'x' }, { key: 5 }, null, 'x', { book_title: 'no key' }]]
+  ];
+  for (const [name, orphans] of bad) {
+    const t = await openNet({ net: { orphans } });
+    const s = t.engine.state();
+    check(name + ': no question, playing from the start', s.safetyNet === null && s.filesChanged === null && s.playing && s.position.track === '501' &&
+      t.saver.starts[0].o.files !== true, [s.safetyNet, s.playing]);
+    check(name + ': the book played on without a warning', t.log.warning.every((x) => x.kind !== 'safety-net'));
+    t.engine.close();
+  }
+  // Slow: given up on after 5 s, and the book opens.
+  const saver = heldSaver();
+  const t = setup({ saver, net: { noLocal: true, positions: { web: null, plex: null }, orphans: [ORPHAN_A], orphansDelay: 9000 } });
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(4500);
+  check('waiting at 4.5 s: not open yet', t.engine.state().book === null && t.engine.state().loading === true, t.engine.state().loading);
+  await t.clock.advance(1500);
+  await p;
+  check('given up at 5 s: the book opens and plays, no question', t.engine.state().book === MULTI.key && t.engine.state().playing &&
+    t.engine.state().safetyNet === null, [t.engine.state().book, t.engine.state().playing]);
+  await t.clock.advance(10000);
+  check('and the late answer changes nothing', t.engine.state().safetyNet === null && t.engine.state().playing);
+  t.engine.close();
+  check('the wait leaves no timer', t.live.size === 0, t.live.size);
+  // Closed during the wait: nothing opens.
+  const u = setup({ saver: heldSaver(), net: { noLocal: true, positions: { web: null, plex: null }, orphans: [ORPHAN_A], orphansDelay: 3000 } });
+  const q = u.engine.open(MULTI.key);
+  await u.clock.advance(500);
+  u.engine.close();
+  await u.clock.advance(6000);
+  await q;
+  check('closed during the wait: no book, no question', u.engine.state().book === null && u.engine.state().safetyNet === null && u.main.paused);
+}
+
+current = 'spec 2.6: the open gate (the handoff question) is not asked while the safety net asks';
+{
+  const g = setup({ saver: heldSaver(), net: { noLocal: true, positions: { web: null, plex: null }, orphans: [ORPHAN_A] } });
+  let asks = 0;
+  g.engine.setOpenGate(() => { asks += 1; return null; });
+  const gp = g.engine.open(MULTI.key);
+  await g.clock.advance(1000);
+  await gp;
+  check('not asked, and the question is open', asks === 0 && g.engine.state().safetyNet !== null, asks);
+  g.engine.close();
+}
+
+current = 'spec 2.6: while the question is open nothing plays and nothing is saved, the lock screen included';
+{
+  const t = await openNet();
+  const reads = t.net.fetches.filter((x) => x.indexOf('/position/') !== -1).length;
+  await t.engine.play();
+  await t.engine.toggle();
+  await t.engine.retry();
+  const h = t.ms.handlers;
+  h.get('play')();
+  h.get('seekto')({ seekTime: 300 });
+  h.get('seekforward')({});
+  h.get('seekbackward')({});
+  t.engine.skip(30);
+  t.engine.seek(300000);
+  t.engine.rewind(300000);
+  t.engine.jumpToChapter(1);
+  await t.main.play();                                  // the element started from outside the engine
+  await t.clock.advance(6 * 60000);
+  await t.engine.play();                                // after a long quiet: no late read either
+  h.get('play')();
+  await t.clock.advance(10000);
+  const s = t.engine.state();
+  check('not playing, the element paused, at the start', !s.playing && t.main.paused && s.bookMs === 0 && s.safetyNet !== null, [s.playing, t.main.paused, s.bookMs]);
+  check('no place was ever offered to the saves as played or moved', t.saver.notes.every((n) => !n.playing && n.reason !== 'play' && n.reason !== 'seek' &&
+    n.reason !== 'skip' && n.reason !== 'jump' && n.reason !== 'preview'), t.saver.notes.map((n) => n.reason));
+  check('nothing released, nothing re-read', t.saver.released.length === 0 &&
+    t.net.fetches.filter((x) => x.indexOf('/position/') !== -1).length === reads, t.net.fetches);
+  check('a preview is refused too', t.engine.previewAt(0) === false && t.engine.confirmPlace(0) === false && t.engine.startOver() === false);
+  // Opening the same book again does not play it either.
+  await t.engine.open(MULTI.key);
+  check('the same book opened again: still held', !t.engine.state().playing && t.engine.state().safetyNet !== null);
+  t.engine.close();
+}
+
+current = 'spec 2.6: the error\'s Retry is held too while the question is open';
+{
+  // The question's book can't reach its media server: the open's error has a Retry.
+  const t = await openNet({ net: { orphans: [ORPHAN_A], down: new Set(['remote']) } });
+  const err = t.log.raw.filter((x) => x[0] === 'error').pop();
+  check('unreachable, with a retry, and the question open', err && typeof err[1].retry === 'function' && t.engine.state().safetyNet !== null, t.log.error);
+  t.net.down.clear();
+  await err[1].retry();
+  await t.engine.retry();
+  await t.clock.advance(5000);
+  check('Retry plays nothing and saves nothing', !t.engine.state().playing && t.main.paused && t.saver.released.length === 0 &&
+    t.saver.notes.every((n) => !n.playing), [t.engine.state().playing, t.saver.notes.map((n) => n.reason)]);
+  t.engine.close();
+}
+
+current = 'spec 2.6: a pick goes through the "files changed" helper as a manually linked earlier copy';
+{
+  const t = await openNet();
+  check('a key that was not offered is refused', t.engine.pickOrphan('999:9') === false && t.engine.state().safetyNet !== null);
+  check('so is a key that is not a key', t.engine.pickOrphan(undefined) === false && t.engine.pickOrphan('') === false);
+  check('the pick', t.engine.pickOrphan('400:1') === true);
+  const s = t.engine.state();
+  const old = s.filesChanged && s.filesChanged.old;
+  check('the question is over; filesChanged is the picked place', s.safetyNet === null && !!old, s);
+  check('it is an earlier copy, by hand, with its names and times', old.linked_from === '400:1' && old.manual === true && old.source === 'orphan' &&
+    old.book_ms === 720000 && old.book_duration_ms === 3600000 && old.chapter_label === 'Chapter 4' && old.book_title === 'Three Parts (First Edition)' &&
+    old.narrator === 'N. Reader' && old.updated_at === ORPHAN_A.updated_at, old);
+  const w = t.log.warning.filter((x) => x.kind === 'files-changed');
+  check('one files-changed warning with it, for the helper', w.length === 1 && w[0].book === MULTI.key && w[0].old.linked_from === '400:1' && w[0].old.manual === true, t.log.warning);
+  check('still held and unsaved', t.saver.released.length === 0 && !s.playing && s.bookMs === 0 && s.filesChanged.spot === 0);
+  check('a second pick has nothing to pick', t.engine.pickOrphan('410:1') === false);
+  // Play is now a bounded preview, as in the 2.5 hold.
+  await t.engine.play();
+  await t.clock.advance(20000);
+  check('a Play is only a preview now', !t.engine.state().playing && t.engine.state().filesChanged !== null && t.saver.released.length === 0 &&
+    bookMsOf(t) >= 14000 && bookMsOf(t) <= 16000, bookMsOf(t));
+  check('the confirm', t.engine.confirmPlace(650000) === true);
+  await t.clock.advance(6000);
+  check('released once with the link, by hand', t.saver.released.length === 1 && t.saver.released[0].link === '400:1' &&
+    t.saver.releasedOpts[0].manual === true && t.saver.releasedOpts[0].startOver === false && t.engine.state().filesChanged === null && bookMsOf(t) === 650000,
+    [t.saver.released, t.saver.releasedOpts, bookMsOf(t)]);
+  t.engine.close();
+  // Start from the beginning sends no link.
+  const u = await openNet();
+  u.engine.pickOrphan('410:1');
+  check('startOver', u.engine.startOver() === true);
+  await u.clock.advance(6000);
+  check('released with no link', u.saver.released.length === 1 && u.saver.released[0].link === null && u.saver.releasedOpts[0].startOver === true, u.saver.released);
+  u.engine.close();
+}
+
+current = 'spec 2.6: "None of these" is stored, ends the hold, and the book is a new book';
+{
+  const t = await openNet();
+  check('dismiss', t.engine.dismissOrphans() === true);
+  await t.clock.advance(1000);
+  const s = t.engine.state();
+  check('stored on the server, once, for this book', t.net.dismissals && t.net.dismissals.length === 1 && t.net.dismissals[0] === ORPHAN_URL + '/dismiss', t.net.dismissals);
+  check('the question is over, nothing else is held', s.safetyNet === null && s.filesChanged === null);
+  check('the saves were released as a new book: no link, nothing placed', t.saver.released.length === 1 && t.saver.released[0].link === null &&
+    t.saver.releasedOpts[0].startOver === true && t.saver.notes.every((n) => !n.place), [t.saver.released, t.saver.releasedOpts]);
+  check('the open was to play, so it plays from the start', s.playing && s.bookMs < 5000 && s.position.track === '501', [s.playing, s.bookMs]);
+  check('a second dismiss has nothing to do', t.engine.dismissOrphans() === false && t.net.dismissals.length === 1);
+  check('and a pick has nothing to pick', t.engine.pickOrphan('400:1') === false);
+  t.engine.close();
+  // An open that was only to load stays paused.
+  const u = await openNet({ opts: { autoplay: false } });
+  u.engine.dismissOrphans();
+  await u.clock.advance(2000);
+  check('autoplay off: released, not playing', u.engine.state().safetyNet === null && !u.engine.state().playing && u.saver.released.length === 1);
+  await u.engine.play();
+  await u.clock.advance(2000);
+  check('then Play plays', u.engine.state().playing);
+  u.engine.close();
+  // The server could not store it: the listener's answer still stands for this open.
+  const v = await openNet({ net: { orphans: [ORPHAN_A], dismissStatus: 503 } });
+  const before = consoleSeen.length;
+  v.engine.dismissOrphans();
+  await v.clock.advance(2000);
+  check('a failed store: still released, and logged', v.engine.state().safetyNet === null && v.saver.released.length === 1 &&
+    consoleSeen.slice(before).some((l) => l.indexOf('None of these') !== -1), consoleSeen.slice(before));
+  v.engine.close();
 }
 
 if (failed) {

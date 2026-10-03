@@ -61,16 +61,16 @@
 
 // Files are matched by name, wherever they are: 'ui.js' is both js/ui.js and
 // the player's view, js/player/ui.js. engine.js, saves.js, features.js and
-// findplace.js are the audiobook player's (js/player/), which lives as long as
-// the document.
+// findplace.js and safetynet.js are the audiobook player's (js/player/), which
+// lives as long as the document.
 export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js', 'auth.js', 'theme-loader.js',
-  'engine.js', 'saves.js', 'features.js', 'findplace.js'];
+  'engine.js', 'saves.js', 'features.js', 'findplace.js', 'safetynet.js'];
 // Shell code whose timers and listeners live as long as the shell's own UI,
 // not the page that called it: ui.js (a toast dismisses itself, a dialog stops
 // listening when it closes) and shell.js's serviceStatus (the one
 // service-status request, shared with the header's pill, that Home asks for
 // but never aborts), and the audiobook player (engine.js, saves.js, ui.js,
-// features.js, findplace.js), which owns and ends its own timers, listeners
+// features.js, findplace.js, safetynet.js), which owns and ends its own timers, listeners
 // and requests and keeps playing across pages: a book a page's Play button opened, its
 // saves and its sleep timer are the player's, not that page's. 'file' is any
 // of the file's functions, 'file#name' one function. When the call that
@@ -79,7 +79,7 @@ export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js'
 // (shell.js) and ctx.setTimeout (router.js) run a page's own work, so what
 // they create stays the page's.
 export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'engine.js', 'saves.js', 'features.js',
-  'findplace.js'];
+  'findplace.js', 'safetynet.js'];
 const SELF_FILE = 'debug-leaks.js';
 const PAGE_RE = /\/static\/js\/pages\/([^/]+)\.js$/;
 const FRAME_RE = /([a-z][\w+.-]*:\/\/[^\s()]+?):\d+(?::\d+)?/i;

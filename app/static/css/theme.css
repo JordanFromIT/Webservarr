@@ -1299,6 +1299,11 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-fp-none { margin: 0; }
 .wsp-fp-others { margin: 0; }
 .wsp-fp-row-icon { font-size: 22px; color: rgb(var(--color-text) / .7); }
+/* The safety net (js/player/safetynet.js) borrows the helper's cards and
+   buttons: a place per card, "This is the one" the primary fill, then
+   "None of these". */
+.wsp-sn-title { overflow-wrap: anywhere; }
+.wsp-sn-none { flex: 0 0 auto; }
 .wsp-action.is-on { color: rgb(var(--color-text)); background: rgb(var(--color-primary) / .2); }
 .wsp-slot-sleep .wsp-action-label { font-variant-numeric: tabular-nums; }
 /* The keyboard shortcuts: only where there is a keyboard and a mouse. */

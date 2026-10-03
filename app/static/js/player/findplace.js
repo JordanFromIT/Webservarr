@@ -555,8 +555,12 @@ export function createFindPlace(env) {
     follow(s);
     const isHeld = mode === 'held';
     const checking = !!s.checking;
+    // A place the listener picked from the safety net (old.manual) is not a
+    // change in this book's files: it is an earlier copy they named.
     setText(lede, isHeld
-      ? "This book's files have changed since you last listened. Pick where to carry on: nothing is saved until you do."
+      ? (old.manual
+        ? 'Pick the spot in this copy that matches where you were in your earlier copy. Nothing is saved until you do.'
+        : "This book's files have changed since you last listened. Pick where to carry on: nothing is saved until you do.")
       : 'That place is in files this book no longer has. Pick the same spot in this copy.');
     // Where they were.
     const copy = copyLine(old);
@@ -808,9 +812,10 @@ export function createFindPlace(env) {
   // Put off while held: a way back stays in view.
   function ensurePrompt() {
     if (promptEntry || isShown || !held()) return;
+    const manual = !!(player.state().filesChanged && player.state().filesChanged.old.manual);
     promptEntry = ui.prompt({
       id: 'findplace',
-      message: 'This book has changed since you last listened.',
+      message: manual ? 'You picked an earlier copy of this book.' : 'This book has changed since you last listened.',
       actions: [{ label: 'Find your place', primary: true, run: function () { promptEntry = null; open(null, null); } }]
     });
   }

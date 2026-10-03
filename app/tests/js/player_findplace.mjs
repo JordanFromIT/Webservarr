@@ -10,7 +10,9 @@
 //
 // Imports each module as it is, through a data: URL like player_engine.mjs
 // (which also proves none touches the DOM at import time).
-// FINDPLACE_JS, FEATURES_JS, UI_JS, ENGINE_JS and SAVES_JS (=<path>) run the
+// The safety net (spec 2.6, js/player/safetynet.js: "Were you listening to
+// one of these?") is run the same way, on the same page, further down.
+// FINDPLACE_JS, SAFETYNET_JS, FEATURES_JS, UI_JS, ENGINE_JS and SAVES_JS (=<path>) run the
 // same cases against other copies of those files.
 // Run: node app/tests/js/player_findplace.mjs (npm run test:js; CI js-checks).
 import { readFileSync } from 'node:fs';
@@ -22,6 +24,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const load = (p) => import('data:text/javascript;charset=utf-8,' + encodeURIComponent(readFileSync(p, 'utf8')));
 const FINDPLACE_PATH = process.env.FINDPLACE_JS || join(here, '../../static/js/player/findplace.js');
 const FP = await load(FINDPLACE_PATH);
+const SAFETYNET_PATH = process.env.SAFETYNET_JS || join(here, '../../static/js/player/safetynet.js');
+const SN = await load(SAFETYNET_PATH);
 const F = await load(process.env.FEATURES_JS || join(here, '../../static/js/player/features.js'));
 const E = await load(process.env.ENGINE_JS || join(here, '../../static/js/player/engine.js'));
 const S = await load(process.env.SAVES_JS || join(here, '../../static/js/player/saves.js'));
@@ -285,6 +289,9 @@ async function setup(o = {}) {
   const t = { win, doc, clock, posts: [], fetches: [] };
   t.now = () => NOW0 + clock.now;
   t.places = { web: o.web === undefined ? null : o.web, plex: null };
+  t.orphans = o.orphans;
+  t.dismissed = o.dismissed || new Set();     // the server's "None of these" (shared by a reload)
+  t.dismissals = [];
   t.history = {};
   t.positionDelay = 0;
   async function fetchFn(url, init) {
@@ -302,6 +309,23 @@ async function setup(o = {}) {
     }
     m = /^\/api\/player\/history\/([^?]+)(?:\?before=(.+))?$/.exec(url);
     if (m) return response(200, t.history[m[2] ? decodeURIComponent(m[2]) : ''] || { entries: [], next_before: null });
+    // The safety net: t.orphans (an array of places, a status number, or
+    // undefined: a 404) answers GET /api/player/orphans/<key>; once the
+    // listener has said "None of these" for a book, the server answers with
+    // none and says it was dismissed.
+    m = /^\/api\/player\/orphans\/([^/]+?)(\/dismiss)?$/.exec(url);
+    if (m) {
+      const key = decodeURIComponent(m[1]);
+      if (m[2]) {
+        t.dismissed.add(key);
+        t.dismissals.push(key);
+        return response(200, { dismissed: true });
+      }
+      if (t.orphansDelay) await new Promise((r) => clock.setTimeout(r, t.orphansDelay));
+      if (typeof t.orphans === 'number') return response(t.orphans, { detail: 'no' });
+      if (t.orphans === undefined) return response(404, { detail: 'Not Found' });
+      return response(200, { orphans: t.dismissed.has(key) ? [] : t.orphans, dismissed: t.dismissed.has(key) });
+    }
     m = /^\/api\/player\/position\/(.+)$/.exec(url);
     if (m) {
       if (t.positionDelay) await new Promise((r) => clock.setTimeout(r, t.positionDelay));
@@ -318,7 +342,7 @@ async function setup(o = {}) {
     },
     now: t.now,
     mono: () => clock.now,
-    storage: memoryStorage(),
+    storage: (t.storage = o.storage || memoryStorage()),
     identity: ID,
     device: 'Test on Linux',
     deviceId: ME,
@@ -373,6 +397,7 @@ async function setup(o = {}) {
   if (!o.noHelper) {
     t.helper = FP.createFindPlace({ player: t.engine, ui: t.ui, doc, now: t.now, features: () => t.features });
   }
+  if (!o.noSafetyNet) t.safety = SN.createSafetyNet({ player: t.engine, ui: t.ui, doc, now: t.now });
   await clock.advance(10);
   t.q = (sel) => doc.querySelector(sel);
   t.qa = (sel) => Array.from(doc.querySelectorAll(sel));
@@ -380,7 +405,10 @@ async function setup(o = {}) {
   t.view = () => t.q('.wsp-full').getAttribute('data-view');
   t.panel = () => t.q('.wsp-panel[data-panel="findplace"]');
   t.shown = () => !!t.panel() && !t.panel().hidden && t.view() === 'findplace';
-  t.cards = () => t.qa('.wsp-fp-cand').filter((c) => !c.hidden);
+  t.cards = () => t.qa('.wsp-fp-cand').filter((c) => !c.hidden && !c.classList.contains('wsp-sn-item'));
+  t.snPanel = () => t.q('.wsp-panel[data-panel="safetynet"]');
+  t.snShown = () => !!t.snPanel() && !t.snPanel().hidden && t.view() === 'safetynet';
+  t.snRows = () => t.qa('.wsp-sn-item');
   t.card = (kind) => t.q(`.wsp-fp-cand[data-kind="${kind}"]`);
   t.txt = (sel) => { const n = t.q(sel); return n && !n.hidden ? n.textContent : null; };
   t.key = (target, k, extra = {}) => {
@@ -392,7 +420,7 @@ async function setup(o = {}) {
   t.promptBtn = (label) => t.qa('.wsp-prompt .wsp-notice-btn').find((b) => b.textContent === label) || null;
   // Spies on the engine's helper calls (the helper reads them at each call).
   t.calls = [];
-  for (const name of ['previewAt', 'confirmPlace', 'startOver', 'seek']) {
+  for (const name of ['previewAt', 'confirmPlace', 'startOver', 'seek', 'pickOrphan', 'dismissOrphans']) {
     const real = t.engine[name];
     t.engine[name] = function () {
       t.calls.push([name].concat(Array.from(arguments)));
@@ -1566,6 +1594,305 @@ await run('T3R6: "Pick another" goes once the spot moves, a Play, or the helper 
   await t.clock.advance(20);
   check('refused elsewhere too: kept', t.txt('.wsp-fp-status') === REFUSED_STATUS && t.st().filesChanged.spot === 595000, t.txt('.wsp-fp-status'));
   t.engine.close();
+});
+
+// ---------------------------------------------------------------------------
+// The safety net: "Were you listening to one of these?" (spec 2.6)
+// ---------------------------------------------------------------------------
+
+const SN_TITLE = 'Were you listening to one of these?';
+function orphansFor(t) {
+  return [
+    { key: '400:1', book_title: 'Three Parts (First Edition)', narrator: 'A. Reader', book_ms: 720000, book_duration_ms: 1800000,
+      chapter_label: 'Chapter 4', updated_at: new Date(t.now() - 3 * 86400000).toISOString(), author_match: true },
+    { key: '410:1', book_title: 'Two Old Parts <img src=x onerror=alert(1)>', narrator: null, book_ms: 60000, book_duration_ms: null,
+      chapter_label: null, updated_at: new Date(t.now() - 3600000).toISOString(), author_match: false }
+  ];
+}
+
+// A book opened with no place of the listener's, and places left on books that are gone.
+async function asking(o = {}) {
+  const t = await setup(o);
+  t.orphans = o.orphans === undefined ? orphansFor(t) : o.orphans;
+  const p = t.engine.open(o.book || MULTI.key);
+  await t.clock.advance(300);
+  await p;
+  return t;
+}
+const asked = (t) => t.fetches.filter((f) => f.url.indexOf('/api/player/orphans/') === 0 && f.method === 'GET');
+
+await run('spec 2.6: the panel opens with the book, in the full player, listing each place', async () => {
+  const t = await asking();
+  check('asked once', asked(t).length === 1, asked(t));
+  check('the engine holds the question', t.st().safetyNet !== null && t.st().safetyNet.orphans.length === 2 && t.st().filesChanged === null);
+  check('the full player is open on it', t.ui.isOpen() && t.snShown() && !t.shown());
+  check('titled with the question', t.q('#wspPanel-safetynet') && t.snPanel().textContent.indexOf(SN_TITLE) !== -1, t.snPanel().textContent.slice(0, 120));
+  const rows = t.snRows();
+  check('a row for each place', rows.length === 2, rows.length);
+  const first = rows[0].textContent;
+  check('the first: title, narrator, book time with percent, chapter, when', first.indexOf('Three Parts (First Edition)') !== -1 &&
+    first.indexOf('Read by A. Reader') !== -1 && first.indexOf('0:12:00 into the book · 40%') !== -1 && first.indexOf('Chapter 4') !== -1 &&
+    first.indexOf('Last listened 3 days ago') !== -1, first);
+  const second = rows[1].textContent;
+  check('the second: no narrator, no percent, no chapter', second.indexOf('Read by') === -1 && second.indexOf('0:01:00 into the book') !== -1 &&
+    second.indexOf('%') === -1 && second.indexOf('Last listened 1 h ago') !== -1, second);
+  check('a title is text, never markup', rows[1].querySelector('img') === null && second.indexOf('<img src=x onerror=alert(1)>') !== -1);
+  check('each row has its own button, named for the book', rows.every((r) => r.querySelector('.wsp-sn-pick')) &&
+    rows[0].querySelector('.wsp-sn-pick').getAttribute('aria-label') === 'This is the one: Three Parts (First Edition)');
+  check('and "None of these"', t.q('.wsp-sn-none') && t.q('.wsp-sn-none').textContent === 'None of these');
+  check('the book is loaded and waiting: not playing, nothing saved', !t.st().playing && t.posts.length === 0 && t.audioEl.paused);
+  t.engine.close();
+  await t.clock.advance(10);
+  check('closing the book takes the panel and the prompt with it', !t.snShown() && t.prompts().length === 0);
+});
+
+await run('spec 2.6: it shows only when ruled', async () => {
+  const mid = { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(NOW0 - 3600000).toISOString(), device: 'Chrome', device_id: OTHER, psid: 'o' };
+  const cases = [
+    ['a place of the listener\'s in the book', { web: mid }],
+    ['files changed (a place in a part the book lacks)', null],
+    ['a linked earlier copy', null],
+    ['no places left on gone books', { orphans: [] }],
+    ['the server says dismissed', { dismissed: new Set([MULTI.key]) }],
+    ['the lookup answering 503', { orphans: 503 }],
+    ['the lookup answering 404', { orphans: undefined, force404: true }]
+  ];
+  for (const [name, o] of cases) {
+    let t;
+    if (name.startsWith('files changed')) { t = await held({}); t.orphans = orphansFor(t); }
+    else if (name === 'a linked earlier copy') { t = await held({}); }
+    else if (o.force404) { t = await setup(); t.orphans = undefined; const p = t.engine.open(MULTI.key); await t.clock.advance(300); await p; }
+    else { t = await asking(o); }
+    check(name + ': no question, no panel', t.st().safetyNet === null && !t.snShown() && t.snRows().length === 0, t.st().safetyNet);
+    if (name.startsWith('files changed') || name === 'a linked earlier copy') check(name + ': the "Find your place" helper has it', t.st().filesChanged !== null && t.shown());
+    else check(name + ': the book opened as it always did', t.st().playing || t.st().position !== null, t.st().playing);
+    check(name + ': nothing offered to save either', t.prompts().length === 0 || t.st().filesChanged !== null);
+    t.engine.close();
+  }
+  // Ruled in: nothing else has the book, so only the safety net asks.
+  const ok = await asking();
+  check('and when ruled in the helper is not open', ok.snShown() && !ok.shown() && ok.st().filesChanged === null);
+  ok.engine.close();
+});
+
+await run('spec 2.6: while the question is open 0 saves and 0 plays, a lock-screen Play included', async () => {
+  const t = await asking();
+  await t.engine.play();
+  t.ms.handlers.get('play')();
+  await t.engine.toggle();
+  await t.engine.retry();
+  t.q('.wsp-play-lg').click();
+  t.key(t.q('.wsp-full'), ' ');
+  t.key(t.q('.wsp-full'), 'ArrowRight');
+  await t.audioEl.play();                               // an element started from outside
+  await t.clock.advance(6 * 60000);
+  t.ms.handlers.get('play')();
+  await t.clock.advance(20000);
+  check('nothing plays: the element, the engine and the lock screen agree', !t.st().playing && t.audioEl.paused && t.ms.playbackState !== 'playing', t.ms.playbackState);
+  check('0 saves', t.posts.length === 0, t.posts);
+  check('0 beacons and no local copy', Array.from(t.storage.map.keys()).every((k) => k.indexOf(':500:1') === -1), Array.from(t.storage.map.keys()));
+  check('still at the start and still asking', t.st().bookMs === 0 && t.st().safetyNet !== null && t.snShown());
+  check('no preview was started', t.calls.every((c) => c[0] !== 'previewAt'));
+  t.engine.close();
+});
+
+await run('spec 2.6: Escape puts it off with a way back; the bar\'s Play brings it back; the lock screen stays held', async () => {
+  const t = await asking();
+  t.key(t.q('#wspPanel-safetynet'), 'Escape');
+  await t.clock.advance(50);
+  check('put off: the player stays, the prompt names the question', !t.snShown() && t.ui.isOpen() && t.prompts().length === 1 && t.prompts()[0] === SN_TITLE, t.prompts());
+  check('still held, nothing saved', t.st().safetyNet !== null && t.posts.length === 0);
+  t.ms.handlers.get('play')();
+  await t.clock.advance(3000);
+  check('the lock screen\'s Play is held', !t.st().playing && t.audioEl.paused);
+  t.promptBtn('Take a look').click();
+  await t.clock.advance(50);
+  check('the prompt brings it back, and goes', t.snShown() && t.prompts().length === 0);
+  // Closed with the full player; the bar's Play asks the question and plays nothing.
+  t.ui.close();
+  await t.clock.advance(500);
+  check('the full player closed, the way back stays above the bar', t.prompts().length === 1 && !t.snShown());
+  t.q('.wsp-bar .wsp-play').click();
+  await t.clock.advance(1000);
+  check('the bar\'s Play opens the full player on the question', t.ui.isOpen() && t.snShown() && !t.st().playing && t.posts.length === 0);
+  check('and the prompt is gone', t.prompts().length === 0);
+  t.engine.close();
+});
+
+await run('spec 2.6: on a wide screen it sits beside the player; Escape closes the player and keeps the question', async () => {
+  const t = await asking({ wide: true });
+  check('beside the player', t.snShown() && t.q('.wsp-full').hasAttribute('data-side'));
+  t.key(t.q('#wspPanel-safetynet'), 'Escape');
+  await t.clock.advance(1000);
+  check('closed, still held, nothing saved, the way back above the bar', !t.ui.isOpen() && t.st().safetyNet !== null && t.posts.length === 0 && t.prompts().length === 1);
+  t.engine.close();
+});
+
+await run('spec 2.6: a reload reopens the question, since nothing was saved', async () => {
+  const t = await asking();
+  await t.engine.play();
+  t.key(t.q('#wspPanel-safetynet'), 'Escape');
+  await t.clock.advance(60000);
+  const storage = t.storage;
+  const orphans = t.orphans;
+  t.engine.close();
+  const u = await setup({ storage });
+  u.orphans = orphans;
+  const p = u.engine.open(MULTI.key);
+  await u.clock.advance(300);
+  await p;
+  check('asked again, the panel is open again', u.st().safetyNet !== null && u.snShown() && u.snRows().length === 2);
+  check('still nothing saved', u.posts.length === 0 && t.posts.length === 0);
+  u.engine.close();
+});
+
+await run('spec 2.6: a pick enters the helper as the old place, and confirming sends linked_from with link_manual', async () => {
+  const t = await asking();
+  t.snRows()[0].querySelector('.wsp-sn-pick').click();
+  await t.clock.advance(100);
+  check('the engine was asked to pick that place', t.calls.some((c) => c[0] === 'pickOrphan' && c[1] === '400:1'), t.calls);
+  check('the question is over, the helper is open', t.st().safetyNet === null && t.st().filesChanged !== null && t.shown() && !t.snShown());
+  check('the old place is the one picked', t.st().filesChanged.old.linked_from === '400:1' && t.st().filesChanged.old.manual === true, t.st().filesChanged.old);
+  const text = t.panel().textContent;
+  check('the helper names the earlier copy and says what to do', text.indexOf('From an earlier copy: Three Parts (First Edition), read by A. Reader') !== -1 &&
+    text.indexOf('earlier copy') !== -1 && text.indexOf('files have changed') === -1 && text.indexOf('0:12:00 into the book') !== -1, text.slice(0, 300));
+  check('candidates: the same time and the same point in this book', t.cards().length === 1 || t.cards().length === 2, t.cards().length);
+  check('still nothing saved or playing', t.posts.length === 0 && !t.st().playing);
+  t.card('time').querySelector('.wsp-fp-use').click();
+  await t.clock.advance(5000);
+  check('confirmed: one save at the spot, carrying the link by hand', t.posts.length === 1 && t.posts[0].linked_from === '400:1' && t.posts[0].link_manual === true &&
+    t.posts[0].book_ms === 720000, t.posts);
+  check('the hold is over', t.st().filesChanged === null && t.st().safetyNet === null && !t.shown() && !t.snShown());
+  t.engine.close();
+  // A pick put off with Escape and shown again is still the helper's.
+  const u = await asking();
+  u.snRows()[1].querySelector('.wsp-sn-pick').click();
+  await u.clock.advance(100);
+  u.key(u.q('#wspPanel-findplace'), 'Escape');
+  await u.clock.advance(50);
+  check('put off: the helper\'s prompt, not the question\'s, and for an earlier copy', u.prompts().length === 1 && u.prompts()[0] === 'You picked an earlier copy of this book.', u.prompts());
+  u.promptBtn('Find your place').click();
+  await u.clock.advance(50);
+  check('and back', u.shown() && u.st().filesChanged.old.linked_from === '410:1');
+  u.engine.close();
+});
+
+await run('spec 2.6: "Start from the beginning" after a pick links nothing', async () => {
+  const t = await asking();
+  t.snRows()[0].querySelector('.wsp-sn-pick').click();
+  await t.clock.advance(100);
+  const start = t.qa('.wsp-fp-row').find((b) => b.textContent.indexOf('Start from the beginning') !== -1);
+  start.click();
+  await t.clock.advance(5000);
+  check('saved at 0 with no link', t.posts.length === 1 && t.posts[0].book_ms === 0 && !('linked_from' in t.posts[0]) && !('link_manual' in t.posts[0]), t.posts);
+  t.engine.close();
+});
+
+await run('spec 2.6: "None of these" sticks: stored, the book opens as new, and the question never returns', async () => {
+  const t = await asking();
+  t.q('.wsp-sn-none').click();
+  await t.clock.advance(3000);
+  check('the engine was asked to dismiss', t.calls.some((c) => c[0] === 'dismissOrphans'));
+  check('stored on the server for this book, once', t.dismissals.length === 1 && t.dismissals[0] === MULTI.key, t.dismissals);
+  check('the panel is gone, no prompt, the open was to play so it plays', !t.snShown() && t.prompts().length === 0 && t.st().safetyNet === null && t.st().playing);
+  check('the first save is the new book at its start, no link', t.posts.length >= 1 && t.posts[0].offset_ms < 5000 && t.posts.every((b) => !('linked_from' in b) && !('link_manual' in b)),
+    t.posts.map((b) => [b.event, b.offset_ms]));
+  const orphans = t.orphans;
+  const dismissed = t.dismissed;
+  t.engine.close();
+  await t.clock.advance(100);
+  // Another page session, another device: the server remembers.
+  const u = await setup({ dismissed });
+  u.orphans = orphans;
+  const p = u.engine.open(MULTI.key);
+  await u.clock.advance(300);
+  await p;
+  check('reopened: asked, answered "dismissed", no question', asked(u).length === 1 && u.st().safetyNet === null && !u.snShown() && u.st().playing, u.st().safetyNet);
+  u.engine.close();
+  // Said of another book, not this one: this one still asks.
+  const v = await setup({ dismissed: new Set(['999:9']) });
+  v.orphans = orphans;
+  const q = v.engine.open(MULTI.key);
+  await v.clock.advance(300);
+  await q;
+  check('a book it was not said of asks as ever', v.st().safetyNet !== null);
+  v.engine.close();
+});
+
+await run('spec 2.6: "None of these" with the open not to play leaves it ready; Play then plays', async () => {
+  const t = await setup();
+  t.orphans = orphansFor(t);
+  const p = t.engine.open(MULTI.key, { autoplay: false });
+  await t.clock.advance(300);
+  await p;
+  check('asks even when the open only loads', t.st().safetyNet !== null && t.snShown());
+  t.q('.wsp-sn-none').click();
+  await t.clock.advance(1000);
+  check('released, ready, not playing', t.st().safetyNet === null && !t.st().playing && t.posts.length === 0);
+  await t.engine.play();
+  await t.clock.advance(2000);
+  check('Play plays', t.st().playing);
+  t.engine.close();
+});
+
+await run('spec 2.6: a lookup that is slow or fails opens the book as it always did', async () => {
+  const t = await setup();
+  t.orphans = orphansFor(t);
+  t.orphansDelay = 9000;
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(4000);
+  check('waiting at 4 s: no panel yet', !t.snShown() && t.st().safetyNet === null);
+  await t.clock.advance(2000);
+  await p;
+  check('at 5 s it opened and plays, no panel', t.st().playing && !t.snShown() && t.st().safetyNet === null && t.prompts().length === 0);
+  await t.clock.advance(10000);
+  check('the late answer changes nothing', t.st().safetyNet === null && !t.snShown() && t.st().playing);
+  t.engine.close();
+});
+
+await run('spec 2.6: a page without the safety net module still works (the engine holds, nothing plays)', async () => {
+  const t = await asking({ noSafetyNet: true });
+  await t.engine.play();
+  t.ms.handlers.get('play')();
+  await t.clock.advance(5000);
+  check('held with no panel: still nothing plays or saves', t.st().safetyNet !== null && !t.st().playing && t.posts.length === 0);
+  t.engine.close();
+});
+
+await run('spec 2.6: boot sets WS.playerSafetyNet once, and only with the player', async () => {
+  const t = await setup({ noSafetyNet: true });
+  t.win.WS = { player: t.engine, playerUI: t.ui };
+  const n = SN.boot(t.win, { now: t.now });
+  check('booted', n && t.win.WS.playerSafetyNet === n && typeof n.open === 'function' && n.shown === false);
+  check('once', SN.boot(t.win, { now: t.now }) === n);
+  check('one panel', t.qa('.wsp-panel[data-panel="safetynet"]').length === 1);
+  check('nothing to open without a question', n.open(null) === false);
+  const bare = new Window({ url: 'https://ws.test/' });
+  bare.WS = {};
+  check('no player, nothing', SN.boot(bare, {}) === null);
+  await bare.happyDOM.close();
+});
+
+await run('spec 2.6: the pure text is the helper\'s', () => {
+  check('always hours', SN.bookClock(725000) === '0:12:05' && SN.bookClock(11560000) === '3:12:40');
+  check('percent', SN.percentOf(720000, 1800000) === 40 && SN.percentOf(999, 1000) === 99 && SN.percentOf(5, 0) === null && SN.percentOf(null, 10) === null);
+  check('ago', SN.formatAgo(30000) === 'just now' && SN.formatAgo(3 * MIN) === '3 min ago' && SN.formatAgo(2 * 3600000) === '2 h ago' && SN.formatAgo(86400000) === '1 day ago' &&
+    SN.formatAgo(3 * 86400000) === '3 days ago');
+  for (const f of ['bookClock', 'percentOf', 'formatAgo']) {
+    const a = FP[f]; const b = SN[f];
+    const same = [0, 1, 999, 59999, 60000, 3599999, 86400000, 5e9, -5, NaN, null, undefined].every((v) => a(v, 1000) === b(v, 1000));
+    check(f + ' agrees with findplace.js', same);
+  }
+});
+
+await run('spec 2.6: no markup from strings, no timers, no inline handlers, no requests of its own', () => {
+  const src = readFileSync(SAFETYNET_PATH, 'utf8');
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  check('no innerHTML', !/innerHTML|insertAdjacentHTML|outerHTML/.test(src));
+  check('no timers', !/setTimeout|setInterval/.test(code));
+  check('no handler properties', !/\.on[a-z]+\s*=(?!=)/.test(src));
+  check('no lookbehind', !/\(\?<[=!]/.test(src));
+  check('no requests, no storage: it only calls the engine', !/\bfetch\(|sendBeacon|localStorage|playerSaves/.test(code));
 });
 
 await run('boot sets WS.playerFindPlace once, and only with the player', async () => {

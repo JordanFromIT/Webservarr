@@ -18,7 +18,9 @@
  * opens the full player. While the book is held because its files changed
  * (state().filesChanged), its Play opens the full player too, where the
  * "Find your place" helper (findplace.js) is: playing there is only ever a
- * preview, and the place is the listener's to choose.
+ * preview, and the place is the listener's to choose. The same while the
+ * safety net's question is open (state().safetyNet, safetynet.js), though
+ * nothing plays at all then.
  *
  * Full player: an overlay above the page and the top bar (a modal dialog:
  * focus stays inside while it is open and goes back where it was on close).
@@ -995,12 +997,13 @@ export function createUI(env) {
   }
 
   // Held for the book's changed files, the bar's Play opens the full player,
-  // where the listener finds their place (a Play there previews it).
+  // where the listener finds their place (a Play there previews it); held
+  // for the safety net's question, where it is asked.
   // Playing a preview (it reads Pause) or reading the saved places, it is
   // the toggle as ever.
   barPlay.addEventListener('click', guarded(function () {
     const s = player.state();
-    if (s && s.book && s.filesChanged && !s.playing && !s.checking) {
+    if (s && s.book && (s.safetyNet || (s.filesChanged && !s.playing && !s.checking))) {
       open();
       return null;
     }

@@ -68,7 +68,9 @@
  * beacon, no last save) and the local copy is not written, until the
  * listener places the book (releaseFiles). A place from an earlier copy
  * then sends linked_from with its saves until the server answers "linked"
- * true or false.
+ * true or false. A place the listener picked by hand from the safety net
+ * (spec 2.6, releaseFiles' manual) also sends link_manual: true with it, kept
+ * in the local copy the same way.
  *
  * Device: every save carries the device label ("Chrome on Android") and this
  * browser's own random id (device_id), made once and kept in localStorage
@@ -129,12 +131,15 @@
  *                                   (the open's handoff question is showing).
  *                                   files: the book's files changed: held (see
  *                                   above) until releaseFiles.
- *   releaseFiles(book, link, { startOver }) -> bool  the listener placed it: the hold ends and
+ *   releaseFiles(book, link, { startOver, manual }) -> bool  the listener placed it: the hold ends and
  *                                   the move reported next is the one save
  *                                   (nothing a preview left pending is sent,
  *                                   no smart rewind's floor survives); link:
  *                                   the earlier copy's key, or null (a link
- *                                   still unsettled is kept, unless startOver)
+ *                                   still unsettled is kept, unless startOver);
+ *                                   manual: the listener picked that copy by hand
+ *                                   from the safety net (spec 2.6), so it rides
+ *                                   with link_manual: true until it settles
  *   stop()                          saves the last place once (if it needs it; its
  *                                   seq is taken at once, so whatever opens next
  *                                   outranks it), ends an active warning with
@@ -492,7 +497,11 @@ export function createSaver(o) {
     if (labelOf(v.chapter_label)) out.chapter_label = labelOf(v.chapter_label);
     // A link to an earlier copy the listener confirmed, not yet settled by
     // the server (see releaseFiles).
-    if (typeof v.linked_from === 'string' && BOOK_KEY.test(v.linked_from)) out.linked_from = v.linked_from;
+    if (typeof v.linked_from === 'string' && BOOK_KEY.test(v.linked_from)) {
+      out.linked_from = v.linked_from;
+      // ... picked by the listener from the safety net (spec 2.6), not matched.
+      if (v.link_manual === true) out.link_manual = true;
+    }
     return out;
   }
 
@@ -558,7 +567,10 @@ export function createSaver(o) {
     if (isFinite(place.bookDurationMs)) v.book_duration_ms = place.bookDurationMs;
     if (place.label) v.chapter_label = place.label;
     // A link still unsettled goes with the copy, so a later open sends it.
-    if (r && r.book === book && r.linkedFrom) v.linked_from = r.linkedFrom;
+    if (r && r.book === book && r.linkedFrom) {
+      v.linked_from = r.linkedFrom;
+      if (r.linkManual) v.link_manual = true;
+    }
     const value = JSON.stringify(v);
     stored(function (s) { s.setItem(localKey(id, book), value); });
   }
@@ -627,7 +639,8 @@ export function createSaver(o) {
       conflict: null,         // a 409 not yet answered: nothing is sent meanwhile
       keepLocal: false,       // leave the local copy alone until the listener acts
       openedAt: NaN,          // the stamp (ms) of the copy the book opened at
-      linkedFrom: null        // an earlier copy's key, sent until the server says whether it linked it
+      linkedFrom: null,       // an earlier copy's key, sent until the server says whether it linked it
+      linkManual: false       // ... the listener picked it by hand (the safety net): sent with link_manual
     };
   }
 
@@ -670,8 +683,9 @@ export function createSaver(o) {
     return mono() - r.reachedMono <= FRESH_MS && now() - r.reachedWall <= FRESH_MS;
   }
 
-  // link: an earlier copy's key (linkedFrom), or null.
-  function body(book, place, event, base, link) {
+  // link: an earlier copy's key (linkedFrom), or null; manual: the listener
+  // picked it from the safety net (linkManual).
+  function body(book, place, event, base, link, manual) {
     seq += 1;
     const b = {
       book: book,
@@ -688,7 +702,10 @@ export function createSaver(o) {
     // The place's book time and chapter (spec 2.5), where the engine gave them.
     if (isFinite(place.bookMs)) b.book_ms = place.bookMs;
     if (place.label) b.chapter_label = place.label;
-    if (link) b.linked_from = link;
+    if (link) {
+      b.linked_from = link;
+      if (manual) b.link_manual = true;
+    }
     return b;
   }
 
@@ -715,7 +732,7 @@ export function createSaver(o) {
     r.lastSendAt = at;
     let p;
     try {
-      p = Promise.resolve(post(body(r.book, place, event, r.base, r.linkedFrom), 'fetch'));
+      p = Promise.resolve(post(body(r.book, place, event, r.base, r.linkedFrom, r.linkManual), 'fetch'));
     } catch (e) {
       p = Promise.reject(e);
     }
@@ -736,9 +753,11 @@ export function createSaver(o) {
     if (r.linkedFrom && (linked === true || linked === false)) {
       const link = r.linkedFrom;
       r.linkedFrom = null;
+      r.linkManual = false;
       editLocal(r.book, function (v) {
         if (v.linked_from !== link) return false;
         delete v.linked_from;
+        delete v.link_manual;
         return true;
       });
     }
@@ -988,7 +1007,10 @@ export function createSaver(o) {
     // yet settled by the server: sent again with the saves until it is (a
     // startOver while held drops it).
     const kept = readLocal(run.book);
-    if (kept && kept.linked_from) run.linkedFrom = kept.linked_from;
+    if (kept && kept.linked_from) {
+      run.linkedFrom = kept.linked_from;
+      run.linkManual = kept.link_manual === true;
+    }
     // A newer local copy the book opens at is sent at once: opening from it
     // counts as reaching it, so it obeys the same 2 minutes as any place.
     if (opts.push) {
@@ -1016,11 +1038,11 @@ export function createSaver(o) {
     // so the server never takes this place over a later one (a late final
     // from the same psid is refused).
     if (r.latest && sendable(r) && (r.playing || dirty(r))) {
-      r.final = body(r.book, r.latest, r.event === 'end' ? 'end' : 'leave', r.base, r.linkedFrom);
+      r.final = body(r.book, r.latest, r.event === 'end' ? 'end' : 'leave', r.base, r.linkedFrom, r.linkManual);
     } else if (r.inFlight && r.inFlight.event !== 'checkin' && sendable(r)) {
       // A pause or a move still in flight is the last word, unless it fails:
       // then this 'leave' of its place goes instead (Plex is told it stopped).
-      r.fallback = body(r.book, r.inFlight.place, r.inFlight.event === 'end' ? 'end' : 'leave', r.base, r.linkedFrom);
+      r.fallback = body(r.book, r.inFlight.place, r.inFlight.event === 'end' ? 'end' : 'leave', r.base, r.linkedFrom, r.linkManual);
     }
     if (!r.final && !r.fallback) return;
     if (!r.inFlight) {
@@ -1082,7 +1104,7 @@ export function createSaver(o) {
       lastBeacon = key;
       if (ev === 'leave') leftAt = at;
       try {
-        post(body(r.book, place, ev, r.base, r.linkedFrom), 'beacon');
+        post(body(r.book, place, ev, r.base, r.linkedFrom, r.linkManual), 'beacon');
       } catch (e) {
         return false;
       }
@@ -1189,8 +1211,13 @@ export function createSaver(o) {
     // 0:00), so it is written to the local copy too.
     r.latest = null;
     r.latestBookMs = NaN;
-    if (typeof link === 'string' && BOOK_KEY.test(link)) r.linkedFrom = link;
-    else if (opts && opts.startOver) r.linkedFrom = null;
+    if (typeof link === 'string' && BOOK_KEY.test(link)) {
+      r.linkedFrom = link;
+      r.linkManual = !!(opts && opts.manual);
+    } else if (opts && opts.startOver) {
+      r.linkedFrom = null;
+      r.linkManual = false;
+    }
     return true;
   }
 

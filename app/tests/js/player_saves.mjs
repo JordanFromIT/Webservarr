@@ -1008,17 +1008,24 @@ function withEngine(o = {}) {
   const storage = o.storage || fakeStorage();
   const places = o.places || { web: null, plex: null };
   const got = [];
+  const dismissals = [];
   const t = makeSaver({ clock, server, storage });
   const net = { failLoads: false };
   const audios = [];
   const engine = E.createEngine({
     host: { appendChild() {} },
     createAudio: () => { const a = new MiniAudio(clock, net); audios.push(a); return a; },
-    fetch: async (url) => {
+    fetch: async (url, init) => {
       got.push(url);
       const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => JSON.parse(JSON.stringify(body)) });
       let m = /^\/api\/player\/book\/([^?]+)/.exec(url);
       if (m) return reply(200, Object.assign({}, o.book || BOOK, { stream: { token: 'tok', uris: { local: [], remote: o.noStream ? [] : [REMOTE] } } }));
+      // The safety net (spec 2.6): o.orphans answers GET /api/player/orphans/<key>
+      // (an array of places, or nothing: a 404); a POST to .../dismiss is kept in dismissals.
+      if (/^\/api\/player\/orphans\//.test(url)) {
+        if (init && init.method === 'POST') { dismissals.push(url); return reply(200, { dismissed: true }); }
+        return o.orphans ? reply(200, { orphans: o.orphans, dismissed: false }) : reply(404, { detail: 'Not Found' });
+      }
       m = /^\/api\/player\/position\/(.+)$/.exec(url);
       if (m && o.slowPosition && got.filter((u) => u.indexOf('/position/') !== -1).length > 1) {
         await new Promise((r) => clock.setTimeout(r, o.slowPosition));    // a late re-read that takes a while
@@ -1043,7 +1050,7 @@ function withEngine(o = {}) {
   });
   engine.on('warning', (w) => { log.warning.push(w); log.order.push(['warning', w.kind, w.active]); });
   engine.on('error', (e) => log.error.push(e));
-  return Object.assign(t, { engine, got, log, places, net, audios });
+  return Object.assign(t, { engine, got, log, places, net, audios, dismissals });
 }
 const iso = (s) => new Date(T0 + s * 1000).toISOString();
 const setLocal = (storage, place) => storage.map.set('ws-player:place:' + IDENTITY + ':500:1', JSON.stringify(place));
@@ -3651,6 +3658,137 @@ for (const read of [300, 2000]) {
     }
     t.engine.close();
   }
+}
+
+// ---- Spec 2.6: the safety net, on the real saver ----
+const ORPHANS = [{ key: '400:1', book_title: 'Three Parts (First Edition)', narrator: 'N. Reader', book_ms: 720000, book_duration_ms: 1800000,
+  chapter_label: 'Chapter 4', updated_at: iso(-3600), author_match: true }];
+const scorePosts = (t) => t.server.calls.length;
+
+current = 'spec 2.6: while the question is open nothing is sent or written, whatever happens, and a reload asks again';
+{
+  const clock = fakeClock(); const server = fakeServer(clock); const storage = fakeStorage();
+  const t = withEngine({ clock, server, storage, book: CHAPTERED, orphans: ORPHANS });
+  await openBook(t);
+  check('the question is open', t.engine.state().safetyNet !== null && !t.engine.state().playing);
+  await t.engine.play();
+  t.engine.seek(250000);
+  t.engine.skip(30);
+  await clock.advance(6 * 60000);
+  await t.engine.play();
+  t.saver.flush('beacon');
+  t.saver.flush();
+  await clock.advance(20000);
+  check('0 saves, 0 beacons', scorePosts(t) === 0, t.server.calls.map((c) => c.body));
+  check('nothing in the local copy', localOf(t) === null && Array.from(storage.map.keys()).every((k) => k.indexOf(':500:1') === -1), Array.from(storage.map.keys()));
+  t.engine.close();
+  await clock.advance(5000);
+  check('closing it (the last save) sends nothing either', scorePosts(t) === 0 && localOf(t) === null);
+  // A reload: a new page session, the same storage and server. It asks again.
+  const u = withEngine({ clock, server, storage, book: CHAPTERED, orphans: ORPHANS });
+  await openBook(u);
+  check('the reload reopens the question', u.engine.state().safetyNet !== null && u.engine.state().safetyNet.orphans.length === 1 && !u.engine.state().playing &&
+    u.got.filter((x) => x.indexOf('/api/player/orphans/') === 0).length === 1);
+  await u.engine.play();
+  await clock.advance(30000);
+  check('and again nothing was saved', scorePosts(u) === 0 && localOf(u) === null);
+  u.engine.close();
+}
+
+current = 'spec 2.6: a pick, confirmed, sends linked_from with link_manual until the server says whether it linked';
+{
+  const clock = fakeClock(); const server = fakeServer(clock); const storage = fakeStorage();
+  const t = withEngine({ clock, server, storage, book: CHAPTERED, orphans: ORPHANS });
+  await openBook(t);
+  server.extra = { linked: null };                       // Plex can't say yet
+  t.engine.pickOrphan('400:1');
+  await clock.advance(20000);
+  check('picked, not confirmed: nothing sent', scorePosts(t) === 0 && localOf(t) === null);
+  t.engine.confirmPlace(650000);
+  await clock.advance(2000);
+  check('the confirm carries the link and the flag, and the spot', scorePosts(t) === 1 && server.calls[0].body.linked_from === '400:1' &&
+    server.calls[0].body.link_manual === true && server.calls[0].body.book_ms === 650000, server.calls.map((c) => c.body));
+  await t.engine.play();
+  await clock.advance(11000);
+  const f = server.fetches();
+  check('null: every save sends both again', f.length >= 3 && f.every((c) => c.body.linked_from === '400:1' && c.body.link_manual === true), f.map((c) => [c.body.event, c.body.link_manual]));
+  t.saver.flush('beacon');
+  check('a beacon meanwhile carries both', beaconBodies(t).pop().link_manual === true && beaconBodies(t).pop().linked_from === '400:1');
+  check('the local copy keeps both', localOf(t).linked_from === '400:1' && localOf(t).link_manual === true && t.saver.readLocal('500:1').link_manual === true, localOf(t));
+  t.engine.close();
+  await clock.advance(20000);
+  // Reopened before the server settled it: the next open sends both again.
+  const row = server.row;
+  const web2 = { track: row.track, offset_ms: row.offset_ms, duration_ms: row.duration_ms, updated_at: row.updated_at, device: row.device, psid: row.psid };
+  const n = server.calls.length;
+  const u = withEngine({ clock, server, storage, book: CHAPTERED, places: { web: web2, plex: null }, orphans: ORPHANS });
+  await openBook(u);
+  check('it does not ask: the listener has a place now', u.got.filter((x) => x.indexOf('/api/player/orphans/') === 0).length === 0 && u.engine.state().safetyNet === null);
+  await clock.advance(12000);
+  const second = server.calls.slice(n);
+  check('the next open sends both again', second.length >= 1 && second.every((c) => c.body.linked_from === '400:1' && c.body.link_manual === true),
+    second.map((c) => [c.body.linked_from, c.body.link_manual]));
+  server.extra = { linked: true };
+  u.engine.pause();
+  await clock.advance(2000);
+  check('settled: gone from the local copy', localOf(u) && !('linked_from' in localOf(u)) && !('link_manual' in localOf(u)), localOf(u));
+  const m = server.calls.length;
+  await u.engine.play();
+  await clock.advance(21000);
+  check('and from the saves', server.calls.slice(m).length >= 1 && server.calls.slice(m).every((c) => !('linked_from' in c.body) && !('link_manual' in c.body)));
+  u.engine.close();
+}
+{
+  // false settles it as well.
+  const t = withEngine({ book: CHAPTERED, orphans: ORPHANS });
+  await openBook(t);
+  t.server.extra = { linked: false };
+  t.engine.pickOrphan('400:1');
+  t.engine.confirmPlace(650000);
+  await t.clock.advance(2000);
+  await t.engine.play();
+  await t.clock.advance(12000);
+  const uf = t.server.fetches();
+  check('false: only the confirm carried it', uf[0].body.link_manual === true && uf.slice(1).length >= 1 && uf.slice(1).every((c) => !('link_manual' in c.body) && !('linked_from' in c.body)));
+  t.engine.close();
+  // An automatic link (the web copy came with linked_from) never carries the flag.
+  const a = withEngine({ book: CHAPTERED, places: { web: LINKED_WEB, plex: null }, orphans: ORPHANS });
+  await openBook(a);
+  a.server.extra = { linked: null };
+  a.engine.confirmPlace(650000);
+  await a.clock.advance(2000);
+  await a.engine.play();
+  await a.clock.advance(12000);
+  check('automatic: linked_from, never link_manual', a.server.calls.length >= 2 && a.server.calls.every((c) => c.body.linked_from === '400:1' && !('link_manual' in c.body)));
+  check('nor in the local copy', localOf(a) && localOf(a).linked_from === '400:1' && !('link_manual' in localOf(a)), localOf(a));
+  a.engine.close();
+  // Start from the beginning after a pick sends no link at all.
+  const s = withEngine({ book: CHAPTERED, orphans: ORPHANS });
+  await openBook(s);
+  s.server.extra = { linked: null };
+  s.engine.pickOrphan('400:1');
+  s.engine.startOver();
+  await s.clock.advance(2000);
+  await s.engine.play();
+  await s.clock.advance(12000);
+  check('startOver: no link, no flag', s.server.calls.length >= 2 && s.server.calls.every((c) => !('linked_from' in c.body) && !('link_manual' in c.body)));
+  check('nor in the local copy', localOf(s) && !('linked_from' in localOf(s)) && !('link_manual' in localOf(s)), localOf(s));
+  s.engine.close();
+}
+
+current = 'spec 2.6: "None of these" releases the hold; the book then saves as any new book does';
+{
+  const t = withEngine({ book: CHAPTERED, orphans: ORPHANS });
+  await openBook(t);
+  check('dismiss', t.engine.dismissOrphans() === true);
+  await t.clock.advance(3000);
+  check('the server was told, once', t.dismissals.length === 1 && t.dismissals[0] === '/api/player/orphans/500%3A1/dismiss', t.dismissals);
+  check('it plays, and nothing was sent for the dismissal itself', t.engine.state().playing && scorePosts(t) <= 1, t.server.calls.map((c) => c.body));
+  await t.clock.advance(25000);
+  const f = t.server.fetches();
+  check('saves as a new book: from the start, no link, no flag', f.length >= 2 && f[0].body.offset_ms < 5000 && f.every((c) => !('linked_from' in c.body) && !('link_manual' in c.body)),
+    f.map((c) => [c.body.event, c.body.offset_ms]));
+  t.engine.close();
 }
 
 if (failed) {

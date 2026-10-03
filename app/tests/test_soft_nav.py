@@ -550,7 +550,7 @@ class HomePage(unittest.TestCase):
         self.assertNotRegex(body, r"\bsetTimeout\(")
         leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
         self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'engine.js', 'saves.js', "
-                      "'features.js',\n  'findplace.js'];", leaks)
+                      "'features.js',\n  'findplace.js', 'safetynet.js'];", leaks)
 
     def test_the_clock_test_runs_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file
@@ -1878,6 +1878,66 @@ class PlayerFindPlace(unittest.TestCase):
         m = re.search(r"\.wsp-fp-status\s*\{([^{}]*)\}", theme)
         self.assertIsNotNone(m)
         self.assertRegex(m.group(1), r"white-space\s*:\s*pre-line")
+
+    def test_its_test_runs_locally_and_in_ci(self):
+        from app.tests.test_theme_engine import repo_file
+        for parts in (("package.json",), (".github", "workflows", "docker-publish.yml")):
+            self.assertIn("node app/tests/js/player_findplace.mjs", repo_file(self, *parts), "/".join(parts))
+
+
+class PlayerSafetyNet(unittest.TestCase):
+    """The audiobook player's "Were you listening to one of these?" panel
+    (js/player/safetynet.js, spec 2026-10-03 audiobook no lost place, section
+    3): document-lifetime like the rest of the player, so loaded once by the
+    shell as its own stamped module, right after the helper it leads into; no
+    markup from strings, no inline handlers (CSP script-src 'self'), no
+    request or storage of its own (it only calls the engine). Its behaviour is
+    in app/tests/js/player_findplace.mjs, run locally and in CI."""
+
+    SAFETYNET = STATIC / "js" / "player" / "safetynet.js"
+
+    def test_it_loads_once_from_the_shell_right_after_the_helper(self):
+        from app.tests.test_shell_contract import BARE_PAGES, SHELL_PAGES
+        part = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
+        tags = [m for m in _SCRIPT_TAG_RE.finditer(part)]
+        srcs = [attr(m.group(1), "src") or "" for m in tags]
+        mine = [i for i, s in enumerate(srcs) if s.startswith("/static/js/player/safetynet.js")]
+        self.assertEqual(len(mine), 1, "the shell loads the safety net exactly once")
+        self.assertEqual(srcs[mine[0]], "/static/js/player/safetynet.js?v=1", "stamped like every shell script")
+        self.assertEqual(attr(tags[mine[0]].group(1), "type"), "module")
+        self.assertEqual(srcs[mine[0] - 1], "/static/js/player/findplace.js?v=1", "right after the helper")
+        for name in SHELL_PAGES + BARE_PAGES:
+            with self.subTest(name):
+                self.assertNotIn("/static/js/player/safetynet.js", read(name), f"{name} loads the safety net itself")
+        for p in (STATIC / "js").rglob("*.js"):
+            self.assertNotRegex(p.read_text(encoding="utf-8"),
+                                r"""(?:\bfrom|\bimport\s*\(?)\s*['"][^'"]*safetynet\.js['"]""", p.name)
+
+    def test_it_is_a_player_file_that_owns_its_listeners(self):
+        leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
+        for name in ("SHELL_FILES", "SELF_OWNED_FILES"):
+            with self.subTest(name):
+                m = re.search(r"export const %s = \[([^\]]*)\]" % name, leaks)
+                self.assertIsNotNone(m)
+                self.assertIn("'safetynet.js'", m.group(1))
+
+    def test_it_builds_no_markup_from_strings_and_no_handler_properties(self):
+        src = self.SAFETYNET.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        for word in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "setInterval",
+                     "setTimeout", "eval("):
+            self.assertNotIn(word, code, word)
+        self.assertNotRegex(code, r"\.on[a-z]+\s*=(?!=)", "listeners go through addEventListener")
+        self.assertEqual(string_matches(src, _HANDLER_TEXT_RE), [])
+        self.assertNotRegex(code, r"\.style\.", "colours only through theme.css")
+        self.assertNotRegex(code, r"\bhistory\s*\.|pushState|replaceState|popstate")
+        self.assertNotRegex(code, r"\bfetch\(|sendBeacon|localStorage|playerSaves")
+
+    def test_its_cards_borrow_the_helpers_stilled_ones(self):
+        from app.tests.test_motion import stilled
+        theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        for sel in (".wsp-fp-cand", ".wsp-fp-btn"):
+            self.assertTrue(stilled(theme, sel, "transition"), sel)
 
     def test_its_test_runs_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file
