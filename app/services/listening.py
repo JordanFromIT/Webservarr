@@ -341,7 +341,8 @@ LINK_TRIES = 3
 def set_link(db: Session, identity: str, book: str, linked_from: str) -> Optional[bool]:
     """Keep `linked_from`, an earlier copy the caller has verified (the
     router's rule: the listener's own row under that key, the same work key,
-    and its album gone), on this listener's row for `book`, so the earlier
+    its album gone, and no copy that carried it forward still in the
+    library), on this listener's row for `book`, so the earlier
     copy's history stays with the book. Set once: a row that already has a
     link keeps it. Independent of the check-in's own outcome (a refused
     older seq or a conflict still leaves a row, so the link is still set).
@@ -375,6 +376,25 @@ def link_chain(db: Session, identity: str, book: str, first: Optional[str]) -> l
     return chain
 
 
+def successors(db: Session, identity: str, key: str, exclude=()) -> list:
+    """The book keys of this listener's rows that carried `key` forward (a
+    row whose linked_from is `key`), none of `exclude`, newest first, at
+    most LINK_TRIES. The router asks whether one of them (or one of theirs)
+    is still in the library before it offers `key` as an earlier copy: a
+    place already carried into an edition that is still there is that
+    edition's, never another side-by-side edition's (spec 2.5 s2). Scoped
+    by identity, so the primary key's (identity, book_key) index bounds the
+    read to this listener's own rows."""
+    if not isinstance(key, str):
+        return []
+    P = ListeningPosition
+    q = db.query(P.book_key).filter(P.identity == identity, P.linked_from == key)
+    exclude = [k for k in exclude if isinstance(k, str)]
+    if exclude:
+        q = q.filter(P.book_key.notin_(exclude))
+    return [r[0] for r in q.order_by(P.updated_at.desc(), P.book_key).limit(LINK_TRIES).all()]
+
+
 def find_linked(db: Session, identity: str, work_key: Optional[str], exclude_key: str,
                 skip=()) -> Optional[ListeningPosition]:
     """The newest of this listener's stored positions with `work_key` under a
@@ -382,8 +402,9 @@ def find_linked(db: Session, identity: str, work_key: Optional[str], exclude_key
     place in an earlier copy of a book re-added as a new Plex album.
 
     The caller links it only when that copy's album is gone from the
-    library, so editions side by side never share a place; `skip` names
-    copies it found still there. One query on
+    library and no copy that carried it forward (successors) is still
+    there, so editions side by side never share a place; `skip` names
+    copies it passed over. One query on
     ix_listening_positions_identity_work_key, scoped by identity."""
     if not isinstance(work_key, str) or not WORK_KEY.fullmatch(work_key):
         return None

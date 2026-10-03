@@ -322,6 +322,8 @@ async def cover(request: Request, key: str, who: Listener = Depends(listener)):
 # work key and handed back instead, marked linked_from, but only when that
 # copy's album is gone from the library: two editions side by side (two
 # narrators of one title) share a work key and must never share a place.
+# For the same reason a place already carried into a copy still in the
+# library (A became B, B is there) is never offered to a third (C, beside B).
 #
 # The lookup either completes or answers 503 (the player's Retry, which never
 # falls back to 0:00): a lookup that gave up on a Plex error would open the
@@ -351,13 +353,55 @@ def _lookup_failed() -> HTTPException:
     return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=PLEX_DOWN)
 
 
+async def _carried_forward(db: Session, who: "Listener", key: str, requesting: str,
+                           known: dict) -> Optional[bool]:
+    """True when the listener's place in the earlier copy `key` already
+    lives on in a copy still in the library: a row of theirs whose
+    linked_from is `key` (or, link by link, up to listening.LINK_HOPS deep,
+    one of that row's own successors) under a book whose album is still
+    there, other than `requesting`. That place is that copy's: offering it
+    to `requesting` as well would merge two editions side by side (spec 2.5
+    s2). A copy that carried it forward and is gone itself doesn't count
+    (A became B, B went too: a new C may inherit, through B).
+
+    False when no such copy is there, None when Plex can't say. The
+    database is asked first (listening.successors), so a copy nothing
+    carried forward costs no Plex read; at most LINK_HOPS album checks in
+    all, and a chain going on past them counts as carried forward (the
+    place is withheld rather than merged unchecked). `known` holds the
+    album checks this request already made (key -> _album_gone's answer)."""
+    seen = {key, requesting}
+    frontier, checks = [key], 0
+    for _hop in range(listening.LINK_HOPS):
+        gone_too = []
+        for earlier in frontier:
+            for later in listening.successors(db, who.identity, earlier, exclude=seen):
+                seen.add(later)
+                if later not in known:
+                    if checks >= listening.LINK_HOPS:
+                        return True
+                    checks += 1
+                    known[later] = await _album_gone(later)
+                if known[later] is None:
+                    return None
+                if not known[later]:
+                    return True             # still in the library: the place is its
+                gone_too.append(later)
+        if not gone_too:
+            return False
+        frontier = gone_too
+    return any(listening.successors(db, who.identity, k, exclude=seen) for k in frontier)
+
+
 async def _earlier_copy(db: Session, who: "Listener", key: str, album: Optional[dict] = None):
     """This listener's position row in an earlier copy of the book, or None.
 
     Only for a listener with no row of their own for `key` (the caller
     checks), and only a copy whose album assert_in_library no longer finds
-    (NotInLibrary). A copy still in the library is passed over for the next
-    newest, at most listening.LINK_TRIES of them.
+    (NotInLibrary) and whose place no copy still in the library carried
+    forward (_carried_forward). A copy still in the library, or carried
+    into one that is, is passed over for the next newest, at most
+    listening.LINK_TRIES of them.
 
     The database is asked first, so a listener with no candidate costs no
     Plex read. For disc 1 the book's exact key is known from `album` alone
@@ -383,17 +427,22 @@ async def _earlier_copy(db: Session, who: "Listener", key: str, album: Optional[
         raise _lookup_failed() from None
     except pp.NotInLibrary as exc:
         raise _http_error(exc) from None
-    skip = []
+    skip, known = [], {}
     for _attempt in range(listening.LINK_TRIES):
         row = listening.find_linked(db, who.identity, about.get("work_key"), key, skip=skip)
         if row is None:
             return None
-        gone = await _album_gone(row.book_key)
+        gone = known[row.book_key] if row.book_key in known else await _album_gone(row.book_key)
+        known[row.book_key] = gone
         if gone is None:
             raise _lookup_failed()
         if gone:
-            return row          # that copy's album is gone: this is the book it became
-        skip.append(row.book_key)   # still in the library: an edition side by side
+            carried = await _carried_forward(db, who, row.book_key, key, known)
+            if carried is None:
+                raise _lookup_failed()
+            if not carried:
+                return row      # that copy's album is gone and its place lives nowhere else: this is the book it became
+        skip.append(row.book_key)   # still in the library, or carried into a copy that is: an edition side by side
     return None
 
 
@@ -591,7 +640,8 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
       whatever the save's own outcome, a refused seq or a 409 included), so
       the earlier copy's history stays with it;
     - false: it is not a link the server would make (not the listener's own
-      copy, another work, or its album still in the library), or the row
+      copy, another work, its album still in the library, or its place
+      already carried into another copy still in the library), or the row
       already has another link; stop sending it;
     - null: it could not be checked now (Plex failed); send it again with
       the next save.
@@ -622,6 +672,11 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
         else:
             # _album_gone: True, False, or None when Plex can't say.
             linked = results[1] if not isinstance(results[1], Exception) else None
+        if linked:
+            # Its place already lives on in a copy still in the library: not
+            # this book's to take (_carried_forward).
+            carried = await _carried_forward(db, who, body.linked_from, body.book, {body.linked_from: True})
+            linked = None if carried is None else not carried
 
     try:
         result = listening.save_checkin(db, who.identity, body.book, body.track, body.offset_ms,

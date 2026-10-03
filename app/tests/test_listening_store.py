@@ -600,6 +600,47 @@ class LinkedFrom(StoreBase):
         self.assertEqual(listening.link_chain(self.db, ME, "9:1", "10:1"), ["10:1", "11:1", "12:1", "13:1", "14:1"])
         self.assertEqual(listening.LINK_HOPS, 5)
 
+    def test_successors_are_the_listeners_rows_that_carried_a_copy_forward(self):
+        # T5F1: the copies whose linked_from is the key, newest first, never
+        # one excluded, never another listener's, at most LINK_TRIES.
+        import time
+        self.assertEqual(listening.successors(self.db, ME, "300:1"), [])
+        for book in ("400:1", "410:1", "420:1", "430:1"):
+            checkin(self.db, book=book, psid="p-" + book)
+            listening.set_link(self.db, ME, book, "300:1")
+            time.sleep(0.002)
+        checkin(self.db, identity=THEM, book="440:1", psid="them")
+        listening.set_link(self.db, THEM, "440:1", "300:1")
+        checkin(self.db, book="450:1", psid="p-450")
+        listening.set_link(self.db, ME, "450:1", "310:1")
+        self.assertEqual(listening.successors(self.db, ME, "300:1"), ["430:1", "420:1", "410:1"])
+        self.assertEqual(listening.successors(self.db, ME, "300:1", exclude=["430:1", "410:1", None]),
+                         ["420:1", "400:1"])
+        self.assertEqual(listening.successors(self.db, THEM, "300:1"), ["440:1"])
+        self.assertEqual(listening.successors(self.db, ME, None), [])
+        self.assertEqual(listening.LINK_TRIES, 3)
+
+    def test_the_successor_read_is_scoped_by_an_identity_index(self):
+        from sqlalchemy import event
+        checkin(self.db, book="400:1")
+        listening.set_link(self.db, ME, "400:1", "300:1")
+        engine = self.Session.kw["bind"]
+        seen = []
+
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            if "FROM listening_positions" in statement:
+                seen.append((statement, parameters))
+        event.listen(engine, "before_cursor_execute", capture)
+        listening.successors(self.db, ME, "300:1", exclude=["410:1"])
+        event.remove(engine, "before_cursor_execute", capture)
+        self.assertEqual(len(seen), 1)
+        statement, parameters = seen[0]
+        with engine.connect() as conn:
+            rows = conn.exec_driver_sql("EXPLAIN QUERY PLAN " + statement, tuple(parameters)).fetchall()
+        plan = " ".join(str(r[-1]) for r in rows)
+        self.assertIn("USING INDEX", plan)
+        self.assertIn("identity=?", plan)
+
     def test_has_work_keys_is_the_listeners_own_under_another_key(self):
         self.assertFalse(listening.has_work_keys(self.db, ME, "400:1"))
         checkin(self.db, book="300:1", work_key=None)

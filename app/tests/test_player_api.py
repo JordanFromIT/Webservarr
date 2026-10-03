@@ -1128,6 +1128,123 @@ class EarlierCopies(PlayerApiBase):
         self.assertEqual(r.status_code, 200)
         self.assertTrue(seen["overlap"])
 
+    # --- A place already carried into a copy still there (T5F1) ---
+
+    THERE = "450:1"     # B: the copy A's place was carried into, still in the library
+
+    def carried(self, book, from_key, identity="plex:1001", **seed):
+        self.seed(book, identity=identity, **seed)
+        row = self.db.query(ListeningPosition).filter_by(identity=identity, book_key=book).one()
+        row.linked_from = from_key
+        self.db.commit()
+
+    def test_a_place_carried_into_a_copy_still_there_is_never_offered_again(self):
+        # Spec 2.5 s2: A is gone, its place lives on in B (still in the
+        # library); C, a side-by-side edition of B, must not take it too.
+        from datetime import datetime
+        with mock.patch.dict(LIBRARY, {self.THERE: {"451": 500_000}}), mock.patch.dict(WORKS, {self.THERE: self.WORK}):
+            self.seed(self.GONE, at=datetime(2026, 9, 20))
+            self.carried(self.THERE, self.GONE, at=datetime(2026, 9, 25))
+            self.assertIsNone(self.position(self.NEW))
+            self.assertEqual(self.history(), [])
+            # Nor will the server store such a link.
+            r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=1,
+                             linked_from=self.GONE)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertIs(r.json()["linked"], False)
+            row = self.db.query(ListeningPosition).filter_by(identity="plex:1001", book_key=self.NEW).one()
+            self.db.refresh(row)
+            self.assertIsNone(row.linked_from)
+            self.assertEqual({e["book_key"] for e in self.history()}, {self.NEW})
+            # B keeps its own place and its link.
+            self.assertNotIn("linked_from", self.position(self.THERE))
+            self.assertEqual({e["book_key"] for e in self.history(self.THERE)}, {self.THERE, self.GONE})
+
+    def test_a_copy_that_carried_it_and_went_too_passes_it_on(self):
+        # A became B, B is gone too: a new C inherits B's place, and A's
+        # history through B's link.
+        from datetime import datetime
+        self.seed(self.GONE, at=datetime(2026, 9, 20), offset=11, logs=1)
+        self.carried("460:1", self.GONE, at=datetime(2026, 9, 25), offset=22, logs=1)
+        web = self.position(self.NEW)
+        self.assertEqual((web["linked_from"], web["offset_ms"]), ("460:1", 22))
+        self.assertEqual([(e["book_key"], e.get("earlier_copy")) for e in self.history()],
+                         [("460:1", True), (self.GONE, True)])
+        row = self.save_new(seq=1, linked_from="460:1")
+        self.assertEqual(row.linked_from, "460:1")
+        self.assertEqual([e["book_key"] for e in self.history()], [self.NEW, "460:1", self.GONE])
+
+    def test_a_copy_still_there_further_down_the_chain_still_counts(self):
+        # A became B (gone), B became D (still there): A's place is D's.
+        from datetime import datetime
+        with mock.patch.dict(LIBRARY, {self.THERE: {"451": 500_000}}), mock.patch.dict(WORKS, {self.THERE: self.WORK}):
+            self.seed(self.GONE, at=datetime(2026, 9, 20))
+            self.carried("460:1", self.GONE, at=datetime(2026, 9, 22), work_key=None)
+            self.carried(self.THERE, "460:1", at=datetime(2026, 9, 25), work_key=None)
+            self.assertIsNone(self.position(self.NEW))
+            r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=1,
+                             linked_from=self.GONE)
+            self.assertIs(r.json()["linked"], False)
+
+    def test_a_chain_past_the_bound_withholds_the_place(self):
+        # Gone copies LINK_HOPS deep, then one still there: never merged
+        # unchecked, and never more than LINK_HOPS album checks for the chain.
+        from datetime import datetime
+        from app.services import listening
+        with mock.patch.dict(LIBRARY, {self.THERE: {"451": 500_000}}):
+            self.seed(self.GONE, at=datetime(2026, 9, 1))
+            keys = [f"{470 + n}:1" for n in range(listening.LINK_HOPS)] + [self.THERE]
+            prev = self.GONE
+            for n, k in enumerate(keys):
+                self.carried(k, prev, at=datetime(2026, 9, 2 + n), work_key=None)
+                prev = k
+            self.assertIsNone(self.position(self.NEW))
+            # The book check, A's check, then at most LINK_HOPS for the chain.
+            self.assertLessEqual(pp.assert_in_library.await_count, 2 + listening.LINK_HOPS)
+            # One link shorter, the chain ends gone: A's place is offered.
+            last = self.db.query(ListeningPosition).filter_by(identity="plex:1001", book_key=self.THERE).one()
+            self.db.delete(last)
+            self.db.commit()
+            self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+
+    def test_another_listeners_copy_never_counts_as_carrying_it(self):
+        with mock.patch.dict(LIBRARY, {self.THERE: {"451": 500_000}}), mock.patch.dict(WORKS, {self.THERE: self.WORK}):
+            self.seed(self.GONE)
+            self.carried(self.THERE, self.GONE, identity="plex:1002")
+            self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+            row = self.save_new(seq=1, linked_from=self.GONE)
+            self.assertEqual(row.linked_from, self.GONE)
+
+    def test_plex_failing_on_the_carried_copys_check_is_503_or_null(self):
+        self.seed(self.GONE)
+        self.carried("460:1", self.GONE, work_key=None)
+
+        async def check(key, track_key=None):
+            if key == "460:1":
+                raise pp.PlayerUnavailable("down")
+            return await fake_assert_in_library(key, track_key)
+        with mock.patch.object(pp, "assert_in_library", side_effect=check):
+            for path in (f"/api/player/position/{self.NEW}", f"/api/player/history/{self.NEW}"):
+                with self.subTest(path=path):
+                    self.assertEqual(self.client.get(path).status_code, 503)
+            r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=1,
+                             linked_from=self.GONE)
+            self.assertIsNone(r.json()["linked"])
+        row = self.db.query(ListeningPosition).filter_by(identity="plex:1001", book_key=self.NEW).one()
+        self.assertIsNone(row.linked_from)
+        # Once Plex answers (460:1 is gone), A's place is the new copy's.
+        self.assertIs(self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=2,
+                                   linked_from=self.GONE).json()["linked"], True)
+
+    def test_a_link_resent_from_the_book_itself_still_holds(self):
+        # The requesting book's own row already carries A: not a successor
+        # that takes A away from it.
+        self.seed(self.GONE)
+        self.save_new(seq=1, linked_from=self.GONE)
+        r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="new-page", seq=2,
+                         linked_from=self.GONE)
+        self.assertIs(r.json()["linked"], True)
+
     # --- History follows a chain of copies (T1S4) ---
 
     def test_history_follows_a_chain_of_copies(self):
