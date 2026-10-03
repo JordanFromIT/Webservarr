@@ -127,9 +127,11 @@
  *                     a part this browser can't decode (near one, it is the
  *                     15 s before it, within the part), and after 15 s of
  *                     playing by the wall clock (more at a speed under 1x),
- *                     so a seek from outside the engine can't stretch it
- *                     (each timeupdate counts 1 s at most, so buffering
- *                     never shortens it).
+ *                     so a seek from outside the engine can't stretch it.
+ *                     Buffering does not count: the wall time restarts at
+ *                     the first timeupdate after a 'waiting', and each
+ *                     timeupdate counts 1 s at most (a stall the element
+ *                     reports no 'waiting' for costs under 1 s).
  *                     false: not held, or a part this browser can't decode
  *                     (with a 'part-format' warning).
  *   confirmPlace(bookMs) -> bool  held: the listener places the book at bookMs.
@@ -145,10 +147,14 @@
  *                     another device or a Plex app saved meanwhile is asked
  *                     about (a 'conflict' warning) and the confirm waits for
  *                     the answer (resolveConflict: Continue lands at the other
- *                     place, Keep listening here at the spot, moved by any
- *                     move meanwhile). The book stays held until the
- *                     confirm's move lands.
- *                     false as previewAt.
+ *                     place, Keep listening here at the spot). The book stays
+ *                     held until the confirm's move lands, at the chosen spot:
+ *                     a move made meanwhile (a skip, a seek, a chapter jump, a
+ *                     preview elsewhere) counts, and its linked_from goes with
+ *                     it wherever it lands. A Play made during the read (a
+ *                     preview meanwhile) plays on from there once it lands,
+ *                     unless a Pause took it back; once asked, the answer
+ *                     decides. false as previewAt.
  *   startOver() -> bool  confirmPlace(0), never sending linked_from
  *   setSpeed(x)       0.75 to 2 in 0.05 steps (clamped, rounded); returns the speed
  *   setSkip(s)        the skip length (the skip buttons and the Media Session
@@ -864,6 +870,9 @@ export function createEngine(env) {
 
   audio.addEventListener('waiting', function () {
     if (book && wantPlay) arm();
+    // Buffering is not playing: a preview's wall time starts again from the
+    // next timeupdate (the stall costs it nothing).
+    if (preview) preview.lastWall = null;
   });
 
   audio.addEventListener('playing', function () {
@@ -902,8 +911,8 @@ export function createEngine(env) {
     // A preview (the book's files changed) stops after its 15 s.
     // ... and after as long by the wall clock, so a seek from outside the
     // engine (back before its start) can't stretch it.
-    // Each step counts PREVIEW_WALL_STEP_MS at most: the stream buffering
-    // (no timeupdate meanwhile) is not playing, and never shortens it.
+    // Buffering is not playing: a 'waiting' restarts the count, and each
+    // step counts PREVIEW_WALL_STEP_MS at most (a stall with no 'waiting').
     if (files && preview && !preview.done && wantPlay) {
       const w = wallNow();
       if (preview.lastWall !== null) preview.played += clampNumber(w - preview.lastWall, 0, PREVIEW_WALL_STEP_MS);
@@ -924,6 +933,7 @@ export function createEngine(env) {
     // a fresh preview at the helper's chosen spot, started on the element
     // as it plays. Never pause the element and then play it here: its
     // queued 'pause' and 'play' events would answer each other for ever.
+    if (files && files.reading && !wantPlay) files.play = true;
     if (files && !wantPlay && !pending && !error && !previewPaused()) {
       if (!startPreview(files.spot)) stopElement();
       return;
@@ -943,6 +953,7 @@ export function createEngine(env) {
     // The element pauses itself at the end of a part and when its src
     // changes; anything else is the browser or the system pausing it.
     if (!book || pending || audio.ended || !wantPlay) return;
+    if (files) files.play = false;
     wantPlay = false;
     disarm();
     sessionState();
@@ -1465,7 +1476,7 @@ export function createEngine(env) {
     }
     resumedFrom = resumed ? { source: resumed.source, device: resumed.device, updated_at: resumed.updated_at, age_ms: age } : null;
     // spot: the helper's chosen spot (book ms), where Play previews while held.
-    files = changedFrom ? { old: changedFrom, spot: startMs, pending: null, reading: false, asked: false, timer: null } : null;
+    files = changedFrom ? { old: changedFrom, spot: startMs, pending: null, reading: false, asked: false, timer: null, play: false } : null;
     if (saver) {
       try {
         saver.start(key, {
@@ -1551,6 +1562,9 @@ export function createEngine(env) {
   }
 
   function heldPlay(resume) {
+    // While a confirm reads the saved places, a Play plays on from where
+    // it lands (land); meanwhile it is a preview, as ever.
+    if (files.reading) files.play = true;
     if (previewPaused()) return resume();
     if (wantPlay) return Promise.resolve();
     startPreview(files.spot);
@@ -1628,9 +1642,16 @@ export function createEngine(env) {
     } catch (e) { /* already */ }
   }
 
+  // The listener's Pause (the bar, the keyboard, the lock screen): it also
+  // takes back a Play made while a confirm reads the saved places.
+  function userPause() {
+    if (files) files.play = false;
+    pause();
+  }
+
   function toggle() {
     // The bar's button and the keyboard: Pause whenever anything plays.
-    if (wantPlay || (checking && checking.plays) || (book && !audio.paused)) pause();
+    if (wantPlay || (checking && checking.plays) || (book && !audio.paused)) userPause();
     else return play();
   }
 
@@ -1790,27 +1811,33 @@ export function createEngine(env) {
       confirmRead();
       return true;
     }
-    land(v);
+    land(v, false);
     return true;
   }
 
-  // The confirm lands at `at`: the hold ends, then its one explicit move.
-  // Its link goes only with the very spot confirmed from the earlier copy.
-  function land(at) {
+  // The confirm lands at `at` (the chosen spot: a move made while it waited
+  // counts): the hold ends, then its one explicit move. A confirmPlace's
+  // link goes with it wherever it lands (never a startOver's). carry: a Play
+  // made while the confirm read the saved places plays on from there.
+  function land(at, carry) {
     const p = files.pending;
     const old = files.old;
     preview = null;
-    pause();
+    if (!carry) pause();
     if (files.timer !== null && files.timer !== undefined) clearT(files.timer);
     files = null;
     if (saver && typeof saver.releaseFiles === 'function') {
       try {
-        saver.releaseFiles(book.key, p.link && at === p.v && old.linked_from ? old.linked_from : null, { startOver: !p.link });
+        saver.releaseFiles(book.key, p.link && old.linked_from ? old.linked_from : null, { startOver: !p.link });
       } catch (e) {
         console.error('[player] saving failed', e);
       }
     }
     seek(at, 'seek', false, true, { place: true });
+    if (carry && book && !wantPlay) {
+      const pr = playOn();
+      if (pr && typeof pr.catch === 'function') pr.catch(function (e) { console.error('[player] playing failed', e); });
+    }
   }
 
   /* A confirm: the saved places read again, still held
@@ -1828,6 +1855,7 @@ export function createEngine(env) {
       seen = null;
     }
     my.reading = true;
+    my.play = false;
     function finish(places) {
       if (my.timer !== null) clearT(my.timer);
       my.timer = null;
@@ -1835,7 +1863,7 @@ export function createEngine(env) {
       my.reading = false;
       let asked = false;
       try {
-        asked = !!places && !!seen && askIfElsewhere(places, seen, my.pending.v);
+        asked = !!places && !!seen && askIfElsewhere(places, seen, my.spot);
       } catch (e) {
         console.error('[player] the re-check failed', e);
       }
@@ -1846,7 +1874,7 @@ export function createEngine(env) {
       }
       quietSince = wallNow();
       changed('checking');
-      land(my.pending.v);
+      land(my.spot, !!my.play);
     }
     my.timer = setT(function () {
       my.timer = null;
@@ -2188,7 +2216,7 @@ export function createEngine(env) {
     sessionReady = true;
     const actions = {
       play: function () { play(); },
-      pause: function () { pause(); },
+      pause: function () { userPause(); },
       seekbackward: function (d) { skip(-((d && d.seekOffset) || skipS)); },
       seekforward: function (d) { skip((d && d.seekOffset) || skipS); },
       seekto: function (d) {
@@ -2239,7 +2267,7 @@ export function createEngine(env) {
   return {
     open: open,
     play: play,
-    pause: pause,
+    pause: userPause,
     toggle: toggle,
     seek: function (bookMs, o) { seek(bookMs, 'seek', false, !!(o && o.answer)); },
     // Smart rewind is a playback aid: a preview (the files changed) plays exactly.
@@ -2279,7 +2307,9 @@ export function createEngine(env) {
         // it to the other place; Keep listening here left it).
         if (files && files.asked && files.pending) {
           files.asked = false;
-          land(files.spot);
+          // The answer decides what plays (features.js plays on it), not
+          // a Play made during the read.
+          land(files.spot, false);
         }
       }
       return c;

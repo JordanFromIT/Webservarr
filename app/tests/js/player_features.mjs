@@ -3536,6 +3536,53 @@ await run('boot sets WS.playerFeatures once, and only with the player', async ()
   await bare.happyDOM.close();
 });
 
+// Spec 2.5 fix round 5 (T2U1): placing a book whose files changed is no jump
+// to undo. Undo would go back to the held start (0:00) and save it over the
+// listener's place: none is offered for the confirm's moves, or for any move
+// while the book is held.
+async function heldFiles() {
+  const storage = memoryStorage();
+  const t = await setup({ storage, identity: ID, deviceId: ME, wall: true });
+  t.places = { web: { track: '401', offset_ms: 120000, duration_ms: 900000, updated_at: new Date(t.serverNow() - 3600000).toISOString(),
+    device: 'Chrome on Windows', device_id: OTHER, psid: 'other', book_ms: 720000, book_duration_ms: 1800000, chapter_label: 'Chapter 4',
+    linked_from: '400:1', book_title: 'Three Parts (First Edition)' }, plex: null };
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(300);
+  await p;
+  t.keep = () => t.qa('.wsp-notice-btn').find((b) => b.textContent === 'Keep listening here') || null;
+  return t;
+}
+await run('spec 2.5 (T2U1): no Undo for placing a book whose files changed, nor for a move while it is held', async () => {
+  for (const plex of [false, true]) {
+    const t = await heldFiles();
+    check('held', t.engine.state().filesChanged !== null);
+    const n = t.posts.length;
+    if (plex) t.places.plex = { track: '502', offset_ms: 30000, duration_ms: 900000, updated_at: new Date(t.serverNow() - MIN).toISOString(), device: 'Plexamp' };
+    t.positionDelay = 1000;
+    t.engine.confirmPlace(650000);                     // 0:00 -> 10:50, still held while it reads
+    await t.clock.advance(100);
+    check((plex ? 'asked: ' : '') + 'no Undo at the confirm', !t.undoBtn() && t.notices().every((x) => x.indexOf('Jumped') === -1), t.notices());
+    t.engine.jumpToChapter(2);                         // a move while held, over 2 minutes
+    await t.clock.advance(100);
+    check((plex ? 'asked: ' : '') + 'no Undo for a move while held', !t.undoBtn(), t.notices());
+    t.engine.seek(650000);
+    await t.clock.advance(1500);
+    if (plex) {
+      check('the question is up, still no Undo', !!t.keep() && !t.undoBtn(), t.notices());
+      t.keep().click();
+    }
+    await t.clock.advance(1000);
+    check((plex ? 'asked: ' : '') + 'landed at the spot, with no Undo after it', t.engine.state().filesChanged === null && bookMs(t) >= 650000 && !t.undoBtn(), [bookMs(t), t.notices()]);
+    check((plex ? 'asked: ' : '') + 'saved there with the link, never 0:00', t.posts.length > n && t.posts.slice(n).every((b) => b.book_ms >= 650000 && b.linked_from === '400:1'),
+      t.posts.slice(n).map((b) => [b.event, b.book_ms, b.linked_from]));
+    // Not held any more: a big jump offers Undo as ever.
+    t.engine.seek(1600000);
+    await t.clock.advance(100);
+    check((plex ? 'asked: ' : '') + 'after it, a big jump offers Undo as ever', !!t.undoBtn());
+    t.engine.close();
+  }
+});
+
 await run('no markup from strings, no intervals, no inline handlers', () => {
   const src = readFileSync(FEATURES_PATH, 'utf8');
   check('no innerHTML', !/innerHTML|insertAdjacentHTML|outerHTML/.test(src));

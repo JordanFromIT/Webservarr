@@ -3328,9 +3328,14 @@ for (const variant of ['Play, then Pause during the read', 'Play only']) {
   if (variant.indexOf('Pause') !== -1) t.engine.pause();
   check(variant + ': still held during the read', t.engine.state().filesChanged !== null && server.calls.length === 0);
   await clock.advance(5000);
+  // Fix round 5 (T2U3): a Play made during the read plays on from the
+  // landing (saved as a move while playing); a Pause after it takes it back.
+  const playOn = variant.indexOf('Pause') === -1;
   check(variant + ': the confirm landed after the read, saved once at the spot', t.engine.state().filesChanged === null && server.calls.length === 1 &&
-    server.calls[0].body.book_ms === 650000 && server.calls[0].body.event === 'pause' && server.row.track === '502' && server.row.offset_ms === 50000,
+    server.calls[0].body.book_ms === 650000 && server.calls[0].body.event === (playOn ? 'seek' : 'pause') && server.row.track === '502' && server.row.offset_ms === 50000,
     server.calls.map((c) => c.body));
+  check(variant + (playOn ? ': the Play carried over: playing from it' : ': the Pause took the Play back: paused at it'),
+    t.engine.state().playing === playOn && t.engine.state().bookMs >= 650000 && t.engine.state().bookMs < 655000, t.engine.state());
   await t.engine.play();
   await clock.advance(12000);
   const bad = server.calls.filter((c) => c.body.book_ms < 650000);
@@ -3546,6 +3551,106 @@ for (const how of ['skip(-10)', 'the lock screen\'s seek back', 'skip(+10)', 'th
     t.server.calls[0].body.book_ms === want && t.server.row.book_ms === want && t.engine.state().bookMs === want, t.server.calls.map((c) => c.body.book_ms));
   check(how + ': never 0:00', !t.server.calls.some((c) => c.body.book_ms < 600000));
   t.engine.close();
+}
+
+// ---- Fix round 5 ----
+// A held rig whose re-read answers `read` ms late, with a Media Session; the
+// web copy is from an earlier copy of the book (linked_from 400:1).
+async function heldSlowRead(read, o = {}) {
+  const clock = fakeClock(); const server = fakeServer(clock); const storage = fakeStorage();
+  server.row = { psid: 'other', seq: 9, track: '401', offset_ms: 120000, updated_at: LINKED_WEB.updated_at, device: 'Chrome on Windows' };
+  server.post = casPost(server, clock);
+  const ms = { metadata: null, playbackState: 'none', handlers: new Map(), setActionHandler(a, fn) { this.handlers.set(a, fn); }, setPositionState() {} };
+  const places = { web: Object.assign({}, LINKED_WEB), plex: o.plex || null };
+  const t = withEngine({ clock, server, storage, book: CHAPTERED, places, wallClock: true, slowPosition: read, mediaSession: ms });
+  await openBook(t);
+  await clock.advance(20000);
+  return Object.assign(t, { clock, server, storage, ms });
+}
+
+// T2U2: a move made while the confirm reads the saved places is the
+// listener's: the confirm lands there, its link goes with it (never a
+// startOver's), and the read compares the newer places with that spot.
+current = 'T2U2: a move during the confirm\'s read is where it lands, with the link';
+const DURING = [
+  ['skip(-10)', (t) => t.engine.skip(-10), 640000],
+  ['skip(+30)', (t) => t.engine.skip(30), 680000],
+  ['seek(700000) (the scrubber, a history entry)', (t) => t.engine.seek(700000), 700000],
+  ['the lock screen\'s seekto 400 s', (t) => t.ms.handlers.get('seekto')({ seekTime: 400 }), 400000],
+  ['the lock screen\'s seek back', (t) => t.ms.handlers.get('seekbackward')({}), 640000]
+];
+for (const [what, move, want] of DURING) {
+  const t = await heldSlowRead(2000);
+  t.engine.confirmPlace(650000);
+  await t.clock.advance(500);
+  move(t);
+  await t.clock.advance(100);
+  check(what + ': still held, reading, at the moved spot', t.engine.state().filesChanged !== null && t.engine.state().checking === true &&
+    t.engine.state().bookMs === want && t.server.calls.length === 0, t.engine.state().bookMs);
+  await t.clock.advance(5000);
+  check(what + ': landed there, saved once with the link', t.engine.state().filesChanged === null && t.engine.state().bookMs === want &&
+    t.server.calls.length === 1 && t.server.calls[0].body.book_ms === want && t.server.calls[0].body.linked_from === '400:1',
+    t.server.calls.map((c) => [c.body.book_ms, c.body.linked_from || null]));
+  t.engine.close();
+}
+{
+  const t = await heldSlowRead(2000);
+  t.engine.startOver();
+  await t.clock.advance(500);
+  t.engine.skip(10);
+  await t.clock.advance(5000);
+  check('startOver, then skip(+10) during its read: lands at 10 s, never with the link', t.engine.state().filesChanged === null &&
+    t.server.calls.length === 1 && t.server.calls[0].body.book_ms === 10000 && !t.server.calls[0].body.linked_from,
+    t.server.calls.map((c) => [c.body.book_ms, c.body.linked_from || null]));
+  t.engine.close();
+}
+{
+  // A Plexamp place at 640 000, newer: the confirm said 650 000, then the
+  // listener skipped back 10 s to it. The very spot: nothing to ask.
+  const t = await heldSlowRead(2000);
+  t.places.plex = { track: '502', offset_ms: 40000, duration_ms: 900000, updated_at: new Date(t.clock.now - 60000).toISOString(), device: 'Plexamp' };
+  t.engine.confirmPlace(650000);
+  await t.clock.advance(500);
+  t.engine.skip(-10);
+  await t.clock.advance(5000);
+  check('the read compares with the moved spot: Plexamp there is no question', !t.log.warning.some((w) => w.kind === 'conflict') &&
+    t.engine.state().filesChanged === null && t.server.calls.length === 1 && t.server.calls[0].body.book_ms === 640000,
+    [t.log.warning.map((w) => w.kind), t.server.calls.map((c) => c.body.book_ms)]);
+  t.engine.close();
+}
+
+// T2U3: a Play made while the confirm reads (the bar, the lock screen, or a
+// helper that plays on confirm) plays on from where it lands; a Pause after
+// it takes it back; a question asked by the read leaves it to the answer.
+current = 'T2U3: a Play during the confirm\'s read plays on from the landing';
+for (const read of [300, 2000]) {
+  for (const how of ['play() at once', 'play() 100 ms later', 'the lock screen\'s Play 100 ms later', 'Play, then Pause', 'Play, then a question']) {
+    const t = await heldSlowRead(read);
+    if (how === 'Play, then a question') t.places.plex = { track: '502', offset_ms: 30000, duration_ms: 900000, updated_at: new Date(t.clock.now - 60000).toISOString(), device: 'Plexamp' };
+    t.engine.confirmPlace(650000);
+    if (how === 'play() at once') await t.engine.play();
+    else {
+      await t.clock.advance(100);
+      if (how.startsWith('the lock')) t.ms.handlers.get('play')(); else await t.engine.play();
+    }
+    if (how === 'Play, then Pause') { await t.clock.advance(100); t.ms.handlers.get('pause')(); }
+    await t.clock.advance(5000);
+    const s = t.engine.state();
+    const label = `read ${read} ms, ${how}`;
+    if (how === 'Play, then a question') {
+      await t.clock.advance(20000);
+      check(label + ': asked, still held: the Play stays a bounded preview, nothing saved', t.engine.state().filesChanged !== null &&
+        !t.engine.state().playing && t.server.calls.length === 0 && t.log.warning.some((w) => w.kind === 'conflict'), [t.engine.state().playing, t.server.calls.length]);
+    } else if (how === 'Play, then Pause') {
+      check(label + ': landed paused at the spot', s.filesChanged === null && !s.playing && s.bookMs === 650000 && t.server.calls.length === 1 &&
+        t.server.calls[0].body.book_ms === 650000, [s.playing, s.bookMs]);
+    } else {
+      check(label + ': landed and playing on from the spot', s.filesChanged === null && s.playing && s.bookMs > 650000 && s.bookMs <= 655000, [s.playing, s.bookMs]);
+      check(label + ': its first save is the spot, none before it', t.server.calls.length >= 1 && t.server.calls[0].body.book_ms === 650000 &&
+        t.server.calls.every((c) => c.body.book_ms >= 650000), t.server.calls.map((c) => [c.body.event, c.body.book_ms]));
+    }
+    t.engine.close();
+  }
 }
 
 if (failed) {

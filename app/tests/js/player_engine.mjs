@@ -2294,7 +2294,9 @@ class StallAudio extends FakeAudio {
       if (g !== this.gen || this.paused || !this.ticking) return;
       const env = this.env;
       const now = env.clock.now;
-      if (env.stallFrom !== undefined && now >= env.stallFrom && now < env.stallFrom + env.stallMs) {
+      // env.stalls: [[from, ms], ...] (clock ms); or one, env.stallFrom and env.stallMs.
+      const stalls = env.stalls || (env.stallFrom !== undefined ? [[env.stallFrom, env.stallMs]] : []);
+      if (stalls.some(([f, ms]) => now >= f && now < f + ms)) {
         if (!this.stalled) { this.stalled = true; this.fire('waiting'); }
         this.tick(g);
         return;
@@ -2314,6 +2316,20 @@ for (const stall of [0, 3000, 6000]) {
   await t.clock.advance(40000);
   check(stall + ' ms buffering 3 s in: about 15 s of the book still heard', !t.engine.state().playing && t.engine.state().filesChanged !== null &&
     bookMsOf(t) >= 714000 && bookMsOf(t) <= 715500 && t.log.error.length === 0, bookMsOf(t));
+  t.engine.close();
+}
+
+// Fix round 5 (T2U4): every stall is free, not only the first: a 'waiting'
+// restarts the preview's wall count.
+current = 'fix round 5 (T2U4): several stalls mid-preview cost it nothing';
+for (const [name, stalls] of [['two 2 s stalls', [[3000, 2000], [8000, 2000]]], ['five 1.2 s stalls every 3 s', [[2000, 1200], [5000, 1200], [8000, 1200], [11000, 1200], [14000, 1200]]]]) {
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true, Audio: StallAudio } });
+  const t0 = t.clock.now;
+  t.env.stalls = stalls.map(([f, ms]) => [t0 + f, ms]);
+  t.engine.previewAt(700000);
+  await t.clock.advance(60000);
+  check(name + ': the whole 15 s of the book heard', !t.engine.state().playing && t.engine.state().filesChanged !== null &&
+    bookMsOf(t) >= 714750 && bookMsOf(t) <= 715500 && t.log.error.length === 0, bookMsOf(t));
   t.engine.close();
 }
 

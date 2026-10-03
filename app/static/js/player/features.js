@@ -52,7 +52,9 @@
  * - Undo: a seek of more than 2 minutes (the scrubber, a chapter, a skip, the
  *   lock screen) shows "Jumped back|ahead <delta>." with Undo for 8 s. Undo
  *   goes back to where that jump started, and raises no notice of its own; a
- *   second big jump replaces the first's notice and place.
+ *   second big jump replaces the first's notice and place. Placing a book
+ *   whose files changed (a move marked place) and any move while it is held
+ *   offer no Undo.
  * - Keys: Space plays or pauses, the left and right arrows skip by the skip
  *   length, [ and ] change the speed by 0.05; a held key acts once. Inside the full player they are
  *   always on (WS.playerUI.onKey; Space on a focused button presses the
@@ -921,7 +923,10 @@ export function createFeatures(env) {
         sleep.endMs = chapterEnd(s);
         if (sleep.endMs === null) cancelSleep();
       }
-      if (!undoing && typeof d.from === 'number' && typeof d.to === 'number' &&
+      // No Undo for placing a book whose files changed (confirmPlace's moves,
+      // marked place) or for any move while it is held: Undo would take the
+      // listener back to the held start, never their place.
+      if (!undoing && !d.place && !s.filesChanged && typeof d.from === 'number' && typeof d.to === 'number' &&
           Math.abs(d.to - d.from) > UNDO_OVER_MS) {
         offerUndo(s.book, d.from, d.to);
       }
