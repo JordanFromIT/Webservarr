@@ -77,7 +77,9 @@
  *                     place, hide(), or the full player closing.
  *                     Call show() from the tap or key that asks for it: only
  *                     then does the panel get a CloseWatcher of its own (the
- *                     phone's Back closes it alone). Shown any other way, Escape
+ *                     phone's Back closes it alone); shown from an 'open'
+ *                     handler (the tap that opened the player, which made
+ *                     the player's), it gets none. Shown any other way, Escape
  *                     still closes it first, but Back closes the player.
  *   open(), close(), isOpen()        the full player
  *   on('open' | 'close', fn) -> unsubscribe
@@ -244,6 +246,11 @@ export function createUI(env) {
   let panelWatcher = null;
   let openedAt = null;         // the address the full player opened on
   let panelTapped = false;     // the panel over the player got its watcher from a tap
+  // The full player's 'open' handlers are running, and its watcher was made
+  // in this tap: a panel they show (the same tap) gets none of its own (the
+  // two would share one close request, and one Back would close both).
+  // Escape still closes it first.
+  let watcherTap = false;
 
   // again: re-made for a layer that had one (the screen turned), not a new
   // layer, so no tap is needed.
@@ -490,7 +497,7 @@ export function createUI(env) {
     const was = view;
     view = name;
     // Over the player (a phone): a layer of its own, closed first.
-    if (isOpen && !panelWatcher && !matches(WIDE)) panelTapped = watchPanel(false);
+    if (isOpen && !panelWatcher && !watcherTap && !matches(WIDE)) panelTapped = watchPanel(false);
     drawPanels();
     if (name === 'chapters') centreCurrent();
     const p = panels.get(name);
@@ -961,9 +968,11 @@ export function createUI(env) {
 
   // Held for the book's changed files, the bar's Play opens the full player,
   // where the listener finds their place (a Play there previews it).
+  // Playing a preview (it reads Pause) or reading the saved places, it is
+  // the toggle as ever.
   barPlay.addEventListener('click', guarded(function () {
     const s = player.state();
-    if (s && s.book && s.filesChanged) {
+    if (s && s.book && s.filesChanged && !s.playing && !s.checking) {
       open();
       return null;
     }
@@ -1121,12 +1130,18 @@ export function createUI(env) {
       watcher = null;
       close();
     });
+
     render(player.state());
     centreCurrent();
     syncScroll();
     if (clockTimer === null) clockTimer = setT(tickClock, CLOCK_MS);
     closeBtn.focus({ preventScroll: true });
-    emit('open');
+    watcherTap = !!watcher;
+    try {
+      emit('open');
+    } finally {
+      watcherTap = false;
+    }
     return true;
   }
 

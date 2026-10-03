@@ -68,8 +68,9 @@
  *   entries: earlier_copy) starts a new session; a session running across
  *   two pages is one. Each shows when it started and ended, where it ended
  *   ("Chapter 3 · 1:02:03 into the book · 34%": that copy's chapter, book
- *   time and how far through), the device, and "Earlier copy" for an
- *   earlier copy's. A tap goes to where it ended (a seek: the listener's own
+ *   time and how far through), the chapters it covered when more than one
+ *   ("Chapters 2 to 3"), the device, and "Earlier copy" for an earlier
+ *   copy's. A tap goes to where it ended (a seek: the listener's own
  *   move, with Undo over 2 minutes; while the book is held because its files
  *   changed, it moves the helper's chosen spot and the helper shows again).
  *   A session whose part is gone (the files changed, or an earlier copy)
@@ -1543,6 +1544,9 @@ export function createFeatures(env) {
     hs.sessions.forEach(function (x, i) {
       const when = sessionWhen(x, nowMs);
       const where = sessionPlace(x, s.chapters, s.bookDurationMs);
+      // The chapters it covered, when more than the one it ended in.
+      const covered = sessionChapters(x, s.chapters);
+      const range = covered.indexOf('Chapters ') === 0 ? covered : '';
       const device = x.device || 'Another device';
       // Its part is gone (the files changed, or an earlier copy): the helper
       // finds the place in this copy.
@@ -1550,14 +1554,14 @@ export function createFeatures(env) {
       const b = h('button', {
         type: 'button', class: 'wsp-row wsp-hist-row', 'data-session': String(i),
         disabled: gone && !canFind ? true : null,
-        'aria-label': [when, where, device + (x.earlier ? ', earlier copy' : '')].filter(Boolean).join(', ') +
+        'aria-label': [when, where, range, device + (x.earlier ? ', earlier copy' : '')].filter(Boolean).join(', ') +
           (gone ? (canFind ? '. Find this place in this copy' : '') : '. Go to where it ended')
       }, [
         h('span', { class: 'wsp-row-text' }, [
           h('span', { class: 'wsp-hist-when', text: when }),
           where ? h('span', { class: 'wsp-hist-what', text: where }) : null,
           h('span', { class: 'wsp-hist-dev' }, [
-            h('span', { class: 'wsp-hist-device', text: device }),
+            h('span', { class: 'wsp-hist-device', text: range ? range + ' · ' + device : device }),
             x.earlier ? h('span', { class: 'wsp-hist-tag', text: 'Earlier copy' }) : null
           ])
         ]),

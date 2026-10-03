@@ -441,13 +441,17 @@ await run('Review Focus 2: a 20 h place in a 10 h copy is clamped, and the point
   const H = 3600000;
   const c = FP.candidates({ book_ms: 20 * H, book_duration_ms: 25 * H }, 10 * H, [], null);
   check('two candidates', c.length === 2, c);
-  check('the same time: clamped to this copy\'s end', c[0].kind === 'time' && c[0].bookMs === 10 * H, c[0]);
-  check('the same point: 80% of this copy', c[1].kind === 'percent' && c[1].bookMs === 8 * H, c[1]);
-  check('both inside the copy', c.every((x) => x.bookMs >= 0 && x.bookMs <= 10 * H));
+  // T3F2: never the very end (a Play there would start again from 0:00).
+  check('the same time: clamped to 30 s before this copy\'s end', c[0].kind === 'time' && c[0].bookMs === 10 * H - 30000 && c[0].clamped === true, c[0]);
+  check('the same point: 80% of this copy', c[1].kind === 'percent' && c[1].bookMs === 8 * H && c[1].clamped === false, c[1]);
+  check('both inside the copy', c.every((x) => x.bookMs >= 0 && x.bookMs <= 10 * H - 30000));
   const end = FP.candidates({ book_ms: 20 * H, book_duration_ms: 20 * H }, 10 * H, [], null);
-  check('the old end: one candidate, this copy\'s end', end.length === 1 && end[0].bookMs === 10 * H, end);
+  check('the old end: one candidate, 30 s before this copy\'s end', end.length === 1 && end[0].bookMs === 10 * H - 30000 && end[0].clamped, end);
   const bad = FP.candidates({ book_ms: 30 * H, book_duration_ms: 20 * H }, 10 * H, [], null);
-  check('a place past its own length still lands inside', bad.every((x) => x.bookMs <= 10 * H), bad);
+  check('a place past its own length still lands inside', bad.every((x) => x.bookMs <= 10 * H - 30000), bad);
+  const inside = FP.candidates({ book_ms: 10 * H - 30000 }, 10 * H, [], null)[0];
+  check('exactly at the margin: not clamped', inside.bookMs === 10 * H - 30000 && inside.clamped === false, inside);
+  check('a copy under 30 s: its start', FP.candidates({ book_ms: 5000 }, 20000, [], null)[0].bookMs === 0);
 });
 
 await run('Review Focus 1: no book time, no candidates', () => {
@@ -482,8 +486,11 @@ await run('text: book time, percent, ago and the earlier copy\'s name', () => {
   check('percent: whole, down', FP.percentOf(640, 1000) === 64 && FP.percentOf(999, 1000) === 99 && FP.percentOf(1000, 1000) === 100);
   check('percent unknown', FP.percentOf(5, 0) === null && FP.percentOf(null, 10) === null);
   check('ago', FP.formatAgo(30000) === 'just now' && FP.formatAgo(3 * MIN) === '3 min ago' && FP.formatAgo(2 * 3600000) === '2 h ago' && FP.formatAgo(3 * 86400000) === '3 days ago');
-  check('named, with the narrator', FP.copyLine({ book_title: 'Saga (Full Cast)', narrator: 'A. Reader' }) === 'From an earlier copy: Saga (Full Cast), read by A. Reader');
-  check('no narrator: left out', FP.copyLine({ book_title: 'Saga', narrator: null }) === 'From an earlier copy: Saga');
+  check('named, with the narrator', FP.copyLine({ linked_from: '400:1', book_title: 'Saga (Full Cast)', narrator: 'A. Reader' }) === 'From an earlier copy: Saga (Full Cast), read by A. Reader');
+  check('no narrator: left out', FP.copyLine({ linked_from: '400:1', book_title: 'Saga', narrator: null }) === 'From an earlier copy: Saga');
+  // T3F5: files changed within the same album are no earlier copy.
+  check('no link: nothing, even with a title', FP.copyLine({ linked_from: null, book_title: 'Saga', narrator: 'A. Reader' }) === '' &&
+    FP.copyLine({ book_title: 'Saga', earlier: true }) === '');
   check('a linked copy with no title', FP.copyLine({ linked_from: '400:1' }) === 'From an earlier copy');
   check('nothing to say', FP.copyLine({}) === '' && FP.copyLine(null) === '');
 });
@@ -592,7 +599,7 @@ await run('Start from the beginning: startOver, never the link', async () => {
   const t = await held();
   const start = t.qa('.wsp-fp-row')[1];
   start.click();
-  check('startOver', t.calls.some((c) => c[0] === 'startOver'));
+  check('startOver, with nothing passed (so no link)', JSON.stringify(t.calls.filter((c) => c[0] === 'startOver')) === '[["startOver"]]', t.calls);
   await t.clock.advance(5000);
   check('placed at 0', t.st().filesChanged === null && t.st().bookMs === 0 && !t.shown());
   check('saved at 0, no link', t.posts.length >= 1 && t.posts.every((b) => b.book_ms === 0 && !b.linked_from), t.posts.map((b) => [b.book_ms, b.linked_from]));
@@ -709,10 +716,26 @@ await run('a clamped candidate says the copy is shorter', async () => {
   check('the same time', t.card('time').querySelector('.wsp-fp-at').textContent.startsWith('0:25:00'));
   check('not clamped: nothing to say', t.card('time').querySelector('.wsp-fp-note').hidden);
   t.engine.close();
+  // 40:00 of a 50-minute copy in this 30-minute copy (T3F2).
   const u = await held({ old: { book_ms: 2400000, book_duration_ms: 3000000 } });
-  check('clamped to the end', u.card('time').querySelector('.wsp-fp-at').textContent.startsWith('0:30:00'), u.card('time').querySelector('.wsp-fp-at').textContent);
+  check('clamped to 30 s before the end', u.card('time').querySelector('.wsp-fp-at').textContent.startsWith('0:29:30'), u.card('time').querySelector('.wsp-fp-at').textContent);
   check('says why', u.card('time').querySelector('.wsp-fp-note').textContent === 'This copy ends before then');
+  check('the same point is chosen, not the clamped time', u.card('percent').classList.contains('is-chosen') && !u.card('time').classList.contains('is-chosen') &&
+    u.st().filesChanged.spot === 1440000, u.st().filesChanged.spot);
+  u.card('percent').querySelector('.wsp-fp-use').click();
+  await u.clock.advance(5000);
+  check('confirmed at the same point', u.st().filesChanged === null && u.posts[0].book_ms === 1440000, u.posts.map((b) => b.book_ms));
+  u.q('.wsp-play-lg').click();
+  await u.clock.advance(3000);
+  check('a Play goes on from there, never from 0:00', u.st().playing && u.st().bookMs > 1440000 && u.st().bookMs < 1450000, u.st().bookMs);
   u.engine.close();
+  // Only the clamped one (the old end, near this copy's end): none is chosen, and its confirm is short of the end.
+  const v = await held({ old: { book_ms: 1800000, book_duration_ms: 1800000 } });
+  check('none chosen, the spot left at the start', v.cards().length === 1 && v.qa('.wsp-fp-cand.is-chosen').length === 0 && v.st().filesChanged.spot === 0);
+  v.card('time').querySelector('.wsp-fp-use').click();
+  await v.clock.advance(5000);
+  check('its confirm lands 30 s before the end', v.st().filesChanged === null && v.st().bookMs === 1770000, v.st().bookMs);
+  v.engine.close();
 });
 
 await run('Show history opens the history; an entry whose part is gone opens the helper with it as the old place', async () => {
@@ -735,9 +758,15 @@ await run('Show history opens the history; an entry whose part is gone opens the
   check('the helper, with that entry as the old place', t.shown() && t.txt('.wsp-fp-old-time') === '0:15:00 into the book · 50%' && t.txt('.wsp-fp-old-chapter') === 'Chapter 5',
     [t.view(), t.txt('.wsp-fp-old-time')]);
   check('an earlier copy\'s', t.txt('.wsp-fp-copy') === 'From an earlier copy');
-  check('its candidates: one (the same length)', t.cards().length === 1 && t.cards()[0].querySelector('.wsp-fp-at').textContent === '0:15:00 · Part 2 of 3');
-  check('the chosen spot moved to it, nothing saved', t.st().filesChanged.spot === 900000 && t.posts.length === 0);
-  t.cards()[0].querySelector('.wsp-fp-use').click();
+  const time = t.card('time');
+  check('its candidate (the same length)', !time.hidden && t.card('percent') === null && time.querySelector('.wsp-fp-at').textContent === '0:15:00 · Part 2 of 3',
+    time.querySelector('.wsp-fp-at').textContent);
+  // T3F3: picked once per hold: the listener's spot stays, shown as itself.
+  check('the chosen spot is kept, shown as itself', t.st().filesChanged.spot === 720000 && !t.card('spot').hidden &&
+    t.card('spot').querySelector('.wsp-fp-at').textContent === '0:12:00 · Part 2 of 3' && !time.classList.contains('is-chosen'),
+    [t.st().filesChanged.spot, t.card('spot').querySelector('.wsp-fp-at').textContent]);
+  check('nothing moved, nothing saved', t.calls.filter((c) => c[0] === 'seek').length === 1 && t.posts.length === 0, t.calls);
+  time.querySelector('.wsp-fp-use').click();
   await t.clock.advance(5000);
   check('confirmed there, held link kept', t.st().filesChanged === null && t.posts[0].book_ms === 900000 && t.posts[0].linked_from === '400:1', t.posts.map((b) => [b.book_ms, b.linked_from]));
   t.engine.close();
@@ -801,6 +830,185 @@ await run('without the helper a gone entry is disabled, as before', async () => 
   t.q('.wsp-slot-history .wsp-action').click();
   await t.clock.advance(50);
   check('disabled', t.q('.wsp-hist-row').disabled);
+  t.engine.close();
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 1
+// ---------------------------------------------------------------------------
+
+await run('T3F1: a drag of the nudge moves the spot when it is let go, whatever comes first', async () => {
+  const t = await held();
+  const range = t.q('.wsp-fp-range');
+  const PE = t.win.PointerEvent || t.win.MouseEvent;
+  const drag = (by) => {
+    range.dispatchEvent(new PE('pointerdown', { bubbles: true, pointerId: 1 }));
+    range.value = String(Number(range.value) + by / 2);
+    range.dispatchEvent(new t.win.Event('input', { bubbles: true }));
+    range.value = String(Number(range.value) + by / 2);
+    range.dispatchEvent(new t.win.Event('input', { bubbles: true }));
+  };
+  const seeks = () => t.calls.filter((c) => c[0] === 'seek').length;
+  const n0 = seeks();
+  drag(120);
+  check('a drag only shows', t.st().filesChanged.spot === 720000 && t.card('time').querySelector('.wsp-fp-at').textContent.startsWith('0:14:00'),
+    t.card('time').querySelector('.wsp-fp-at').textContent);
+  range.dispatchEvent(new PE('pointerup', { bubbles: true, pointerId: 1 }));
+  check('pointerup first (as a browser sends it): moved', t.st().filesChanged.spot === 840000, t.st().filesChanged.spot);
+  range.dispatchEvent(new t.win.Event('change', { bubbles: true }));
+  await t.clock.advance(10);
+  check('the change after it moves nothing more', t.st().filesChanged.spot === 840000 && seeks() === n0 + 1, [t.st().filesChanged.spot, seeks() - n0]);
+  drag(-60);
+  range.dispatchEvent(new t.win.Event('change', { bubbles: true }));
+  range.dispatchEvent(new PE('pointerup', { bubbles: true, pointerId: 1 }));
+  check('change first: moved once', t.st().filesChanged.spot === 780000 && seeks() === n0 + 2, [t.st().filesChanged.spot, seeks() - n0]);
+  drag(60);
+  range.dispatchEvent(new PE('pointercancel', { bubbles: true, pointerId: 1 }));
+  check('a cancelled drag goes back', t.st().filesChanged.spot === 780000 && t.card('time').querySelector('.wsp-fp-at').textContent.startsWith('0:13:00'),
+    t.card('time').querySelector('.wsp-fp-at').textContent);
+  check('nothing saved', t.posts.length === 0);
+  t.engine.close();
+});
+
+await run('T3F3: picked once per hold; another place shown, Escape and the prompt, an in-book entry: the listener\'s spot stays', async () => {
+  const t = await held();
+  t.history[''] = {
+    entries: [
+      { track: '401', offset_ms: 300000, device: 'Chrome on Android', device_id: OTHER, event: 'pause', at: new Date(t.now() - 2 * 3600000).toISOString(),
+        book_key: '400:1', book_ms: 900000, book_duration_ms: 1800000, chapter_label: 'Chapter 5', earlier_copy: true },
+      { track: '503', offset_ms: 100000, device: 'Test on Linux', device_id: ME, event: 'pause', at: new Date(t.now() - 3 * 3600000).toISOString(), book_key: '500:1' }
+    ],
+    next_before: null
+  };
+  t.qa('.wsp-fp-step')[1].click();
+  t.qa('.wsp-fp-step')[1].click();
+  check('nudged', t.st().filesChanged.spot === 740000);
+  t.qa('.wsp-fp-row')[0].click();
+  await t.clock.advance(50);
+  t.qa('.wsp-hist-row')[0].click();
+  await t.clock.advance(10);
+  check('another old place: the nudged spot is kept', t.st().filesChanged.spot === 740000 && t.txt('.wsp-fp-old-chapter') === 'Chapter 5', t.st().filesChanged.spot);
+  check('as its own card, not the entry\'s candidate 3 min away', t.q('.wsp-fp-cand.is-chosen').getAttribute('data-kind') === 'spot');
+  t.qa('.wsp-fp-step')[1].click();
+  check('nudged there, it stays its own card', t.st().filesChanged.spot === 750000 && t.q('.wsp-fp-cand.is-chosen').getAttribute('data-kind') === 'spot' &&
+    t.q('.wsp-fp-cand.is-chosen .wsp-fp-at').textContent === '0:12:30 · Part 2 of 3', t.q('.wsp-fp-cand.is-chosen .wsp-fp-at').textContent);
+  t.key(t.q('#wspPanel-findplace'), 'Escape');
+  await t.clock.advance(10);
+  t.promptBtn('Find your place').click();
+  await t.clock.advance(10);
+  check('back from the prompt: still kept', t.shown() && t.st().filesChanged.spot === 750000, t.st().filesChanged.spot);
+  t.qa('.wsp-fp-row')[0].click();
+  await t.clock.advance(50);
+  t.qa('.wsp-hist-row')[1].click();
+  await t.clock.advance(10);
+  check('an in-book entry: the spot is the entry\'s', t.shown() && t.st().filesChanged.spot === 1600000, t.st().filesChanged.spot);
+  const seeks = t.calls.filter((c) => c[0] === 'seek').map((c) => c[1]);
+  check('only the open\'s pick, the nudges and the entry moved it', JSON.stringify(seeks) === '[720000,730000,740000,750000,1600000]', seeks);
+  const chosen = t.q('.wsp-fp-cand.is-chosen');
+  check('shown as the chosen spot', chosen && chosen.getAttribute('data-kind') === 'spot' && chosen.querySelector('.wsp-fp-at').textContent === '0:26:40 · Part 3 of 3');
+  chosen.querySelector('.wsp-fp-use').click();
+  await t.clock.advance(5000);
+  check('confirmed there', t.st().filesChanged === null && t.posts[0].book_ms === 1600000, t.posts.map((b) => b.book_ms));
+  t.engine.close();
+});
+
+await run('T3F3: held for a same-album change, a gone entry then an in-book one: the in-book spot is the one used', async () => {
+  const t = await held({ old: { track: '499', linked_from: null, book_title: null, narrator: null } });
+  const base = { device: 'Chrome on Windows', device_id: OTHER, event: 'pause', book_key: '500:1', book_duration_ms: 3600000 };
+  t.history[''] = { next_before: null, entries: [
+    { ...base, track: '498', offset_ms: 30000, at: new Date(t.now() - 3 * 3600000).toISOString(), book_ms: 300000, chapter_label: 'Chapter 2' },
+    { ...base, track: '502', offset_ms: 200000, at: new Date(t.now() - 2 * 86400000).toISOString(), book_ms: 800000, chapter_label: 'Part 2 of 3' }
+  ] };
+  t.qa('.wsp-fp-row')[0].click();
+  await t.clock.advance(50);
+  t.q('.wsp-hist-row[data-session="0"]').click();
+  await t.clock.advance(10);
+  check('the gone one: the spot is kept', t.st().filesChanged.spot === 720000, t.st().filesChanged.spot);
+  t.qa('.wsp-fp-row')[0].click();
+  await t.clock.advance(50);
+  t.q('.wsp-hist-row[data-session="1"]').click();
+  await t.clock.advance(10);
+  check('the in-book one: there', t.st().filesChanged.spot === 800000, t.st().filesChanged.spot);
+  t.q('.wsp-fp-cand.is-chosen .wsp-fp-use').click();
+  await t.clock.advance(5000);
+  check('confirmed there', t.st().filesChanged === null && t.posts[0].book_ms === 800000, t.posts.map((b) => b.book_ms));
+  t.engine.close();
+});
+
+await run('T3F4: while a confirm waits on a question, Preview waits too and the panel says so', async () => {
+  for (const answer of ['Keep listening here', 'Continue']) {
+    const t = await held();
+    t.places.plex = { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(t.now()).toISOString(), device: 'Plexamp' };
+    await t.clock.advance(5000);
+    t.card('percent').querySelector('.wsp-fp-use').click();
+    await t.clock.advance(200);
+    check(answer + ': asked, still held, not checking', !!t.st().filesChanged && !t.st().checking && t.prompts().some((x) => x.indexOf('Continue from') === 0), t.prompts());
+    check(answer + ': Preview waits', t.qa('.wsp-fp-cand').filter((c) => !c.hidden).every((c) => c.querySelector('.wsp-fp-preview').disabled));
+    check(answer + ': the panel says so', t.txt('.wsp-fp-status') === 'Answer the question above to carry on.', t.txt('.wsp-fp-status'));
+    t.card('time').querySelector('.wsp-fp-preview').click();
+    check(answer + ': a press there does nothing', t.calls.every((c) => c[0] !== 'previewAt') && t.st().filesChanged.spot === 360000);
+    t.qa('.wsp-prompt .wsp-notice-btn').find((b) => b.textContent === answer).click();
+    await t.clock.advance(3000);
+    check(answer + ': landed where the answer says', t.st().filesChanged === null && t.posts[0].book_ms === (answer === 'Continue' ? 900000 : 360000), t.posts.map((b) => b.book_ms));
+    t.engine.close();
+  }
+});
+
+await run('T3F5: files changed within the same album name no earlier copy', async () => {
+  const t = await held({ old: { linked_from: null, book_title: 'Three Parts', narrator: 'A. Reader' } });
+  check('no copy line', t.txt('.wsp-fp-copy') === null);
+  t.engine.close();
+});
+
+await run('T3F6: the status live region is there while empty', async () => {
+  const t = await held();
+  const st = t.q('.wsp-fp-status');
+  check('empty, not hidden, a polite status', st.textContent === '' && !st.hidden && !st.closest('[hidden]') && st.getAttribute('role') === 'status');
+  t.engine.close();
+});
+
+await run('T3U2: the bar\'s button during a held preview is the toggle: it pauses, as it says', async () => {
+  const t = await held();
+  t.card('time').querySelector('.wsp-fp-preview').click();
+  await t.clock.advance(1000);
+  t.ui.close();
+  await t.clock.advance(400);
+  const bar = t.q('.wsp-bar .wsp-play');
+  check('it reads Pause', t.st().playing && bar.getAttribute('aria-label') === 'Pause', bar.getAttribute('aria-label'));
+  bar.click();
+  await t.clock.advance(1000);
+  check('pressed: paused, the player still closed', !t.st().playing && !t.ui.isOpen() && bar.getAttribute('aria-label') === 'Play');
+  bar.click();
+  await t.clock.advance(400);
+  check('paused, it reads Play and opens the helper', t.ui.isOpen() && t.shown() && !t.st().playing);
+  check('nothing saved', t.posts.length === 0);
+  t.engine.close();
+});
+
+await run('T3U3: the tap that opens the player makes one watcher; the panel shown with it makes none', async () => {
+  const t = await held({ closeWatcher: true, noActivation: true });
+  t.ui.close();
+  await t.clock.advance(400);
+  t.env.activation = true;
+  t.q('.wsp-bar .wsp-play').click();
+  await t.clock.advance(10);
+  check('bar Play: the player and its helper, one watcher', t.ui.isOpen() && t.shown() && t.cw.live.length === 1, t.cw.live.length);
+  t.key(t.q('#wspPanel-findplace'), 'Escape');
+  check('Escape still closes the helper first', t.ui.isOpen() && !t.shown());
+  t.cw.live[0].close();
+  await t.clock.advance(400);
+  check('Back closes the player, no watcher left', !t.ui.isOpen() && t.cw.live.length === 0);
+  t.promptBtn('Find your place').click();
+  await t.clock.advance(10);
+  check('the prompt with the player closed: one watcher', t.ui.isOpen() && t.shown() && t.cw.live.length === 1, t.cw.live.length);
+  t.key(t.q('#wspPanel-findplace'), 'Escape');
+  t.promptBtn('Find your place').click();
+  await t.clock.advance(10);
+  check('the prompt with the player open: the panel\'s own watcher', t.shown() && t.cw.live.length === 2, t.cw.live.length);
+  t.cw.live[1].close();
+  await t.clock.advance(10);
+  check('Back closes the helper alone', t.ui.isOpen() && !t.shown() && t.cw.live.length === 1);
+  check('nothing saved', t.posts.length === 0 && t.st().filesChanged !== null);
   t.engine.close();
 });
 

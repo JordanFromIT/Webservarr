@@ -18,24 +18,29 @@
  * with the full player, and again whenever the full player opens while the
  * book is held (the bar's Play opens it too: ui.js). It shows:
  * - where the listener was: the book time, how far through the book, the
- *   old chapter's name, when they last listened, and the earlier copy's
- *   title and narrator when the place came from one;
+ *   old chapter's name, when they last listened, and, for a place from an
+ *   earlier copy of the book (linked_from), that copy's title and narrator;
  * - the candidate spots in this copy (candidates() below), each with this
  *   copy's chapter there, Preview (the obvious action: 15 s from the spot,
  *   nothing saved) and "Use this spot" (the confirm: WS.player.confirmPlace);
  * - on the chosen candidate (the one previewed or picked), a nudge: a
- *   scrubber and back and forward by the skip length. The chosen spot is
- *   the engine's (state().filesChanged.spot): a move anywhere else while
- *   held (the full player's scrubber, a chapter, the lock screen, a history
- *   entry) moves it, and it shows as "Your chosen spot" when it is near no
+ *   scrubber (it moves the spot when let go) and back and forward by the
+ *   skip length. The chosen spot is the engine's
+ *   (state().filesChanged.spot). Once per hold, while it is still at the
+ *   hold's start, the first playable candidate is picked (never one pulled
+ *   in from past this copy's end); after that the spot is the listener's: a
+ *   move anywhere else while held (the full player's scrubber, a chapter,
+ *   the lock screen, a history entry) moves it, another old place shown
+ *   keeps it, and it shows as "Your chosen spot" when it is near no
  *   candidate;
  * - "Show history" (the features' history panel) and "Start from the
  *   beginning" (WS.player.startOver).
  * With no book time on the old place (a place saved before this change),
  * there are no candidates: only the history and the start. A candidate in a
  * part this browser can't decode is shown as unavailable: no preview, no
- * confirm. While the confirm reads the saved places (state().checking),
- * Preview waits.
+ * confirm. While a confirm (or start over) waits, on its read of the saved
+ * places (state().checking) or on the question that read asked, Preview
+ * waits and the panel says so.
  *
  * Closing it (its back button, Escape, the phone's Back, closing the full
  * player) is "decide later": nothing is saved and the book stays held. A
@@ -53,16 +58,19 @@
  *
  * Pure (importable by Node, no DOM at import time):
  *   candidates(old, durationMs, chapters, blocked)
- *       -> [{ kind: 'time'|'percent', bookMs, chapterLabel, unavailable }]
- *       'time': old.book_ms clamped to this copy's length; 'percent': the
- *       same fraction of this copy (absent without old.book_duration_ms);
+ *       -> [{ kind: 'time'|'percent', bookMs, chapterLabel, unavailable, clamped }]
+ *       'time': old.book_ms; 'percent': the same fraction of this copy
+ *       (absent without old.book_duration_ms). Both are clamped to END_MS
+ *       before this copy's end (clamped: true when that moved one), so a
+ *       confirm never lands at the very end;
  *       only 'time' when they are NEAR_MS or less apart. [] without old.book_ms.
  *       blocked: fn(bookMs) -> true in a part this browser can't decode, or
  *       the engine's parts() ([{ start_ms, duration_ms, playable }]).
  *   bookClock(ms)          "3:12:40", "0:12:05" (always hours: never a time of day)
  *   percentOf(ms, total)   whole percent through, or null
  *   formatAgo(ms)          "just now", "3 min ago", "2 h ago", "3 days ago"
- *   copyLine(old)          "From an earlier copy: <title>, read by <narrator>", or ''
+ *   copyLine(old)          "From an earlier copy: <title>, read by <narrator>" (a linked
+ *                          copy only), or ''
  *   createFindPlace(env)   the helper, given its surroundings
  *   boot(win, overrides)   WS.playerFindPlace
  *
@@ -74,6 +82,7 @@
  */
 
 export const NEAR_MS = 5000;           // candidates this close (or closer) are one
+export const END_MS = 30000;           // a candidate is never nearer the copy's end than this
 export const NUDGE_MS = 300000;        // the nudge reaches this far either side of its candidate
 export const FINE_MS = 1000;           // an arrow key on the nudge moves this much
 export const PANEL = 'findplace';
@@ -122,11 +131,14 @@ function text(v) {
   return typeof v === 'string' ? v.trim() : '';
 }
 
-/* The earlier copy, named, so a wrong match is plain to see. */
+/* The earlier copy, named, so a wrong match is plain to see. Only for a
+   place from an earlier copy (linked_from): files changed within the same
+   album are this copy's own book. */
 export function copyLine(old) {
   const o = old || {};
+  if (!o.linked_from) return '';
   const title = text(o.book_title);
-  if (!title) return o.linked_from || o.earlier ? 'From an earlier copy' : '';
+  if (!title) return 'From an earlier copy';
   const by = text(o.narrator);
   return 'From an earlier copy: ' + title + (by ? ', read by ' + by : '');
 }
@@ -170,11 +182,14 @@ export function candidates(old, durationMs, chapters, blocked) {
   const at = o.book_ms;
   if (!known(at) || at < 0 || !isFinite(dur) || dur <= 0) return [];
   const isBlocked = blockedBy(blocked);
+  // Never at the very end: placed there, the next Play would start the book
+  // again from 0:00.
+  const limit = Math.max(0, dur - END_MS);
   function spot(kind, ms) {
-    const v = Math.max(0, Math.min(dur, ms));
-    return { kind: kind, bookMs: v, chapterLabel: chapterAt(chapters, v), unavailable: isBlocked(v) };
+    const v = Math.max(0, Math.min(limit, ms));
+    return { kind: kind, bookMs: v, chapterLabel: chapterAt(chapters, v), unavailable: isBlocked(v), clamped: ms > limit };
   }
-  const out = [spot('time', Math.min(at, dur))];
+  const out = [spot('time', at)];
   const total = o.book_duration_ms;
   if (known(total) && total > 0) {
     const p = spot('percent', Math.round((Math.min(at, total) / total) * dur));
@@ -299,7 +314,9 @@ export function createFindPlace(env) {
   let holds = 0;               // a number per hold (each files-changed warning)
   let promptEntry = null;      // the "Find your place" prompt, while the helper is put off
   let isShown = false;
-  let opening = false;         // the full player is being opened for the helper
+  let opening = null;          // the full player is being opened for the helper: its show()
+  let pending = false;         // a confirm (or start over) is waiting on its read or question
+  let rematch = false;         // the old place changed under a kept spot (see follow)
   const SPOT = 'spot';
 
   // ---- The panel ----
@@ -411,17 +428,26 @@ export function createFindPlace(env) {
     if (typeof chosen === 'number' && chosen >= cards.length) chosen = -1;
   }
 
-  // The first candidate that can play, else none.
+  // The first candidate that can play and was not pulled in from past this
+  // copy's end (the same point in the book is the better guess then), else
+  // none.
   function firstOpen() {
-    for (let i = 0; i < list.length; i++) if (!list[i].unavailable) return i;
+    for (let i = 0; i < list.length; i++) if (!list[i].unavailable && !list[i].clamped) return i;
     return -1;
   }
 
-  // At the open of a hold (or a history entry): the first candidate is the
-  // chosen spot, so the nudge, the full player's Play and the time shown
-  // are all at it. Held, that is a move of the held playhead (nothing saved).
+  // Once per hold (or per history entry when not held): the first candidate
+  // is the chosen spot, so the nudge, the full player's Play and the time
+  // shown are all at it. Held, that is a move of the held playhead (nothing
+  // saved), and only while the spot is still where the hold put it: a spot
+  // the listener moved (a history entry, the lock screen) is theirs.
   function select(s) {
     const i = firstOpen();
+    if (mode === 'held' && spotNow(s) !== 0) {
+      chosen = -1;
+      ownSpot = null;
+      return;
+    }
     chosen = i;
     if (i === -1) {
       if (mode === 'free') freeSpot = null;
@@ -446,10 +472,14 @@ export function createFindPlace(env) {
     const at = spotNow(s);
     if (ownSpot !== null && at === ownSpot) return;
     ownSpot = at;
-    if (typeof chosen === 'number' && chosen >= 0 && Math.abs(at - centreOf(chosen)) <= NUDGE_MS) return;
+    // A spot kept from another old place is only a candidate's when it is
+    // that very spot; else it shows as itself, beside the candidates.
+    const reach = rematch ? NEAR_MS : NUDGE_MS;
+    rematch = false;
+    if (chosen !== -1 && cardOf(chosen) && Math.abs(at - centreOf(chosen)) <= reach) return;
     let near = -1;
     for (let i = 0; i < list.length; i++) {
-      if (!list[i].unavailable && Math.abs(at - list[i].bookMs) <= NUDGE_MS &&
+      if (!list[i].unavailable && Math.abs(at - list[i].bookMs) <= reach &&
           (near === -1 || Math.abs(at - list[i].bookMs) < Math.abs(at - list[near].bookMs))) near = i;
     }
     if (near !== -1) {
@@ -485,7 +515,9 @@ export function createFindPlace(env) {
     const when = isFinite(at) ? 'Last listened ' + formatAgo(now() - at) : '';
     setText(oldWhen, when);
     setHidden(oldWhen, !when);
-    setText(status, isHeld && checking ? 'Checking for a newer place…' : '');
+    // A confirm waits on its read, then on any question that read asked.
+    const waiting = isHeld && (checking || pending);
+    setText(status, !isHeld ? '' : checking ? 'Checking for a newer place…' : pending ? 'Answer the question above to carry on.' : '');
     // The spots (the chosen spot's own card, after a move, even with none).
     const any = list.length > 0 || chosen === SPOT;
     setHidden(candHead, !any);
@@ -514,7 +546,7 @@ export function createFindPlace(env) {
       const playing = isHeld && isChosen && !!s.playing;
       setText(c.prev.firstChild, playing ? 'pause' : 'play_arrow');
       setText(c.prev.lastChild, playing ? 'Pause' : 'Preview');
-      c.prev.disabled = off || (checking && !playing);
+      c.prev.disabled = off || (waiting && !playing);
       setAttr(c.prev, 'aria-label', (playing ? 'Pause the preview' : 'Preview from ' + bookClock(v)) + ', ' + KIND_LABEL[c.kind]);
       c.use.disabled = off;
       setAttr(c.use, 'aria-label', 'Use this spot, ' + bookClock(v) + ', ' + KIND_LABEL[c.kind]);
@@ -553,8 +585,15 @@ export function createFindPlace(env) {
     const s = player.state();
     const dur = num(s.bookDurationMs);
     const to = Math.max(0, dur > 0 ? Math.min(dur, v) : v);
+    // Already there (a drag let go, then its change): nothing to move.
+    if (to === spotNow(s)) {
+      draw();
+      return;
+    }
     if (mode === 'held') {
       if (!held()) return;
+      // The helper's own move: its card stays the chosen one.
+      ownSpot = to;
       player.seek(to);
       ownSpot = spotNow(player.state());
     } else {
@@ -593,6 +632,7 @@ export function createFindPlace(env) {
       if (player.confirmPlace(v)) {
         chosen = i;
         ownSpot = spotNow(player.state());
+        pending = true;
       }
       draw();
       return;
@@ -608,7 +648,7 @@ export function createFindPlace(env) {
   }));
   startRow.addEventListener('click', safely(function () {
     if (mode === 'held') {
-      if (held()) player.startOver();
+      if (held() && player.startOver()) pending = true;
       draw();
       return;
     }
@@ -624,11 +664,18 @@ export function createFindPlace(env) {
     const c = cardOf(chosen);
     if (c) setText(c.at, [bookClock(v), chapterAt(player.state().chapters, v)].filter(Boolean).join(' · '));
   }));
-  nudgeRange.addEventListener('change', safely(function () {
+  function commitDrag() {
     scrubbing = false;
     move(nudgeLo + Number(nudgeRange.value) * 1000);
+  }
+  // Let go: the drag moves the spot (a browser may send the change after
+  // the pointerup, or not at all for a drag back to where it began).
+  nudgeRange.addEventListener('change', safely(commitDrag));
+  nudgeRange.addEventListener('pointerup', safely(function () {
+    if (scrubbing) commitDrag();
   }));
-  ['pointerup', 'pointercancel', 'blur'].forEach(function (type) {
+  // Cancelled, or left another way: back to where the spot is.
+  ['pointercancel', 'blur'].forEach(function (type) {
     nudgeRange.addEventListener(type, function () {
       if (!scrubbing) return;
       scrubbing = false;
@@ -681,28 +728,43 @@ export function createFindPlace(env) {
       next = s.filesChanged.old;
     }
     const nextMode = isHeld ? 'held' : 'free';
-    const id = (isHeld ? 'hold' + holds : 'free') + '|' + s.book + '|' + oldKey(next);
+    // Held, the first candidate is picked once per hold, whatever place the
+    // helper shows later; not held, once per history entry.
+    const id = (isHeld ? 'hold' + holds : 'free|' + oldKey(next)) + '|' + s.book;
     const fresh = id !== selectedFor;
+    const changed = !old || oldKey(old) !== oldKey(next) || mode !== nextMode;
     old = Object.assign({}, next);
     mode = nextMode;
     book = s.book;
+    function show() {
+      dropPrompt();
+      isShown = true;
+      panel.show(opener);
+    }
     if (!ui.isOpen()) {
-      opening = true;
+      // Shown from the full player's 'open' (below): in the tap that opens
+      // it, the panel is the player's layer, not one of its own.
+      opening = show;
       let ok = false;
       try {
         ok = ui.open();
       } finally {
-        opening = false;
+        opening = null;
       }
       if (!ok) return false;
+      if (!isShown) show();
+    } else {
+      show();
     }
-    dropPrompt();
-    isShown = true;
-    panel.show(opener);
     build(player.state());
     if (fresh) {
       selectedFor = id;
       select(player.state());
+    } else if (changed) {
+      // Another old place, the spot kept: its card is worked out afresh.
+      chosen = -1;
+      ownSpot = null;
+      rematch = true;
     }
     draw();
     return true;
@@ -723,6 +785,8 @@ export function createFindPlace(env) {
     ownSpot = null;
     freeSpot = null;
     spotCentre = null;
+    pending = false;
+    rematch = false;
     drawnFor = '';
   }
 
@@ -763,7 +827,13 @@ export function createFindPlace(env) {
 
   // The full player opening while the book is held opens on the helper.
   ui.on('open', safely(function () {
-    if (!opening && held() && !isShown) open(null, null);
+    if (opening) {
+      const show = opening;
+      opening = null;
+      show();
+      return;
+    }
+    if (held() && !isShown) open(null, null);
   }));
 
   return {

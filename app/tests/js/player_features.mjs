@@ -3431,10 +3431,11 @@ await run('history: sessions from the log, and a tap goes to where one ended', a
   // Saved before the book time was kept: this copy's chapter, time and length.
   check('where each ended: chapter, book time, percent', what[0] === 'Part 1 of 3 · 0:01:00 into the book · 3%' && what[1] === 'Part 3 of 3 · 0:26:40 into the book · 88%', what);
   const devs = rows.map((r) => r.querySelector('.wsp-hist-dev').textContent);
-  check('the device', devs.join() === 'Test on Linux,Chrome on Android', devs);
+  // T3C1 (player spec 8): the chapters a session covered, when more than one.
+  check('the chapters covered and the device', devs.join() === 'Test on Linux,Chapters 2 to 3 · Chrome on Android', devs);
   check('no earlier copy here', !t.q('.wsp-hist-tag'));
   check('when', rows[1].querySelector('.wsp-hist-when').textContent.startsWith('Today · '), rows[1].querySelector('.wsp-hist-when').textContent);
-  check('a spoken label', /, Part 3 of 3 · 0:26:40 into the book · 88%, Chrome on Android\. Go to where it ended$/.test(rows[1].getAttribute('aria-label')), rows[1].getAttribute('aria-label'));
+  check('a spoken label', /, Part 3 of 3 · 0:26:40 into the book · 88%, Chapters 2 to 3, Chrome on Android\. Go to where it ended$/.test(rows[1].getAttribute('aria-label')), rows[1].getAttribute('aria-label'));
   check('no older pages: no Show older', t.q('.wsp-hist-more').hidden);
   const posts = t.posts.length;
   rows[1].click();

@@ -1261,7 +1261,9 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-fp-old-chapter { margin: 4px 0 0; font-size: 15px; overflow-wrap: anywhere; }
 .wsp-fp-old-when { margin: 4px 0 0; font-size: 13px; color: rgb(var(--color-text) / .7); }
 .wsp-fp-status { margin: 0; font-size: 13px; font-weight: 600; color: rgb(var(--color-text) / .7); }
-.wsp-fp-status:empty { display: none; }
+/* Empty, the live region stays in place (so what it says next is
+   announced) and takes no room: it gives back the column's gap. */
+.wsp-fp-status:empty { margin-top: -16px; }
 .wsp-fp-head { margin-bottom: -8px; }
 .wsp-fp-cands { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .wsp-fp-cand {

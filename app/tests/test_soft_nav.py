@@ -1862,6 +1862,15 @@ class PlayerFindPlace(unittest.TestCase):
         for sel in (".wsp-fp-cand", ".wsp-fp-btn"):
             self.assertTrue(stilled(theme, sel, "transition"), sel)
 
+    def test_its_status_region_is_never_taken_out_of_the_page(self):
+        # A live region that is display:none while empty is not announced
+        # when it fills (T3F6).
+        theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        for m in re.finditer(r"([^{}]*\.wsp-fp-status[^{}]*)\{([^{}]*)\}", theme):
+            self.assertNotRegex(m.group(2), r"display\s*:\s*none|visibility\s*:\s*hidden", m.group(1).strip())
+        code = js_code_only(self.FINDPLACE.read_text(encoding="utf-8"))
+        self.assertNotRegex(code, r"setHidden\(status")
+
     def test_its_test_runs_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file
         for parts in (("package.json",), (".github", "workflows", "docker-publish.yml")):
