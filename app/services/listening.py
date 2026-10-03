@@ -82,11 +82,12 @@ WORK_KEY = re.compile(r"[0-9a-f]{32}", re.ASCII)
 BOOK_KEY = re.compile(r"[0-9]{1,20}:[0-9]{1,6}", re.ASCII)
 # The book-time fields the server reads from Plex, not the player.
 SERVER_FIELDS = ("book_duration_ms", "work_key", "narrator")
-# "Were you listening to one of these?" (spec 2.6 s3): the newest rows looked
-# at, at most that many album checks per request, and the share of a book
-# from which it counts as finished.
+# "Were you listening to one of these?" (spec 2.6 s3): how many places are
+# offered, how many of the listener's newest unfinished rows are looked at
+# (a bound on the query; the library listing the router reads settles which
+# are gone), and the share of a book from which it counts as finished.
 ORPHAN_ROWS = 10
-ORPHAN_ALBUM_CHECKS = 10
+ORPHAN_CANDIDATES = 200
 FINISHED_PERCENT = 97
 # How many earlier copies a history follows through their own links.
 LINK_HOPS = 5
@@ -575,22 +576,22 @@ def find_linked(db: Session, identity: str, work_key: Optional[str], exclude_key
 
 def orphan_candidates(db: Session, identity: str, exclude_key: str) -> list:
     """This listener's position rows that might be places in books that left
-    the library (spec 2.6 s3): the newest ORPHAN_ROWS by updated_at, none of
-    them `exclude_key`, all unfinished. A row is finished when its log holds
+    the library (spec 2.6 s3): the newest ORPHAN_CANDIDATES by updated_at, none
+    of them `exclude_key`, all unfinished. A row is finished when its log holds
     an `end` mark, or its book_ms is FINISHED_PERCENT or more of its
     book_duration_ms (both known: an unknown book_ms, or an unknown length,
     still counts as unfinished).
 
-    The router asks Plex which of them are gone and which a copy still in the
-    library carried forward (a successor, pending claims included), within
-    ORPHAN_ALBUM_CHECKS album checks. Scoped by identity; the log is read on
+    The router tells which of them are gone (one library listing) and which a
+    copy still in the library carried forward (a successor, pending claims
+    included). Scoped by identity; the log is read on
     ix_listening_log_identity_book_at."""
     P, L = ListeningPosition, ListeningLog
     ended = exists().where(L.identity == P.identity, L.book_key == P.book_key, L.event == "end")
     unfinished = or_(P.book_ms.is_(None), P.book_duration_ms.is_(None), P.book_duration_ms <= 0,
                      P.book_ms * 100 < P.book_duration_ms * FINISHED_PERCENT)
     return (db.query(P).filter(P.identity == identity, P.book_key != exclude_key, ~ended, unfinished)
-            .order_by(P.updated_at.desc(), P.book_key).limit(ORPHAN_ROWS).all())
+            .order_by(P.updated_at.desc(), P.book_key).limit(ORPHAN_CANDIDATES).all())
 
 
 def orphans_dismissed(db: Session, identity: str, book: str) -> bool:

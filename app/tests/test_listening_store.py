@@ -1600,11 +1600,12 @@ class OrphanCandidates(StoreBase):
     def keys(self, identity=ME, exclude="999:1"):
         return [r.book_key for r in listening.orphan_candidates(self.db, identity, exclude)]
 
-    def test_newest_first_and_at_most_ten(self):
-        for n in range(13):
-            self.row(f"{300 + n}:1", day=n + 1)
-        self.assertEqual(self.keys(), [f"{300 + n}:1" for n in range(12, 2, -1)])
-        self.assertEqual(listening.ORPHAN_ROWS, 10)
+    def test_newest_first_and_at_most_two_hundred(self):
+        for n in range(205):
+            self.row(f"{1000 + n}:1", day=n + 1)
+        keys = self.keys()
+        self.assertEqual(keys, [f"{1000 + n}:1" for n in range(204, 4, -1)])
+        self.assertEqual((listening.ORPHAN_CANDIDATES, listening.ORPHAN_ROWS), (200, 10))
 
     def test_finished_rows_are_not_candidates_and_do_not_take_a_place(self):
         for n in range(12):

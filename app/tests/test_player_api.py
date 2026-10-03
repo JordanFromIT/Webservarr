@@ -1661,6 +1661,12 @@ class OrphanBase(PlayerApiBase):
         self.assert_in_library = p.start()
         self.addCleanup(p.stop)
 
+        async def listing():
+            return [{"key": k, "title": k} for k in LIBRARY]
+        p = mock.patch.object(pp, "list_books", side_effect=listing)
+        self.list_books = p.start()
+        self.addCleanup(p.stop)
+
     def row(self, book, identity="plex:1001", author="Cal Penn", book_ms=100_000, duration=1_000_000,
             end=False, event="checkin", **extra):
         """A position row of the listener's, each one a day newer than the last."""
@@ -1754,32 +1760,58 @@ class Orphans(OrphanBase):
         self.assertEqual([(o["key"], o["author_match"]) for o in self.get().json()["orphans"]],
                          [("302:1", False), ("301:1", False)])
 
-    def test_only_the_newest_ten_rows_and_ten_album_checks(self):
+    def test_only_ten_places_are_offered_the_newest_first(self):
         for n in range(12):
             self.row(f"{300 + n}:1")
-        found = self.listed()
-        self.assertEqual(len(found), 10)
-        self.assertEqual(found, [f"{300 + n}:1" for n in range(11, 1, -1)])      # the 2 oldest are not looked at
-        # The book's own check, then one album check per row looked at.
-        self.assertEqual(self.assert_in_library.await_count, 1 + 10)
+        self.assertEqual(self.listed(), [f"{300 + n}:1" for n in range(11, 1, -1)])
 
-    def test_the_ten_rows_are_candidates_so_rows_that_are_finished_do_not_use_them_up(self):
+    def test_exactly_one_library_listing_is_read_and_no_album_is_checked(self):
+        for n in range(12):
+            self.row(f"{300 + n}:1")
+        self.row(self.THERE, linked_from="300:1")
+        self.listed()
+        self.assertEqual(self.list_books.await_count, 1)
+        self.assertEqual(self.assert_in_library.await_count, 1)       # the book's own check, as every route makes
+
+    def test_no_candidate_reads_no_listing(self):
+        self.row("300:1", end=True)
+        self.assertEqual(self.listed(), [])
+        self.assertEqual(self.list_books.await_count, 0)
+
+    def test_twelve_unfinished_books_still_in_the_library_do_not_hide_an_older_orphan(self):
+        self.row("300:1")                                    # the orphan, older than all the rest
+        there = {f"{600 + n}:1": {"1": 1} for n in range(12)}
+        with mock.patch.dict(LIBRARY, there):
+            for key in there:
+                self.row(key)
+            self.assertEqual(self.listed(), ["300:1"])
+        self.assertEqual(self.list_books.await_count, 1)
+
+    def test_finished_rows_do_not_hide_older_places(self):
         for n in range(12):
             self.row(f"{300 + n}:1", end=n >= 4)              # the 8 newest are finished
         self.assertEqual(sorted(self.listed()), [f"{300 + n}:1" for n in range(4)])
 
-    def test_successor_checks_stay_within_the_ten_album_checks(self):
-        from datetime import datetime
-        for n in range(10):
+    def test_places_beyond_the_old_check_budget_are_offered(self):
+        # Twelve places, each carried into a copy that is gone too (a finished
+        # row, so not a candidate itself): every one is checked in memory, none
+        # is dropped for want of an album check.
+        for n in range(12):
             self.row(f"{300 + n}:1")
-        # Each has a finished successor in the library: one more check each.
-        for n in range(10):
+        for n in range(12):
             self.row(f"{500 + n}:1", linked_from=f"{300 + n}:1", end=True)
-        with mock.patch.dict(LIBRARY, {f"{500 + n}:1": {"1": 1} for n in range(10)}):
+        found = self.listed()
+        self.assertEqual(found, [f"{300 + n}:1" for n in range(11, 1, -1)])
+        self.assertEqual(self.assert_in_library.await_count, 1)
+
+    def test_a_successor_that_is_not_a_candidate_still_excludes_a_place_in_the_library(self):
+        for n in range(12):
+            self.row(f"{300 + n}:1")
+        for n in range(12):
+            self.row(f"{500 + n}:1", linked_from=f"{300 + n}:1", end=True)
+        with mock.patch.dict(LIBRARY, {f"{500 + n}:1": {"1": 1} for n in range(12)}):
             self.assertEqual(self.listed(), [])
-        # 10 candidates used all the checks, so none of their successors could
-        # be checked, and the places are left out rather than offered unchecked.
-        self.assertLessEqual(self.assert_in_library.await_count, 1 + 10)
+        self.assertEqual(self.list_books.await_count, 1)
 
     def test_a_successor_in_the_library_excludes_the_place_when_the_checks_allow(self):
         self.row("300:1")
@@ -1839,22 +1871,11 @@ class Orphans(OrphanBase):
         down = mock.AsyncMock(side_effect=pp.PlayerUnavailable("down"))
         with mock.patch.object(pp, "assert_in_library", down):                 # the book's own check
             self.assertEqual(self.get().status_code, 503)
-
-        async def check(key, track_key=None):
-            if key == "300:1":
-                raise pp.PlayerUnavailable("down")
-            return await fake_assert_in_library(key, track_key)
-        with mock.patch.object(pp, "assert_in_library", side_effect=check):    # a place's check
+        with mock.patch.object(pp, "list_books", down):                        # the library listing
             self.assertEqual(self.get().status_code, 503)
-        self.row(self.THERE, linked_from="301:1")
-
-        async def successor_down(key, track_key=None):
-            if key == self.THERE:
-                raise pp.PlayerUnavailable("down")
-            return await fake_assert_in_library(key, track_key)
-        with mock.patch.object(pp, "assert_in_library", side_effect=successor_down):   # a successor's check
-            self.assertEqual(self.get().status_code, 503)
-        self.assertEqual(sorted(self.listed()), ["300:1"])
+        with mock.patch.object(pp, "list_books", mock.AsyncMock(side_effect=pp.PlayerOff("off"))):
+            self.assertEqual(self.get().status_code, 404)
+        self.assertEqual(sorted(self.listed()), ["300:1", "301:1"])
 
     def test_it_only_reads_the_database_for_the_listeners_own_rows(self):
         from sqlalchemy import event

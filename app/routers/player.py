@@ -356,7 +356,7 @@ def _lookup_failed() -> HTTPException:
 
 
 async def _carried_forward(db: Session, who: "Listener", key: str, requesting: str,
-                           known: dict, max_checks: int = listening.LINK_HOPS) -> Optional[bool]:
+                           known: dict, present: Optional[set] = None) -> Optional[bool]:
     """True when the listener's place in the earlier copy `key` already
     lives on in a copy still in the library: a row of theirs whose
     linked_from is `key` or that holds a pending claim on it (or, link by
@@ -372,9 +372,10 @@ async def _carried_forward(db: Session, who: "Listener", key: str, requesting: s
     database is asked first (listening.successors), so a copy nothing
     carried forward costs no Plex read; at most LINK_HOPS album checks in
     all, and a chain going on past them counts as carried forward (the
-    place is withheld rather than merged unchecked; `max_checks` lowers that
-    bound for a request with fewer checks left). `known` holds the
-    album checks this request already made (key -> _album_gone's answer)."""
+    place is withheld rather than merged unchecked). `known` holds the
+    album checks this request already made (key -> _album_gone's answer).
+    With `present` (the album keys of one library listing) no album is
+    checked with Plex at all: a copy is there when its album is in the set."""
     seen = {key, requesting}
     frontier, checks = [key], 0
     for _hop in range(listening.LINK_HOPS):
@@ -382,8 +383,10 @@ async def _carried_forward(db: Session, who: "Listener", key: str, requesting: s
         for earlier in frontier:
             for later in listening.successors(db, who.identity, earlier, exclude=seen):
                 seen.add(later)
+                if later not in known and present is not None:
+                    known[later] = later.split(":")[0] not in present
                 if later not in known:
-                    if checks >= max_checks:
+                    if checks >= listening.LINK_HOPS:
                         return True
                     checks += 1
                     known[later] = await _album_gone(later)
@@ -571,40 +574,47 @@ async def orphans(request: Request, key: str, who: Listener = Depends(listener),
     library, unfinished (no `end` mark in the log, and under 97% of the
     book when its length is known), and carried forward by no copy still in
     the library, pending claims included (the same successor rule as
-    /position). Only the newest listening.ORPHAN_ROWS candidate rows are
-    looked at, with at most listening.ORPHAN_ALBUM_CHECKS album checks in
-    all; a place whose successors can't be checked within them is left out.
+    /position). Of the newest listening.ORPHAN_CANDIDATES unfinished rows,
+    the gone ones are found with one listing of the audiobook library, read
+    for this request alone (nothing is cached: two workers), and every
+    presence check, successors and claim holders too, is made against it. The
+    places are filtered first and the first ORPHAN_ROWS are returned, so a
+    listener with many unfinished books still in the library never has an
+    older orphan hidden.
 
-    Empty when the listener answered "None of these" for the book
-    (`dismissed`), or already has a place of their own in it: the question
-    is for a book with none. 503 when Plex fails before the lookup can
-    finish (the book then opens as it did, and the question comes again)."""
+    Empty (and no listing read) when the listener answered "None of these"
+    for the book (`dismissed`), has no candidate row, or already has a place
+    of their own in it: the question is for a book with none. 503 when Plex
+    fails before the lookup can finish (the book then opens as it did, and
+    the question comes again)."""
     album, _access = await _checked_book(who, key)
     dismissed = listening.orphans_dismissed(db, who.identity, key)
     if dismissed or listening.get_position_row(db, who.identity, key) is not None:
         return {"orphans": [], "dismissed": dismissed}
-    author = pp.album_author(album)
     rows = listening.orphan_candidates(db, who.identity, key)
+    if not rows:
+        return {"orphans": [], "dismissed": False}
+    try:
+        present = {b["key"].split(":")[0] for b in await pp.list_books()}
+    except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
+        raise _http_error(exc) from None
+    author = pp.album_author(album)
     match = {r.book_key: pp.same_author(r.author, author) for r in rows}
     rows.sort(key=lambda r: not match[r.book_key])      # a stable sort: the newest stay first within each
-    checked = await asyncio.gather(*(_album_gone(r.book_key) for r in rows))
-    if any(gone is None for gone in checked):
-        raise _lookup_failed()
-    known = {r.book_key: gone for r, gone in zip(rows, checked)}
+    known = {r.book_key: r.book_key.split(":")[0] not in present for r in rows}
     found = []
-    for row, gone in zip(rows, checked):
-        if not gone:
+    for row in rows:
+        if not known[row.book_key]:
             continue                    # still in the library
-        left = max(0, listening.ORPHAN_ALBUM_CHECKS - len(known))
-        carried = await _carried_forward(db, who, row.book_key, key, known, max_checks=left)
-        if carried is None:
-            raise _lookup_failed()
-        if not carried:
-            found.append({"key": row.book_key, "book_title": row.book_title, "narrator": row.narrator,
-                          "book_ms": row.book_ms, "book_duration_ms": row.book_duration_ms,
-                          "chapter_label": row.chapter_label, "updated_at": utc_iso(row.updated_at),
-                          "author_match": match[row.book_key]})
-    return {"orphans": found[:listening.ORPHAN_ROWS], "dismissed": False}
+        if await _carried_forward(db, who, row.book_key, key, known, present=present):
+            continue                    # its place lives on in a copy still there
+        found.append({"key": row.book_key, "book_title": row.book_title, "narrator": row.narrator,
+                      "book_ms": row.book_ms, "book_duration_ms": row.book_duration_ms,
+                      "chapter_label": row.chapter_label, "updated_at": utc_iso(row.updated_at),
+                      "author_match": match[row.book_key]})
+        if len(found) == listening.ORPHAN_ROWS:
+            break
+    return {"orphans": found, "dismissed": False}
 
 
 @router.post("/orphans/{key}/dismiss", dependencies=[Depends(require_same_origin)])
