@@ -1194,6 +1194,21 @@ class WorkKeys(unittest.TestCase):
             with self.subTest(title=title):
                 self.assertEqual(pp.work_key(self.AUTHOR, title), pp.work_key(self.AUTHOR, "Tide Mill"))
 
+    def test_a_huge_run_of_digits_in_a_dropped_part_is_no_error(self):
+        # T1Z2: a run past int()'s digit limit (4300) would be a ValueError, a
+        # 500 on every check-in and /position for the book.
+        huge = "9" * 5000
+        for title in (f"Tide Mill - Read by Radio {huge} Players", f"Tide Mill (Narrated by X, Series {huge}.{huge})"):
+            with self.subTest(title=title[:40]):
+                key = pp.work_key(self.AUTHOR, title)
+                self.assertRegex(key, r"^[0-9a-f]{32}$")
+                self.assertNotEqual(key, pp.work_key(self.AUTHOR, "Tide Mill"))
+        album = dict(ALBUMS["500"], title=f"Quiet Book - Read by Radio {huge} Players")
+        with mock.patch.dict(ALBUMS, {"500": album}):
+            self.assertRegex(pp.album_work_key(album), r"^[0-9a-f]{32}$")
+        # Ordinary narrator digits are tokens as before.
+        self.assertEqual(pp._dropped_digits("Read by Radio 4 Players, Series 2.5"), ["n4", "n2.5"])
+
     def test_nothing_is_taken_off_that_would_leave_the_title_empty(self):
         self.assertEqual(pp._work_title("Unabridged"), "unabridged")
         self.assertEqual(pp._work_title("(Full-Cast Edition)"), "full cast edition")
@@ -1220,6 +1235,24 @@ class BookIdentity(BridgeBase):
         self.assertEqual(second["duration_ms"], 70_000)
         self.assertEqual(second["work_key"], pp.work_key("Cal Penn", "Second Tale"))
         self.assertNotEqual(first["work_key"], second["work_key"])
+
+    def test_a_disc_of_a_several_book_album_is_named_with_its_album_and_disc(self):
+        # T1Z1: a box set's disc is often titled by its first track ("Chapter
+        # One"), which names no copy; the kept title says which box and disc.
+        self.assertEqual(self.run_async(pp.book_identity("400:1"))["title"], "Long Series, Disc 1: First Tale")
+        self.assertEqual(self.run_async(pp.book_identity("400:2"))["title"], "Long Series, Disc 2: Second Tale")
+        album = {"ratingKey": "650", "type": "album", "title": "Harbour Tales - Read by Kim Moss",
+                 "titleSort": "Harbour Tales", "parentTitle": "Cal Penn", "thumb": "/library/metadata/650/thumb/1"}
+        with mock.patch.dict(ALBUMS, {"650": album}), mock.patch.dict(TRACKS):
+            TRACKS["650"] = [track(651, 650, 1, 1, 10_000, "E/Box1", title="Chapter One, Part 1"),
+                             track(652, 650, 2, 1, 20_000, "E/Box2", title="Chapter One"),
+                             track(653, 650, 3, 1, 30_000, "E/Box3", title=" ")]
+            titles = [self.run_async(pp.book_identity(f"650:{d}"))["title"] for d in (1, 2, 3)]
+        self.assertEqual(titles, ["Harbour Tales, Disc 1: Chapter One", "Harbour Tales, Disc 2: Chapter One",
+                                  "Harbour Tales, Disc 3"])
+        # An album of one book keeps the book's own title.
+        self.assertEqual(self.run_async(pp.book_identity("200:1"))["title"], "Parts Book")
+        self.assertEqual(pp._copy_title({"title": ""}, 2, [{"title": "Tale"}], 2, "Tale"), "Disc 2: Tale")
 
     def test_a_dash_narrator_in_the_album_title_is_taken_off_only_when_plex_names_them(self):
         named = dict(ALBUMS["500"], title="Quiet Book - Dee Lane", Collection=[{"tag": "Quiet Tales - Read by Dee Lane"}])

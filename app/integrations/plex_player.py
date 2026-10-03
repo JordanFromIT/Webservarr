@@ -782,7 +782,9 @@ _BOOK_NUMBER = re.compile(
     rf"|(?:no\s*|#\s*)(?P<d>{_DECIMAL}))(?:\s+of\s+(?P<of>{_DECIMAL}|{_WORD_NUMBER}))?(?![^\W_])",
     re.IGNORECASE)
 # Digits in a part that is dropped (the narrator's), kept as tokens.
-_DIGITS = re.compile(r"[0-9]+(?:\.[0-9]+)?")
+# At most six digits a side, so a run of thousands can't reach int()'s digit
+# limit (a ValueError, a 500); a longer run is several tokens.
+_DIGITS = re.compile(r"[0-9]{1,6}(?:\.[0-9]{1,6})?")
 # A bracket pair with nothing left in it once its number phrase is out.
 _EMPTY_GROUP = re.compile(r"[(\[{][\s,;:.\-\u2013\u2014\ue000]*[)\]}]")
 # Separators, and marks, left at the very end: a mark there is in no part
@@ -1174,7 +1176,22 @@ def _identity(album: dict, disc: int, children) -> dict:
     return {"work_key": _hash_work(about["author"], title) if title else None,
             "narrator": about["narrator"] or None,
             "duration_ms": sum(_track_duration(t) for t in tracks) or None,
-            "title": about["title"] or None}
+            "title": _copy_title(album, disc, tracks, len(discs), about["title"]) or None}
+
+
+def _copy_title(album: dict, disc: int, tracks: list, disc_count: int, title: str) -> str:
+    """The title a save keeps to name the copy its place came from (the
+    helper's "From an earlier copy: <title>"). For an album of one book, the
+    book's title. For a disc of an album of several, "<album>, Disc N:
+    <disc title>": a box set's discs are often titled by their first track
+    ("Chapter One"), which alone names no copy at all. An untitled disc is
+    "<album>, Disc N", as list_books names it."""
+    if disc_count < 2:
+        return title
+    album_title = _split_narrator(_album_title(album))[0]
+    own = _PART_SUFFIX.sub("", ((tracks[0].get("title") if tracks else "") or "").strip())
+    named = f"{album_title}, Disc {disc}" if album_title else f"Disc {disc}"
+    return f"{named}: {own}" if own else named
 
 
 def album_work_key(album: dict) -> Optional[str]:
@@ -1201,7 +1218,8 @@ async def book_identity(key: str, album: Optional[dict] = None) -> dict:
     generic title is named "<album> disc N"), `narrator` the book's narrator
     (None when not named), `duration_ms` the book's length, its tracks in
     play order put together (None when Plex gives no durations), and
-    `title` the title list_books shows for it (None when empty).
+    `title` the title list_books shows for it, or for a disc of an album of
+    several "<album>, Disc N: <disc title>" (_copy_title; None when empty).
 
     `album` is the album's metadata when the caller already read it
     (assert_in_library returns it); only the album's tracks are read then,
