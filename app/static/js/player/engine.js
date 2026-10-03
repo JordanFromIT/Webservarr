@@ -84,7 +84,9 @@
  *       preview paused before its end, else start a fresh one at the
  *       helper's chosen spot (state().filesChanged.spot). A move (seek,
  *       skip, chapter jump, seekto, the scrubber) ends the preview, pauses,
- *       and only moves that spot; smart rewind does nothing. previewAt,
+ *       and only moves that spot (a skip, the lock screen's seek back and
+ *       forward and the arrow keys from that spot, not from the playhead);
+ *       smart rewind does nothing. previewAt,
  *       confirmPlace and startOver are the way out. The element played
  *       from outside while held (no Media Session) adopts a paused preview,
  *       else becomes a fresh one; it is never paused and played again there.
@@ -125,7 +127,9 @@
  *                     a part this browser can't decode (near one, it is the
  *                     15 s before it, within the part), and after 15 s of
  *                     playing by the wall clock (more at a speed under 1x),
- *                     so a seek from outside the engine can't stretch it.
+ *                     so a seek from outside the engine can't stretch it
+ *                     (each timeupdate counts 1 s at most, so buffering
+ *                     never shortens it).
  *                     false: not held, or a part this browser can't decode
  *                     (with a 'part-format' warning).
  *   confirmPlace(bookMs) -> bool  held: the listener places the book at bookMs.
@@ -134,13 +138,16 @@
  *                     rewind floor; compare-and-swap applies as to any save).
  *                     A place from an earlier copy sends its linked_from with
  *                     the saves until the server says whether it linked it.
- *                     After 5 minutes or more without playing, the saved
- *                     places are read again first, still held (checking): a
- *                     newer place another device or a Plex app saved meanwhile
- *                     is asked about (a 'conflict' warning) and the confirm
- *                     waits for the answer (resolveConflict: Continue lands at
- *                     the other place, Keep listening here at the spot). The
- *                     book stays held until the confirm's move lands.
+ *                     The held playhead moves to the spot at once (a 'seek'
+ *                     marked { place: true } too, nothing saved); then the
+ *                     saved places are always read again first, still held
+ *                     (checking; RECHECK_WAIT_MS at most): a newer place
+ *                     another device or a Plex app saved meanwhile is asked
+ *                     about (a 'conflict' warning) and the confirm waits for
+ *                     the answer (resolveConflict: Continue lands at the other
+ *                     place, Keep listening here at the spot, moved by any
+ *                     move meanwhile). The book stays held until the
+ *                     confirm's move lands.
  *                     false as previewAt.
  *   startOver() -> bool  confirmPlace(0), never sending linked_from
  *   setSpeed(x)       0.75 to 2 in 0.05 steps (clamped, rounded); returns the speed
@@ -220,8 +227,9 @@
  *                'save' (state().saveError changed), 'prefs' (the skip length or
  *                the listener's settings changed), 'checking' (a late Play's read
  *                of the saved places started or ended), 'preview' (previewAt
- *                moved to its spot). confirmPlace's move is a 'seek' with
- *                place: true.
+ *                moved to its spot). confirmPlace's moves are 'seek's with
+ *                place: true (the held playhead to the spot, then the one
+ *                that lands).
  *     'ended'    { state } at the end of the last part
  *     'error'    { code, message, retry: function | null }; code 'unreachable',
  *                'part', 'format' (no retry), 'forbidden', 'not-found', 'signed-out',
@@ -257,6 +265,7 @@ export const UNREACHABLE = "Can't reach the media server";
 export const PLAYER_BROKEN = "The player couldn't start. Please update your browser.";
 export const PREVIEW_MS = 15000;       // previewAt plays this much of the book from a spot
 const PREVIEW_END_GAP_MS = 1000;       // ... stopping this short of the book's end (never ending it)
+const PREVIEW_WALL_STEP_MS = 1000;     // ... its wall time counting this much at most per timeupdate
 export const FORMAT_UNSUPPORTED = "This book's audio format can't play in this browser";
 export const PART_FORMAT = "This part's format can't play in this browser";
 export const RECHECK_AFTER_MS = 300000;  // a Play after this long without playing re-reads the saved places
@@ -893,9 +902,11 @@ export function createEngine(env) {
     // A preview (the book's files changed) stops after its 15 s.
     // ... and after as long by the wall clock, so a seek from outside the
     // engine (back before its start) can't stretch it.
+    // Each step counts PREVIEW_WALL_STEP_MS at most: the stream buffering
+    // (no timeupdate meanwhile) is not playing, and never shortens it.
     if (files && preview && !preview.done && wantPlay) {
       const w = wallNow();
-      if (preview.lastWall !== null) preview.played += Math.max(0, w - preview.lastWall);
+      if (preview.lastWall !== null) preview.played += clampNumber(w - preview.lastWall, 0, PREVIEW_WALL_STEP_MS);
       preview.lastWall = w;
       if (bookMsNow() >= preview.end || preview.played >= PREVIEW_MS / Math.min(1, speed)) {
         preview.done = true;
@@ -1744,9 +1755,9 @@ export function createEngine(env) {
      for a spot the listener confirms, never startOver). Refused (false) when
      the book is not held, or the spot is in a part this browser can't
      decode.
-     After RECHECK_AFTER_MS or more without playing (as for a late Play), the
-     saved places are read again first, still held: the confirm lands when
-     the read ends (or after RECHECK_WAIT_MS). If another device, or a Plex
+     The held playhead moves to the spot at once. The saved places are then
+     always read again first, still held: the confirm lands when the read
+     ends (or after RECHECK_WAIT_MS). If another device, or a Plex
      app, saved a newer place meanwhile, that is asked about (a 'conflict'
      warning) inside the hold, and the confirm waits for the answer
      (resolveConflict): Continue's move to the other place, else the spot
@@ -1766,9 +1777,16 @@ export function createEngine(env) {
     pause();
     // A later confirm replaces one still waiting on its read or question.
     files.pending = { v: v, link: !!link };
+    // The held playhead goes to the spot (the chosen spot with it), so what
+    // shows, and any move while the confirm waits, start from there. Still
+    // held: nothing is saved for it.
+    seek(v, 'seek', false, false, { place: true });
     files.spot = v;
     if (files.reading || files.asked) return true;
-    if (saver && quietSince !== null && wallNow() - quietSince >= RECHECK_AFTER_MS) {
+    // The saved places are always read again first: another device or a
+    // Plex app may have saved a newer place since the book was held, and a
+    // preview (playing) since then shows nothing of it.
+    if (saver) {
       confirmRead();
       return true;
     }
@@ -1795,7 +1813,7 @@ export function createEngine(env) {
     seek(at, 'seek', false, true, { place: true });
   }
 
-  /* A confirm after a long quiet: the saved places read again, still held
+  /* A confirm: the saved places read again, still held
      (state().checking meanwhile). Asked: the confirm waits for the answer.
      Else (nothing newer, or the read failed or took RECHECK_WAIT_MS) it
      lands. */
@@ -1850,7 +1868,10 @@ export function createEngine(env) {
     // Waiting on a late move's read, a skip stays relative: three skips back
     // queued behind one read go back three times, from wherever it is then.
     if (!wantPlay && lateCheck(function () { skip(d); }, false)) return;
-    seek(bookMsNow() + d * 1000, 'skip');
+    // Held for the book's changed files, a skip moves the helper's chosen
+    // spot (the place a confirm waits to land at, too), not the playhead (a
+    // preview's, or where the hold left it).
+    seek((files ? files.spot : bookMsNow()) + d * 1000, 'skip');
   }
 
   function jumpToChapter(i) {

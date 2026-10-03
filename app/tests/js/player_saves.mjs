@@ -3475,6 +3475,79 @@ current = 'T2R6: a held preview stops after 15 s of playing even when sought bac
   t.engine.close();
 }
 
+// ---- Fix round 4 ----
+// A held rig after the helper has been up 6 minutes: a compare-and-swap
+// server, and then a newer place saved meanwhile in a Plex app or by another
+// device (variant).
+async function heldAfterQuiet(variant, o = {}) {
+  const clock = fakeClock(); const server = fakeServer(clock); const storage = fakeStorage();
+  server.row = { psid: 'other', seq: 9, track: '599', offset_ms: 120000, updated_at: GONE_WEB.updated_at, device: 'Chrome on Windows' };
+  server.post = casPost(server, clock);
+  const places = { web: Object.assign({}, GONE_WEB), plex: null };
+  const t = withEngine({ clock, server, storage, book: CHAPTERED, places, wallClock: true, mediaSession: o.mediaSession });
+  await openBook(t);
+  await clock.advance(6 * 60000);
+  const at = new Date(clock.now - 60000).toISOString();
+  if (variant === 'Plexamp') places.plex = { track: '502', offset_ms: 30000, duration_ms: 900000, updated_at: at, device: 'Plexamp' };
+  else {
+    server.row = { psid: 'phone', seq: 3, track: '502', offset_ms: 30000, updated_at: at, device: 'Safari on iPhone' };
+    places.web = Object.assign({}, GONE_WEB, { track: '502', offset_ms: 30000, book_ms: 630000, updated_at: at, psid: 'phone', device: 'Safari on iPhone' });
+  }
+  return Object.assign(t, { clock, server, storage, rowBefore: JSON.stringify(server.row) });
+}
+
+// T2R7: the helper's natural flow is Preview, then Use this spot. A preview
+// is playing, so it shows nothing of a place saved elsewhere meanwhile: the
+// confirm still reads the saved places first, and asks.
+current = 'T2R7: Preview, then confirm: a newer Plex-app or other-device place is still asked about first, nothing saved until answered';
+for (const variant of ['Plexamp', 'another device']) {
+  for (const flow of ['a preview to its end', '3 s into a preview', '3 s into the bar Play\'s preview']) {
+    const t = await heldAfterQuiet(variant);
+    if (flow === 'a preview to its end') { t.engine.previewAt(650000); await t.clock.advance(16000); }
+    else if (flow === '3 s into a preview') { t.engine.previewAt(650000); await t.clock.advance(3000); }
+    else { t.engine.seek(650000); await t.engine.play(); await t.clock.advance(3000); }
+    const label = variant + ', ' + flow;
+    t.engine.confirmPlace(650000);
+    await t.clock.advance(6000);
+    const asked = t.log.warning.filter((w) => w.kind === 'conflict');
+    check(label + ': asked about the newer place', asked.length === 1 && asked[0].conflict.track === '502' && asked[0].conflict.offset_ms === 30000, asked);
+    check(label + ': still held, nothing saved, the server row untouched', t.engine.state().filesChanged !== null && t.server.calls.length === 0 &&
+      JSON.stringify(t.server.row) === t.rowBefore, t.server.calls.map((c) => [c.body.book_ms, c.status]));
+    t.engine.resolveConflict();                        // Keep listening here
+    await t.clock.advance(2000);
+    check(label + ': Keep listening here: saved once at the spot', t.engine.state().filesChanged === null && t.server.calls.length === 1 &&
+      t.server.calls[0].body.book_ms === 650000 && t.server.calls[0].status === 200, t.server.calls.map((c) => [c.body.book_ms, c.status]));
+    t.engine.close();
+  }
+}
+
+// T2R8: during the confirm's question, the held playhead is at the confirmed
+// spot, and every move goes from that spot: Keep listening here then saves
+// where the listener moved to, never the held 0:00.
+current = 'T2R8: a move during the confirm\'s question goes from the confirmed spot; Keep listening here saves there';
+for (const how of ['skip(-10)', 'the lock screen\'s seek back', 'skip(+10)', 'the lock screen\'s seekto 700 s', 'no move']) {
+  const ms = { metadata: null, playbackState: 'none', handlers: new Map(), setActionHandler(a, fn) { this.handlers.set(a, fn); }, setPositionState() {} };
+  const t = await heldAfterQuiet('Plexamp', { mediaSession: ms });
+  t.engine.confirmPlace(650000);
+  await t.clock.advance(3000);
+  const asked = t.engine.state();
+  check(how + ': asked, held, the playhead at the confirmed spot', t.log.warning.some((w) => w.kind === 'conflict') && asked.filesChanged !== null &&
+    asked.bookMs === 650000 && asked.filesChanged.spot === 650000, [asked.bookMs, asked.filesChanged]);
+  if (how === 'skip(-10)') t.engine.skip(-10);
+  if (how === 'the lock screen\'s seek back') ms.handlers.get('seekbackward')({});
+  if (how === 'skip(+10)') t.engine.skip(10);
+  if (how === 'the lock screen\'s seekto 700 s') ms.handlers.get('seekto')({ seekTime: 700 });
+  await t.clock.advance(500);
+  const want = { 'skip(-10)': 640000, 'the lock screen\'s seek back': 640000, 'skip(+10)': 660000, 'the lock screen\'s seekto 700 s': 700000, 'no move': 650000 }[how];
+  check(how + ': still held, nothing saved', t.engine.state().filesChanged !== null && t.server.calls.length === 0);
+  t.engine.resolveConflict();                          // Keep listening here
+  await t.clock.advance(5000);
+  check(how + ': Keep listening here saves once where the listener is', t.engine.state().filesChanged === null && t.server.calls.length === 1 &&
+    t.server.calls[0].body.book_ms === want && t.server.row.book_ms === want && t.engine.state().bookMs === want, t.server.calls.map((c) => c.body.book_ms));
+  check(how + ': never 0:00', !t.server.calls.some((c) => c.body.book_ms < 600000));
+  t.engine.close();
+}
+
 if (failed) {
   realError(`${failed}/${total} player saves cases FAILED`);
   process.exit(1);

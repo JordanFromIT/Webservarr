@@ -2169,8 +2169,8 @@ current = 'fix round 3 (T2R4): a confirm after a long quiet stays held through i
   check('still held, checking, the read sent', t.engine.state().filesChanged !== null && t.engine.state().checking === true &&
     t.saver.released.length === 0 && t.net.fetches.filter((u) => u.indexOf('/position/') !== -1).length === reads + 1);
   await t.clock.advance(1000);
-  check('then it lands: released once, one place move', t.engine.state().filesChanged === null && t.engine.state().checking === false &&
-    t.saver.released.length === 1 && t.saver.notes.filter((n) => n.place).length === 1 && bookMsOf(t) === 650000, [t.saver.released, bookMsOf(t)]);
+  check('then it lands: released once, one place move after the release', t.engine.state().filesChanged === null && t.engine.state().checking === false &&
+    t.saver.released.length === 1 && t.saver.notes.filter((n) => n.place && n.released === 1).length === 1 && bookMsOf(t) === 650000, [t.saver.released, bookMsOf(t)]);
   t.engine.close();
   const u = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true }, net: { fetchDelay: {} } });
   await u.clock.advance(6 * 60000);
@@ -2189,11 +2189,15 @@ current = 'fix round 3 (T2R4): a confirm after a long quiet stays held through i
   check('a held Play after a long quiet: a preview at once, no re-read', w.engine.state().playing && !w.engine.state().checking &&
     w.net.fetches.filter((x) => x.indexOf('/position/') !== -1).length === r1);
   w.engine.close();
-  // Without the long quiet: lands at once, no read.
+  // Fix round 4 (T2R7): without the long quiet too, the confirm re-reads
+  // first, still held, then lands.
   const v = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true } });
-  const r0 = v.net.fetches.length;
+  const r0 = v.net.fetches.filter((x) => x.indexOf('/position/') !== -1).length;
   v.engine.confirmPlace(650000);
-  check('a confirm soon after the open lands at once, no read', v.engine.state().filesChanged === null && v.net.fetches.length === r0 && v.saver.released.length === 1);
+  check('a confirm soon after the open re-reads too, still held', v.engine.state().filesChanged !== null && v.engine.state().checking === true &&
+    v.net.fetches.filter((x) => x.indexOf('/position/') !== -1).length === r0 + 1 && v.saver.released.length === 0);
+  await v.clock.advance(1000);
+  check('then lands', v.engine.state().filesChanged === null && v.saver.released.length === 1 && bookMsOf(v) === 650000, bookMsOf(v));
   v.engine.close();
 }
 
@@ -2210,6 +2214,106 @@ current = 'fix round 3 (T2R6): at 0.75x a preview still plays 15 s of the book (
   t.engine.previewAt(1000000);
   await t.clock.advance(40000);
   check('and at 2x (about 7.5 s of wall time)', !t.engine.state().playing && bookMsOf(t) >= 1015000 && bookMsOf(t) <= 1015600, bookMsOf(t));
+  t.engine.close();
+}
+
+// Fix round 4 (T2R7): a preview is playing, so it says nothing about places
+// saved elsewhere meanwhile: a confirm right after one still re-reads first.
+current = 'fix round 4 (T2R7): a confirm right after a preview still re-reads the saved places first, held meanwhile';
+for (const how of ['a preview to its end', 'confirmed 3 s into a preview', 'confirmed 3 s into the bar Play\'s preview']) {
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true } });
+  await t.clock.advance(6 * 60000);
+  if (how === 'a preview to its end') { t.engine.previewAt(650000); await t.clock.advance(16000); }
+  else if (how === 'confirmed 3 s into a preview') { t.engine.previewAt(650000); await t.clock.advance(3000); }
+  else { t.engine.seek(650000); await t.engine.play(); await t.clock.advance(3000); }
+  const reads = t.net.fetches.filter((u) => u.indexOf('/position/') !== -1).length;
+  t.engine.confirmPlace(650000);
+  check(how + ': the read goes out, still held', t.engine.state().filesChanged !== null && t.engine.state().checking === true &&
+    t.net.fetches.filter((u) => u.indexOf('/position/') !== -1).length === reads + 1 && t.saver.released.length === 0, t.saver.released);
+  await t.clock.advance(1000);
+  check(how + ': then it lands at the spot', t.engine.state().filesChanged === null && t.saver.released.length === 1 && bookMsOf(t) === 650000 &&
+    !t.engine.state().playing, bookMsOf(t));
+  t.engine.close();
+}
+
+// Fix round 4 (T2R8): while held, the helper's chosen spot is where the
+// listener is: a relative move (skip, the lock screen's seek back and
+// forward) goes from it, not from a preview's playhead, and a confirm
+// waiting on its read has the held playhead at its spot.
+current = 'fix round 4 (T2R8): while held, every move is relative to the chosen spot; a waiting confirm moves the held playhead there';
+{
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true } });
+  const spot = () => t.engine.state().filesChanged.spot;
+  t.engine.previewAt(700000);
+  await t.clock.advance(5000);
+  check('a preview plays past its start', t.engine.state().playing && bookMsOf(t) > 704000, bookMsOf(t));
+  t.engine.skip(-10);
+  await t.clock.advance(500);
+  check('skip back during it: 10 s before the spot, paused there', spot() === 690000 && bookMsOf(t) === 690000 && !t.engine.state().playing, [spot(), bookMsOf(t)]);
+  t.engine.previewAt(700000);
+  await t.clock.advance(5000);
+  t.ms.handlers.get('seekforward')({});
+  await t.clock.advance(500);
+  check('the lock screen\'s seek forward: from the spot', spot() === 710000 && bookMsOf(t) === 710000, [spot(), bookMsOf(t)]);
+  t.engine.previewAt(700000);
+  await t.clock.advance(5000);
+  t.ms.handlers.get('seekbackward')({ seekOffset: 30 });
+  await t.clock.advance(500);
+  check('the lock screen\'s seek back by 30 s: from the spot', spot() === 670000 && bookMsOf(t) === 670000, [spot(), bookMsOf(t)]);
+  t.engine.previewAt(700000);
+  await t.clock.advance(20000);
+  check('a finished preview leaves the playhead past the spot', !t.engine.state().playing && bookMsOf(t) >= 714500 && spot() === 700000, [spot(), bookMsOf(t)]);
+  t.engine.skip(10);
+  await t.clock.advance(500);
+  check('skip forward after it: from the spot', spot() === 710000 && bookMsOf(t) === 710000, [spot(), bookMsOf(t)]);
+  t.engine.previewAt(700000);
+  await t.clock.advance(5000);
+  t.ms.handlers.get('seekto')({ seekTime: 800 });
+  await t.clock.advance(500);
+  check('seekto and a chapter jump land where they say', spot() === 800000 && bookMsOf(t) === 800000 &&
+    (t.engine.jumpToChapter(2), spot() === 1500000 && bookMsOf(t) === 1500000), [spot(), bookMsOf(t)]);
+  check('still held throughout', t.engine.state().filesChanged !== null && t.saver.released.length === 0);
+  t.engine.close();
+  // A confirm waiting on its read: the held playhead is at its spot.
+  const u = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true } });
+  await u.clock.advance(6 * 60000);
+  u.engine.confirmPlace(650000);
+  const s = u.engine.state();
+  check('a confirm waiting on its read: held, the playhead at its spot', s.filesChanged !== null && s.checking === true &&
+    s.bookMs === 650000 && s.filesChanged.spot === 650000 && s.position.track === '502' && s.position.offset_ms === 50000, [s.bookMs, s.position]);
+  u.engine.skip(-10);
+  check('a skip meanwhile goes from there', u.engine.state().filesChanged.spot === 640000 && bookMsOf(u) === 640000, bookMsOf(u));
+  u.engine.close();
+}
+
+// Fix round 4 (T2R9): the stream buffering mid-preview (no timeupdate
+// meanwhile) is not playing: it does not shorten the preview.
+class StallAudio extends FakeAudio {
+  tick(g) {
+    this.env.clock.setTimeout(() => {
+      if (g !== this.gen || this.paused || !this.ticking) return;
+      const env = this.env;
+      const now = env.clock.now;
+      if (env.stallFrom !== undefined && now >= env.stallFrom && now < env.stallFrom + env.stallMs) {
+        if (!this.stalled) { this.stalled = true; this.fire('waiting'); }
+        this.tick(g);
+        return;
+      }
+      if (this.stalled) { this.stalled = false; this.fire('playing'); }
+      this._t = Math.min(this.duration, this._t + 0.25 * this.playbackRate);
+      this.fire('timeupdate');
+      this.tick(g);
+    }, 250);
+  }
+}
+current = 'fix round 4 (T2R9): buffering mid-preview does not shorten it';
+for (const stall of [0, 3000, 6000]) {
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true, Audio: StallAudio } });
+  t.engine.previewAt(700000);
+  if (stall) { t.env.stallFrom = t.clock.now + 3000; t.env.stallMs = stall; }
+  await t.clock.advance(40000);
+  check(stall + ' ms buffering 3 s in: about 15 s of the book still heard', !t.engine.state().playing && t.engine.state().filesChanged !== null &&
+    bookMsOf(t) >= 714000 && bookMsOf(t) <= 715500 && t.log.error.length === 0, bookMsOf(t));
   t.engine.close();
 }
 
@@ -2316,8 +2420,12 @@ current = 'spec 2.5: confirmPlace is an explicit move that ends the hold; startO
   check('paused at the spot', !s.playing && bookMsOf(t) === 650000 && s.position.track === '502' && s.position.offset_ms === 50000, [s.playing, bookMsOf(t)]);
   check('the saves were released, with the earlier copy\'s link', t.saver.released.length === 1 && t.saver.released[0].link === '400:1', t.saver.released);
   const mv = t.saver.notes.filter((n) => n.reason === 'seek');
-  check('then one explicit move (a seek marked place)', mv.length === 1 && mv[0].to === 650000 && mv[0].place === true && mv[0].placeMs === 650000, mv);
-  check('the release came before that move', mv[0] && mv[0].released === 1, mv);
+  // Fix round 4 (T2R8): the held playhead goes to the spot first (still
+  // held, marked place too), then the confirm lands after its re-read.
+  check('the held playhead moved to the spot first (a seek marked place, still held)', mv.length === 2 && mv[0].to === 650000 && mv[0].place === true &&
+    mv[0].released === 0, mv);
+  check('then one explicit move (a seek marked place)', mv.length === 2 && mv[1].to === 650000 && mv[1].place === true && mv[1].placeMs === 650000, mv);
+  check('the release came before that move', mv[1] && mv[1].released === 1, mv);
   check('the preview stopped while still held', t.saver.notes.some((n) => n.reason === 'pause' && n.released === 0));
   check('not held: previewAt refused now', t.engine.previewAt(100000) === false);
   await t.engine.play();
@@ -2334,6 +2442,7 @@ current = 'spec 2.5: confirmPlace is an explicit move that ends the hold; startO
   // A place with no link: none passed.
   const v = await openHeld(MULTI.key, { web: GONE, plex: null });
   v.engine.confirmPlace(100000);
+  await v.clock.advance(1000);
   check('no link to pass', v.saver.released.length === 1 && v.saver.released[0].link === null, v.saver.released);
   v.engine.close();
 }
