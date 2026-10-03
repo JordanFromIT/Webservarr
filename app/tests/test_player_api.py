@@ -1908,6 +1908,21 @@ class Orphans(OrphanBase):
         finally:
             LIBRARY["100:1"] = saved
 
+    def test_an_end_that_was_refused_or_late_finishes_nothing(self):
+        # T2R1: the phone listens; the laptop's delayed end gets a 409 (it was
+        # not the page that saw the row). The row is not finished.
+        book = dict(book="100:1", track="101", duration_ms=1_000_000, device="Phone")
+        self.assertEqual(self.checkin(event="pause", offset_ms=400_000, book_ms=400_000, seq=1, psid="phone", **book).status_code, 200)
+        late = self.checkin(event="end", offset_ms=1_000_000, book_ms=1_000_000, seq=1, psid="laptop",
+                            base="2000-01-01T00:00:00.000Z", **book)
+        self.assertEqual(late.status_code, 409)
+        self.assertEqual(self.db.query(ListeningLog).filter_by(book_key="100:1", event="end").count(), 1)
+        saved = LIBRARY.pop("100:1")
+        try:
+            self.assertEqual(self.listed(), ["100:1"])
+        finally:
+            LIBRARY["100:1"] = saved
+
     def test_a_disc_that_left_a_box_set_that_stayed_is_gone(self):
         # T2O2: presence is the listing's book key (album and disc).
         self.row("500:4")
@@ -2092,6 +2107,12 @@ class ManualLinks(PlayerApiBase):
             self.addCleanup(p.stop)
         self.seq = 0
 
+        async def listing():
+            return [{"key": k, "title": k} for k in LIBRARY]
+        p = mock.patch.object(pp, "list_books", side_effect=listing)
+        self.list_books = p.start()
+        self.addCleanup(p.stop)
+
     def confirm(self, book=None, linked_from=None, manual=True, **extra):
         book = book or self.NEW
         track = next(iter(LIBRARY[book]))
@@ -2220,6 +2241,29 @@ class ManualLinks(PlayerApiBase):
         self.assertEqual(self.claim_manual(), {self.GONE: True})
         self.assertIs(self.row_of(self.NEW).link_manual, True)
         self.assertEqual(self.link_of(self.NEW), self.GONE)
+
+    def test_a_manual_link_walks_a_chain_of_any_length(self):
+        # T2R2: the walk is the orphan list's: no bound of 5 hops.
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        for n in range(1, 8):
+            self.carried(f"{300 + n}:1", f"{299 + n}:1", work_key=None)
+        self.assertIs(self.confirm(), True)                       # 300:1 became 301:1 .. 307:1, all gone
+        self.assertEqual(self.link_of(self.NEW), self.GONE)
+
+    def test_a_manual_link_is_refused_when_a_long_chain_ends_in_the_library(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        for n in range(1, 8):
+            self.carried(f"{300 + n}:1", f"{299 + n}:1", work_key=None)
+        self.carried(self.THERE, "307:1", work_key=None)           # 8 hops on, still there
+        self.assertIs(self.confirm(), False)
+        self.assertEqual(self.claims(), set())
+
+    def test_a_manual_link_waits_while_the_library_cannot_be_listed(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        with mock.patch.object(pp, "list_books", mock.AsyncMock(side_effect=pp.PlayerUnavailable("down"))):
+            self.assertIsNone(self.confirm())
+        self.assertEqual(self.claims(), {(self.GONE, self.NEW, "pending")})
+        self.assertIs(self.confirm(), True)
 
     def test_a_manual_pending_claim_sent_again_without_the_flag_is_still_manual(self):
         # T2O3: the browser that lost the flag is not an automatic link.

@@ -1657,6 +1657,16 @@ class OrphanCandidates(StoreBase):
         self.db.commit()
         self.assertEqual(self.keys(), ["300:1"])
 
+    def test_an_end_logged_after_the_rows_last_save_finishes_nothing(self):
+        # T2R1: only an end that saved the row finishes it (a refused or late
+        # end is logged but leaves the row as it was).
+        from app.models import ListeningLog
+        self.row("300:1")
+        self.db.add(ListeningLog(identity=ME, book_key="300:1", track_key="1", offset_ms=5, device="Phone",
+                                 event="end", at=datetime(2026, 9, 1) + timedelta(days=30)))
+        self.db.commit()
+        self.assertEqual(self.keys(), ["300:1"])
+
 
 class SuccessorGraph(StoreBase):
     """The whole successor map of one listener (spec 2.6 T2C2)."""

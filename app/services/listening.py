@@ -578,7 +578,7 @@ def orphan_candidates(db: Session, identity: str, exclude_key: str) -> list:
     """This listener's position rows that might be places in books that left
     the library (spec 2.6 s3): the newest ORPHAN_CANDIDATES by updated_at, none
     of them `exclude_key`, all unfinished. A row is finished when the latest
-    event of its log is an `end` mark (the row was last saved by it), or its book_ms is FINISHED_PERCENT or more of its
+    event of its log is an `end` mark that saved the row, or its book_ms is FINISHED_PERCENT or more of its
     book_duration_ms (both known: an unknown book_ms, or an unknown length,
     still counts as unfinished).
 
@@ -587,10 +587,12 @@ def orphan_candidates(db: Session, identity: str, exclude_key: str) -> list:
     included). Scoped by identity; the log is read on
     ix_listening_log_identity_book_at."""
     P, L = ListeningPosition, ListeningLog
-    # Finished only while the end is the latest event: a book listened to
-    # again after the end (a re-listen from 0:00) is a place again.
+    # Finished only while the end is what the row was last saved by (a
+    # stored end shares its row's time): a book listened to again after the
+    # end is a place again, and an end that was refused (409) or came late
+    # finishes nothing.
     ended = exists().where(L.identity == P.identity, L.book_key == P.book_key, L.event == "end",
-                           L.at >= P.updated_at)
+                           L.at == P.updated_at)
     unfinished = or_(P.book_ms.is_(None), P.book_duration_ms.is_(None), P.book_duration_ms <= 0,
                      P.book_ms * 100 < P.book_duration_ms * FINISHED_PERCENT)
     return (db.query(P).filter(P.identity == identity, P.book_key != exclude_key, ~ended, unfinished)

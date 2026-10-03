@@ -1462,6 +1462,8 @@ class WorkKeys(unittest.TestCase):
                      (f"{base}, Series LI", f"{base}, Series LII"),
                      (f"{base}, Series LL", f"{base}, Series LLI"),
                      (f"{base}, Part A", f"{base}, Part B"),
+                     (f"{base}, Part C", f"{base}, Part D"),
+                     (f"{base}, C", f"{base} [100, Unabridged]"),
                      (f"{base}, A", f"{base}, B"),
                      (f"{base}, Collection 3", f"{base}, Level 3"),
                      (f"{base}, Year 3", f"{base}, Level 3"),
@@ -1497,24 +1499,73 @@ class WorkKeys(unittest.TestCase):
         # falls, leading zeros and the size of the set.
         for base in ("Tide Mill", "Tide Mill, Book 2"):
             key = pp.work_key(self.AUTHOR, base)
-            for suffix in (" (2019)", " [2019]", " (Unabridged, 2019)", " [64kbps]", " (128 kbps)", " [MP3 64kbps]",
-                           " (M4B, 64k)", " [mp3-320]", " [B07XYZ1234]", " [ASIN B07XYZ1234]", " (ASIN: B07XYZ1234)",
-                           " (Unabridged) [MP3]", " (Unabridged) (2019)", " [Unabridged] [mp3-320] (2019)"):
+            for suffix in (" [64kbps]", " (128 kbps)", " [MP3 64kbps]", " (44.1 kHz)",
+                           " (M4B, 64k)", " [mp3-320]", " [mp3_128]", " [B07XYZ1234]", " [ASIN B07XYZ1234]",
+                           " (ASIN: B07XYZ1234)", " (Unabridged) [MP3]", " [Unabridged] [mp3-320]"):
                 with self.subTest(title=base + suffix):
                     self.assertEqual(pp.work_key(self.AUTHOR, base + suffix), key)
-        for suffix in (" (Full-Cast Edition, 2019)", " (Dramatized, 128 kbps)", " [Full Cast, B07XYZ1234]",
-                       " (Full-Cast Edition) (2019)"):
+        for suffix in (" (Full-Cast Edition, 64k)", " (Dramatized, 128 kbps)", " [Full Cast, B07XYZ1234]",
+                       " (Full-Cast Edition) [mp3-320]"):
             with self.subTest(suffix=suffix):
                 self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill" + suffix), pp.work_key(self.AUTHOR, "Tide Mill"))
         key = pp.work_key(self.AUTHOR, "Tide Mill: The Rising")
         for title in ("Tide Mill (Unabridged): The Rising", "Tide Mill (Unabridged) - The Rising",
-                      "Tide Mill [Unabridged]: The Rising (2019)"):
+                      "Tide Mill [Unabridged]: The Rising [64kbps]"):
             with self.subTest(title=title):
                 self.assertEqual(pp.work_key(self.AUTHOR, title), key)
         self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill 02"), pp.work_key(self.AUTHOR, "Tide Mill 2"))
         self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill 007"), pp.work_key(self.AUTHOR, "Tide Mill 7"))
         self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill 2.01"), pp.work_key(self.AUTHOR, "Tide Mill 2.1"))
+        # The part of a number after a separator keeps its zeros.
+        for a, b in (("Tide Mill 1,005", "Tide Mill 1.5"), ("Tide Mill 1:05", "Tide Mill 1.5"),
+                     ("Tide Mill 1,005", "Tide Mill 1:05"), ("Tide Mill 1-05", "Tide Mill 1-5"),
+                     ("Tide Mill (1.5, Unabridged)", "Tide Mill 1,005")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
         self.assertEqual(pp._work_title("Tide Mill 0"), "tide mill 0")
+
+    def test_a_bare_number_or_a_year_is_never_noise(self):
+        # T2K4: a number beside a format word is a number ("(12, Unabridged)" and
+        # "(13, Unabridged)" are two books). T2K5: a year is not noise either,
+        # for a yearly work's years are its volumes.
+        for a, b in (("Warriors (12, Unabridged)", "Warriors (13, Unabridged)"),
+                     ("Warriors (01, Unabridged)", "Warriors (02, Unabridged)"),
+                     ("Warriors [12, MP3]", "Warriors [13, MP3]"),
+                     ("Warriors (Unabridged, 12)", "Warriors (Unabridged, 13)"),
+                     ("Warriors (12 - Unabridged)", "Warriors (13 - Unabridged)"),
+                     ("Warriors (Unabridged 12)", "Warriors (Unabridged 13)"),
+                     ("Warriors (100, Unabridged)", "Warriors (101, Unabridged)"),
+                     ("Warriors - Read by Tamsin Ashby [12, Unabridged]", "Warriors - Read by Tamsin Ashby [13, Unabridged]"),
+                     ("Warriors [12] [MP3]", "Warriors [13] [MP3]"),
+                     ("Warriors (12) (Unabridged)", "Warriors (13) (Unabridged)"),
+                     ("Magnum (Opus 12)", "Magnum (Opus 13)"),
+                     ("Title (10k)", "Title (20k)"),
+                     ("Year's Best SF (2019)", "Year's Best SF (2020)"),
+                     ("Year's Best SF (2019, Unabridged)", "Year's Best SF (2020, Unabridged)"),
+                     ("Best Science Fiction of the Year [2019]", "Best Science Fiction of the Year [2020]"),
+                     ("Doctor Who (Audio, 1963)", "Doctor Who (Audio, 2005)")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill (2019)"), pp.work_key(self.AUTHOR, "Tide Mill"))
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill (12, Unabridged)"), pp.work_key(self.AUTHOR, "Tide Mill"))
+
+    def test_a_lone_lowercase_letter_after_part_book_or_volume_is_kept(self):
+        # T2K6
+        base = "Tide Mill - Read by Tamsin Ashby"
+        for kind in ("Part", "Book", "Vol.", "Volume", "Pt.", "Bk."):
+            with self.subTest(kind=kind):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, f"{base}, {kind} a"), pp.work_key(self.AUTHOR, f"{base}, {kind} b"))
+        # Elsewhere a lone lowercase letter is a word of the narration.
+        self.assertEqual(pp.work_key(self.AUTHOR, f"{base}, a"), pp.work_key(self.AUTHOR, "Tide Mill"))
+
+    def test_marks_of_non_latin_scripts_are_part_of_their_letters(self):
+        # T2K6: Thai tone marks, Hebrew shin and sin dots.
+        for a, b in (("\u0e44\u0e21\u0e48", "\u0e44\u0e21\u0e49"), ("\u05e9\u05c1", "\u05e9\u05c2"),
+                     ("Tide Mill \u0e44\u0e21\u0e48", "Tide Mill \u0e44\u0e21\u0e49"),
+                     (f"Tide Mill - Read by Tamsin Ashby: \u0e44\u0e21\u0e48", "Tide Mill - Read by Tamsin Ashby: \u0e44\u0e21\u0e49")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        self.assertEqual(pp.work_key(self.AUTHOR, "Les Mis\u00e9rables"), pp.work_key(self.AUTHOR, "Les Miserables"))
 
     def test_other_productions_and_other_numbers_still_split(self):
         # T2K3: a year-like or number-like group that is not noise stays.

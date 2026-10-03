@@ -752,9 +752,25 @@ async def _link_verdict(db: Session, who: "Listener", key: str, earlier: str, cl
         # Its place already lives on in a copy still in the library: not
         # this book's to take (_carried_forward).
         known[earlier] = True
-        carried = await _carried_forward(db, who, earlier, key, known)
+        carried = await _carried(db, who, earlier, key, known, manual)
         linked = None if carried is None else not carried
     return linked
+
+
+async def _carried(db: Session, who: "Listener", key: str, requesting: str, known: dict,
+                   manual: bool) -> Optional[bool]:
+    """_carried_forward for an automatic link; for a manual one (spec 2.6
+    T2R2) the same whole-chain walk the orphan list makes: one listing of the
+    library and the listener's successor graph, a chain of any length, None
+    when the listing cannot be read."""
+    if not manual:
+        return await _carried_forward(db, who, key, requesting, known)
+    try:
+        present = {b["key"] for b in await pp.list_books()}
+    except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
+        logger.info("Library listing unavailable for a manual link: %s", type(exc).__name__)
+        return None
+    return _carried_in_memory(listening.successor_graph(db, who.identity), key, requesting, present)
 
 
 async def _settle_pending(db: Session, who: "Listener", key: str, earlier: str, claimed, about: dict,
@@ -792,7 +808,7 @@ async def _settle_claim(db: Session, who: "Listener", key: str, link: tuple, out
     # that `earlier` was carried forward. Releasing it is safe only when that
     # place lives on in none of the holder's own successors either, and
     # unknown (Plex can't say) is not safe: answer null and let it be asked again.
-    if await _carried_forward(db, who, outcome, key, known) is not False:
+    if await _carried(db, who, outcome, key, known, manual) is not False:
         return None
     outcome = listening.claim_link(db, who.identity, key, earlier, verdict, release=outcome, manual=manual)
     return None if isinstance(outcome, str) else outcome   # yet another copy took it meanwhile: ask again

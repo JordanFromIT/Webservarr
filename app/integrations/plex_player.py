@@ -961,7 +961,10 @@ def _book_numbers(text: str) -> tuple:
 
 
 # A digit run or a word (hyphenated compounds split) of a part taken off.
-_READER_ITEM = re.compile(r"[0-9]{1,6}(?:\.[0-9]{1,6})?(?:(?:st|nd|rd|th)(?![^\W\d_]))?|[^\W\d_]+")
+# (A combining mark of a non-Latin script is part of its letter.)
+_MARKS = "".join(chr(c) for c in range(0x300, 0x1E100) if unicodedata.category(chr(c))[0] == "M")
+_READER_ITEM = re.compile(
+    r"[0-9]{1,6}(?:\.[0-9]{1,6})?(?:(?:st|nd|rd|th)(?![^\W\d_]))?|(?:[^\W\d_]|[" + re.escape(_MARKS) + r"])+")
 # What divides a part taken off: a comma, a semicolon or a bracket starts a
 # further item (a co-narrator, a number: "Dee Lane", "Series 2"), a colon or
 # a spaced dash starts text that is the title's own ("Winter").
@@ -1006,8 +1009,9 @@ def _reader_items(segment: str, name: bool) -> list:
             i = hit[1]
             continue
         word = text.casefold()
-        initial = name and len(word) == 1
-        value = None if initial else _roman(word, 50 if name else 3999)
+        # A lone C, D or M is a letter ("Part C"), not 100, 500 or 1000.
+        letter = len(word) == 1 and (name or word in "cdm")
+        value = None if letter else _roman(word, 50 if name else 3999)
         items.append(("n", str(value)) if value else ("w", word, text))
         i += 1
     return items
@@ -1032,7 +1036,8 @@ def _dropped_numbers(part: str) -> list:
         last = items[-1] if items else None
         whole = index > 0 and (own or any(
             i[0] == "n" or _ROMAN_LOOKING.fullmatch(i[2]) or any(c.isdigit() for c in i[2]) for i in items) or (
-            last is not None and last[0] == "w" and len(last[1]) == 1 and last[2].isupper()))
+            last is not None and last[0] == "w" and len(last[1]) == 1 and (
+                last[2].isupper() or (len(items) > 1 and items[-2][0] == "w" and items[-2][1] in _LETTERED))))
         counted = ""
         for item in items:
             if item[0] == "n":
@@ -1047,30 +1052,35 @@ def _dropped_numbers(part: str) -> list:
     return tokens
 
 
+# The words after which a lone letter, capital or not, names the part ("Part a").
+_LETTERED = frozenset("part pt book bk vol volume".split())
+
 # Capitals that spell a Roman numeral, right or not ("LL"): kept, not guessed at.
 _ROMAN_LOOKING = re.compile(r"[IVXLCDM]+")
 
-# Noise a re-rip adds, in a bracket pair of its own: a year, a format or
-# bitrate, an ASIN, "Unabridged" (spec 2.6 T2K3). Not (Graphic Audio), (BBC
-# Radio 4), (Audible Original): those are other productions.
-_YEAR = r"(?:19|20)[0-9]{2}"
+# Noise a re-rip adds, in a bracket pair of its own: a format or bitrate, an
+# ASIN, "Unabridged" (spec 2.6 T2K3). Not (Graphic Audio), (BBC Radio 4),
+# (Audible Original): those are other productions. Not a year either: "(2019)"
+# and "(2020)" of a yearly work are two books (T2K5), and a bare number is
+# a number (T2K4): only a number joined to its format is noise.
 _ASIN = r"(?:asin[\s:#]*)?b0[0-9a-z]{8}"
-_BITRATE = r"[0-9]{2,3}(?:\.[0-9])?\s*(?:kbps|kb/s|khz|hz|k)(?![a-z])"
+_BITRATE = (r"(?:[0-9]{2,3}(?:\.[0-9])?\s*(?:kbps|kb/s|khz|hz)"
+            r"|(?:32|48|56|64|80|96|112|128|160|192|224|256|320)k)(?![a-z])")
+_CODEC_RATE = r"\b(?:mp3|m4b|m4a|aac|flac|ogg|opus|wav|aax|aaxc)[\-_][0-9]{2,3}\b"
 _FORMAT_WORDS = (r"\b(?:mp3|m4b|m4a|aac|flac|ogg|opus|wav|aax|aaxc|cbr|vbr|stereo|mono|retail|"
                  r"unabridged|abridged|audio\s*books?)\b")
-_NOISE_TOKENS = re.compile(f"{_ASIN}|{_YEAR}|{_BITRATE}", re.IGNORECASE)
+_NOISE_TOKENS = re.compile(f"{_ASIN}|{_BITRATE}|{_CODEC_RATE}", re.IGNORECASE)
 _ANY_GROUP = re.compile(r"\s*[(\[{]([^()\[\]{}]*)[)\]}]\s*")
 
 
 def _is_noise(inner: str) -> bool:
-    """True when a bracket pair holds only such noise."""
+    """True when a bracket pair holds only such noise (a bare number in it is
+    not noise: "(12, Unabridged)" and "(13, Unabridged)" are two books)."""
     rest, found = inner.casefold(), False
-    for pattern in (_ASIN, _YEAR, _BITRATE):
+    for pattern in (_ASIN, _CODEC_RATE, _BITRATE):      # "mp3-320" before "mp3"
         rest, n = re.subn(pattern, " ", rest, flags=re.IGNORECASE)
         found = found or n > 0
     rest, formats = re.subn(_FORMAT_WORDS, " ", rest, flags=re.IGNORECASE)
-    if formats:
-        rest = re.sub(r"\b[0-9]{2,3}\b", " ", rest)       # "mp3-320"
     return (found or formats > 0) and not re.sub(r"[\s,;:/.+\-]", "", rest)
 
 
@@ -1081,9 +1091,9 @@ def _without_noise_groups(text: str) -> str:
     return " ".join(out.split()) or text
 
 
-# Leading zeros of a whole number: "02" is "2" (not "2.01", whose "01" is a
-# decimal's).
-_LEADING_ZEROS = re.compile(r"(?<![0-9.])0+(?=[0-9])")
+# Leading zeros of a whole number: "02" is "2" (not "2.01" or "1,005" or
+# "1:05" or "1-05", whose "01", "005" and "05" are the second part of a number).
+_LEADING_ZEROS = re.compile(r"(?<![0-9.,:/\-])0+(?=[0-9])")
 
 
 def _work_title(title: str, narrator: str = "") -> str:
@@ -1139,7 +1149,13 @@ def _work_title(title: str, narrator: str = "") -> str:
 def _work_words(text: str) -> str:
     """Casefolded words with punctuation gone: an apostrophe joins its word
     ("Keeper's" is "keepers"), anything else splits. Folded as _normal does."""
-    return " ".join(re.sub(r"[\W_]+", " ", _fold(_normal(text)).replace("'", "")).split())
+    folded = _fold(_normal(text)).replace("'", "")
+    if folded.isascii():
+        return " ".join(re.sub(r"[\W_]+", " ", folded).split())
+    # Beyond ASCII a combining mark (a Thai tone, a Hebrew dot) belongs to its
+    # letter: it is not punctuation that splits a word.
+    return " ".join("".join(c if c.isalnum() or unicodedata.category(c)[0] == "M" else " "
+                            for c in folded).split())
 
 
 def _narrator_key(narrator: str) -> str:
