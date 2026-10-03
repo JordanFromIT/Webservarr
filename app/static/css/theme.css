@@ -1260,7 +1260,8 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-fp-old-time { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .wsp-fp-old-chapter { margin: 4px 0 0; font-size: 15px; overflow-wrap: anywhere; }
 .wsp-fp-old-when { margin: 4px 0 0; font-size: 13px; color: rgb(var(--color-text) / .7); }
-.wsp-fp-status { margin: 0; font-size: 13px; font-weight: 600; color: rgb(var(--color-text) / .7); }
+/* pre-line: the wait's line and the reason for a far spot are two lines. */
+.wsp-fp-status { margin: 0; font-size: 13px; font-weight: 600; color: rgb(var(--color-text) / .7); white-space: pre-line; }
 /* Empty, the live region stays in place (so what it says next is
    announced) and takes no room: it gives back the column's gap. */
 .wsp-fp-status:empty { margin-top: -16px; }

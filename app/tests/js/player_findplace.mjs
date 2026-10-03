@@ -1403,6 +1403,40 @@ await run('T3R4: a landing that would walk back over 60 s keeps the book held, a
   t.engine.close();
 });
 
+await run('T3R7: while a confirm waits, a far spot still says why, under the wait\'s line', async () => {
+  // The question: a move to the end shows 8:59:30, and the reason with it.
+  let t = await heldLong();
+  t.places.plex = { track: '661', offset_ms: 1000000, duration_ms: 9 * HOUR, updated_at: new Date(t.now() - MIN).toISOString(), device: 'Plexamp' };
+  t.q('.wsp-fp-cand.is-chosen .wsp-fp-use').click();
+  await t.clock.advance(500);
+  check('asked', t.prompts().some((x) => x.indexOf('Continue from') === 0), t.prompts());
+  t.ms.handlers.get('seekto')({ seekTime: LONG_END / 1000 });
+  await t.clock.advance(20);
+  check('the question: 8:59:30, with both lines', chosenAt(t).startsWith('8:59:30') &&
+    t.txt('.wsp-fp-status') === 'Answer the question above to carry on.\n' + FAR_STATUS, t.txt('.wsp-fp-status'));
+  answer(t, 'Keep listening here').click();
+  await t.clock.advance(3000);
+  check('Keep listening here: held, the reason alone', t.st().filesChanged !== null && t.posts.length === 0 && t.txt('.wsp-fp-status') === FAR_STATUS, t.txt('.wsp-fp-status'));
+  t.engine.close();
+  // The read: the same.
+  t = await heldLong();
+  t.positionDelay = 2000;
+  t.q('.wsp-fp-cand.is-chosen .wsp-fp-use').click();
+  await t.clock.advance(100);
+  t.ms.handlers.get('seekto')({ seekTime: LONG_END / 1000 });
+  await t.clock.advance(20);
+  check('the read: both lines', t.st().checking && t.txt('.wsp-fp-status') === 'Checking for a newer place…\n' + FAR_STATUS, t.txt('.wsp-fp-status'));
+  t.engine.close();
+  // A spot that is not far shows the wait's line alone, as before.
+  t = await held();
+  t.places.plex = { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(t.now()).toISOString(), device: 'Plexamp' };
+  await t.clock.advance(5000);
+  t.q('.wsp-fp-cand.is-chosen .wsp-fp-use').click();
+  await t.clock.advance(500);
+  check('not far: the wait\'s line alone', t.txt('.wsp-fp-status') === 'Answer the question above to carry on.', t.txt('.wsp-fp-status'));
+  t.engine.close();
+});
+
 await run('T3R5: a move refused while the question waits leaves the confirm waiting', async () => {
   for (const press of [false, true]) {
     const t = await held({ book: MIXED.key });

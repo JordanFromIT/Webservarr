@@ -43,8 +43,8 @@
  * waits and the panel says so. The chosen spot is shown where a confirm
  * would land it (landingFor); when that is far back from it (landingFar: a
  * part this browser can't play in between), the panel says so and names
- * the nearest spot it can play, so nothing lands far from the listener's
- * spot unseen. A confirm that could not land (the engine's 'part-format'
+ * the nearest spot it can play (a second line under the wait's, while a
+ * confirm waits), so nothing lands far from the listener's spot unseen. A confirm that could not land (the engine's 'part-format'
  * warning marked landing) ends the wait, and the helper shows again if it
  * was put off. A refused move's "Pick another" lasts until the spot moves,
  * a Play or preview, or the helper is shown again.
@@ -578,13 +578,15 @@ export function createFindPlace(env) {
     const spot = usable(spotNow(s), s);
     const dur = num(s.bookDurationMs);
     // A confirm waits on its read, then on any question that read asked.
-    // Then: the spot shown is far back from the listener's (a part that
-    // can't play in between), or a move was refused.
+    // The spot shown far back from the listener's (a part that can't play
+    // in between) always says why, under the wait's line too. Else a move
+    // was refused.
     const waiting = isHeld && (checking || pending);
     const far = isHeld && walkedFar(spotNow(s), s);
-    setText(status, !isHeld ? '' : checking ? 'Checking for a newer place…' : pending ? 'Answer the question above to carry on.' :
-      far ? "That part can't play in this browser. The nearest spot it can play is " + bookClock(spot) + '.' :
-        refused ? "That spot can't play in this browser. Pick another." : '');
+    const wait = !isHeld ? '' : checking ? 'Checking for a newer place…' : pending ? 'Answer the question above to carry on.' : '';
+    const why = !isHeld ? '' : far ? "That part can't play in this browser. The nearest spot it can play is " + bookClock(spot) + '.' :
+      !wait && refused ? "That spot can't play in this browser. Pick another." : '';
+    setText(status, [wait, why].filter(Boolean).join('\n'));
     // The spots (the chosen spot's own card, after a move, even with none).
     const any = list.length > 0 || chosen === SPOT;
     setHidden(candHead, !any);

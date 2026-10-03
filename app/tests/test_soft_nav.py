@@ -1871,6 +1871,14 @@ class PlayerFindPlace(unittest.TestCase):
         code = js_code_only(self.FINDPLACE.read_text(encoding="utf-8"))
         self.assertNotRegex(code, r"setHidden\(status")
 
+    def test_its_status_shows_the_wait_and_the_reason_as_two_lines(self):
+        # While a confirm waits, a far spot's reason goes under the wait's
+        # line (T3R7): joined by a newline, which only pre-line shows.
+        theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        m = re.search(r"\.wsp-fp-status\s*\{([^{}]*)\}", theme)
+        self.assertIsNotNone(m)
+        self.assertRegex(m.group(1), r"white-space\s*:\s*pre-line")
+
     def test_its_test_runs_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file
         for parts in (("package.json",), (".github", "workflows", "docker-publish.yml")):
