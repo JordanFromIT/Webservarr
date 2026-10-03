@@ -1817,6 +1817,23 @@ await run('T5F2: the range of a session counts places not in this copy by the ch
     e(2, '401', 9000, { book_key: '400:1', chapter_label: '3', earlier_copy: true })
   ], place)[0];
   check('names not in this copy: first to last', F.sessionRange(named, MULTI.chapters) === 'Chapter 3 to The Letter', F.sessionRange(named, MULTI.chapters));
+  // T5R1: a name several of this copy's chapters have (numbering restarts
+  // in each part) is no chapter number: the names as saved, first to last.
+  const parts = [
+    { label: 'Chapter 1', start_ms: 0 }, { label: 'Chapter 2', start_ms: 600000 }, { label: 'Chapter 3', start_ms: 1200000 },
+    { label: 'Chapter 1', start_ms: 1800000 }, { label: 'Chapter 2', start_ms: 2400000 }, { label: 'Chapter 3', start_ms: 3000000 }
+  ];
+  const partTwo = F.groupSessions([
+    e(0, '403', 9000, { book_key: '400:1', chapter_label: 'Chapter 3', earlier_copy: true }),
+    e(1, '402', 9000, { book_key: '400:1', chapter_label: 'Chapter 2', earlier_copy: true })
+  ], () => null)[0];
+  check('a repeated name: never the first chapter of that name', F.sessionRange(partTwo, parts) === 'Chapter 2 to Chapter 3', F.sessionRange(partTwo, parts));
+  const unique = parts.concat([{ label: 'Epilogue', start_ms: 3600000 }]);
+  const epi = F.groupSessions([
+    e(0, '404', 9000, { book_key: '400:1', chapter_label: 'Epilogue', earlier_copy: true }),
+    e(1, '403', 9000, { book_key: '400:1', chapter_label: 'Chapter 3', earlier_copy: true })
+  ], () => null)[0];
+  check('one repeated name among unique ones: names, not numbers', F.sessionRange(epi, unique) === 'Chapter 3 to Epilogue', F.sessionRange(epi, unique));
   check('one name: no range', F.sessionRange({ fromMs: null, toMs: null, labels: ['The Letter', 'The Letter'], goneLabels: ['The Letter', 'The Letter'] }, MULTI.chapters) === '');
   // No saved names: those places are left out.
   const bare = F.groupSessions([e(0, '402', 1), e(1, '401', 2)], () => null)[0];

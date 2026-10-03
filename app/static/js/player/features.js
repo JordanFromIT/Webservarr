@@ -538,8 +538,9 @@ export function sessionChapters(session, chapters) {
    Places in this copy count by where they fall in its chapters (as
    sessionChapters). A place that is not in this copy (its part is gone, or
    it is an earlier copy's) counts by the chapter name its entry saved: a
-   name this copy's chapters have is that chapter's number; when any such
-   name is not one of them, the range is the names the entries saved, first
+   name exactly one of this copy's chapters has is that chapter's number;
+   when any such name is not one of them, or several of them have it (a
+   book numbered again in each part), the range is the names the entries saved, first
    to last ("Part 4 of 17 to Part 6 of 17"). Without saved names those
    places are left out (no range from them alone). */
 export function sessionRange(session, chapters) {
@@ -548,9 +549,18 @@ export function sessionRange(session, chapters) {
   const gone = Array.isArray(s.goneLabels) ? s.goneLabels : [];
   const placed = list.length && typeof s.fromMs === 'number' && typeof s.toMs === 'number';
   const nums = placed ? [chapterIndexAt(list, s.fromMs), chapterIndexAt(list, s.toMs)] : [];
+  // A name counts as a number only when exactly one of this copy's chapters
+  // has it: a book whose numbering restarts per part has "Chapter 1" twice,
+  // and the first would be the wrong one.
   const numbered = gone.map(function (label) {
-    for (let i = 0; i < list.length; i++) if (list[i] && list[i].label === label) return i;
-    return -1;
+    let found = -1;
+    for (let i = 0; i < list.length; i++) {
+      if (list[i] && list[i].label === label) {
+        if (found !== -1) return -1;
+        found = i;
+      }
+    }
+    return found;
   });
   if (numbered.indexOf(-1) === -1) {
     const all = nums.concat(numbered);
