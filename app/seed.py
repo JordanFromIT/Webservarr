@@ -173,6 +173,46 @@ def migrate_listening_book_fields(db: Session) -> None:
             db.commit()
 
 
+LISTENING_CLAIMS_MARKER = "migration.listening_claims_v1"
+
+
+def migrate_listening_claims(db: Session) -> None:
+    """One-time migration: give every earlier-copy link the listening rows
+    already hold its claim (spec 2.6 s4: one successor per earlier copy).
+
+    create_all makes the listening_claims table; this fills it from
+    listening_positions.linked_from, as verified claims. Where two rows hold
+    the same earlier copy (the race the claims close), the newer row gets
+    the claim; the other keeps its link for its history. Idempotent and
+    safe with two workers: the back-fill is the transaction's first
+    statement (a write, so SQLite's write lock is taken before anything is
+    decided) and an INSERT OR IGNORE, and the marker is written in the same
+    commit; a worker that loses the race to it rolls back.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    for table in ("listening_claims", "listening_positions", "settings"):
+        if not list(db.execute(text(f"PRAGMA table_info({table})"))):
+            return  # no tables yet: create_all makes them (and there is nothing to fill)
+    if _setting_row(db, LISTENING_CLAIMS_MARKER):
+        return
+    filled = db.execute(text(
+        "INSERT OR IGNORE INTO listening_claims (identity, earlier_key, holder_key, state, claimed_at) "
+        "SELECT identity, linked_from, book_key, 'verified', updated_at FROM listening_positions "
+        "WHERE linked_from IS NOT NULL AND linked_from != book_key "
+        "ORDER BY updated_at DESC, book_key"
+    )).rowcount
+    db.add(Setting(key=LISTENING_CLAIMS_MARKER, value="done",
+                   description="One-time claims for the earlier-copy links listening rows held"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # the other worker ran it first
+        return
+    logger.info("Gave %d earlier-copy link(s) their claim", filled)
+
+
 def migrate_user_uid(db: Session) -> None:
     """One-time migration: add users.uid (unique) and give every existing
     user a permanent random one.

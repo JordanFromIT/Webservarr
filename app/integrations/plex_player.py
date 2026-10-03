@@ -458,12 +458,22 @@ def _track_duration(t: dict) -> int:
 def _natural(text: str) -> tuple:
     """A sort key that orders "CD2" before "CD10".
 
-    Digit runs are capped at 6 (T5N1, the same class as T1Z2): a run past
-    int()'s digit limit (4300) would be a ValueError, a 500 on list_books.
-    A folder or track title never has a digit run that long, so this never
-    changes ordering for a real name."""
-    return tuple((0, int(p), "") if p.isdigit() else (1, 0, p.casefold())
-                 for p in re.split(r"([0-9]{1,6})", text) if p)
+    A digit run compares by its value at any length (spec 2.6 s6): leading
+    zeros stripped, then by length, then by the digits, so "999999" sorts
+    before "1000000". Never int(): a run past its digit limit (4300) would
+    be a ValueError, a 500 on list_books (T5N1). "01" and "1" tie, as
+    before. The split's own groups are the runs (odd places), so a text
+    part made of other digits ("²") is text, never a number."""
+    key = []
+    for i, part in enumerate(re.split(r"([0-9]+)", text)):
+        if not part:
+            continue
+        if i % 2:
+            value = part.lstrip("0")
+            key.append((0, len(value), value))
+        else:
+            key.append((1, 0, part.casefold()))
+    return tuple(key)
 
 
 def _close(a: int, b: int) -> bool:

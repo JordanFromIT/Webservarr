@@ -680,6 +680,172 @@ class EarlierCopyHistory(StoreBase):
         self.assertEqual([e["offset_ms"] for e in listening.get_history_page(self.db, ME, "400:1")["entries"]], [3])
 
 
+class Claims(StoreBase):
+    """Spec 2.6 s4: one successor per earlier copy. A check-in that carries
+    linked_from claims that copy for its book, verified or pending; SQLite's
+    own key on (identity, earlier copy) lets only one book hold it."""
+
+    def claims(self, identity=ME):
+        from app.models import ListeningClaim
+        self.db.expire_all()
+        return {(c.earlier_key, c.holder_key, c.state)
+                for c in self.db.query(ListeningClaim).filter_by(identity=identity)}
+
+    def link_of(self, book, identity=ME):
+        from app.models import ListeningPosition
+        self.db.expire_all()
+        return self.db.query(ListeningPosition).filter_by(identity=identity, book_key=book).one().linked_from
+
+    def test_sqlite_itself_refuses_a_second_claim_on_one_earlier_copy(self):
+        from sqlalchemy.exc import IntegrityError
+        from app.models import ListeningClaim
+        at = datetime(2026, 10, 1)
+        self.db.add(ListeningClaim(identity=ME, earlier_key="300:1", holder_key="400:1", state="verified",
+                                   claimed_at=at))
+        self.db.commit()
+        self.db.add(ListeningClaim(identity=ME, earlier_key="300:1", holder_key="410:1", state="pending",
+                                   claimed_at=at))
+        with self.assertRaises(IntegrityError):
+            self.db.commit()
+        self.db.rollback()
+        # Another listener's claim on the same key is theirs alone.
+        self.db.add(ListeningClaim(identity=THEM, earlier_key="300:1", holder_key="410:1", state="pending",
+                                   claimed_at=at))
+        self.db.commit()
+        self.assertEqual(self.claims(), {("300:1", "400:1", "verified")})
+        self.assertEqual(self.claims(THEM), {("300:1", "410:1", "pending")})
+
+    def test_pending_then_verified(self):
+        checkin(self.db, book="400:1")
+        self.assertIsNone(listening.claim_link(self.db, ME, "400:1", "300:1", None))
+        self.assertEqual(self.claims(), {("300:1", "400:1", "pending")})
+        self.assertIsNone(self.link_of("400:1"))          # the row's link waits for the verify
+        self.assertIsNone(listening.claim_link(self.db, ME, "400:1", "300:1", None))   # a resend, still unsure
+        self.assertIs(listening.claim_link(self.db, ME, "400:1", "300:1", True), True)
+        self.assertEqual(self.claims(), {("300:1", "400:1", "verified")})
+        self.assertEqual(self.link_of("400:1"), "300:1")
+        # Held and linked: an unsure resend still says so.
+        self.assertIs(listening.claim_link(self.db, ME, "400:1", "300:1", None), True)
+
+    def test_a_refusal_drops_a_pending_claim_but_never_a_verified_one(self):
+        checkin(self.db, book="400:1")
+        listening.claim_link(self.db, ME, "400:1", "300:1", None)
+        self.assertIs(listening.claim_link(self.db, ME, "400:1", "300:1", False), False)
+        self.assertEqual(self.claims(), set())
+        listening.claim_link(self.db, ME, "400:1", "300:1", True)
+        self.assertIs(listening.claim_link(self.db, ME, "400:1", "300:1", False), False)
+        self.assertEqual(self.claims(), {("300:1", "400:1", "verified")})
+        self.assertEqual(self.link_of("400:1"), "300:1")
+
+    def test_another_copys_claim_names_its_holder(self):
+        checkin(self.db, book="400:1", psid="b")
+        checkin(self.db, book="410:1", psid="c")
+        listening.claim_link(self.db, ME, "400:1", "300:1", None)
+        for verdict in (True, None):
+            with self.subTest(verdict=verdict):
+                self.assertEqual(listening.claim_link(self.db, ME, "410:1", "300:1", verdict), "400:1")
+        self.assertEqual(self.claims(), {("300:1", "400:1", "pending")})
+        self.assertIsNone(self.link_of("410:1"))
+        # Released by name (its holder's album is gone): the claim moves.
+        self.assertIs(listening.claim_link(self.db, ME, "410:1", "300:1", True, release="400:1"), True)
+        self.assertEqual(self.claims(), {("300:1", "410:1", "verified")})
+        self.assertEqual(self.link_of("410:1"), "300:1")
+
+    def test_a_holder_whose_row_was_deleted_or_reset_holds_nothing(self):
+        from app.models import ListeningPosition
+        checkin(self.db, book="400:1", psid="b")
+        checkin(self.db, book="410:1", psid="c")
+        checkin(self.db, book="420:1", psid="d")
+        listening.claim_link(self.db, ME, "400:1", "300:1", True)
+        listening.claim_link(self.db, ME, "410:1", "310:1", None)
+        self.assertEqual(listening.successors(self.db, ME, "300:1"), ["400:1"])
+        self.assertEqual(listening.successors(self.db, ME, "310:1"), ["410:1"])
+        # 400:1's row is reset (its link cleared); 410:1's row is deleted.
+        self.db.query(ListeningPosition).filter_by(identity=ME, book_key="400:1").update({"linked_from": None})
+        self.db.query(ListeningPosition).filter_by(identity=ME, book_key="410:1").delete()
+        self.db.commit()
+        self.assertEqual(listening.successors(self.db, ME, "300:1"), [])
+        self.assertEqual(listening.successors(self.db, ME, "310:1"), [])
+        self.assertIs(listening.claim_link(self.db, ME, "420:1", "300:1", True), True)
+        self.assertIs(listening.claim_link(self.db, ME, "400:1", "310:1", None), None)
+        self.assertEqual(self.claims(), {("300:1", "420:1", "verified"), ("310:1", "400:1", "pending")})
+
+    def test_no_row_no_claim_and_a_row_with_another_link_none(self):
+        self.assertIsNone(listening.claim_link(self.db, ME, "400:1", "300:1", True))
+        self.assertEqual(self.claims(), set())
+        checkin(self.db, book="400:1")
+        listening.claim_link(self.db, ME, "400:1", "300:1", True)
+        for verdict in (True, None):
+            with self.subTest(verdict=verdict):
+                self.assertIs(listening.claim_link(self.db, ME, "400:1", "310:1", verdict), False)
+        self.assertEqual(self.claims(), {("300:1", "400:1", "verified")})
+        for bad in ("", "junk", "300", "400:1", None, 300):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    listening.claim_link(self.db, ME, "400:1", bad, True)
+
+    def test_successors_count_a_pending_claim_like_a_link(self):
+        import time
+        checkin(self.db, book="400:1", psid="b")
+        time.sleep(0.002)
+        checkin(self.db, book="410:1", psid="c")
+        listening.set_link(self.db, ME, "400:1", "300:1")
+        listening.claim_link(self.db, ME, "410:1", "310:1", None)
+        self.assertEqual(listening.successors(self.db, ME, "310:1"), ["410:1"])
+        self.assertEqual(listening.successors(self.db, ME, "310:1", exclude=["410:1"]), [])
+        self.assertEqual(listening.successors(self.db, ME, "300:1"), ["400:1"])
+        self.assertEqual(listening.successors(self.db, THEM, "310:1"), [])
+
+    def test_identities_are_isolated(self):
+        checkin(self.db, book="400:1", psid="b")
+        checkin(self.db, identity=THEM, book="410:1", psid="them")
+        listening.claim_link(self.db, THEM, "410:1", "300:1", None)
+        self.assertIs(listening.claim_link(self.db, ME, "400:1", "300:1", True), True)
+        self.assertEqual(self.claims(), {("300:1", "400:1", "verified")})
+        self.assertEqual(self.claims(THEM), {("300:1", "410:1", "pending")})
+        self.assertEqual(listening.successors(self.db, THEM, "300:1"), ["410:1"])
+        self.assertEqual(listening.successors(self.db, ME, "300:1"), ["400:1"])
+
+    def test_a_checkin_writes_its_claim_in_the_saves_own_transaction(self):
+        from sqlalchemy import event
+        engine = self.Session.kw["bind"]
+        seen = []
+
+        def statement(conn, cursor, sql, parameters, context, executemany):
+            if sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
+                seen.append(sql.split("(")[0].strip())
+
+        def commit(conn):
+            seen.append("COMMIT")
+        for kind in ("stored", "older seq", "conflict"):
+            with self.subTest(kind=kind):
+                book = {"stored": "400:1", "older seq": "410:1", "conflict": "420:1"}[kind]
+                if kind == "older seq":
+                    checkin(self.db, book=book, psid="p", seq=5)
+                if kind == "conflict":
+                    checkin(self.db, book=book, psid="another device", seq=1)
+                listening.prune_if_due(self.db)          # not due again: no housekeeping write below
+                seen.clear()
+                event.listen(engine, "before_cursor_execute", statement)
+                event.listen(engine, "commit", commit)
+                try:
+                    result = checkin(self.db, book=book, psid="p", seq=1, link=(f"3{book[1:]}", None))
+                finally:
+                    event.remove(engine, "before_cursor_execute", statement)
+                    event.remove(engine, "commit", commit)
+                self.assertIsNone(result["link"])
+                self.assertEqual(seen.count("COMMIT"), 1, seen)
+                self.assertTrue(any(s.startswith("INSERT INTO listening_claims") or
+                                    s.startswith("INSERT OR IGNORE INTO listening_claims") for s in seen), seen)
+                self.assertEqual(self.claims() & {(f"3{book[1:]}", book, "pending")},
+                                 {(f"3{book[1:]}", book, "pending")})
+        # And a verified link is kept on the row in that same transaction.
+        result = checkin(self.db, book="430:1", psid="p", link=("330:1", True))
+        self.assertIs(result["link"], True)
+        self.assertEqual(self.link_of("430:1"), "330:1")
+        self.assertNotIn("link", checkin(self.db, book="440:1", psid="p"))
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class BookFieldsMigration(unittest.TestCase):
     """An install from before spec 2.5 gets the five columns on both tables
@@ -844,6 +1010,113 @@ class BookFieldsMigration(unittest.TestCase):
         self.assertIn("migrate_listening_book_fields(db)", source)
         self.assertLess(source.index("migrate_listening_device_id(db)"),
                         source.index("migrate_listening_book_fields(db)"))
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class ClaimsBackfill(unittest.TestCase):
+    """Spec 2.6 s4: an install from before claims gets one for every link
+    its rows already hold, once. Where two rows hold the same earlier copy
+    (the race this closes), the newer one gets it. Two workers starting at
+    once both come up."""
+
+    def file_db(self):
+        import os
+        import tempfile
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from app import models  # noqa: F401  registers the tables
+        from app.database import Base
+        from app.models import ListeningPosition
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        engine = create_engine("sqlite:///" + path)
+        self.addCleanup(engine.dispose)
+        Base.metadata.create_all(bind=engine)
+        db = sessionmaker(bind=engine)()
+        for identity, book, link, day in ((ME, "400:1", "300:1", 20), (ME, "410:1", "300:1", 25),
+                                          (ME, "420:1", "400:1", 26), (ME, "430:1", None, 27),
+                                          (THEM, "400:1", "300:1", 21)):
+            db.add(ListeningPosition(identity=identity, book_key=book, track_key="1", offset_ms=5, duration_ms=9,
+                                     updated_at=datetime(2026, 9, day), device="Phone", source="web",
+                                     linked_from=link))
+        db.commit()
+        db.close()
+        return engine
+
+    @staticmethod
+    def claims(db):
+        from sqlalchemy import text
+        return set(map(tuple, db.execute(text(
+            "SELECT identity, earlier_key, holder_key, state FROM listening_claims")).fetchall()))
+
+    EXPECTED = {(ME, "300:1", "410:1", "verified"), (ME, "400:1", "420:1", "verified"),
+                (THEM, "300:1", "400:1", "verified")}
+
+    def test_every_link_gets_its_claim_once(self):
+        import logging
+        from sqlalchemy.orm import sessionmaker
+        from app.seed import migrate_listening_claims
+        db = sessionmaker(bind=self.file_db())()
+        try:
+            with self.assertLogs("app.seed", level=logging.INFO):
+                migrate_listening_claims(db)
+            self.assertEqual(self.claims(db), self.EXPECTED)
+            with self.assertNoLogs("app.seed", level=logging.INFO):
+                migrate_listening_claims(db)       # once: nothing left to do
+            self.assertEqual(self.claims(db), self.EXPECTED)
+            # The store reads them: 300:1's place lives on in 410:1 (and in
+            # 400:1, which still holds the link for its history).
+            self.assertEqual(listening.successors(db, ME, "300:1"), ["410:1", "400:1"])
+        finally:
+            db.close()
+
+    def test_two_workers_at_once_both_come_up(self):
+        # Worker 2 runs the whole migration between worker 1's look for the
+        # marker and its back-fill: worker 1 writes nothing twice and carries on.
+        from sqlalchemy import create_engine, event
+        from sqlalchemy.orm import sessionmaker
+        from app.seed import migrate_listening_claims
+        engine = self.file_db()
+        other = create_engine(str(engine.url))
+        self.addCleanup(other.dispose)
+        raced = []
+
+        def other_worker(conn, cursor, statement, parameters, context, executemany):
+            if "INTO listening_claims" in statement and not raced:
+                raced.append(statement)
+                db2 = sessionmaker(bind=other)()
+                try:
+                    migrate_listening_claims(db2)
+                finally:
+                    db2.close()
+        event.listen(engine, "before_cursor_execute", other_worker)
+        self.addCleanup(event.remove, engine, "before_cursor_execute", other_worker)
+        db = sessionmaker(bind=engine)()
+        try:
+            migrate_listening_claims(db)
+            self.assertEqual(len(raced), 1)
+            self.assertEqual(self.claims(db), self.EXPECTED)
+        finally:
+            db.close()
+
+    def test_no_op_before_the_tables_exist(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from app.seed import migrate_listening_claims
+        empty = sessionmaker(bind=create_engine("sqlite://"))()
+        try:
+            migrate_listening_claims(empty)     # no tables yet: create_all makes them
+        finally:
+            empty.close()
+
+    def test_init_db_runs_it_after_the_book_fields(self):
+        import inspect as pyinspect
+        from app import database
+        source = pyinspect.getsource(database.init_db)
+        self.assertIn("migrate_listening_claims(db)", source)
+        self.assertLess(source.index("migrate_listening_book_fields(db)"),
+                        source.index("migrate_listening_claims(db)"))
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")

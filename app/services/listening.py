@@ -27,7 +27,10 @@ being replaced (spec 2.5): book time (ms from the start of the book), the
 book's length then, that copy's chapter name and narrator, and a work key
 (plex_player.work_key) that names the book apart from its files. A book
 re-added as a new Plex album finds its earlier copy's row by that key
-(find_linked).
+(find_linked). Only one book may carry an earlier copy forward (spec 2.6
+s4): the check-in that confirms the link claims that copy for its book, in
+the save's own transaction, and the claims table's key lets SQLite itself
+refuse a second claim (claim_link).
 
 The log keeps every stored check-in for the history view and is pruned after
 LOG_DAYS. Pruning runs at startup and then at most once a day, piggybacked on
@@ -41,11 +44,12 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import and_, case, or_
+from sqlalchemy import and_, case, exists, or_
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import ListeningLog, ListeningPosition, PlayerPrefs, Setting
+from app.models import ListeningClaim, ListeningLog, ListeningPosition, PlayerPrefs, Setting
 from app.utils import utc_iso
 
 logger = logging.getLogger(__name__)
@@ -161,7 +165,8 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
                  device_id: Optional[str] = None, base: Optional[str] = None,
                  book_ms: Optional[int] = None, chapter_label: Optional[str] = None,
                  book_duration_ms: Optional[int] = None, work_key: Optional[str] = None,
-                 narrator: Optional[str] = None, book_title: Optional[str] = None) -> dict:
+                 narrator: Optional[str] = None, book_title: Optional[str] = None,
+                 link: Optional[tuple] = None) -> dict:
     """Store a check-in as this listener's position in the book and log it.
 
     `device_id` is the sending browser's own random id (DEVICE_ID), or None
@@ -179,8 +184,13 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     to `book_duration_ms` when both are known. An empty chapter name is
     stored as null. When this check-in's length is unknown, `book_ms` is
     clamped to the length the row keeps, on the position row (in the
-    UPDATE) and on the log row alike. The link to an earlier copy is set
-    apart (set_link).
+    UPDATE) and on the log row alike.
+
+    `link` is (earlier copy's key, verdict) when the check-in carries
+    linked_from: the claim on that copy (claim_link, with the verdict the
+    router reached) is written in this check-in's own transaction, whatever
+    the save's outcome (a refused older seq or a conflict still leaves a
+    row), and the result carries claim_link's answer as "link".
 
     `book_title` is the title the library shows for the book (the server's
     read, cut to BOOK_TITLE_MAX), kept on the position row only so a place
@@ -210,6 +220,8 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
         raise ValueError("device_id must be 16 to 40 lower-case letters and digits")
     base_at = parse_base(base)
     about = _book_fields(book_ms, chapter_label, book_duration_ms, work_key, narrator)
+    if link is not None:
+        _earlier_key(link[0], book)
 
     now = _utcnow()
     values = {"track_key": track, "offset_ms": offset_ms, "duration_ms": duration_ms, "updated_at": now,
@@ -252,6 +264,13 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     if base_at is not None:
         allowed.append(and_(P.updated_at >= base_at, P.updated_at < base_at + timedelta(milliseconds=1)))
     swap = or_(*allowed)
+    claimed = {}
+
+    def claim() -> None:
+        """The claim on the earlier copy, in the transaction open now."""
+        if link is not None:
+            claimed["link"] = _apply_link(db, identity, book, link[0], link[1], now)
+
     for _attempt in range(3):
         if db.query(P).filter(*mine, not_newer_self, swap).update(update, synchronize_session=False):
             break
@@ -260,15 +279,19 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
             stored_at = row.updated_at
             if row.psid == psid and row.seq is not None and row.seq > seq:
                 db.rollback()
-                return {"stored": False, "updated_at": utc_iso(stored_at)}
+                if link is not None:
+                    claim()
+                    db.commit()
+                return {"stored": False, "updated_at": utc_iso(stored_at), **claimed}
             conflict = {"track": row.track_key, "offset_ms": row.offset_ms, "device": row.device,
                         "updated_at": utc_iso(stored_at)}
             kept_ms = row.book_duration_ms
             db.rollback()
             db.add(ListeningLog(identity=identity, book_key=book, track_key=track, offset_ms=offset_ms,
                                 device=device, device_id=device_id, event=event, at=now, **logged(kept_ms)))
+            claim()
             db.commit()
-            return {"stored": False, "updated_at": utc_iso(stored_at), "conflict": conflict}
+            return {"stored": False, "updated_at": utc_iso(stored_at), "conflict": conflict, **claimed}
         db.add(P(identity=identity, book_key=book, **values))
         try:
             db.flush()
@@ -284,6 +307,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
         kept_ms = db.query(P.book_duration_ms).filter(*mine).scalar()
     db.add(ListeningLog(identity=identity, book_key=book, track_key=track, offset_ms=offset_ms,
                         device=device, device_id=device_id, event=event, at=now, **logged(kept_ms)))
+    claim()
     db.commit()
 
     try:
@@ -292,7 +316,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
         # Housekeeping never fails a check-in that has already been stored.
         db.rollback()
         logger.exception("Listening log pruning failed")
-    return {"stored": True, "updated_at": utc_iso(now)}
+    return {"stored": True, "updated_at": utc_iso(now), **claimed}
 
 
 def position_dict(row: ListeningPosition) -> dict:
@@ -350,9 +374,11 @@ def set_link(db: Session, identity: str, book: str, linked_from: str) -> Optiona
     True when the row now holds `linked_from`, False when it holds another
     link, None when there is no row (a check-in always leaves one; nothing
     is created without a place). Raises ValueError for a key that is not
-    another book's."""
-    if not (isinstance(linked_from, str) and BOOK_KEY.fullmatch(linked_from) and linked_from != book):
-        raise ValueError("linked_from must be another book's key")
+    another book's.
+
+    The row's link alone: a check-in keeps a link through claim_link, which
+    also claims the earlier copy (spec 2.6 s4)."""
+    _earlier_key(linked_from, book)
     P = ListeningPosition
     (db.query(P).filter(P.identity == identity, P.book_key == book, P.linked_from.is_(None))
      .update({"linked_from": linked_from}, synchronize_session=False))
@@ -362,6 +388,88 @@ def set_link(db: Session, identity: str, book: str, linked_from: str) -> Optiona
         return None
     db.refresh(row)
     return row.linked_from == linked_from
+
+
+def _earlier_key(earlier, book: str) -> str:
+    if not (isinstance(earlier, str) and BOOK_KEY.fullmatch(earlier) and earlier != book):
+        raise ValueError("linked_from must be another book's key")
+    return earlier
+
+
+def _still_held():
+    """A claim still held by its holder: the holder's row is there and keeps
+    the link, or (pending) has none yet. A claim whose holder's row was
+    deleted, or reset to no link or another one, holds nothing."""
+    P, C = ListeningPosition, ListeningClaim
+    return exists().where(P.identity == C.identity, P.book_key == C.holder_key,
+                          or_(P.linked_from == C.earlier_key,
+                              and_(P.linked_from.is_(None), C.state == "pending")))
+
+
+def _apply_link(db: Session, identity: str, book: str, earlier: str, verdict: Optional[bool],
+                now: datetime, release: Optional[str] = None):
+    """claim_link's work in the transaction open now (no commit). Every path
+    starts with a write, so SQLite's write lock is held before anything is
+    read and decided."""
+    P, C = ListeningPosition, ListeningClaim
+    claim = (C.identity == identity, C.earlier_key == earlier)
+    if verdict is False:
+        # Refused (its album is there again, say): a pending claim of this
+        # book's goes, so it blocks nothing; a verified one stays with the link.
+        db.query(C).filter(*claim, C.holder_key == book, C.state == "pending").delete(synchronize_session=False)
+        return False
+    if release is not None:
+        db.query(C).filter(*claim, C.holder_key == release).delete(synchronize_session=False)
+    db.query(C).filter(*claim, C.holder_key != book, ~_still_held()).delete(synchronize_session=False)
+    row = db.query(P.linked_from).filter(P.identity == identity, P.book_key == book).first()
+    if row is None:
+        return None             # no place, so no claim (a check-in always leaves a row)
+    if row.linked_from is not None and row.linked_from != earlier:
+        # Set once: this book carries another copy forward, never this one.
+        db.query(C).filter(*claim, C.holder_key == book).delete(synchronize_session=False)
+        return False
+    held = verdict or row.linked_from == earlier
+    db.execute(sqlite_insert(C).values(identity=identity, earlier_key=earlier, holder_key=book,
+                                       state="verified" if held else "pending", claimed_at=now)
+               .on_conflict_do_nothing())
+    holder, state = db.query(C.holder_key, C.state).filter(*claim).one()
+    if holder != book:
+        return holder
+    if not held:
+        return None
+    if state != "verified":
+        db.query(C).filter(*claim, C.holder_key == book).update({"state": "verified"}, synchronize_session=False)
+    db.query(P).filter(P.identity == identity, P.book_key == book, P.linked_from.is_(None)).update(
+        {"linked_from": earlier}, synchronize_session=False)
+    return True
+
+
+def claim_link(db: Session, identity: str, book: str, earlier: str, verdict: Optional[bool],
+               release: Optional[str] = None):
+    """Claim the earlier copy `earlier` for this listener's book `book`
+    (spec 2.6 s4), with the verdict the router reached on the link: True
+    (verified), None (Plex couldn't say: a pending claim) or False (refused).
+
+    The claims table's key (identity, earlier copy) lets SQLite itself keep
+    one holder per earlier copy. A pending claim blocks other copies as a
+    verified one does (successors). Returns:
+    - True: `book` holds a verified claim, and its row the link (set once,
+      as set_link);
+    - None: `book` holds a pending claim, or has no row (nothing is claimed
+      without a place);
+    - False: refused. A refusal drops a pending claim of `book`'s (never a
+      verified one); a row already linked to another copy claims nothing;
+    - the holder's book key, when another book holds the claim. The caller
+      decides: if that book's album is gone, it calls again with `release`
+      naming it, which drops that claim first.
+
+    A claim whose holder's row was deleted, or no longer holds the link
+    (reset), is released here too. Commits. Raises ValueError for a key
+    that is not another book's."""
+    _earlier_key(earlier, book)
+    outcome = _apply_link(db, identity, book, earlier, verdict, _utcnow(), release=release)
+    db.commit()
+    return outcome
 
 
 def link_chain(db: Session, identity: str, book: str, first: Optional[str]) -> list:
@@ -378,17 +486,22 @@ def link_chain(db: Session, identity: str, book: str, first: Optional[str]) -> l
 
 def successors(db: Session, identity: str, key: str, exclude=()) -> list:
     """The book keys of this listener's rows that carried `key` forward (a
-    row whose linked_from is `key`), none of `exclude`, newest first, at
-    most LINK_TRIES. The router asks whether one of them (or one of theirs)
-    is still in the library before it offers `key` as an earlier copy: a
-    place already carried into an edition that is still there is that
-    edition's, never another side-by-side edition's (spec 2.5 s2). Scoped
-    by identity, so the primary key's (identity, book_key) index bounds the
+    row whose linked_from is `key`, or that holds a pending claim on it:
+    spec 2.6 s4), none of `exclude`, newest first, at most LINK_TRIES. The
+    router asks whether one of them (or one of theirs) is still in the
+    library before it offers `key` as an earlier copy: a place already
+    carried into an edition that is still there is that edition's, never
+    another side-by-side edition's (spec 2.5 s2). A pending claim's holder
+    has no link on its row yet; a verified claim's holder has. Scoped by
+    identity, so the primary key's (identity, book_key) index bounds the
     read to this listener's own rows."""
     if not isinstance(key, str):
         return []
-    P = ListeningPosition
-    q = db.query(P.book_key).filter(P.identity == identity, P.linked_from == key)
+    P, C = ListeningPosition, ListeningClaim
+    pending = exists().where(C.identity == P.identity, C.earlier_key == key, C.holder_key == P.book_key,
+                             C.state == "pending")
+    q = db.query(P.book_key).filter(P.identity == identity,
+                                    or_(P.linked_from == key, and_(P.linked_from.is_(None), pending)))
     exclude = [k for k in exclude if isinstance(k, str)]
     if exclude:
         q = q.filter(P.book_key.notin_(exclude))

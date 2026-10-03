@@ -814,6 +814,54 @@ class Copies(unittest.TestCase):
         self.assertEqual(sorted(names, key=pp._natural), ["Rip/CD1", "Rip/CD2", "Rip/CD9", "Rip/CD10"])
         self.assertTrue(pp._disc_siblings("Book Title - CD3", "Book Title - CD4"))
 
+    # Spec 2.6 s6 (FR-N1): a digit run compares by value, at any length:
+    # leading zeros stripped, then by length, then by the digits.
+
+    def test_numbers_of_seven_digits_or_more_sort_by_value(self):
+        self.assertEqual(sorted(["Track 1000000", "Track 999999"], key=pp._natural),
+                         ["Track 999999", "Track 1000000"])
+        self.assertEqual(sorted(["x/0001000000", "x/999999", "x/12345678", "x/02"], key=pp._natural),
+                         ["x/02", "x/999999", "x/0001000000", "x/12345678"])
+        # Leading zeros alone never order two names ("01" and "1" tie, as before).
+        self.assertEqual(pp._natural("CD01")[:2], pp._natural("CD1")[:2])
+
+    def test_a_100000_digit_run_does_not_raise_and_sorts_by_value(self):
+        huge = "1" + "0" * 99_999                   # 100000 digits
+        shorter = "9" * 99_999
+        key = pp._natural(f"Part {huge}")           # far past int()'s 4300-digit limit
+        self.assertIsNotNone(key)
+        self.assertEqual(sorted([f"Part {huge}", f"Part {shorter}", "Part 7"], key=pp._natural),
+                         ["Part 7", f"Part {shorter}", f"Part {huge}"])
+
+    def test_natural_sort_fuzz_keeps_the_old_order_and_orders_long_runs_by_value(self):
+        import random
+        import re as _re
+
+        def old(text):          # _natural as it was at f1b897b
+            return tuple((0, int(p), "") if p.isdigit() else (1, 0, p.casefold())
+                         for p in _re.split(r"([0-9]{1,6})", text) if p)
+
+        def by_value(text):     # the reference for any length (int() is fine up to 4300 digits)
+            return tuple((0, int(p), "") if p.isdigit() else (1, 0, p.casefold())
+                         for p in _re.split(r"([0-9]+)", text) if p)
+
+        rng = random.Random(20261003)
+        pieces = ["CD", "Disc ", "Part", "Track", " - ", "_", ".", "/", "a", "B", "chapter ", " ", "(", ")"]
+
+        def name(max_digits):
+            out = []
+            for _ in range(rng.randint(1, 5)):
+                out.append(rng.choice(pieces))
+                if rng.random() < 0.8:
+                    out.append("".join(rng.choice("0123456789") for _ in range(rng.randint(1, max_digits))))
+            return "".join(out)
+
+        for _round in range(300):
+            short = [name(6) for _ in range(12)]
+            self.assertEqual(sorted(short, key=pp._natural), sorted(short, key=old), short)
+            long = [name(14) for _ in range(12)]
+            self.assertEqual(sorted(long, key=pp._natural), sorted(long, key=by_value), long)
+
 
 class Detail(BridgeBase):
     def test_single_file_book_chapters(self):

@@ -323,7 +323,9 @@ async def cover(request: Request, key: str, who: Listener = Depends(listener)):
 # copy's album is gone from the library: two editions side by side (two
 # narrators of one title) share a work key and must never share a place.
 # For the same reason a place already carried into a copy still in the
-# library (A became B, B is there) is never offered to a third (C, beside B).
+# library (A became B, B is there) is never offered to a third (C, beside B),
+# nor one B has claimed while Plex couldn't yet confirm it (a pending claim,
+# spec 2.6 s4). The claims table lets only one book hold an earlier copy.
 #
 # The lookup either completes or answers 503 (the player's Retry, which never
 # falls back to 0:00): a lookup that gave up on a Plex error would open the
@@ -357,12 +359,14 @@ async def _carried_forward(db: Session, who: "Listener", key: str, requesting: s
                            known: dict) -> Optional[bool]:
     """True when the listener's place in the earlier copy `key` already
     lives on in a copy still in the library: a row of theirs whose
-    linked_from is `key` (or, link by link, up to listening.LINK_HOPS deep,
-    one of that row's own successors) under a book whose album is still
-    there, other than `requesting`. That place is that copy's: offering it
-    to `requesting` as well would merge two editions side by side (spec 2.5
-    s2). A copy that carried it forward and is gone itself doesn't count
-    (A became B, B went too: a new C may inherit, through B).
+    linked_from is `key` or that holds a pending claim on it (or, link by
+    link, up to listening.LINK_HOPS deep, one of that row's own successors)
+    under a book whose album is still there, other than `requesting`. A
+    pending claim blocks as a verified one does (spec 2.6 s4). That place
+    is that copy's: offering it to `requesting` as well would merge two
+    editions side by side (spec 2.5 s2). A copy that carried it forward
+    and is gone itself doesn't count (A became B, B went too: a new C may
+    inherit, through B).
 
     False when no such copy is there, None when Plex can't say. The
     database is asked first (listening.successors), so a copy nothing
@@ -607,6 +611,25 @@ async def _claimed_link(db: Session, who: "Listener", key: str, claim: Optional[
     return row if row is not None and row.work_key else None
 
 
+async def _settle_claim(db: Session, who: "Listener", key: str, link: tuple, outcome, known: dict):
+    """The check-in's "linked" from the claim its save wrote
+    (listening.claim_link's answer). When another book holds the claim (two
+    confirms at once on the two workers, or a copy that claimed it before),
+    that book's album decides: still in the library, it keeps the claim and
+    this book is refused (false); gone, its claim is released and taken
+    over (a copy that went too blocks nothing, so A to B to C works); Plex
+    can't say, null (sent again with the next save). `known` holds the
+    album checks this request already made."""
+    if not isinstance(outcome, str):
+        return outcome
+    gone = known[outcome] if outcome in known else await _album_gone(outcome)
+    if not gone:
+        return None if gone is None else False
+    earlier, verdict = link
+    outcome = listening.claim_link(db, who.identity, key, earlier, verdict, release=outcome)
+    return None if isinstance(outcome, str) else outcome   # yet another copy took it meanwhile: ask again
+
+
 @router.post("/checkin", dependencies=[Depends(require_same_origin)])
 @_limit(CHECKIN_LIMIT, "checkin")
 async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
@@ -635,16 +658,23 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     the values it had.
 
     `linked_from` (spec 2.5 s4): the earlier copy /position linked this book
-    to. Every response to a check-in that carries one says "linked":
-    - true: the link is kept on the listener's row for the book (set once,
-      whatever the save's own outcome, a refused seq or a 409 included), so
-      the earlier copy's history stays with it;
+    to. The check-in claims that copy for the book, in the save's own
+    transaction (spec 2.6 s4: one successor per earlier copy, enforced by
+    the database). Every response to a check-in that carries one says
+    "linked":
+    - true: the claim is verified and the link is kept on the listener's row
+      for the book (set once, whatever the save's own outcome, a refused seq
+      or a 409 included), so the earlier copy's history stays with it;
     - false: it is not a link the server would make (not the listener's own
       copy, another work, its album still in the library, or its place
-      already carried into another copy still in the library), or the row
-      already has another link; stop sending it;
-    - null: it could not be checked now (Plex failed); send it again with
-      the next save.
+      already carried into another copy still in the library, pending
+      claims included), or the row already has another link, or another
+      book won the claim at the same moment; stop sending it. The place is
+      saved all the same;
+    - null: it could not be checked now (Plex failed), and a pending claim
+      is stored: it blocks other copies until a later check-in carrying the
+      link verifies it (true) or finds the old album back (false, and the
+      claim is dropped). Send it again with the next save.
     Its album check runs at the same time as the book's reads."""
     claimed = await _claimed_link(db, who, body.book, body.linked_from)
     reads = [pp.checkin_book(body.book, body.track)]
@@ -661,7 +691,7 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     _album, about = results[0]
     about = about or {}
 
-    linked = None
+    linked, known = None, {}
     if body.linked_from is not None:
         if claimed is None:
             linked = False
@@ -675,8 +705,11 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
         if linked:
             # Its place already lives on in a copy still in the library: not
             # this book's to take (_carried_forward).
-            carried = await _carried_forward(db, who, body.linked_from, body.book, {body.linked_from: True})
+            known[body.linked_from] = True
+            carried = await _carried_forward(db, who, body.linked_from, body.book, known)
             linked = None if carried is None else not carried
+    # The claim's verdict; nothing to claim for a key that is not another book's.
+    link = (body.linked_from, linked) if body.linked_from not in (None, body.book) else None
 
     try:
         result = listening.save_checkin(db, who.identity, body.book, body.track, body.offset_ms,
@@ -685,11 +718,11 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
                                         chapter_label=body.chapter_label,
                                         book_duration_ms=about.get("duration_ms"),
                                         work_key=about.get("work_key"), narrator=about.get("narrator"),
-                                        book_title=about.get("title"))
+                                        book_title=about.get("title"), link=link)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
-    if linked:
-        linked = listening.set_link(db, who.identity, body.book, body.linked_from)
+    if link is not None:
+        linked = await _settle_claim(db, who, body.book, link, result.pop("link", None), known)
     extra = {} if body.linked_from is None else {"linked": linked}
     if result.get("conflict"):
         return JSONResponse({"conflict": result["conflict"], "now": utc_iso(datetime.now(timezone.utc)), **extra},

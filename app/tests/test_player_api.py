@@ -1260,6 +1260,279 @@ class EarlierCopies(PlayerApiBase):
                          [(self.NEW, None), (self.GONE, True), ("290:1", True)])
 
 
+class Claims(PlayerApiBase):
+    """Spec 2.6 s4 (2.5 ledger T5R2): one successor per earlier copy. A
+    confirm writes a claim on the earlier copy, pending when Plex can't
+    verify it (linked: null), and a pending claim blocks a side-by-side
+    edition exactly as a verified one does. A claim whose holder's album is
+    gone, or whose holder's row was deleted or reset, blocks nothing, so
+    chains (A to B to C) keep working."""
+
+    NEW, GONE, WORK, THERE = EarlierCopies.NEW, EarlierCopies.GONE, EarlierCopies.WORK, EarlierCopies.THERE
+    seed = EarlierCopies.seed
+    carried = EarlierCopies.carried
+    save_new = EarlierCopies.save_new
+    history = EarlierCopies.history
+
+    def setUp(self):
+        super().setUp()
+        # NEW (C) and THERE (B) are two editions side by side, both in the
+        # library; GONE (A) is the earlier copy, gone.
+        for p in (mock.patch.dict(LIBRARY, {self.NEW: {"401": 500_000}, self.THERE: {"451": 500_000}}),
+                  mock.patch.dict(WORKS, {self.NEW: self.WORK, self.THERE: self.WORK})):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def claims(self, identity="plex:1001"):
+        from app.models import ListeningClaim
+        self.db.expire_all()
+        return {(c.earlier_key, c.holder_key, c.state)
+                for c in self.db.query(ListeningClaim).filter_by(identity=identity)}
+
+    def link_of(self, book, identity="plex:1001"):
+        self.db.expire_all()
+        return self.db.query(ListeningPosition).filter_by(identity=identity, book_key=book).one().linked_from
+
+    def down(self, key):
+        """Plex can't check `key`'s album."""
+        async def check(k, track_key=None):
+            if k == key:
+                raise pp.PlayerUnavailable("down")
+            return await fake_assert_in_library(k, track_key)
+        return mock.patch.object(pp, "assert_in_library", side_effect=check)
+
+    def confirm(self, book, linked_from, seq=1, psid=None):
+        track = next(iter(LIBRARY[book]))
+        r = self.checkin(book=book, track=track, duration_ms=LIBRARY[book][track], psid=psid or "page-" + book,
+                         seq=seq, linked_from=linked_from)
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["linked"]
+
+    def pending_in_b(self):
+        self.seed(self.GONE)
+        with self.down(self.GONE):
+            self.assertIsNone(self.confirm(self.THERE, self.GONE))
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "pending")})
+        self.assertIsNone(self.link_of(self.THERE))
+
+    def test_a_pending_claim_blocks_a_side_by_side_edition(self):
+        self.pending_in_b()
+        # C, beside B: A's place is neither offered nor linked.
+        self.assertIsNone(self.position(self.NEW))
+        self.assertEqual(self.history(), [])
+        self.assertIs(self.confirm(self.NEW, self.GONE), False)
+        self.assertIsNone(self.link_of(self.NEW))
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "pending")})
+
+    def test_a_pending_claim_is_verified_by_the_resend(self):
+        self.pending_in_b()
+        self.assertIs(self.confirm(self.THERE, self.GONE, seq=2), True)
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "verified")})
+        self.assertEqual(self.link_of(self.THERE), self.GONE)
+        self.assertEqual({e["book_key"] for e in self.history(self.THERE)}, {self.THERE, self.GONE})
+        self.assertIsNone(self.position(self.NEW))
+
+    def test_a_pending_claim_is_dropped_when_the_old_album_is_there_again(self):
+        self.pending_in_b()
+        with mock.patch.dict(LIBRARY, {self.GONE: {"301": 400_000}}):
+            self.assertIs(self.confirm(self.THERE, self.GONE, seq=2), False)
+        self.assertEqual(self.claims(), set())
+        self.assertIsNone(self.link_of(self.THERE))
+
+    def test_a_pending_claim_whose_book_is_unknown_yet_is_verified_later(self):
+        # The book's own work key couldn't be read: pending, not refused.
+        self.seed(self.GONE)
+        self.book_identity.side_effect = pp.PlayerUnavailable("down")
+        self.assertIsNone(self.confirm(self.THERE, self.GONE))
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "pending")})
+        self.book_identity.side_effect = fake_book_identity
+        self.assertIs(self.confirm(self.THERE, self.GONE, seq=2), True)
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "verified")})
+
+    def test_a_chain_a_to_b_to_c(self):
+        # A became B (verified), B is gone too: C inherits B's place, and
+        # each copy holds the claim on the one before it.
+        from datetime import datetime
+        self.seed(self.GONE, at=datetime(2026, 9, 20), offset=11, logs=1)
+        with mock.patch.dict(LIBRARY, {"460:1": {"461": 500_000}}), mock.patch.dict(WORKS, {"460:1": self.WORK}):
+            self.assertIs(self.confirm("460:1", self.GONE), True)
+        self.assertEqual(self.position(self.NEW)["linked_from"], "460:1")
+        self.assertIs(self.confirm(self.NEW, "460:1"), True)
+        self.assertEqual(self.claims(), {(self.GONE, "460:1", "verified"), ("460:1", self.NEW, "verified")})
+        self.assertEqual([e["book_key"] for e in self.history()][-2:], ["460:1", self.GONE])
+
+    def test_a_holder_that_went_too_does_not_block_and_its_claim_moves(self):
+        # B claimed A (pending, its own work key unknown), then B went too.
+        # C is offered A, and C's confirm takes the claim over.
+        self.seed(self.GONE)
+        with mock.patch.dict(LIBRARY, {"460:1": {"461": 500_000}}), mock.patch.dict(WORKS, {"460:1": None}):
+            self.assertIsNone(self.confirm("460:1", self.GONE))
+        self.assertEqual(self.claims(), {(self.GONE, "460:1", "pending")})
+        self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+        self.assertIs(self.confirm(self.NEW, self.GONE), True)
+        self.assertEqual(self.claims(), {(self.GONE, self.NEW, "verified")})
+        self.assertEqual(self.link_of(self.NEW), self.GONE)
+
+    def test_a_verified_holder_that_went_too_passes_the_claim_on(self):
+        from datetime import datetime
+        from app.models import ListeningClaim
+        self.seed(self.GONE)
+        self.carried("460:1", self.GONE, work_key=None)       # B holds A's link, and B is gone
+        self.db.add(ListeningClaim(identity="plex:1001", earlier_key=self.GONE, holder_key="460:1",
+                                   state="verified", claimed_at=datetime(2026, 9, 21)))
+        self.db.commit()
+        self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+        self.assertIs(self.confirm(self.NEW, self.GONE), True)
+        self.assertEqual(self.claims(), {(self.GONE, self.NEW, "verified")})
+        self.assertEqual(self.link_of("460:1"), self.GONE)      # B's history keeps its link
+
+    def held_by_b(self):
+        self.seed(self.GONE)
+        self.assertIs(self.confirm(self.THERE, self.GONE), True)
+        self.assertIsNone(self.position(self.NEW))
+
+    def test_a_claim_is_released_when_its_holders_row_is_deleted(self):
+        self.held_by_b()
+        self.db.query(ListeningPosition).filter_by(identity="plex:1001", book_key=self.THERE).delete()
+        self.db.commit()
+        self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+        self.assertIs(self.confirm(self.NEW, self.GONE), True)
+        self.assertEqual(self.claims(), {(self.GONE, self.NEW, "verified")})
+
+    def test_a_claim_is_released_when_its_holders_row_is_reset(self):
+        self.held_by_b()
+        self.db.query(ListeningPosition).filter_by(identity="plex:1001", book_key=self.THERE).update(
+            {"linked_from": None})
+        self.db.commit()
+        self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+        self.assertIs(self.confirm(self.NEW, self.GONE), True)
+        self.assertEqual(self.claims(), {(self.GONE, self.NEW, "verified")})
+
+    def test_claims_are_kept_apart_by_identity(self):
+        # Another listener's pending claim on the same key blocks nothing of
+        # this listener's, and the reverse.
+        self.seed(self.GONE, identity="plex:1002")
+        self.as_user(B)
+        with self.down(self.GONE):
+            self.assertIsNone(self.confirm(self.THERE, self.GONE))
+        self.as_user(A)
+        self.seed(self.GONE)
+        self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+        self.assertIs(self.confirm(self.NEW, self.GONE), True)
+        self.assertEqual(self.claims(), {(self.GONE, self.NEW, "verified")})
+        self.assertEqual(self.claims("plex:1002"), {(self.GONE, self.THERE, "pending")})
+        self.as_user(B)
+        self.assertIs(self.confirm(self.THERE, self.GONE, seq=2), True)
+        self.assertEqual(self.claims("plex:1002"), {(self.GONE, self.THERE, "verified")})
+
+
+def _race_worker(db_path, book, barrier, out):
+    """One uvicorn worker in TwoWorkersClaimOneCopy: its own process, engine
+    and client on the shared database file. It confirms `book` as the
+    successor of 300:1, after meeting the other worker at the save."""
+    try:
+        from sqlalchemy.orm import sessionmaker
+        from app import database
+        from app.services import listening
+        engine = database.make_engine("sqlite:///" + db_path,
+                                      connect_args={"check_same_thread": False, "timeout": 30})
+        Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        real_save = listening.save_checkin
+
+        def save(*args, **kwargs):
+            # Both have verified the link (no successor yet) before either saves.
+            barrier.wait()
+            return real_save(*args, **kwargs)
+        patches = [
+            mock.patch("app.routers.setup.is_setup_completed", return_value=True),
+            mock.patch.object(pp, "player_on", mock.Mock(return_value=True)),
+            mock.patch.object(pp, "assert_in_library", side_effect=fake_assert_in_library),
+            mock.patch.object(pp, "checkin_book", side_effect=fake_checkin_book),
+            mock.patch.object(pp, "book_identity", mock.AsyncMock(side_effect=fake_book_identity)),
+            mock.patch.object(pp, "timeline", mock.AsyncMock(return_value=None)),
+            mock.patch.object(settings, "app_domain", "localhost"),
+            mock.patch.object(settings, "app_scheme", "https"),
+            mock.patch.dict(LIBRARY, {"400:1": {"401": 500_000}, "450:1": {"451": 500_000}}),
+            mock.patch.dict(WORKS, {"400:1": "e5" * 16, "450:1": "e5" * 16}),
+            mock.patch.object(listening, "save_checkin", save),
+        ]
+        for p in patches:
+            p.start()
+        client = helpers.api_client(Session, A)
+        client.cookies.set(settings.session_cookie_name, "sid-race-" + book)
+        track = next(iter(LIBRARY[book]))
+        r = client.post("/api/player/checkin", headers={"Origin": ORIGIN}, json={
+            "book": book, "track": track, "offset_ms": 9_000, "duration_ms": 500_000, "event": "checkin",
+            "device": "Phone", "psid": "page-" + book, "seq": 1, "linked_from": "300:1"})
+        out.put((book, r.status_code, r.json()))
+    except BaseException as exc:   # reported to the parent, which fails the test
+        out.put((book, "error", repr(exc)))
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class TwoWorkersClaimOneCopy(unittest.TestCase):
+    """Spec 2.6 s4, the race (2.5 ledger T5R2a): two editions side by side
+    confirm the same earlier copy at once, on the two uvicorn workers. Real
+    processes on one SQLite file; both verify before either saves. Exactly
+    one claim; the other gets linked: false with its place saved, unlinked."""
+
+    def test_one_wins_the_other_is_refused_and_still_saved(self):
+        import multiprocessing
+        import os
+        import queue
+        import tempfile
+        from datetime import datetime
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from app.database import Base
+        from app.models import ListeningClaim
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "race.db")
+        engine = create_engine("sqlite:///" + path)
+        self.addCleanup(engine.dispose)
+        Base.metadata.create_all(bind=engine)
+        db = sessionmaker(bind=engine)()
+        self.addCleanup(db.close)
+        db.add(ListeningPosition(identity="plex:1001", book_key="300:1", track_key="301", offset_ms=1_234,
+                                 duration_ms=400_000, updated_at=datetime(2026, 9, 20), device="Old phone",
+                                 source="web", psid="old", seq=3, book_ms=401_234, book_duration_ms=900_000,
+                                 work_key="e5" * 16))
+        db.commit()
+
+        ctx = multiprocessing.get_context("spawn")
+        barrier = ctx.Barrier(2, timeout=120)
+        out = ctx.Queue()
+        workers = [ctx.Process(target=_race_worker, args=(path, book, barrier, out)) for book in ("400:1", "450:1")]
+        for w in workers:
+            w.start()
+        results = []
+        try:
+            for _ in workers:
+                results.append(out.get(timeout=180))
+        except queue.Empty:
+            self.fail(f"a worker never answered: {results}")
+        finally:
+            for w in workers:
+                w.join(30)
+                if w.is_alive():
+                    w.kill()
+        for book, status, body in results:
+            self.assertEqual(status, 200, (book, body))
+        linked = sorted((body["linked"], book) for book, _status, body in results)
+        self.assertEqual([v for v, _book in linked], [False, True], results)
+        winner, loser = linked[1][1], linked[0][1]
+        claims = [(c.earlier_key, c.holder_key, c.state) for c in db.query(ListeningClaim).all()]
+        self.assertEqual(claims, [("300:1", winner, "verified")])
+        rows = {r.book_key: r for r in db.query(ListeningPosition).filter_by(identity="plex:1001")}
+        self.assertEqual(rows[winner].linked_from, "300:1")
+        self.assertIsNone(rows[loser].linked_from)
+        self.assertEqual((rows[loser].offset_ms, rows[loser].psid), (9_000, "page-" + loser))
+        for book, _status, body in results:
+            self.assertIs(body["stored"], True, (book, body))
+
+
 class DeviceIds(PlayerApiBase):
     """Each browser sends its own random id with every check-in (optional,
     for older players); /position and /history hand it back."""

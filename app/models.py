@@ -326,6 +326,26 @@ class ListeningPosition(Base):
         return f"<ListeningPosition(identity='{self.identity}', book='{self.book_key}')>"
 
 
+class ListeningClaim(Base):
+    """One listener's claim that `holder_key` is the book an earlier copy
+    (`earlier_key`, gone from the library) became (spec 2.6 s4). The key is
+    (identity, earlier_key), so SQLite itself lets only one book hold an
+    earlier copy, however two workers race. Written by the check-in that
+    carries linked_from: "verified", or "pending" while Plex can't confirm
+    it. Released when the holder's row is deleted or no longer holds it, or
+    its album is gone when another copy claims it (listening.claim_link)."""
+    __tablename__ = "listening_claims"
+
+    identity = Column(String(255), primary_key=True)
+    earlier_key = Column(String(64), primary_key=True)
+    holder_key = Column(String(64), nullable=False)
+    state = Column(String(10), nullable=False)      # verified, pending
+    claimed_at = Column(DateTime, nullable=False)   # naive UTC
+
+    def __repr__(self):
+        return f"<ListeningClaim(identity='{self.identity}', earlier='{self.earlier_key}')>"
+
+
 class ListeningLog(Base):
     """Every stored check-in, for the listening history. Pruned after 180 days."""
     __tablename__ = "listening_log"
