@@ -93,7 +93,9 @@
  *       confirmPlace's move never waits on a late Play's re-read.
  *       The safety net (spec 2.6): a book the listener has no place in at all
  *       (no copy in WebServarr, Plex or this browser, none a Plex read that
- *       failed), opened without an `at`, asks the server for their places on
+ *       failed; a copy this browser only kept as the book's opening place,
+ *       never played or moved here, is no place), opened without an `at`,
+ *       asks the server for their places on
  *       books that left the library (GET /api/player/orphans/<key>, alongside
  *       the book, ORPHANS_WAIT_MS at most). With any, the book opens held
  *       (state().safetyNet, a 'warning' { kind: 'safety-net' }) at its start,
@@ -1558,7 +1560,12 @@ export function createEngine(env) {
         console.error('[player] saving failed', e);
         return null;
       }
-      return !weighed.length && !got.places.plexError ? lookupOrphans(key) : null;
+      // A copy this browser only kept as the book's opening place (opened,
+      // never played or moved here) is no place of the listener's: a lookup
+      // that failed at the last open must not hide the question now.
+      const local = localCopy(key);
+      const mine = weighed.filter(function (c) { return !(c.source === 'local' && !(local && local.own === true)); });
+      return !mine.length && !got.places.plexError ? lookupOrphans(key) : null;
     }) : null;
     let data;
     let places = null;
@@ -1653,6 +1660,12 @@ export function createEngine(env) {
     // The files changed: the listener places the book first; the handoff
     // and conflict rules then apply to that place (through its save).
     const asking = !!(orphans && orphans.length && !changedFrom);
+    // The question starts the book at its start, whatever opening place this
+    // browser kept (the lookup found it is no place of the listener's).
+    if (asking && resumed) {
+      resumed = null;
+      startMs = 0;
+    }
     if (openGate && places && !opts.at && !changedFrom && !asking) {
       const msOf = function (c) { return c ? toBookMs(book.tracks, c.track, c.offset_ms) : null; };
       const canPlay = function (ms) { return ms !== null && !blocked(toTrackOffset(book.tracks, ms).index); };

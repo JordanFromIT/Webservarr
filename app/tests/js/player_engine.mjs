@@ -2690,6 +2690,26 @@ current = 'spec 2.6: it asks only for a book with no place at all, never for a r
   bare.engine.close();
 }
 
+current = 'spec 2.6: an opening place this browser kept is no place of the listener\'s; one they played here is';
+for (const [name, own, asks] of [['kept only as the book\'s opening place', false, true], ['played here', true, false]]) {
+  const saver = heldSaver();
+  const local = { track: '502', offset_ms: 100000, duration_ms: 900000, updated_at: '2026-09-30T10:00:00.000Z', device: 'Chrome', own, acked: false, ackedAt: null };
+  saver.readLocal = () => local;
+  const base = saver.resumeFrom;
+  saver.resumeFrom = (key, p) => base(key, p).concat([Object.assign({ source: 'local' }, local)]);
+  const t = setup({ saver, net: { noLocal: true, positions: { web: null, plex: null }, orphans: [ORPHAN_A] } });
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(1000);
+  await p;
+  const s = t.engine.state();
+  if (asks) {
+    check(name + ': the question is asked, from the start, resuming nothing', asked(t).length === 1 && s.safetyNet !== null && s.resumedFrom === null && s.bookMs === 0 && !s.playing, [asked(t), s.resumedFrom, s.bookMs]);
+  } else {
+    check(name + ': not asked, resumed from it', asked(t).length === 0 && s.safetyNet === null && s.resumedFrom && s.resumedFrom.source === 'local' && s.bookMs >= 600000, [asked(t), s.resumedFrom]);
+  }
+  t.engine.close();
+}
+
 current = 'spec 2.6: a lookup that fails, is empty, is malformed or is slow opens the book as it always did';
 {
   const bad = [

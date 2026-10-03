@@ -3791,6 +3791,22 @@ current = 'spec 2.6: "None of these" releases the hold; the book then saves as a
   t.engine.close();
 }
 
+current = 'spec 2.6: a lookup that failed at one open is asked again at the next, though this browser kept the opening place';
+{
+  // The first open's lookup failed (a 404 here); the book opened and kept its opening place.
+  const storage2 = fakeStorage();
+  const v = withEngine({ storage: storage2, book: CHAPTERED, orphans: undefined, places: { web: null, plex: null } });
+  await v.engine.open('500:1', { autoplay: false });
+  await v.clock.advance(1000);
+  const opening = localOf(v);
+  v.engine.close();
+  const w = withEngine({ storage: storage2, book: CHAPTERED, orphans: ORPHANS, places: { web: null, plex: null } });
+  await openBook(w);
+  check('the opening place is kept, not played here', opening && opening.own === false, opening);
+  check('so the next open asks', w.engine.state().safetyNet !== null && w.engine.state().resumedFrom === null && !w.engine.state().playing, [w.engine.state().safetyNet, w.engine.state().resumedFrom]);
+  w.engine.close();
+}
+
 if (failed) {
   realError(`${failed}/${total} player saves cases FAILED`);
   process.exit(1);
