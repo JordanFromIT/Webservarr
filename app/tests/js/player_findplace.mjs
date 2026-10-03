@@ -113,7 +113,22 @@ const MIXED = {
   ],
   chapters: []
 };
-const BOOKS = { [MULTI.key]: MULTI, [MIXED.key]: MIXED };
+// The last 30 s fall in a part this browser can't decode: 0-600 s mp3,
+// 600-620 s E-AC3, 620-640 s mp3 (the credits).
+const TAIL = {
+  key: '640:1', title: 'Tail', author: 'S. Writer', narrator: '', series: '', cover: '', shape: 'parts',
+  tracks: [
+    { key: '641', part_path: '/library/parts/1001/1/file.mp3', duration_ms: 600000, index: 1, ...MP3 },
+    { key: '642', part_path: '/library/parts/1002/1/file.m4b', duration_ms: 20000, index: 2, ...EAC3 },
+    { key: '643', part_path: '/library/parts/1003/1/file.mp3', duration_ms: 20000, index: 3, ...MP3 }
+  ],
+  chapters: [
+    { index: 1, label: 'Story', start_ms: 0, end_ms: 600000 },
+    { index: 2, label: 'Music', start_ms: 600000, end_ms: 620000 },
+    { index: 3, label: 'Credits', start_ms: 620000, end_ms: 640000 }
+  ]
+};
+const BOOKS = { [MULTI.key]: MULTI, [MIXED.key]: MIXED, [TAIL.key]: TAIL };
 const trackByPath = new Map();
 for (const b of Object.values(BOOKS)) for (const t of b.tracks) trackByPath.set(t.part_path, t);
 const UNDECODABLE = new Set(['', 'audio/mp4; codecs="ec-3"']);
@@ -1121,6 +1136,128 @@ await run('T2Z1 (edge5): the question\'s answer plays on from a landing short of
   await t.clock.advance(10000);
   check('never back at the start', noRestart(t), t.posts.map((b) => b.book_ms));
   t.engine.close();
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 3 (T3R2, T3R3)
+// ---------------------------------------------------------------------------
+
+await run('landingFor: the end margin, and the last playable spot before a part that can\'t play', () => {
+  const parts = [
+    { start_ms: 0, duration_ms: 600000, playable: true },
+    { start_ms: 600000, duration_ms: 20000, playable: false },
+    { start_ms: 620000, duration_ms: 20000, playable: true }
+  ];
+  check('inside: as it is', FP.landingFor(300000, 640000, parts) === 300000);
+  check('the end: pulled into the blocked part, so 30 s before the part before it', FP.landingFor(640000, 640000, parts) === 570000, FP.landingFor(640000, 640000, parts));
+  check('just short of the blocked part: as it is', FP.landingFor(599000, 640000, parts) === 599000);
+  check('plain book: 30 s short', FP.landingFor(1800000, 1800000, [{ start_ms: 0, duration_ms: 1800000, playable: true }]) === 1770000);
+  check('a short part before: its start', FP.landingFor(40000, 40000, [{ start_ms: 0, duration_ms: 5000, playable: true }, { start_ms: 5000, duration_ms: 35000, playable: false }]) === 0);
+  check('nothing playable before: as clamped', FP.landingFor(40000, 40000, [{ start_ms: 0, duration_ms: 20000, playable: false }, { start_ms: 20000, duration_ms: 20000, playable: true }]) === 10000);
+});
+
+const TAIL_END = 640000;
+const TAIL_LAND = 570000;
+async function heldTail() {
+  const t = await held({ book: TAIL.key, old: { book_ms: 300000, book_duration_ms: TAIL_END } });
+  t.warnings = [];
+  t.engine.on('warning', (w) => t.warnings.push(w.kind));
+  return t;
+}
+const tailOk = (t) => t.posts.length >= 1 && t.posts.every((b) => b.book_ms >= 300000);
+
+await run('T3R2: the end margin in a part that can\'t play: the helper\'s spot lands at the last playable one, and saves there', async () => {
+  for (const how of ['lock screen seekto end', 'the Credits chapter']) {
+    const t = await heldTail();
+    if (how === 'lock screen seekto end') t.ms.handlers.get('seekto')({ seekTime: TAIL_END / 1000 });
+    else t.engine.jumpToChapter(2);
+    await t.clock.advance(20);
+    const c = t.q('.wsp-fp-cand.is-chosen');
+    check(how + ': shown where it will land', c.querySelector('.wsp-fp-at').textContent.startsWith('0:09:30'), c.querySelector('.wsp-fp-at').textContent);
+    c.querySelector('.wsp-fp-use').click();
+    await t.clock.advance(5000);
+    check(how + ': landed there, saved there, the helper gone', t.st().filesChanged === null && t.st().bookMs === TAIL_LAND && t.posts[0].book_ms === TAIL_LAND && !t.shown(),
+      [t.st().bookMs, t.posts.map((b) => b.book_ms), t.shown()]);
+    check(how + ': nothing refused', t.warnings.indexOf('part-format') === -1, t.warnings);
+    await t.engine.play();
+    await t.clock.advance(3000);
+    check(how + ': a Play goes on from there, never 0:00', t.st().playing && t.st().bookMs > TAIL_LAND && tailOk(t), [t.st().bookMs, t.posts.map((b) => b.book_ms)]);
+    t.engine.close();
+  }
+});
+
+await run('T3R2: a move to the end while the confirm reads, or while it asks: it lands at the last playable spot, never released without it', async () => {
+  for (const play of [false, true]) {
+    const t = await heldTail();
+    t.positionDelay = 2000;
+    t.q('.wsp-fp-cand.is-chosen .wsp-fp-use').click();
+    await t.clock.advance(100);
+    if (play) await t.engine.play();
+    await t.clock.advance(100);
+    t.ms.handlers.get('seekto')({ seekTime: TAIL_END / 1000 });
+    await t.clock.advance(5000);
+    check('read, Play ' + play + ': landed at the last playable spot', t.st().filesChanged === null && t.st().bookMs >= TAIL_LAND && t.st().bookMs < 600000 && t.posts[0].book_ms === TAIL_LAND,
+      [t.st().bookMs, t.posts.map((b) => b.book_ms)]);
+    check('read, Play ' + play + ': the helper gone, ' + (play ? 'playing on' : 'paused'), !t.shown() && t.st().playing === play, [t.shown(), t.st().playing]);
+    // The helper's buttons, gone with it, do nothing if pressed anyway.
+    const n = t.posts.length;
+    t.q('.wsp-fp-cand.is-chosen .wsp-fp-use').click();
+    t.qa('.wsp-fp-row')[1].click();
+    t.qa('.wsp-fp-step')[0].click();
+    await t.clock.advance(100);
+    check('read, Play ' + play + ': the gone helper\'s buttons do nothing', t.posts.length === n && t.st().bookMs >= TAIL_LAND && t.txt('.wsp-fp-status') === '',
+      [t.posts.slice(n).map((b) => b.book_ms), t.st().bookMs, t.txt('.wsp-fp-status')]);
+    await t.engine.play();
+    await t.clock.advance(3000);
+    check('read, Play ' + play + ': never 0:00', t.st().bookMs > TAIL_LAND && tailOk(t), [t.st().bookMs, t.posts.map((b) => b.book_ms)]);
+    t.engine.close();
+  }
+  const t = await heldTail();
+  t.places.plex = { track: '641', offset_ms: 30000, duration_ms: 600000, updated_at: new Date(t.now() - MIN).toISOString(), device: 'Plexamp' };
+  await t.clock.advance(5000);
+  t.q('.wsp-fp-cand.is-chosen .wsp-fp-use').click();
+  await t.clock.advance(500);
+  check('asked', t.prompts().some((x) => x.indexOf('Continue from') === 0), t.prompts());
+  t.ms.handlers.get('seekto')({ seekTime: TAIL_END / 1000 });
+  await t.clock.advance(50);
+  t.qa('.wsp-prompt .wsp-notice-btn').find((b) => b.textContent === 'Keep listening here').click();
+  await t.clock.advance(5000);
+  check('the question: landed at the last playable spot, playing on', t.st().filesChanged === null && t.st().bookMs >= TAIL_LAND && t.st().bookMs < 600000 && t.st().playing &&
+    t.posts[0].book_ms === TAIL_LAND, [t.st().bookMs, t.posts.map((b) => b.book_ms)]);
+  check('the question: never 0:00', tailOk(t), t.posts.map((b) => b.book_ms));
+  t.engine.close();
+});
+
+await run('T3R2: a spot the engine refuses keeps the book held, and the helper says why', async () => {
+  // MIXED: 0-600 s mp3, 600-620 s E-AC3. A nudge into the part that can't play.
+  const t = await held({ book: MIXED.key, old: { book_ms: 595000, book_duration_ms: 920000 } });
+  check('the candidate at 9:55', t.st().filesChanged.spot === 595000);
+  t.qa('.wsp-fp-step')[1].click();
+  await t.clock.advance(10);
+  check('refused: still held, the spot as it was', t.st().filesChanged !== null && t.st().filesChanged.spot === 595000);
+  check('the helper says so', t.txt('.wsp-fp-status') === "That spot can't play in this browser. Pick another.", t.txt('.wsp-fp-status'));
+  t.qa('.wsp-fp-step')[0].click();
+  check('the next choice clears it', t.txt('.wsp-fp-status') === '' && t.st().filesChanged.spot === 585000, [t.txt('.wsp-fp-status'), t.st().filesChanged.spot]);
+  check('nothing saved', t.posts.length === 0);
+  t.engine.close();
+});
+
+await run('T3R3: Back and the left arrow step from the spot as shown, after a move to the end', async () => {
+  for (const [how, start] of [['the end', END], ['5 s before it', END - 5000]]) {
+    for (const press of ['Back', 'ArrowLeft']) {
+      const t = await held();
+      t.engine.seek(start);
+      await t.clock.advance(20);
+      const shown = () => t.q('.wsp-fp-cand.is-chosen .wsp-fp-at').textContent;
+      check(how + ' ' + press + ': shown 30 s short', shown().startsWith('0:29:30'), shown());
+      if (press === 'Back') t.qa('.wsp-fp-step')[0].click();
+      else t.key(t.q('.wsp-fp-range'), 'ArrowLeft');
+      await t.clock.advance(20);
+      const want = press === 'Back' ? LIMIT - 10000 : LIMIT - 1000;
+      check(how + ' ' + press + ': the first press moves from there', t.st().filesChanged.spot === want, t.st().filesChanged.spot);
+      t.engine.close();
+    }
+  }
 });
 
 await run('boot sets WS.playerFindPlace once, and only with the player', async () => {

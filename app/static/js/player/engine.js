@@ -1792,8 +1792,12 @@ export function createEngine(env) {
     if (!files || !book || !playhead) return false;
     const n = Number(bookMs);
     if (!isFinite(n)) return false;
-    const v = clampNumber(n, 0, placeLimit());
-    if (blocked(toTrackOffset(book.tracks, v).index)) {
+    // A spot in a part this browser can't decode is refused; one the end
+    // margin pulls into such a part lands at the last playable spot before
+    // it (landingSpot).
+    const asked = clampNumber(n, 0, book.durationMs);
+    const v = blocked(toTrackOffset(book.tracks, asked).index) ? null : landingSpot(asked, asked);
+    if (v === null) {
       emit('warning', { kind: 'part-format', message: PART_FORMAT });
       return false;
     }
@@ -1826,17 +1830,57 @@ export function createEngine(env) {
     return Math.max(0, book.durationMs - PLACE_END_MS);
   }
 
+  /* Where a confirm lands for `at`: within placeLimit(), in a part this
+     browser can play. Clamped into a part it can't (a book whose last
+     30 s are in one), the last playable spot before it, PLACE_END_MS short
+     of that part's end where the part is long enough; with none, the spot
+     the confirm was made at (place() checked it); else null. A spot that
+     is in such a part without the margin's pull is returned as it is. */
+  function landingSpot(at, fallback) {
+    const lim = placeLimit();
+    const v = clampNumber(Number(at) || 0, 0, lim);
+    const i = toTrackOffset(book.tracks, v).index;
+    // Only the margin's pull is moved on: a spot asked for in such a part is
+    // the listener's, and seek() refuses it as ever.
+    if (!blocked(i) || v >= (Number(at) || 0)) return v;
+    for (let j = i - 1; j >= 0; j--) {
+      if (blocked(j)) continue;
+      const end = book.starts[j] + durationOf(book.tracks[j]);
+      return Math.max(book.starts[j], Math.min(lim, end - PLACE_END_MS));
+    }
+    const f = clampNumber(Number(fallback), 0, lim);
+    return isFinite(f) && !blocked(toTrackOffset(book.tracks, f).index) ? f : null;
+  }
+
   // The confirm lands at `at` (the chosen spot: a move made while it waited
-  // counts, within placeLimit()): the hold ends, then its one explicit move.
-  // A confirmPlace's link goes with it wherever it lands (never a
-  // startOver's). carry: a Play made while the confirm read the saved places
-  // plays on from there, never from the book's end (it would start again).
+  // counts, within placeLimit() and playable here: landingSpot): the hold
+  // ends, then its one explicit move. Never one without the other: with
+  // nowhere playable to land, the book stays held (a 'part-format' warning)
+  // for the listener to choose again. A confirmPlace's link goes with it
+  // wherever it lands (never a startOver's). carry: a Play made while the
+  // confirm read the saved places plays on from there, never from the book's
+  // end (it would start again).
   function land(at, carry) {
     const p = files.pending;
     const old = files.old;
+    let to = landingSpot(at, p.v);
+    // Never a seek that would be refused: then the spot the confirm was
+    // made at, else nowhere (held).
+    if (to !== null && blocked(toTrackOffset(book.tracks, to).index)) to = landingSpot(p.v, null);
+    if (to !== null && blocked(toTrackOffset(book.tracks, to).index)) to = null;
     preview = null;
     if (!carry) pause();
     if (files.timer !== null && files.timer !== undefined) clearT(files.timer);
+    if (to === null) {
+      files.timer = null;
+      files.pending = null;
+      files.reading = false;
+      files.asked = false;
+      if (carry) pause();
+      emit('warning', { kind: 'part-format', message: PART_FORMAT });
+      changed('checking');
+      return;
+    }
     files = null;
     if (saver && typeof saver.releaseFiles === 'function') {
       try {
@@ -1845,7 +1889,7 @@ export function createEngine(env) {
         console.error('[player] saving failed', e);
       }
     }
-    seek(clampNumber(Number(at) || 0, 0, placeLimit()), 'seek', false, true, { place: true });
+    seek(to, 'seek', false, true, { place: true });
     if (carry && book && !wantPlay && !atEnd()) {
       const pr = playOn();
       if (pr && typeof pr.catch === 'function') pr.catch(function (e) { console.error('[player] playing failed', e); });

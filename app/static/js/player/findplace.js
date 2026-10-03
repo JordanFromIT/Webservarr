@@ -66,6 +66,7 @@
  *       only 'time' when they are NEAR_MS or less apart. [] without old.book_ms.
  *       blocked: fn(bookMs) -> true in a part this browser can't decode, or
  *       the engine's parts() ([{ start_ms, duration_ms, playable }]).
+ *   landingFor(ms, durationMs, parts)   where a confirm of ms lands (as engine.js)
  *   bookClock(ms)          "3:12:40", "0:12:05" (always hours: never a time of day)
  *   percentOf(ms, total)   whole percent through, or null
  *   formatAgo(ms)          "just now", "3 min ago", "2 h ago", "3 days ago"
@@ -198,6 +199,32 @@ export function candidates(old, durationMs, chapters, blocked) {
   return out;
 }
 
+/* Where a confirm of ms lands, as the engine places it (engine.js
+   landingSpot): no nearer the end than END_MS, and, when that margin pulls it
+   into a part this browser can't decode, the last playable spot before that
+   part (END_MS short of its end where the part is long enough). parts: the
+   engine's parts(). */
+export function landingFor(ms, durationMs, parts) {
+  const dur = Number(durationMs);
+  if (!isFinite(dur) || dur <= 0) return Math.max(0, num(ms));
+  const lim = Math.max(0, dur - END_MS);
+  const v = Math.max(0, Math.min(lim, num(ms)));
+  const list = Array.isArray(parts) ? parts : [];
+  let i = -1;
+  for (let k = 0; k < list.length; k++) {
+    if (v < num(list[k].start_ms) + num(list[k].duration_ms) || k === list.length - 1) { i = k; break; }
+  }
+  // Only the margin's pull is moved on: a spot in such a part by itself is
+  // refused by the engine, as ever.
+  if (i === -1 || list[i].playable !== false || v >= num(ms)) return v;
+  for (let j = i - 1; j >= 0; j--) {
+    if (list[j].playable === false) continue;
+    const start = num(list[j].start_ms);
+    return Math.max(start, Math.min(lim, start + num(list[j].duration_ms) - END_MS));
+  }
+  return v;
+}
+
 // "+5 s", "−1 min 20 s": how far the nudge moved a candidate.
 function delta(ms) {
   const s = Math.round(num(ms) / 1000);
@@ -317,6 +344,7 @@ export function createFindPlace(env) {
   let opening = null;          // the full player is being opened for the helper: its show()
   let pending = false;         // a confirm (or start over) is waiting on its read or question
   let rematch = false;         // the old place changed under a kept spot (see follow)
+  let refused = false;         // the engine refused a spot (a part this browser can't play) since the last choice
   const SPOT = 'spot';
 
   // ---- The panel ----
@@ -517,7 +545,8 @@ export function createFindPlace(env) {
     setHidden(oldWhen, !when);
     // A confirm waits on its read, then on any question that read asked.
     const waiting = isHeld && (checking || pending);
-    setText(status, !isHeld ? '' : checking ? 'Checking for a newer place…' : pending ? 'Answer the question above to carry on.' : '');
+    setText(status, !isHeld ? '' : checking ? 'Checking for a newer place…' : pending ? 'Answer the question above to carry on.' :
+      refused ? "That spot can't play in this browser. Pick another." : '');
     // The spots (the chosen spot's own card, after a move, even with none).
     const any = list.length > 0 || chosen === SPOT;
     setHidden(candHead, !any);
@@ -558,7 +587,7 @@ export function createFindPlace(env) {
     if (!nudged || nudged.li.hidden || (nudged.cand && nudged.cand.unavailable)) {
       if (nudge.parentNode) nudge.parentNode.removeChild(nudge);
     } else if (!scrubbing) {
-      drawNudge(spot, dur);
+      drawNudge(spot, dur > 0 ? usable(dur, s) : Infinity);
     }
     const n = Math.round(skipMs() / 1000);
     setAttr(nudgeBack, 'aria-label', 'Back ' + n + ' seconds');
@@ -567,12 +596,13 @@ export function createFindPlace(env) {
   }
 
   // The scrubber spans the nudge's reach either side of its card (and the
-  // spot, wherever a move took it), within the book, short of its end by
-  // END_MS (where a confirm stops).
-  function drawNudge(spot, dur) {
+  // spot, wherever a move took it), within the book, up to the furthest spot
+  // a confirm can land (top: END_MS short of the end, or the last playable
+  // spot before it).
+  function drawNudge(spot, top) {
     const c = centreOf(chosen);
     const lo = Math.max(0, Math.min(c - NUDGE_MS, spot));
-    const hi = Math.min(dur > 0 ? Math.max(0, dur - END_MS) : Infinity, Math.max(c + NUDGE_MS, spot));
+    const hi = Math.min(top, Math.max(c + NUDGE_MS, spot));
     nudgeLo = lo;
     const max = Math.max(1, Math.round((hi - lo) / 1000));
     setAttr(nudgeRange, 'max', String(max));
@@ -584,18 +614,25 @@ export function createFindPlace(env) {
 
   // ---- The choices ----
 
-  // As far into the book as a spot can be used: END_MS short of the end
-  // (the engine's confirm stops there too).
-  function limitOf(s) {
-    const dur = num(s.bookDurationMs);
-    return dur > 0 ? Math.max(0, dur - END_MS) : Infinity;
+  // A spot as it can be used: where the engine's confirm would land it
+  // (landingFor).
+  function usable(v, s) {
+    let parts = [];
+    try {
+      parts = player.parts();
+    } catch (e) { /* none known */ }
+    return landingFor(v, s.bookDurationMs, parts);
   }
 
-  function usable(v, s) {
-    return Math.max(0, Math.min(limitOf(s), v));
+  // A choice from a helper not showing (its hold is over, or the book went)
+  // does nothing: there is no place for it to go.
+  function live() {
+    return isShown && mode !== null && !!old;
   }
 
   function move(v) {
+    if (!live()) return;
+    refused = false;
     const s = player.state();
     const to = usable(v, s);
     // Already there (a drag let go, then its change): nothing to move.
@@ -623,7 +660,8 @@ export function createFindPlace(env) {
   }
 
   function onPreview(c) {
-    if (mode !== 'held' || !held()) return;
+    if (!live() || mode !== 'held' || !held()) return;
+    refused = false;
     const s = player.state();
     const i = c === spotCard ? SPOT : cards.indexOf(c);
     if (i === chosen && s.playing) {
@@ -639,10 +677,12 @@ export function createFindPlace(env) {
   }
 
   function onUse(c) {
+    if (!live()) return;
     const v = valueOf(c);
     if (mode === 'held') {
       if (!held()) return;
       const i = c === spotCard ? SPOT : cards.indexOf(c);
+      refused = false;
       if (player.confirmPlace(v)) {
         chosen = i;
         ownSpot = spotNow(player.state());
@@ -661,6 +701,7 @@ export function createFindPlace(env) {
     if (f && typeof f.showHistory === 'function') f.showHistory(historyRow);
   }));
   startRow.addEventListener('click', safely(function () {
+    if (!live()) return;
     if (mode === 'held') {
       if (held() && player.startOver()) pending = true;
       draw();
@@ -669,8 +710,14 @@ export function createFindPlace(env) {
     player.seek(0);
     hide();
   }));
-  nudgeBack.addEventListener('click', safely(function () { move(spotNow(player.state()) - skipMs()); }));
-  nudgeFwd.addEventListener('click', safely(function () { move(spotNow(player.state()) + skipMs()); }));
+  // Steps go from the spot as shown (a move elsewhere may have taken the
+  // engine's to the very end; it shows, and is used, END_MS short of it).
+  function stepFrom() {
+    const s = player.state();
+    return usable(spotNow(s), s);
+  }
+  nudgeBack.addEventListener('click', safely(function () { move(stepFrom() - skipMs()); }));
+  nudgeFwd.addEventListener('click', safely(function () { move(stepFrom() + skipMs()); }));
   nudgeRange.addEventListener('input', safely(function () {
     // Shows where the drag is; moves when it is let go.
     scrubbing = true;
@@ -701,7 +748,7 @@ export function createFindPlace(env) {
     if (!step || e.altKey || e.ctrlKey || e.metaKey) return;
     // A second at a time (the player's keys, which skip, never see it).
     e.preventDefault();
-    move(spotNow(player.state()) + step * FINE_MS);
+    move(stepFrom() + step * FINE_MS);
   }));
 
   // ---- Showing and hiding ----
@@ -801,10 +848,21 @@ export function createFindPlace(env) {
     spotCentre = null;
     pending = false;
     rematch = false;
+    refused = false;
     drawnFor = '';
+    setText(status, '');
   }
 
   // ---- The engine and the view ----
+
+  // A spot refused (a part this browser can't play), a confirm's landing
+  // included: the book stays held, and the panel says why.
+  player.on('warning', safely(function (w) {
+    if (!w || w.kind !== 'part-format' || mode !== 'held' || !held()) return;
+    pending = false;
+    refused = true;
+    if (isShown) draw();
+  }));
 
   player.on('warning', safely(function (w) {
     if (!w || w.kind !== 'files-changed') return;
