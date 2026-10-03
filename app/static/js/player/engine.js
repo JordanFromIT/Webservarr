@@ -147,17 +147,28 @@
  *                     another device or a Plex app saved meanwhile is asked
  *                     about (a 'conflict' warning) and the confirm waits for
  *                     the answer (resolveConflict: Continue lands at the other
- *                     place, Keep listening here at the spot). The book stays
- *                     held until the confirm's move lands, at the chosen spot:
- *                     a move made meanwhile (a skip, a seek, a chapter jump, a
- *                     preview elsewhere) counts, and its linked_from goes with
- *                     it wherever it lands. A Play made during the read (a
- *                     preview meanwhile) plays on from there once it lands,
- *                     unless a Pause took it back; once asked, the answer
- *                     decides. false as previewAt.
- *                     Wherever it is asked to land, it lands no nearer the
- *                     book's end than PLACE_END_MS (30 s; 0 for a shorter
- *                     book), so the next Play never starts the book again.
+ *                     place exactly, as that device or app left it, with no
+ *                     end margin; Keep listening here at the spot). The book
+ *                     stays held until the confirm's move lands, at the
+ *                     chosen spot: a move made meanwhile (a skip, a seek, a
+ *                     chapter jump, a preview elsewhere) counts, and its
+ *                     linked_from goes with it wherever it lands. A Play made
+ *                     during the read (a preview meanwhile) plays on from
+ *                     there once it lands, unless a Pause took it back; once
+ *                     asked, the answer decides. false as previewAt.
+ *                     Wherever else it is asked to land (the listener's own
+ *                     spot), it lands no nearer the book's end than
+ *                     PLACE_END_MS (30 s; 0 for a shorter book), so the next
+ *                     Play never starts the book again. Where that margin
+ *                     falls in a part this browser can't decode, it lands at
+ *                     the last playable spot before it, but only within
+ *                     PLACE_WALK_MS (60 s) of where the margin alone would
+ *                     put it. Further back than that it never lands: the book
+ *                     stays held (a 'part-format' warning marked landing:
+ *                     true, as when there is nowhere playable at all) for the
+ *                     helper to show that spot and why; confirmPlace asked
+ *                     for such a spot is false, and only moves the held spot
+ *                     to it (nothing confirmed).
  *   startOver() -> bool  confirmPlace(0), never sending linked_from
  *   setSpeed(x)       0.75 to 2 in 0.05 steps (clamped, rounded); returns the speed
  *   setSkip(s)        the skip length (the skip buttons and the Media Session
@@ -246,8 +257,10 @@
  *     'warning'  { kind: 'part-skipped', message }
  *                { kind: 'files-changed', book, old } (see open; old as in
  *                  state().filesChanged)
- *                { kind: 'part-format', message } (a seek, preview or confirm
- *                  into a part that can't play)
+ *                { kind: 'part-format', message, landing } (a seek, preview or
+ *                  confirm into a part that can't play; landing: true when a
+ *                  confirm waiting on its read or question could not land,
+ *                  so the book stays held and that confirm is over)
  *                { kind: 'conflict', book, conflict: { track, offset_ms, device,
  *                  updated_at }, now } (saves.js on a 409, or a late Play's
  *                  re-read: another page's or Plex's newer place)
@@ -276,6 +289,7 @@ export const PREVIEW_MS = 15000;       // previewAt plays this much of the book 
 const PREVIEW_END_GAP_MS = 1000;       // ... stopping this short of the book's end (never ending it)
 const PREVIEW_WALL_STEP_MS = 1000;     // ... its wall time counting this much at most per timeupdate
 export const PLACE_END_MS = 30000;     // a confirmed place is never nearer the book's end than this
+export const PLACE_WALK_MS = 60000;    // ... nor moved back further than this for a part that can't play, unasked
 export const FORMAT_UNSUPPORTED = "This book's audio format can't play in this browser";
 export const PART_FORMAT = "This part's format can't play in this browser";
 export const RECHECK_AFTER_MS = 300000;  // a Play after this long without playing re-reads the saved places
@@ -1801,6 +1815,14 @@ export function createEngine(env) {
       emit('warning', { kind: 'part-format', message: PART_FORMAT });
       return false;
     }
+    // One the margin would pull back further than PLACE_WALK_MS is never
+    // placed unasked: the held spot only moves to it, so the helper shows
+    // where it could land and why (a confirm waiting meanwhile lands from it,
+    // so it stays held too).
+    if (walkedFar(asked, v)) {
+      seek(asked);
+      return false;
+    }
     // A preview playing stops first, still held (nothing is sent for it).
     preview = null;
     pause();
@@ -1852,22 +1874,37 @@ export function createEngine(env) {
     return isFinite(f) && !blocked(toTrackOffset(book.tracks, f).index) ? f : null;
   }
 
+  // A landing at `to` for a spot asked at `at` moved further than
+  // PLACE_WALK_MS from where the end margin alone puts `at` (a part this
+  // browser can't decode in between, or the confirm's own spot taken
+  // instead): never done without the listener seeing it.
+  function walkedFar(at, to) {
+    return Math.abs(clampNumber(Number(at) || 0, 0, placeLimit()) - to) > PLACE_WALK_MS;
+  }
+
   // The confirm lands at `at` (the chosen spot: a move made while it waited
   // counts, within placeLimit() and playable here: landingSpot): the hold
   // ends, then its one explicit move. Never one without the other: with
-  // nowhere playable to land, the book stays held (a 'part-format' warning)
-  // for the listener to choose again. A confirmPlace's link goes with it
-  // wherever it lands (never a startOver's). carry: a Play made while the
-  // confirm read the saved places plays on from there, never from the book's
-  // end (it would start again).
-  function land(at, carry) {
+  // nowhere playable to land, or only further than PLACE_WALK_MS from it,
+  // the book stays held (a 'part-format' warning, landing: true) for the
+  // listener to choose again, the spot left where it was so the helper
+  // shows where it could land. exact: `at` is another device's or a Plex
+  // app's place (the question's Continue): there exactly, no end margin,
+  // where it can play. A confirmPlace's link goes with it wherever it lands
+  // (never a startOver's). carry: a Play made while the confirm read the
+  // saved places plays on from there, never from the book's end (it would
+  // start again).
+  function land(at, carry, exact) {
     const p = files.pending;
     const old = files.old;
-    let to = landingSpot(at, p.v);
+    const there = clampNumber(Number(at) || 0, 0, book.durationMs);
+    const isExact = !!exact && !blocked(toTrackOffset(book.tracks, there).index);
+    let to = isExact ? there : landingSpot(at, p.v);
     // Never a seek that would be refused: then the spot the confirm was
     // made at, else nowhere (held).
     if (to !== null && blocked(toTrackOffset(book.tracks, to).index)) to = landingSpot(p.v, null);
     if (to !== null && blocked(toTrackOffset(book.tracks, to).index)) to = null;
+    if (to !== null && !isExact && walkedFar(at, to)) to = null;
     preview = null;
     if (!carry) pause();
     if (files.timer !== null && files.timer !== undefined) clearT(files.timer);
@@ -1877,7 +1914,7 @@ export function createEngine(env) {
       files.reading = false;
       files.asked = false;
       if (carry) pause();
-      emit('warning', { kind: 'part-format', message: PART_FORMAT });
+      emit('warning', { kind: 'part-format', message: PART_FORMAT, landing: true });
       changed('checking');
       return;
     }
@@ -2360,12 +2397,15 @@ export function createEngine(env) {
         if (isFinite(t)) plexSeenAt = Math.max(plexSeenAt, t);
         // A question asked before a confirm (the files changed): the confirm
         // lands now, where the answer left the chosen spot (Continue moved
-        // it to the other place; Keep listening here left it).
+        // it to the other place; Keep listening here left it). At the other
+        // place it lands exactly: that is where the other device or Plex app
+        // really is, so neither the end margin nor a walk back applies.
         if (files && files.asked && files.pending) {
           files.asked = false;
+          const other = placeMs(c.track, c.offset_ms);
           // The answer decides what plays (features.js plays on it), not
           // a Play made during the read.
-          land(files.spot, false);
+          land(files.spot, false, other !== null && files.spot === other);
         }
       }
       return c;

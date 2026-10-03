@@ -1128,6 +1128,9 @@ export function createFeatures(env) {
     // not play on: a Play there would start the book again from 0:00.
     const now2 = player.state();
     if (held && !now2.filesChanged && now2.book && now2.bookDurationMs > 0 && now2.bookMs >= now2.bookDurationMs) return;
+    // A confirm that could not land (still held: the helper shows why) plays
+    // nothing either: a Play while held would only preview.
+    if (held && now2.filesChanged) return;
     playNow();
   }
 

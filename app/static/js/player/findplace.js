@@ -40,7 +40,14 @@
  * part this browser can't decode is shown as unavailable: no preview, no
  * confirm. While a confirm (or start over) waits, on its read of the saved
  * places (state().checking) or on the question that read asked, Preview
- * waits and the panel says so.
+ * waits and the panel says so. The chosen spot is shown where a confirm
+ * would land it (landingFor); when that is far back from it (landingFar: a
+ * part this browser can't play in between), the panel says so and names
+ * the nearest spot it can play, so nothing lands far from the listener's
+ * spot unseen. A confirm that could not land (the engine's 'part-format'
+ * warning marked landing) ends the wait, and the helper shows again if it
+ * was put off. A refused move's "Pick another" lasts until the spot moves,
+ * a Play or preview, or the helper is shown again.
  *
  * Closing it (its back button, Escape, the phone's Back, closing the full
  * player) is "decide later": nothing is saved and the book stays held. A
@@ -67,6 +74,9 @@
  *       blocked: fn(bookMs) -> true in a part this browser can't decode, or
  *       the engine's parts() ([{ start_ms, duration_ms, playable }]).
  *   landingFor(ms, durationMs, parts)   where a confirm of ms lands (as engine.js)
+ *   landingFar(ms, durationMs, parts)   true when that is further than WALK_MS back
+ *                          (for a part that can't play): the engine keeps the
+ *                          book held rather than land there unasked
  *   bookClock(ms)          "3:12:40", "0:12:05" (always hours: never a time of day)
  *   percentOf(ms, total)   whole percent through, or null
  *   formatAgo(ms)          "just now", "3 min ago", "2 h ago", "3 days ago"
@@ -84,6 +94,7 @@
 
 export const NEAR_MS = 5000;           // candidates this close (or closer) are one
 export const END_MS = 30000;           // a candidate is never nearer the copy's end than this
+export const WALK_MS = 60000;          // a confirm never lands further back than this unasked (engine PLACE_WALK_MS)
 export const NUDGE_MS = 300000;        // the nudge reaches this far either side of its candidate
 export const FINE_MS = 1000;           // an arrow key on the nudge moves this much
 export const PANEL = 'findplace';
@@ -225,6 +236,20 @@ export function landingFor(ms, durationMs, parts) {
   return v;
 }
 
+/* Whether a confirm of ms would land (landingFor) further than WALK_MS from
+   where the end margin alone puts it, for a part this browser can't decode
+   in between: the engine never lands there unasked (it keeps the book held),
+   so the helper shows that spot and says why. false for a landing that is
+   itself refused (it is no walk). As engine.js walkedFar. */
+export function landingFar(ms, durationMs, parts) {
+  const dur = Number(durationMs);
+  if (!isFinite(dur) || dur <= 0) return false;
+  const to = landingFor(ms, dur, parts);
+  if (blockedBy(parts)(to)) return false;
+  const from = Math.max(0, Math.min(Math.max(0, dur - END_MS), num(ms)));
+  return Math.abs(from - to) > WALK_MS;
+}
+
 // "+5 s", "−1 min 20 s": how far the nudge moved a candidate.
 function delta(ms) {
   const s = Math.round(num(ms) / 1000);
@@ -345,6 +370,7 @@ export function createFindPlace(env) {
   let pending = false;         // a confirm (or start over) is waiting on its read or question
   let rematch = false;         // the old place changed under a kept spot (see follow)
   let refused = false;         // the engine refused a spot (a part this browser can't play) since the last choice
+  let seenSpot = null;         // the chosen spot when last drawn: a refusal lasts until it moves
   const SPOT = 'spot';
 
   // ---- The panel ----
@@ -498,6 +524,10 @@ export function createFindPlace(env) {
   function follow(s) {
     if (mode !== 'held') return;
     const at = spotNow(s);
+    // A refused move leaves the spot where it was; once it moves (a valid
+    // move, here or elsewhere), what was refused is no longer the news.
+    if (seenSpot !== null && at !== seenSpot) refused = false;
+    seenSpot = at;
     if (ownSpot !== null && at === ownSpot) return;
     ownSpot = at;
     // A spot kept from another old place is only a candidate's when it is
@@ -543,19 +573,23 @@ export function createFindPlace(env) {
     const when = isFinite(at) ? 'Last listened ' + formatAgo(now() - at) : '';
     setText(oldWhen, when);
     setHidden(oldWhen, !when);
+    // The spot as it can be used (a move elsewhere may have taken it to the
+    // very end; a confirm stops END_MS short of it).
+    const spot = usable(spotNow(s), s);
+    const dur = num(s.bookDurationMs);
     // A confirm waits on its read, then on any question that read asked.
+    // Then: the spot shown is far back from the listener's (a part that
+    // can't play in between), or a move was refused.
     const waiting = isHeld && (checking || pending);
+    const far = isHeld && walkedFar(spotNow(s), s);
     setText(status, !isHeld ? '' : checking ? 'Checking for a newer place…' : pending ? 'Answer the question above to carry on.' :
-      refused ? "That spot can't play in this browser. Pick another." : '');
+      far ? "That part can't play in this browser. The nearest spot it can play is " + bookClock(spot) + '.' :
+        refused ? "That spot can't play in this browser. Pick another." : '');
     // The spots (the chosen spot's own card, after a move, even with none).
     const any = list.length > 0 || chosen === SPOT;
     setHidden(candHead, !any);
     setHidden(candList, !any);
     setHidden(none, !!list.length);
-    // The spot as it can be used (a move elsewhere may have taken it to the
-    // very end; a confirm stops END_MS short of it).
-    const spot = usable(spotNow(s), s);
-    const dur = num(s.bookDurationMs);
     cards.concat([spotCard]).forEach(function (c, n) {
       const i = c === spotCard ? SPOT : n;
       const isChosen = i === chosen;
@@ -622,6 +656,16 @@ export function createFindPlace(env) {
       parts = player.parts();
     } catch (e) { /* none known */ }
     return landingFor(v, s.bookDurationMs, parts);
+  }
+
+  // Whether that is far back from v (landingFar): the engine won't land it
+  // unasked.
+  function walkedFar(v, s) {
+    let parts = [];
+    try {
+      parts = player.parts();
+    } catch (e) { /* none known */ }
+    return landingFar(v, s.bookDurationMs, parts);
   }
 
   // A choice from a helper not showing (its hold is over, or the book went)
@@ -797,6 +841,8 @@ export function createFindPlace(env) {
     old = Object.assign({}, next);
     mode = nextMode;
     book = s.book;
+    // Shown again: a refusal from before is old news.
+    refused = false;
     function show() {
       dropPrompt();
       isShown = true;
@@ -849,17 +895,24 @@ export function createFindPlace(env) {
     pending = false;
     rematch = false;
     refused = false;
+    seenSpot = null;
     drawnFor = '';
     setText(status, '');
   }
 
   // ---- The engine and the view ----
 
-  // A spot refused (a part this browser can't play), a confirm's landing
-  // included: the book stays held, and the panel says why.
+  // A spot refused (a part this browser can't play): the book stays held,
+  // and the panel says why. Only the confirm's own landing (landing: true)
+  // ends its wait: a move refused while the question waits leaves it
+  // waiting. That landing shows the helper again if it was put off, so a
+  // confirm never comes to nothing unseen.
   player.on('warning', safely(function (w) {
     if (!w || w.kind !== 'part-format' || mode !== 'held' || !held()) return;
-    pending = false;
+    if (w.landing) {
+      pending = false;
+      if (!isShown) open(null, null);
+    }
     refused = true;
     if (isShown) draw();
   }));
@@ -874,6 +927,8 @@ export function createFindPlace(env) {
 
   player.on('change', safely(function (d) {
     const s = d && d.state ? d.state : player.state();
+    // A Play (a preview, while held) is a choice made since the refusal.
+    if (d && (d.reason === 'play' || d.reason === 'preview')) refused = false;
     if (s.book !== book && book !== null) {
       // Another book, or none: what showed was this one's.
       if (isShown) hide();
