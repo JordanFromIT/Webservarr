@@ -398,6 +398,22 @@ class Shapes(PlayerApiBase):
             self.assertEqual(r.json()["plex"], None)
             self.assertEqual(r.json()["web"]["offset_ms"], 5_000)
 
+    def test_position_says_when_plex_could_not_be_read(self):
+        # A failed read is not "Plex holds no place": the player's re-read
+        # before a late answer to a Plex app's question must tell them apart.
+        self.checkin()
+        for exc in (pp.PlayerUnavailable("down"), pp.TokenRejected("401"), pp.NoServerAccess("x")):
+            self.plex_position.side_effect = exc
+            body = self.client.get("/api/player/position/200:1").json()
+            self.assertIsNone(body["plex"])
+            self.assertIs(body["plex_error"], True)
+        # Read, with no place (or only an echo of ours): no flag at all.
+        self.plex_position.side_effect = None
+        self.plex_position.return_value = None
+        body = self.client.get("/api/player/position/200:1").json()
+        self.assertNotIn("plex_error", body)
+        self.assertEqual(set(body), {"web", "plex", "now"})
+
     def test_history_is_newest_first(self):
         self.checkin(seq=1, offset_ms=1_000, event="play")
         self.checkin(seq=2, offset_ms=2_000, event="pause")

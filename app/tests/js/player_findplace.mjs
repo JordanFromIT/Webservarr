@@ -986,7 +986,8 @@ await run('PR3 (held): a confirm\'s Plex question left 10 min: Plexamp moved, th
     t.places.plex = { track: '503', offset_ms: 120000, duration_ms: 300000, updated_at: new Date(t.now() - 30000).toISOString(), device: 'Plexamp' };
     const r0 = reads(t);
     t.promptBtn(answer).click();
-    check(answer + ': reading, nothing to tap meanwhile', t.prompts().join() === 'Checking for a newer place…' && !t.promptBtn('Continue'), t.prompts());
+    check(answer + ': reading, its buttons wait', t.prompts().join() === 'Checking for a newer place…' &&
+      ['Continue', 'Keep listening here'].every((l) => t.promptBtn(l) && !t.promptBtn(l).disabled && t.promptBtn(l).getAttribute('aria-disabled') === 'true'), t.prompts());
     check(answer + ': nothing can answer it meanwhile', t.engine.resolveConflict() === null && !!t.st().filesChanged);
     await t.clock.advance(3000);
     check(answer + ': read again, once', reads(t) === r0 + 1, reads(t) - r0);
@@ -1013,11 +1014,40 @@ await run('PR3 (held): a confirm\'s Plex question left 10 min: Plexamp moved, th
   t.positionDelay = 6000;
   t.promptBtn('Continue').click();
   await t.clock.advance(10000);
-  check('slow read: the question as it was', t.prompts().join() === 'Continue from 15:00 (Plexamp, just now)?' && !!t.promptBtn('Continue'), t.prompts());
+  check('slow read: the question again, its age counted on', t.prompts().join() === 'Continue from 15:00 (Plexamp, 10 min ago)?' &&
+    !!t.promptBtn('Continue') && t.promptBtn('Continue').getAttribute('aria-disabled') === 'false', t.prompts());
   check('slow read: still held at the chosen spot, nothing saved', !!t.st().filesChanged && t.st().filesChanged.spot === 360000 && t.posts.length === 0, [t.st().filesChanged, t.posts.length]);
   check('slow read: the helper still waits', t.txt('.wsp-fp-status') === 'Answer the question above to carry on.' &&
     t.cards().every((c) => c.querySelector('.wsp-fp-preview').disabled), t.txt('.wsp-fp-status'));
   t.engine.close();
+});
+
+await run('T4F1 (held): a Pause while the confirm\'s Plex question is read again: it lands as answered, and does not play', async () => {
+  for (const how of ['pause', 'play then pause', 'pause then play', 'neither']) {
+    const t = await held();
+    t.places.plex = { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: new Date(t.now()).toISOString(), device: 'Plexamp' };
+    await t.clock.advance(5000);
+    t.card('percent').querySelector('.wsp-fp-use').click();
+    await t.clock.advance(200);
+    await t.clock.advance(10 * MIN);
+    t.positionDelay = 3000;
+    t.promptBtn('Continue').click();
+    await t.clock.advance(300);
+    if (how === 'play then pause') {
+      t.ms.handlers.get('play')();
+      await t.clock.advance(1000);
+    }
+    if (how !== 'neither') t.ms.handlers.get('pause')();
+    if (how === 'pause then play') {
+      await t.clock.advance(300);
+      t.ms.handlers.get('play')();               // played again before the read ends: it plays on
+    }
+    await t.clock.advance(8000);
+    check(how + ': landed at Plexamp\'s 15:00 and saved there', t.st().filesChanged === null && t.posts.length >= 1 && t.posts[0].book_ms === 900000, t.posts.map((b) => b.book_ms));
+    const plays = how === 'neither' || how === 'pause then play';
+    check(how + (plays ? ': plays on, as answered' : ': not playing'), t.st().playing === plays, t.st().playing);
+    t.engine.close();
+  }
 });
 
 await run('T3F5: files changed within the same album name no earlier copy', async () => {

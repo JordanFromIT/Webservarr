@@ -1228,6 +1228,34 @@ await run('prompts: handoff and up next', () => {
   check('pressed: runs and goes', JSON.stringify(ran) === '["play"]' && !q.shown);
 });
 
+await run('prompts: a kept button stays; update() in place, busy disables the buttons and keeps the focus', () => {
+  const t = setup();
+  t.engine.set(BOOK, 'open');
+  const ran = [];
+  const p = t.ui.prompt({
+    message: 'Continue from 17:00 (Plexamp, 3 min ago)?',
+    actions: [{ label: 'Continue', keep: true, primary: true, run: () => ran.push('continue') }, { label: 'Keep listening here', keep: true, run: () => ran.push('keep') }]
+  });
+  const box = t.q('.wsp-prompt');
+  const [a, b] = t.qa('.wsp-prompt .wsp-notice-btn');
+  a.focus();
+  a.click();
+  check('kept: it ran, and the prompt stays', JSON.stringify(ran) === '["continue"]' && p.shown && t.q('.wsp-prompt') === box);
+  p.update({ message: 'Checking for a newer place…', busy: true });
+  // aria-disabled only: a disabled button would lose the focus in a browser.
+  check('busy: the new words, the same buttons waiting, the focus kept', t.q('.wsp-prompt .wsp-notice-text').textContent === 'Checking for a newer place…' &&
+    !a.disabled && !b.disabled && a.getAttribute('aria-disabled') === 'true' && b.getAttribute('aria-disabled') === 'true' &&
+    box.getAttribute('aria-busy') === 'true' && t.doc.activeElement === a);
+  b.click();
+  check('a press while busy does nothing', JSON.stringify(ran) === '["continue"]');
+  p.update({ message: 'Continue from 27:00 (Plexamp, just now)?', busy: false });
+  check('busy ends: ready again, the new words', a.getAttribute('aria-disabled') === 'false' && box.getAttribute('aria-busy') === 'false' &&
+    t.q('.wsp-prompt .wsp-notice-text').textContent === 'Continue from 27:00 (Plexamp, just now)?');
+  p.remove();
+  p.update({ message: 'gone', busy: true });
+  check('removed: update does nothing', !p.shown && !t.q('.wsp-prompt'));
+});
+
 await run('slots stay hidden until filled; panels', () => {
   const t = setup();
   t.engine.set(BOOK, 'open');

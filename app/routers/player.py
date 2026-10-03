@@ -406,7 +406,10 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
 
     Plex's is best effort: once the listener's access is confirmed, a failure
     reading their Plex state (a refused token, plex.tv down) makes it null,
-    and WebServarr's still resumes the book.
+    and WebServarr's still resumes the book. Such a failure also adds
+    `plex_error: true`, so a null that means "Plex could not be read" is
+    never taken for "Plex holds no place" (the player's re-read before a
+    late answer to a Plex app's question).
 
     Plex's copy is null too when it is an echo: a place this listener's own
     log has, logged within 30 s of Plex's timestamp for it
@@ -431,6 +434,7 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
     before that lookup can finish (never a null that would open the book
     at 0:00)."""
     album, _access = await _checked_book(who, key)
+    plex_error = False
     try:
         plex_pos = await pp.plex_position(who.session(), key, session_id=who.session_id)
     except pp.NotInLibrary as exc:
@@ -438,6 +442,7 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
     except pp.PlayerUnavailable as exc:
         logger.info("Plex position unavailable: %s", type(exc).__name__)
         plex_pos = None
+        plex_error = True
     if plex_pos and listening.is_logged_place(db, who.identity, key, plex_pos.get("track"),
                                               plex_pos.get("offset_ms"), plex_pos.get("updated_at")):
         plex_pos = None
@@ -448,7 +453,10 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
         row = await _earlier_copy(db, who, key, album=album)
         if row is not None:
             web = {**listening.position_dict(row), "linked_from": row.book_key}
-    return {"web": web, "plex": plex_pos, "now": utc_iso(datetime.now(timezone.utc))}
+    body = {"web": web, "plex": plex_pos, "now": utc_iso(datetime.now(timezone.utc))}
+    if plex_error:
+        body["plex_error"] = True
+    return body
 
 
 @router.get("/history/{key}")

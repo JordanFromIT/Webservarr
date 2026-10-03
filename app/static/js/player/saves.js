@@ -157,6 +157,8 @@
  *                                   Plex place leaves the base as it was)
  *   adoptBase(book, updated_at)     another page saved this very place: its
  *                                   timestamp is the base from now on
+ *   sessionEnded()                  another player request got a 401: as a
+ *                                   check-in's (nothing more is sent; sign in)
  *   flush('beacon' | 'fetch', event) send now: a beacon, or a fetch past the backoff
  *   wake()                          back from frozen or hidden: the save in flight
  *                                   gets its full 15 s again
@@ -1214,6 +1216,9 @@ export function createSaver(o) {
     lastSeen: lastSeen,
     otherSaved: otherSaved,
     adoptBase: adoptBase,
+    // Another request of the player's was refused with 401 (the engine's
+    // re-read of the saved places): the session ended, as for a check-in.
+    sessionEnded: signOut,
     onWarning: function (fn) {
       if (typeof fn !== 'function') return noop;
       warnFns.add(fn);

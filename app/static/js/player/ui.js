@@ -54,10 +54,16 @@
  *       runs run(). duration: ms on screen (default 5 s, errors 7 s, 4 s more
  *       with an action); 0 keeps it until remove(), and gives it a Dismiss
  *       button. id: a notice with the same id replaces the earlier one.
- *   prompt({ message, actions: [{ label, run, primary }], id }) -> { remove() }
+ *   prompt({ message, actions: [{ label, run, primary, keep }], id })
+ *       -> { remove(), update({ message, busy }), shown }
  *       A question in the same place (handoff, up next): stays until one of
  *       its buttons is pressed (which removes it, then runs run) or
  *       remove(). id defaults to 'prompt', so a new prompt replaces the last.
+ *       keep: pressing that button only runs run; the prompt stays until
+ *       run's owner removes it. update: a new message in place, and busy
+ *       true makes its buttons wait (aria-disabled, presses ignored; not
+ *       disabled, so the focus stays on the one pressed) keeping its
+ *       height, so nothing under it moves; busy false ends that.
  *   slot(name)        the element of a slot: 'menu' (the full player's top
  *                     right), 'speed', 'sleep', 'history' (its row of actions).
  *                     A slot never starts a swipe (data-no-swipe); anything
@@ -647,7 +653,9 @@ export function createUI(env) {
       role: err ? 'alert' : null
     });
     if (!o.prompt) el.appendChild(h('span', { class: 'ws-light ' + (err ? 'ws-light-error' : 'ws-light-unconfigured'), 'aria-hidden': 'true' }));
-    el.appendChild(h('p', { class: 'wsp-notice-text', text: String(message == null ? '' : message) }));
+    const textEl = h('p', { class: 'wsp-notice-text', text: String(message == null ? '' : message) });
+    el.appendChild(textEl);
+    const buttons = [];
     let timer = null;
     let gone = false;
     const entry = { el: el, sticky: false, remove: remove };
@@ -673,9 +681,11 @@ export function createUI(env) {
       actions.forEach(function (a) {
         const b = h('button', { type: 'button', class: 'wsp-notice-btn' + (a.primary ? ' is-primary' : ''), text: String(a.label) });
         b.addEventListener('click', function () {
-          remove();
+          if (b.getAttribute('aria-disabled') === 'true') return;
+          if (!a.keep) remove();
           if (typeof a.run === 'function') safely(a.run)();
         });
+        buttons.push(b);
         row.appendChild(b);
       });
       el.appendChild(row);
@@ -707,7 +717,25 @@ export function createUI(env) {
     else noticeBox.appendChild(el);
     syncHost();
     syncScroll();
-    return { remove: remove, get shown() { return !gone; } };
+    // A new message in place; busy: its buttons wait (still there, so the
+    // focus and the layout stay), the prompt no shorter than it was.
+    function update(u) {
+      if (gone || !u) return;
+      if (typeof u.busy === 'boolean') {
+        // The words' block keeps its height, so the buttons under it stay put.
+        if (u.busy) textEl.style.minHeight = textEl.getBoundingClientRect().height + 'px';
+        else textEl.style.minHeight = '';
+        el.setAttribute('aria-busy', u.busy ? 'true' : 'false');
+        // aria-disabled, not disabled: a browser moves the focus off a
+        // button made disabled, and the one pressed must keep it. Presses
+        // meanwhile are ignored (the click handler).
+        buttons.forEach(function (b) {
+          b.setAttribute('aria-disabled', u.busy ? 'true' : 'false');
+        });
+      }
+      if (u.message != null) textEl.textContent = String(u.message);
+    }
+    return { remove: remove, update: update, get shown() { return !gone; } };
   }
 
   function notify(message, o) {

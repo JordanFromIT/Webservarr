@@ -393,12 +393,16 @@ async function setup(o = {}) {
       t.positionCalls += 1;
       if (t.positionMode === 'down') throw new TypeError('Failed to fetch');
       if (t.positionMode === 'hang') return new Promise(() => {});
+      // t.positionStatus: the read refused with that status.
+      if (t.positionStatus) return response(t.positionStatus, { detail: 'no' });
       // t.positionDelay: a slow read, answered that much later.
       if (t.positionDelay) await new Promise((r) => clock.setTimeout(r, t.positionDelay));
       const reply = t.server
         ? { web: t.server.web(decodeURIComponent(m[1])), plex: t.plexCopy || null }
         : { web: t.places.web, plex: t.places.plex || null };
       if (!t.noNow) reply.now = new Date(t.serverNow()).toISOString();
+      // t.plexError: the server could not read Plex (plex null, plex_error true).
+      if (t.plexError) { reply.plex = null; reply.plex_error = true; }
       return response(200, reply);
     }
     return response(404, {});
@@ -436,8 +440,10 @@ async function setup(o = {}) {
     deviceId: o.deviceId,
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
-    psid: o.psid || 'test-psid'
+    psid: o.psid || 'test-psid',
+    onSignedOut: () => { t.signedOut += 1; }
   });
+  t.signedOut = 0;
   t.saver = saver;
   const ms = {
     metadata: null, playbackState: 'none', handlers: new Map(),
@@ -3663,6 +3669,10 @@ async function plexQuestion() {
   t.prompts = () => t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
   t.btns = () => t.qa('.wsp-prompt .wsp-notice-btn').map((b) => b.textContent);
   t.btn = (label) => t.qa('.wsp-prompt .wsp-notice-btn').find((b) => b.textContent === label) || null;
+  // Its buttons there and all waiting (aria-disabled; never disabled, which would take the
+  // focus off the one pressed) while the place is read again.
+  t.waiting = () => t.btns().join() === 'Continue,Keep listening here' &&
+    t.qa('.wsp-prompt .wsp-notice-btn').every((b) => !b.disabled && b.getAttribute('aria-disabled') === 'true');
   t.stored = (n) => t.posts.slice(n).map((b) => [b.event, b.track, b.offset_ms]);
   t.seeks = [];
   t.engine.on('change', (d) => { if (d.reason === 'seek') t.seeks.push(d.to); });
@@ -3676,6 +3686,7 @@ async function plexQuestion() {
   await t.clock.advance(6 * MIN);
   t.places = { web: t.places.web, plex: plexCopyAt('502', 420000, t.now() - MIN, 900000) };   // Plexamp: 17:00
   t.ms.handlers.get('play')();
+  t.askedAt = t.now();                       // the read answers at once: the question shows now
   await t.clock.advance(3000);
   check('asked about Plexamp\'s 17:00', t.prompts().join() === PR3_ASKED && !t.st().playing, t.prompts());
   t.here = t.st().position;
@@ -3778,11 +3789,13 @@ await run('PR3: a read that fails or takes over 4 s keeps the question as it was
     const seeks = t.seeks.length;
     const local = JSON.stringify(t.saver.readLocal(MULTI.key));
     t.btn('Continue').click();
-    check(mode + ': reading, nothing to tap meanwhile', t.prompts().join() === 'Checking for a newer place…' && t.btns().length === 0, [t.prompts(), t.btns()]);
+    check(mode + ': reading, its buttons wait', t.prompts().join() === 'Checking for a newer place…' && t.waiting(), [t.prompts(), t.btns()]);
     await t.clock.advance(4500);
-    check(mode + ': after 4 s the question is back as it was', t.prompts().join() === PR3_ASKED && t.btns().join() === 'Continue,Keep listening here', [t.prompts(), t.btns()]);
+    // T4F4: the question as it was, its age counted on (asked 1 min ago, 10 min 4.5 s since).
+    check(mode + ': after 4 s the question is back, its age counted on', t.prompts().join() === 'Continue from 17:00 (Plexamp, 11 min ago)?' &&
+      t.btns().join() === 'Continue,Keep listening here' && !t.waiting(), [t.prompts(), t.btns()]);
     await t.clock.advance(5000);              // a slow read's answer, come too late, changes nothing
-    check(mode + ': still as it was', t.prompts().join() === PR3_ASKED, t.prompts());
+    check(mode + ': still as it was', t.prompts().join() === 'Continue from 17:00 (Plexamp, 11 min ago)?', t.prompts());
     check(mode + ': nothing acted on, nothing saved', t.positionCalls === reads + 1 && t.posts.length === n && t.seeks.length === seeks &&
       !t.st().playing && t.st().position.offset_ms === t.here.offset_ms, [t.positionCalls - reads, t.stored(n), t.st().position]);
     check(mode + ': the local copy is as it was', JSON.stringify(t.saver.readLocal(MULTI.key)) === local, [local, t.saver.readLocal(MULTI.key)]);
@@ -3835,7 +3848,7 @@ await run('PR3: a double tap while the place is read again acts once', async () 
     keep.click();                              // the second tap of a double tap, on the same button
     cont.click();                              // or on the other one
     await t.clock.advance(100);
-    check((moved ? 'moved' : 'not moved') + ': one read; nothing to tap meanwhile', t.positionCalls === reads + 1 && t.btns().length === 0, [t.positionCalls - reads, t.btns()]);
+    check((moved ? 'moved' : 'not moved') + ': one read; the buttons wait', t.positionCalls === reads + 1 && t.waiting(), [t.positionCalls - reads, t.btns()]);
     await t.clock.advance(12000);
     check((moved ? 'moved' : 'not moved') + ': still one read', t.positionCalls === reads + 1, t.positionCalls - reads);
     if (moved) {
@@ -3847,6 +3860,186 @@ await run('PR3: a double tap while the place is read again acts once', async () 
     }
     t.engine.close();
   }
+});
+
+// ---- Task 4 fix round 1 ----
+
+await run('T4E1: the read refused. 401: the sign-in path, nothing acted on. 404: the answer goes on as before the read existed. 503: kept', async () => {
+  for (const status of [401, 404, 503]) {
+    const t = await plexQuestion();
+    await t.clock.advance(10 * MIN);
+    t.positionStatus = status;
+    const reads = t.positionCalls;
+    const n = t.posts.length;
+    const seeks = t.seeks.length;
+    t.btn('Continue').click();
+    await t.clock.advance(5000);
+    check(status + ': read once', t.positionCalls === reads + 1, t.positionCalls - reads);
+    if (status === 404) {
+      // Answered: Continue goes to 17:00, and its check-in goes as ever.
+      check('404: the answer goes on, through its check-in', t.prompts().length === 0 && t.seeks.slice(seeks).includes(1020000) && t.posts.length > n,
+        [t.prompts(), t.seeks.slice(seeks), t.stored(n)]);
+    } else {
+      check(status + ': the question stays, nothing acted on or saved', /^Continue from 17:00/.test(t.prompts().join()) && !t.waiting() &&
+        t.posts.length === n && t.seeks.length === seeks && !t.st().playing, [t.prompts(), t.stored(n), t.seeks.slice(seeks)]);
+      check(status + (status === 401 ? ': sent to sign in' : ': not sent to sign in'), t.signedOut === (status === 401 ? 1 : 0), t.signedOut);
+    }
+    t.engine.close();
+  }
+});
+
+await run('T4E2: the server could not read Plex (plex_error): the answer waits, nothing saved', async () => {
+  for (const answer of ['Continue', 'Keep listening here']) {
+    const t = await plexQuestion();
+    await t.clock.advance(10 * MIN);
+    t.places = { web: t.places.web, plex: plexCopyAt('503', 120000, t.now() - 30000, 300000) };   // moved, unseen
+    t.plexError = true;
+    const reads = t.positionCalls;
+    const n = t.posts.length;
+    const seeks = t.seeks.length;
+    t.btn(answer).click();
+    await t.clock.advance(5000);
+    check(answer + ': read once; the question stays, nothing acted on or saved', t.positionCalls === reads + 1 && /^Continue from 17:00/.test(t.prompts().join()) &&
+      t.posts.length === n && t.seeks.length === seeks && !t.st().playing, [t.prompts(), t.stored(n)]);
+    // Plex readable again: the next answer reads again and finds the move.
+    t.plexError = false;
+    t.btn(answer).click();
+    await t.clock.advance(3000);
+    check(answer + ': read again, the new place shows', t.positionCalls === reads + 2 && /^Continue from 27:00/.test(t.prompts().join()) && t.posts.length === n, t.prompts());
+    t.engine.close();
+  }
+});
+
+await run('T4E3: the wall clock set back past when the question showed: read again all the same', async () => {
+  const t = await plexQuestion();
+  t.asleepMs = -3600000;                           // the clock stepped back an hour after it showed
+  await t.clock.advance(10 * MIN);
+  t.places = { web: t.places.web, plex: plexCopyAt('503', 120000, t.now() - 30000, 300000) };
+  const reads = t.positionCalls;
+  const n = t.posts.length;
+  t.btn('Continue').click();
+  await t.clock.advance(3000);
+  check('read again, the new place shows, nothing saved', t.positionCalls === reads + 1 && /^Continue from 27:00/.test(t.prompts().join()) && t.posts.length === n,
+    [t.positionCalls - reads, t.prompts(), t.stored(n)]);
+  t.engine.close();
+});
+
+await run('T4F1: a Pause while the place is read again: the answer moves (and saves) but does not play', async () => {
+  for (const answer of ['Continue', 'Keep listening here']) {
+    for (const playingFirst of [false, true]) {
+      const what = answer + (playingFirst ? ' (playing on first)' : '');
+      const t = await plexQuestion();
+      if (playingFirst) {
+        t.engine.play();
+        await t.clock.advance(2000);
+      }
+      await t.clock.advance(10 * MIN);
+      t.positionDelay = 2000;
+      const n = t.posts.length;
+      const seeks = t.seeks.length;
+      t.btn(answer).click();
+      await t.clock.advance(500);
+      t.ms.handlers.get('pause')();                // the lock screen's Pause, during the read
+      await t.clock.advance(6000);
+      check(what + ': answered, not playing', t.prompts().length === 0 && !t.st().playing, [t.prompts(), t.st().playing]);
+      if (answer === 'Continue') {
+        check(what + ': moved to 17:00 and saved there', t.seeks.slice(seeks).includes(1020000) && t.stored(n).some((b) => b[1] === '502' && b[2] === 420000), t.stored(n));
+      }
+      t.engine.close();
+    }
+  }
+  // Paused, then played again during the read: it plays on, as answered.
+  const u = await plexQuestion();
+  await u.clock.advance(10 * MIN);
+  u.positionDelay = 2000;
+  u.btn('Keep listening here').click();
+  await u.clock.advance(300);
+  u.ms.handlers.get('pause')();
+  await u.clock.advance(300);
+  u.ms.handlers.get('play')();
+  await u.clock.advance(6000);
+  check('paused then played during the read: plays on', u.prompts().length === 0 && u.st().playing, [u.prompts(), u.st().playing]);
+  u.engine.close();
+});
+
+await run('T4F2/F3: the pressed button keeps the focus while the place is read again; the question is the same element throughout', async () => {
+  for (const mode of ['moved', 'failed']) {
+    const t = await plexQuestion();
+    t.ui.open();
+    await t.clock.advance(50);
+    await t.clock.advance(10 * MIN);
+    if (mode === 'moved') t.places = { web: t.places.web, plex: plexCopyAt('503', 120000, t.now() - 30000, 300000) };
+    else t.positionMode = 'down';
+    t.positionDelay = mode === 'moved' ? 1000 : 0;
+    const box = t.q('.wsp-prompt');
+    const b = t.btn('Continue');
+    b.focus();
+    b.click();
+    check(mode + ': during the read, the same question with its buttons, the focus on the one pressed', t.q('.wsp-prompt') === box && t.doc.activeElement === b && t.waiting() &&
+      box.getAttribute('aria-busy') === 'true', [t.doc.activeElement && t.doc.activeElement.textContent, t.btns()]);
+    await t.clock.advance(3000);
+    check(mode + ': after it, still the same question and button, focused and ready', t.q('.wsp-prompt') === box && t.btn('Continue') === b && t.doc.activeElement === b &&
+      b.getAttribute('aria-disabled') === 'false' && box.getAttribute('aria-busy') === 'false', [t.prompts(), t.doc.activeElement && t.doc.activeElement.textContent]);
+    check(mode + ': its words', t.prompts().join() === (mode === 'moved' ? 'Continue from 27:00 (Plexamp, just now)?' : 'Continue from 17:00 (Plexamp, 11 min ago)?'), t.prompts());
+    t.engine.close();
+  }
+});
+
+await run('T4F5: "Keep listening here" after the book ended under the question: no restart from 0:00', async () => {
+  const t = await plexQuestion();
+  t.engine.play();                                 // plays on under the question (unsaved)
+  await t.clock.advance(16 * MIN);                 // ... to the book's end
+  const s0 = t.st();
+  check('the book ended under the question', !s0.playing && s0.bookMs >= s0.bookDurationMs && t.prompts().length === 1, [s0.bookMs, s0.bookDurationMs, t.prompts()]);
+  const n = t.posts.length;
+  t.btn('Keep listening here').click();
+  await t.clock.advance(6000);
+  const s1 = t.st();
+  check('not playing, still at the end, nothing saved at 0:00', !s1.playing && s1.bookMs >= s1.bookDurationMs && t.posts.slice(n).every((b) => b.track !== '501' || b.offset_ms > 0),
+    [s1.playing, s1.position, t.stored(n)]);
+  t.engine.close();
+});
+
+await run('T4M1: the 2-minute line exactly: no read at 120000 ms, a read at 120001', async () => {
+  for (const extra of [0, 1]) {
+    const t = await plexQuestion();
+    await t.clock.advance(t.askedAt + 120000 + extra - t.now());
+    const reads = t.positionCalls;
+    t.btn('Keep listening here').click();
+    await t.clock.advance(10);
+    check((120000 + extra) + ' ms: ' + (extra ? 'read' : 'no read'), t.positionCalls === reads + extra, t.positionCalls - reads);
+    t.engine.close();
+  }
+});
+
+await run('T4M2/M3: one read at a time, each guard on its own; nothing answers the question meanwhile', async () => {
+  // The features' guard: a second press while reading asks the engine nothing.
+  const t = await plexQuestion();
+  await t.clock.advance(10 * MIN);
+  t.positionDelay = 2000;
+  let asks = 0;
+  const real = t.engine.recheckPlex;
+  t.engine.recheckPlex = function () { asks += 1; return real.apply(t.engine, arguments); };
+  const b = t.btn('Continue');
+  b.click();
+  b.removeAttribute('aria-disabled');              // forced through, past the waiting button
+  b.click();
+  t.btn('Keep listening here').removeAttribute('aria-disabled');
+  t.btn('Keep listening here').click();
+  await t.clock.advance(100);
+  check('features: the engine asked once', asks === 1, asks);
+  check('M3: resolveConflict() answers nothing during the read', t.engine.resolveConflict() === null && /^Checking/.test(t.prompts().join()));
+  t.engine.close();
+  // The engine's guard: two calls, one read, one promise.
+  const u = await plexQuestion();
+  await u.clock.advance(10 * MIN);
+  u.positionDelay = 2000;
+  const reads = u.positionCalls;
+  const p1 = u.engine.recheckPlex();
+  const p2 = u.engine.recheckPlex();
+  await u.clock.advance(3000);
+  check('engine: the same promise, one read', p1 === p2 && u.positionCalls === reads + 1, u.positionCalls - reads);
+  u.engine.close();
 });
 
 await run('no markup from strings, no intervals, no inline handlers', () => {

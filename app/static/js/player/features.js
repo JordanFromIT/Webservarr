@@ -1094,22 +1094,39 @@ export function createFeatures(env) {
     drawHandoff(entry);
   }
 
+  function canGoTo(offer) {
+    return typeof offer.other.bookMs === 'number' && offer.other.canGo !== false;
+  }
+
+  // The question's words, its "ago" counted on from when it was asked (the
+  // server's age then, plus the wall time since), so a question shown
+  // again later never says "just now" of an old place.
+  function messageFor(entry) {
+    const o = entry.offer.other;
+    const since = Math.max(0, now() - entry.shown);
+    const ago = typeof o.agoMs === 'number' && isFinite(o.agoMs) ? o.agoMs + since : o.agoMs;
+    return handoffMessage({ other: Object.assign({}, o, { agoMs: ago }) });
+  }
+
   function drawHandoff(entry) {
     const offer = entry.offer;
     const kind = entry.kind;
     const actions = [];
-    const canGo = typeof offer.other.bookMs === 'number' && offer.other.canGo !== false;
+    const canGo = canGoTo(offer);
+    // A conflict's answers keep the question up while it may be read again
+    // (answerHandoff removes it), so the button pressed keeps the focus.
+    const keep = kind === 'conflict';
     if (canGo) {
-      actions.push({ label: 'Continue', primary: true, run: function () { chooseHandoff(entry, 'other'); } });
+      actions.push({ label: 'Continue', primary: true, keep: keep, run: function () { chooseHandoff(entry, 'other'); } });
     }
     actions.push({ label: kind === 'conflict' ? 'Keep listening here' : 'Start from here',
-      primary: !actions.length, run: function () { chooseHandoff(entry, 'own'); } });
+      primary: !actions.length, keep: keep, run: function () { chooseHandoff(entry, 'own'); } });
     // At an open where the other place can't play here: the question can
     // wait (nothing is saved or overwritten until the listener plays or moves).
     if (!canGo && kind === 'open') {
       actions.push({ label: 'Not now', run: function () { if (handoff === entry) handoff = null; } });
     }
-    entry.prompt = ui.prompt({ id: 'handoff', message: handoffMessage(offer), actions: actions });
+    entry.prompt = ui.prompt({ id: 'handoff', message: messageFor(entry), actions: actions });
   }
 
   function playNow() {
@@ -1128,16 +1145,20 @@ export function createFeatures(env) {
      here: to this browser's place. At a conflict, Keep listening here: the
      place here is saved over the stored one. Then play.
      A Plex app's question showing for over QUESTION_STALE_MS (spec 2.5
-     section 7) is read again first: nothing on the server guards a Plex
-     app's place, and it may have moved on. Meanwhile "Checking for a newer
-     place…" shows instead, and nothing is done (a second tap does nothing;
-     the saves, and a confirm's hold, stay held). Then the answer goes on if
-     the Plex app has not moved; if it has, the question shows its new place
-     (the engine asks again); if the read failed or took too long, the
-     question shows again as it was, to answer again. */
+     section 7; by the wall clock, and a clock set back before it showed
+     counts as over) is read again first: nothing on the server guards a
+     Plex app's place, and it may have moved on. Meanwhile the question
+     stays with its buttons disabled and "Checking for a newer place…" in
+     its place (the focus and the layout stay), and nothing is done (a
+     second tap does nothing; the saves, and a confirm's hold, stay held).
+     Then the answer goes on if the Plex app has not moved, without playing
+     if the listener paused meanwhile; if it has moved, the question shows
+     its new place (the engine asks again); if the read failed or took too
+     long, the question shows again, to answer again. */
   function chooseHandoff(entry, which) {
     if (handoff !== entry || entry.reading) return;
-    if (entry.kind === 'conflict' && now() - entry.shown > QUESTION_STALE_MS && typeof player.recheckPlex === 'function') {
+    const age = now() - entry.shown;
+    if (entry.kind === 'conflict' && (age > QUESTION_STALE_MS || age < 0) && typeof player.recheckPlex === 'function') {
       let reading = null;
       try {
         reading = player.recheckPlex();
@@ -1147,7 +1168,9 @@ export function createFeatures(env) {
       }
       if (reading && typeof reading.then === 'function') {
         entry.reading = true;
-        entry.prompt = ui.prompt({ id: 'handoff', message: CHECKING_PLACE, actions: [] });
+        if (entry.prompt && entry.prompt.shown && typeof entry.prompt.update === 'function') {
+          entry.prompt.update({ message: CHECKING_PLACE, busy: true });
+        }
         reading.then(function (r) { recheckDone(entry, which, r); }, function (e) {
           logError(e);
           recheckDone(entry, which, 'failed');
@@ -1155,22 +1178,32 @@ export function createFeatures(env) {
         return;
       }
     }
-    answerHandoff(entry, which);
+    answerHandoff(entry, which, false);
   }
 
   function recheckDone(entry, which, result) {
     entry.reading = false;
-    // Asked again at the Plex app's new place (a question of its own now),
-    // or gone with the book: nothing more for this one.
+    // Asked again in a new question (the Plex app's new place where Continue
+    // appeared or went), or gone with the book: nothing more for this one.
     if (handoff !== entry) return;
-    if (result === 'same') {
-      answerHandoff(entry, which);
+    // 'paused': not moved, and the listener paused meanwhile (the engine
+    // saw the Pause, even with nothing playing): answered, not played.
+    if (result === 'same' || result === 'paused') {
+      answerHandoff(entry, which, result === 'paused');
       return;
     }
-    drawHandoff(entry);
+    // Moved (the warning put the new place in this question) or failed: the
+    // question, to answer again.
+    if (entry.prompt && entry.prompt.shown && typeof entry.prompt.update === 'function') {
+      entry.prompt.update({ message: messageFor(entry), busy: false });
+    } else {
+      drawHandoff(entry);
+    }
   }
 
-  function answerHandoff(entry, which) {
+  // stay: the listener paused while the place was read again; the answer
+  // moves (and saves) but does not play.
+  function answerHandoff(entry, which, stay) {
     if (handoff !== entry) return;
     handoff = null;
     if (entry.prompt) entry.prompt.remove();
@@ -1184,10 +1217,12 @@ export function createFeatures(env) {
     // After the move: the save that resumes carries the place chosen.
     const held = !!player.state().filesChanged;
     if (entry.kind === 'conflict' && typeof player.resolveConflict === 'function') player.resolveConflict();
-    // A confirm (the files changed) that landed at the book's very end does
-    // not play on: a Play there would start the book again from 0:00.
+    if (stay) return;
+    // At the book's very end (a confirm landed there, or the book ended
+    // under the question) it does not play on: a Play there would start the
+    // book again from 0:00.
     const now2 = player.state();
-    if (held && !now2.filesChanged && now2.book && now2.bookDurationMs > 0 && now2.bookMs >= now2.bookDurationMs) return;
+    if (now2.book && now2.bookDurationMs > 0 && now2.bookMs >= now2.bookDurationMs) return;
     // A confirm that could not land (still held: the helper shows why) plays
     // nothing either: a Play while held would only preview.
     if (held && now2.filesChanged) return;
@@ -1222,6 +1257,14 @@ export function createFeatures(env) {
         } catch (e) { /* none known */ }
         const i = partAt(parts, offer.other.bookMs);
         if (i !== -1 && !parts[i].playable) offer.other.canGo = false;
+      }
+      // The new place goes into the question being read again, in place
+      // (its buttons, and the focus on one, stay), unless Continue comes or
+      // goes with it: then a question of its own.
+      if (update && canGoTo(offer) === canGoTo(handoff.offer) && handoff.prompt && handoff.prompt.shown) {
+        handoff.offer = offer;
+        handoff.shown = now();
+        return;
       }
       showHandoff(offer, 'conflict');
     } catch (e) {

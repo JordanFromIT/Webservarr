@@ -218,9 +218,16 @@
  *                     'moved': the Plex app moved on, and the question is
  *                     asked again at its new place (a 'conflict' warning; a
  *                     later Continue goes there); nothing else changes.
- *                     'same': the answer goes on. 'failed' (the read failed
- *                     or took too long): nothing changes. null: no Plex app's
- *                     question waits (nothing read). One read at a time.
+ *                     'same': the answer goes on ('paused': and the
+ *                     listener paused meanwhile, even with nothing playing,
+ *                     so it does not play; also when the read is
+ *                     refused with a 4xx other than 401, 408 or 429: the
+ *                     answer's check-in meets it, as before). 'failed': the
+ *                     read failed (no network, 408, 429, 5xx), took too
+ *                     long, or the server could not read Plex (plex_error);
+ *                     on a 401 the saves' sign-in path is taken first.
+ *                     Nothing changes. null: no Plex app's question waits
+ *                     (nothing read). One read at a time.
  *   placeMs(track, offsetMs)  the book time of a place in the loaded book, or null
  *   own()             this browser's own copy of the loaded book's place (as
  *                     in setOpenGate's info), or null
@@ -1244,7 +1251,9 @@ export function createEngine(env) {
     try {
       if (clockDone) clockDone(data.now);
     } catch (e) { /* no clock measure */ }
-    return { web: data.web || null, plex: data.plex || null, now: typeof data.now === 'string' ? data.now : null };
+    // plexError: Plex could not be read (its null is no answer, not "no place").
+    return { web: data.web || null, plex: data.plex || null, now: typeof data.now === 'string' ? data.now : null,
+      plexError: data.plex_error === true };
   }
 
   function makeBook(key, data) {
@@ -1595,6 +1604,9 @@ export function createEngine(env) {
      at the helper's chosen spot. Nothing else plays until the listener
      places the book. */
   function play() {
+    // A Play while a Plex app's question is read again: the answer that
+    // follows may play (recheckPlex).
+    if (rechecking) rechecking.paused = false;
     if (files && book) return heldPlay(playOn);
     return playOn();
   }
@@ -1684,6 +1696,9 @@ export function createEngine(env) {
   // takes back a Play made while a confirm reads the saved places.
   function userPause() {
     if (files) files.play = false;
+    // Paused while a Plex app's question is read again (even with nothing
+    // playing): the answer that follows does not play (recheckPlex).
+    if (rechecking) rechecking.paused = true;
     pause();
   }
 
@@ -2301,18 +2316,42 @@ export function createEngine(env) {
     const gen0 = openGen;
     const asked = plexAsked;
     let resolve = null;
-    const my = { promise: new Promise(function (r) { resolve = r; }), timer: null, stop: null };
+    const my = { promise: new Promise(function (r) { resolve = r; }), timer: null, stop: null, paused: false };
     function end(result) {
       if (rechecking !== my) return;
       rechecking = null;
       if (my.timer !== null) clearT(my.timer);
       my.timer = null;
-      resolve(result);
+      resolve(result === 'same' && my.paused ? 'paused' : result);
     }
     my.stop = function () { end('failed'); };
+    // A refused read: 401, the session ended (the saves' sign-in path, as a
+    // check-in's 401; nothing is acted on). Any other refusal (a 404: the
+    // book is gone) is answered as before this read existed: the answer
+    // goes on, and its check-in meets the same refusal ("not saved").
+    // Only what may pass (no network, a timeout, 408, 429, 5xx) is 'failed'.
+    function refused(e) {
+      if (rechecking !== my) return;
+      const status = e && typeof e.status === 'number' ? e.status : 0;
+      if (status === 401) {
+        try {
+          if (typeof saver.sessionEnded === 'function') saver.sessionEnded();
+        } catch (x) {
+          console.error('[player] saving failed', x);
+        }
+        end('failed');
+        return;
+      }
+      if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+        end('same');
+        return;
+      }
+      finish(null);
+    }
     function finish(places) {
       if (rechecking !== my) return;
-      if (!places || openGen !== gen0 || !book || book.key !== key || plexAsked !== asked) {
+      // Plex could not be read: its place may have moved unseen.
+      if (!places || places.plexError || openGen !== gen0 || !book || book.key !== key || plexAsked !== asked) {
         end('failed');
         return;
       }
@@ -2351,7 +2390,7 @@ export function createEngine(env) {
     } catch (e) {
       asking = Promise.reject(e);
     }
-    asking.then(finish, function () { finish(null); });
+    asking.then(finish, refused);
     return my.promise;
   }
 
