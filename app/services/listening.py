@@ -49,7 +49,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import ListeningClaim, ListeningLog, ListeningPosition, PlayerPrefs, Setting
+from app.models import ListeningClaim, ListeningDismissal, ListeningLog, ListeningPosition, PlayerPrefs, Setting
 from app.utils import utc_iso
 
 logger = logging.getLogger(__name__)
@@ -75,12 +75,19 @@ HISTORY_PAGE = 500
 BOOK_MS_MAX = 10 ** 9
 LABEL_MAX = 200
 NARRATOR_MAX = 200
+AUTHOR_MAX = 200
 BOOK_TITLE_MAX = 300
 WORK_KEY = re.compile(r"[0-9a-f]{32}", re.ASCII)
 # A book key, "<album>:<disc>", as plex_player.parse_key takes it.
 BOOK_KEY = re.compile(r"[0-9]{1,20}:[0-9]{1,6}", re.ASCII)
 # The book-time fields the server reads from Plex, not the player.
 SERVER_FIELDS = ("book_duration_ms", "work_key", "narrator")
+# "Were you listening to one of these?" (spec 2.6 s3): the newest rows looked
+# at, at most that many album checks per request, and the share of a book
+# from which it counts as finished.
+ORPHAN_ROWS = 10
+ORPHAN_ALBUM_CHECKS = 10
+FINISHED_PERCENT = 97
 # How many earlier copies a history follows through their own links.
 LINK_HOPS = 5
 
@@ -166,7 +173,8 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
                  book_ms: Optional[int] = None, chapter_label: Optional[str] = None,
                  book_duration_ms: Optional[int] = None, work_key: Optional[str] = None,
                  narrator: Optional[str] = None, book_title: Optional[str] = None,
-                 link: Optional[tuple] = None) -> dict:
+                 link: Optional[tuple] = None, link_manual: bool = False,
+                 author: Optional[str] = None) -> dict:
     """Store a check-in as this listener's position in the book and log it.
 
     `device_id` is the sending browser's own random id (DEVICE_ID), or None
@@ -191,6 +199,13 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     router reached) is written in this check-in's own transaction, whatever
     the save's outcome (a refused older seq or a conflict still leaves a
     row), and the result carries claim_link's answer as "link".
+
+    `link_manual`: the link was chosen by the listener, not found by work key
+    (spec 2.6 s3); the claim and the row's link keep the flag.
+
+    `author` is the book's author as the library names them (the server's
+    read, cut to AUTHOR_MAX), kept on the position row for the orphan lookup;
+    like the other server fields, None leaves the row's value as it was.
 
     `book_title` is the title the library shows for the book (the server's
     read, cut to BOOK_TITLE_MAX), kept on the position row only so a place
@@ -230,7 +245,11 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
         if not isinstance(book_title, str):
             raise ValueError("book_title must be text")
         values["book_title"] = book_title[:BOOK_TITLE_MAX] or None
-    for name in (*SERVER_FIELDS, "book_title"):
+    if author is not None:
+        if not isinstance(author, str):
+            raise ValueError("author must be text")
+        values["author"] = author[:AUTHOR_MAX] or None
+    for name in (*SERVER_FIELDS, "book_title", "author"):
         if values.get(name, "") is None:
             del values[name]        # unknown this time: the row keeps what it had
     P = ListeningPosition
@@ -269,7 +288,7 @@ def save_checkin(db: Session, identity: str, book: str, track: str, offset_ms: i
     def claim() -> None:
         """The claim on the earlier copy, in the transaction open now."""
         if link is not None:
-            claimed["link"] = _apply_link(db, identity, book, link[0], link[1], now)
+            claimed["link"] = _apply_link(db, identity, book, link[0], link[1], now, manual=link_manual)
 
     for _attempt in range(3):
         if db.query(P).filter(*mine, not_newer_self, swap).update(update, synchronize_session=False):
@@ -407,7 +426,7 @@ def _still_held():
 
 
 def _apply_link(db: Session, identity: str, book: str, earlier: str, verdict: Optional[bool],
-                now: datetime, release: Optional[str] = None):
+                now: datetime, release: Optional[str] = None, manual: bool = False):
     """claim_link's work in the transaction open now (no commit). Every path
     starts with a write, so SQLite's write lock is held before anything is
     read and decided."""
@@ -430,9 +449,10 @@ def _apply_link(db: Session, identity: str, book: str, earlier: str, verdict: Op
         return False
     held = verdict or row.linked_from == earlier
     db.execute(sqlite_insert(C).values(identity=identity, earlier_key=earlier, holder_key=book,
-                                       state="verified" if held else "pending", claimed_at=now)
+                                       state="verified" if held else "pending", claimed_at=now,
+                                       manual=bool(manual))
                .on_conflict_do_nothing())
-    holder, state = db.query(C.holder_key, C.state).filter(*claim).one()
+    holder, state, was_manual = db.query(C.holder_key, C.state, C.manual).filter(*claim).one()
     if holder != book:
         return holder
     if not held:
@@ -440,12 +460,12 @@ def _apply_link(db: Session, identity: str, book: str, earlier: str, verdict: Op
     if state != "verified":
         db.query(C).filter(*claim, C.holder_key == book).update({"state": "verified"}, synchronize_session=False)
     db.query(P).filter(P.identity == identity, P.book_key == book, P.linked_from.is_(None)).update(
-        {"linked_from": earlier}, synchronize_session=False)
+        {"linked_from": earlier, "link_manual": bool(was_manual)}, synchronize_session=False)
     return True
 
 
 def claim_link(db: Session, identity: str, book: str, earlier: str, verdict: Optional[bool],
-               release: Optional[str] = None):
+               release: Optional[str] = None, manual: bool = False):
     """Claim the earlier copy `earlier` for this listener's book `book`
     (spec 2.6 s4), with the verdict the router reached on the link: True
     (verified), None (Plex couldn't say: a pending claim) or False (refused).
@@ -463,11 +483,15 @@ def claim_link(db: Session, identity: str, book: str, earlier: str, verdict: Opt
       decides: if that book's album is gone, it calls again with `release`
       naming it, which drops that claim first.
 
+    `manual`: the listener chose this link (spec 2.6 s3) instead of the work
+    key finding it. The claim keeps the flag when it is written (a pending
+    claim that verifies later still has it) and hands it to the row's link.
+
     A claim whose holder's row was deleted, or no longer holds the link
     (reset), is released here too. Commits. Raises ValueError for a key
     that is not another book's."""
     _earlier_key(earlier, book)
-    outcome = _apply_link(db, identity, book, earlier, verdict, _utcnow(), release=release)
+    outcome = _apply_link(db, identity, book, earlier, verdict, _utcnow(), release=release, manual=manual)
     db.commit()
     return outcome
 
@@ -481,6 +505,15 @@ def pending_claim(db: Session, identity: str, book: str) -> Optional[str]:
            .filter(C.identity == identity, C.holder_key == book, C.state == "pending", _still_held())
            .order_by(C.claimed_at.desc(), C.earlier_key).first())
     return row[0] if row is not None else None
+
+
+def claim_is_manual(db: Session, identity: str, book: str, earlier: str) -> bool:
+    """True when `book`'s claim on the earlier copy `earlier` was a manual
+    link (claim_link's `manual`)."""
+    C = ListeningClaim
+    row = (db.query(C.manual).filter(C.identity == identity, C.holder_key == book, C.earlier_key == earlier)
+           .first())
+    return bool(row is not None and row[0])
 
 
 def link_chain(db: Session, identity: str, book: str, first: Optional[str]) -> list:
@@ -538,6 +571,45 @@ def find_linked(db: Session, identity: str, work_key: Optional[str], exclude_key
     if skip:
         q = q.filter(P.book_key.notin_(skip))
     return q.order_by(P.updated_at.desc(), P.book_key).first()
+
+
+def orphan_candidates(db: Session, identity: str, exclude_key: str) -> list:
+    """This listener's position rows that might be places in books that left
+    the library (spec 2.6 s3): the newest ORPHAN_ROWS by updated_at, none of
+    them `exclude_key`, all unfinished. A row is finished when its log holds
+    an `end` mark, or its book_ms is FINISHED_PERCENT or more of its
+    book_duration_ms (both known: an unknown book_ms, or an unknown length,
+    still counts as unfinished).
+
+    The router asks Plex which of them are gone and which a copy still in the
+    library carried forward (a successor, pending claims included), within
+    ORPHAN_ALBUM_CHECKS album checks. Scoped by identity; the log is read on
+    ix_listening_log_identity_book_at."""
+    P, L = ListeningPosition, ListeningLog
+    ended = exists().where(L.identity == P.identity, L.book_key == P.book_key, L.event == "end")
+    unfinished = or_(P.book_ms.is_(None), P.book_duration_ms.is_(None), P.book_duration_ms <= 0,
+                     P.book_ms * 100 < P.book_duration_ms * FINISHED_PERCENT)
+    return (db.query(P).filter(P.identity == identity, P.book_key != exclude_key, ~ended, unfinished)
+            .order_by(P.updated_at.desc(), P.book_key).limit(ORPHAN_ROWS).all())
+
+
+def orphans_dismissed(db: Session, identity: str, book: str) -> bool:
+    """True when this listener answered "None of these" for `book`."""
+    D = ListeningDismissal
+    return db.query(D.book_key).filter(D.identity == identity, D.book_key == book).first() is not None
+
+
+def dismiss_orphans(db: Session, identity: str, book: str) -> None:
+    """Remember that this listener answered "None of these" for `book`, on
+    every device. Idempotent and safe when two workers get it at once (an
+    INSERT that ignores the key already there). Raises ValueError for a key
+    that is not a book's."""
+    identity = _text("identity", identity, IDENTITY_MAX)
+    if not (isinstance(book, str) and BOOK_KEY.fullmatch(book)):
+        raise ValueError("book must be a book key")
+    db.execute(sqlite_insert(ListeningDismissal).values(identity=identity, book_key=book, dismissed_at=_utcnow())
+               .on_conflict_do_nothing())
+    db.commit()
 
 
 def _entry(r: ListeningLog) -> dict:

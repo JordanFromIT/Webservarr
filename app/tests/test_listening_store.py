@@ -53,7 +53,8 @@ class Tables(StoreBase):
         cols = {c["name"] for c in insp.get_columns("listening_positions")}
         self.assertEqual(cols, {"identity", "book_key", "track_key", "offset_ms", "duration_ms", "updated_at",
                                 "device", "device_id", "source", "psid", "seq", "book_ms", "book_duration_ms",
-                                "chapter_label", "work_key", "narrator", "linked_from", "book_title"})
+                                "chapter_label", "work_key", "narrator", "linked_from", "book_title", "author",
+                                "link_manual"})
         pk = insp.get_pk_constraint("listening_positions")["constrained_columns"]
         uniques = [u["column_names"] for u in insp.get_unique_constraints("listening_positions")]
         self.assertTrue(sorted(pk) == ["book_key", "identity"] or ["identity", "book_key"] in uniques,
@@ -989,7 +990,9 @@ class BookFieldsMigration(unittest.TestCase):
             self.assertNotIn("book_title", self.columns(db, "listening_positions"))
             with self.assertLogs("app.seed", level=logging.INFO) as logs:
                 migrate_listening_book_fields(db)
-            self.assertEqual([r.getMessage() for r in logs.records], ["Added listening_positions.book_title"])
+            self.assertEqual([r.getMessage() for r in logs.records],
+                             ["Added listening_positions.book_title", "Added listening_positions.author",
+                              "Added listening_positions.link_manual"])
             self.assertIn("book_title", self.columns(db, "listening_positions"))
             self.assertEqual(tuple(db.execute(text("SELECT offset_ms, book_title FROM listening_positions")).one()),
                              (10, None))
@@ -1502,3 +1505,323 @@ class SettingsField(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ManualClaims(StoreBase):
+    """Spec 2.6 s3: a claim made for a manual link keeps the flag, on the
+    claim (a pending claim that verifies later still has it) and on the row's
+    link."""
+
+    def state(self, book="400:1"):
+        from app.models import ListeningClaim, ListeningPosition
+        self.db.expire_all()
+        claim = self.db.query(ListeningClaim).filter_by(identity=ME, earlier_key="300:1").one_or_none()
+        row = self.db.query(ListeningPosition).filter_by(identity=ME, book_key=book).one()
+        return (claim.holder_key, claim.state, claim.manual) if claim else None, row.linked_from, row.link_manual
+
+    def test_a_manual_verified_claim_flags_the_claim_and_the_row(self):
+        checkin(self.db, book="400:1")
+        self.assertIs(listening.claim_link(self.db, ME, "400:1", "300:1", True, manual=True), True)
+        self.assertEqual(self.state(), (("400:1", "verified", True), "300:1", True))
+
+    def test_an_automatic_claim_is_not_manual(self):
+        checkin(self.db, book="400:1")
+        self.assertIs(listening.claim_link(self.db, ME, "400:1", "300:1", True), True)
+        self.assertEqual(self.state(), (("400:1", "verified", False), "300:1", False))
+
+    def test_a_pending_manual_claim_keeps_the_flag_when_it_verifies_without_it(self):
+        checkin(self.db, book="400:1")
+        self.assertIsNone(listening.claim_link(self.db, ME, "400:1", "300:1", None, manual=True))
+        self.assertEqual(self.state(), (("400:1", "pending", True), None, None))
+        self.assertTrue(listening.claim_is_manual(self.db, ME, "400:1", "300:1"))
+        self.assertIs(listening.claim_link(self.db, ME, "400:1", "300:1", True), True)
+        self.assertEqual(self.state(), (("400:1", "verified", True), "300:1", True))
+
+    def test_the_first_claim_decides_the_flag(self):
+        checkin(self.db, book="400:1")
+        listening.claim_link(self.db, ME, "400:1", "300:1", None)
+        listening.claim_link(self.db, ME, "400:1", "300:1", True, manual=True)
+        self.assertEqual(self.state(), (("400:1", "verified", False), "300:1", False))
+
+    def test_claim_is_manual_is_per_holder_and_per_listener(self):
+        checkin(self.db, book="400:1")
+        checkin(self.db, book="410:1", psid="c")
+        listening.claim_link(self.db, ME, "400:1", "300:1", True, manual=True)
+        self.assertTrue(listening.claim_is_manual(self.db, ME, "400:1", "300:1"))
+        self.assertFalse(listening.claim_is_manual(self.db, ME, "410:1", "300:1"))
+        self.assertFalse(listening.claim_is_manual(self.db, THEM, "400:1", "300:1"))
+        self.assertFalse(listening.claim_is_manual(self.db, ME, "400:1", "999:1"))
+
+    def test_a_check_in_with_a_manual_link_writes_it_in_its_own_transaction(self):
+        checkin(self.db, book="400:1", link=("300:1", True), link_manual=True)
+        self.assertEqual(self.state(), (("400:1", "verified", True), "300:1", True))
+
+
+class Authors(StoreBase):
+    """The book's author is kept with the place, as the other server fields
+    are: unknown this time leaves what the row had."""
+
+    def author(self):
+        from app.models import ListeningPosition
+        self.db.expire_all()
+        return self.db.query(ListeningPosition).filter_by(identity=ME, book_key=BOOK).one().author
+
+    def test_the_author_is_kept_and_unknown_leaves_it(self):
+        checkin(self.db, seq=1, author="Cal Penn")
+        self.assertEqual(self.author(), "Cal Penn")
+        checkin(self.db, seq=2)
+        self.assertEqual(self.author(), "Cal Penn")
+        checkin(self.db, seq=3, author="Dee Lane")
+        self.assertEqual(self.author(), "Dee Lane")
+
+    def test_a_long_name_is_cut_an_empty_one_is_unknown_and_a_non_text_one_is_refused(self):
+        checkin(self.db, seq=1, author="x" * 300)
+        self.assertEqual(len(self.author()), listening.AUTHOR_MAX)
+        checkin(self.db, seq=2, author="")
+        self.assertEqual(len(self.author()), listening.AUTHOR_MAX)
+        with self.assertRaises(ValueError):
+            checkin(self.db, seq=3, author=7)
+
+
+class OrphanCandidates(StoreBase):
+    """Spec 2.6 s3: the listener's newest 10 unfinished rows, other than the
+    book opened, for the router to check against the library."""
+
+    def row(self, book, identity=ME, day=1, book_ms=100, duration=1000, end=False):
+        from app.models import ListeningLog, ListeningPosition
+        at = datetime(2026, 9, 1) + timedelta(days=day)
+        self.db.add(ListeningPosition(identity=identity, book_key=book, track_key="1", offset_ms=5, duration_ms=9,
+                                      updated_at=at, device="Phone", source="web", book_ms=book_ms,
+                                      book_duration_ms=duration))
+        self.db.add(ListeningLog(identity=identity, book_key=book, track_key="1", offset_ms=5, device="Phone",
+                                 event="end" if end else "checkin", at=at))
+        self.db.commit()
+
+    def keys(self, identity=ME, exclude="999:1"):
+        return [r.book_key for r in listening.orphan_candidates(self.db, identity, exclude)]
+
+    def test_newest_first_and_at_most_ten(self):
+        for n in range(13):
+            self.row(f"{300 + n}:1", day=n + 1)
+        self.assertEqual(self.keys(), [f"{300 + n}:1" for n in range(12, 2, -1)])
+        self.assertEqual(listening.ORPHAN_ROWS, 10)
+
+    def test_finished_rows_are_not_candidates_and_do_not_take_a_place(self):
+        for n in range(12):
+            self.row(f"{300 + n}:1", day=n + 1, end=n >= 2)
+        self.assertEqual(sorted(self.keys()), ["300:1", "301:1"])
+        self.row("400:1", book_ms=970, duration=1000)
+        self.row("401:1", book_ms=969, duration=1000)
+        self.row("402:1", book_ms=None)
+        self.row("403:1", book_ms=5000, duration=None)
+        self.assertEqual(sorted(self.keys()), ["300:1", "301:1", "401:1", "402:1", "403:1"])
+
+    def test_the_book_opened_and_other_listeners_are_left_out(self):
+        self.row("300:1")
+        self.row("301:1")
+        self.row("302:1", identity=THEM)
+        self.assertEqual(sorted(self.keys(exclude="300:1")), ["301:1"])
+        self.assertEqual(self.keys(THEM), ["302:1"])
+        self.assertEqual(self.keys("plex:0"), [])
+
+    def test_the_log_is_read_by_the_index_on_identity_and_book(self):
+        from sqlalchemy import text
+        self.row("300:1")
+        plan = " ".join(str(r[3]) for r in self.db.execute(text(
+            "EXPLAIN QUERY PLAN SELECT 1 FROM listening_positions p WHERE p.identity = :i AND NOT EXISTS "
+            "(SELECT 1 FROM listening_log l WHERE l.identity = p.identity AND l.book_key = p.book_key "
+            "AND l.event = 'end')"), {"i": ME}))
+        self.assertIn("ix_listening_log_identity_book_at", plan)
+
+
+class Dismissals(StoreBase):
+    """"None of these" (spec 2.6 s3): kept per listener and book key."""
+
+    def test_it_persists_per_listener_and_book_key(self):
+        self.assertFalse(listening.orphans_dismissed(self.db, ME, "400:1"))
+        listening.dismiss_orphans(self.db, ME, "400:1")
+        self.assertTrue(listening.orphans_dismissed(self.db, ME, "400:1"))
+        self.assertFalse(listening.orphans_dismissed(self.db, ME, "410:1"))
+        self.assertFalse(listening.orphans_dismissed(self.db, THEM, "400:1"))
+        other = self.Session()
+        self.addCleanup(other.close)
+        self.assertTrue(listening.orphans_dismissed(other, ME, "400:1"))      # a new session, a new worker
+
+    def test_saying_it_twice_is_one_row(self):
+        from app.models import ListeningDismissal
+        listening.dismiss_orphans(self.db, ME, "400:1")
+        listening.dismiss_orphans(self.db, ME, "400:1")
+        self.assertEqual(self.db.query(ListeningDismissal).count(), 1)
+
+    def test_only_a_book_key_is_taken(self):
+        for bad in ("", "junk", "1:", "1:2:3", None, 5, "1:" + "9" * 7):
+            with self.subTest(book=bad):
+                with self.assertRaises(ValueError):
+                    listening.dismiss_orphans(self.db, ME, bad)
+        with self.assertRaises(ValueError):
+            listening.dismiss_orphans(self.db, "", "400:1")
+
+    def test_two_workers_saying_it_at_once_leave_one_row_and_no_error(self):
+        # Worker 2 inserts between worker 1's look and its insert.
+        import os
+        import tempfile
+        from sqlalchemy import create_engine, event
+        from sqlalchemy.orm import sessionmaker
+        from app import models  # noqa: F401  registers the tables
+        from app.database import Base
+        from app.models import ListeningDismissal
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        engine = create_engine("sqlite:///" + path)
+        other = create_engine("sqlite:///" + path)
+        self.addCleanup(engine.dispose)
+        self.addCleanup(other.dispose)
+        Base.metadata.create_all(bind=engine)
+        raced = []
+
+        def other_worker(conn, cursor, statement, parameters, context, executemany):
+            if "INTO listening_dismissals" in statement and not raced:
+                raced.append(statement)
+                db2 = sessionmaker(bind=other)()
+                try:
+                    listening.dismiss_orphans(db2, ME, "400:1")
+                finally:
+                    db2.close()
+        event.listen(engine, "before_cursor_execute", other_worker)
+        self.addCleanup(event.remove, engine, "before_cursor_execute", other_worker)
+        db = sessionmaker(bind=engine)()
+        try:
+            listening.dismiss_orphans(db, ME, "400:1")
+            self.assertEqual(len(raced), 1)
+            self.assertEqual(db.query(ListeningDismissal).count(), 1)
+        finally:
+            db.close()
+
+    def test_the_table_is_made_by_create_all_alone(self):
+        from sqlalchemy import inspect
+        insp = inspect(self.Session.kw["bind"])
+        self.assertEqual({c["name"] for c in insp.get_columns("listening_dismissals")},
+                         {"identity", "book_key", "dismissed_at"})
+        self.assertEqual(sorted(insp.get_pk_constraint("listening_dismissals")["constrained_columns"]),
+                         ["book_key", "identity"])
+        self.assertIn("manual", {c["name"] for c in insp.get_columns("listening_claims")})
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class ManualFlagMigration(unittest.TestCase):
+    """An install from before spec 2.6 s3 (claims made, no manual flag, no
+    author on its places) gains the columns once, rows kept, and two workers
+    starting at once both come up."""
+
+    def old_file_db(self):
+        import os
+        import tempfile
+        from sqlalchemy import create_engine, text
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self.addCleanup(os.remove, path)
+        engine = create_engine("sqlite:///" + path)
+        self.addCleanup(engine.dispose)
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE listening_positions (identity VARCHAR(255) NOT NULL, book_key VARCHAR(64) NOT NULL, "
+                "track_key VARCHAR(64) NOT NULL, offset_ms INTEGER NOT NULL, duration_ms INTEGER NOT NULL, "
+                "updated_at DATETIME NOT NULL, device VARCHAR(80) NOT NULL, device_id VARCHAR(40), "
+                "source VARCHAR(10) NOT NULL, psid VARCHAR(64), seq INTEGER, book_ms INTEGER, "
+                "book_duration_ms INTEGER, chapter_label VARCHAR(200), work_key VARCHAR(32), "
+                "narrator VARCHAR(200), linked_from VARCHAR(64), book_title VARCHAR(300), "
+                "PRIMARY KEY (identity, book_key))"))
+            conn.execute(text(
+                "CREATE TABLE listening_log (id INTEGER PRIMARY KEY, identity VARCHAR(255) NOT NULL, "
+                "book_key VARCHAR(64) NOT NULL, track_key VARCHAR(64) NOT NULL, offset_ms INTEGER NOT NULL, "
+                "device VARCHAR(80) NOT NULL, device_id VARCHAR(40), event VARCHAR(16) NOT NULL, "
+                "at DATETIME NOT NULL, book_ms INTEGER, book_duration_ms INTEGER, chapter_label VARCHAR(200), "
+                "work_key VARCHAR(32), narrator VARCHAR(200))"))
+            conn.execute(text(
+                "CREATE TABLE listening_claims (identity VARCHAR(255) NOT NULL, earlier_key VARCHAR(64) NOT NULL, "
+                "holder_key VARCHAR(64) NOT NULL, state VARCHAR(10) NOT NULL, claimed_at DATETIME NOT NULL, "
+                "PRIMARY KEY (identity, earlier_key))"))
+            conn.execute(text(
+                "INSERT INTO listening_positions (identity, book_key, track_key, offset_ms, duration_ms, "
+                "updated_at, device, source, linked_from) VALUES ('plex:1', '400:1', '6', 10, 20, "
+                "'2026-09-01 00:00:00', 'Chrome', 'web', '300:1')"))
+            conn.execute(text(
+                "INSERT INTO listening_claims VALUES ('plex:1', '300:1', '400:1', 'verified', '2026-09-01 00:00:00')"))
+        return engine
+
+    @staticmethod
+    def columns(db, table):
+        from sqlalchemy import text
+        return {row[1] for row in db.execute(text(f"PRAGMA table_info({table})"))}
+
+    def test_the_columns_are_added_once_and_the_rows_kept(self):
+        import logging
+        from sqlalchemy import text
+        from sqlalchemy.orm import sessionmaker
+        from app.seed import migrate_listening_book_fields
+        db = sessionmaker(bind=self.old_file_db())()
+        try:
+            with self.assertLogs("app.seed", level=logging.INFO) as logs:
+                migrate_listening_book_fields(db)
+            self.assertEqual(sorted(r.getMessage() for r in logs.records),
+                             ["Added listening_claims.manual", "Added listening_positions.author",
+                              "Added listening_positions.link_manual"])
+            with self.assertNoLogs("app.seed", level=logging.INFO):
+                migrate_listening_book_fields(db)
+            self.assertIn("manual", self.columns(db, "listening_claims"))
+            self.assertTrue({"author", "link_manual"} <= self.columns(db, "listening_positions"))
+            self.assertNotIn("author", self.columns(db, "listening_log"))
+            self.assertEqual(tuple(db.execute(text("SELECT earlier_key, holder_key, state, manual "
+                                                   "FROM listening_claims")).one()),
+                             ("300:1", "400:1", "verified", None))
+            # The store works on the upgraded tables.
+            checkin(db, identity="plex:1", book="410:1", author="Cal Penn")
+            self.assertIs(listening.claim_link(db, "plex:1", "410:1", "301:1", True, manual=True), True)
+            self.assertIs(listening.claim_is_manual(db, "plex:1", "410:1", "301:1"), True)
+            self.assertFalse(listening.claim_is_manual(db, "plex:1", "400:1", "300:1"))       # a legacy claim
+        finally:
+            db.close()
+
+    def test_two_workers_at_once_both_come_up(self):
+        from sqlalchemy import create_engine, event
+        from sqlalchemy.orm import sessionmaker
+        from app.seed import migrate_listening_book_fields
+        engine = self.old_file_db()
+        other = create_engine(str(engine.url))
+        self.addCleanup(other.dispose)
+        raced = []
+
+        def other_worker(conn, cursor, statement, parameters, context, executemany):
+            if statement.startswith("ALTER TABLE") and not raced:
+                raced.append(statement)
+                db2 = sessionmaker(bind=other)()
+                try:
+                    migrate_listening_book_fields(db2)
+                finally:
+                    db2.close()
+        event.listen(engine, "before_cursor_execute", other_worker)
+        self.addCleanup(event.remove, engine, "before_cursor_execute", other_worker)
+        db = sessionmaker(bind=engine)()
+        try:
+            migrate_listening_book_fields(db)
+            self.assertEqual(len(raced), 1)
+            self.assertIn("manual", self.columns(db, "listening_claims"))
+            self.assertTrue({"author", "link_manual"} <= self.columns(db, "listening_positions"))
+        finally:
+            db.close()
+
+    def test_init_db_gives_a_pre_2_6_3_database_its_columns_and_the_dismissals_table(self):
+        from unittest import mock
+        from sqlalchemy import inspect
+        from sqlalchemy.orm import sessionmaker
+        from app import database
+        engine = self.old_file_db()
+        with mock.patch.object(database, "engine", engine), \
+                mock.patch.object(database, "SessionLocal", sessionmaker(bind=engine)):
+            database.init_db()
+            database.init_db()          # and again: nothing breaks
+        insp = inspect(engine)
+        self.assertIn("listening_dismissals", insp.get_table_names())
+        self.assertIn("manual", {c["name"] for c in insp.get_columns("listening_claims")})
+        self.assertTrue({"author", "link_manual"} <= {c["name"] for c in insp.get_columns("listening_positions")})

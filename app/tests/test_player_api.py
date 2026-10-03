@@ -64,6 +64,7 @@ BOOKS = [
 WORKS = {"200:1": "c3" * 16, "100:1": "d4" * 16}
 NARRATORS = {"100:1": "Nora"}
 TITLES = {"100:1": "Single Book", "200:1": "Parts Book"}
+AUTHORS = {"100:1": "Ann Author", "200:1": "Bea Writer"}
 
 
 async def fake_assert_in_library(key, track_key=None):
@@ -90,7 +91,7 @@ async def fake_book_identity(key, album=None):
     pp.parse_key(key)
     if key not in LIBRARY:
         raise pp.NotInLibrary("Not in the audiobook library")
-    return {"work_key": WORKS.get(key), "narrator": NARRATORS.get(key),
+    return {"work_key": WORKS.get(key), "author": AUTHORS.get(key), "narrator": NARRATORS.get(key),
             "duration_ms": sum(LIBRARY[key].values()) or None, "title": TITLES.get(key)}
 
 
@@ -164,7 +165,8 @@ class StatusCodes(PlayerApiBase):
     ROUTES = [("get", "/api/player/books"), ("get", "/api/player/book/200:1"),
               ("get", "/api/player/cover/200:1"), ("get", "/api/player/position/200:1"),
               ("get", "/api/player/history/200:1"), ("get", "/api/player/next/200:1"),
-              ("get", "/api/player/prefs"), ("put", "/api/player/prefs"), ("post", "/api/player/checkin")]
+              ("get", "/api/player/prefs"), ("put", "/api/player/prefs"), ("post", "/api/player/checkin"),
+              ("get", "/api/player/orphans/200:1"), ("post", "/api/player/orphans/200:1/dismiss")]
 
     def call(self, method, path):
         if method == "get":
@@ -217,9 +219,13 @@ class StatusCodes(PlayerApiBase):
 
     def test_404_for_keys_outside_the_library(self):
         for path in ("/api/player/book/999:1", "/api/player/position/999:1", "/api/player/history/999:1",
-                     "/api/player/cover/999:1", "/api/player/book/not-a-key", "/api/player/position/1:x"):
+                     "/api/player/cover/999:1", "/api/player/book/not-a-key", "/api/player/position/1:x",
+                     "/api/player/orphans/999:1", "/api/player/orphans/not-a-key"):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 404)
+        for path in ("/api/player/orphans/999:1/dismiss", "/api/player/orphans/not-a-key/dismiss"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.post(path, headers={"Origin": ORIGIN}).status_code, 404)
         # A track from another book, and a book that is not in the library.
         self.assertEqual(self.checkin(track="101").status_code, 404)
         self.assertEqual(self.checkin(book="999:1").status_code, 404)
@@ -230,8 +236,10 @@ class StatusCodes(PlayerApiBase):
     def test_503_when_plex_is_unavailable(self):
         down = mock.AsyncMock(side_effect=pp.PlayerUnavailable("Plex is unavailable"))
         with mock.patch.object(pp, "assert_in_library", down):
-            for path in ("/api/player/position/200:1", "/api/player/history/200:1"):
+            for path in ("/api/player/position/200:1", "/api/player/history/200:1", "/api/player/orphans/200:1"):
                 self.assertEqual(self.client.get(path).status_code, 503, path)
+            self.assertEqual(self.client.post("/api/player/orphans/200:1/dismiss",
+                                              headers={"Origin": ORIGIN}).status_code, 503)
             self.assertEqual(self.checkin().status_code, 503)
         with mock.patch.object(pp, "cover_image", down):
             self.assertEqual(self.client.get("/api/player/cover/200:1").status_code, 503)
@@ -1023,11 +1031,25 @@ class EarlierCopies(PlayerApiBase):
         p.start()
         self.addCleanup(p.stop)
 
-    def test_a_row_of_another_work_costs_no_plex_read(self):
+    def test_a_row_of_another_work_costs_one_tracks_read(self):
+        # Spec 2.6 s3 (2.5 ledger T1S5): the album-level key finding no row
+        # doesn't settle it, since the album may be the first disc of a box
+        # set, keyed differently: the tracks are read once, and find nothing.
         self.album_key(self.WORK)
-        self.seed(self.GONE, work_key="f6" * 16)     # some other book: has_work_keys alone would say yes
+        self.seed(self.GONE, work_key="f6" * 16)
         self.assertIsNone(self.position(self.NEW))
-        self.assertEqual(self.calls(), (1, 0))
+        self.assertEqual(self.calls(), (1, 1))
+
+    def test_the_first_disc_of_a_box_set_is_found_by_its_tracks(self):
+        # Spec 2.6 s3 (2.5 ledger T1S5): the album-level key is the book's
+        # only for an album of one book. The first disc of a re-added box set
+        # has a key of its own, which the pre-check never matched, so its
+        # place was never found. The tracks are read when the album-level
+        # key finds nothing.
+        self.album_key("a1" * 16)                 # what the album alone says: no row has it
+        self.seed(self.GONE)                      # the row has the disc's key, which book_identity gives
+        self.assertEqual(self.position(self.NEW)["linked_from"], self.GONE)
+        self.assertEqual(self.calls(), (2, 1))
 
     def test_a_row_with_the_exact_key_is_confirmed_from_the_tracks(self):
         self.album_key(self.WORK)
@@ -1619,6 +1641,499 @@ class Claims(PlayerApiBase):
         self.assertEqual(self.claims(), {(self.GONE, self.X, "pending"), (self.X, self.THERE, "verified")})
 
 
+class OrphanBase(PlayerApiBase):
+    NEW = "400:1"       # the book opened: in the library, no place of the listener's own
+    THERE = "450:1"     # another book in the library
+
+    def setUp(self):
+        super().setUp()
+        self.author = "Cal Penn"
+        for p in (mock.patch.dict(LIBRARY, {self.NEW: {"401": 500_000}, self.THERE: {"451": 500_000}}),
+                  mock.patch.dict(WORKS, {self.NEW: "e5" * 16, self.THERE: "e5" * 16})):
+            p.start()
+            self.addCleanup(p.stop)
+        self.rows = 0
+
+        async def check(key, track_key=None):
+            album = await fake_assert_in_library(key, track_key)
+            return {**album, "parentTitle": self.author} if key == self.NEW else album
+        p = mock.patch.object(pp, "assert_in_library", side_effect=check)
+        self.assert_in_library = p.start()
+        self.addCleanup(p.stop)
+
+    def row(self, book, identity="plex:1001", author="Cal Penn", book_ms=100_000, duration=1_000_000,
+            end=False, event="checkin", **extra):
+        """A position row of the listener's, each one a day newer than the last."""
+        from datetime import datetime, timedelta
+        self.rows += 1
+        at = datetime(2026, 9, 1) + timedelta(days=self.rows)
+        fields = dict(identity=identity, book_key=book, track_key="301", offset_ms=1_234, duration_ms=400_000,
+                      updated_at=at, device="Old phone", source="web", psid="old", seq=3, book_ms=book_ms,
+                      book_duration_ms=duration, chapter_label="Chapter 4", work_key="f6" * 16,
+                      narrator="Tamsin Ashby", book_title=f"Title of {book}", author=author)
+        fields.update(extra)
+        self.db.add(ListeningPosition(**fields))
+        self.db.add(ListeningLog(identity=identity, book_key=book, track_key="301", offset_ms=1_234,
+                                 device="Old phone", event=event, at=at))
+        if end:
+            self.db.add(ListeningLog(identity=identity, book_key=book, track_key="301", offset_ms=1_234,
+                                     device="Old phone", event="end", at=at))
+        self.db.commit()
+        return at
+
+    def get(self, key=None):
+        return self.client.get(f"/api/player/orphans/{key or self.NEW}")
+
+    def listed(self, key=None):
+        r = self.get(key)
+        self.assertEqual(r.status_code, 200, r.text)
+        return [o["key"] for o in r.json()["orphans"]]
+
+
+class Orphans(OrphanBase):
+    """Spec 2.6 s3: "Were you listening to one of these?". The listener's own
+    places in books that are gone from the library, unfinished and carried
+    forward by no copy still there, the same author first. Bounded: the
+    newest 10 candidate rows and 10 album checks."""
+
+    def test_a_place_in_a_book_that_left_the_library_is_listed_with_what_the_listener_needs(self):
+        at = self.row("300:1")
+        body = self.get().json()
+        self.assertEqual(body["dismissed"], False)
+        self.assertEqual(body["orphans"], [{
+            "key": "300:1", "book_title": "Title of 300:1", "narrator": "Tamsin Ashby", "book_ms": 100_000,
+            "book_duration_ms": 1_000_000, "chapter_label": "Chapter 4",
+            "updated_at": at.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "author_match": True}])
+
+    def test_a_book_still_in_the_library_is_not_an_orphan(self):
+        self.row("100:1")
+        self.row(self.THERE)
+        self.assertEqual(self.listed(), [])
+
+    def test_nothing_is_listed_for_a_book_with_a_place_of_its_own(self):
+        self.row("300:1")
+        self.row(self.NEW)
+        body = self.get().json()
+        self.assertEqual((body["orphans"], body["dismissed"]), ([], False))
+
+    def test_finished_means_97_percent_or_an_end_mark(self):
+        self.row("301:1", book_ms=969, duration=1000)          # 96.9%: not finished
+        self.row("302:1", book_ms=970, duration=1000)          # 97%: finished
+        self.row("303:1", book_ms=1000, duration=1000)
+        self.row("304:1", book_ms=10, duration=1000, end=True)  # an end mark wins over the time
+        self.row("305:1", book_ms=None, duration=1000)         # no book time: still listed
+        self.row("306:1", book_ms=999, duration=None)          # no length: still listed
+        self.row("307:1", book_ms=999, duration=0)             # a zero length is no length
+        self.row("308:1", book_ms=10, duration=1000, event="leave")   # other events are not an end
+        self.assertEqual(sorted(self.listed()), ["301:1", "305:1", "306:1", "307:1", "308:1"])
+
+    def test_an_end_mark_is_the_books_own_and_the_listeners_own(self):
+        self.row("300:1")
+        from datetime import datetime
+        self.db.add(ListeningLog(identity="plex:1002", book_key="300:1", track_key="301", offset_ms=1,
+                                 device="x", event="end", at=datetime(2026, 9, 2)))
+        self.db.add(ListeningLog(identity="plex:1001", book_key="999:1", track_key="301", offset_ms=1,
+                                 device="x", event="end", at=datetime(2026, 9, 2)))
+        self.db.commit()
+        self.assertEqual(self.listed(), ["300:1"])
+
+    def test_the_same_author_comes_first_then_the_most_recent(self):
+        self.row("301:1", author="Cal Penn")
+        self.row("302:1", author="Someone Else")
+        self.row("303:1", author=None)
+        self.row("304:1", author="cal  penn.")
+        self.row("305:1", author="Other Writer")
+        body = self.get().json()["orphans"]
+        self.assertEqual([(o["key"], o["author_match"]) for o in body],
+                         [("304:1", True), ("301:1", True), ("305:1", False), ("303:1", False), ("302:1", False)])
+
+    def test_with_no_author_to_match_it_is_by_recency(self):
+        self.author = ""
+        self.row("301:1")
+        self.row("302:1", author="Someone Else")
+        self.assertEqual([(o["key"], o["author_match"]) for o in self.get().json()["orphans"]],
+                         [("302:1", False), ("301:1", False)])
+
+    def test_only_the_newest_ten_rows_and_ten_album_checks(self):
+        for n in range(12):
+            self.row(f"{300 + n}:1")
+        found = self.listed()
+        self.assertEqual(len(found), 10)
+        self.assertEqual(found, [f"{300 + n}:1" for n in range(11, 1, -1)])      # the 2 oldest are not looked at
+        # The book's own check, then one album check per row looked at.
+        self.assertEqual(self.assert_in_library.await_count, 1 + 10)
+
+    def test_the_ten_rows_are_candidates_so_rows_that_are_finished_do_not_use_them_up(self):
+        for n in range(12):
+            self.row(f"{300 + n}:1", end=n >= 4)              # the 8 newest are finished
+        self.assertEqual(sorted(self.listed()), [f"{300 + n}:1" for n in range(4)])
+
+    def test_successor_checks_stay_within_the_ten_album_checks(self):
+        from datetime import datetime
+        for n in range(10):
+            self.row(f"{300 + n}:1")
+        # Each has a finished successor in the library: one more check each.
+        for n in range(10):
+            self.row(f"{500 + n}:1", linked_from=f"{300 + n}:1", end=True)
+        with mock.patch.dict(LIBRARY, {f"{500 + n}:1": {"1": 1} for n in range(10)}):
+            self.assertEqual(self.listed(), [])
+        # 10 candidates used all the checks, so none of their successors could
+        # be checked, and the places are left out rather than offered unchecked.
+        self.assertLessEqual(self.assert_in_library.await_count, 1 + 10)
+
+    def test_a_successor_in_the_library_excludes_the_place_when_the_checks_allow(self):
+        self.row("300:1")
+        self.row("301:1")
+        self.row(self.THERE, linked_from="300:1")
+        self.assertEqual(self.listed(), ["301:1"])
+
+    def test_a_pending_claim_excludes_the_place_too(self):
+        from datetime import datetime
+        from app.models import ListeningClaim
+        self.row("300:1")
+        self.row(self.THERE)
+        self.db.add(ListeningClaim(identity="plex:1001", earlier_key="300:1", holder_key=self.THERE,
+                                   state="pending", claimed_at=datetime(2026, 9, 20)))
+        self.db.commit()
+        self.assertEqual(self.listed(), [])
+        self.assertEqual(self.get().status_code, 200)
+
+    def test_a_verified_claim_excludes_the_place(self):
+        from datetime import datetime
+        from app.models import ListeningClaim
+        self.row("300:1")
+        self.row(self.THERE, linked_from="300:1")
+        self.db.add(ListeningClaim(identity="plex:1001", earlier_key="300:1", holder_key=self.THERE,
+                                   state="verified", claimed_at=datetime(2026, 9, 20)))
+        self.db.commit()
+        self.assertEqual(self.listed(), [])
+
+    def test_a_successor_that_is_gone_too_does_not_exclude_the_place(self):
+        # A became B, B is gone as well: both are places a new copy may take.
+        self.row("300:1")
+        self.row("310:1", linked_from="300:1")
+        self.assertEqual(sorted(self.listed()), ["300:1", "310:1"])
+
+    def test_a_successor_further_down_the_chain_in_the_library_still_excludes(self):
+        self.row("300:1")
+        self.row("310:1", linked_from="300:1")
+        self.row(self.THERE, linked_from="310:1")
+        self.assertEqual(self.listed(), [])
+
+    def test_the_opened_book_is_never_its_own_orphan(self):
+        self.row("300:1")
+        with mock.patch.dict(LIBRARY, {"300:1": {"301": 1}}):
+            self.assertEqual(self.listed("300:1"), [])
+
+    def test_another_listeners_places_and_successors_do_not_count(self):
+        self.row("300:1", identity="plex:1002")
+        self.row("301:1")
+        self.row(self.THERE, identity="plex:1002", linked_from="301:1")      # theirs: no successor of mine
+        self.assertEqual(self.listed(), ["301:1"])
+        self.as_user(B)
+        self.assertEqual(self.listed(), ["300:1"])
+
+    def test_plex_failing_is_503_never_an_empty_list(self):
+        self.row("300:1")
+        self.row("301:1")
+        down = mock.AsyncMock(side_effect=pp.PlayerUnavailable("down"))
+        with mock.patch.object(pp, "assert_in_library", down):                 # the book's own check
+            self.assertEqual(self.get().status_code, 503)
+
+        async def check(key, track_key=None):
+            if key == "300:1":
+                raise pp.PlayerUnavailable("down")
+            return await fake_assert_in_library(key, track_key)
+        with mock.patch.object(pp, "assert_in_library", side_effect=check):    # a place's check
+            self.assertEqual(self.get().status_code, 503)
+        self.row(self.THERE, linked_from="301:1")
+
+        async def successor_down(key, track_key=None):
+            if key == self.THERE:
+                raise pp.PlayerUnavailable("down")
+            return await fake_assert_in_library(key, track_key)
+        with mock.patch.object(pp, "assert_in_library", side_effect=successor_down):   # a successor's check
+            self.assertEqual(self.get().status_code, 503)
+        self.assertEqual(sorted(self.listed()), ["300:1"])
+
+    def test_it_only_reads_the_database_for_the_listeners_own_rows(self):
+        from sqlalchemy import event
+        statements = []
+
+        def record(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+        self.row("300:1")
+        engine = self.Session.kw["bind"]
+        event.listen(engine, "before_cursor_execute", record)
+        self.addCleanup(event.remove, engine, "before_cursor_execute", record)
+        self.listed()
+        positions = [s for s in statements if "listening_positions" in s and s.lstrip().upper().startswith("SELECT")]
+        self.assertTrue(positions)
+        for statement in positions:
+            self.assertIn("identity", statement)
+        self.assertTrue(any("LIMIT" in s.upper() for s in positions if "book_ms" in s))
+
+
+class OrphanDismissal(OrphanBase):
+    """"None of these" is kept on the server for the listener and the book."""
+
+    def dismiss(self, key=None):
+        return self.client.post(f"/api/player/orphans/{key or self.NEW}/dismiss", headers={"Origin": ORIGIN})
+
+    def test_none_of_these_persists_for_that_book(self):
+        self.row("300:1")
+        self.assertEqual(self.listed(), ["300:1"])
+        r = self.dismiss()
+        self.assertEqual((r.status_code, r.json()), (200, {"dismissed": True}))
+        body = self.get().json()
+        self.assertEqual((body["orphans"], body["dismissed"]), ([], True))
+        # On another device or tab: the same server answer.
+        self.as_user(A)
+        self.assertEqual(self.get().json()["dismissed"], True)
+
+    def test_a_dismissal_without_places_needs_no_plex_lookup(self):
+        self.row("300:1")
+        self.dismiss()
+        self.assert_in_library.reset_mock()
+        self.get()
+        self.assertEqual(self.assert_in_library.await_count, 1)       # only the book's own check
+
+    def test_it_is_per_book_key(self):
+        self.row("300:1")
+        self.dismiss()
+        with mock.patch.dict(LIBRARY, {"410:1": {"411": 1_000}}):
+            body = self.get("410:1").json()
+        self.assertEqual((body["orphans"][0]["key"], body["dismissed"]), ("300:1", False))
+
+    def test_it_is_per_listener(self):
+        self.row("300:1", identity="plex:1002")
+        self.dismiss()
+        self.as_user(B)
+        body = self.get().json()
+        self.assertEqual((body["dismissed"], [o["key"] for o in body["orphans"]]), (False, ["300:1"]))
+
+    def test_it_is_idempotent_and_leaves_one_row(self):
+        from app.models import ListeningDismissal
+        self.assertEqual(self.dismiss().status_code, 200)
+        self.assertEqual(self.dismiss().status_code, 200)
+        rows = self.db.query(ListeningDismissal).all()
+        self.assertEqual([(r.identity, r.book_key) for r in rows], [("plex:1001", self.NEW)])
+
+    def test_only_for_a_book_in_the_library_and_from_this_site(self):
+        from app.models import ListeningDismissal
+        self.assertEqual(self.dismiss("999:1").status_code, 404)
+        self.assertEqual(self.dismiss("junk").status_code, 404)
+        r = self.client.post(f"/api/player/orphans/{self.NEW}/dismiss", headers={"Origin": "https://evil.example"})
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(self.db.query(ListeningDismissal).count(), 0)
+
+    def test_it_does_not_stop_the_book_being_saved_or_its_history(self):
+        self.dismiss()
+        r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="p-new", seq=1)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.client.get(f"/api/player/position/{self.NEW}").json()["web"]["track"], "401")
+
+
+class ManualLinks(PlayerApiBase):
+    """Spec 2.6 s3: a place the listener picked is claimed through the same
+    claim path as an automatic link (uniqueness, pending, successors); it
+    only skips the work-key match."""
+
+    NEW, GONE, THERE = "400:1", "300:1", "450:1"
+    seed = EarlierCopies.seed
+    carried = EarlierCopies.carried
+    history = EarlierCopies.history
+    claims = Claims.claims
+    link_of = Claims.link_of
+    down = Claims.down
+
+    def setUp(self):
+        super().setUp()
+        for p in (mock.patch.dict(LIBRARY, {self.NEW: {"401": 500_000}, self.THERE: {"451": 500_000}}),
+                  mock.patch.dict(WORKS, {self.NEW: "e5" * 16, self.THERE: "e5" * 16})):
+            p.start()
+            self.addCleanup(p.stop)
+        self.seq = 0
+
+    def confirm(self, book=None, linked_from=None, manual=True, **extra):
+        book = book or self.NEW
+        track = next(iter(LIBRARY[book]))
+        self.seq += 1
+        fields = dict(book=book, track=track, duration_ms=LIBRARY[book][track], psid="page-" + book, seq=self.seq,
+                      linked_from=linked_from or self.GONE)
+        if manual:
+            fields["link_manual"] = True
+        fields.update(extra)
+        r = self.checkin(**fields)
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["linked"]
+
+    def row_of(self, book, identity="plex:1001"):
+        self.db.expire_all()
+        return self.db.query(ListeningPosition).filter_by(identity=identity, book_key=book).one()
+
+    def claim_manual(self):
+        from app.models import ListeningClaim
+        self.db.expire_all()
+        return {c.earlier_key: c.manual for c in self.db.query(ListeningClaim).filter_by(identity="plex:1001")}
+
+    OTHER_WORK = "f6" * 16
+
+    def test_a_manual_link_skips_the_work_key_match_and_nothing_else(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        self.assertIs(self.confirm(manual=False), False)         # the work keys differ: not an automatic link
+        self.assertIsNone(self.link_of(self.NEW))
+        self.assertIs(self.confirm(), True)
+        self.assertEqual(self.link_of(self.NEW), self.GONE)
+        self.assertEqual(self.claims(), {(self.GONE, self.NEW, "verified")})
+
+    def test_the_manual_flag_is_stored_on_the_claim_and_the_link(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        self.assertIs(self.confirm(), True)
+        self.assertIs(self.row_of(self.NEW).link_manual, True)
+        self.assertEqual(self.claim_manual(), {self.GONE: True})
+        # History and the position carry on exactly as for an automatic link.
+        self.assertEqual({e["book_key"] for e in self.history()}, {self.NEW, self.GONE})
+
+    def test_an_automatic_link_is_not_flagged_manual(self):
+        self.seed(self.GONE)
+        self.assertIs(self.confirm(manual=False), True)
+        self.assertIs(self.row_of(self.NEW).link_manual, False)
+        self.assertEqual(self.claim_manual(), {self.GONE: False})
+
+    def test_a_row_saved_before_work_keys_can_be_linked_by_hand(self):
+        self.seed(self.GONE, work_key=None)
+        self.assertIs(self.confirm(), True)
+
+    def test_a_manual_link_needs_no_work_key_of_the_books_own(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        self.book_identity.side_effect = pp.PlayerUnavailable("down")
+        self.assertIs(self.confirm(), True)
+
+    def test_refused_while_the_old_album_is_in_the_library(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        with mock.patch.dict(LIBRARY, {self.GONE: {"301": 400_000}}):
+            self.assertIs(self.confirm(), False)
+        self.assertEqual(self.claims(), set())
+        self.assertIsNone(self.link_of(self.NEW))
+
+    def test_refused_when_another_copy_holds_the_claim(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        self.assertIs(self.confirm(self.THERE), True)            # B, in the library, claims A by hand
+        self.assertIs(self.confirm(), False)                     # C may not
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "verified")})
+        self.assertIsNone(self.link_of(self.NEW))
+
+    def test_refused_when_another_copy_holds_a_pending_claim(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        with self.down(self.GONE):
+            self.assertIsNone(self.confirm(self.THERE))
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "pending")})
+        self.assertIs(self.confirm(), False)
+        self.assertEqual(self.claims(), {(self.GONE, self.THERE, "pending")})
+
+    def test_refused_when_the_place_was_carried_into_a_copy_still_there(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        self.carried(self.THERE, self.GONE, work_key=None)
+        self.assertIs(self.confirm(), False)
+        self.assertEqual(self.claims(), set())
+
+    def test_a_copy_that_went_too_does_not_block_a_manual_link(self):
+        # A became B by hand, B is gone: C may take B's place (a chain).
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        self.carried("460:1", self.GONE, work_key=None)
+        self.assertIs(self.confirm(linked_from="460:1"), True)
+        self.assertEqual(self.link_of(self.NEW), "460:1")
+
+    def test_refused_for_another_listeners_row(self):
+        self.seed(self.GONE, identity="plex:1002", work_key=self.OTHER_WORK)
+        self.assertIs(self.confirm(), False)
+        self.assertEqual(self.claims(), set())
+        self.assertEqual(self.claims("plex:1002"), set())
+        self.assertIsNone(self.link_of(self.NEW))
+
+    def test_refused_for_a_place_that_does_not_exist(self):
+        self.assertIs(self.confirm(), False)
+        self.assertEqual(self.claims(), set())
+
+    def test_refused_when_it_would_make_a_loop(self):
+        # A came from the book being linked: a link back would loop.
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        self.db.query(ListeningPosition).filter_by(book_key=self.GONE).update({"linked_from": self.NEW})
+        self.db.commit()
+        self.assertIs(self.confirm(), False)
+        self.assertIsNone(self.link_of(self.NEW))
+
+    def test_a_book_already_linked_to_another_copy_keeps_that_link(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        self.seed("310:1")
+        self.assertIs(self.confirm(linked_from="310:1"), True)
+        self.assertIs(self.confirm(), False)
+        self.assertEqual(self.link_of(self.NEW), "310:1")
+        self.assertEqual(self.claims(), {("310:1", self.NEW, "verified")})
+
+    def test_plex_unable_to_say_is_a_pending_manual_claim_that_verifies_on_any_check_in(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        with self.down(self.GONE):
+            self.assertIsNone(self.confirm())
+        self.assertEqual(self.claims(), {(self.GONE, self.NEW, "pending")})
+        self.assertEqual(self.claim_manual(), {self.GONE: True})
+        self.assertIsNone(self.link_of(self.NEW))
+        # A later check-in with no link at all (the browser lost it) settles
+        # it, as a manual link: no work-key match is asked of it.
+        r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="page-" + self.NEW, seq=50)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.claims(), {(self.GONE, self.NEW, "verified")})
+        self.assertEqual(self.link_of(self.NEW), self.GONE)
+        self.assertIs(self.row_of(self.NEW).link_manual, True)
+
+    def test_a_manual_pending_claim_is_dropped_when_the_old_album_is_back(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        with self.down(self.GONE):
+            self.assertIsNone(self.confirm())
+        with mock.patch.dict(LIBRARY, {self.GONE: {"301": 400_000}}):
+            r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="page-" + self.NEW, seq=50)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.claims(), set())
+
+    def test_two_copies_racing_for_one_place_by_hand_leave_one_holder(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        first, second = self.confirm(), self.confirm(self.THERE)
+        self.assertEqual((first, second), (True, False))
+        self.assertEqual(len(self.claims()), 1)
+
+    def test_the_flag_must_be_true_or_false_and_needs_a_link(self):
+        self.seed(self.GONE, work_key=self.OTHER_WORK)
+        for fields in ({"link_manual": True}, {"link_manual": "yes", "linked_from": self.GONE},
+                       {"link_manual": 1, "linked_from": self.GONE}, {"link_manual": None, "linked_from": self.GONE}):
+            with self.subTest(fields=fields):
+                r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="p", seq=1, **fields)
+                self.assertEqual(r.status_code, 422)
+        self.assertEqual(self.db.query(ListeningPosition).filter_by(book_key=self.NEW).count(), 0)
+
+    def test_a_check_in_without_the_flag_is_unchanged(self):
+        r = self.checkin(book=self.NEW, track="401", duration_ms=500_000, psid="p", seq=1)
+        self.assertNotIn("linked", r.json())
+        self.assertIsNone(self.row_of(self.NEW).link_manual)
+
+
+class BookAuthor(PlayerApiBase):
+    """The book's author is kept with the place (spec 2.6 s3), for the orphan
+    lookup's author-first order."""
+
+    def test_a_check_in_keeps_the_authors_name(self):
+        self.checkin(book="100:1", track="101", duration_ms=1_000_000)
+        row = self.db.query(ListeningPosition).filter_by(book_key="100:1").one()
+        self.assertEqual(row.author, "Ann Author")
+
+    def test_an_unreadable_author_leaves_what_the_row_had(self):
+        self.checkin(book="100:1", track="101", duration_ms=1_000_000, seq=1)
+        self.book_identity.side_effect = pp.PlayerUnavailable("down")
+        self.checkin(book="100:1", track="101", duration_ms=1_000_000, seq=2)
+        self.db.expire_all()
+        self.assertEqual(self.db.query(ListeningPosition).filter_by(book_key="100:1").one().author, "Ann Author")
+
+
 def _race_worker(db_path, book, barrier, out):
     """One uvicorn worker in TwoWorkersClaimOneCopy: its own process, engine
     and client on the shared database file. It confirms `book` as the
@@ -2093,7 +2608,8 @@ class RateLimits(unittest.TestCase):
                     "position": ("60 per 1 minute", "position"), "history": ("60 per 1 minute", "history"),
                     "get_prefs": ("60 per 1 minute", "prefs-get"), "put_prefs": ("60 per 1 minute", "prefs-put"),
                     "checkin": ("60 per 1 minute", "checkin"), "cover": ("240 per 1 minute", "cover"),
-                    "next_book": ("60 per 1 minute", "next")}
+                    "next_book": ("60 per 1 minute", "next"), "orphans": ("60 per 1 minute", "orphans"),
+                    "dismiss_orphans": ("60 per 1 minute", "orphans-dismiss")}
         for name, (limit, scope) in expected.items():
             with self.subTest(route=name):
                 self.assertEqual(self.limits(getattr(player, name)),

@@ -1117,20 +1117,20 @@ class WorkKeys(unittest.TestCase):
 
     def test_the_books_number_is_taken_from_anywhere_in_the_title(self):
         # T1R8: every book-number phrase, in any bracket or after any
-        # separator, narrator's part included, is one normalised token.
+        # separator, narrator's part included, is one normalised token. A
+        # volume and a number are kinds of their own (spec 2.6 s3), tested
+        # in test_volume_book_and_number_are_different_kinds.
         book2 = pp.work_key(self.AUTHOR, "Tide Mill (Book 2)")
         for title in ("Tide Mill, Book 2", "Tide Mill - Read by Tamsin Ashby, Book 2, Unabridged",
                       "Tide Mill - Read by Tamsin Ashby [Book 2]", "Tide Mill - Read by Tamsin Ashby #2",
                       "Tide Mill (Narrated by Tamsin Ashby, Book 2)", "Tide Mill, Book 2 - Read by Tamsin Ashby",
-                      "Tide Mill, Vol. 2", "Tide Mill, Vol 2", "Tide Mill, Volume 2", "Tide Mill, Volume II",
-                      "Tide Mill, Book II", "Tide Mill, Book Two", "Tide Mill, Bk. 2", "Tide Mill No. 2",
-                      "Tide Mill, Number 2",
+                      "Tide Mill, Book II", "Tide Mill, Book Two", "Tide Mill, Bk. 2",
                       "Tide Mill #2", "Tide Mill, Book #2", "Tide Mill, Book 02", "Tide Mill {Book 2}",
                       "Tide Mill (Unabridged) (Book 2)", "Tide Mill (Book 2) (Unabridged)"):
             with self.subTest(title=title):
                 self.assertEqual(pp.work_key(self.AUTHOR, title), book2)
-        self.assertEqual(pp._work_title("Tide Mill - Read by Tamsin Ashby, Vol. II, Unabridged"), "tide mill #2")
-        self.assertEqual(pp._work_title("Tide Mill, Book 3 [Part 1]"), "tide mill #3 p1")
+        self.assertEqual(pp._work_title("Tide Mill - Read by Tamsin Ashby, Book II, Unabridged"), "tide mill #2")
+        self.assertEqual(pp._work_title("Tide Mill, Book 3 [Part 1]"), "tide mill #3 +1")
         # Not a book number: inside a word, a bare number, or letters that
         # aren't a Roman numeral. Those stay as words.
         for a, b in (("Tide Mill Notebook 2", "Tide Mill Notebook 3"), ("Tide Mill 2", "Tide Mill 3"),
@@ -1157,8 +1157,8 @@ class WorkKeys(unittest.TestCase):
                     self.assertEqual(pp.work_key(self.AUTHOR, base + suffix), key)
 
     def test_numbers_keep_their_kind_order_and_repeats(self):
-        # T1K1: a token says which phrase it came from ("#" the book's
-        # number: book, bk., vol., no., #; "p" a part; "/M" of M), in order,
+        # T1K1: a token says which phrase it came from ("#" a book: book, bk.,
+        # #; "%" a volume; "@" a number; "+" a part; "/M" of M), in order,
         # repeats kept, so two different books never share a key.
         for a, b in (("Tide Mill, Book 1, Part 2", "Tide Mill, Book 2, Part 1"),
                      ("Tide Mill, Book 2 of 5", "Tide Mill, Book 5, Part 2"),
@@ -1172,13 +1172,13 @@ class WorkKeys(unittest.TestCase):
             with self.subTest(a=a, b=b):
                 self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
         # Spellings of one number are still one token.
-        for a, b in (("Tide Mill, Vol. 2", "Tide Mill, Volume 2"), ("Tide Mill, Volume II", "Tide Mill, Book 2"),
-                     ("Tide Mill, Book 2, Part 1", "Tide Mill (Vol. II, Pt. 1)"),
+        for a, b in (("Tide Mill, Vol. 2", "Tide Mill, Volume 2"), ("Tide Mill, Volume II", "Tide Mill, Vol 2"),
+                     ("Tide Mill, Book 2, Part 1", "Tide Mill (Book II, Pt. 1)"),
                      ("Tide Mill, Part One of Two", "Tide Mill, Part 1 of 2")):
             with self.subTest(a=a, b=b):
                 self.assertEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
-        self.assertEqual(pp._work_title("Tide Mill, Book 2, Part 1"), "tide mill #2 p1")
-        self.assertEqual(pp._work_title("Tide Mill, Book 2 (Part 1 of 2)"), "tide mill #2 p1/2")
+        self.assertEqual(pp._work_title("Tide Mill, Book 2, Part 1"), "tide mill #2 +1")
+        self.assertEqual(pp._work_title("Tide Mill, Book 2 (Part 1 of 2)"), "tide mill #2 +1/2")
 
     def test_number_words_short_forms_and_narrator_digits_count(self):
         # T1K2: "Book Two" is a number (one to twenty), Bk. and Pt. are
@@ -1197,8 +1197,8 @@ class WorkKeys(unittest.TestCase):
                 two, three = fmt.format(n=2, w="Two"), fmt.format(n=3, w="Three")
                 self.assertNotEqual(pp.work_key(self.AUTHOR, two, "Tamsin Ashby 2"),
                                     pp.work_key(self.AUTHOR, three, "Tamsin Ashby 3"))
-        self.assertEqual(pp._work_title("Tide Mill - Read by Tamsin Ashby, Series 2"), "tide mill n2")
-        self.assertEqual(pp._work_title("Tide Mill, Bk. 2, Pt. 3"), "tide mill #2 p3")
+        self.assertEqual(pp._work_title("Tide Mill - Read by Tamsin Ashby, Series 2"), "tide mill ^series2")
+        self.assertEqual(pp._work_title("Tide Mill, Bk. 2, Pt. 3"), "tide mill #2 +3")
         # A narrator whose name holds a digit keeps it in the key, the same
         # however the narration is written: a split from a copy that doesn't
         # name them, never a collision.
@@ -1281,7 +1281,129 @@ class WorkKeys(unittest.TestCase):
         with mock.patch.dict(ALBUMS, {"500": album}):
             self.assertRegex(pp.album_work_key(album), r"^[0-9a-f]{32}$")
         # Ordinary narrator digits are tokens as before.
-        self.assertEqual(pp._dropped_digits("Read by Radio 4 Players, Series 2.5"), ["n4", "n2.5"])
+        self.assertEqual(pp._dropped_numbers("Read by Radio 4 Players, Series 2.5"), ["^radio4", "^series2.5"])
+
+    # --- Spec 2.6 s3: the 2.5 parked matcher items, one test each ---
+
+    def test_volume_book_and_number_are_different_kinds(self):
+        # 2.5 parked: Vol./Book/No. shared one kind, so "Vol. 2" was "Book 2".
+        # Each is a kind of its own now; spellings within a kind still agree.
+        for a, b in (("Tide Mill, Vol. 2", "Tide Mill, Book 2"), ("Tide Mill, Volume II", "Tide Mill, Book II"),
+                     ("Tide Mill, No. 2", "Tide Mill, Book 2"), ("Tide Mill, Number 2", "Tide Mill, Vol. 2"),
+                     ("Tide Mill, Vol. 1, Book 2", "Tide Mill, Book 1, Vol. 2"),
+                     ("Tide Mill - Read by Tamsin Ashby, Vol. 2", "Tide Mill - Read by Tamsin Ashby, Book 2"),
+                     ("Tide Mill (Vol. 2, Unabridged)", "Tide Mill (No. 2, Unabridged)")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        for a, b in (("Tide Mill, Vol. 2", "Tide Mill, Volume II"), ("Tide Mill, Vol 2", "Tide Mill, Volume Two"),
+                     ("Tide Mill, No. 2", "Tide Mill, Number 2"), ("Tide Mill, No 2", "Tide Mill No.2"),
+                     ("Tide Mill, Book 2", "Tide Mill, Bk. 2"), ("Tide Mill, Book 2", "Tide Mill #2")):
+            with self.subTest(a=a, b=b):
+                self.assertEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        self.assertEqual(pp._work_title("Tide Mill, Vol. 1, Book 2, No. 3, Part 4"), "tide mill %1 #2 @3 +4")
+
+    def test_number_words_to_twenty_ordinals_and_roman_numerals_are_the_same_number(self):
+        roman = "I II III IV V VI VII VIII IX X XI XII XIII XIV XV XVI XVII XVIII XIX XX".split()
+        words = ("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+                 "sixteen seventeen eighteen nineteen twenty").split()
+        ordinals = ("first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth "
+                    "thirteenth fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth twentieth").split()
+        suffixes = {1: "st", 2: "nd", 3: "rd"}
+        for n in range(1, 21):
+            suffix = "th" if n // 10 == 1 else suffixes.get(n % 10, "th")
+            spellings = [f"Book {n}", f"Book {roman[n - 1]}", f"Book {words[n - 1]}", f"Book {ordinals[n - 1]}",
+                         f"Book {n}{suffix}", f"{ordinals[n - 1].title()} Book", f"{n}{suffix} Book",
+                         f"Book {words[n - 1].title()}"]
+            keys = {pp.work_key(self.AUTHOR, f"Tide Mill, {s}") for s in spellings}
+            with self.subTest(n=n):
+                self.assertEqual(len(keys), 1, spellings)
+        # Every one of them a different book from the next.
+        self.assertEqual(len({pp.work_key(self.AUTHOR, f"Tide Mill, Book {w}") for w in words}), 20)
+        self.assertEqual(pp._work_title("Tide Mill, Second Volume"), "tide mill %2")
+        self.assertEqual(pp._work_title("Tide Mill, 3rd Part of 5"), "tide mill +3/5")
+
+    def test_numbers_after_a_non_marker_word_in_the_narrators_part_are_kept(self):
+        # 2.5 parked: a number word, Roman numeral or ordinal after a word
+        # that isn't a marker was dropped with the narrator's part ("Read by
+        # X, Two" and "Read by X, Three" were one book).
+        for two, three in (("Tide Mill - Read by Tamsin Ashby, Two", "Tide Mill - Read by Tamsin Ashby, Three"),
+                           ("Tide Mill - Read by Tamsin Ashby, II", "Tide Mill - Read by Tamsin Ashby, III"),
+                           ("Tide Mill - Read by Tamsin Ashby, Second", "Tide Mill - Read by Tamsin Ashby, Third"),
+                           ("Tide Mill - Read by Tamsin Ashby, 2nd", "Tide Mill - Read by Tamsin Ashby, 3rd"),
+                           ("Tide Mill - Read by Tamsin Ashby, Series Two", "Tide Mill - Read by Tamsin Ashby, Series Three"),
+                           ("Tide Mill (Narrated by Tamsin Ashby, Season II)", "Tide Mill (Narrated by Tamsin Ashby, Season III)"),
+                           ("Tide Mill - Read by Tamsin Ashby (Second Series)", "Tide Mill - Read by Tamsin Ashby (Third Series)"),
+                           ("Tide Mill - Read by Radio Four Players", "Tide Mill - Read by Radio Five Players"),
+                           ("Tide Mill - Tamsin Ashby II", "Tide Mill - Tamsin Ashby III")):
+            with self.subTest(two=two):
+                narrator = "Tamsin Ashby II" if "Tamsin Ashby II" in two else ""
+                other = "Tamsin Ashby III" if narrator else ""
+                self.assertNotEqual(pp.work_key(self.AUTHOR, two, narrator), pp.work_key(self.AUTHOR, three, other))
+        # The same number written two ways in that part is one token.
+        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill - Read by Tamsin Ashby, Two"),
+                         pp.work_key(self.AUTHOR, "Tide Mill - Read by Tamsin Ashby, 2"))
+        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill - Read by Tamsin Ashby, Series Two"),
+                         pp.work_key(self.AUTHOR, "Tide Mill - Read by Tamsin Ashby, Series 2"))
+        # An initial is not a Roman numeral; a narrator without a number is no token.
+        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill - Read by Eric V. Smith"), pp.work_key(self.AUTHOR, "Tide Mill"))
+        self.assertEqual(pp._work_title("Tide Mill - Read by Tamsin Ashby, I"), "tide mill ^1")
+
+    def test_a_number_in_the_narrators_part_keeps_what_it_counts(self):
+        # 2.5 parked: "Series 2" and "Disc 2" were both "n2".
+        for a, b in (("Series 2", "Disc 2"), ("Disc 2", "CD 2"), ("Season 2", "Episode 2"), ("Radio 4", "Series 4"),
+                     ("Series 2", "2"), ("Series 2", "Series 3")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, f"Tide Mill - Read by Tamsin Ashby, {a}"),
+                                    pp.work_key(self.AUTHOR, f"Tide Mill - Read by Tamsin Ashby, {b}"))
+        self.assertEqual(pp._dropped_numbers("Read by BBC Radio 4 Full Cast, Series Two, 3rd Disc"),
+                         ["^radio4", "^series2", "^3"])
+        self.assertEqual(pp._dropped_numbers("Read by Tamsin Ashby"), [])
+
+    def test_a_copy_part_whose_only_number_is_a_word_is_kept(self):
+        # 2.5 parked: "(Two, Unabridged)" was a copy part with no digit, so it
+        # went whole, and book Two and book Three shared a key.
+        for a, b in (("Tide Mill (Two, Unabridged)", "Tide Mill (Three, Unabridged)"),
+                     ("Tide Mill (Second, Unabridged)", "Tide Mill (Third, Unabridged)"),
+                     ("Tide Mill [Dramatized, Two]", "Tide Mill [Dramatized, Three]"),
+                     ("Tide Mill - Two, Full Cast Edition", "Tide Mill - Three, Full Cast Edition"),
+                     ("Tide Mill (Unabridged, XII)", "Tide Mill (Unabridged, XIII)")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        # Only the copy words go.
+        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill (Two, Unabridged)"), pp.work_key(self.AUTHOR, "Tide Mill (Two)"))
+
+    def test_a_token_is_never_a_word_of_a_title(self):
+        # 2.5 parked: tokens were letters and digits ("p1", "n2"), so a title
+        # that was spelt like one collided with the phrase that made it.
+        for title, phrase in (("Tide Mill P1", "Tide Mill, Part 1"), ("Tide Mill p2", "Tide Mill, Pt. 2"),
+                              ("Tide Mill N2", "Tide Mill - Read by Tamsin Ashby, Series 2"),
+                              ("Tide Mill n2", "Tide Mill - Read by Tamsin Ashby, 2"),
+                              ("Tide Mill B2", "Tide Mill, Book 2"), ("Tide Mill 2", "Tide Mill, Book 2"),
+                              ("Tide Mill v2", "Tide Mill, Vol. 2"), ("Tide Mill _1", "Tide Mill, Book 1")):
+            with self.subTest(title=title):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, title), pp.work_key(self.AUTHOR, phrase))
+
+    def test_different_books_never_share_a_key_across_the_ways_a_number_is_written(self):
+        # A sweep across the formats: book, volume, number and part, 1 to 4,
+        # as digits, words, Roman numerals and ordinals, in the title, in
+        # brackets and in the narrator's part. A key belongs to one book.
+        roman, words = ("I", "II", "III", "IV"), ("One", "Two", "Three", "Four")
+        ordinals, suffixed = ("First", "Second", "Third", "Fourth"), ("1st", "2nd", "3rd", "4th")
+        kinds = {"book": ("Book {n}", "Bk. {n}", "Book {w}", "Book {r}", "Book {o}", "Book {s}", "{o} Book", "#{n}"),
+                 "vol": ("Vol. {n}", "Volume {n}", "Volume {r}", "Volume {w}", "{o} Volume"),
+                 "no": ("No. {n}", "Number {n}", "Number {w}", "No. {r}"),
+                 "part": ("Part {n}", "Pt. {n}", "Part {r}", "Part {w}", "{o} Part")}
+        wraps = ("Tide Mill - Read by Tamsin Ashby, {p}", "Tide Mill (Narrated by Tamsin Ashby, {p})",
+                 "Tide Mill - Read by Tamsin Ashby [{p}]", "Tide Mill, {p}", "Tide Mill ({p})", "Tide Mill - {p}",
+                 "Tide Mill ({p}, Unabridged)", "Tide Mill (Unabridged) ({p})", "Tide Mill, {p} - Read by Tamsin Ashby")
+        owner = {}
+        for wrap in wraps:
+            for kind, phrases in kinds.items():
+                for phrase in phrases:
+                    for n in range(1, 5):
+                        title = wrap.format(p=phrase.format(n=n, r=roman[n - 1], w=words[n - 1], o=ordinals[n - 1],
+                                                            s=suffixed[n - 1]))
+                        self.assertEqual(owner.setdefault(pp.work_key(self.AUTHOR, title), (kind, n)), (kind, n), title)
 
     def test_nothing_is_taken_off_that_would_leave_the_title_empty(self):
         self.assertEqual(pp._work_title("Unabridged"), "unabridged")
@@ -1289,11 +1411,121 @@ class WorkKeys(unittest.TestCase):
         self.assertEqual(pp._work_title(""), "")
 
 
+class LiveLibraryKeys(unittest.TestCase):
+    """The work keys of the dev instance's audiobook library as it stood on
+    2026-10-03 (34 albums, each one book): spec 2.6 s3 changed the matcher,
+    and this library's keying did not change at all. 21 works; every work
+    that has several editions (a narrator each) is one key, and nothing else
+    is. The key values are those the previous matcher gave, pinned."""
+
+    LIBRARY = (
+        ('George R.R. Martin', 'A Clash of Kings - Read by Roy Dotrice'),
+        ('George R.R. Martin', 'A Dance with Dragons - Read by Roy Dotrice'),
+        ('George R.R. Martin', 'A Feast for Crows - Read by Roy Dotrice'),
+        ('George R.R. Martin', 'A Game of Thrones - Read by Roy Dotrice'),
+        ('George R.R. Martin', 'A Storm of Swords - Read by Roy Dotrice'),
+        ('J.K. Rowling', 'Harry Potter and the Chamber of Secrets - Read by Full Cast'),
+        ('J.K. Rowling', 'Harry Potter and the Chamber of Secrets - Read by Jim Dale'),
+        ('J.K. Rowling', 'Harry Potter and the Chamber of Secrets - Read by Stephen Fry'),
+        ('J.K. Rowling', 'Harry Potter and the Deathly Hallows - Read by Full Cast'),
+        ('J.K. Rowling', 'Harry Potter and the Deathly Hallows - Read by Jim Dale'),
+        ('J.K. Rowling', 'Harry Potter and the Deathly Hallows - Read by Stephen Fry'),
+        ('J.K. Rowling', 'Harry Potter and the Goblet of Fire - Read by Full Cast'),
+        ('J.K. Rowling', 'Harry Potter and the Goblet of Fire - Read by Jim Dale'),
+        ('J.K. Rowling', 'Harry Potter and the Goblet of Fire - Read by Stephen Fry'),
+        ('J.K. Rowling', 'Harry Potter and the Half-Blood Prince - Read by Full Cast'),
+        ('J.K. Rowling', 'Harry Potter and the Half-Blood Prince - Read by Jim Dale'),
+        ('J.K. Rowling', 'Harry Potter and the Half-Blood Prince - Read by Stephen Fry'),
+        ('J.K. Rowling', 'Harry Potter and the Order of the Phoenix - Read by Full Cast'),
+        ('J.K. Rowling', 'Harry Potter and the Order of the Phoenix - Read by Jim Dale'),
+        ('J.K. Rowling', 'Harry Potter and the Order of the Phoenix - Read by Stephen Fry'),
+        ('J.K. Rowling', "Harry Potter and the Philosopher's Stone - Read by Stephen Fry"),
+        ('J.K. Rowling', 'Harry Potter and the Prisoner of Azkaban - Read by Full Cast'),
+        ('J.K. Rowling', 'Harry Potter and the Prisoner of Azkaban - Read by Jim Dale'),
+        ('J.K. Rowling', 'Harry Potter and the Prisoner of Azkaban - Read by Stephen Fry'),
+        ('J.K. Rowling', "Harry Potter and the Sorcerer's Stone - Read by Jim Dale"),
+        ('J.K. Rowling', 'Harry Potter and the Sorcerer’s Stone - Read by Full Cast'),
+        ('Joseph Heller', 'CATCH-22 - Read by Jay O. Sanders'),
+        ('Matt Dinniman', "Carl's Doomsday Scenario - Read by Jeff Hays"),
+        ('Matt Dinniman', "The Butcher's Masquerade - Read by Jeff Hays"),
+        ('Matt Dinniman', "The Dungeon Anarchist's Cookbook - Read by Jeff Hays"),
+        ('Matt Dinniman', 'The Eye of the Bedlam Bride - Read by Jeff Hays'),
+        ('Matt Dinniman', 'The Gate of the Feral Gods - Read by Jeff Hays'),
+        ('S.J.A. Turney', "Marius' Mules I: The Invasion of Gaul - Read by Malk Williams"),
+        ('Sarah J. Maas', 'Queen of Shadows - Read by Elizabeth Evans'),
+    )
+    KEYS = {
+        "003fe7dc4c79170c9c5f6a440799fbd8",
+        "0071fd0871b013bcf3d14a49131374b6",
+        "00f8a8d916a4e5bd31f358154b08394b",
+        "172432dfb2d5b9deb6644735cbb406d7",
+        "1a824449ebd1cdfad54ecfdd6b252709",
+        "38aa37d8404ecef397390cfbe83672cb",
+        "3b42b8771787605caee92e0815482cc1",
+        "3b798d69b20026c6be2dab72471df857",
+        "55a44c640e94765279a522dbb037ef92",
+        "6d3f4645deead23f9f23ff1a103eae6e",
+        "7fa75f288ea433762e018f2135a15345",
+        "91109a5ea9f2879fe2cf997528b04044",
+        "91157e7bac77cc4a3b260f5abc900db0",
+        "9f9bda885ecaad407317273a3f89e1e3",
+        "9ff24dbf7d90820d5512fb0af8a59b19",
+        "a3b16fb047a587f727909a62c0af267c",
+        "a9819cbbf55bc277238a4e08cc0ba6f4",
+        "b2748765fc37ce6591bfff19e08601a8",
+        "dbdca6f5943cec121d4f2ca4702d2f9c",
+        "eef646e57db7a292fd0257ec9fbe28f2",
+        "ff811a1f7107425cbdf7e49ce93d3f5a",
+    }
+
+    @staticmethod
+    def key(author, title):
+        shown, narrator = pp._split_narrator(title)
+        return pp.work_key(author, title, narrator)
+
+    def test_the_library_keys_as_before(self):
+        keys = {self.key(a, t) for a, t in self.LIBRARY}
+        self.assertEqual(len(self.LIBRARY), 34)
+        self.assertEqual(keys, self.KEYS)
+
+    def test_editions_of_one_work_share_a_key_and_no_two_works_do(self):
+        groups = {}
+        for author, title in self.LIBRARY:
+            groups.setdefault(self.key(author, title), []).append(pp._work_words(pp._split_narrator(title)[0]))
+        self.assertEqual(sorted(len(g) for g in groups.values()), [1] * 14 + [2] + [3] * 6)
+        for key, titles in groups.items():
+            with self.subTest(key=key):
+                # Within a key every edition is one title (the Sorcerer's Stone
+                # in two apostrophes aside), never two works.
+                self.assertEqual(len(set(titles)), 1, titles)
+
+    def test_the_library_as_one_disc_albums_keys_the_same_through_a_save(self):
+        # book_identity and the album-level pre-check give the same key for an
+        # album of one book.
+        for author, title in self.LIBRARY:
+            album = {"ratingKey": "500", "type": "album", "title": title, "titleSort": title,
+                     "parentTitle": author}
+            children = {"Metadata": [{"ratingKey": "501", "type": "track", "parentRatingKey": "500",
+                                      "parentIndex": 1, "index": 1, "duration": 60_000, "title": "Part 1",
+                                      "Media": [{"Part": [{"file": "/m/F/1.mp3", "duration": 60_000}]}]}]}
+            with self.subTest(title=title):
+                key = pp._identity(album, 1, children)["work_key"]
+                self.assertEqual(key, self.key(author, title))
+                self.assertEqual(key, pp.album_work_key(album))
+
+
+def disc_key(author, album_title, disc_title, narrator=""):
+    """The work key of a disc of an album holding several books (spec 2.6
+    s3): the disc's own title under the album's own work title."""
+    return pp._hash_work(author, pp._work_title(album_title, narrator) + pp._ALBUM_SEPARATOR
+                         + pp._work_title(disc_title, narrator))
+
+
 class BookIdentity(BridgeBase):
     def test_the_fields_a_save_records(self):
         out = self.run_async(pp.book_identity("200:1"))
-        self.assertEqual(out, {"work_key": pp.work_key("Bea Writer", "Parts Book"), "narrator": "Pat Voice",
-                               "duration_ms": 600_000, "title": "Parts Book"})
+        self.assertEqual(out, {"work_key": pp.work_key("Bea Writer", "Parts Book"), "author": "Bea Writer",
+                               "narrator": "Pat Voice", "duration_ms": 600_000, "title": "Parts Book"})
 
     def test_it_matches_what_list_books_says_of_every_book(self):
         for book in self.run_async(pp.list_books()):
@@ -1301,13 +1533,18 @@ class BookIdentity(BridgeBase):
                 out = self.run_async(pp.book_identity(book["key"]))
                 self.assertEqual(out["duration_ms"], book["duration_ms"])
                 self.assertEqual(out["narrator"], book["narrator"] or None)
-                self.assertEqual(out["work_key"], pp.work_key(book["author"], book["title"], book["narrator"]))
+                album = ALBUMS[book["key"].split(":")[0]]
+                if len({t["parentIndex"] for t in TRACKS[album["ratingKey"]]}) > 1:
+                    expected = disc_key(book["author"], album["title"], book["title"], book["narrator"])
+                else:
+                    expected = pp.work_key(book["author"], book["title"], book["narrator"])
+                self.assertEqual(out["work_key"], expected)
 
     def test_a_disc_of_a_series_album_is_its_own_work(self):
         first = self.run_async(pp.book_identity("400:1"))
         second = self.run_async(pp.book_identity("400:2"))
         self.assertEqual(second["duration_ms"], 70_000)
-        self.assertEqual(second["work_key"], pp.work_key("Cal Penn", "Second Tale"))
+        self.assertEqual(second["work_key"], disc_key("Cal Penn", "Long Series - Read by Kim Moss", "Second Tale", "Kim Moss"))
         self.assertNotEqual(first["work_key"], second["work_key"])
 
     def test_a_disc_of_a_several_book_album_is_named_with_its_album_and_disc(self):
@@ -1354,8 +1591,9 @@ class BookIdentity(BridgeBase):
                     keys = [self.run_async(pp.book_identity(f"650:{d}"))["work_key"] for d in (1, 2, 3)]
                 self.assertEqual(len(set(keys)), 3)
                 self.assertEqual(keys[1], pp.work_key("Cal Penn", "Harbour Tales disc 2"))
-        # A disc titled by its own track keeps that title.
-        self.assertEqual(self.run_async(pp.book_identity("400:2"))["work_key"], pp.work_key("Cal Penn", "Second Tale"))
+        # A disc titled by its own track keeps that title, under the album's.
+        self.assertEqual(self.run_async(pp.book_identity("400:2"))["work_key"],
+                         disc_key("Cal Penn", "Long Series - Read by Kim Moss", "Second Tale", "Kim Moss"))
 
     def test_the_album_level_key_is_the_single_book_albums_key(self):
         # T1S5: an album of one book gives its key from the album alone.
@@ -1509,7 +1747,44 @@ class BookIdentity(BridgeBase):
                                      track(663, 660, 3, 1, 30_000, "E/T3", title="The Lighthouse")]
                     keys = [self.run_async(pp.book_identity(f"660:{d}"))["work_key"] for d in (1, 2, 3)]
                 self.assertEqual(len(set(keys)), 3)
-                self.assertEqual(keys[2], pp.work_key("Cal Penn", "The Lighthouse"))
+                self.assertEqual(keys[2], disc_key("Cal Penn", "Harbour Tales", "The Lighthouse"))
+
+    def test_discs_of_different_albums_that_share_a_title_never_share_a_key(self):
+        # 2.5 parked: two albums by one author whose discs share a title
+        # ("Chapter One") had the same per-disc keys. The album's own work
+        # title is part of every disc's key now (spec 2.6 s3); a box set
+        # re-added under the same title (and what normalising takes off)
+        # still gets its keys back.
+        def box(rk, album_title, shared="Chapter One", author="Cal Penn"):
+            album = {"ratingKey": rk, "type": "album", "title": album_title, "titleSort": album_title,
+                     "parentTitle": author, "thumb": f"/library/metadata/{rk}/thumb/1"}
+            with mock.patch.dict(ALBUMS, {rk: album}), mock.patch.dict(TRACKS):
+                TRACKS[rk] = [track(int(rk) + 1, rk, 1, 1, 10_000, f"E/{rk}a", title=shared),
+                              track(int(rk) + 2, rk, 2, 1, 20_000, f"E/{rk}b", title=shared),
+                              track(int(rk) + 3, rk, 3, 1, 30_000, f"E/{rk}c", title="The Lighthouse")]
+                return [self.run_async(pp.book_identity(f"{rk}:{d}"))["work_key"] for d in (1, 2, 3)]
+        harbour = box("640", "Harbour Tales")
+        island = box("645", "Island Tales")
+        self.assertEqual(len(set(harbour + island)), 6)
+        # Even a disc with a title of its own, and with no title in common.
+        self.assertNotEqual(box("647", "Harbour Tales", shared="Opening")[2], island[2])
+        self.assertEqual(box("650", "Harbour Tales (Unabridged)"), harbour)
+        self.assertEqual(box("655", "Harbour Tales - Read by Kim Moss"), harbour)
+        self.assertNotEqual(box("660", "Harbour Tales", author="Dee Lane"), harbour)
+
+    def test_a_book_by_its_author_and_the_author_alone(self):
+        self.assertEqual(self.run_async(pp.book_identity("100:1"))["author"], "Ann Author")
+        self.assertEqual(pp.album_author(ALBUMS["200"]), "Bea Writer")
+        self.assertEqual(pp.album_author({"title": "Tide Mill"}), "")
+        album = dict(ALBUMS["500"], parentTitle=" ")
+        with mock.patch.dict(ALBUMS, {"500": album}):
+            self.assertIsNone(self.run_async(pp.book_identity("500:1"))["author"])
+        # Case, spacing and punctuation are not a different author.
+        self.assertTrue(pp.same_author("J.K. Rowling", "J. K. Rowling"))
+        self.assertTrue(pp.same_author("ren\u00e9e ash", "Renee  Ash"))
+        self.assertFalse(pp.same_author("J.K. Rowling", "Matt Dinniman"))
+        self.assertFalse(pp.same_author("", ""))
+        self.assertFalse(pp.same_author(None, "Ann Author"))
 
     def test_untitled_discs_are_keyed_from_the_albums_whole_title(self):
         # T1K4: a disc whose first track has no title is named by the album

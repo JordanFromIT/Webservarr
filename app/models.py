@@ -321,6 +321,14 @@ class ListeningPosition(Base):
     # could read it, so a place offered from this copy can say which copy it
     # was. Null when not known.
     book_title = Column(String(300), nullable=True)
+    # The book's author as the library named them (spec 2.6 s3), so a place
+    # whose album is gone can be offered first to a book by the same author.
+    # Null when not known.
+    author = Column(String(200), nullable=True)
+    # True when linked_from was chosen by the listener from "Were you
+    # listening to one of these?" rather than found by work key (spec 2.6
+    # s3); null for an automatic link or none.
+    link_manual = Column(Boolean, nullable=True)
 
     def __repr__(self):
         return f"<ListeningPosition(identity='{self.identity}', book='{self.book_key}')>"
@@ -341,9 +349,26 @@ class ListeningClaim(Base):
     holder_key = Column(String(64), nullable=False)
     state = Column(String(10), nullable=False)      # verified, pending
     claimed_at = Column(DateTime, nullable=False)   # naive UTC
+    # The claim was chosen by the listener (a manual link), not found by work
+    # key; kept so a pending claim that verifies later still says so.
+    manual = Column(Boolean, nullable=True)
 
     def __repr__(self):
         return f"<ListeningClaim(identity='{self.identity}', earlier='{self.earlier_key}')>"
+
+
+class ListeningDismissal(Base):
+    """The listener answered "None of these" to "Were you listening to one of
+    these?" for `book_key` (spec 2.6 s3). One row per identity and book, so it
+    holds on every device; the question is never asked for that book again."""
+    __tablename__ = "listening_dismissals"
+
+    identity = Column(String(255), primary_key=True)
+    book_key = Column(String(64), primary_key=True)
+    dismissed_at = Column(DateTime, nullable=False)   # naive UTC
+
+    def __repr__(self):
+        return f"<ListeningDismissal(identity='{self.identity}', book='{self.book_key}')>"
 
 
 class ListeningLog(Base):

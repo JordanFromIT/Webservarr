@@ -60,8 +60,13 @@ The safety net now catches misses, so the matcher is tightened to remove false m
 - Vol., Book and No. are distinct kinds ("Vol. 2" no longer equals "Book 2").
 - Number words (one to twenty), ordinals and Roman numerals are read wherever a book number can
   appear, including after non-marker words and in a "Read by" part.
-- Per-disc keys of a multi-disc album include the album's own key, so two different albums whose
-  discs share a title never share a key.
+- Per-disc keys of a multi-disc album include the album's own work title (its work key's text,
+  not its Plex key, which a re-added album does not keep), so two different albums whose discs
+  share a title never share a key, and a box set re-added under the same title still does.
+- Numbers that go with a dropped narrator part ("Read by X, Series 2") become tokens of their own
+  kind, and a token is a punctuation mark, so no title can spell one.
+- The author is kept with each place (position row), so the orphan lookup can put the same
+  author first; rows saved before it was kept sort by recency only.
 - The disc-1 gap of a re-added box set (2.5 ledger T1S5) is closed by reading the album's tracks
   whenever the album-level pre-check misses. It stays within the existing read bound.
 
