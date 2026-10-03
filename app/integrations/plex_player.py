@@ -84,6 +84,12 @@ class TokenRejected(PlayerUnavailable):
     cache is dropped so the next call asks plex.tv again."""
 
 
+class PlexStateUnreadable(PlayerUnavailable):
+    """plex_position(strict=True): Plex answered the listener's state read,
+    but not with anything readable (a 404, or a shape we can't read), so
+    whether Plex holds a place is unknown, not "no place"."""
+
+
 class NotInLibrary(Exception):
     """The key is malformed or not in the configured audiobook library (maps to 404)."""
 
@@ -1300,7 +1306,8 @@ async def cover_image(key: str, size: int = COVER_SIZE) -> tuple:
 
 # --- Plex's listening state ---------------------------------------------------------
 
-async def plex_position(session: dict, key: str, session_id: Optional[str] = None) -> Optional[dict]:
+async def plex_position(session: dict, key: str, session_id: Optional[str] = None,
+                        strict: bool = False) -> Optional[dict]:
     """Plex's own position for this listener and book, or None when Plex has
     none: {track, offset_ms, duration_ms, book_ms, book_duration_ms,
     updated_at, device, source}. `duration_ms` is the track's, `updated_at`
@@ -1317,7 +1324,13 @@ async def plex_position(session: dict, key: str, session_id: Optional[str] = Non
     (a listener who only ever played track 3 is at track 3, not track 1).
     Resume uses `track` and `offset_ms`; `book_ms` is for display and
     comparison. A 401 on the listener's server token drops the cached access
-    and raises TokenRejected (a PlayerUnavailable)."""
+    and raises TokenRejected (a PlayerUnavailable).
+
+    The listener's state read answered with a 404, or in a shape we can't
+    read, is no place (None) by default. strict=True raises
+    PlexStateUnreadable (a PlayerUnavailable) for those instead, for a
+    caller that must tell "Plex holds no place" from "Plex could not be
+    read" (GET /position's plex_error)."""
     admin = _configured()
     parse_key(key)
     access = await server_access(session, session_id=session_id)
@@ -1329,9 +1342,14 @@ async def plex_position(session: dict, key: str, session_id: Optional[str] = Non
         except TokenRejected:
             await forget_access(session, session_id)
             raise
+    if mine is None and strict:
+        # A 404 on a book just read: not an answer about the listener's place.
+        raise PlexStateUnreadable("Plex did not return the listener's state")
     try:
         rows = _items(mine)
     except PlayerUnavailable:
+        if strict:
+            raise PlexStateUnreadable("Plex returned the listener's state in an unexpected shape") from None
         # The listener's own state in a shape we can't read: no Plex place
         # (the book still resumes from WebServarr's copy and the local one).
         return None

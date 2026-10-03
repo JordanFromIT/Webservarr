@@ -407,6 +407,18 @@ class Shapes(PlayerApiBase):
             body = self.client.get("/api/player/position/200:1").json()
             self.assertIsNone(body["plex"])
             self.assertIs(body["plex_error"], True)
+        # The listener's state read answered with a 404 or an odd shape:
+        # plex_position(strict=True) raises PlexStateUnreadable, so /position
+        # flags it too (T4R1), rather than reading it as "no place".
+        async def strict_unreadable(session, key, session_id=None, strict=False):
+            if strict:
+                raise pp.PlexStateUnreadable("odd")
+            return None
+        self.plex_position.side_effect = strict_unreadable
+        body = self.client.get("/api/player/position/200:1").json()
+        self.assertIsNone(body["plex"])
+        self.assertIs(body["plex_error"], True)
+        self.assertIs(self.plex_position.await_args.kwargs.get("strict"), True)
         # Read, with no place (or only an echo of ours): no flag at all.
         self.plex_position.side_effect = None
         self.plex_position.return_value = None
@@ -1201,6 +1213,13 @@ class PlexEchoes(PlayerApiBase):
         self.plex_at("201", 93_500)
         self.assertIsNone(self.plex())
         self.assertEqual(self.position()["track"], "202")
+
+    def test_an_echo_left_out_is_no_plex_error(self):
+        self.checkin(track="202", offset_ms=150_000, event="pause")
+        self.plex_at("202", 150_000)
+        body = self.client.get("/api/player/position/200:1").json()
+        self.assertIsNone(body["plex"])
+        self.assertNotIn("plex_error", body)
 
     def test_within_five_seconds_only(self):
         self.checkin(track="202", offset_ms=150_000, event="pause")

@@ -406,7 +406,8 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
 
     Plex's is best effort: once the listener's access is confirmed, a failure
     reading their Plex state (a refused token, plex.tv down) makes it null,
-    and WebServarr's still resumes the book. Such a failure also adds
+    and WebServarr's still resumes the book. Such a failure (including a
+    404 or an unreadable shape for the listener's own state) also adds
     `plex_error: true`, so a null that means "Plex could not be read" is
     never taken for "Plex holds no place" (the player's re-read before a
     late answer to a Plex app's question).
@@ -436,7 +437,7 @@ async def position(request: Request, key: str, who: Listener = Depends(listener)
     album, _access = await _checked_book(who, key)
     plex_error = False
     try:
-        plex_pos = await pp.plex_position(who.session(), key, session_id=who.session_id)
+        plex_pos = await pp.plex_position(who.session(), key, session_id=who.session_id, strict=True)
     except pp.NotInLibrary as exc:
         raise _http_error(exc) from None
     except pp.PlayerUnavailable as exc:

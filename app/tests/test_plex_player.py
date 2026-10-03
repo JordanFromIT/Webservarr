@@ -1825,6 +1825,32 @@ class Shapes(BridgeBase):
                 finally:
                     self.plex.handle = orig
 
+    def test_plex_position_strict_tells_an_unreadable_state_from_no_place(self):
+        # strict=True (GET /position, for its plex_error): a 404 or an odd
+        # shape on the listener's state read raises PlexStateUnreadable;
+        # without it (any other caller) both stay "no place", as before.
+        orig = self.plex.handle
+        for label, reply in (("404", httpx.Response(404)),
+                             ("odd shape", httpx.Response(200, json={"MediaContainer": {"Metadata": {"k": 1}}})),
+                             ("strings", httpx.Response(200, json={"MediaContainer": {"Metadata": ["x"]}}))):
+            with self.subTest(read=label):
+                def handle(request, orig=orig, reply=reply):
+                    if request.url.path == "/library/metadata/200/children" and \
+                            request.headers.get("X-Plex-Token") == SERVER_TOKEN:
+                        self.plex.calls.append(request)
+                        return reply
+                    return orig(request)
+                self.plex.handle = handle
+                try:
+                    with self.assertRaises(pp.PlexStateUnreadable):
+                        self.run_async(pp.plex_position(listener(), "200:1", session_id=SID, strict=True))
+                    self.assertIsNone(self.run_async(pp.plex_position(listener(), "200:1", session_id=SID)))
+                finally:
+                    self.plex.handle = orig
+        self.assertTrue(issubclass(pp.PlexStateUnreadable, pp.PlayerUnavailable))
+        # A readable answer with no place is no place, strict or not.
+        self.assertIsNone(self.run_async(pp.plex_position(listener(), "200:1", session_id=SID, strict=True)))
+
     def test_a_track_whose_media_is_odd_still_reads(self):
         odd = dict(TRACKS["500"][0], Media={"Part": []})
         with mock.patch.dict(TRACKS, {"500": [odd]}):

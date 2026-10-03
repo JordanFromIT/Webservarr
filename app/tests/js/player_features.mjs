@@ -3864,8 +3864,9 @@ await run('PR3: a double tap while the place is read again acts once', async () 
 
 // ---- Task 4 fix round 1 ----
 
-await run('T4E1: the read refused. 401: the sign-in path, nothing acted on. 404: the answer goes on as before the read existed. 503: kept', async () => {
-  for (const status of [401, 404, 503]) {
+await run('T4E1: the read refused. 401: the sign-in path, nothing acted on. 404: the answer goes on as before the read existed. 408, 429, 503: kept', async () => {
+  // 408 and 429 pass like a 5xx: kept, never taken as the 404's "answer goes on".
+  for (const status of [401, 404, 408, 429, 503]) {
     const t = await plexQuestion();
     await t.clock.advance(10 * MIN);
     t.positionStatus = status;
