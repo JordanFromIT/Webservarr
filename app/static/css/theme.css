@@ -1240,6 +1240,9 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-hist-row { align-items: center; }
 .wsp-hist-row:disabled { cursor: default; opacity: .6; }
 .wsp-hist-when, .wsp-hist-what, .wsp-hist-device { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Where it ended and the chapters covered wrap rather than cut: the end of
+   the line ("· 29%") is the part that matters on a phone. */
+.wsp-hist-what, .wsp-hist-device { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
 .wsp-hist-when { font-weight: 600; }
 .wsp-hist-what { margin-top: 2px; font-size: 13px; color: rgb(var(--color-text)); font-variant-numeric: tabular-nums; }
 .wsp-hist-dev { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 2px; font-size: 13px; color: rgb(var(--color-text) / .7); }

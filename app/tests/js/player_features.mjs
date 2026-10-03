@@ -1791,6 +1791,77 @@ await run('session lines: when, and the chapters covered', () => {
   check('none known: nothing', F.sessionChapters({ fromMs: null, toMs: null }, MULTI.chapters) === '' && F.sessionChapters({ fromMs: 1, toMs: 2 }, []) === '');
 });
 
+await run('T5F2: the range of a session counts places not in this copy by the chapter names they saved', () => {
+  const at = (min) => new Date(Date.UTC(2026, 8, 29, 20, 0) - min * 60000).toISOString();
+  const e = (min, track, offset, more) => Object.assign({ track, offset_ms: offset, device: 'Chrome on Android', device_id: OTHER, event: 'checkin', at: at(min) }, more);
+  // 501 and 503 are here; 502's file is gone (a new part replaced it).
+  const place = (track, off) => (track === '501' ? off : track === '503' ? 1500000 + off : null);
+  const same = F.groupSessions([
+    e(0, '502', 5000, { book_key: '500:1', chapter_label: 'Part 2 of 3' }),
+    e(1, '501', 590000, { book_key: '500:1', chapter_label: 'Part 1 of 3' })
+  ], place)[0];
+  check('labels oldest first, and the gone ones apart', same.labels.join('|') === 'Part 1 of 3|Part 2 of 3' && same.goneLabels.join('|') === 'Part 2 of 3', same);
+  check('a gone part: its saved chapter counts', F.sessionRange(same, MULTI.chapters) === 'Chapters 1 to 2', F.sessionRange(same, MULTI.chapters));
+  check('sessionChapters alone did not see it', F.sessionChapters(same, MULTI.chapters) === 'Part 1 of 3');
+  // An earlier copy's session: none of its places is here.
+  const earlier = F.groupSessions([
+    e(0, '403', 9000, { book_key: '400:1', chapter_label: 'Part 3 of 3', earlier_copy: true }),
+    e(1, '402', 9000, { book_key: '400:1', chapter_label: 'Part 2 of 3', earlier_copy: true }),
+    e(2, '401', 9000, { book_key: '400:1', chapter_label: 'Part 1 of 3', earlier_copy: true })
+  ], place)[0];
+  check('an earlier copy: by its names', F.sessionRange(earlier, MULTI.chapters) === 'Chapters 1 to 3', F.sessionRange(earlier, MULTI.chapters));
+  // Names this copy doesn't have: as that copy named them, first to last.
+  const named = F.groupSessions([
+    e(0, '403', 9000, { book_key: '400:1', chapter_label: 'The Letter', earlier_copy: true }),
+    e(1, '402', 9000, { book_key: '400:1', chapter_label: '4', earlier_copy: true }),
+    e(2, '401', 9000, { book_key: '400:1', chapter_label: '3', earlier_copy: true })
+  ], place)[0];
+  check('names not in this copy: first to last', F.sessionRange(named, MULTI.chapters) === 'Chapter 3 to The Letter', F.sessionRange(named, MULTI.chapters));
+  check('one name: no range', F.sessionRange({ fromMs: null, toMs: null, labels: ['The Letter', 'The Letter'], goneLabels: ['The Letter', 'The Letter'] }, MULTI.chapters) === '');
+  // No saved names: those places are left out.
+  const bare = F.groupSessions([e(0, '402', 1), e(1, '401', 2)], () => null)[0];
+  check('no names: no range', bare.goneLabels.length === 0 && F.sessionRange(bare, MULTI.chapters) === '', bare);
+  const mixedBare = F.groupSessions([e(0, '502', 1), e(1, '501', 590000, { chapter_label: 'Part 1 of 3' })], place)[0];
+  check('a gone place without a name adds nothing', F.sessionRange(mixedBare, MULTI.chapters) === '', F.sessionRange(mixedBare, MULTI.chapters));
+  // This copy's places alone: today's range.
+  check('this copy alone: as before', F.sessionRange({ fromMs: 10000, toMs: 1600000, labels: [], goneLabels: [] }, MULTI.chapters) === 'Chapters 1 to 3' &&
+    F.sessionRange({ fromMs: 610000, toMs: 900000, labels: [], goneLabels: [] }, MULTI.chapters) === '' &&
+    F.sessionRange({ fromMs: null, toMs: null }, MULTI.chapters) === '' && F.sessionRange(null, MULTI.chapters) === '');
+  check('blank names are no names', F.groupSessions([e(0, '402', 1, { chapter_label: '  ' })], place)[0].goneLabels.length === 0);
+});
+
+await run('T5F2: history rows show the range of a session whose places are not in this copy', async () => {
+  const t = await setup({ wide: true });
+  await t.openAt(MULTI.key, '501', 60000, { autoplay: false });
+  const e = (agoMs, track, offset, more) => Object.assign(entry(t, agoMs, track, offset), more);
+  t.history[''] = {
+    entries: [
+      e(MIN, '502', 300000, { book_key: '500:1', book_ms: 900000, book_duration_ms: 1800000, chapter_label: 'Part 2 of 3' }),
+      e(30 * MIN, '403', 200000, { book_key: '400:1', book_ms: 1700000, book_duration_ms: 1800000, chapter_label: 'Part 3 of 3', earlier_copy: true }),
+      e(31 * MIN, '401', 190000, { book_key: '400:1', book_ms: 190000, book_duration_ms: 1800000, chapter_label: 'Part 1 of 3', earlier_copy: true })
+    ],
+    next_before: null
+  };
+  t.ui.open();
+  t.q('.wsp-slot-history .wsp-action').click();
+  await t.clock.advance(50);
+  const rows = t.qa('.wsp-hist-row');
+  const devs = rows.map((r) => r.querySelector('.wsp-hist-device').textContent);
+  check('the earlier copy\'s session shows the chapters it covered', rows.length === 2 && devs[1] === 'Chapters 1 to 3 · Chrome on Android', devs);
+  check('in the spoken label', /, Chapters 1 to 3, Chrome on Android, earlier copy$/.test(rows[1].getAttribute('aria-label')), rows[1].getAttribute('aria-label'));
+  t.engine.close();
+});
+
+await run('T5F3: a history row\'s place and chapters wrap, never cut (the percent ends the line on a phone)', () => {
+  const css = readFileSync(process.env.THEME_CSS || join(here, '../../static/css/theme.css'), 'utf8');
+  // The last rule naming each wins: it must let the text wrap and show it all.
+  for (const cls of ['wsp-hist-what', 'wsp-hist-device']) {
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((m) => new RegExp('\\.' + cls + '(?![\\w-])').test(m[1]) && /white-space|overflow|text-overflow/.test(m[2]));
+    const last = rules.length ? rules[rules.length - 1][2] : '';
+    check(cls + ': wraps', /white-space:\s*normal/.test(last) && /overflow:\s*visible/.test(last) && !/text-overflow:\s*ellipsis/.test(last), last);
+  }
+});
+
 await run('handoff: only another device, within 24 h, with a place of its own here over 30 s away', () => {
   const now = '2026-09-29T20:00:00.000Z';
   const ago = (ms) => new Date(Date.parse(now) - ms).toISOString();

@@ -124,6 +124,8 @@
  *   formatAgo(ms)                         "just now", "3 min ago", "2 h ago", "3 days ago"
  *   groupSessions(entries, placeMs)       history entries (newest first) as sessions, newest first
  *   sessionWhen(session, now), sessionChapters(session, chapters)   a session's lines
+ *   sessionRange(session, chapters)       "Chapters 3 to 5" (also from the names a place
+ *                                         not in this copy saved), or ''
  *   sessionPlace(session, chapters, durationMs)   "Chapter 3 · 1:02:03 into the book · 34%"
  *   chapterName(label)                    "Chapter 3" for a bare number, else the label
  *   createFeatures(env)                   the features, given their surroundings
@@ -419,7 +421,10 @@ export function handoffMessage(offer) {
      endMs (null: not in the book), fromMs, toMs (the book time covered, null
      when none of its places is in the book), count, and from the entry it
      ended at, as that copy saved it: endBookMs, endDurationMs, endLabel
-     (null when not saved), bookKey, earlier (an earlier copy's) }. */
+     (null when not saved), bookKey, earlier (an earlier copy's), labels
+     (the chapter names its entries saved, oldest first) and goneLabels
+     (those of its entries whose place is not in this copy: a part gone, or
+     an earlier copy's) }. */
 function wholeMs(v) {
   return typeof v === 'number' && isFinite(v) && v >= 0 ? v : null;
 }
@@ -448,15 +453,20 @@ export function groupSessions(entries, placeMs) {
         endMs: ms, fromMs: ms, toMs: ms, count: 0,
         endBookMs: wholeMs(e.book_ms), endDurationMs: wholeMs(e.book_duration_ms),
         endLabel: typeof e.chapter_label === 'string' && e.chapter_label ? e.chapter_label : null,
-        bookKey: copy || null, earlier: e.earlier_copy === true
+        bookKey: copy || null, earlier: e.earlier_copy === true, labels: [], goneLabels: []
       };
       out.push(cur);
     }
     cur.start = at;
     cur.count += 1;
+    const label = typeof e.chapter_label === 'string' && e.chapter_label.trim() ? e.chapter_label.trim() : null;
+    // Newest first here, so each goes in front: the lists end up oldest first.
+    if (label !== null) cur.labels.unshift(label);
     if (ms !== null) {
       cur.fromMs = cur.fromMs === null ? ms : Math.min(cur.fromMs, ms);
       cur.toMs = cur.toMs === null ? ms : Math.max(cur.toMs, ms);
+    } else if (label !== null) {
+      cur.goneLabels.unshift(label);
     }
   }
   return out.map(function (x) {
@@ -464,7 +474,7 @@ export function groupSessions(entries, placeMs) {
       start: x.start, end: x.end, device: x.device, device_id: x.device_id, endPlace: x.endPlace,
       endMs: x.endMs, fromMs: x.fromMs, toMs: x.toMs, count: x.count,
       endBookMs: x.endBookMs, endDurationMs: x.endDurationMs, endLabel: x.endLabel,
-      bookKey: x.bookKey, earlier: x.earlier
+      bookKey: x.bookKey, earlier: x.earlier, labels: x.labels, goneLabels: x.goneLabels
     };
   });
 }
@@ -521,6 +531,38 @@ export function sessionChapters(session, chapters) {
   const b = chapterIndexAt(list, num(s.toMs));
   if (a === b) return String(list[a].label || 'Chapter ' + (a + 1));
   return 'Chapters ' + (a + 1) + ' to ' + (b + 1);
+}
+
+/* The chapters a session covered when it covered more than one, for its
+   history row: "Chapters 3 to 5", or '' for one chapter or none known.
+   Places in this copy count by where they fall in its chapters (as
+   sessionChapters). A place that is not in this copy (its part is gone, or
+   it is an earlier copy's) counts by the chapter name its entry saved: a
+   name this copy's chapters have is that chapter's number; when any such
+   name is not one of them, the range is the names the entries saved, first
+   to last ("Part 4 of 17 to Part 6 of 17"). Without saved names those
+   places are left out (no range from them alone). */
+export function sessionRange(session, chapters) {
+  const s = session || {};
+  const list = Array.isArray(chapters) ? chapters : [];
+  const gone = Array.isArray(s.goneLabels) ? s.goneLabels : [];
+  const placed = list.length && typeof s.fromMs === 'number' && typeof s.toMs === 'number';
+  const nums = placed ? [chapterIndexAt(list, s.fromMs), chapterIndexAt(list, s.toMs)] : [];
+  const numbered = gone.map(function (label) {
+    for (let i = 0; i < list.length; i++) if (list[i] && list[i].label === label) return i;
+    return -1;
+  });
+  if (numbered.indexOf(-1) === -1) {
+    const all = nums.concat(numbered);
+    if (!all.length) return '';
+    const a = Math.min.apply(null, all);
+    const b = Math.max.apply(null, all);
+    return a === b ? '' : 'Chapters ' + (a + 1) + ' to ' + (b + 1);
+  }
+  const labels = Array.isArray(s.labels) && s.labels.length ? s.labels : gone;
+  const first = labels[0];
+  const last = labels[labels.length - 1];
+  return first === last ? '' : chapterName(first) + ' to ' + chapterName(last);
 }
 
 /* A chapter's label as a name: "Chapter 3" for a bare number (or Roman numeral),
@@ -1658,9 +1700,9 @@ export function createFeatures(env) {
     hs.sessions.forEach(function (x, i) {
       const when = sessionWhen(x, nowMs);
       const where = sessionPlace(x, s.chapters, s.bookDurationMs);
-      // The chapters it covered, when more than the one it ended in.
-      const covered = sessionChapters(x, s.chapters);
-      const range = covered.indexOf('Chapters ') === 0 ? covered : '';
+      // The chapters it covered, when more than the one it ended in (by the
+      // names it saved, for places not in this copy).
+      const range = sessionRange(x, s.chapters);
       const device = x.device || 'Another device';
       // Its part is gone (the files changed, or an earlier copy): the helper
       // finds the place in this copy.
