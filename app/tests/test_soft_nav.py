@@ -550,7 +550,7 @@ class HomePage(unittest.TestCase):
         self.assertNotRegex(body, r"\bsetTimeout\(")
         leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
         self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'engine.js', 'saves.js', "
-                      "'features.js'];", leaks)
+                      "'features.js',\n  'findplace.js'];", leaks)
 
     def test_the_clock_test_runs_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file
@@ -1811,6 +1811,61 @@ class PlayerFeatures(unittest.TestCase):
         theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
         for sel in (".wsp-chip", ".wsp-switch", ".wsp-switch::after", ".wsp-row"):
             self.assertTrue(stilled(theme, sel, "transition"), sel)
+
+
+class PlayerFindPlace(unittest.TestCase):
+    """The audiobook player's "Find your place" helper (js/player/findplace.js,
+    spec 2026-09-30 audiobook files changed, section 5): document-lifetime
+    like the rest of the player, so loaded once by the shell as its own
+    stamped module, right after the features it opens history through; no
+    markup from strings and no inline handlers (CSP script-src 'self'); text
+    colours only from theme.css. Its behaviour is
+    app/tests/js/player_findplace.mjs, run locally and in CI."""
+
+    FINDPLACE = STATIC / "js" / "player" / "findplace.js"
+
+    def test_it_loads_once_from_the_shell_right_after_the_features(self):
+        from app.tests.test_shell_contract import BARE_PAGES, SHELL_PAGES
+        part = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
+        tags = [m for m in _SCRIPT_TAG_RE.finditer(part)]
+        srcs = [attr(m.group(1), "src") or "" for m in tags]
+        mine = [i for i, s in enumerate(srcs) if s.startswith("/static/js/player/findplace.js")]
+        self.assertEqual(len(mine), 1, "the shell loads the helper exactly once")
+        self.assertEqual(srcs[mine[0]], "/static/js/player/findplace.js?v=1", "stamped like every shell script")
+        self.assertEqual(attr(tags[mine[0]].group(1), "type"), "module")
+        self.assertEqual(srcs[mine[0] - 1], "/static/js/player/features.js?v=1", "right after the features")
+        for name in SHELL_PAGES + BARE_PAGES:
+            with self.subTest(name):
+                self.assertNotIn("/static/js/player/findplace.js", read(name), f"{name} loads the helper itself")
+        for p in (STATIC / "js").rglob("*.js"):
+            self.assertNotRegex(p.read_text(encoding="utf-8"),
+                                r"""(?:\bfrom|\bimport\s*\(?)\s*['"][^'"]*findplace\.js['"]""", p.name)
+
+    def test_it_builds_no_markup_from_strings_and_no_handler_properties(self):
+        src = self.FINDPLACE.read_text(encoding="utf-8")
+        code = js_code_only(src)
+        for word in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "setInterval",
+                     "setTimeout", "eval("):
+            self.assertNotIn(word, code, word)
+        self.assertNotRegex(code, r"\.on[a-z]+\s*=(?!=)", "listeners go through addEventListener")
+        self.assertEqual(string_matches(src, _HANDLER_TEXT_RE), [])
+        # Colours only through theme.css: the one style write is the nudge's fill.
+        self.assertEqual(re.findall(r"\.style\.[\w.]+", code), [".style.setProperty"])
+        self.assertNotRegex(code, r"\bhistory\s*\.|pushState|replaceState|popstate")
+        self.assertNotRegex(code, r"WSUI\.(?:confirm|alert|prompt|dialog|open)")
+        # It reaches the engine only through WS.player's API: it never saves.
+        self.assertNotRegex(code, r"\bfetch\(|sendBeacon|localStorage|playerSaves")
+
+    def test_its_controls_are_stilled_by_reduced_motion(self):
+        from app.tests.test_motion import stilled
+        theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        for sel in (".wsp-fp-cand", ".wsp-fp-btn"):
+            self.assertTrue(stilled(theme, sel, "transition"), sel)
+
+    def test_its_test_runs_locally_and_in_ci(self):
+        from app.tests.test_theme_engine import repo_file
+        for parts in (("package.json",), (".github", "workflows", "docker-publish.yml")):
+            self.assertIn("node app/tests/js/player_findplace.mjs", repo_file(self, *parts), "/".join(parts))
 
 
 if __name__ == "__main__":

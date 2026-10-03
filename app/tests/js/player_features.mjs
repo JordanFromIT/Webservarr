@@ -1729,6 +1729,30 @@ await run('history sessions: a gap over 10 minutes splits, exactly 10 does not; 
   check('junk is skipped', F.groupSessions([null, { at: 'yesterday' }, 5], place).length === 0 && F.groupSessions(null).length === 0);
 });
 
+await run('history (spec 2.5): sessions split by copy; where one ended, as that copy saved it', () => {
+  const at = (min) => new Date(Date.UTC(2026, 8, 29, 20, 0) - min * 60000).toISOString();
+  const e = (min, track, more) => Object.assign({ track, offset_ms: 1000, device: 'Chrome on Android', device_id: OTHER, event: 'checkin', at: at(min) }, more);
+  const place = (track, off) => (track === '501' ? off : null);
+  const g = F.groupSessions([
+    e(0, '501', { book_key: '500:1', book_ms: 1000, book_duration_ms: 3600000, chapter_label: 'One' }),
+    e(1, '401', { book_key: '400:1', book_ms: 61000, book_duration_ms: 7200000, chapter_label: 'Uno', earlier_copy: true }),
+    e(2, '401', { book_key: '400:1', book_ms: 60000, earlier_copy: true })
+  ], place);
+  check('two sessions: one per copy', g.length === 2 && g[0].count === 1 && g[1].count === 2, g.map((x) => x.count));
+  check('the end entry\'s own fields', g[1].endBookMs === 61000 && g[1].endDurationMs === 7200000 && g[1].endLabel === 'Uno' && g[1].bookKey === '400:1' && g[1].earlier === true, g[1]);
+  check('this copy\'s', g[0].earlier === false && g[0].bookKey === '500:1' && g[0].endMs === 1000);
+  const none = F.groupSessions([e(0, '501')], place)[0];
+  check('not saved: null', none.endBookMs === null && none.endDurationMs === null && none.endLabel === null && none.bookKey === null && none.earlier === false, none);
+  check('chapter names', F.chapterName('3') === 'Chapter 3' && F.chapterName('XII') === 'Chapter XII' && F.chapterName('Chapter 3') === 'Chapter 3' &&
+    F.chapterName('Part 2 of 17') === 'Part 2 of 17' && F.chapterName('The Letter') === 'The Letter' && F.chapterName('Mix') === 'Mix' && F.chapterName(null) === '');
+  check('the saved place', F.sessionPlace(g[1], MULTI.chapters, 1800000) === 'Uno · 0:01:01 into the book · 0%', F.sessionPlace(g[1], MULTI.chapters, 1800000));
+  check('no saved length: no percent', F.sessionPlace({ endBookMs: 3725000, endDurationMs: null, endLabel: '12', endMs: null }, [], 1800000) === 'Chapter 12 · 1:02:05 into the book');
+  check('saved before: this copy', F.sessionPlace({ endBookMs: null, endMs: 1500000 }, MULTI.chapters, 1800000) === 'Part 3 of 3 · 0:25:00 into the book · 83%');
+  check('an unnamed chapter of this copy', F.sessionPlace({ endBookMs: null, endMs: 700000 }, [{ start_ms: 0 }, { start_ms: 600000 }], 1800000) === 'Chapter 2 · 0:11:40 into the book · 38%');
+  check('nothing known', F.sessionPlace({ endBookMs: null, endMs: null, endLabel: null }, MULTI.chapters, 1800000) === '');
+  check('a label alone', F.sessionPlace({ endBookMs: null, endMs: null, endLabel: 'Prologue' }, [], 0) === 'Prologue');
+});
+
 await run('a session across a page boundary is one', () => {
   const at = (min) => new Date(Date.UTC(2026, 8, 29, 20, 0) - min * 60000).toISOString();
   const e = (min) => ({ track: '501', offset_ms: 1000 * (100 - min), device: 'Chrome on Android', device_id: OTHER, event: 'checkin', at: at(min) });
@@ -3404,11 +3428,13 @@ await run('history: sessions from the log, and a tap goes to where one ended', a
   const rows = t.qa('.wsp-hist-row');
   check('two sessions, newest first', rows.length === 2, rows.length);
   const what = rows.map((r) => r.querySelector('.wsp-hist-what').textContent);
-  check('chapters and device', what[0] === 'Part 1 of 3 · Test on Linux' && what[1] === 'Chapters 2 to 3 · Chrome on Android', what);
-  const ends = rows.map((r) => r.querySelector('.wsp-hist-at').textContent);
-  check('where each ended', ends.join() === '1:00,26:40', ends);
+  // Saved before the book time was kept: this copy's chapter, time and length.
+  check('where each ended: chapter, book time, percent', what[0] === 'Part 1 of 3 · 0:01:00 into the book · 3%' && what[1] === 'Part 3 of 3 · 0:26:40 into the book · 88%', what);
+  const devs = rows.map((r) => r.querySelector('.wsp-hist-dev').textContent);
+  check('the device', devs.join() === 'Test on Linux,Chrome on Android', devs);
+  check('no earlier copy here', !t.q('.wsp-hist-tag'));
   check('when', rows[1].querySelector('.wsp-hist-when').textContent.startsWith('Today · '), rows[1].querySelector('.wsp-hist-when').textContent);
-  check('a spoken label', /Go to where it ended, 26:40$/.test(rows[1].getAttribute('aria-label')), rows[1].getAttribute('aria-label'));
+  check('a spoken label', /, Part 3 of 3 · 0:26:40 into the book · 88%, Chrome on Android\. Go to where it ended$/.test(rows[1].getAttribute('aria-label')), rows[1].getAttribute('aria-label'));
   check('no older pages: no Show older', t.q('.wsp-hist-more').hidden);
   const posts = t.posts.length;
   rows[1].click();
@@ -3417,6 +3443,43 @@ await run('history: sessions from the log, and a tap goes to where one ended', a
   await t.clock.advance(1100);
   check('saved as the listener\'s own move', t.posts.length === posts + 1 && t.posts[posts].track === '503' && t.posts[posts].offset_ms === 100000, t.posts.slice(posts));
   check('back to the player on a phone', t.q('.wsp-full').getAttribute('data-view') === null);
+  t.engine.close();
+});
+
+await run('history (spec 2.5): that copy\'s chapter, book time and percent; an earlier copy says so; its part gone, no helper: disabled', async () => {
+  const t = await setup({ wide: true });
+  await t.openAt(MULTI.key, '501', 60000, { autoplay: false });
+  const e = (agoMs, track, offset, more) => Object.assign(entry(t, agoMs, track, offset), more);
+  t.history[''] = {
+    entries: [
+      e(MIN, '502', 300000, { book_key: '500:1', book_ms: 900000, book_duration_ms: 1800000, chapter_label: '7' }),
+      // An earlier copy's entries: their own chapter names and length.
+      e(30 * MIN, '401', 200000, { book_key: '400:1', book_ms: 3725000, book_duration_ms: 7200000, chapter_label: 'The Letter', earlier_copy: true }),
+      e(31 * MIN, '401', 190000, { book_key: '400:1', book_ms: 3715000, book_duration_ms: 7200000, chapter_label: 'The Letter', earlier_copy: true }),
+      // Saved before the book time was kept, its part gone: nothing to say where.
+      e(90 * MIN, '399', 5000, { book_key: '400:1', earlier_copy: true })
+    ],
+    next_before: null
+  };
+  t.ui.open();
+  t.q('.wsp-slot-history .wsp-action').click();
+  await t.clock.advance(50);
+  const rows = t.qa('.wsp-hist-row');
+  check('another copy starts another session', rows.length === 3, rows.length);
+  const what = rows.map((r) => { const w = r.querySelector('.wsp-hist-what'); return w ? w.textContent : null; });
+  check('"Chapter <label> · <h:mm:ss> into the book · <n>%"', what[0] === 'Chapter 7 · 0:15:00 into the book · 50%', what[0]);
+  check('the earlier copy\'s own chapter, time and length', what[1] === 'The Letter · 1:02:05 into the book · 51%', what[1]);
+  check('nothing known: no line', what[2] === null, what[2]);
+  const tags = rows.map((r) => { const g = r.querySelector('.wsp-hist-tag'); return g ? g.textContent : ''; });
+  check('"Earlier copy" on the earlier copy\'s', tags.join() === ',Earlier copy,Earlier copy', tags);
+  check('in the spoken label', /Chrome on Android, earlier copy$/.test(rows[1].getAttribute('aria-label')), rows[1].getAttribute('aria-label'));
+  check('no helper: the gone ones are disabled', !rows[0].disabled && rows[1].disabled && rows[2].disabled);
+  rows[1].click();
+  await t.clock.advance(100);
+  check('a tap there does nothing', bookMs(t) === 60000 && t.posts.length === 0, bookMs(t));
+  rows[0].click();
+  await t.clock.advance(100);
+  check('one in the book still goes where it ended', bookMs(t) === 900000, bookMs(t));
   t.engine.close();
 });
 
@@ -3437,8 +3500,7 @@ await run('history: Show older loads the next page, and a session across the pag
   check('the next page by its cursor', urls[urls.length - 1] === '/api/player/history/500%3A1?before=cur~1', urls);
   const rows = t.qa('.wsp-hist-row');
   check('the session runs on into the older page, then an older one', rows.length === 2, rows.length);
-  check('the first covers both pages', rows[0].querySelector('.wsp-hist-what').textContent.startsWith('Part 2 of 3'), rows[0].querySelector('.wsp-hist-what').textContent);
-  check('it still ends where the first page\'s newest place is', rows[0].querySelector('.wsp-hist-at').textContent === '18:20', rows[0].querySelector('.wsp-hist-at').textContent);
+  check('it still ends where the first page\'s newest place is', rows[0].querySelector('.wsp-hist-what').textContent === 'Part 2 of 3 · 0:18:20 into the book · 61%', rows[0].querySelector('.wsp-hist-what').textContent);
   check('no more pages', t.q('.wsp-hist-more').hidden);
   t.engine.close();
 });

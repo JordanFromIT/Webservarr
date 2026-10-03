@@ -64,11 +64,17 @@
  *   Space and arrows), not under a page's tour or a WSUI dialog.
  * - History (GET /api/player/history/<book>, a page at a time): the log
  *   grouped into listening sessions, newest first. A gap of more than 10
- *   minutes, or another device, starts a new session; a session running
- *   across two pages is one. Each shows when it started and ended, the
- *   chapters it covered and the device, and a tap goes to where it ended
- *   (a seek: the listener's own move, with Undo over 2 minutes). "Show
- *   older" loads the next page.
+ *   minutes, another device, or another copy of the book (an earlier copy's
+ *   entries: earlier_copy) starts a new session; a session running across
+ *   two pages is one. Each shows when it started and ended, where it ended
+ *   ("Chapter 3 · 1:02:03 into the book · 34%": that copy's chapter, book
+ *   time and how far through), the device, and "Earlier copy" for an
+ *   earlier copy's. A tap goes to where it ended (a seek: the listener's own
+ *   move, with Undo over 2 minutes; while the book is held because its files
+ *   changed, it moves the helper's chosen spot and the helper shows again).
+ *   A session whose part is gone (the files changed, or an earlier copy)
+ *   opens the "Find your place" helper (findplace.js) with it as the old
+ *   place. "Show older" loads the next page.
  * - Handoff: a book that opens at a place saved by ANOTHER device (its
  *   device_id, else its label when either side has no id) in the last 24
  *   hours, when this browser has its own place in the book (one the listener
@@ -111,6 +117,8 @@
  *   formatAgo(ms)                         "just now", "3 min ago", "2 h ago", "3 days ago"
  *   groupSessions(entries, placeMs)       history entries (newest first) as sessions, newest first
  *   sessionWhen(session, now), sessionChapters(session, chapters)   a session's lines
+ *   sessionPlace(session, chapters, durationMs)   "Chapter 3 · 1:02:03 into the book · 34%"
+ *   chapterName(label)                    "Chapter 3" for a bare number, else the label
  *   createFeatures(env)                   the features, given their surroundings
  *   boot(win, overrides)                  WS.playerFeatures
  *
@@ -119,6 +127,7 @@
  *   cancelSleep()
  *   sleepState() -> { kind, minutes, leftMs } | null
  *   prefs() -> { skip_s, speed, smart_rewind }
+ *   showHistory(opener)   the history panel (the helper's "Show history")
  */
 
 export const SKIP_CHOICES = [5, 10, 15, 30, 45, 60];
@@ -394,11 +403,18 @@ export function handoffMessage(offer) {
 
 /* History entries (newest first, as GET /history gives them, several pages
    joined) as listening sessions, newest first. A gap of more than 10
-   minutes, or another device, starts a new one. placeMs(track, offset) is a
-   place's book time (null when the book has no such part). Each session:
+   minutes, another device, or another copy of the book (book_key), starts a
+   new one. placeMs(track, offset) is a place's book time (null when the book
+   has no such part). Each session:
    { start, end (ms), device, device_id, endPlace { track, offset_ms },
      endMs (null: not in the book), fromMs, toMs (the book time covered, null
-     when none of its places is in the book), count }. */
+     when none of its places is in the book), count, and from the entry it
+     ended at, as that copy saved it: endBookMs, endDurationMs, endLabel
+     (null when not saved), bookKey, earlier (an earlier copy's) }. */
+function wholeMs(v) {
+  return typeof v === 'number' && isFinite(v) && v >= 0 ? v : null;
+}
+
 export function groupSessions(entries, placeMs) {
   const list = Array.isArray(entries) ? entries : [];
   const out = [];
@@ -408,7 +424,8 @@ export function groupSessions(entries, placeMs) {
     const at = Date.parse(e.at);
     if (!isFinite(at)) continue;
     const devId = idOf(e.device_id);
-    const who = devId ? 'id:' + devId : 'label:' + (typeof e.device === 'string' ? e.device : '');
+    const copy = typeof e.book_key === 'string' ? e.book_key : '';
+    const who = copy + '|' + (devId ? 'id:' + devId : 'label:' + (typeof e.device === 'string' ? e.device : ''));
     let ms = null;
     if (typeof placeMs === 'function' && e.track != null && typeof e.offset_ms === 'number') {
       const b = placeMs(String(e.track), e.offset_ms);
@@ -419,7 +436,10 @@ export function groupSessions(entries, placeMs) {
         who: who, start: at, end: at,
         device: typeof e.device === 'string' ? e.device : '', device_id: devId,
         endPlace: { track: String(e.track), offset_ms: num(e.offset_ms) },
-        endMs: ms, fromMs: ms, toMs: ms, count: 0
+        endMs: ms, fromMs: ms, toMs: ms, count: 0,
+        endBookMs: wholeMs(e.book_ms), endDurationMs: wholeMs(e.book_duration_ms),
+        endLabel: typeof e.chapter_label === 'string' && e.chapter_label ? e.chapter_label : null,
+        bookKey: copy || null, earlier: e.earlier_copy === true
       };
       out.push(cur);
     }
@@ -433,7 +453,9 @@ export function groupSessions(entries, placeMs) {
   return out.map(function (x) {
     return {
       start: x.start, end: x.end, device: x.device, device_id: x.device_id, endPlace: x.endPlace,
-      endMs: x.endMs, fromMs: x.fromMs, toMs: x.toMs, count: x.count
+      endMs: x.endMs, fromMs: x.fromMs, toMs: x.toMs, count: x.count,
+      endBookMs: x.endBookMs, endDurationMs: x.endDurationMs, endLabel: x.endLabel,
+      bookKey: x.bookKey, earlier: x.earlier
     };
   });
 }
@@ -492,6 +514,44 @@ export function sessionChapters(session, chapters) {
   return 'Chapters ' + (a + 1) + ' to ' + (b + 1);
 }
 
+/* A chapter's label as a name: "Chapter 3" for a bare number (or Roman numeral),
+   else the label as the book has it ("Part 2 of 17", "Chapter 3", "The
+   Letter"), never "Chapter Chapter 3". */
+export function chapterName(label) {
+  const t = typeof label === 'string' ? label.trim() : '';
+  return /^(?:\d+|(?=[MDCLXVI])M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3}))$/.test(t) ? 'Chapter ' + t : t;
+}
+
+// A book time with its hours always: "0:12:05" (never read as a time of day).
+function bookClock(ms) {
+  const t = Math.max(0, Math.floor(num(ms) / 1000));
+  return Math.floor(t / 3600) + ':' + pad(Math.floor((t % 3600) / 60)) + ':' + pad(t % 60);
+}
+
+/* Where a session ended, in terms that survive the files changing: that
+   copy's chapter, the book time and how far through the book, from what
+   the entry saved ("Chapter 3 · 1:02:03 into the book · 34%"). An entry
+   saved before the book time was kept falls back to this copy (its chapters
+   and length), when its part is still here; '' when nothing is known. */
+export function sessionPlace(session, chapters, durationMs) {
+  const s = session || {};
+  const list = Array.isArray(chapters) ? chapters : [];
+  const here = typeof s.endMs === 'number' && isFinite(s.endMs) ? s.endMs : null;
+  const at = typeof s.endBookMs === 'number' ? s.endBookMs : here;
+  let label = typeof s.endLabel === 'string' ? s.endLabel : '';
+  if (!label && here !== null && list.length) {
+    const i = chapterIndexAt(list, here);
+    label = String(list[i].label || String(i + 1));
+  }
+  let total = typeof s.endBookMs === 'number' ? s.endDurationMs : num(durationMs);
+  if (typeof total !== 'number' || !(total > 0)) total = null;
+  const out = [];
+  if (label) out.push(chapterName(label));
+  if (at !== null) out.push(bookClock(at) + ' into the book');
+  if (at !== null && total !== null) out.push(Math.max(0, Math.min(100, Math.floor((at / total) * 100))) + '%');
+  return out.join(' · ');
+}
+
 // ---------------------------------------------------------------------------
 // The features
 // ---------------------------------------------------------------------------
@@ -499,7 +559,8 @@ export function sessionChapters(session, chapters) {
 /* env: { player (WS.player), ui (WS.playerUI), doc, win (its pagehide and
    the router's ws:before-hard-nav), fetch, now() (wall clock: time away),
    mono() (a clock the system never steps: the sleep timer), setTimeout,
-   clearTimeout, matchMedia, isDialogOpen(), pathname(), tourActive() }. */
+   clearTimeout, matchMedia, isDialogOpen(), pathname(), tourActive(),
+   findPlace() -> WS.playerFindPlace or null }. */
 export function createFeatures(env) {
   const player = env.player;
   const ui = env.ui;
@@ -1478,20 +1539,29 @@ export function createFeatures(env) {
     hs.sessions = groupSessions(hs.entries, function (track, offset) { return player.placeMs(track, offset); });
     histList.textContent = '';
     const nowMs = now();
+    const canFind = !!helper();
     hs.sessions.forEach(function (x, i) {
       const when = sessionWhen(x, nowMs);
-      const what = [sessionChapters(x, s.chapters), x.device || 'Another device'].filter(Boolean).join(' · ');
-      const at = x.endMs === null ? '' : clock(x.endMs);
+      const where = sessionPlace(x, s.chapters, s.bookDurationMs);
+      const device = x.device || 'Another device';
+      // Its part is gone (the files changed, or an earlier copy): the helper
+      // finds the place in this copy.
+      const gone = x.endMs === null;
       const b = h('button', {
         type: 'button', class: 'wsp-row wsp-hist-row', 'data-session': String(i),
-        disabled: x.endMs === null ? true : null,
-        'aria-label': when + ', ' + what + (at ? '. Go to where it ended, ' + at : '')
+        disabled: gone && !canFind ? true : null,
+        'aria-label': [when, where, device + (x.earlier ? ', earlier copy' : '')].filter(Boolean).join(', ') +
+          (gone ? (canFind ? '. Find this place in this copy' : '') : '. Go to where it ended')
       }, [
         h('span', { class: 'wsp-row-text' }, [
           h('span', { class: 'wsp-hist-when', text: when }),
-          h('span', { class: 'wsp-hist-what', text: what })
+          where ? h('span', { class: 'wsp-hist-what', text: where }) : null,
+          h('span', { class: 'wsp-hist-dev' }, [
+            h('span', { class: 'wsp-hist-device', text: device }),
+            x.earlier ? h('span', { class: 'wsp-hist-tag', text: 'Earlier copy' }) : null
+          ])
         ]),
-        h('span', { class: 'wsp-hist-at', text: at })
+        gone && canFind ? icon('travel_explore', 'wsp-hist-find') : null
       ]);
       histList.appendChild(h('li', null, [b]));
     });
@@ -1505,23 +1575,53 @@ export function createFeatures(env) {
     setText(histMore.firstChild, hs.failed ? 'Try again' : 'Show older');
   }
 
+  // The "Find your place" helper (findplace.js), loaded after this.
+  function helper() {
+    try {
+      const f = typeof env.findPlace === 'function' ? env.findPlace() : null;
+      return f && typeof f.open === 'function' ? f : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // A session as the helper's old place (as state().filesChanged.old).
+  function oldPlace(x) {
+    return {
+      track: x.endPlace.track, offset_ms: x.endPlace.offset_ms,
+      book_ms: x.endBookMs, book_duration_ms: x.endDurationMs, chapter_label: x.endLabel,
+      updated_at: new Date(x.end).toISOString(), source: 'history',
+      linked_from: x.earlier ? x.bookKey : null, book_title: null, narrator: null, earlier: x.earlier
+    };
+  }
+
   histList.addEventListener('click', function (e) {
     const b = e.target && e.target.closest ? e.target.closest('[data-session]') : null;
     if (!b || !hist || hist.book !== player.state().book) return;
     const x = hist.sessions[Number(b.getAttribute('data-session'))];
-    if (!x || x.endMs === null) return;
+    if (!x) return;
+    const fp = helper();
+    if (x.endMs === null) {
+      // Its part is gone: the helper, with this as the place to find.
+      if (fp) fp.open(oldPlace(x), b);
+      return;
+    }
     // The listener's own move: saved as their place, with Undo over 2 minutes.
+    // Held for the book's changed files, it is the helper's chosen spot
+    // (nothing saved): back to the helper, to use it.
     player.seek(x.endMs);
+    if (fp && player.state().filesChanged) fp.open(null, b);
     // On a phone the list covers the player: back to it, to see the jump.
-    hideOnPhone(historyPanel);
+    else hideOnPhone(historyPanel);
   });
   histMore.addEventListener('click', function () {
     loadHistory(!(hist && hist.failed && !hist.entries.length));
   });
-  historyBtn.addEventListener('click', function () {
-    historyPanel.show(historyBtn);
+  function showHistory(opener) {
+    historyPanel.show(opener && opener.nodeType === 1 ? opener : historyBtn);
     loadHistory(false);
-  });
+  }
+  historyBtn.addEventListener('click', function () { showHistory(historyBtn); });
   ui.fill('history', historyBtn);
 
   function drawAll() {
@@ -1543,7 +1643,8 @@ export function createFeatures(env) {
       if (!sleep) return null;
       return { kind: sleep.kind, minutes: sleep.minutes, leftMs: sleepLeft(sleep, player.state()) };
     },
-    prefs: function () { return { skip_s: prefs.skip_s, speed: prefs.speed, smart_rewind: prefs.smart_rewind }; }
+    prefs: function () { return { skip_s: prefs.skip_s, speed: prefs.speed, smart_rewind: prefs.smart_rewind }; },
+    showHistory: function (opener) { showHistory(opener); }
   };
 }
 
@@ -1575,6 +1676,8 @@ export function boot(win, overrides) {
     matchMedia: typeof win.matchMedia === 'function' ? win.matchMedia.bind(win) : null,
     isDialogOpen: function () { return !!(win.WSUI && win.WSUI.isDialogOpen && win.WSUI.isDialogOpen()); },
     pathname: function () { return win.location.pathname; },
+    // The "Find your place" helper loads after this (findplace.js).
+    findPlace: function () { return WS.playerFindPlace || null; },
     // A page's tour (tour.js) shows its layer while it runs.
     tourActive: function () {
       const layer = doc.getElementById('tourLayer');

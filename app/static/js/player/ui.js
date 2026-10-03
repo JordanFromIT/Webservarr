@@ -15,7 +15,10 @@
  * cover, title, chapter, time left, play/pause and a thin progress line. Its
  * height is --ws-player-h on <html>, so the page gives up that much at the
  * bottom and nothing is ever under it (0px while it is hidden). Tapping it
- * opens the full player.
+ * opens the full player. While the book is held because its files changed
+ * (state().filesChanged), its Play opens the full player too, where the
+ * "Find your place" helper (findplace.js) is: playing there is only ever a
+ * preview, and the place is the listener's to choose.
  *
  * Full player: an overlay above the page and the top bar (a modal dialog:
  * focus stays inside while it is open and goes back where it was on close).
@@ -64,11 +67,14 @@
  *   actionButton({ icon, text, label }) -> <button>
  *                     a button styled for the row of actions: an icon (or a
  *                     short text such as "1.5×") over its label
- *   panel(name, { title }) -> { body, show(opener), hide(), shown }
+ *   panel(name, { title, onHide }) -> { body, show(opener), hide(), shown }
  *                     a view of the full player like Chapters: beside the
  *                     player on a wide screen, over it (with a back button)
  *                     on a phone. body is where its content goes; opener, the
  *                     button that showed it, gets focus back when it hides.
+ *                     onHide() is called whenever it stops showing: its back
+ *                     button, Escape or Back, another panel shown in its
+ *                     place, hide(), or the full player closing.
  *                     Call show() from the tap or key that asks for it: only
  *                     then does the panel get a CloseWatcher of its own (the
  *                     phone's Back closes it alone). Shown any other way, Escape
@@ -435,7 +441,7 @@ export function createUI(env) {
 
   // ---- Panels ----
 
-  const panels = new Map();   // name -> { section, body, heading, api }
+  const panels = new Map();   // name -> { section, body, heading, api, onHide }
 
   function panel(name, opts) {
     name = String(name);
@@ -456,9 +462,16 @@ export function createUI(env) {
       hide: function () { hidePanel(name); },
       get shown() { return view === name; }
     };
-    panels.set(name, { section: section, body: body, heading: heading, api: api });
+    const onHide = opts && typeof opts.onHide === 'function' ? opts.onHide : null;
+    panels.set(name, { section: section, body: body, heading: heading, api: api, onHide: onHide });
     drawPanels();
     return api;
+  }
+
+  // The panel that was showing has stopped: its own onHide.
+  function left(name) {
+    const p = name === null ? null : panels.get(name);
+    if (p && p.onHide) safely(p.onHide)();
   }
 
   function drawPanels() {
@@ -474,6 +487,7 @@ export function createUI(env) {
   function showPanel(name, opener) {
     if (!panels.has(name)) return;
     panelFrom = opener && opener.nodeType === 1 ? opener : doc.activeElement;
+    const was = view;
     view = name;
     // Over the player (a phone): a layer of its own, closed first.
     if (isOpen && !panelWatcher && !matches(WIDE)) panelTapped = watchPanel(false);
@@ -483,6 +497,7 @@ export function createUI(env) {
     try {
       p.heading.focus({ preventScroll: true });
     } catch (e) { /* not focusable yet */ }
+    if (was !== null && was !== name) left(was);
   }
 
   function watchPanel(again) {
@@ -511,6 +526,7 @@ export function createUI(env) {
   function hidePanel(name) {
     if (name && view !== name) return;
     if (view === null) return;
+    const was = view;
     view = null;
     panelTapped = false;
     const w = panelWatcher;
@@ -520,6 +536,7 @@ export function createUI(env) {
     const back = panelFrom;
     panelFrom = null;
     if (isOpen && back && back.isConnected && full.contains(back) && isVisible(back)) back.focus({ preventScroll: true });
+    left(was);
   }
 
   // ---- Chapters ----
@@ -942,7 +959,16 @@ export function createUI(env) {
     };
   }
 
-  barPlay.addEventListener('click', guarded(function () { return player.toggle(); }));
+  // Held for the book's changed files, the bar's Play opens the full player,
+  // where the listener finds their place (a Play there previews it).
+  barPlay.addEventListener('click', guarded(function () {
+    const s = player.state();
+    if (s && s.book && s.filesChanged) {
+      open();
+      return null;
+    }
+    return player.toggle();
+  }));
   fullPlay.addEventListener('click', guarded(function () { return player.toggle(); }));
   full.addEventListener('keydown', onKey);
   backBtn.addEventListener('click', function () { player.skip(-(num(player.setSkip()) || 10)); });
@@ -1127,9 +1153,11 @@ export function createUI(env) {
     bar.removeAttribute('inert');
     setAttr(openBtn, 'aria-expanded', 'false');
     host.appendChild(noticeBox);
+    const was = view;
     view = null;
     panelFrom = null;
     drawPanels();
+    left(was);
     // The top bar and the page stay under the sheet until it has slid away.
     closing = { timer: null, onEnd: null };
     closing.onEnd = function (e) {

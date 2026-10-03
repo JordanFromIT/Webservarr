@@ -1229,16 +1229,67 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-row[aria-pressed="true"] { font-weight: 600; background: rgb(var(--color-primary) / .2); }
 .wsp-row[aria-pressed="true"] .wsp-row-check { visibility: visible; }
 .wsp-row-off { color: rgb(var(--color-text) / .7); }
-/* History: one listening session a row, where it ended on the right. */
+/* History: one listening session a row: when, where it ended, the device
+   (and "Earlier copy" for an earlier copy's); a find mark where its part is
+   gone and the tap opens the helper. */
 .wsp-hist { margin-top: 0; }
 .wsp-hist-note:empty { display: none; }
 .wsp-hist-row { align-items: center; }
 .wsp-hist-row:disabled { cursor: default; opacity: .6; }
-.wsp-hist-when, .wsp-hist-what { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsp-hist-when, .wsp-hist-what, .wsp-hist-device { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wsp-hist-when { font-weight: 600; }
-.wsp-hist-what { margin-top: 2px; font-size: 13px; color: rgb(var(--color-text) / .7); }
-.wsp-hist-at { flex-shrink: 0; font-size: 13px; font-variant-numeric: tabular-nums; color: rgb(var(--color-text) / .7); }
+.wsp-hist-what { margin-top: 2px; font-size: 13px; color: rgb(var(--color-text)); font-variant-numeric: tabular-nums; }
+.wsp-hist-dev { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 2px; font-size: 13px; color: rgb(var(--color-text) / .7); }
+.wsp-hist-device { min-width: 0; }
+.wsp-hist-tag {
+  flex-shrink: 0; padding: 1px 8px; border-radius: 9999px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  color: rgb(var(--color-text) / .7); background: rgb(var(--color-text) / .08);
+}
+.wsp-hist-find { flex-shrink: 0; font-size: 22px; color: rgb(var(--color-text) / .45); }
 .wsp-hist-more { justify-content: center; font-weight: 600; }
+
+/* ---- "Find your place" (js/player/findplace.js) ----
+ * Where the listener was, then the spots in this copy: each a card with
+ * Preview (the primary fill) and "Use this spot"; the chosen one outlined
+ * in the primary colour, with the nudge. Unavailable spots are dimmed. */
+.wsp-fp { display: flex; flex-direction: column; gap: 16px; }
+.wsp-fp-lede { margin: 0; font-size: 15px; line-height: 1.45; color: rgb(var(--color-text) / .7); }
+.wsp-fp-old { padding: 16px; border-radius: 16px; background: rgb(var(--color-text) / .05); }
+.wsp-fp-eyebrow { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: rgb(var(--color-text) / .7); }
+.wsp-fp-copy { margin: 0 0 8px; font-size: 15px; font-weight: 600; line-height: 1.35; }
+.wsp-fp-old-time { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.wsp-fp-old-chapter { margin: 4px 0 0; font-size: 15px; overflow-wrap: anywhere; }
+.wsp-fp-old-when { margin: 4px 0 0; font-size: 13px; color: rgb(var(--color-text) / .7); }
+.wsp-fp-status { margin: 0; font-size: 13px; font-weight: 600; color: rgb(var(--color-text) / .7); }
+.wsp-fp-status:empty { display: none; }
+.wsp-fp-head { margin-bottom: -8px; }
+.wsp-fp-cands { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.wsp-fp-cand {
+  padding: 12px 12px 12px 16px; border-radius: 16px; border: 1px solid rgb(var(--color-text) / .10);
+  transition: border-color 150ms ease-out, background-color 150ms ease-out;
+}
+.wsp-fp-cand.is-chosen { border-color: rgb(var(--color-primary)); background: rgb(var(--color-primary) / .08); }
+.wsp-fp-kind { margin: 0; font-size: 15px; font-weight: 600; }
+.wsp-fp-at { margin: 2px 0 0; font-size: 13px; color: rgb(var(--color-text) / .7); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wsp-fp-note { margin: 4px 0 0; font-size: 13px; color: rgb(var(--color-text) / .7); }
+.wsp-fp-cand.is-off .wsp-fp-kind, .wsp-fp-cand.is-off .wsp-fp-at { color: rgb(var(--color-text) / .45); }
+.wsp-fp-nudge { display: flex; align-items: center; gap: 4px; margin: 8px -4px 0; }
+.wsp-fp-range { flex: 1; min-width: 0; }
+.wsp-fp-step .material-symbols-outlined { font-size: 24px; }
+.wsp-fp-actions { display: flex; gap: 8px; margin-top: 12px; }
+.wsp-fp-btn {
+  flex: 1 1 0; min-width: 0; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 0 12px; border-radius: 10px; font-size: 15px; font-weight: 600; white-space: nowrap;
+  color: rgb(var(--color-text)); background: rgb(var(--color-text) / .08);
+  transition: background-color 150ms ease-out, filter 150ms ease-out;
+}
+.wsp-fp-btn.is-primary { color: rgb(var(--color-text-secondary)); background: rgb(var(--color-primary)); }
+.wsp-fp-btn:disabled { opacity: .45; cursor: default; }
+.wsp-fp-btn:focus-visible { outline: 2px solid rgb(var(--color-primary)); outline-offset: 2px; }
+.wsp-fp-btn-icon { font-size: 22px; font-variation-settings: 'FILL' 1; }
+.wsp-fp-none { margin: 0; }
+.wsp-fp-others { margin: 0; }
+.wsp-fp-row-icon { font-size: 22px; color: rgb(var(--color-text) / .7); }
 .wsp-action.is-on { color: rgb(var(--color-text)); background: rgb(var(--color-primary) / .2); }
 .wsp-slot-sleep .wsp-action-label { font-variant-numeric: tabular-nums; }
 /* The keyboard shortcuts: only where there is a keyboard and a mouse. */
@@ -1257,6 +1308,8 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-row:hover { background: rgb(var(--color-text) / .06); }
   .wsp-row[aria-pressed="true"]:hover { background: rgb(var(--color-primary) / .26); }
   .wsp-hist-row:disabled:hover { background: none; }
+  .wsp-fp-btn:hover:not(:disabled) { background: rgb(var(--color-text) / .14); }
+  .wsp-fp-btn.is-primary:hover:not(:disabled) { background: rgb(var(--color-primary)); filter: brightness(1.12); }
   .wsp-action.is-on:hover { background: rgb(var(--color-primary) / .26); }
 }
 
@@ -1264,6 +1317,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   .wsp-bar, .wsp-notice, .wsp-spin { animation: none; }
   .wsp-sheet, .wsp-bar-open, .wsp-play, .wsp-icon-btn, .wsp-skip, .wsp-action, .wsp-chapter-item, .wsp-notice-btn { transition: none; }
   .wsp-chip, .wsp-switch, .wsp-switch::after, .wsp-row { transition: none; }
+  .wsp-fp-cand, .wsp-fp-btn { transition: none; }
   .wsp-play:active, .wsp-skip:active { transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {

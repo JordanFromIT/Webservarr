@@ -5,7 +5,7 @@
   "scripts": {
     "build:css": "tailwindcss -c tailwind.config.js -i app/static/css/tailwind.src.css -o app/static/css/app.css --minify && node scripts/stamp-css.mjs",
     "watch:css": "tailwindcss -c tailwind.config.js -i app/static/css/tailwind.src.css -o app/static/css/app.css --watch",
-    "test:js": "node app/tests/js/same_address.mjs && node app/tests/js/contrast.mjs && node app/tests/js/router.mjs && node app/tests/js/router_runtime.mjs && node app/tests/js/debug_leaks.mjs && node app/tests/js/view_transition.mjs && node app/tests/js/service_status.mjs && node app/tests/js/reader_progress.mjs && node app/tests/js/player_engine.mjs && node app/tests/js/player_saves.mjs && node app/tests/js/player_ui.mjs && node app/tests/js/player_features.mjs"
+    "test:js": "node app/tests/js/same_address.mjs && node app/tests/js/contrast.mjs && node app/tests/js/router.mjs && node app/tests/js/router_runtime.mjs && node app/tests/js/debug_leaks.mjs && node app/tests/js/view_transition.mjs && node app/tests/js/service_status.mjs && node app/tests/js/reader_progress.mjs && node app/tests/js/player_engine.mjs && node app/tests/js/player_saves.mjs && node app/tests/js/player_ui.mjs && node app/tests/js/player_features.mjs && node app/tests/js/player_findplace.mjs"
   },
   "devDependencies": {
     "@tailwindcss/container-queries": "^0.1.1",
