@@ -148,7 +148,7 @@
  *                                   from, to (a move's book ms), placeMs (the
  *                                   book ms of state.position), placeLabel (the
  *                                   label of the chapter it is in) }
- *   lastSeen(book) -> { base, psid, conflict } | null   what this page last saw
+ *   lastSeen(book) -> { base, psid, conflict, files } | null   what this page last saw
  *   otherSaved(book, { track, offset_ms, device, updated_at }, now, plex)
  *                                   a newer place saved elsewhere (another page,
  *                                   or plex: a Plex app), found before a late
@@ -636,6 +636,13 @@ export function createSaver(o) {
     return !!(r && r.conflict && r.conflict.files);
   }
 
+  // A question is waiting for the listener's answer: a 409, a place found
+  // newer elsewhere, or one asked inside the files hold (question). The
+  // files hold alone is none.
+  function asking(r) {
+    return !!(r && r.conflict && (!r.conflict.files || r.conflict.question));
+  }
+
   /* Paused within DRIFT_MS of the place the server took, on its part: the
      element's last timeupdate after a pause lands a moment past the saved
      pause (about 250 ms). That is the saved place, not a new one: a close
@@ -1088,13 +1095,15 @@ export function createSaver(o) {
 
   /* The listener answered a 409 (Continue, or Keep listening here): the
      place it showed is the one this page has now seen, so saves go again
-     with its timestamp as the base. Returns the conflict, or null. */
+     with its timestamp as the base. Returns the conflict, or null. Held for
+     the book's changed files, a question asked inside the hold (before a
+     confirm, see otherSaved) is answered, but the hold stays: only placing
+     the book releases it (the engine does that next). */
   function resolveConflict() {
     const r = run;
-    // The files-changed hold is released only by placing the book.
-    if (!r || !r.conflict || filesHeld(r)) return null;
+    if (!asking(r)) return null;
     const c = r.conflict;
-    r.conflict = null;
+    r.conflict = filesHeld(r) ? { files: true } : null;
     // A Plex app's place was never a 409: the base stays WebServarr's own.
     if (c.updated_at && !c.plex) r.base = c.updated_at;
     step();
@@ -1103,12 +1112,14 @@ export function createSaver(o) {
 
   /* What this page last saw of the book on the server: its base (the
      stored timestamp of its last acknowledged save, or of the place read at
-     open), its psid, and whether a 409 is still unanswered. null when the
-     book is not the one being saved. */
+     open), its psid, whether a 409 (or a question asked like one) is still
+     unanswered, and whether it is held for the book's changed files (files:
+     that hold alone is no question, so a confirm's re-read looks past it).
+     null when the book is not the one being saved. */
   function lastSeen(book) {
     const r = run;
     if (!r || r.book !== String(book)) return null;
-    return { base: r.base, psid: psid, conflict: !!r.conflict };
+    return { base: r.base, psid: psid, conflict: asking(r), files: filesHeld(r) };
   }
 
   /* Before a late Play or move the engine found a newer place saved
@@ -1116,10 +1127,13 @@ export function createSaver(o) {
      true). Taken like a 409 for it: nothing is sent until the listener
      answers (resolveConflict), the local copy is capped below it (so an
      unanswered close can't make this place win the next open), and the
-     'conflict' warning asks the question. */
+     'conflict' warning asks the question. Held for the book's changed files
+     (a confirm's re-read found it), the question is asked inside the hold:
+     it stays held, and the local copy (the old place) is left as it is. */
   function otherSaved(book, c, serverNow, plex) {
     const r = run;
-    if (!r || r.stopped || r.book !== String(book) || !c || typeof c.updated_at !== 'string' || filesHeld(r)) return false;
+    if (!r || r.stopped || r.book !== String(book) || !c || typeof c.updated_at !== 'string') return false;
+    const held = filesHeld(r);
     r.conflict = {
       track: String(c.track == null ? '' : c.track),
       offset_ms: Number(c.offset_ms),
@@ -1128,7 +1142,11 @@ export function createSaver(o) {
       now: typeof serverNow === 'string' ? serverNow : null,
       plex: !!plex
     };
-    capLocal(r.book, r);
+    if (held) {
+      r.conflict.files = true;
+      r.conflict.question = true;
+    }
+    else capLocal(r.book, r);
     const k = r.conflict;
     tell({ kind: 'conflict', book: r.book, conflict: { track: k.track, offset_ms: k.offset_ms, device: k.device, updated_at: k.updated_at }, now: k.now });
     step();
@@ -1139,7 +1157,8 @@ export function createSaver(o) {
      timestamp is what this page has now seen (the next save is not refused). */
   function adoptBase(book, updatedAt) {
     const r = run;
-    if (!r || r.stopped || r.book !== String(book) || r.conflict || typeof updatedAt !== 'string' || !updatedAt) return false;
+    if (!r || r.stopped || r.book !== String(book) || typeof updatedAt !== 'string' || !updatedAt) return false;
+    if (asking(r)) return false;
     r.base = updatedAt;
     return true;
   }

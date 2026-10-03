@@ -105,9 +105,12 @@
  *       on (as a 409 does): nothing is saved until the listener answers
  *       (resolveConflict), and a Play meanwhile plays without saving. A
  *       failed or slow read goes on. The lock screen's Play takes the same
- *       path. pause() or toggle() during a Play's read cancels it.
- *       pause(), and toggle() whenever anything plays, always stop the
- *       element, even one playing without the engine knowing.
+ *       path. pause() or toggle() during a Play's read cancels it and stops
+ *       an element playing meanwhile. pause(), and toggle() whenever
+ *       anything plays, always stop the element, even one playing without
+ *       the engine knowing. Held for the book's changed files there is no
+ *       late Play (a Play is a preview, nothing is saved); confirmPlace
+ *       re-reads for itself (see it).
  *   seek(bookMs, { answer }), skip(deltaS), jumpToChapter(i)   i: a position in state().chapters;
  *       answer: the move answers the open's question (features.js): if a
  *       late read then asks again, it still happens, unsaved
@@ -120,7 +123,9 @@
  *                     'preview' change), then pauses; a second call replaces
  *                     the first. It stops 1 s short of the book's end or of
  *                     a part this browser can't decode (near one, it is the
- *                     15 s before it, within the part).
+ *                     15 s before it, within the part), and after 15 s of
+ *                     playing by the wall clock (more at a speed under 1x),
+ *                     so a seek from outside the engine can't stretch it.
  *                     false: not held, or a part this browser can't decode
  *                     (with a 'part-format' warning).
  *   confirmPlace(bookMs) -> bool  held: the listener places the book at bookMs.
@@ -129,6 +134,13 @@
  *                     rewind floor; compare-and-swap applies as to any save).
  *                     A place from an earlier copy sends its linked_from with
  *                     the saves until the server says whether it linked it.
+ *                     After 5 minutes or more without playing, the saved
+ *                     places are read again first, still held (checking): a
+ *                     newer place another device or a Plex app saved meanwhile
+ *                     is asked about (a 'conflict' warning) and the confirm
+ *                     waits for the answer (resolveConflict: Continue lands at
+ *                     the other place, Keep listening here at the spot). The
+ *                     book stays held until the confirm's move lands.
  *                     false as previewAt.
  *   startOver() -> bool  confirmPlace(0), never sending linked_from
  *   setSpeed(x)       0.75 to 2 in 0.05 steps (clamped, rounded); returns the speed
@@ -557,7 +569,11 @@ export function createEngine(env) {
     const detail = Object.assign({ reason: reason }, extra || {});
     // Playback stopped: the quiet time a late Play measures starts now.
     const on = !!(book && wantPlay && !error);
-    if (wasPlaying && !on) quietSince = wallNow();
+    if (wasPlaying && !on) {
+      quietSince = wallNow();
+      // A preview's wall time counts only while it plays.
+      if (preview) preview.lastWall = null;
+    }
     wasPlaying = on;
     if (saver) {
       // First, so this change already carries what saving it changed. The
@@ -619,7 +635,7 @@ export function createEngine(env) {
       speed: speed,
       connection: book && cur ? cur.side : null,
       error: error ? { code: error.code, message: error.message } : null,
-      checking: !!checking,
+      checking: !!checking || !!(files && files.reading),
       lastSavedAt: saver ? saver.lastSavedAt : null,
       saveError: saver ? !!saver.warning : false,
       resumedFrom: resumedFrom,
@@ -875,9 +891,16 @@ export function createEngine(env) {
     if (moved && wantPlay && !audio.paused) disarm();
     changed('time');
     // A preview (the book's files changed) stops after its 15 s.
-    if (files && preview && !preview.done && wantPlay && bookMsNow() >= preview.end) {
-      preview.done = true;
-      pause();
+    // ... and after as long by the wall clock, so a seek from outside the
+    // engine (back before its start) can't stretch it.
+    if (files && preview && !preview.done && wantPlay) {
+      const w = wallNow();
+      if (preview.lastWall !== null) preview.played += Math.max(0, w - preview.lastWall);
+      preview.lastWall = w;
+      if (bookMsNow() >= preview.end || preview.played >= PREVIEW_MS / Math.min(1, speed)) {
+        preview.done = true;
+        pause();
+      }
     }
   });
 
@@ -1229,6 +1252,7 @@ export function createEngine(env) {
     }
     resumedFrom = null;
     unchosen = false;
+    if (files && files.timer !== null && files.timer !== undefined) clearT(files.timer);
     files = null;
     preview = null;
     checking = null;
@@ -1430,7 +1454,7 @@ export function createEngine(env) {
     }
     resumedFrom = resumed ? { source: resumed.source, device: resumed.device, updated_at: resumed.updated_at, age_ms: age } : null;
     // spot: the helper's chosen spot (book ms), where Play previews while held.
-    files = changedFrom ? { old: changedFrom, spot: startMs } : null;
+    files = changedFrom ? { old: changedFrom, spot: startMs, pending: null, reading: false, asked: false, timer: null } : null;
     if (saver) {
       try {
         saver.start(key, {
@@ -1561,8 +1585,10 @@ export function createEngine(env) {
 
   function pause() {
     if (checking && checking.plays) {
-      // A late Play still reading the saved places: it does not happen.
+      // A late Play still reading the saved places: it does not happen, and
+      // an element playing meanwhile (from outside) stops too.
       checking = null;
+      stopElement();
       changed('checking');
       return;
     }
@@ -1673,7 +1699,7 @@ export function createEngine(env) {
   // short of that wall (so it never ends the book or reaches a part that
   // can't play: the element's end of a part would go on into it).
   function previewFrom(ms) {
-    return { start: ms, end: Math.min(ms + PREVIEW_MS, previewWall(ms) - PREVIEW_END_GAP_MS), done: false };
+    return { start: ms, end: Math.min(ms + PREVIEW_MS, previewWall(ms) - PREVIEW_END_GAP_MS), done: false, played: 0, lastWall: null };
   }
 
   /* Starts a preview at a book time (see previewAt); false when it is in a
@@ -1717,7 +1743,15 @@ export function createEngine(env) {
      its key goes with the saves until the server links it (ruling (c): only
      for a spot the listener confirms, never startOver). Refused (false) when
      the book is not held, or the spot is in a part this browser can't
-     decode. */
+     decode.
+     After RECHECK_AFTER_MS or more without playing (as for a late Play), the
+     saved places are read again first, still held: the confirm lands when
+     the read ends (or after RECHECK_WAIT_MS). If another device, or a Plex
+     app, saved a newer place meanwhile, that is asked about (a 'conflict'
+     warning) inside the hold, and the confirm waits for the answer
+     (resolveConflict): Continue's move to the other place, else the spot
+     confirmed. Play or Pause meanwhile only preview: the book stays held
+     until the confirm's move lands. */
   function place(bookMs, link) {
     if (!files || !book || !playhead) return false;
     const n = Number(bookMs);
@@ -1727,20 +1761,87 @@ export function createEngine(env) {
       emit('warning', { kind: 'part-format', message: PART_FORMAT });
       return false;
     }
-    const old = files.old;
     // A preview playing stops first, still held (nothing is sent for it).
     preview = null;
     pause();
+    // A later confirm replaces one still waiting on its read or question.
+    files.pending = { v: v, link: !!link };
+    files.spot = v;
+    if (files.reading || files.asked) return true;
+    if (saver && quietSince !== null && wallNow() - quietSince >= RECHECK_AFTER_MS) {
+      confirmRead();
+      return true;
+    }
+    land(v);
+    return true;
+  }
+
+  // The confirm lands at `at`: the hold ends, then its one explicit move.
+  // Its link goes only with the very spot confirmed from the earlier copy.
+  function land(at) {
+    const p = files.pending;
+    const old = files.old;
+    preview = null;
+    pause();
+    if (files.timer !== null && files.timer !== undefined) clearT(files.timer);
     files = null;
     if (saver && typeof saver.releaseFiles === 'function') {
       try {
-        saver.releaseFiles(book.key, link && old.linked_from ? old.linked_from : null, { startOver: !link });
+        saver.releaseFiles(book.key, p.link && at === p.v && old.linked_from ? old.linked_from : null, { startOver: !p.link });
       } catch (e) {
         console.error('[player] saving failed', e);
       }
     }
-    seek(v, 'seek', false, true, { place: true });
-    return true;
+    seek(at, 'seek', false, true, { place: true });
+  }
+
+  /* A confirm after a long quiet: the saved places read again, still held
+     (state().checking meanwhile). Asked: the confirm waits for the answer.
+     Else (nothing newer, or the read failed or took RECHECK_WAIT_MS) it
+     lands. */
+  function confirmRead() {
+    const my = files;
+    const key = book.key;
+    const gen0 = openGen;
+    let seen = null;
+    try {
+      seen = typeof saver.lastSeen === 'function' ? saver.lastSeen(key) : null;
+    } catch (e) {
+      seen = null;
+    }
+    my.reading = true;
+    function finish(places) {
+      if (my.timer !== null) clearT(my.timer);
+      my.timer = null;
+      if (files !== my || !my.reading || openGen !== gen0 || !book || book.key !== key) return;
+      my.reading = false;
+      let asked = false;
+      try {
+        asked = !!places && !!seen && askIfElsewhere(places, seen, my.pending.v);
+      } catch (e) {
+        console.error('[player] the re-check failed', e);
+      }
+      if (asked) {
+        my.asked = true;
+        changed('checking');
+        return;
+      }
+      quietSince = wallNow();
+      changed('checking');
+      land(my.pending.v);
+    }
+    my.timer = setT(function () {
+      my.timer = null;
+      finish(null);
+    }, RECHECK_WAIT_MS);
+    let asking;
+    try {
+      asking = fetchPlaces(key);
+    } catch (e) {
+      asking = Promise.reject(e);
+    }
+    asking.then(finish, function () { finish(null); });
+    changed('checking');
   }
 
   function skip(deltaS) {
@@ -1897,6 +1998,9 @@ export function createEngine(env) {
      at all: another place is newer and the listener is asked, or a Pause
      cancelled the Play). */
   function lateCheck(then, plays) {
+    // Held for the book's changed files nothing is saved, so there is
+    // nothing to re-check (a confirm re-reads for itself: confirmRead).
+    if (files) return false;
     if (checking) {
       checking.queue.push(then);
       if (plays) checking.plays = true;
@@ -1967,7 +2071,8 @@ export function createEngine(env) {
      another tab of this browser), or Plex's copy (not an echo of ours:
      GET /position leaves those out) newer than anything this page saw. The
      newer of the two that is somewhere else is asked about. true: asked. */
-  function askIfElsewhere(places, seen) {
+  // hereMs: the place to compare with (a confirm's spot), else the playhead's.
+  function askIfElsewhere(places, seen, hereAt) {
     const at = hold || playhead;
     if (!book || !at) return false;
     const base = typeof seen.base === 'string' ? Date.parse(seen.base) : NaN;
@@ -1986,7 +2091,7 @@ export function createEngine(env) {
       }
     }
     found.sort(function (a, b) { return b.t - a.t; });
-    const hereMs = book.starts[at.index] + at.offset;
+    const hereMs = typeof hereAt === 'number' ? hereAt : book.starts[at.index] + at.offset;
     const now = typeof places.now === 'string' ? places.now : null;
     for (const f of found) {
       const c = f.copy;
@@ -2148,6 +2253,13 @@ export function createEngine(env) {
         quietSince = wallNow();
         const t = c.plex ? Date.parse(c.updated_at) : NaN;
         if (isFinite(t)) plexSeenAt = Math.max(plexSeenAt, t);
+        // A question asked before a confirm (the files changed): the confirm
+        // lands now, where the answer left the chosen spot (Continue moved
+        // it to the other place; Keep listening here left it).
+        if (files && files.asked && files.pending) {
+          files.asked = false;
+          land(files.spot);
+        }
       }
       return c;
     },

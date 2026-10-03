@@ -433,7 +433,8 @@ function setup(o = {}) {
     MediaMetadata: FakeMetadata,
     permissions: o.permissions,
     baseUrl: 'https://ws.test/news',
-    saver: o.saver
+    saver: o.saver,
+    now: o.wall ? () => clock.now : undefined
   });
   const log = { change: [], ended: [], error: [], warning: [], raw: [] };
   // Every place a change reported, with what the element was doing then:
@@ -2155,6 +2156,61 @@ for (const how of ['after a finished preview', 'after a move']) {
   t.env.stopTicker = true;
   t.engine.close();
   await t.clock.advance(1000);
+}
+
+// Fix round 3 (T2R4): after 5+ minutes quiet, a confirm re-reads the saved
+// places first, still held; closing meanwhile leaves no timer.
+current = 'fix round 3 (T2R4): a confirm after a long quiet stays held through its re-read; a close meanwhile leaves nothing';
+{
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true } });
+  await t.clock.advance(6 * 60000);
+  const reads = t.net.fetches.filter((u) => u.indexOf('/position/') !== -1).length;
+  check('confirmPlace', t.engine.confirmPlace(650000) === true);
+  check('still held, checking, the read sent', t.engine.state().filesChanged !== null && t.engine.state().checking === true &&
+    t.saver.released.length === 0 && t.net.fetches.filter((u) => u.indexOf('/position/') !== -1).length === reads + 1);
+  await t.clock.advance(1000);
+  check('then it lands: released once, one place move', t.engine.state().filesChanged === null && t.engine.state().checking === false &&
+    t.saver.released.length === 1 && t.saver.notes.filter((n) => n.place).length === 1 && bookMsOf(t) === 650000, [t.saver.released, bookMsOf(t)]);
+  t.engine.close();
+  const u = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true }, net: { fetchDelay: {} } });
+  await u.clock.advance(6 * 60000);
+  u.net.positions = null;                            // the re-read now never answers usefully (404)
+  u.engine.confirmPlace(650000);
+  u.engine.close();
+  check('closed during the read: no timer left, nothing released', u.live.size === 0 && u.saver.released.length === 0, u.live.size);
+  await u.clock.advance(10000);
+  check('and nothing lands later', u.saver.released.length === 0 && u.engine.state().book === null);
+  // Held, a Play after the long quiet is a preview: no late re-read for it.
+  const w = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true } });
+  await w.clock.advance(6 * 60000);
+  const r1 = w.net.fetches.filter((x) => x.indexOf('/position/') !== -1).length;
+  await w.engine.play();
+  await w.clock.advance(1000);
+  check('a held Play after a long quiet: a preview at once, no re-read', w.engine.state().playing && !w.engine.state().checking &&
+    w.net.fetches.filter((x) => x.indexOf('/position/') !== -1).length === r1);
+  w.engine.close();
+  // Without the long quiet: lands at once, no read.
+  const v = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true } });
+  const r0 = v.net.fetches.length;
+  v.engine.confirmPlace(650000);
+  check('a confirm soon after the open lands at once, no read', v.engine.state().filesChanged === null && v.net.fetches.length === r0 && v.saver.released.length === 1);
+  v.engine.close();
+}
+
+// T2R6: the preview's wall-clock bound scales with a slower speed, so at
+// 0.75x it still plays its 15 s of the book.
+current = 'fix round 3 (T2R6): at 0.75x a preview still plays 15 s of the book (the wall bound allows for it)';
+{
+  const t = await openHeld(MULTI.key, { web: GONE, plex: null }, { setup: { wall: true } });
+  t.engine.setSpeed(0.75);
+  t.engine.previewAt(700000);
+  await t.clock.advance(40000);
+  check('15 s of the book at 0.75x', !t.engine.state().playing && bookMsOf(t) >= 714500 && bookMsOf(t) <= 715500, bookMsOf(t));
+  t.engine.setSpeed(2);
+  t.engine.previewAt(1000000);
+  await t.clock.advance(40000);
+  check('and at 2x (about 7.5 s of wall time)', !t.engine.state().playing && bookMsOf(t) >= 1015000 && bookMsOf(t) <= 1015600, bookMsOf(t));
+  t.engine.close();
 }
 
 current = 'spec 2.5: while held, Retry after an outage only ever plays a bounded preview';

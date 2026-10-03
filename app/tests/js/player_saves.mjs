@@ -3031,16 +3031,27 @@ current = 'spec 2.5: while held, a 409 answer, a late re-read or a flush never l
   p.play();
   await p.listen(5000);
   check('resolveConflict leaves the hold', t.saver.resolveConflict() === null);
-  check('otherSaved does not replace it', t.saver.otherSaved('500:1', { track: '501', offset_ms: 1, updated_at: iso(0) }, iso(0), false) === false);
-  check('lastSeen says held (no late re-read)', t.saver.lastSeen('500:1').conflict === true);
+  // Fix round 3 (T2R4): the hold alone is no question, so a confirm's
+  // re-read looks past it (lastSeen), and a newer place found then is asked
+  // about inside the hold (otherSaved): still held, nothing sent.
+  const seen = t.saver.lastSeen('500:1');
+  check('lastSeen: held, no question yet', seen.files === true && seen.conflict === false, seen);
+  check('otherSaved asks inside the hold', t.saver.otherSaved('500:1', { track: '501', offset_ms: 1, updated_at: iso(0) }, iso(0), false) === true);
+  check('one conflict warning', t.warnings.length === 1 && t.warnings[0].kind === 'conflict' && t.warnings[0].conflict.offset_ms === 1, t.warnings);
+  const seen2 = t.saver.lastSeen('500:1');
+  check('lastSeen: held, with the question', seen2.files === true && seen2.conflict === true, seen2);
+  check('adoptBase refused while it is asked', t.saver.adoptBase('500:1', iso(1)) === false);
   check('flush fetch: nothing', t.saver.flush('fetch') === false);
   check('flush beacon: nothing', t.saver.flush('beacon') === false && t.saver.flush('beacon', 'leave') === false);
+  const answered = t.saver.resolveConflict();
+  check('the answer clears the question, not the hold', answered && answered.updated_at === iso(0) && t.saver.lastSeen('500:1').files === true &&
+    t.saver.lastSeen('500:1').conflict === false && t.saver.lastSeen('500:1').base === iso(0), [answered, t.saver.lastSeen('500:1')]);
   await p.listen(30000);
   p.pause();
   await t.clock.advance(30000);
   t.saver.stop();
   await t.clock.advance(20000);
-  check('nothing at all', t.server.calls.length === 0 && localOf(t) === null && t.warnings.length === 0, [t.server.calls.length, t.warnings]);
+  check('nothing at all', t.server.calls.length === 0 && localOf(t) === null, [t.server.calls.length]);
 }
 
 // Review Focus 3: a tab closed, killed or reloaded while the helper is open
@@ -3300,7 +3311,7 @@ for (const act of ['confirmPlace', 'startOver']) {
 // T2R3: a confirm made after 5 minutes or more at the helper is saved at
 // once: its move never waits on the late re-read, so a Play and Pause
 // during that read can't cancel it and leave the book unheld at 0:00.
-current = 'T2R3: a confirm after 5+ minutes held is saved at once; Play and Pause during the late read never cancel it';
+current = 'T2R3: a confirm after 5+ minutes held is saved once the re-read lands; Play and Pause during the read never cancel it';
 for (const variant of ['Play, then Pause during the read', 'Play only']) {
   const clock = fakeClock(); const server = fakeServer(clock); const storage = fakeStorage();
   server.row = { track: '599', offset_ms: 120000, updated_at: GONE_WEB.updated_at, psid: 'other', seq: 9 };
@@ -3310,17 +3321,157 @@ for (const variant of ['Play, then Pause during the read', 'Play only']) {
   check(variant + ': held', t.engine.state().filesChanged !== null && server.calls.length === 0);
   t.engine.confirmPlace(650000);
   await clock.advance(200);
-  check(variant + ': the confirm is saved at once, at the spot', server.calls.length === 1 && server.calls[0].body.book_ms === 650000 &&
-    server.calls[0].body.event === 'pause' && server.row.track === '502' && server.row.offset_ms === 50000, server.calls.map((c) => c.body));
-  t.engine.play();
+  check(variant + ': held while the re-read is out, nothing sent', t.engine.state().filesChanged !== null && t.engine.state().checking === true &&
+    server.calls.length === 0, server.calls.map((c) => c.body));
+  t.engine.play();                                     // held: a preview, never a save
   await clock.advance(1000);
   if (variant.indexOf('Pause') !== -1) t.engine.pause();
+  check(variant + ': still held during the read', t.engine.state().filesChanged !== null && server.calls.length === 0);
   await clock.advance(5000);
+  check(variant + ': the confirm landed after the read, saved once at the spot', t.engine.state().filesChanged === null && server.calls.length === 1 &&
+    server.calls[0].body.book_ms === 650000 && server.calls[0].body.event === 'pause' && server.row.track === '502' && server.row.offset_ms === 50000,
+    server.calls.map((c) => c.body));
   await t.engine.play();
   await clock.advance(12000);
   const bad = server.calls.filter((c) => c.body.book_ms < 650000);
   check(variant + ': never a save before the confirmed spot (no 0:00)', bad.length === 0 && server.row.book_ms >= 650000, server.calls.map((c) => [c.body.event, c.body.book_ms]));
   check(variant + ': playing on from it', t.engine.state().playing && t.engine.state().bookMs > 650000 && t.engine.state().filesChanged === null, t.engine.state().bookMs);
+  t.engine.close();
+}
+
+// ---- Fix round 3 ----
+// The server's own rule (listening.save_checkin): another page session's
+// row whose stamp is not `base` refuses with 409.
+function casPost(server, clock) {
+  return (body, kind) => {
+    const b = JSON.parse(JSON.stringify(body));
+    const call = { kind, body: b, at: clock.now, status: null };
+    server.calls.push(call);
+    if (kind === 'beacon') return true;
+    return new Promise((resolve) => clock.setTimeout(() => {
+      const row = server.row;
+      if (row && row.psid !== b.psid && b.base !== row.updated_at) {
+        call.status = 409;
+        resolve({ status: 409, data: { conflict: { track: row.track, offset_ms: row.offset_ms, device: row.device, updated_at: row.updated_at }, now: new Date(clock.now).toISOString() } });
+        return;
+      }
+      call.status = 200;
+      server.row = Object.assign({}, b, { updated_at: new Date(clock.now).toISOString() });
+      resolve({ status: 200, data: { stored: true, updated_at: server.row.updated_at } });
+    }, 80));
+  };
+}
+
+// T2R4: a confirm after 5+ minutes held reads the saved places again BEFORE
+// the hold ends. A newer place saved meanwhile in a Plex app, or by another
+// device, is asked about inside the hold: nothing is saved until the
+// listener answers; Keep listening here confirms the spot, Continue the
+// other place.
+current = 'T2R4: a confirm after a long quiet asks about a newer Plex-app or other-device place first, saving nothing until answered';
+for (const variant of ['a Plex app played meanwhile', 'another device saved meanwhile', 'control: nothing newer']) {
+  for (const answer of variant.startsWith('control') ? ['none'] : ['Keep listening here', 'Continue']) {
+    const clock = fakeClock(); const server = fakeServer(clock); const storage = fakeStorage();
+    server.row = { psid: 'other', seq: 9, track: '599', offset_ms: 120000, updated_at: GONE_WEB.updated_at, device: 'Chrome on Windows' };
+    server.post = casPost(server, clock);
+    // An older, acknowledged local copy too: the question must leave it alone.
+    setLocal(storage, { track: '598', offset_ms: 5000, duration_ms: 900000, updated_at: iso(-7200), own: true, acked: true, book_ms: 605000 });
+    const keptLocal = storage.map.get(LOCAL_KEY);
+    const places = { web: Object.assign({}, GONE_WEB), plex: null };
+    const t = withEngine({ clock, server, storage, book: CHAPTERED, places, wallClock: true });
+    await openBook(t);
+    await clock.advance(6 * 60000);                    // the helper up for 6 minutes
+    const at = new Date(clock.now - 60000).toISOString();
+    if (variant.startsWith('a Plex')) places.plex = { track: '502', offset_ms: 30000, duration_ms: 900000, updated_at: at, device: 'Plexamp' };
+    if (variant.startsWith('another')) {
+      server.row = { psid: 'phone', seq: 3, track: '502', offset_ms: 30000, updated_at: at, device: 'Safari on iPhone' };
+      places.web = Object.assign({}, GONE_WEB, { track: '502', offset_ms: 30000, book_ms: 630000, updated_at: at, psid: 'phone', device: 'Safari on iPhone' });
+    }
+    const label = variant + (answer === 'none' ? '' : ' / ' + answer);
+    const rowBefore = JSON.stringify(server.row);
+    t.engine.confirmPlace(650000);
+    await clock.advance(6000);
+    const asked = t.log.warning.filter((w) => w.kind === 'conflict');
+    if (variant.startsWith('control')) {
+      check(label + ': no question; the confirm lands after the read, saved once', asked.length === 0 && t.engine.state().filesChanged === null &&
+        server.calls.length === 1 && server.calls[0].body.book_ms === 650000 && server.calls[0].status === 200, server.calls.map((c) => [c.body.book_ms, c.status]));
+      t.engine.close();
+      continue;
+    }
+    check(label + ': the question, about the newer place', asked.length === 1 && asked[0].conflict.track === '502' && asked[0].conflict.offset_ms === 30000, asked);
+    check(label + ': still held, nothing saved, the server row untouched', t.engine.state().filesChanged !== null && server.calls.length === 0 &&
+      JSON.stringify(server.row) === rowBefore, [server.calls.length, server.row]);
+    check(label + ': the local copy left as it was', storage.map.get(LOCAL_KEY) === keptLocal, storage.map.get(LOCAL_KEY));
+    await t.engine.play();                             // held: a bounded preview only
+    await clock.advance(60000);
+    check(label + ': Play meanwhile saves nothing', server.calls.length === 0 && t.engine.state().filesChanged !== null && !t.engine.state().playing);
+    if (answer === 'Continue') t.engine.seek(630000);  // features.js: Continue moves to the other place, then answers
+    t.engine.resolveConflict();
+    await clock.advance(2000);
+    const want = answer === 'Continue' ? 630000 : 650000;
+    check(label + ': answered: the hold ends at the chosen place, saved once', t.engine.state().filesChanged === null && server.calls.length === 1 &&
+      server.calls[0].body.book_ms === want && server.calls[0].status === 200 && server.row.book_ms === want, server.calls.map((c) => [c.body.book_ms, c.status]));
+    t.engine.close();
+  }
+}
+
+{
+  // Held, a Play after the long quiet is only a preview: no late re-read,
+  // no question (the real saver: its lastSeen looks past the hold).
+  const t = withEngine({ book: CHAPTERED, places: { web: GONE_WEB, plex: null }, wallClock: true, slowPosition: 3000 });
+  await openBook(t);
+  await t.clock.advance(6 * 60000);
+  const reads = t.got.filter((u) => u.indexOf('/position/') !== -1).length;
+  await t.engine.play();
+  await t.clock.advance(1000);
+  check('T2R4: a held Play after a long quiet previews at once, no re-read', t.engine.state().playing && !t.engine.state().checking &&
+    t.got.filter((u) => u.indexOf('/position/') !== -1).length === reads && t.engine.state().bookMs > 0, t.engine.state());
+  t.engine.close();
+}
+
+// T2R5: pause() and toggle() during a late Play's read stop an element
+// playing meanwhile from outside the engine, not only the read.
+current = 'T2R5: pause() or toggle() during a late Play\'s read also stops the element';
+for (const how of ['toggle()', 'pause()']) {
+  const clock = fakeClock(); const server = fakeServer(clock); const storage = fakeStorage();
+  const web = { track: '502', offset_ms: 1000, duration_ms: 900000, updated_at: iso(-3600), device: 'Chrome on Windows', psid: 'other' };
+  const t = withEngine({ clock, server, storage, places: { web, plex: null }, wallClock: true, slowPosition: 3500 });
+  await openBook(t);
+  await clock.advance(3000);
+  t.engine.pause();
+  await clock.advance(6 * 60000);                      // paused 6 minutes: the next Play is late
+  t.engine.play();                                     // the read goes out (3.5 s)
+  await clock.advance(200);
+  const el = t.audios[0];
+  el.play();                                           // from outside, during the read
+  await clock.advance(200);
+  check(how + ': the element plays during the read', !el.paused && t.engine.state().checking === true);
+  if (how === 'toggle()') t.engine.toggle(); else t.engine.pause();
+  await clock.advance(10000);
+  check(how + ': it stops, and the read is cancelled', el.paused && !t.engine.state().playing && t.engine.state().checking === false, [el.paused, t.engine.state()]);
+  t.engine.close();
+}
+
+// T2R6: a held preview is bounded by the wall clock too, so a seek from
+// outside the engine back before its start can't stretch it.
+current = 'T2R6: a held preview stops after 15 s of playing even when sought back from outside';
+{
+  const t = withEngine({ book: CHAPTERED, places: { web: GONE_WEB, plex: null }, wallClock: true });
+  await openBook(t);
+  t.engine.previewAt(700000);
+  await t.clock.advance(3000);
+  t.audios[0].currentTime = 10;                        // part 2 at 10 s: book 610 000, before the preview's start
+  await t.clock.advance(150000);
+  const s = t.engine.state();
+  check('stopped about 15 s after it started playing', !s.playing && s.bookMs >= 610000 && s.bookMs <= 623000 && s.filesChanged !== null, s.bookMs);
+  check('nothing saved', t.server.calls.length === 0);
+  // Its wall time counts only while it plays: paused and resumed, it gets its full 15 s.
+  t.engine.previewAt(1000000);
+  await t.clock.advance(5000);
+  t.engine.pause();
+  await t.clock.advance(60000);
+  await t.engine.play();
+  await t.clock.advance(30000);
+  check('a pause in the middle does not use it up', !t.engine.state().playing && t.engine.state().bookMs >= 1015000 && t.engine.state().bookMs <= 1015500, t.engine.state().bookMs);
   t.engine.close();
 }
 
