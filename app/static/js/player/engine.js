@@ -155,6 +155,9 @@
  *                     preview meanwhile) plays on from there once it lands,
  *                     unless a Pause took it back; once asked, the answer
  *                     decides. false as previewAt.
+ *                     Wherever it is asked to land, it lands no nearer the
+ *                     book's end than PLACE_END_MS (30 s; 0 for a shorter
+ *                     book), so the next Play never starts the book again.
  *   startOver() -> bool  confirmPlace(0), never sending linked_from
  *   setSpeed(x)       0.75 to 2 in 0.05 steps (clamped, rounded); returns the speed
  *   setSkip(s)        the skip length (the skip buttons and the Media Session
@@ -272,6 +275,7 @@ export const PLAYER_BROKEN = "The player couldn't start. Please update your brow
 export const PREVIEW_MS = 15000;       // previewAt plays this much of the book from a spot
 const PREVIEW_END_GAP_MS = 1000;       // ... stopping this short of the book's end (never ending it)
 const PREVIEW_WALL_STEP_MS = 1000;     // ... its wall time counting this much at most per timeupdate
+export const PLACE_END_MS = 30000;     // a confirmed place is never nearer the book's end than this
 export const FORMAT_UNSUPPORTED = "This book's audio format can't play in this browser";
 export const PART_FORMAT = "This part's format can't play in this browser";
 export const RECHECK_AFTER_MS = 300000;  // a Play after this long without playing re-reads the saved places
@@ -1788,7 +1792,7 @@ export function createEngine(env) {
     if (!files || !book || !playhead) return false;
     const n = Number(bookMs);
     if (!isFinite(n)) return false;
-    const v = clampNumber(n, 0, book.durationMs);
+    const v = clampNumber(n, 0, placeLimit());
     if (blocked(toTrackOffset(book.tracks, v).index)) {
       emit('warning', { kind: 'part-format', message: PART_FORMAT });
       return false;
@@ -1815,10 +1819,18 @@ export function createEngine(env) {
     return true;
   }
 
+  // How far into the book a confirm may place it: PLACE_END_MS short of the
+  // end (0 for a shorter book). A place at the very end would make the next
+  // Play start the book again from 0:00.
+  function placeLimit() {
+    return Math.max(0, book.durationMs - PLACE_END_MS);
+  }
+
   // The confirm lands at `at` (the chosen spot: a move made while it waited
-  // counts): the hold ends, then its one explicit move. A confirmPlace's
-  // link goes with it wherever it lands (never a startOver's). carry: a Play
-  // made while the confirm read the saved places plays on from there.
+  // counts, within placeLimit()): the hold ends, then its one explicit move.
+  // A confirmPlace's link goes with it wherever it lands (never a
+  // startOver's). carry: a Play made while the confirm read the saved places
+  // plays on from there, never from the book's end (it would start again).
   function land(at, carry) {
     const p = files.pending;
     const old = files.old;
@@ -1833,8 +1845,8 @@ export function createEngine(env) {
         console.error('[player] saving failed', e);
       }
     }
-    seek(at, 'seek', false, true, { place: true });
-    if (carry && book && !wantPlay) {
+    seek(clampNumber(Number(at) || 0, 0, placeLimit()), 'seek', false, true, { place: true });
+    if (carry && book && !wantPlay && !atEnd()) {
       const pr = playOn();
       if (pr && typeof pr.catch === 'function') pr.catch(function (e) { console.error('[player] playing failed', e); });
     }

@@ -1122,7 +1122,12 @@ export function createFeatures(env) {
     if (which === 'other') player.seek(entry.offer.other.bookMs, answer);
     else if (entry.kind === 'open') player.seek(entry.offer.own.bookMs, answer);
     // After the move: the save that resumes carries the place chosen.
+    const held = !!player.state().filesChanged;
     if (entry.kind === 'conflict' && typeof player.resolveConflict === 'function') player.resolveConflict();
+    // A confirm (the files changed) that landed at the book's very end does
+    // not play on: a Play there would start the book again from 0:00.
+    const now2 = player.state();
+    if (held && !now2.filesChanged && now2.book && now2.bookDurationMs > 0 && now2.bookMs >= now2.bookDurationMs) return;
     playNow();
   }
 

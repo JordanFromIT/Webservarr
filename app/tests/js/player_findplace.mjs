@@ -10,8 +10,8 @@
 //
 // Imports each module as it is, through a data: URL like player_engine.mjs
 // (which also proves none touches the DOM at import time).
-// FINDPLACE_JS=<path> / FEATURES_JS=<path> run the same cases against other
-// copies of those files.
+// FINDPLACE_JS, FEATURES_JS, UI_JS, ENGINE_JS and SAVES_JS (=<path>) run the
+// same cases against other copies of those files.
 // Run: node app/tests/js/player_findplace.mjs (npm run test:js; CI js-checks).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -23,8 +23,8 @@ const load = (p) => import('data:text/javascript;charset=utf-8,' + encodeURIComp
 const FINDPLACE_PATH = process.env.FINDPLACE_JS || join(here, '../../static/js/player/findplace.js');
 const FP = await load(FINDPLACE_PATH);
 const F = await load(process.env.FEATURES_JS || join(here, '../../static/js/player/features.js'));
-const E = await load(join(here, '../../static/js/player/engine.js'));
-const S = await load(join(here, '../../static/js/player/saves.js'));
+const E = await load(process.env.ENGINE_JS || join(here, '../../static/js/player/engine.js'));
+const S = await load(process.env.SAVES_JS || join(here, '../../static/js/player/saves.js'));
 const U = await load(process.env.UI_JS || join(here, '../../static/js/player/ui.js'));
 
 let failed = 0;
@@ -1009,6 +1009,117 @@ await run('T3U3: the tap that opens the player makes one watcher; the panel show
   await t.clock.advance(10);
   check('Back closes the helper alone', t.ui.isOpen() && !t.shown() && t.cw.live.length === 1);
   check('nothing saved', t.posts.length === 0 && t.st().filesChanged !== null);
+  t.engine.close();
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 2 (T3R1, T2Z1): a confirm never lands at the very end of the book
+// (the next Play would start it again from 0:00), whatever route took the
+// chosen spot there.
+// ---------------------------------------------------------------------------
+
+const END = 1800000;
+const LIMIT = END - 30000;
+// No save at the book's start after the confirm, and playback goes on near the end.
+const noRestart = (t) => t.posts.every((b) => b.book_ms >= LIMIT - 1000);
+
+await run('T3R1: the nudge and Forward stop 30 s short of the end; the confirm lands there and plays on', async () => {
+  const t = await held({ old: { book_ms: 1740000, book_duration_ms: END } });
+  check('the candidate, chosen', t.st().filesChanged.spot === 1740000 && t.cards().length === 1);
+  const fwd = () => t.qa('.wsp-fp-step')[1].click();
+  fwd(); fwd(); fwd();
+  check('Forward x3: 30 s short of the end', t.st().filesChanged.spot === LIMIT, t.st().filesChanged.spot);
+  fwd();
+  check('a fourth goes no further', t.st().filesChanged.spot === LIMIT, t.st().filesChanged.spot);
+  t.key(t.q('.wsp-fp-range'), 'ArrowRight');
+  check('nor an arrow', t.st().filesChanged.spot === LIMIT, t.st().filesChanged.spot);
+  const range = t.q('.wsp-fp-range');
+  check('the scrubber ends there', 1740000 - 300000 + Number(range.getAttribute('max')) * 1000 === LIMIT, range.getAttribute('max'));
+  range.value = range.getAttribute('max');
+  range.dispatchEvent(new t.win.Event('change', { bubbles: true }));
+  check('dragged to its end: there', t.st().filesChanged.spot === LIMIT, t.st().filesChanged.spot);
+  t.card('time').querySelector('.wsp-fp-use').click();
+  check('confirmPlace there', t.calls.filter((c) => c[0] === 'confirmPlace').pop()[1] === LIMIT, t.calls);
+  await t.clock.advance(5000);
+  check('landed 30 s short, saved there', t.st().filesChanged === null && t.st().bookMs === LIMIT && t.posts[0].book_ms === LIMIT, t.posts.map((b) => b.book_ms));
+  t.q('.wsp-play-lg').click();
+  await t.clock.advance(5000);
+  check('a Play goes on from there', t.st().playing && t.st().bookMs > LIMIT && noRestart(t), [t.st().bookMs, t.posts.map((b) => b.book_ms)]);
+  t.engine.close();
+});
+
+await run('T3R1: a history entry at the very end; the lock screen\'s seek to the end; a confirm asked for the end', async () => {
+  for (const how of ['history', 'lock screen', 'engine']) {
+    const t = await held();
+    if (how === 'history') {
+      t.history[''] = { entries: [{ track: '503', offset_ms: 300000, device: 'Test on Linux', device_id: ME, event: 'pause', at: new Date(t.now() - 60000).toISOString(), book_key: '500:1' }], next_before: null };
+      t.qa('.wsp-fp-row')[0].click();
+      await t.clock.advance(50);
+      t.q('.wsp-hist-row').click();
+      await t.clock.advance(10);
+    } else if (how === 'lock screen') {
+      t.ms.handlers.get('seekto')({ seekTime: END / 1000 });
+      await t.clock.advance(10);
+    }
+    if (how === 'engine') {
+      check(how + ': confirmPlace(end) is taken', t.engine.confirmPlace(END) === true);
+    } else {
+      check(how + ': the spot at the end, nothing saved', t.st().filesChanged.spot === END && t.posts.length === 0, t.st().filesChanged.spot);
+      const chosen = t.q('.wsp-fp-cand.is-chosen');
+      check(how + ': shown 30 s short', chosen.querySelector('.wsp-fp-at').textContent.startsWith('0:29:30'), chosen.querySelector('.wsp-fp-at').textContent);
+      chosen.querySelector('.wsp-fp-use').click();
+    }
+    await t.clock.advance(5000);
+    check(how + ': landed 30 s short', t.st().filesChanged === null && t.st().bookMs === LIMIT && t.posts[0].book_ms === LIMIT, [t.st().bookMs, t.posts.map((b) => b.book_ms)]);
+    await t.engine.play();
+    await t.clock.advance(5000);
+    check(how + ': a Play goes on from there', t.st().playing && t.st().bookMs > LIMIT && noRestart(t), [t.st().bookMs, t.posts.map((b) => b.book_ms)]);
+    t.engine.close();
+  }
+});
+
+await run('T2Z1 (E1, E4): a Play carried through the confirm\'s read never meets the end, so never starts again', async () => {
+  for (const [name, move] of [['none', null], ['skip(+30)', (t) => t.engine.skip(30)],
+    ['lock screen seekforward', (t) => t.ms.handlers.get('seekforward')({ seekOffset: 30 })], ['seek(end)', (t) => t.engine.seek(END)]]) {
+    const t = await held();
+    t.positionDelay = 2000;
+    t.engine.confirmPlace(END - 15000);
+    await t.clock.advance(100);
+    await t.engine.play();
+    await t.clock.advance(200);
+    if (move) move(t);
+    await t.clock.advance(5000);
+    check(name + ': landed short of the end, playing on', t.st().filesChanged === null && t.st().playing && t.st().bookMs >= LIMIT && t.st().bookMs < END, t.st());
+    await t.clock.advance(10000);
+    check(name + ': never back at the start', t.st().bookMs >= LIMIT && noRestart(t), [t.st().bookMs, t.posts.map((b) => b.book_ms)]);
+    t.engine.close();
+  }
+  // E4: a confirm of the very end, the element played from outside while its move loads.
+  const t = await held();
+  t.positionDelay = 2000;
+  t.engine.confirmPlace(END);
+  t.audioEl.play();
+  await t.clock.advance(5000);
+  check('E4: landed 30 s short', t.st().filesChanged === null && t.st().bookMs >= LIMIT && t.st().bookMs < END, t.st().bookMs);
+  await t.clock.advance(10000);
+  check('E4: never back at the start', t.st().bookMs >= LIMIT && noRestart(t), [t.st().bookMs, t.posts.map((b) => b.book_ms)]);
+  t.engine.close();
+});
+
+await run('T2Z1 (edge5): the question\'s answer plays on from a landing short of the end', async () => {
+  const t = await held();
+  t.places.plex = { track: '502', offset_ms: 30000, duration_ms: 900000, updated_at: new Date(t.now() - MIN).toISOString(), device: 'Plexamp' };
+  await t.clock.advance(5000);
+  t.engine.confirmPlace(END - 15000);
+  await t.clock.advance(500);
+  check('asked', t.prompts().some((x) => x.indexOf('Continue from') === 0) && t.st().filesChanged !== null, t.prompts());
+  t.engine.skip(30);
+  await t.clock.advance(100);
+  t.qa('.wsp-prompt .wsp-notice-btn').find((b) => b.textContent === 'Keep listening here').click();
+  await t.clock.advance(5000);
+  check('landed 30 s short, playing on', t.st().filesChanged === null && t.st().playing && t.st().bookMs >= LIMIT && t.st().bookMs < END, t.st());
+  await t.clock.advance(10000);
+  check('never back at the start', noRestart(t), t.posts.map((b) => b.book_ms));
   t.engine.close();
 });
 

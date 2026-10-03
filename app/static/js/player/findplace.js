@@ -523,7 +523,9 @@ export function createFindPlace(env) {
     setHidden(candHead, !any);
     setHidden(candList, !any);
     setHidden(none, !!list.length);
-    const spot = spotNow(s);
+    // The spot as it can be used (a move elsewhere may have taken it to the
+    // very end; a confirm stops END_MS short of it).
+    const spot = usable(spotNow(s), s);
     const dur = num(s.bookDurationMs);
     cards.concat([spotCard]).forEach(function (c, n) {
       const i = c === spotCard ? SPOT : n;
@@ -565,11 +567,12 @@ export function createFindPlace(env) {
   }
 
   // The scrubber spans the nudge's reach either side of its card (and the
-  // spot, wherever a move took it), within the book.
+  // spot, wherever a move took it), within the book, short of its end by
+  // END_MS (where a confirm stops).
   function drawNudge(spot, dur) {
     const c = centreOf(chosen);
     const lo = Math.max(0, Math.min(c - NUDGE_MS, spot));
-    const hi = Math.min(dur > 0 ? dur : Infinity, Math.max(c + NUDGE_MS, spot));
+    const hi = Math.min(dur > 0 ? Math.max(0, dur - END_MS) : Infinity, Math.max(c + NUDGE_MS, spot));
     nudgeLo = lo;
     const max = Math.max(1, Math.round((hi - lo) / 1000));
     setAttr(nudgeRange, 'max', String(max));
@@ -581,10 +584,20 @@ export function createFindPlace(env) {
 
   // ---- The choices ----
 
+  // As far into the book as a spot can be used: END_MS short of the end
+  // (the engine's confirm stops there too).
+  function limitOf(s) {
+    const dur = num(s.bookDurationMs);
+    return dur > 0 ? Math.max(0, dur - END_MS) : Infinity;
+  }
+
+  function usable(v, s) {
+    return Math.max(0, Math.min(limitOf(s), v));
+  }
+
   function move(v) {
     const s = player.state();
-    const dur = num(s.bookDurationMs);
-    const to = Math.max(0, dur > 0 ? Math.min(dur, v) : v);
+    const to = usable(v, s);
     // Already there (a drag let go, then its change): nothing to move.
     if (to === spotNow(s)) {
       draw();
@@ -604,8 +617,9 @@ export function createFindPlace(env) {
   }
 
   function valueOf(c) {
+    const s = player.state();
     const i = c === spotCard ? SPOT : cards.indexOf(c);
-    return i === chosen ? spotNow(player.state()) : c.cand ? c.cand.bookMs : spotNow(player.state());
+    return usable(i === chosen || !c.cand ? spotNow(s) : c.cand.bookMs, s);
   }
 
   function onPreview(c) {
