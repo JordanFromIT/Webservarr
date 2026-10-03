@@ -613,6 +613,15 @@ export function sessionPlace(session, chapters, durationMs) {
   return out.join(' · ');
 }
 
+/* A history row's "·"-joined text, with the space right after each dot made
+   non-breaking (T5N2): the space before a dot can still break a line, so a
+   wrapped line never ends with a bare "·" orphaned from the item it names.
+   Used only for what is shown; sessionPlace/sessionRange and the aria-label
+   built from them keep plain spaces. */
+function noOrphanDot(text) {
+  return text.split(' · ').join(' · ');
+}
+
 // ---------------------------------------------------------------------------
 // The features
 // ---------------------------------------------------------------------------
@@ -1725,9 +1734,9 @@ export function createFeatures(env) {
       }, [
         h('span', { class: 'wsp-row-text' }, [
           h('span', { class: 'wsp-hist-when', text: when }),
-          where ? h('span', { class: 'wsp-hist-what', text: where }) : null,
+          where ? h('span', { class: 'wsp-hist-what', text: noOrphanDot(where) }) : null,
           h('span', { class: 'wsp-hist-dev' }, [
-            h('span', { class: 'wsp-hist-device', text: range ? range + ' · ' + device : device }),
+            h('span', { class: 'wsp-hist-device', text: range ? noOrphanDot(range + ' · ' + device) : device }),
             x.earlier ? h('span', { class: 'wsp-hist-tag', text: 'Earlier copy' }) : null
           ])
         ]),

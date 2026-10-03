@@ -766,7 +766,7 @@ await run('Show history opens the history; an entry whose part is gone opens the
   await t.clock.advance(50);
   check('the history', t.view() === 'history' && t.fetches.some((f) => f.url === '/api/player/history/500%3A1'), t.view());
   const row = t.q('.wsp-hist-row');
-  check('the entry, labelled', row.querySelector('.wsp-hist-what').textContent === 'Chapter 5 · 0:15:00 into the book · 50%' &&
+  check('the entry, labelled', row.querySelector('.wsp-hist-what').textContent === 'Chapter 5 · 0:15:00 into the book · 50%' &&
     row.querySelector('.wsp-hist-tag').textContent === 'Earlier copy' && !row.disabled, row.textContent);
   row.click();
   await t.clock.advance(10);

@@ -1864,7 +1864,7 @@ await run('T5F2: history rows show the range of a session whose places are not i
   await t.clock.advance(50);
   const rows = t.qa('.wsp-hist-row');
   const devs = rows.map((r) => r.querySelector('.wsp-hist-device').textContent);
-  check('the earlier copy\'s session shows the chapters it covered', rows.length === 2 && devs[1] === 'Chapters 1 to 3 · Chrome on Android', devs);
+  check('the earlier copy\'s session shows the chapters it covered', rows.length === 2 && devs[1] === 'Chapters 1 to 3 · Chrome on Android', devs);
   check('in the spoken label', /, Chapters 1 to 3, Chrome on Android, earlier copy$/.test(rows[1].getAttribute('aria-label')), rows[1].getAttribute('aria-label'));
   t.engine.close();
 });
@@ -1877,6 +1877,38 @@ await run('T5F3: a history row\'s place and chapters wrap, never cut (the percen
     const last = rules.length ? rules[rules.length - 1][2] : '';
     check(cls + ': wraps', /white-space:\s*normal/.test(last) && /overflow:\s*visible/.test(last) && !/text-overflow:\s*ellipsis/.test(last), last);
   }
+});
+
+await run('T5N2: a history row keeps "·" attached to what follows it, not orphaned by a wrap', async () => {
+  const t = await setup({ wide: true });
+  await t.openAt(MULTI.key, '501', 60000, { autoplay: false });
+  t.engine.pause();
+  t.history[''] = {
+    entries: [
+      entry(t, 60000, '501', 60000, 'Test on Linux', ME, 'pause'),
+      entry(t, 3600000, '503', 100000, 'Chrome on Android', OTHER, 'pause'),
+      entry(t, 3700000, '502', 800000),
+      entry(t, 3900000, '502', 200000, 'Chrome on Android', OTHER, 'play')
+    ],
+    next_before: null
+  };
+  t.ui.open();
+  t.q('.wsp-slot-history .wsp-action').click();
+  await t.clock.advance(50);
+  const rows = t.qa('.wsp-hist-row');
+  const what = rows[1].querySelector('.wsp-hist-what').textContent;
+  const device = rows[1].querySelector('.wsp-hist-device').textContent;
+  // Each "·" is followed by a non-breaking space: a wrapped line can only end
+  // before the dot, never with it left orphaned at the end of a line.
+  check('the place line', what === 'Part 3 of 3 · 0:26:40 into the book · 88%', what);
+  check('the chapters-and-device line', device === 'Chapters 2 to 3 · Chrome on Android', device);
+  check('no plain "· " is left in either', !/· /.test(what) && !/· /.test(device), [what, device]);
+  // The fix is cosmetic: it does not touch what sessionPlace/sessionRange
+  // return, so the spoken label still reads with ordinary, breakable spaces.
+  check('the aria-label (spoken, never rendered) is unaffected',
+    /Part 3 of 3 · 0:26:40 into the book · 88%, Chapters 2 to 3, Chrome on Android/.test(rows[1].getAttribute('aria-label')),
+    rows[1].getAttribute('aria-label'));
+  t.engine.close();
 });
 
 await run('handoff: only another device, within 24 h, with a place of its own here over 30 s away', () => {
@@ -3526,10 +3558,10 @@ await run('history: sessions from the log, and a tap goes to where one ended', a
   check('two sessions, newest first', rows.length === 2, rows.length);
   const what = rows.map((r) => r.querySelector('.wsp-hist-what').textContent);
   // Saved before the book time was kept: this copy's chapter, time and length.
-  check('where each ended: chapter, book time, percent', what[0] === 'Part 1 of 3 · 0:01:00 into the book · 3%' && what[1] === 'Part 3 of 3 · 0:26:40 into the book · 88%', what);
+  check('where each ended: chapter, book time, percent', what[0] === 'Part 1 of 3 · 0:01:00 into the book · 3%' && what[1] === 'Part 3 of 3 · 0:26:40 into the book · 88%', what);
   const devs = rows.map((r) => r.querySelector('.wsp-hist-dev').textContent);
   // T3C1 (player spec 8): the chapters a session covered, when more than one.
-  check('the chapters covered and the device', devs.join() === 'Test on Linux,Chapters 2 to 3 · Chrome on Android', devs);
+  check('the chapters covered and the device', devs.join() === 'Test on Linux,Chapters 2 to 3 · Chrome on Android', devs);
   check('no earlier copy here', !t.q('.wsp-hist-tag'));
   check('when', rows[1].querySelector('.wsp-hist-when').textContent.startsWith('Today · '), rows[1].querySelector('.wsp-hist-when').textContent);
   check('a spoken label', /, Part 3 of 3 · 0:26:40 into the book · 88%, Chapters 2 to 3, Chrome on Android\. Go to where it ended$/.test(rows[1].getAttribute('aria-label')), rows[1].getAttribute('aria-label'));
@@ -3565,8 +3597,8 @@ await run('history (spec 2.5): that copy\'s chapter, book time and percent; an e
   const rows = t.qa('.wsp-hist-row');
   check('another copy starts another session', rows.length === 3, rows.length);
   const what = rows.map((r) => { const w = r.querySelector('.wsp-hist-what'); return w ? w.textContent : null; });
-  check('"Chapter <label> · <h:mm:ss> into the book · <n>%"', what[0] === 'Chapter 7 · 0:15:00 into the book · 50%', what[0]);
-  check('the earlier copy\'s own chapter, time and length', what[1] === 'The Letter · 1:02:05 into the book · 51%', what[1]);
+  check('"Chapter <label> · <h:mm:ss> into the book · <n>%"', what[0] === 'Chapter 7 · 0:15:00 into the book · 50%', what[0]);
+  check('the earlier copy\'s own chapter, time and length', what[1] === 'The Letter · 1:02:05 into the book · 51%', what[1]);
   check('nothing known: no line', what[2] === null, what[2]);
   const tags = rows.map((r) => { const g = r.querySelector('.wsp-hist-tag'); return g ? g.textContent : ''; });
   check('"Earlier copy" on the earlier copy\'s', tags.join() === ',Earlier copy,Earlier copy', tags);
@@ -3598,7 +3630,7 @@ await run('history: Show older loads the next page, and a session across the pag
   check('the next page by its cursor', urls[urls.length - 1] === '/api/player/history/500%3A1?before=cur~1', urls);
   const rows = t.qa('.wsp-hist-row');
   check('the session runs on into the older page, then an older one', rows.length === 2, rows.length);
-  check('it still ends where the first page\'s newest place is', rows[0].querySelector('.wsp-hist-what').textContent === 'Part 2 of 3 · 0:18:20 into the book · 61%', rows[0].querySelector('.wsp-hist-what').textContent);
+  check('it still ends where the first page\'s newest place is', rows[0].querySelector('.wsp-hist-what').textContent === 'Part 2 of 3 · 0:18:20 into the book · 61%', rows[0].querySelector('.wsp-hist-what').textContent);
   check('no more pages', t.q('.wsp-hist-more').hidden);
   t.engine.close();
 });
