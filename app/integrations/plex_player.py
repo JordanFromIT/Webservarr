@@ -683,7 +683,7 @@ async def list_books() -> list:
 
 _NUMBERED = re.compile(r"(?:\bbook|\bvolume|\bvol\.?|#)\s*#?\s*([0-9]{1,3})(?![0-9])", re.IGNORECASE)
 _NUMBER_WORDS = re.compile(r",?\s*(?:\bbook|\bvolume|\bvol\.?|#)\s*#?\s*[0-9]{1,3}(?![0-9])", re.IGNORECASE)
-_ROMAN = {"i": 1, "v": 5, "x": 10, "l": 50}
+_ROMAN = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
 
 
 def _fold(text) -> str:
@@ -692,8 +692,9 @@ def _fold(text) -> str:
     return " ".join(text.casefold().split())
 
 
-def _roman(word: str) -> Optional[int]:
-    """The value of a Roman numeral from I to L written the usual way, or None."""
+def _roman(word: str, limit: int = 50) -> Optional[int]:
+    """The value of a lower-case Roman numeral written the usual way, from I
+    up to `limit` (L by default; at most 3999), or None."""
     total, prev = 0, 0
     for ch in reversed(word):
         v = _ROMAN.get(ch)
@@ -701,12 +702,13 @@ def _roman(word: str) -> Optional[int]:
             return None
         total = total - v if v < prev else total + v
         prev = max(prev, v)
-    return total if 0 < total <= 50 and _to_roman(total) == word else None
+    return total if 0 < total <= limit and _to_roman(total) == word else None
 
 
 def _to_roman(n: int) -> str:
     out = ""
-    for value, letters in ((50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")):
+    for value, letters in ((1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"), (50, "l"),
+                           (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")):
         while n >= value:
             out += letters
             n -= value
@@ -796,7 +798,11 @@ _NUMBER_MARK = re.compile(r"[0-9#\ue000]|\b(?:book|vol|volume|part)\b", re.IGNOR
 _WORD_VALUES = {w: n for n, w in enumerate(
     ("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
      "seventeen eighteen nineteen twenty").split(), start=1)}
-_WORD_NUMBER = "|".join(sorted(_WORD_VALUES, key=len, reverse=True))
+_BIGGER = r"hundred|thousand|hundredth|thousandth"
+_WORD_NUMBER = (r"(?:twenty(?![\s-]+(?:one|two|three|four|five|six|seven|eight|nine|first|second|third|fourth|fifth"
+                r"|sixth|seventh|eighth|ninth|" + _BIGGER + r")\b)|(?:"
+                + "|".join(sorted((w for w in _WORD_VALUES if w != "twenty"), key=len, reverse=True))
+                + r")(?![\s-]+(?:" + _BIGGER + r")\b))")
 _ORDINAL_VALUES = {w: n for n, w in enumerate(
     ("first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth thirteenth "
      "fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth twentieth").split(), start=1)}
@@ -823,6 +829,57 @@ _KIND_MARKS = (("book", "#"), ("hash", "#"), ("lbook", "#"), ("vol", "%"), ("lvo
 _NUMBER_OR_WORD = re.compile(r"[0-9]{1,6}(?:\.[0-9]{1,6})?|[^\W\d_]+")
 # The words that say what a number in the narrator's part counts.
 _COUNTED = frozenset("series season disc disk cd episode chapter act side radio".split())
+# Number words of any size, for the parts that are taken off: "thirty-one",
+# "one hundred and five", "two thousand", their ordinals ("twenty-first").
+_SMALL = {**_WORD_VALUES, **_ORDINAL_VALUES}
+_TENS = {w: 10 * n for n, w in enumerate(
+    "twenty thirty forty fifty sixty seventy eighty ninety".split(), start=2)}
+_TENS.update({w: 10 * n for n, w in enumerate(
+    "twentieth thirtieth fortieth fiftieth sixtieth seventieth eightieth ninetieth".split(), start=2)})
+_NUMBER_WORD_SET = frozenset([*_SMALL, *_TENS, "hundred", "hundredth", "thousand", "thousandth"])
+
+
+def _below_hundred(words: list, i: int):
+    """(value, next index) of the number below a hundred that starts at
+    words[i], or None."""
+    if i >= len(words):
+        return None
+    w = words[i]
+    if w in _TENS:
+        n = _TENS[w]
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        if w.endswith("y") and nxt in _SMALL and _SMALL[nxt] < 10:
+            return n + _SMALL[nxt], i + 2
+        return n, i + 1
+    if w in _SMALL:
+        return _SMALL[w], i + 1
+    return None
+
+
+def _below_thousand(words: list, i: int):
+    first = _below_hundred(words, i)
+    if first and first[1] < len(words) and words[first[1]] in ("hundred", "hundredth") and first[0] < 10:
+        value, j = first[0] * 100, first[1] + 1
+        if j < len(words) and words[j] == "and":
+            j += 1
+        rest = _below_hundred(words, j)
+        if rest:
+            return value + rest[0], rest[1]
+        return value, first[1] + 1
+    return first
+
+
+def _number_run(words: list, i: int):
+    """(value, next index) of the longest number written in words that
+    starts at words[i] ("forty one", "one hundred and five"), or None."""
+    first = _below_thousand(words, i)
+    if first and first[1] < len(words) and words[first[1]] in ("thousand", "thousandth") and first[0] < 1000:
+        value, j = first[0] * 1000, first[1] + 1
+        rest = _below_thousand(words, j)
+        return (value + rest[0], rest[1]) if rest else (value, j)
+    return first
+
+
 # A bracket pair with nothing left in it once its number phrase is out.
 _EMPTY_GROUP = re.compile(r"[(\[{][\s,;:.\-\u2013\u2014\ue000]*[)\]}]")
 # Separators, and marks, left at the very end: a mark there is in no part
@@ -833,19 +890,38 @@ _TRAILING_SEPARATORS = re.compile(r"[\s,;:\-\u2013\u2014\ue000]+$")
 _APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "\u00b4": "'", "`": "'"})
 
 
+def _is_latin(ch: str) -> bool:
+    return ch.isascii() or "LATIN" in unicodedata.name(ch, "")
+
+
 def _normal(text) -> str:
-    """Text with apostrophe variants made plain, then NFKD with the
-    combining marks dropped (accents, full-width forms), and "&" as "and"."""
+    """Text with apostrophe variants made plain, then NFKD (full-width forms,
+    circled and superscript digits) with the combining marks of Latin letters
+    dropped (accents: "Misérables" is "Miserables"); the marks of any other
+    script are kept, so kana voicing ("かき" is not "かぎ") and Cyrillic
+    letters survive (NFC puts them back together). Decimal digits of other
+    scripts become ASCII digits, and "&" is "and"."""
     text = str(text or "").translate(_APOSTROPHES)
-    text = "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch))
-    return text.replace("&", " and ")
+    out, latin = [], False
+    for ch in unicodedata.normalize("NFKD", text):
+        if unicodedata.combining(ch):
+            if latin:
+                continue
+        else:
+            latin = _is_latin(ch)
+            digit = unicodedata.decimal(ch, None)
+            if digit is not None and not ch.isascii():
+                ch = str(digit)
+        out.append(ch)
+    return unicodedata.normalize("NFC", "".join(out)).replace("&", " and ")
 
 
 def _numbered(part: str) -> bool:
     """True when a part of a title holds a book number: a digit, "#", a
-    book/vol/part marker, a Roman numeral, a number word or an ordinal."""
-    return bool(_NUMBER_MARK.search(part)) or any(
-        _roman(w) or w in _WORD_VALUES or w in _ORDINAL_VALUES for w in re.findall(r"[a-z]+", part.casefold()))
+    book/vol/part marker, a Roman numeral (or capitals that look like one), a
+    number word (of any size) or an ordinal."""
+    return bool(_NUMBER_MARK.search(part)) or bool(re.search(r"\b[IVXLCDM]+\b", part)) or any(
+        _roman(w, 3999) or w in _NUMBER_WORD_SET for w in re.findall(r"[a-z]+", part.casefold()))
 
 
 def _without_copy_words(part: str) -> str:
@@ -856,12 +932,12 @@ def _number_token(text: str) -> Optional[str]:
     """A number as a token: "02" is "2", "II", "Two", "Second" and "2nd" are
     "2"; a decimal is kept exactly ("2.1" is not "2.10"). None for a Roman
     numeral that isn't one."""
-    if text[0].isdigit():
+    if text[0] in "0123456789":
         whole, dot, part = re.sub(r"(?:st|nd|rd|th)$", "", text, flags=re.IGNORECASE).partition(".")
         return str(int(whole)) + dot + part
     word = text.casefold()
     n = _WORD_VALUES.get(word) or _ORDINAL_VALUES.get(word) or _roman(word)
-    return str(n) if n else None
+    return str(n) if n else None         # anything else, ❶ say, is a word
 
 
 def _book_numbers(text: str) -> tuple:
@@ -877,33 +953,137 @@ def _book_numbers(text: str) -> tuple:
         if value is None or of is None:
             return m.group(0)       # "Part Lil" is words, not a number
         kind = next(mark for group, mark in _KIND_MARKS if m.group(group))
-        tokens.append(kind + value + (f"/{of}" if of else ""))
+        # "Book 2 of 5" is book 2 (a re-rip may name the set's size or not);
+        # only a part keeps its "of M".
+        tokens.append(kind + value + (f"/{of}" if of and kind == "+" else ""))
         return f" {_MARK} "
     return _BOOK_NUMBER.sub(take, text), tokens
 
 
+# A digit run or a word (hyphenated compounds split) of a part taken off.
+_READER_ITEM = re.compile(r"[0-9]{1,6}(?:\.[0-9]{1,6})?(?:(?:st|nd|rd|th)(?![^\W\d_]))?|[^\W\d_]+")
+# What divides a part taken off: a comma, a semicolon or a bracket starts a
+# further item (a co-narrator, a number: "Dee Lane", "Series 2"), a colon or
+# a spaced dash starts text that is the title's own ("Winter").
+_READER_SPLIT = re.compile(r"\s*(?:([,;()\[\]{}])|(:)|(\s[-\u2013\u2014]\s))\s*")
+
+
+def _reader_segments(part: str) -> list:
+    """[(text, is_title_text)] of a part taken off, split at its separators.
+    A segment is the title's own when a colon, a spaced dash or a closing
+    bracket stands between it and the segment before: what follows the end of
+    the narration is not the narration."""
+    out, last, own = [], 0, False
+    for m in _READER_SPLIT.finditer(part):
+        if part[last:m.start()].strip():
+            out.append((part[last:m.start()], own))
+            own = False
+        last = m.end()
+        own = own or bool(m.group(2) or m.group(3) or (m.group(1) and m.group(1) in ")]}"))
+    if part[last:].strip():
+        out.append((part[last:], own))
+    return out
+
+
+def _reader_items(segment: str, name: bool) -> list:
+    """The numbers and words of one segment of a part taken off, in order, as
+    ("n", value) and ("w", word, as written). A number is a digit run, a
+    number word of any size, an ordinal or a Roman numeral. In the name (the
+    first segment) a Roman numeral is one of L or less and a single letter is
+    an initial ("Eric V. Smith"), not a number."""
+    pieces = [(m.group(0), m.end()) for m in _READER_ITEM.finditer(segment)]
+    folded = [text.casefold() for text, _end in pieces]
+    items, i = [], 0
+    while i < len(pieces):
+        text, end = pieces[i]
+        if text[0] in "0123456789":
+            items.append(("n", _number_token(text)))
+            i += 1
+            continue
+        hit = _number_run(folded, i)
+        if hit:
+            items.append(("n", str(hit[0])))
+            i = hit[1]
+            continue
+        word = text.casefold()
+        initial = name and len(word) == 1
+        value = None if initial else _roman(word, 50 if name else 3999)
+        items.append(("n", str(value)) if value else ("w", word, text))
+        i += 1
+    return items
+
+
 def _dropped_numbers(part: str) -> list:
-    """Tokens for the numbers of a part that is taken off: digits, number
-    words, ordinals and Roman numerals (a letter with a full stop after it
-    is an initial, not one: "Eric V. Smith"). "^radio4" for "Read by Radio 4 Players",
-    "^series2" for "Read by X, Series 2" and "Read by X, Series Two", "^2"
-    for "Read by X, Two": a number there may be the book's, so it is never
-    simply lost, and the word before it (_COUNTED) says what it counts."""
-    tokens, counted = [], ""
-    for m in _NUMBER_OR_WORD.finditer(part):
-        text = m.group(0)
-        if text[0].isdigit():
-            value = _number_token(text)
-        else:
-            word = text.casefold()
-            initial = len(word) == 1 and part[m.end():m.end() + 1] == "."
-            value = None if initial else _number_token(word)
-            if value is None:
-                counted = word if word in _COUNTED else ""
-                continue
-        tokens.append(f"^{counted}{value}")
+    """Tokens for what a part that is taken off (the narration) holds besides
+    the narrator's name, so a number or a title there is never simply lost:
+    "^radio4" for "Read by Radio 4 Players", "^2" for "Read by X, Two".
+    - In the first segment, the name, only numbers count, each tagged by the
+      word before it.
+    - A segment after a comma, semicolon or bracket that holds a number, or
+      ends in a single capital letter ("Part A"), is kept whole: "^series2"
+      for "Series 2" and "Series Two", "^~part" and "^~a" for the words of
+      "Part A" (a co-narrator's name, which has none of these, is not kept).
+    - Text after a colon or a spaced dash is the title's own and is kept
+      (copy words aside)."""
+    tokens = []
+    for index, (segment, own) in enumerate(_reader_segments(part)):
+        segment = _COPY_WORDS.sub(" ", segment)
+        items = _reader_items(segment, name=index == 0)
+        last = items[-1] if items else None
+        whole = index > 0 and (own or any(
+            i[0] == "n" or _ROMAN_LOOKING.fullmatch(i[2]) or any(c.isdigit() for c in i[2]) for i in items) or (
+            last is not None and last[0] == "w" and len(last[1]) == 1 and last[2].isupper()))
         counted = ""
+        for item in items:
+            if item[0] == "n":
+                tokens.append(f"^{counted}{item[1]}")
+                counted = ""
+            else:
+                if counted and whole:
+                    tokens.append(f"^~{counted}")
+                counted = item[1]
+        if counted and whole:
+            tokens.append(f"^~{counted}")
     return tokens
+
+
+# Capitals that spell a Roman numeral, right or not ("LL"): kept, not guessed at.
+_ROMAN_LOOKING = re.compile(r"[IVXLCDM]+")
+
+# Noise a re-rip adds, in a bracket pair of its own: a year, a format or
+# bitrate, an ASIN, "Unabridged" (spec 2.6 T2K3). Not (Graphic Audio), (BBC
+# Radio 4), (Audible Original): those are other productions.
+_YEAR = r"(?:19|20)[0-9]{2}"
+_ASIN = r"(?:asin[\s:#]*)?b0[0-9a-z]{8}"
+_BITRATE = r"[0-9]{2,3}(?:\.[0-9])?\s*(?:kbps|kb/s|khz|hz|k)(?![a-z])"
+_FORMAT_WORDS = (r"\b(?:mp3|m4b|m4a|aac|flac|ogg|opus|wav|aax|aaxc|cbr|vbr|stereo|mono|retail|"
+                 r"unabridged|abridged|audio\s*books?)\b")
+_NOISE_TOKENS = re.compile(f"{_ASIN}|{_YEAR}|{_BITRATE}", re.IGNORECASE)
+_ANY_GROUP = re.compile(r"\s*[(\[{]([^()\[\]{}]*)[)\]}]\s*")
+
+
+def _is_noise(inner: str) -> bool:
+    """True when a bracket pair holds only such noise."""
+    rest, found = inner.casefold(), False
+    for pattern in (_ASIN, _YEAR, _BITRATE):
+        rest, n = re.subn(pattern, " ", rest, flags=re.IGNORECASE)
+        found = found or n > 0
+    rest, formats = re.subn(_FORMAT_WORDS, " ", rest, flags=re.IGNORECASE)
+    if formats:
+        rest = re.sub(r"\b[0-9]{2,3}\b", " ", rest)       # "mp3-320"
+    return (found or formats > 0) and not re.sub(r"[\s,;:/.+\-]", "", rest)
+
+
+def _without_noise_groups(text: str) -> str:
+    """`text` with every bracket pair of pure noise taken out, wherever it is,
+    unless that would leave nothing."""
+    out = _ANY_GROUP.sub(lambda m: " " if _is_noise(m.group(1)) else m.group(0), text)
+    return " ".join(out.split()) or text
+
+
+# Leading zeros of a whole number: "02" is "2" (not "2.01", whose "01" is a
+# decimal's).
+_LEADING_ZEROS = re.compile(r"(?<![0-9.])0+(?=[0-9])")
 
 
 def _work_title(title: str, narrator: str = "") -> str:
@@ -917,6 +1097,7 @@ def _work_title(title: str, narrator: str = "") -> str:
     less its copy words. Nothing is taken off that would leave it empty."""
     text, numbers = _book_numbers(" ".join(_normal(title).split()))
     text = " ".join(_EMPTY_GROUP.sub(" ", text).split())
+    text = _without_noise_groups(text)
     named = _work_words(narrator or "")
     while True:
         before = text
@@ -934,7 +1115,10 @@ def _work_title(title: str, narrator: str = "") -> str:
             if _work_words(inner) == "a novel":
                 text = head
             elif _COPY_WORDS.search(inner):
-                text = f"{head} {_without_copy_words(inner)}" if _numbered(inner) else head
+                inner = _NOISE_TOKENS.sub(" ", inner)
+                rest = _without_copy_words(inner)
+                lettered = re.fullmatch(r"[^\W\d_]", rest.strip(" ,;:-"))     # "(A, Unabridged)"
+                text = f"{head} {rest}" if _numbered(inner) or lettered else head
         stripped = _TRAILING_COPY_WORD.sub("", text).strip()
         if stripped:
             text = stripped
@@ -949,7 +1133,7 @@ def _work_title(title: str, narrator: str = "") -> str:
         text = " ".join(text.split())
         if text == before:
             break
-    return " ".join([_work_words(text), *numbers]).strip()
+    return " ".join([_work_words(_LEADING_ZEROS.sub("", text)), *numbers]).strip()
 
 
 def _work_words(text: str) -> str:
@@ -1047,6 +1231,18 @@ async def _album(client: httpx.AsyncClient, admin: dict, album_key: str) -> dict
     if album.get("type") != "album" or section != admin["section"]:
         raise NotInLibrary("Not in the audiobook library")
     return album
+
+
+async def disc_in_library(key: str) -> bool:
+    """True when the book's disc is among the discs its album holds now: an
+    album can stay while a disc of it goes (a box set split up). Reads the
+    album's tracks; call it once the album is known to be there
+    (assert_in_library). PlayerUnavailable when Plex fails."""
+    album_key, disc = parse_key(key)
+    admin = _configured()
+    async with _pms_client() as client:
+        children = await _pms_get(client, admin, admin["token"], f"/library/metadata/{album_key}/children")
+    return disc in _discs(_items(children))
 
 
 async def _book(client: httpx.AsyncClient, admin: dict, key: str) -> tuple:
@@ -1238,7 +1434,11 @@ def _identity(album: dict, disc: int, children) -> dict:
         raise NotInLibrary("Not in the audiobook library")
     tracks = discs[disc]
     about = _describe(album, disc, tracks, len(discs))
-    title = _disc_work_title(album, disc, discs)
+    try:
+        title = _disc_work_title(album, disc, discs)
+    except Exception as exc:  # noqa: BLE001 - a title no key can be made of is a book with no key, never an error
+        logger.warning("No work key could be made of a book's title: %s", type(exc).__name__)
+        title = ""
     return {"work_key": _hash_work(about["author"], title) if title else None,
             "author": about["author"] or None,
             "narrator": about["narrator"] or None,
@@ -1269,7 +1469,11 @@ def album_work_key(album: dict) -> Optional[str]:
     holding several books as discs it is not their key: only its tracks
     can say that."""
     about = _describe(album, 1, [], 1)
-    title = _work_title(_album_title(album), about["narrator"])
+    try:
+        title = _work_title(_album_title(album), about["narrator"])
+    except Exception as exc:  # noqa: BLE001 - as in _identity: no key, not an error
+        logger.warning("No work key could be made of an album's title: %s", type(exc).__name__)
+        return None
     if not about["author"] or not title:
         return None
     return _hash_work(about["author"], title)

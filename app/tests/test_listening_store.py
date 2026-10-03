@@ -1503,10 +1503,6 @@ class SettingsField(unittest.TestCase):
         self.assertIn("'integration.plex.audiobook_library'", plex)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ManualClaims(StoreBase):
     """Spec 2.6 s3: a claim made for a manual link keeps the flag, on the
     claim (a pending claim that verifies later still has it) and on the row's
@@ -1625,14 +1621,69 @@ class OrphanCandidates(StoreBase):
         self.assertEqual(self.keys(THEM), ["302:1"])
         self.assertEqual(self.keys("plex:0"), [])
 
-    def test_the_log_is_read_by_the_index_on_identity_and_book(self):
-        from sqlalchemy import text
+    def test_the_real_query_reads_the_log_by_its_index_and_is_limited(self):
+        # T2M2: EXPLAIN the statement orphan_candidates itself sends.
+        from sqlalchemy import event, text
         self.row("300:1")
-        plan = " ".join(str(r[3]) for r in self.db.execute(text(
-            "EXPLAIN QUERY PLAN SELECT 1 FROM listening_positions p WHERE p.identity = :i AND NOT EXISTS "
-            "(SELECT 1 FROM listening_log l WHERE l.identity = p.identity AND l.book_key = p.book_key "
-            "AND l.event = 'end')"), {"i": ME}))
+        seen = []
+
+        def record(conn, cursor, statement, parameters, context, executemany):
+            seen.append((statement, parameters))
+        engine = self.Session.kw["bind"]
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            self.keys()
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        statement, parameters = next((st, ps) for st, ps in seen if "listening_log" in st)
+        self.assertIn("LIMIT", statement.upper())
+        self.assertIn(listening.ORPHAN_CANDIDATES, tuple(parameters))
+        self.assertIn(ME, tuple(parameters))
+        raw = self.db.connection().connection.cursor()
+        raw.execute("EXPLAIN QUERY PLAN " + statement, tuple(parameters))
+        plan = " ".join(str(r[3]) for r in raw.fetchall())
         self.assertIn("ix_listening_log_identity_book_at", plan)
+        self.assertNotIn("SCAN listening_log", plan)
+
+    def test_a_row_is_finished_only_while_the_end_is_its_latest_event(self):
+        # T2O1: a listen after the end makes the row a place again.
+        from app.models import ListeningLog, ListeningPosition
+        self.row("300:1", end=True)
+        self.assertEqual(self.keys(), [])
+        row = self.db.query(ListeningPosition).filter_by(identity=ME, book_key="300:1").one()
+        row.updated_at = row.updated_at + timedelta(hours=1)
+        self.db.add(ListeningLog(identity=ME, book_key="300:1", track_key="1", offset_ms=5, device="Phone",
+                                 event="checkin", at=row.updated_at))
+        self.db.commit()
+        self.assertEqual(self.keys(), ["300:1"])
+
+
+class SuccessorGraph(StoreBase):
+    """The whole successor map of one listener (spec 2.6 T2C2)."""
+
+    def test_links_and_pending_claims_are_edges_and_only_the_listeners_own(self):
+        from app.models import ListeningClaim, ListeningPosition
+        at = datetime(2026, 9, 20)
+
+        def row(book, identity=ME, linked=None):
+            self.db.add(ListeningPosition(identity=identity, book_key=book, track_key="1", offset_ms=5,
+                                          duration_ms=9, updated_at=at, device="x", source="web", linked_from=linked))
+        row("2:1", linked="1:1")
+        row("3:1", linked="2:1")
+        row("4:1")                                  # holds a pending claim on 3:1
+        row("5:1", linked="3:1")                    # holds a verified one: its link is the edge
+        row("6:1", identity=THEM, linked="1:1")
+        row("7:1", linked="9:1")                    # has a link, so its pending claim (below) is not an edge
+        self.db.add(ListeningClaim(identity=ME, earlier_key="3:1", holder_key="4:1", state="pending", claimed_at=at))
+        self.db.add(ListeningClaim(identity=ME, earlier_key="8:1", holder_key="7:1", state="pending", claimed_at=at))
+        self.db.add(ListeningClaim(identity=THEM, earlier_key="3:1", holder_key="6:1", state="pending", claimed_at=at))
+        self.db.commit()
+        graph = listening.successor_graph(self.db, ME)
+        self.assertEqual({k: sorted(v) for k, v in graph.items()},
+                         {"1:1": ["2:1"], "2:1": ["3:1"], "3:1": ["4:1", "5:1"], "9:1": ["7:1"]})
+        self.assertEqual({k: sorted(v) for k, v in listening.successor_graph(self.db, THEM).items()},
+                         {"1:1": ["6:1"]})
+        self.assertEqual(listening.successor_graph(self.db, "plex:0"), {})
 
 
 class Dismissals(StoreBase):
@@ -1826,3 +1877,7 @@ class ManualFlagMigration(unittest.TestCase):
         self.assertIn("listening_dismissals", insp.get_table_names())
         self.assertIn("manual", {c["name"] for c in insp.get_columns("listening_claims")})
         self.assertTrue({"author", "link_manual"} <= {c["name"] for c in insp.get_columns("listening_positions")})
+
+
+if __name__ == "__main__":
+    unittest.main()

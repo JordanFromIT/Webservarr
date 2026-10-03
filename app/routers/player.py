@@ -336,11 +336,13 @@ PLEX_DOWN = "Plex is unavailable right now. Try again in a moment."
 
 
 async def _album_gone(key: str) -> Optional[bool]:
-    """True when assert_in_library no longer finds the book's album
-    (NotInLibrary), False while it is there, None when Plex can't say (or
-    the player went off meanwhile)."""
+    """True when the book is no longer in the library: assert_in_library no
+    longer finds its album (NotInLibrary), or the album is there but its disc
+    is not (a box set split up: pp.disc_in_library). False while it is
+    there, None when Plex can't say (or the player went off meanwhile)."""
     try:
         await pp.assert_in_library(key)
+        return not await pp.disc_in_library(key)
     except pp.PlayerOff:
         return None
     except pp.NotInLibrary:
@@ -348,7 +350,6 @@ async def _album_gone(key: str) -> Optional[bool]:
     except pp.PlayerUnavailable as exc:
         logger.info("Earlier-copy check unavailable: %s", type(exc).__name__)
         return None
-    return False
 
 
 def _lookup_failed() -> HTTPException:
@@ -356,7 +357,7 @@ def _lookup_failed() -> HTTPException:
 
 
 async def _carried_forward(db: Session, who: "Listener", key: str, requesting: str,
-                           known: dict, present: Optional[set] = None) -> Optional[bool]:
+                           known: dict) -> Optional[bool]:
     """True when the listener's place in the earlier copy `key` already
     lives on in a copy still in the library: a row of theirs whose
     linked_from is `key` or that holds a pending claim on it (or, link by
@@ -373,9 +374,7 @@ async def _carried_forward(db: Session, who: "Listener", key: str, requesting: s
     carried forward costs no Plex read; at most LINK_HOPS album checks in
     all, and a chain going on past them counts as carried forward (the
     place is withheld rather than merged unchecked). `known` holds the
-    album checks this request already made (key -> _album_gone's answer).
-    With `present` (the album keys of one library listing) no album is
-    checked with Plex at all: a copy is there when its album is in the set."""
+    album checks this request already made (key -> _album_gone's answer)."""
     seen = {key, requesting}
     frontier, checks = [key], 0
     for _hop in range(listening.LINK_HOPS):
@@ -383,8 +382,6 @@ async def _carried_forward(db: Session, who: "Listener", key: str, requesting: s
         for earlier in frontier:
             for later in listening.successors(db, who.identity, earlier, exclude=seen):
                 seen.add(later)
-                if later not in known and present is not None:
-                    known[later] = later.split(":")[0] not in present
                 if later not in known:
                     if checks >= listening.LINK_HOPS:
                         return True
@@ -577,7 +574,9 @@ async def orphans(request: Request, key: str, who: Listener = Depends(listener),
     /position). Of the newest listening.ORPHAN_CANDIDATES unfinished rows,
     the gone ones are found with one listing of the audiobook library, read
     for this request alone (nothing is cached: two workers), and every
-    presence check, successors and claim holders too, is made against it. The
+    presence check, successors and claim holders too, is made against its
+    book keys (album and disc: a disc that left a box set that stayed is
+    gone). A chain of copies of any length is walked in memory. The
     places are filtered first and the first ORPHAN_ROWS are returned, so a
     listener with many unfinished books still in the library never has an
     older orphan hidden.
@@ -595,18 +594,18 @@ async def orphans(request: Request, key: str, who: Listener = Depends(listener),
     if not rows:
         return {"orphans": [], "dismissed": False}
     try:
-        present = {b["key"].split(":")[0] for b in await pp.list_books()}
+        present = {b["key"] for b in await pp.list_books()}
     except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
         raise _http_error(exc) from None
     author = pp.album_author(album)
     match = {r.book_key: pp.same_author(r.author, author) for r in rows}
     rows.sort(key=lambda r: not match[r.book_key])      # a stable sort: the newest stay first within each
-    known = {r.book_key: r.book_key.split(":")[0] not in present for r in rows}
+    graph = listening.successor_graph(db, who.identity)
     found = []
     for row in rows:
-        if not known[row.book_key]:
+        if row.book_key in present:
             continue                    # still in the library
-        if await _carried_forward(db, who, row.book_key, key, known, present=present):
+        if _carried_in_memory(graph, row.book_key, key, present):
             continue                    # its place lives on in a copy still there
         found.append({"key": row.book_key, "book_title": row.book_title, "narrator": row.narrator,
                       "book_ms": row.book_ms, "book_duration_ms": row.book_duration_ms,
@@ -617,15 +616,39 @@ async def orphans(request: Request, key: str, who: Listener = Depends(listener),
     return {"orphans": found, "dismissed": False}
 
 
+def _carried_in_memory(graph: dict, key: str, requesting: str, present: set) -> bool:
+    """True when the place in the earlier copy `key` lives on in a book of
+    `present`: some book that carried it forward (graph, listening.
+    successor_graph), or one that carried that one forward, however long the
+    chain, is in the library. `requesting` is not a successor. Cycle-safe
+    (each book is visited once), so bounded by the listener's rows."""
+    seen, stack = {key, requesting}, [key]
+    while stack:
+        for later in graph.get(stack.pop(), ()):
+            if later in seen:
+                continue
+            seen.add(later)
+            if later in present:
+                return True
+            stack.append(later)
+    return False
+
+
 @router.post("/orphans/{key}/dismiss", dependencies=[Depends(require_same_origin)])
 @_limit(PLAYER_LIMIT, "orphans-dismiss")
 async def dismiss_orphans(request: Request, key: str, who: Listener = Depends(listener),
                           db: Session = Depends(get_db)):
     """The listener's "None of these" for the book `key`: remembered on the
     server for them and the book, so the question is never asked again on
-    any device. Idempotent. Only for a book in the library (404 otherwise),
-    which also bounds what a listener can store."""
+    any device. Idempotent. Only for a book in the library's listing, disc
+    included (404 otherwise), which also bounds what a listener can store."""
     await _checked_book(who, key)
+    try:
+        in_library = key in {b["key"] for b in await pp.list_books()}
+    except (pp.PlayerUnavailable, pp.NotInLibrary) as exc:
+        raise _http_error(exc) from None
+    if not in_library:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not in the audiobook library")
     listening.dismiss_orphans(db, who.identity, key)
     return {"dismissed": True}
 
@@ -835,7 +858,11 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     time), so a browser that lost the link, or another device, still settles
     it. Its outcome is not answered: "linked" is only for the link the
     request carried."""
-    claimed = await _claimed_link(db, who, body.book, body.linked_from, body.link_manual)
+    # A link the book's own stored claim made by hand stays manual when the
+    # browser sends it again without the flag.
+    manual = body.link_manual or (body.linked_from is not None and body.linked_from != body.book and
+                                  listening.claim_is_manual(db, who.identity, body.book, body.linked_from))
+    claimed = await _claimed_link(db, who, body.book, body.linked_from, manual)
     reads = [pp.checkin_book(body.book, body.track)]
     if claimed is not None:
         reads.append(_album_gone(body.linked_from))
@@ -866,7 +893,7 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
     if body.linked_from is not None:
         linked = await _link_verdict(db, who, body.book, body.linked_from, claimed, about,
                                      results[1] if claimed is not None else None, known,
-                                     manual=body.link_manual)
+                                     manual=manual)
     # The claim's verdict; nothing to claim for a key that is not another book's.
     link = (body.linked_from, linked) if body.linked_from not in (None, body.book) else None
 
@@ -878,12 +905,12 @@ async def checkin(request: Request, body: Checkin, background: BackgroundTasks,
                                         book_duration_ms=about.get("duration_ms"),
                                         work_key=about.get("work_key"), narrator=about.get("narrator"),
                                         book_title=about.get("title"), link=link,
-                                        link_manual=body.link_manual, author=about.get("author"))
+                                        link_manual=manual, author=about.get("author"))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     if link is not None:
         linked = await _settle_claim(db, who, body.book, link, result.pop("link", None), known,
-                                     manual=body.link_manual)
+                                     manual=manual)
     if pending is not None:
         gone = results[pending_read] if pending_row is not None else None
         await _settle_pending(db, who, body.book, pending, pending_row, about, gone, known,

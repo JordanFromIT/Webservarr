@@ -1139,14 +1139,17 @@ class WorkKeys(unittest.TestCase):
             with self.subTest(a=a, b=b):
                 self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
 
-    def test_book_n_of_m_is_not_book_n(self):
-        # Accepted split, kept deliberate: "Book 2 of 5" gives 2 and 5, so a
-        # copy that writes it that way does not link to "Book 2" (a split
-        # only loses a link; it never links the wrong book's place).
-        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill, Book 2 of 5"), pp.work_key(self.AUTHOR, "Tide Mill, Book 2"))
-        self.assertEqual(pp._work_title("Tide Mill, Book 2 of 5"), "tide mill #2/5")
-        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill - Read by Tamsin Ashby, Book 2 of 5"),
-                         pp.work_key(self.AUTHOR, "Tide Mill (Book 2 of 5, Unabridged)"))
+    def test_book_n_of_m_is_book_n(self):
+        # T2K3: a re-rip may name the size of the set or not; the book is the
+        # same. (A part keeps its "of M": "Part 1 of 2" is not "Part 1 of 3".)
+        for title in ("Tide Mill, Book 2 of 5", "Tide Mill, Book Two of Five", "Tide Mill - Read by Tamsin Ashby, Book 2 of 5",
+                      "Tide Mill (Book 2 of 5, Unabridged)", "Tide Mill, Book 2 of 12"):
+            with self.subTest(title=title):
+                self.assertEqual(pp.work_key(self.AUTHOR, title), pp.work_key(self.AUTHOR, "Tide Mill, Book 2"))
+        self.assertEqual(pp._work_title("Tide Mill, Book 2 of 5"), "tide mill #2")
+        self.assertEqual(pp._work_title("Tide Mill, Vol. 2 of 5"), "tide mill %2")
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill, Part 1 of 2"), pp.work_key(self.AUTHOR, "Tide Mill, Part 1 of 3"))
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill, Book 3 of 5"), pp.work_key(self.AUTHOR, "Tide Mill, Book 2 of 5"))
 
     def test_copy_variants_of_a_numbered_book_share_its_key(self):
         for base in ("Tide Mill", "Tide Mill, Book 2"):
@@ -1356,7 +1359,7 @@ class WorkKeys(unittest.TestCase):
                 self.assertNotEqual(pp.work_key(self.AUTHOR, f"Tide Mill - Read by Tamsin Ashby, {a}"),
                                     pp.work_key(self.AUTHOR, f"Tide Mill - Read by Tamsin Ashby, {b}"))
         self.assertEqual(pp._dropped_numbers("Read by BBC Radio 4 Full Cast, Series Two, 3rd Disc"),
-                         ["^radio4", "^series2", "^3"])
+                         ["^radio4", "^series2", "^3", "^~disc"])
         self.assertEqual(pp._dropped_numbers("Read by Tamsin Ashby"), [])
 
     def test_a_copy_part_whose_only_number_is_a_word_is_kept(self):
@@ -1404,6 +1407,148 @@ class WorkKeys(unittest.TestCase):
                         title = wrap.format(p=phrase.format(n=n, r=roman[n - 1], w=words[n - 1], o=ordinals[n - 1],
                                                             s=suffixed[n - 1]))
                         self.assertEqual(owner.setdefault(pp.work_key(self.AUTHOR, title), (kind, n)), (kind, n), title)
+
+    # --- Spec 2.6, fix round 1: T2K1 to T2K3 ---
+
+    def test_no_digit_symbol_can_make_a_work_key_raise(self):
+        # T2K1: str.isdigit() is true for symbols no int() can read (❶, ⓵, ፩, ²).
+        # None of them is an error in any part of a title, and a decimal digit
+        # of another script is that digit.
+        import sys
+        digits = [chr(c) for c in range(sys.maxunicode + 1) if chr(c).isdigit()]
+        self.assertGreater(len(digits), 600)
+        for c in digits:
+            for fmt in ("Tide Mill - Read by Tamsin Ashby, Book {c}", "Tide Mill - Read by Tamsin Ashby, Series {c}",
+                        "Tide Mill (Narrated by {c})", "Tide Mill, Book {c}", "Tide Mill ({c}, Unabridged)",
+                        "Tide Mill - {c}"):
+                try:
+                    key = pp.work_key(self.AUTHOR, fmt.format(c=c))
+                except Exception as exc:  # noqa: BLE001
+                    self.fail(f"U+{ord(c):04X} in {fmt!r}: {exc!r}")
+                self.assertRegex(key, r"^[0-9a-f]{32}$")
+        import unicodedata
+        two = next(c for c in digits if unicodedata.decimal(c, None) == 2 and not c.isascii())
+        self.assertEqual(pp.work_key(self.AUTHOR, f"Tide Mill - Read by Tamsin Ashby, Series {two}"),
+                         pp.work_key(self.AUTHOR, "Tide Mill - Read by Tamsin Ashby, Series 2"))
+        self.assertEqual(pp.work_key(self.AUTHOR, f"Tide Mill, Book {two}"), pp.work_key(self.AUTHOR, "Tide Mill, Book 2"))
+        self.assertIsNone(pp._number_token("\u2776"))
+        self.assertIsNone(pp._number_token("\u2488"))
+        # A symbol with no decimal value is a word: books marked ❶ and ❷ differ.
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill - Read by Tamsin Ashby, Book \u2776"),
+                            pp.work_key(self.AUTHOR, "Tide Mill - Read by Tamsin Ashby, Book \u2777"))
+
+    def test_a_title_no_key_can_be_made_of_is_a_book_with_no_key_not_an_error(self):
+        album = dict(ALBUMS["500"], title="Quiet Book")
+        children = {"Metadata": TRACKS["500"]}
+        boom = mock.Mock(side_effect=ValueError("boom"))
+        with mock.patch.object(pp, "_work_title", boom):
+            out = pp._identity(album, 1, children)
+            self.assertIsNone(out["work_key"])
+            self.assertEqual(out["author"], "Ann Author")
+            self.assertEqual(out["duration_ms"], 90_000)
+            self.assertIsNone(pp.album_work_key(album))
+
+    def test_the_narration_keeps_everything_but_the_narrators_name(self):
+        # T2K2: numbers of any size, numbers of other scripts, letters, Roman
+        # numerals and text after the narrator are kept, so these are never one book.
+        base = "Tide Mill - Read by Tamsin Ashby"
+        for a, b in ((f"{base}, Book Thirty", f"{base}, Book Forty"),
+                     (f"{base}, Book Thirty-One", f"{base}, Book Forty-One"),
+                     (f"{base}, Book One Hundred", f"{base}, Book 1"),
+                     (f"{base}, Book One Hundred and One", f"{base}, Book One Hundred"),
+                     (f"{base}, Series Two Thousand", f"{base}, Series Two"),
+                     (f"{base}, Book \u0662", f"{base}, Book \u0663"),
+                     (f"{base}, Series V.", f"{base}, Series X."),
+                     (f"{base}, Series LI", f"{base}, Series LII"),
+                     (f"{base}, Series LL", f"{base}, Series LLI"),
+                     (f"{base}, Part A", f"{base}, Part B"),
+                     (f"{base}, A", f"{base}, B"),
+                     (f"{base}, Collection 3", f"{base}, Level 3"),
+                     (f"{base}, Year 3", f"{base}, Level 3"),
+                     (f"{base}: Winter", f"{base}: Summer"),
+                     (f"{base} - Winter", f"{base} - Summer"),
+                     (f"{base}) (Winter", f"{base}) (Summer"),
+                     ("Tide Mill (Narrated by Tamsin Ashby) (Winter)", "Tide Mill (Narrated by Tamsin Ashby) (Summer)"),
+                     ("Tide Mill (LL, Unabridged)", "Tide Mill (LLI, Unabridged)"),
+                     ("Tide Mill (Thirty, Unabridged)", "Tide Mill (Forty, Unabridged)"),
+                     ("Tide Mill (A, Unabridged)", "Tide Mill (B, Unabridged)")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        # The name itself, a co-narrator, an initial and copy words are not kept.
+        for title in (f"{base}, Dee Lane", f"{base}, Dee Lane, Unabridged", "Tide Mill - Read by Eric V. Smith",
+                      "Tide Mill - Read by J. K. Smith", f"{base}: Unabridged", f"{base} (Unabridged)"):
+            with self.subTest(title=title):
+                self.assertEqual(pp.work_key(self.AUTHOR, title), pp.work_key(self.AUTHOR, "Tide Mill"))
+        self.assertEqual(pp._number_run("one hundred and twenty five".split(), 0), (125, 5))
+        self.assertEqual(pp._number_run("forty one".split(), 0), (41, 2))
+        self.assertEqual(pp._number_run("two thousand five hundred".split(), 0), (2500, 4))
+
+    def test_only_latin_accents_are_folded(self):
+        # T2K2: kana voicing and Cyrillic letters are not accents.
+        for a, b in (("\u304b\u304d", "\u304b\u304e"), ("\u30ac", "\u30ab"), ("\u0439", "\u0438"),
+                     ("Tide Mill \u0439", "Tide Mill \u0438")):
+            with self.subTest(a=a, b=b):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, a), pp.work_key(self.AUTHOR, b))
+        self.assertEqual(pp.work_key(self.AUTHOR, "Les Mis\u00e9rables"), pp.work_key(self.AUTHOR, "Les Miserables"))
+        self.assertEqual(pp.work_key(self.AUTHOR, "\u304b\u304e"), pp.work_key(self.AUTHOR, "\u304b\u304d\u3099"))
+
+    def test_a_rerips_noise_does_not_split_the_book(self):
+        # T2K3: a year, a format or bitrate tag, an ASIN, "(Unabridged)" wherever it
+        # falls, leading zeros and the size of the set.
+        for base in ("Tide Mill", "Tide Mill, Book 2"):
+            key = pp.work_key(self.AUTHOR, base)
+            for suffix in (" (2019)", " [2019]", " (Unabridged, 2019)", " [64kbps]", " (128 kbps)", " [MP3 64kbps]",
+                           " (M4B, 64k)", " [mp3-320]", " [B07XYZ1234]", " [ASIN B07XYZ1234]", " (ASIN: B07XYZ1234)",
+                           " (Unabridged) [MP3]", " (Unabridged) (2019)", " [Unabridged] [mp3-320] (2019)"):
+                with self.subTest(title=base + suffix):
+                    self.assertEqual(pp.work_key(self.AUTHOR, base + suffix), key)
+        for suffix in (" (Full-Cast Edition, 2019)", " (Dramatized, 128 kbps)", " [Full Cast, B07XYZ1234]",
+                       " (Full-Cast Edition) (2019)"):
+            with self.subTest(suffix=suffix):
+                self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill" + suffix), pp.work_key(self.AUTHOR, "Tide Mill"))
+        key = pp.work_key(self.AUTHOR, "Tide Mill: The Rising")
+        for title in ("Tide Mill (Unabridged): The Rising", "Tide Mill (Unabridged) - The Rising",
+                      "Tide Mill [Unabridged]: The Rising (2019)"):
+            with self.subTest(title=title):
+                self.assertEqual(pp.work_key(self.AUTHOR, title), key)
+        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill 02"), pp.work_key(self.AUTHOR, "Tide Mill 2"))
+        self.assertEqual(pp.work_key(self.AUTHOR, "Tide Mill 007"), pp.work_key(self.AUTHOR, "Tide Mill 7"))
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill 2.01"), pp.work_key(self.AUTHOR, "Tide Mill 2.1"))
+        self.assertEqual(pp._work_title("Tide Mill 0"), "tide mill 0")
+
+    def test_other_productions_and_other_numbers_still_split(self):
+        # T2K3: a year-like or number-like group that is not noise stays.
+        plain = pp.work_key(self.AUTHOR, "Tide Mill")
+        for suffix in (" (Graphic Audio)", " [GraphicAudio]", " (BBC Radio 4)", " (Audible Original)", " (2)",
+                       " [2]", " (Book 2)", " (Part 2)", " (Vol. 2)", " (No. 2)", " (Dolby Atmos)"):
+            with self.subTest(suffix=suffix):
+                self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill" + suffix), plain)
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill, Vol. 2"), pp.work_key(self.AUTHOR, "Tide Mill, Book 2"))
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill, Part 2"), pp.work_key(self.AUTHOR, "Tide Mill, Book 2"))
+        self.assertNotEqual(pp.work_key(self.AUTHOR, "Tide Mill, No. 2"), pp.work_key(self.AUTHOR, "Tide Mill, Book 2"))
+
+    def test_an_adversarial_corpus_never_merges_two_books(self):
+        # Every spelling of a number in every place a book number can be, large
+        # numbers and other scripts included: a key belongs to one book.
+        words = {1: "One", 21: "Twenty-One", 30: "Thirty", 31: "Thirty-One", 40: "Forty", 41: "Forty-One",
+                 50: "Fifty", 99: "Ninety-Nine", 100: "One Hundred", 101: "One Hundred and One"}
+        roman = {1: "I", 21: "XXI", 30: "XXX", 31: "XXXI", 40: "XL", 41: "XLI", 50: "L", 99: "XCIX", 100: "C"}
+        arabic = str.maketrans("0123456789", "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669")
+        wraps = ("Tide Mill, {p}", "Tide Mill ({p}, Unabridged)", "Tide Mill - Read by Tamsin Ashby, {p}",
+                 "Tide Mill (Narrated by Tamsin Ashby, {p})", "Tide Mill - Read by Tamsin Ashby ({p})",
+                 "Tide Mill - Read by Tamsin Ashby; {p}", "Tide Mill, {p} - Read by Tamsin Ashby",
+                 "Tide Mill (Unabridged) [{p}] (2019)")
+        owner = {}
+        for wrap in wraps:
+            for kind in ("Book", "Volume", "Part", "Series"):
+                for n, word in words.items():
+                    for spelling in {str(n), f"{n:03d}", word, str(n).translate(arabic), roman.get(n, word)}:
+                        title = wrap.format(p=f"{kind} {spelling}")
+                        key = pp.work_key(self.AUTHOR, title)
+                        # Spellings of one number in a dropped part ("Series") can differ without
+                        # merging anything: what must hold is that one key never holds two numbers.
+                        self.assertEqual(owner.setdefault(key, (kind, n)), (kind, n), title)
+
 
     def test_nothing_is_taken_off_that_would_leave_the_title_empty(self):
         self.assertEqual(pp._work_title("Unabridged"), "unabridged")
@@ -1828,6 +1973,28 @@ class BookIdentity(BridgeBase):
         self.plex.pms_down = 503
         with self.assertRaises(pp.PlayerUnavailable):
             self.run_async(pp.book_identity("200:1"))
+
+
+class DiscInLibrary(BridgeBase):
+    """pp.disc_in_library: an album can stay while a disc of it goes."""
+
+    def test_a_disc_of_the_album_is_there_or_not(self):
+        self.assertTrue(self.run_async(pp.disc_in_library("400:1")))
+        self.assertTrue(self.run_async(pp.disc_in_library("400:2")))
+        self.assertFalse(self.run_async(pp.disc_in_library("400:3")))
+        self.assertFalse(self.run_async(pp.disc_in_library("400:999999")))
+        self.assertTrue(self.run_async(pp.disc_in_library("200:1")))
+        self.assertFalse(self.run_async(pp.disc_in_library("200:2")))
+
+    def test_an_album_that_is_not_there_and_malformed_keys(self):
+        self.assertFalse(self.run_async(pp.disc_in_library("999:1")))
+        with self.assertRaises(pp.NotInLibrary):
+            self.run_async(pp.disc_in_library("junk"))
+
+    def test_plex_failing_is_unavailable(self):
+        self.plex.pms_down = 503
+        with self.assertRaises(pp.PlayerUnavailable):
+            self.run_async(pp.disc_in_library("400:1"))
 
 
 class CheckinBook(BridgeBase):

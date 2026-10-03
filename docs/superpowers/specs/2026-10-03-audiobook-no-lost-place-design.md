@@ -32,13 +32,16 @@ break: no lost place, no wrong place, no out-of-order tracks. This closes all fo
   earlier copy is offered (2.5 spec section 4). The player then asks the server for the listener's
   *orphaned places*.
 - **Orphaned place.** One of the listener's own position rows where all of these hold:
-  - its book's album is gone from the library;
-  - it is not finished: it has no `end` mark, and its `book_ms` is under 97% of its
-    `book_duration_ms` when both are known;
+  - its book is gone from the library (the book's key, album and disc, is not in the library's
+    listing: a disc that left a box set that stayed is gone);
+  - it is not finished: the latest event is not an `end` mark (a book listened to again after
+    its end is a place again), and its `book_ms` is under 97% of its `book_duration_ms` when
+    both are known;
   - it has no successor still in the library and no pending claim (section 4).
-- **Bounds.** The newest 10 candidate rows by `updated_at`, with at most 10 album checks per
-  request. Scoped by identity. Rows by the same author as the opened book come first, then by
-  recency.
+- **Bounds.** The newest 200 unfinished rows by `updated_at`, one listing of the library per
+  request (every presence check is made against it, in memory, chains of any length included),
+  and at most 10 places returned. Scoped by identity. Rows by the same author as the opened
+  book come first, then by recency.
 - **What the listener sees.** Before the player plays anything, a panel in the full player titled
   "Were you listening to one of these?". Each row shows the old title, the narrator, the book time
   and percentage, and when it was last listened to. There is also "None of these".
@@ -65,6 +68,15 @@ The safety net now catches misses, so the matcher is tightened to remove false m
   share a title never share a key, and a box set re-added under the same title still does.
 - Numbers that go with a dropped narrator part ("Read by X, Series 2") become tokens of their own
   kind, and a token is a punctuation mark, so no title can spell one.
+- In the narration ("Read by ...") only the narrator's name is dropped: numbers of any size
+  (words, other scripts' digits, Roman numerals), single capital letters, text after a colon,
+  dash or closing bracket and any segment that holds a number all stay. Accents are folded for
+  Latin letters only (kana voicing is a difference). A symbol that is a digit but has no decimal
+  value is a word, and a title no key can be made of is a book with no key, never an error.
+- A re-rip's noise is folded: a bracketed year, format or bitrate tag, ASIN, "(Unabridged)"
+  wherever it stands, leading zeros, and the size of a set ("Book 2 of 5" is "Book 2"). Other
+  productions ((Graphic Audio), (BBC Radio 4), (Audible Original)) and Vol., No. and Part against
+  Book stay different.
 - The author is kept with each place (position row), so the orphan lookup can put the same
   author first; rows saved before it was kept sort by recency only.
 - The disc-1 gap of a re-added box set (2.5 ledger T1S5) is closed by reading the album's tracks

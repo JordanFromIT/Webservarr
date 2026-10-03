@@ -577,8 +577,8 @@ def find_linked(db: Session, identity: str, work_key: Optional[str], exclude_key
 def orphan_candidates(db: Session, identity: str, exclude_key: str) -> list:
     """This listener's position rows that might be places in books that left
     the library (spec 2.6 s3): the newest ORPHAN_CANDIDATES by updated_at, none
-    of them `exclude_key`, all unfinished. A row is finished when its log holds
-    an `end` mark, or its book_ms is FINISHED_PERCENT or more of its
+    of them `exclude_key`, all unfinished. A row is finished when the latest
+    event of its log is an `end` mark (the row was last saved by it), or its book_ms is FINISHED_PERCENT or more of its
     book_duration_ms (both known: an unknown book_ms, or an unknown length,
     still counts as unfinished).
 
@@ -587,11 +587,41 @@ def orphan_candidates(db: Session, identity: str, exclude_key: str) -> list:
     included). Scoped by identity; the log is read on
     ix_listening_log_identity_book_at."""
     P, L = ListeningPosition, ListeningLog
-    ended = exists().where(L.identity == P.identity, L.book_key == P.book_key, L.event == "end")
+    # Finished only while the end is the latest event: a book listened to
+    # again after the end (a re-listen from 0:00) is a place again.
+    ended = exists().where(L.identity == P.identity, L.book_key == P.book_key, L.event == "end",
+                           L.at >= P.updated_at)
     unfinished = or_(P.book_ms.is_(None), P.book_duration_ms.is_(None), P.book_duration_ms <= 0,
                      P.book_ms * 100 < P.book_duration_ms * FINISHED_PERCENT)
     return (db.query(P).filter(P.identity == identity, P.book_key != exclude_key, ~ended, unfinished)
             .order_by(P.updated_at.desc(), P.book_key).limit(ORPHAN_CANDIDATES).all())
+
+
+# The most position rows of one listener the successor graph reads.
+GRAPH_ROWS = 5000
+
+
+def successor_graph(db: Session, identity: str) -> dict:
+    """{earlier copy: [books that carried its place forward]} for this
+    listener, whole: every row of theirs whose linked_from is set, and every
+    pending claim whose holder's row has no link yet (successors, for all
+    copies at once, so a chain of any length can be walked in memory). At
+    most GRAPH_ROWS rows, newest first; scoped by identity, on the primary
+    key's (identity, book_key) index and the claims' (identity, earlier_key)."""
+    P, C = ListeningPosition, ListeningClaim
+    graph: dict = {}
+    linked = (db.query(P.book_key, P.linked_from)
+              .filter(P.identity == identity, P.linked_from.isnot(None))
+              .order_by(P.updated_at.desc(), P.book_key).limit(GRAPH_ROWS).all())
+    for book, earlier in linked:
+        graph.setdefault(earlier, []).append(book)
+    pending = (db.query(C.earlier_key, C.holder_key)
+               .join(P, and_(P.identity == C.identity, P.book_key == C.holder_key))
+               .filter(C.identity == identity, C.state == "pending", P.linked_from.is_(None))
+               .order_by(C.claimed_at.desc()).limit(GRAPH_ROWS).all())
+    for earlier, book in pending:
+        graph.setdefault(earlier, []).append(book)
+    return graph
 
 
 def orphans_dismissed(db: Session, identity: str, book: str) -> bool:
