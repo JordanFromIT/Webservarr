@@ -4,7 +4,8 @@
  * The Books page (when its answer says this person is not connected) and the
  * reader (a 401 from WebServarr's Kavita proxy) need this session to have a
  * Kavita sign-in, and the only way to get one is a full-page trip through
- * /kavita/connect, which comes back to /books. Done blindly every time, a sign-in that fails - or one
+ * /kavita/connect, which comes back to the page that asked (a path under /books
+ * or /reader, else /books). Done blindly every time, a sign-in that fails - or one
  * that "works" but still leaves Kavita saying no - becomes a loop: the page
  * flashes until the rate limit answers with raw JSON.
  *
@@ -38,12 +39,21 @@
     leaving = false;
   }
 
+  /** The sign-in's address, asking to come back to this very page (the server
+      only takes a page under /books or /reader, and falls back to /books). */
+  function connectUrl() {
+    var here = '';
+    try { here = location.pathname + location.search; } catch (e) { here = ''; }
+    return CONNECT_URL + (here ? '?return=' + encodeURIComponent(here) : '');
+  }
+
   /** Off to the sign-in: a full navigation, never a soft one (it leaves the site). */
   function leave() {
     leaving = true;
+    var url = connectUrl();
     var router = window.WS && window.WS.router;
-    if (router && typeof router.hardNavigate === 'function') router.hardNavigate(CONNECT_URL);
-    else window.location.href = CONNECT_URL;
+    if (router && typeof router.hardNavigate === 'function') router.hardNavigate(url);
+    else window.location.href = url;
   }
 
   function triedRecently() {

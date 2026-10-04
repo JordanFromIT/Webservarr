@@ -16,12 +16,14 @@
  * Drawn in one write over a skeleton with the same shape: the heading stays
  * and everything after it is a new element, so nothing already on screen moves.
  *
+ * The card helpers come from books.js, loaded by the address the server wrote
+ * (and stamped with that file's content hash) in #wsPage's data-ws-dep: so a
+ * cached old books.js is never paired with a new page. No import statement.
+ *
  * A soft-navigation page (spec 4.2): everything below runs from mount(ctx),
  * each visit has its own state, and every listener, fetch and timer ends with
  * ctx.signal. Markup is built with textContent only.
  */
-import { renderBookCard, coverBox, noteLine } from './books.js';
-
 const KEEP_MS = 2 * 60 * 1000;      // a kept copy older than this is not painted: places move
 const MOUNT_WAIT_MS = 1500;         // the page is on screen (or its skeleton) before mount resolves
 const NAME_MAX = 200;               // the API's own limit on a name
@@ -74,6 +76,7 @@ export async function mount(ctx) {
   const root = ctx.root;
   const signal = ctx.signal;
   const $ = function (id) { return root.querySelector('#' + id); };
+  const { renderBookCard, coverBox, noteLine } = await import(root.getAttribute('data-ws-dep') || './books.js');
 
   const kind = root.getAttribute('data-kind') === 'series' ? 'series' : 'person';
   const params = ctx.url.searchParams;
@@ -317,6 +320,8 @@ export async function mount(ctx) {
   // ---- Boot ----
 
   if (window.WSKavita && typeof window.WSKavita.init === 'function') window.WSKavita.init();
+  // A sign-in that just failed sends the person back here: no automatic attempt this visit.
+  if (window.WSKavita && typeof window.WSKavita.arrivedFromFailedConnect === 'function') window.WSKavita.arrivedFromFailedConnect();
 
   if (!target) {
     WS.arrive('list', showNotFound);

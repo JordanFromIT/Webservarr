@@ -637,9 +637,11 @@ def _inject_head(content: str, branding: dict, user: Optional[dict], version: st
 # exactly once, and nobody has to remember to bump a number. Only local
 # /static/ assets are touched, and only an existing ?v= marker is replaced.
 # A converted page's #wsPage names its module in data-ws-module, which the
-# router imports, so that URL is stamped the same way.
+# router imports, so that URL is stamped the same way; data-ws-dep names a
+# file that module loads (the Books pages' card helpers), stamped the same way,
+# so a cached old file is never paired with a new module.
 
-_ASSET_VERSION_RE = re.compile(r'(?P<attr>(?:src|href|data-ws-module)="(?P<path>/static/[^"?]+)\?v=)[^"]*"')
+_ASSET_VERSION_RE = re.compile(r'(?P<attr>(?:src|href|data-ws-module|data-ws-dep)="(?P<path>/static/[^"?]+)\?v=)[^"]*"')
 _stamp_cache: dict = {}
 
 

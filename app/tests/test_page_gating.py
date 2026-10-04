@@ -149,6 +149,25 @@ class MovedRoutes(PageRoutesBase):
             self.assertEqual(r.status_code, 200, name)
             self.assertIn('data-page="books-person"', r.text, name)
 
+    def test_the_shared_file_a_books_page_loads_is_stamped_with_its_own_hash(self):
+        # T4C2: data-ws-dep names books.js, and carries books.js's content stamp
+        # (as data-ws-module carries the page's own), so a cached older books.js
+        # can never pair with a newer page module.
+        import re
+        values = {"integration.kavita.url": "http://192.168.1.50:5000"}
+        want = "/static/js/pages/books.js?v=" + pages.asset_stamp("/static/js/pages/books.js")
+        for path in ("/books/7", "/books/person?role=author&name=X", "/books/series?name=X"):
+            r = self.get(path, MEMBER_SESSION, values)
+            found = re.findall(r'data-ws-dep="([^"]+)"', r.text)
+            self.assertEqual(found, [want], path)
+            module = re.findall(r'data-ws-module="([^"]+)"', r.text)[0]
+            self.assertNotEqual(module.split("?v=")[1], found[0].split("?v=")[1], "each file has its own stamp")
+
+    def test_a_stamp_is_written_into_a_dep_attribute_and_nothing_else_changes(self):
+        out = pages._stamp_asset_versions('<div data-ws-module="/static/js/pages/book.js?v=1" data-ws-dep="/static/js/pages/books.js?v=1" data-x="/static/js/pages/books.js?v=1">')
+        self.assertIn('data-ws-dep="/static/js/pages/books.js?v=' + pages.asset_stamp("/static/js/pages/books.js") + '"', out)
+        self.assertIn('data-x="/static/js/pages/books.js?v=1"', out)
+
     def test_the_book_page_wants_a_whole_number_and_a_session(self):
         values = {"integration.kavita.url": "http://192.168.1.50:5000"}
         for path in ("/books/abc", "/books/1.5", "/books/-3"):

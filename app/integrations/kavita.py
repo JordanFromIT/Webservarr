@@ -385,6 +385,40 @@ async def user_series_ids(base: str, token: str) -> set:
         return set(await _series_ids_as_user(client, base, token, []))
 
 
+async def chapter_is_visible(base: str, token: str, chapter_id: int, known_series_id: Optional[int] = None) -> bool:
+    """True when the person's own account may see the series this chapter is in.
+
+    Kavita's book endpoints (book-info, book-page, resources) do not check
+    library access, so the proxy asks here first. The series comes from the
+    catalog when it knows the chapter (known_series_id), else from the chapter's
+    own book-info (a number is all that is taken from it); it is then looked for
+    in the list Kavita gives this person, which holds only what their library
+    access and age restriction allow. A chapter Kavita does not know is not
+    visible. KavitaTokenRefused for a 401, KavitaUnavailable when Kavita is
+    not answering."""
+    async with _user_client() as client:
+        series_id = known_series_id
+        if series_id is None:
+            try:
+                response = await client.get(f"{base}/api/Book/{int(chapter_id)}/book-info",
+                                            headers={"Authorization": f"Bearer {token}"})
+            except httpx.HTTPError as exc:
+                raise KavitaUnavailable("Kavita did not answer") from exc
+            if response.status_code == 401:
+                raise KavitaTokenRefused("Kavita no longer accepts this sign-in")
+            if response.status_code >= 500:
+                raise KavitaUnavailable(f"Kavita answered HTTP {response.status_code}")
+            if response.status_code != 200:
+                return False
+            try:
+                series_id = (response.json() or {}).get("seriesId")
+            except (ValueError, AttributeError):
+                return False
+            if not isinstance(series_id, int) or isinstance(series_id, bool):
+                return False
+        return series_id in set(await _series_ids_as_user(client, base, token, []))
+
+
 async def in_progress_series_ids(base: str, token: str) -> list:
     """The ids of the series this person has started and not finished, as
     Kavita counts it for them, all of them."""

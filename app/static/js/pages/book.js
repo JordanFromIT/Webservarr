@@ -15,12 +15,14 @@
  * (commit), over a skeleton with the same shape: the heading stays and
  * everything after it is a new element, so nothing already on screen moves.
  *
+ * The card helpers come from books.js, loaded by the address the server wrote
+ * (and stamped with that file's content hash) in #wsPage's data-ws-dep: so a
+ * cached old books.js is never paired with a new page. No import statement.
+ *
  * A soft-navigation page (spec 4.2): everything below runs from mount(ctx),
  * each visit has its own state, and every listener, fetch and timer ends with
  * ctx.signal. Markup is built with textContent only.
  */
-import { coverBox } from './books.js';
-
 const KEEP_MS = 2 * 60 * 1000;      // a kept copy older than this is not painted: places move
 const MOUNT_WAIT_MS = 1500;         // the page is on screen (or its skeleton) before mount resolves
 const FOLD_AT = 400;                // a description longer than this folds behind "Show more"
@@ -90,13 +92,15 @@ export async function mount(ctx) {
   const root = ctx.root;
   const signal = ctx.signal;
   const $ = function (id) { return root.querySelector('#' + id); };
+  const { coverBox } = await import(root.getAttribute('data-ws-dep') || './books.js');
 
   const state = {
     id: bookId(ctx.url.pathname),
     gen: 0,
     data: null,
     edition: '',            // the narrator picked: a plex_book_key
-    reconnectTried: false, connectProblem: false,
+    reconnectTried: false, connectProblem: false, connectView: false,
+    opening: '',            // a plex_book_key this page asked the player for, until the player shows it
     unwatch: null,
     addressFixed: false,
     embed: ((ctx.data || {}).branding || {}).requests_source === 'seerr_embed'
@@ -131,6 +135,7 @@ export async function mount(ctx) {
   function connectProblem() {
     if (signal.aborted) return;
     state.connectProblem = true;
+    if (state.connectView) { showConnect(); return; }
     const sub = root.querySelector('[data-action="read"] [data-sub]');
     if (sub) sub.textContent = connectText();
   }
@@ -177,7 +182,10 @@ export async function mount(ctx) {
     const p = player();
     const st = p && typeof p.state === 'function' ? p.state() : null;
     const mine = !!st && String(st.book) === edition.plex_book_key;
-    const loading = mine && !!st.loading;
+    // The engine holds no book (state().book is null) while it fetches one, so
+    // "Opening" is this page's own flag, until the player shows the key or an error.
+    if (state.opening && st && (String(st.book) === state.opening || st.error)) state.opening = '';
+    const loading = (mine && !!st.loading) || state.opening === edition.plex_book_key;
     const playing = mine && !!st.playing && !loading;
     btn.querySelector('[data-icon]').textContent = playing ? 'pause' : 'play_arrow';
     btn.querySelector('[data-label]').textContent = loading ? 'Opening…' : playing ? 'Pause' : 'Listen';
@@ -189,7 +197,7 @@ export async function mount(ctx) {
 
   function listen() {
     const edition = editionOf(state.edition);
-    if (!edition) return;
+    if (!edition || state.opening) return;
     const p = player();
     if (!p) {
       if (window.WSUI && typeof window.WSUI.toast === 'function') {
@@ -205,9 +213,15 @@ export async function mount(ctx) {
     }
     // Where the listener left off. A failure is the player's to show (its
     // notices); open() rejects only when the saved place is not in the book.
-    Promise.resolve(p.open(edition.plex_book_key, { autoplay: true })).catch(function (e) {
+    const key = edition.plex_book_key;
+    state.opening = key;
+    Promise.resolve(p.open(key, { autoplay: true })).catch(function (e) {
       if (signal.aborted) return;
-      console.warn('The player could not open ' + edition.plex_book_key, e);
+      console.warn('The player could not open ' + key, e);
+    }).then(function () {
+      // Settled (playing, failed, or refused): the player's own state says which from here.
+      if (state.opening === key) state.opening = '';
+      syncListen();
     });
     syncListen();
   }
@@ -373,7 +387,7 @@ export async function mount(ctx) {
 
   function byline(data) {
     const b = data.book;
-    const box = el('div', 'mt-4 space-y-1');
+    const box = el('div', 'mt-4 space-y-1 break-words');
     if (b.author) {
       const p = el('p', 'text-[17px] text-frosted-blue', 'By ');
       const a = el('a', PERSON, b.author);
@@ -411,7 +425,7 @@ export async function mount(ctx) {
     const paragraphs = String(text || '').split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
     if (!paragraphs.length) return null;
     const wrap = el('div', 'mt-8 max-w-[65ch]');
-    const body = el('div', 'space-y-3 text-[16px] leading-relaxed text-frosted-blue');
+    const body = el('div', 'space-y-3 break-words text-[16px] leading-relaxed text-frosted-blue');
     body.id = 'bookAbout';
     paragraphs.forEach(function (s) { body.appendChild(el('p', '', s)); });
     wrap.appendChild(body);
@@ -518,6 +532,21 @@ export async function mount(ctx) {
     message('notfound', 'We couldn’t find that book', 'It may have been removed from the library, or this link is out of date.', back);
   }
 
+  /** An ebook this person cannot see only because Kavita does not know them yet
+      (the API's 404 says so): the hand-off runs once, from here, and comes back
+      to this page; if it cannot (it was just tried, or failed) they are told, with a button. */
+  function showConnect() {
+    state.connectView = true;
+    const action = el('button', 'ws-lift mt-6 h-11 rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Connect');
+    action.id = 'connectBtn';
+    action.type = 'button';
+    action.addEventListener('click', retryConnect, { signal: signal });
+    message('connect', 'Connect your ebook library',
+      state.connectProblem ? 'We couldn’t connect you to the ebook library just now. Try again in a moment.'
+        : 'This book is in the ebook library. Connecting you now.',
+      state.connectProblem ? action : null);
+  }
+
   function showError() {
     const retry = el('button', 'ws-lift mt-6 h-11 rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Try again');
     retry.id = 'retryBtn';
@@ -580,6 +609,7 @@ export async function mount(ctx) {
         if (gen !== state.gen || quiet(err)) return;
         WS.arrive('book', function () {
           if (signal.aborted || gen !== state.gen) return;
+          if (statusOf(err) === 404 && err.body && err.body.reason === 'not_connected') { startConnect(); showConnect(); return; }
           if (statusOf(err) === 404) showNotFound(); else showError();
         });
       }
@@ -589,6 +619,8 @@ export async function mount(ctx) {
   // ---- Boot ----
 
   if (window.WSKavita && typeof window.WSKavita.init === 'function') window.WSKavita.init();
+  // A sign-in that just failed sends the person back here: no automatic attempt this visit.
+  if (window.WSKavita && typeof window.WSKavita.arrivedFromFailedConnect === 'function') window.WSKavita.arrivedFromFailedConnect();
 
   if (!state.id) {
     WS.arrive('book', showNotFound);

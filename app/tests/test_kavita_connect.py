@@ -219,8 +219,8 @@ def check_leave(t, src):
     through the router when it is there (ws:before-hard-nav first)."""
     body = js_code_only(body_of(t, src, "leave"))
     t.assertRegex(body, r"^\s*leaving\s*=\s*true\s*;", "a second 401 would go again meanwhile")
-    t.assertRegex(body, r"\brouter\.hardNavigate\(\s*CONNECT_URL\s*\)", "the sign-in skips ws:before-hard-nav")
-    t.assertRegex(body, r"\belse\s+window\.location\.href\s*=\s*CONNECT_URL\b", "no way out without the router")
+    t.assertRegex(body, r"\brouter\.hardNavigate\(\s*url\s*\)", "the sign-in skips ws:before-hard-nav")
+    t.assertRegex(body, r"\belse\s+window\.location\.href\s*=\s*url\b", "no way out without the router")
     t.assertLess(body.index("hardNavigate("), body.index("window.location.href"))
 
 

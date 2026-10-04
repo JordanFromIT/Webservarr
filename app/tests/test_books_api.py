@@ -377,6 +377,39 @@ class KavitaVisibility(BooksBase):
         self.assertEqual(body["notes"][0]["reason"], "not_connected")
         self.series_ids.assert_not_awaited()
 
+    def test_an_ebook_only_book_for_someone_not_connected_says_so_instead_of_no_such_book(self):
+        # T4C1: a shared link to an ebook-only book. The page runs the hand-off on this and asks again.
+        self.as_user(plex_user("1003", kavita_token=""))
+        r = self.get("/api/books/4")                                        # Emma: an ebook, no audio
+        self.assertEqual(r.status_code, 404)
+        body = r.json()
+        self.assertEqual(body["reason"], "not_connected")
+        self.assertEqual([n["reason"] for n in body["notes"]], ["not_connected"])
+        self.assertEqual(body["notes"][0]["source"], "kavita")
+        self.assertNotIn("Emma", r.text)                                    # nothing about the book itself
+        # A token Kavita refuses is the same: they have to connect again.
+        self.as_user(A)
+        self.series_ids.side_effect = kavita.KavitaTokenRefused("expired")
+        r = self.get("/api/books/4")
+        self.assertEqual((r.status_code, r.json()["reason"]), (404, "not_connected"))
+
+    def test_other_404s_stay_plain(self):
+        self.as_user(plex_user("1003", kavita_token=""))
+        self.assertNotIn("reason", self.get("/api/books/99999").json())         # no such id
+        self.assertEqual(self.get("/api/books/99999").status_code, 404)
+        self.as_user(A)
+        self.series_ids.side_effect = kavita.KavitaUnavailable("down")
+        r = self.get("/api/books/4")                                        # Kavita down: not "connect", it would not help
+        self.assertEqual(r.status_code, 404)
+        self.assertNotIn("reason", r.json())
+        self.series_ids.side_effect = self.reachable_series
+        self.reach = {2}                                                    # connected, but this library is not theirs
+        r = self.get("/api/books/4")
+        self.assertEqual(r.status_code, 404)
+        self.assertNotIn("reason", r.json())
+        self.as_user(plex_user("1003", kavita_token=""))
+        self.assertEqual(self.get("/api/books/1").status_code, 200)         # paired: the audio shows, the page handles the note
+
     def test_a_token_from_another_kavita_address_is_not_used(self):
         self.as_user(plex_user("1003", kavita_base="http://old-kavita.test:5000"))
         self.assertTrue(all("ebook" not in i["formats"] for i in self.ok("/api/books")["items"]))

@@ -732,6 +732,7 @@ class BookPages(unittest.TestCase):
                 self.assertIn('<script src="/static/js/kavita-connect.js?v=1" data-ws-page-script></script>', read(name))
         for src in self.sources().values():
             self.assertIn("window.WSKavita.init()", src)
+            self.assertIn("window.WSKavita.arrivedFromFailedConnect()", src)
             self.assertIn("helper.reconnect(connectProblem)", src)
 
     def test_the_player_is_watched_for_the_visit_only(self):
@@ -744,8 +745,18 @@ class BookPages(unittest.TestCase):
         books = module_source("books")
         for name in ("renderBookCard", "coverBox", "noteLine"):
             self.assertRegex(books, rf"export function {name}\(")
-        self.assertIn("from './books.js'", module_source("book"))
-        self.assertIn("from './books.js'", module_source("books-list"))
+        # T4C2: no import statement (a bare './books.js' is not stamped, so a cached
+        # old file could pair with a new module); the page names the file, the
+        # server stamps it with that file's own content hash (test_page_gating).
+        for name in ("book", "books-list"):
+            with self.subTest(name):
+                src = module_source(name)
+                self.assertNotRegex(js_code_only(src), r"(?m)^\s*import\b[^(]")
+                self.assertNotIn("./books.js'", src.replace("|| './books.js'", ""))
+                self.assertIn("await import(root.getAttribute('data-ws-dep') || './books.js')", src)
+        for name in ("book", "books-person", "books-series"):
+            with self.subTest(name):
+                self.assertIn('data-ws-dep="/static/js/pages/books.js?v=1"', read(name))
 
 
 class ReaderPage(unittest.TestCase):

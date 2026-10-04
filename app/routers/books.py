@@ -38,7 +38,7 @@ from typing import Annotated, Dict, List, Literal, Optional, Tuple
 from urllib.parse import quote
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Path, Query, Request, status
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
@@ -645,6 +645,13 @@ async def book_detail(request: Request, book_id: BookId, who: Scope = Depends(ca
     ebook_visible = _is_visible_ebook(book, who)
     audio_visible = who.audio and bool(editions)
     if not (ebook_visible or audio_visible):
+        # An ebook this person cannot see only because they are not connected to
+        # Kavita yet: say so (the page runs the hand-off and asks again), rather
+        # than "no such book". Nothing about the book itself is in the answer.
+        not_connected = [n for n in who.notes if n["source"] == "kavita" and n["reason"] == "not_connected"]
+        if book.kavita_chapter_id is not None and not_connected:
+            return JSONResponse(status_code=404, content={"detail": EBOOKS_NOT_CONNECTED, "reason": "not_connected",
+                                                          "notes": not_connected})
         raise HTTPException(status_code=404, detail="No such book")
 
     notes = list(who.notes)

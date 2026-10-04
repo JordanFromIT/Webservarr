@@ -31,7 +31,8 @@ from app.database import SessionLocal
 from app.dependencies import get_current_user
 from app.integrations.config import same_address
 from app.limiter import limiter
-from app.models import Setting
+from app.integrations import kavita as kavita_api
+from app.models import Book, Setting
 from app.settings_registry import switch_is_off
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,36 @@ PROXY_TIMEOUT = 60.0
 # Rendered book pages need their embedded Kavita URLs rewritten (see
 # rewrite_book_html), so they are buffered rather than streamed.
 _BOOK_PAGE_PATH = re.compile(r"^api/[Bb]ook/\d+/book-page$", re.IGNORECASE)
+
+# A chapter's own endpoints (book-info, book-page, resources, contents). Kavita
+# does not check library access on these, so the proxy does (see
+# _require_visible_chapter).
+_CHAPTER_PATH = re.compile(r"^api/book/(\d{1,10})(?:/|$)", re.IGNORECASE)
+
+
+def _catalog_series_of_chapter(chapter_id: int) -> Optional[int]:
+    """The Kavita series the Books catalog says this chapter is in, if it knows the chapter."""
+    db = SessionLocal()
+    try:
+        row = db.query(Book.kavita_series_id).filter(Book.kavita_chapter_id == chapter_id).first()
+    finally:
+        db.close()
+    return row[0] if row and row[0] else None
+
+
+async def _require_visible_chapter(chapter_id: int, base: str, token: str) -> None:
+    """404 unless the caller's own Kavita account may see the series this
+    chapter is in; 401 when Kavita refuses their sign-in; 503 when it does not
+    answer. Looked up for every request (nothing is remembered between them)."""
+    try:
+        visible = await kavita_api.chapter_is_visible(base, token, chapter_id, _catalog_series_of_chapter(chapter_id))
+    except kavita_api.KavitaTokenRefused:
+        raise HTTPException(status_code=401, detail="Kavita session expired")
+    except kavita_api.KavitaUnavailable:
+        raise HTTPException(status_code=503, detail="Kavita is unavailable")
+    if not visible:
+        raise HTTPException(status_code=404, detail="Not found")
+
 
 # Hop-by-hop headers must never be forwarded (RFC 9110 7.6.1).
 #
@@ -422,12 +453,48 @@ def force_query_response_mode(location: str) -> str:
     return parsed._replace(query=urlencode(params)).geturl()
 
 
-def _connect_failed() -> RedirectResponse:
+# Where a hand-off may send the person back to: the Books pages (a book, an
+# author, a series) and the reader. Anything else is /books.
+_RETURN_ROOTS = ("/books", "/reader")
+_RETURN_MAX = 512
+
+
+def safe_return_path(value) -> str:
+    """The page a Kavita hand-off returns to, from the address's ?return=.
+
+    Only a same-origin relative path under /books or /reader is kept (with its
+    query): no scheme, host, "//", backslash, control character, space, ".." or
+    encoded dot, slash or backslash. Anything else is /books. The fragment is
+    dropped."""
+    if not isinstance(value, str) or not value or len(value) > _RETURN_MAX or not value.isascii():
+        return "/books"
+    if any(ord(c) <= 0x20 or ord(c) == 0x7F for c in value) or "\\" in value:
+        return "/books"
+    if not value.startswith("/") or value.startswith("//"):
+        return "/books"
+    parts = urlparse(value)
+    if parts.scheme or parts.netloc:
+        return "/books"
+    path = parts.path
+    if not any(path == root or path.startswith(root + "/") for root in _RETURN_ROOTS):
+        return "/books"
+    lowered = path.lower()
+    if ".." in path.split("/") or any(bad in lowered for bad in ("%2e", "%2f", "%5c", "%00")):
+        return "/books"
+    return path + ("?" + parts.query if parts.query else "")
+
+
+def _with_error_flag(path: str) -> str:
+    return path + ("&" if "?" in path else "?") + "kavita=error"
+
+
+def _connect_failed(return_to: str = "/books") -> RedirectResponse:
     """The hand-off could not start (Kavita down, or it answered something
-    unexpected). The person is sent back to Books, which says so quietly and
-    keeps what it already shows, instead of leaving them on a raw JSON error.
-    The failure flag also stops the page asking again (kavita-connect.js)."""
-    return RedirectResponse("/books?kavita=error", status_code=302)
+    unexpected). The person is sent back to the page they came from (Books by
+    default), which says so quietly and keeps what it already shows, instead of
+    leaving them on a raw JSON error. The failure flag also stops the page
+    asking again (kavita-connect.js)."""
+    return RedirectResponse(_with_error_flag(return_to), status_code=302)
 
 
 @router.get("/kavita/connect", include_in_schema=False)
@@ -435,6 +502,7 @@ def _connect_failed() -> RedirectResponse:
 async def kavita_connect(
     request: Request,
     current_user: Dict[str, str] = Depends(get_current_user),
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """
     Begin the Kavita OIDC handshake.
@@ -442,10 +510,18 @@ async def kavita_connect(
     The caller already holds a WebServarr session, which means they already hold
     an Authentik session — so Authentik returns immediately and the user sees no
     prompt and no consent screen.
+
+    ?return=<path> says which page to come back to (safe_return_path: a path
+    under /books or /reader, else /books). It is kept in the session across the
+    trip, because Authentik's redirect carries nothing of ours.
     """
     base = kavita_url_for(current_user)
     if not base:
         raise HTTPException(status_code=503, detail="Kavita is not configured")
+
+    return_to = safe_return_path(request.query_params.get("return"))
+    if session_id:
+        await session_manager.update_session(session_id, {"kavita_return": return_to})
 
     host = request.headers.get("host", "")
 
@@ -454,18 +530,18 @@ async def kavita_connect(
             upstream = await client.get(f"{base}/oidc/login", headers=origin_headers(host))
     except httpx.RequestError as exc:
         logger.warning("Kavita connect failed: %s", exc)
-        return _connect_failed()
+        return _connect_failed(return_to)
 
     location = upstream.headers.get("location")
     if not location:
         logger.warning("Kavita /oidc/login did not redirect (HTTP %d)", upstream.status_code)
-        return _connect_failed()
+        return _connect_failed(return_to)
 
     # Relaying the upstream Location unchecked would be an open redirect (M8):
     # confine it to the Authentik authorize endpoint (or Kavita itself).
     if not _location_allowed(location, base):
         logger.warning("Kavita /oidc/login redirected to an unexpected origin")
-        return _connect_failed()
+        return _connect_failed(return_to)
 
     location = force_query_response_mode(location)
     response = RedirectResponse(location, status_code=302)
@@ -591,9 +667,15 @@ async def signin_oidc(
         logger.warning("Kavita callback failed: %s", exc)
         raise HTTPException(status_code=503, detail="Kavita is unavailable")
 
+    # The page the hand-off was started from, checked again here (a session
+    # field is ours, but it is cheap to be sure), and forgotten.
+    return_to = safe_return_path(session.get("kavita_return"))
+    if session.get("kavita_return"):
+        await session_manager.update_session(session_id, {"kavita_return": ""})
+
     if not token:
         logger.warning("Kavita handshake completed without a token (HTTP %d)", callback.status_code)
-        return RedirectResponse("/books?kavita=error", status_code=302)
+        return RedirectResponse(_with_error_flag(return_to), status_code=302)
 
     # The address is stored with the token: the proxy sends the token only to
     # the address it came from, so one obtained just before the Kavita address
@@ -602,7 +684,7 @@ async def signin_oidc(
         session_id,
         {"kavita_token": token, "kavita_api_key": kavita_api_key or "", "kavita_base": base},
     )
-    return RedirectResponse("/books", status_code=302)
+    return RedirectResponse(return_to, status_code=302)
 
 
 @router.api_route(
@@ -639,6 +721,9 @@ async def kavita_proxy(
         # recorded with it): never sent here. Kavita answers 401 and the page
         # reconnects, which stores a token for this address.
         token = api_key = None
+    chapter = _CHAPTER_PATH.match(path)
+    if chapter and token:
+        await _require_visible_chapter(int(chapter.group(1)), base, token)
     headers = build_forward_headers(request, token)
     body = await request.body()
 

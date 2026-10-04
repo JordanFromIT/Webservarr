@@ -76,13 +76,15 @@ function fakeClock() {
 }
 
 // ---- The modules, imported as they are ----
-// A page module reaches books.js by a relative import; through a data: URL
-// there is no "relative", so the specifier is pointed at books.js's own data URL.
+// A page module loads books.js from the address its page names in data-ws-dep
+// (the server stamps it); here that address is books.js's own data: URL.
 
 const dataUrl = (src) => 'data:text/javascript;charset=utf-8,' + encodeURIComponent(src);
 const booksSrc = readFileSync(BOOKS_PATH, 'utf8');
 const BOOKS_URL = dataUrl(booksSrc);
 async function loadPage(path) {
+  // (A copy of a module from before it named its dependency in the page, run with
+  // BOOK_JS / BOOKS_LIST_JS, still has the import statement: pointed at the same data: URL.)
   const src = readFileSync(path, 'utf8').replace(/from\s+['"]\.\/books\.js(\?[^'"]*)?['"]/g, `from ${JSON.stringify(BOOKS_URL)}`);
   return import(dataUrl(src));
 }
@@ -151,7 +153,9 @@ function fakeShell(doc, clock, net) {
     },
     getJSON(url, opts) {
       return net.fetch(url, opts && opts.signal ? { signal: opts.signal } : undefined).then((r) => {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (!r.ok) {
+          return r.json().then((body) => { const e = new Error('HTTP ' + r.status); e.status = r.status; e.body = body; throw e; });
+        }
         return r.json();
       });
     },
@@ -183,11 +187,12 @@ function visit(kind, o = {}) {
   const win = new Window({ url });
   const doc = win.document;
   doc.body.innerHTML = HTML[kind].match(NAV)[0].replace(/<\/main>$/, '');
+  doc.getElementById('wsPage').setAttribute('data-ws-dep', BOOKS_URL);
   const clock = fakeClock();
   const net = network();
   const ctl = new win.AbortController();
   const WS = fakeShell(doc, clock, net);
-  const kav = { init: 0, reconnect: [], retry: 0, blockNext: false };
+  const kav = { init: 0, failedChecks: 0, reconnect: [], retry: 0, blockNext: false };
   const toasts = [];
   const titles = [];
   const replaced = [];
@@ -208,7 +213,7 @@ function visit(kind, o = {}) {
       init() { kav.init += 1; },
       reconnect(cb) { kav.reconnect.push(cb); if (kav.blockNext) cb(); },
       retry() { kav.retry += 1; },
-      arrivedFromFailedConnect() { return false; }
+      arrivedFromFailedConnect() { kav.failedChecks += 1; return false; }
     };
   }
   // The player: which book it holds and whether it plays; change listeners as the engine has them.
@@ -694,6 +699,86 @@ await run('a repeat visit paints at once from the kept copy and then settles to 
   check('and the page holds one set of buttons', t.qa('[data-action="read"]').length === 1);
 });
 
+await run('a double press on Listen opens the player once: the engine holds no book while it fetches one', async (make) => {
+  const t = await open(make, detail());
+  // As the real engine: open() is slow, and state().book stays null until the book is in.
+  const slow = deferred();
+  t.player.open = function (key, opts) { this.opened.push([key, opts]); return slow.promise; };
+  t.click('[data-action="listen"]');
+  t.click('[data-action="listen"]');
+  await flush();
+  check('the second press opened nothing more', t.player.opened.length === 1, t.player.opened);
+  check('the player still holds no book', t.player.state().book === null);
+  check('the button says Opening and waits', label(t, 'listen') === 'Opening…' && t.q('[data-action="listen"]').disabled === true, label(t, 'listen'));
+  t.player.change({ book: '100:2', playing: false, loading: true });
+  await flush();
+  check('still Opening while the player loads it', label(t, 'listen') === 'Opening…');
+  t.player.change({ book: '100:2', playing: true, loading: false });
+  await flush();
+  slow.resolve();
+  await flush();
+  check('once the player shows the book it says Pause, enabled', label(t, 'listen') === 'Pause' && t.q('[data-action="listen"]').disabled === false, label(t, 'listen'));
+  t.click('[data-action="listen"]');
+  await flush();
+  check('and then a press is the player\'s toggle', t.player.toggled === 1 && t.player.opened.length === 1);
+});
+
+await run('Opening ends on an error, on a refusal and when the open settles', async (make) => {
+  const t = await open(make, detail());
+  const slow = deferred();
+  t.player.open = function (key, opts) { this.opened.push([key, opts]); return slow.promise; };
+  t.click('[data-action="listen"]');
+  await flush();
+  check('opening', label(t, 'listen') === 'Opening…');
+  t.player.change({ error: { message: 'no' }, loading: false });
+  await flush();
+  check('a player error ends it: Listen again, enabled', label(t, 'listen') === 'Listen' && t.q('[data-action="listen"]').disabled === false, label(t, 'listen'));
+  t.player.change({ error: null });
+  const u = await open(make, detail());
+  u.player.open = function (key, opts) { this.opened.push([key, opts]); return Promise.reject(new Error('unknown track')); };
+  const warn = console.warn;
+  console.warn = () => {};
+  try { u.click('[data-action="listen"]'); await flush(); } finally { console.warn = warn; }
+  check('a refused open ends it', label(u, 'listen') === 'Listen' && u.q('[data-action="listen"]').disabled === false);
+  const v = await open(make, detail());
+  v.click('[data-action="listen"]');
+  await flush();
+  check('an open that settled with the player showing nothing yet is not stuck on Opening', label(v, 'listen') === 'Listen' && v.q('[data-action="listen"]').disabled === false);
+});
+
+await run('long words in a description and a byline wrap instead of widening the page', async (make) => {
+  const url = 'https://example.com/' + 'a'.repeat(200);
+  const t = await open(make, detail({ book: { description: 'See ' + url, author: 'A'.repeat(120), narrators: ['N'.repeat(120)], series: 'S'.repeat(120) } }));
+  check('the description breaks anywhere', /\bbreak-words\b/.test(t.q('#bookAbout').className), t.q('#bookAbout').className);
+  check('and so does the byline', /\bbreak-words\b/.test(t.q('#bookRest .mt-4').className), t.q('#bookRest .mt-4').className);
+  check('the one-column page may shrink below its widest word (minmax(0,1fr))', /grid-cols-\[minmax\(0,1fr\)\]/.test(HTML.book));
+});
+
+await run('a not-connected person opening an ebook-only book: the hand-off runs once and comes back to this page', async (make) => {
+  const answer = { status: 404, body: { detail: 'Connect to your ebook library to see ebooks', reason: 'not_connected', notes: [{ source: 'kavita', reason: 'not_connected', text: 'Connect to your ebook library to see ebooks' }] } };
+  const t = await open(make, () => answer);
+  check('the hand-off was started once', t.kav.reconnect.length === 1, t.kav.reconnect.length);
+  const box = t.q('[data-state="connect"]');
+  check('the page says it is connecting, not that the book is missing', !!box && /Connecting you now/.test(box.textContent) && /Connect your ebook library/.test(t.text('#bookTitle')) && !t.q('[data-state="notfound"]'), [t.text('#bookTitle'), box && box.textContent]);
+  check('no button while it is under way', !t.q('#connectBtn'));
+  check('a failed sign-in coming back here is read first', t.kav.failedChecks === 1);
+  // Refused (tried a minute ago, or the last sign-in failed): said, with Try again that tries once more.
+  const u = make('book', { routes: bookRoutes(() => answer) });
+  u.kav.blockNext = true;
+  const m = u.mount();
+  await u.clock.advance(1600);
+  await m;
+  check('a refused hand-off says so and offers Connect', /couldn.t connect/i.test(u.text('[data-state="connect"]')) && !!u.q('#connectBtn'), u.text('[data-state="connect"]'));
+  u.click('#connectBtn');
+  check('Connect tries once more through the helper', u.kav.retry === 1);
+  check('it asked for the book once and did not loop', u.net.urls('/api/books/').length === 1 && u.kav.reconnect.length === 1);
+  // A plain 404, and a 404 about something else, stay "couldn't find".
+  const v = await open(make, () => ({ status: 404, body: { detail: 'No such book' } }));
+  check('a plain 404 is still not found, with no hand-off', !!v.q('[data-state="notfound"]') && v.kav.reconnect.length === 0);
+  const w = await open(make, () => ({ status: 404, body: { reason: 'something_else' } }));
+  check('another reason is not a hand-off', !!w.q('[data-state="notfound"]') && w.kav.reconnect.length === 0);
+});
+
 // ---------------------------------------------------------------------------
 // Author, narrator and series pages
 // ---------------------------------------------------------------------------
@@ -846,6 +931,15 @@ await run('the list pages leave nothing behind and write only text', async (make
   check('a visit that was left before it began draws nothing', u.qa('#seriesList').length === 0);
 });
 
+await run('the page reads a failed sign-in on arrival, on every Books page', async (make) => {
+  const t = await open(make, detail());
+  check('book page', t.kav.failedChecks === 1);
+  const u = await openList(make, 'person', personAnswer());
+  check('person page', u.kav.failedChecks === 1);
+  const v = await openList(make, 'series', seriesAnswer());
+  check('series page', v.kav.failedChecks === 1);
+});
+
 // ---------------------------------------------------------------------------
 // The reader opens the chapter it is given
 // ---------------------------------------------------------------------------
@@ -865,7 +959,7 @@ await run('the reader\'s target: a chapter is read from the address', async () =
   check('a series that is not a number is none', target(q('seriesId=x&chapterId=7')).seriesId === null);
 });
 
-async function readerVisit(search) {
+async function readerVisit(search, turn) {
   const win = new Window({ url: 'https://ws.test/reader' + search });
   const doc = win.document;
   doc.body.innerHTML = READER_HTML.match(/<div id="wsPage"[\s\S]*<\/main>/)[0].replace(/<\/main>$/, '');
@@ -881,13 +975,16 @@ async function readerVisit(search) {
   win.WS = g.WS;
   const answers = (url) => {
     if (/\/series-detail\?seriesId=5$/.test(url)) return { specials: [], chapters: [], volumes: [{ id: 900, chapters: [{ id: 11, volumeId: 900 }] }], storylineChapters: [] };
-    if (/\/Book\/77\/book-info$/.test(url)) return { pages: 30, libraryId: 1, volumeId: 905, bookTitle: 'Prisoner of Azkaban' };
+    if (/\/Book\/77\/book-info$/.test(url)) return { pages: 30, libraryId: 1, volumeId: 905, seriesId: 104, bookTitle: 'Prisoner of Azkaban' };
+    if (/\/Book\/(77|11)\/book-page\?page=\d+$/.test(url)) return '<p>A page.</p>';
     if (/\/Book\/11\/book-info$/.test(url)) return { pages: 10, libraryId: 1, volumeId: 900, bookTitle: 'Sorcerer\'s Stone' };
     if (/get-progress\?chapterId=(77|11)$/.test(url)) return '';
     return null;
   };
-  const fetchFn = (url) => {
+  const posts = [];
+  const fetchFn = (url, init) => {
     calls.push(String(url));
+    if (init && init.method === 'POST') posts.push({ url: String(url), body: JSON.parse(init.body) });
     const a = answers(String(url));
     const ok = a !== null;
     return Promise.resolve({
@@ -904,13 +1001,22 @@ async function readerVisit(search) {
     setTitle() {}, beforeLeave() {}
   };
   let thrown = null;
-  const mounted = reader.mount(ctx).catch((e) => { thrown = e; });
+  let leave = null;
+  const mounted = reader.mount(ctx).then((fn) => { leave = fn; }, (e) => { thrown = e; });
   await flush();
   await flush();
+  if (turn) {
+    // Turn a page, then leave as a soft navigation does: the writer saves the place.
+    doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    await flush();
+    await flush();
+  }
   ctl.abort();
   await mounted;
+  if (typeof leave === 'function') leave();
+  await flush();
   for (const k of Object.keys(saved)) { if (saved[k]) Object.defineProperty(g, k, saved[k]); else delete g[k]; }
-  return { calls, thrown };
+  return { calls, thrown, posts };
 }
 
 await run('the reader opens the chapter in its address, not the series\' first', async () => {
@@ -924,6 +1030,11 @@ await run('the reader opens the chapter in its address, not the series\' first',
   check('a series alone still opens its first chapter', series.calls.some((u) => /series-detail\?seriesId=5/.test(u)) && series.calls.some((u) => /\/Book\/11\/book-info/.test(u)), series.calls);
   const none = await readerVisit('');
   check('no address, no request', none.calls.length === 0, none.calls);
+  // T4H3: the place is saved under the chapter's own series (book-info's), not the address's.
+  const turned = await readerVisit('?seriesId=5&chapterId=77', true);
+  const saved = turned.posts.filter((x) => /Reader\/progress$/.test(x.url));
+  check('a turned page is saved', saved.length >= 1, turned.posts);
+  check('under the series Kavita names for the chapter (104), not the address\'s (5)', saved.length >= 1 && saved.every((x) => x.body.seriesId === 104 && x.body.chapterId === 77 && x.body.volumeId === 905), saved.map((x) => x.body));
   const bad = await readerVisit('?seriesId=5&chapterId=abc');
   check('a chapter that is not a number is ignored: the first chapter opens', bad.calls.some((u) => /\/Book\/11\/book-info/.test(u)) && !bad.calls.some((u) => /abc/.test(u)), bad.calls);
 });

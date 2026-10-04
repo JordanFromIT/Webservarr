@@ -22,7 +22,7 @@
  *   WS.arrive(key, write)         reveal sections top-down, in document order
  *   WS.arriveReset()              start the order again for a newly mounted page (router.js)
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
- *   WS.getJSON(url, { signal })   fetch JSON; rejects on non-2xx; signal optional
+ *   WS.getJSON(url, { signal })   fetch JSON; rejects on non-2xx (err.status, err.body); signal optional
  *   WS.dragScroll(el, { signal }) mouse drag-to-scroll for a sideways row; signal optional
  *   WS.dragScroll.stop(el)        end that row's momentum glide (before scrolling it)
  *   WS.popOpen(el) / WS.popClose(el) / WS.popIsOpen(el)
@@ -244,7 +244,16 @@
     return fetch(url, signal ? { signal: signal } : undefined).then(function (r) {
       // A page can outlive its session; the first API answer says so.
       if (r.status === 401) { leaveTo('/login'); throw new Error('HTTP 401'); }
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) {
+        // The error carries what the server said (err.status, err.body: its
+        // JSON, or null), for a page that tells one refusal from another.
+        return r.json().then(function (b) { return b; }, function () { return null; }).then(function (body) {
+          var err = new Error('HTTP ' + r.status);
+          err.status = r.status;
+          err.body = body;
+          throw err;
+        });
+      }
       return r.json();
     });
   }

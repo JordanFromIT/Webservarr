@@ -861,6 +861,9 @@ export async function mount(ctx) {
     book.pages = info.pages || 0;
     book.libraryId = info.libraryId;
     book.volumeId = info.volumeId || book.volumeId;
+    // The chapter's own series, not the address's: a chapter named in the
+    // address belongs where Kavita says it does, and progress is saved there.
+    book.seriesId = info.seriesId || book.seriesId;
     book.title = info.bookTitle || info.seriesName || 'Reader';
     el('bookTitle').textContent = book.title;
     ctx.setTitle(book.title);
