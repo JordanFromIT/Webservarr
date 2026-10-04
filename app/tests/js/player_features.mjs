@@ -133,7 +133,13 @@ const LONG = {
     { index: 2, label: 'The rest', start_ms: 36000000, end_ms: LONG_MS }
   ]
 };
-const BOOKS = { [MULTI.key]: MULTI, [SPAN.key]: SPAN, [MIXED.key]: MIXED, [LONG.key]: LONG };
+// Two minutes in one part: shorter than a sample.
+const SHORT = {
+  key: '540:1', title: 'Short', author: 'E. Writer', narrator: '', series: '', cover: '', shape: 'single',
+  tracks: [{ key: '541', part_path: '/library/parts/941/1/file.mp3', duration_ms: 120000, index: 1, ...MP3 }],
+  chapters: []
+};
+const BOOKS = { [MULTI.key]: MULTI, [SPAN.key]: SPAN, [MIXED.key]: MIXED, [LONG.key]: LONG, [SHORT.key]: SHORT };
 const trackByPath = new Map();
 for (const b of Object.values(BOOKS)) for (const t of b.tracks) trackByPath.set(t.part_path, t);
 const UNDECODABLE = new Set(['', 'audio/mp4; codecs="ec-3"']);
@@ -350,6 +356,13 @@ async function setup(o = {}) {
   // History pages by their cursor ('' the first); the next book per book.
   t.history = {};
   t.nextBooks = {};
+  // The Up next queue (books 3b): its entries in order, { id, title,
+  // edition_key }; the next-audio reads (their `after`); t.queueAnswer, when
+  // set, is the read's answer as it is; t.queueDown: the read fails (503).
+  t.queue = [];
+  t.queueAsks = [];
+  t.queueAnswer = undefined;
+  t.queueDown = false;
   t.positionCalls = 0;
   t.positionMode = 'ok';      // 'down' (a network error) or 'hang' (never answers)
   async function fetchFn(url, init) {
@@ -406,6 +419,21 @@ async function setup(o = {}) {
       // t.plexError: the server could not read Plex (plex null, plex_error true).
       if (t.plexError) { reply.plex = null; reply.plex_error = true; }
       return response(200, reply);
+    }
+    m = /^\/api\/books\/me\/queue\/next-audio\?after=(.+)$/.exec(url);
+    if (m) {
+      const after = decodeURIComponent(m[1]);
+      t.queueAsks.push(after);
+      if (t.queueDown) return response(503, { detail: 'down' });
+      if (t.queueAnswer !== undefined) return response(200, t.queueAnswer);
+      const q = t.queue.find((x) => x.edition_key !== after);
+      return response(200, q ? { book: { kind: 'book', id: q.id, title: q.title, author: '', cover_url: '', formats: [], position: t.queue.indexOf(q) }, edition_key: q.edition_key }
+        : { book: null, edition_key: null });
+    }
+    m = /^\/api\/books\/(\d+)\/queue$/.exec(url);
+    if (m && init.method === 'DELETE') {
+      t.queue = t.queue.filter((x) => String(x.id) !== m[1]);
+      return response(200, { ok: true });
     }
     return response(404, {});
   }
@@ -3708,6 +3736,340 @@ await run('up next: none for a standalone book, not at the end of a part, Not no
   await t.clock.advance(300);
   check('playing again (from the start) removes it', t.st().playing && t.qa('.wsp-prompt').length === 0);
   t.engine.close();
+});
+
+// ---------------------------------------------------------------------------
+// Up next from the queue (books 3b, spec section 5)
+// ---------------------------------------------------------------------------
+
+const QUEUED = { id: 41, title: 'Spanning', edition_key: SPAN.key };
+const deletes = (t) => t.fetches.filter((f) => f.method === 'DELETE').map((f) => f.url);
+const playBtn = (t) => t.qa('.wsp-prompt .wsp-notice-btn').find((b) => b.textContent === 'Play') || null;
+
+await run('up next: the first queued audiobook is offered over the series, never started; Play opens it the normal way, then it leaves the queue', async () => {
+  const t = await setup();
+  t.nextBooks[MULTI.key] = { key: LONG.key, title: 'Long' };
+  t.queue = [Object.assign({}, QUEUED)];
+  await t.openAt(MULTI.key, '503', 298000);
+  await t.clock.advance(3000);
+  check('the book ended', !t.st().playing && bookMs(t) === 1800000, bookMs(t));
+  check('the queue was asked once, past the book that ended', t.queueAsks.join() === MULTI.key, t.queueAsks);
+  check('the series offer was not asked for', t.fetches.every((f) => !f.url.startsWith('/api/player/next/')));
+  const prompts = t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent);
+  check('Up next: the queued book', prompts.join() === 'Up next: Spanning', prompts);
+  check('Play and Not now', t.qa('.wsp-prompt .wsp-notice-btn').map((b) => b.textContent).join() === 'Play,Not now');
+  const loads = t.loads.length;
+  await t.clock.advance(120000);
+  check('it never starts by itself', t.st().book === MULTI.key && !t.st().playing && t.loads.length === loads);
+  check('nothing leaves the queue on an offer', deletes(t).length === 0, deletes(t));
+  const before = t.fetches.length;
+  playBtn(t).click();
+  await t.clock.advance(300);
+  check('Play opens the queued edition, playing', t.st().book === SPAN.key && t.st().playing, [t.st().book, t.st().playing]);
+  check('with the normal resume', t.fetches.slice(before).some((f) => f.url === '/api/player/position/510%3A1'));
+  check('and once it plays, it leaves the queue (once)', deletes(t).join() === '/api/books/41/queue', deletes(t));
+  check('the offer is gone', t.qa('.wsp-prompt').length === 0);
+  await t.clock.advance(30000);
+  check('no second removal', deletes(t).length === 1, deletes(t));
+  t.engine.close();
+});
+
+await run('up next: an empty queue, a failed read, or an answer naming the book that ended falls back to the series offer', async () => {
+  const t = await setup();
+  t.nextBooks[MULTI.key] = { key: LONG.key, title: 'Long' };
+  const toEnd = async () => {
+    t.engine.seek(1798000);
+    await t.engine.play();
+    await t.clock.advance(3000);
+  };
+  const said = () => t.qa('.wsp-prompt .wsp-notice-text').map((n) => n.textContent).join();
+  const notNow = () => { const b = t.qa('.wsp-notice-btn').find((x) => x.textContent === 'Not now'); if (b) b.click(); };
+  await t.openAt(MULTI.key, '503', 298000);
+  await t.clock.advance(3000);
+  check('an empty queue: the series', said() === 'Up next: Long' && t.queueAsks.length === 1, [said(), t.queueAsks]);
+  notNow();
+  t.queueDown = true;
+  await toEnd();
+  check('the queue can\'t be read: the series', said() === 'Up next: Long' && t.queueAsks.length === 2, [said(), t.queueAsks]);
+  notNow();
+  t.queueDown = false;
+  t.queueAnswer = { book: { kind: 'book', id: 9, title: 'Three Parts' }, edition_key: MULTI.key };
+  await toEnd();
+  check('the book that just ended is never offered: the series', said() === 'Up next: Long', said());
+  notNow();
+  t.queueAnswer = { book: { kind: 'book', id: 9, title: 'Odd' }, edition_key: null };
+  await toEnd();
+  check('an entry with no edition: the series', said() === 'Up next: Long', said());
+  notNow();
+  t.queueAnswer = undefined;
+  t.nextBooks = {};
+  await toEnd();
+  check('neither: nothing offered', t.qa('.wsp-prompt').length === 0, said());
+  check('no removal on any of it', deletes(t).length === 0);
+  t.engine.close();
+});
+
+await run('up next while the player holds (a conflict): the offer hides and Play opens nothing; answered, it comes back', async () => {
+  const { clock, phone, desk } = await twoDevices();
+  phone.queue = [Object.assign({}, QUEUED)];
+  await phone.openAt(MULTI.key, '503', 290000);
+  await clock.advance(11000);
+  check('the phone\'s book ended, offered', !phone.st().playing && phone.prompts().join() === 'Up next: Spanning', phone.prompts());
+  const stale = playBtn(phone);
+  // The desktop picks the book up and saves a newer place; the phone then moves.
+  await desk.open();
+  desk.engine.seek(600000);
+  await clock.advance(2000);
+  desk.engine.pause();
+  await clock.advance(1500);
+  phone.engine.seek(1700000);
+  await clock.advance(2000);
+  check('the phone is asked about the newer place', phone.prompts().some((p) => /^Continue from /.test(p)), phone.prompts());
+  check('the offer is hidden while it asks', !phone.prompts().some((p) => /^Up next/.test(p)), phone.prompts());
+  const loads = phone.loads.length;
+  if (stale) stale.click();
+  await clock.advance(2000);
+  check('Play pressed meanwhile opens nothing', phone.st().book === MULTI.key && phone.loads.length === loads &&
+    !phone.fetches.some((f) => f.url === '/api/player/book/510%3A1'), [phone.st().book, phone.loads.length - loads]);
+  check('nothing left the queue', deletes(phone).length === 0);
+  await clock.advance(30000);
+  check('still hidden while unanswered', !phone.prompts().some((p) => /^Up next/.test(p)) && !phone.st().playing, phone.prompts());
+  phone.engine.seek(1800000, { answer: true });
+  phone.button('Keep listening here').click();
+  await clock.advance(1500);
+  check('answered at the end: the offer is back', phone.prompts().join() === 'Up next: Spanning', phone.prompts());
+  playBtn(phone).click();
+  await clock.advance(300);
+  check('now Play opens it', phone.st().book === SPAN.key && phone.st().playing, [phone.st().book, phone.st().playing]);
+  phone.engine.close();
+  desk.engine.close();
+});
+
+await run('up next: a queued book that opens held (its files changed) stays held, plays nothing, and stays queued until it really plays', async () => {
+  const t = await setup({ places: { web: { track: '999', offset_ms: 5000, duration_ms: 10000, updated_at: '2026-09-29T17:00:00.000Z', device: 'Chrome on Linux' }, plex: null } });
+  t.queue = [Object.assign({}, QUEUED)];
+  await t.openAt(MULTI.key, '503', 298000);
+  await t.clock.advance(3000);
+  playBtn(t).click();
+  await t.clock.advance(300);
+  const s = t.st();
+  check('the queued book opened held, paused', s.book === SPAN.key && !!s.filesChanged && !s.playing, [s.book, !!s.filesChanged, s.playing]);
+  check('not removed while held', deletes(t).length === 0, deletes(t));
+  await t.engine.play();
+  await t.clock.advance(3000);
+  check('a preview while held is not its play: still queued', deletes(t).length === 0 && !!t.st().filesChanged, deletes(t));
+  t.engine.startOver();
+  await t.clock.advance(4500);
+  if (!t.st().playing) await t.engine.play();
+  await t.clock.advance(1000);
+  check('placed and playing: it leaves the queue', !t.st().filesChanged && t.st().playing && deletes(t).join() === '/api/books/41/queue', [!!t.st().filesChanged, t.st().playing, deletes(t)]);
+  t.engine.close();
+});
+
+await run('up next: another book opened instead forgets the removal', async () => {
+  const t = await setup({ places: { web: { track: '999', offset_ms: 5000, duration_ms: 10000, updated_at: '2026-09-29T17:00:00.000Z', device: 'Chrome on Linux' }, plex: null } });
+  t.queue = [Object.assign({}, QUEUED)];
+  await t.openAt(MULTI.key, '503', 298000);
+  await t.clock.advance(3000);
+  playBtn(t).click();
+  await t.clock.advance(300);
+  check('held', t.st().book === SPAN.key && !!t.st().filesChanged);
+  await t.openAt(LONG.key, '531', 1000);
+  await t.clock.advance(3000);
+  check('another book plays, the queued one is not removed', t.st().book === LONG.key && t.st().playing && deletes(t).length === 0, deletes(t));
+  t.engine.close();
+});
+
+// ---------------------------------------------------------------------------
+// Try a sample (books 3b, spec section 7; Review Focus 4)
+// ---------------------------------------------------------------------------
+
+// A sampler beside the page's engine, its own engine made as boot makes it:
+// no saver, no lock screen.
+function withSampler(t) {
+  t.sampleEls = [];
+  t.sampleEvents = [];
+  t.sampler = E.createSampler({
+    main: t.engine,
+    make: () => E.createEngine({
+      host: { appendChild(el) { return el; } },
+      createAudio: () => { const a = new FakeAudio(t); t.sampleEls.push(a); return a; },
+      fetch: t.fetch, setTimeout: t.clock.setTimeout, clearTimeout: t.clock.clearTimeout,
+      mediaSession: null, MediaMetadata: null, baseUrl: 'https://ws.test/news', saver: null
+    })
+  });
+  t.sampler.on((d) => t.sampleEvents.push(d));
+  return t;
+}
+// What a sample may never do: write anything, read a place, or touch the queue.
+function sampleWrites(t, from, key) {
+  const enc = encodeURIComponent(key);
+  return t.fetches.slice(from).filter((f) => f.method !== 'GET' || f.url.indexOf('/api/player/checkin') !== -1 ||
+    f.url.indexOf('/:/') !== -1 || f.url.indexOf('/api/books') === 0 || f.url === '/api/player/position/' + enc ||
+    f.url.indexOf('/api/player/orphans/' + enc) === 0 || f.url.indexOf('/api/player/next') === 0).map((f) => f.method + ' ' + f.url);
+}
+const mainShape = (s) => JSON.stringify([s.book, s.position, s.bookMs, s.speed, s.chapterIndex, s.filesChanged, s.safetyNet, s.error, s.resumedFrom]);
+
+await run('a sample plays its first 5 minutes in its own engine and stops at exactly 5:00, saving nothing anywhere; the main player is paused, then plays on', async () => {
+  const storage = memoryStorage();
+  const t = withSampler(await setup({ storage, identity: ID, stateful: true }));
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(5000);
+  check('the main player plays', t.st().playing);
+  const f0 = t.fetches.length;
+  const started = t.sampler.sample(LONG.key);
+  await t.clock.advance(50);
+  const paused = t.st();
+  const posts0 = t.posts.length;
+  const stored = JSON.stringify(Array.from(storage.map.entries()));
+  check('the main player paused first', !paused.playing && t.audioEl.paused, paused.playing);
+  check('the main player\'s pause is its own save, of its own book', t.posts.every((p) => p.book === MULTI.key), t.posts.map((p) => p.book));
+  await t.clock.advance(1000);
+  check('sample() answers that it started', (await started) === true);
+  const ss = t.sampler.state();
+  check('the sample plays from 0:00', ss && ss.book === LONG.key && ss.playing && ss.bookMs > 0 && ss.bookMs <= 1250, ss);
+  check('in an element of its own', t.sampleEls.length === 1 && !t.sampleEls[0].paused && t.audioEl.paused);
+  check('a sample-change with the time left', t.sampleEvents.length > 0 && t.sampleEvents[t.sampleEvents.length - 1].sample.leftMs === 300000 - ss.bookMs, t.sampleEvents.slice(-1));
+  check('the lock screen is still the main book\'s', t.ms.metadata && t.ms.metadata.title === MULTI.title);
+  await t.clock.advance(297000);
+  const late = t.sampler.state();
+  check('still playing just before 5:00', late && late.playing && late.leftMs > 0 && late.leftMs <= 2000, late);
+  check('no save while it played', t.posts.length === posts0, t.posts.slice(posts0));
+  check('the local copies untouched while it played', JSON.stringify(Array.from(storage.map.entries())) === stored);
+  await t.clock.advance(3000);
+  check('stopped: no sample', t.sampler.state() === null);
+  const last = t.sampleEvents[t.sampleEvents.length - 1];
+  check('the last event says it reached the limit', last.reason === 'limit' && last.sample === null && last.error === null, last);
+  const maxMs = Math.max(...t.sampleEvents.filter((e) => e.sample).map((e) => e.sample.bookMs));
+  check('it never played past 5:00', maxMs <= 300000 && maxMs >= 299750, maxMs);
+  check('its element stopped', t.sampleEls[0].paused);
+  check('no check-in, timeline, scrobble, place read or queue change for the sample', sampleWrites(t, f0, LONG.key).length === 0, sampleWrites(t, f0, LONG.key));
+  check('only the book was read for it', t.fetches.slice(f0).filter((f) => f.url.indexOf(encodeURIComponent(LONG.key)) !== -1).map((f) => f.url).join() === '/api/player/book/530%3A1');
+  check('saves since are the main player\'s own, of its own book (its Play again)', t.posts.slice(posts0).every((p) => p.book === MULTI.key), t.posts.slice(posts0).map((p) => p.book));
+  check('the main player keeps local copies here (so a sample\'s would show)', Array.from(storage.map.keys()).some((k) => k.indexOf(MULTI.key) !== -1), Array.from(storage.map.keys()));
+  check('no local copy for the sample', !Array.from(storage.map.keys()).some((k) => k.indexOf(LONG.key) !== -1), Array.from(storage.map.keys()));
+  await t.clock.advance(5000);
+  const back = t.st();
+  check('the main player plays on, on the same book, from its place', back.playing && back.book === MULTI.key && back.bookMs >= paused.bookMs - 30000, [back.playing, back.book, back.bookMs, paused.bookMs]);
+  check('and nothing else about it changed', JSON.stringify([back.speed, back.filesChanged, back.safetyNet, back.error]) === JSON.stringify([paused.speed, paused.filesChanged, paused.safetyNet, paused.error]));
+  check('one engine plays', !t.audioEl.paused && t.sampleEls[0].paused);
+  t.engine.close();
+});
+
+await run('a sample over a paused main player: Stop leaves the main player exactly as it was, with not one save', async () => {
+  const t = withSampler(await setup({ stateful: true }));
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(3000);
+  t.engine.pause();
+  await t.clock.advance(2000);
+  const before = mainShape(t.st());
+  const posts0 = t.posts.length;
+  const f0 = t.fetches.length;
+  await t.sampler.sample(SPAN.key);
+  await t.clock.advance(60000);
+  check('the sample plays', t.sampler.state() && t.sampler.state().playing);
+  check('stopSample() answers true', t.sampler.stopSample() === true);
+  check('and a second time false', t.sampler.stopSample() === false);
+  await t.clock.advance(5000);
+  const last = t.sampleEvents[t.sampleEvents.length - 1];
+  check('stopped by the listener', last.reason === 'stop' && last.sample === null, last);
+  check('the main player is exactly as it was, still paused', mainShape(t.st()) === before && !t.st().playing, [mainShape(t.st()), before]);
+  check('not one save', t.posts.length === posts0, t.posts.slice(posts0));
+  check('nothing written', sampleWrites(t, f0, SPAN.key).length === 0, sampleWrites(t, f0, SPAN.key));
+  t.engine.close();
+});
+
+await run('a sample ends at a short book\'s end; one that cannot load says why and gives the main player back', async () => {
+  const t = withSampler(await setup());
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(2000);
+  await t.sampler.sample(SHORT.key);
+  await t.clock.advance(125000);
+  let last = t.sampleEvents[t.sampleEvents.length - 1];
+  check('the end of a 2-minute book ends the sample', t.sampler.state() === null && last.reason === 'end', last);
+  await t.clock.advance(1000);
+  check('the main player plays again', t.st().playing && t.st().book === MULTI.key);
+  const ok = await t.sampler.sample('999:1');
+  await t.clock.advance(1000);
+  last = t.sampleEvents[t.sampleEvents.length - 1];
+  check('sample() answers false', ok === false);
+  check('an error event, the sample gone', last.reason === 'error' && last.sample === null && last.error && last.error.code === 'not-found' && typeof last.error.message === 'string', last);
+  check('the main player plays again', t.st().playing && t.st().book === MULTI.key);
+  t.engine.close();
+});
+
+await run('a sample: the main player\'s own Play ends it (one plays at a time); a second sample replaces the first and still gives the main player back', async () => {
+  const t = withSampler(await setup());
+  await t.openAt(MULTI.key, '502', 300000);
+  await t.clock.advance(2000);
+  await t.sampler.sample(SPAN.key);
+  await t.clock.advance(10000);
+  await t.sampler.sample(LONG.key);
+  await t.clock.advance(2000);
+  check('the second replaced the first', t.sampler.state().book === LONG.key && t.sampleEls.length === 1 && !t.st().playing);
+  t.sampler.stopSample();
+  await t.clock.advance(1000);
+  check('the main player was playing before the first: it plays again', t.st().playing);
+  await t.sampler.sample(SPAN.key);
+  await t.clock.advance(2000);
+  await t.engine.play();
+  await t.clock.advance(1000);
+  const last = t.sampleEvents[t.sampleEvents.length - 1];
+  check('the main player\'s Play ended the sample', t.sampler.state() === null && last.reason === 'main' && t.sampleEls[0].paused && t.st().playing, last);
+  t.engine.close();
+});
+
+await run('a sample never touches Up next: the main book ending meanwhile is offered as always, the sample ending offers nothing', async () => {
+  const t = withSampler(await setup());
+  t.queue = [Object.assign({}, QUEUED)];
+  await t.sampler.sample(SHORT.key);
+  await t.clock.advance(125000);
+  check('a sample\'s end asks the queue nothing', t.queueAsks.length === 0 && t.qa('.wsp-prompt').length === 0, t.queueAsks);
+  check('nothing removed', deletes(t).length === 0);
+  t.engine.close();
+});
+
+await run('boot gives WS.player sample(), stopSample() and the sample-change event, with an engine of its own that saves nothing', async () => {
+  const t = await setup({ noFeatures: true });
+  const posts = [];
+  const saver = S.createSaver({
+    post: (body) => { posts.push(body); return Promise.resolve({ status: 200, data: { stored: true, updated_at: new Date(t.now()).toISOString() } }); },
+    now: t.now, mono: () => t.clock.now, storage: null, identity: '', device: 'Test on Linux',
+    setTimeout: t.clock.setTimeout, clearTimeout: t.clock.clearTimeout, psid: 'boot-psid', onSignedOut() {}
+  });
+  const els = [];
+  t.win.WS = {};
+  const engine = E.boot(t.win, {
+    host: { appendChild(el) { return el; } },
+    createAudio: () => { const a = new FakeAudio(t); els.push(a); return a; },
+    fetch: t.fetch, setTimeout: t.clock.setTimeout, clearTimeout: t.clock.clearTimeout,
+    mediaSession: t.ms, MediaMetadata: null, saver
+  });
+  check('the sample calls are there', typeof engine.sample === 'function' && typeof engine.stopSample === 'function' && typeof engine.sampleState === 'function');
+  check('no second element until a sample', els.length === 1);
+  const seen = [];
+  const off = engine.on('sample-change', (d) => seen.push(d.reason));
+  const p = engine.open(MULTI.key, { at: { track: '502', offset_ms: 300000 } });
+  await t.clock.advance(300);
+  await p;
+  await t.clock.advance(2000);
+  const posts0 = posts.length;
+  await engine.sample(SPAN.key);
+  await t.clock.advance(5000);
+  check('a sample plays in a second element', els.length === 2 && !els[1].paused && els[0].paused);
+  check('its saves are not the page\'s: only the main player\'s pause was saved', posts.slice(posts0).every((b) => b.book === MULTI.key) && posts.slice(posts0).length <= 1, posts.slice(posts0));
+  check('sample-change events', seen[0] === 'start' && seen.length > 1, seen);
+  check('sampleState()', engine.sampleState() && engine.sampleState().book === SPAN.key);
+  engine.stopSample();
+  await t.clock.advance(1000);
+  check('stopped', engine.sampleState() === null && seen[seen.length - 1] === 'stop' && els[1].paused);
+  off();
+  const n = seen.length;
+  await engine.sample(SPAN.key);
+  engine.stopSample();
+  check('unsubscribed', seen.length === n);
+  check('the other events still work', typeof engine.on('change', () => {}) === 'function');
+  engine.close();
 });
 
 await run('boot sets WS.playerFeatures once, and only with the player', async () => {

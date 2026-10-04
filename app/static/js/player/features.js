@@ -102,9 +102,18 @@
  *   on, the question shows its new place and the answer is not acted on;
  *   a read that fails or takes over 4 s shows the question again as it
  *   was (spec 2.5 section 7).
- * - Up next: at the end of the book, the next in its series
- *   (GET /api/player/next/<book>): "Up next: <title>" with Play, which opens
- *   it where the listener left off. It never starts by itself.
+ * - Up next: at the end of the book, the first audiobook in the listener's
+ *   Up next queue they can hear, other than this one (books 3b:
+ *   GET /api/books/me/queue/next-audio?after=<book>, its preferred edition),
+ *   else the next in its series (GET /api/player/next/<book>): "Up next:
+ *   <title>" with Play, which opens it through the normal open (where the
+ *   listener left off; the handoff, conflicts, the files changed and the
+ *   safety net all apply). It never starts by itself, and never opens a book
+ *   while the player holds this one (a question about another device's
+ *   place, Find your place, the safety net, a late Play's read): the offer
+ *   is hidden meanwhile and shows again once the hold is over. A queued book
+ *   leaves the queue (DELETE /api/books/<id>/queue) once it really plays,
+ *   not on a preview while it is held.
  *
  * Pure (importable by Node, no DOM at import time):
  *   rewindFor(awayMs)                     ms to go back: 0, 3 s, 10 s or 30 s
@@ -154,6 +163,8 @@ export const HEARD_MS = 1000;          // real progress that counts as listening
 export const PREFS_URL = '/api/player/prefs';
 export const HISTORY_URL = '/api/player/history/';
 export const NEXT_URL = '/api/player/next/';
+export const QUEUE_NEXT_URL = '/api/books/me/queue/next-audio?after=';
+export const QUEUE_URL = '/api/books/';    // + <book id> + '/queue': DELETE takes it off the queue
 export const SESSION_GAP_MS = 600000;     // a longer gap in the log starts a new session
 export const HANDOFF_WITHIN_MS = 86400000; // another device's place this recent is offered on open
 export const HANDOFF_APART_MS = 30000;    // places closer than this are the same place
@@ -1001,7 +1012,13 @@ export function createFeatures(env) {
   // at its 'open' { book, offer }.
   let handoff = null;
   let pendingOpen = null;
-  let upNext = null;           // { book, prompt }: the next book offered at the end
+  // The next book offered at the end { book (the one that ended), offer
+  // ({ key, title, queued: the queue entry's book id or null }, once known),
+  // prompt (null while the player holds) }.
+  let upNext = null;
+  // A queued book opened from the offer, which leaves the queue once it
+  // really plays: { id, key }.
+  let dequeue = null;
   let hist = null;             // the history loaded (see History)
 
   let lastBook = null;
@@ -1073,6 +1090,8 @@ export function createFeatures(env) {
       cancelSleep();
       askNext(s.book);
     }
+    if (dequeue) takeFromQueue(s);
+    if (r !== 'time') syncUpNext();
     // The listener's settings: read when the first book starts loading.
     if (r === 'loading' && loadState === 'idle') loadPrefs();
     if (r === 'open') {
@@ -1153,6 +1172,8 @@ export function createFeatures(env) {
     const entry = { book: book, offer: offer, kind: kind, prompt: null, shown: now(), reading: false };
     handoff = entry;
     drawHandoff(entry);
+    // A question holds the book: an Up next offer waits for its answer.
+    syncUpNext();
   }
 
   function canGoTo(offer) {
@@ -1185,7 +1206,11 @@ export function createFeatures(env) {
     // At an open where the other place can't play here: the question can
     // wait (nothing is saved or overwritten until the listener plays or moves).
     if (!canGo && kind === 'open') {
-      actions.push({ label: 'Not now', run: function () { if (handoff === entry) handoff = null; } });
+      actions.push({ label: 'Not now', run: function () {
+        if (handoff !== entry) return;
+        handoff = null;
+        syncUpNext();
+      } });
     }
     entry.prompt = ui.prompt({ id: 'handoff', message: messageFor(entry), actions: actions });
   }
@@ -1278,12 +1303,13 @@ export function createFeatures(env) {
     // After the move: the save that resumes carries the place chosen.
     const held = !!player.state().filesChanged;
     if (entry.kind === 'conflict' && typeof player.resolveConflict === 'function') player.resolveConflict();
-    if (stay) return;
+    // Answered without playing: an Up next offer the question held shows.
+    if (stay) return syncUpNext();
     // At the book's very end (a confirm landed there, or the book ended
     // under the question) it does not play on: a Play there would start the
     // book again from 0:00.
     const now2 = player.state();
-    if (now2.book && now2.bookDurationMs > 0 && now2.bookMs >= now2.bookDurationMs) return;
+    if (now2.book && now2.bookDurationMs > 0 && now2.bookMs >= now2.bookDurationMs) return syncUpNext();
     // A confirm that could not land (still held: the helper shows why) plays
     // nothing either: a Play while held would only preview.
     if (held && now2.filesChanged) return;
@@ -1341,36 +1367,122 @@ export function createFeatures(env) {
     if (u && u.prompt) u.prompt.remove();
   }
 
-  // At the end of the book: the next in its series, offered, never started.
+  /* The player holds the book (spec 2.5 and 2.6: Find your place, the safety
+     net, a question about another device's place, a late Play's read): no
+     book is opened over it, so the offer waits. */
+  function holding(s) {
+    return !!(handoff || s.filesChanged || s.safetyNet || s.checking || s.loading);
+  }
+
+  // The offer shows only while the book that ended is there, paused and
+  // unheld; held, it waits (hidden) and comes back once the hold is over.
+  function syncUpNext() {
+    const u = upNext;
+    if (!u || !u.offer) return;
+    const s = player.state();
+    if (s.book !== u.book || s.playing) return;
+    if (holding(s)) {
+      if (u.prompt) {
+        u.prompt.remove();
+        u.prompt = null;
+      }
+      return;
+    }
+    if (!u.prompt) {
+      u.prompt = ui.prompt({
+        id: 'upnext',
+        message: 'Up next: ' + String(u.offer.title || ''),
+        actions: [
+          { label: 'Play', primary: true, run: function () { playNext(u); } },
+          { label: 'Not now', run: function () { if (upNext === u) upNext = null; } }
+        ]
+      });
+    }
+  }
+
+  // The first queued audiobook, other than the one that ended (books 3b);
+  // null when there is none or the queue can't be read.
+  function queuedNext(book) {
+    return getJSON(QUEUE_NEXT_URL + encodeURIComponent(book)).then(function (data) {
+      const q = data && data.book;
+      const key = data && data.edition_key;
+      const id = q ? String(q.id) : '';
+      if (!/^[0-9]{1,20}$/.test(id) || typeof key !== 'string' || !key || key === book) return null;
+      return { key: key, title: q.title, queued: id };
+    }, function () { return null; });
+  }
+
+  // The next in the book's series.
+  function seriesNext(book) {
+    return getJSON(NEXT_URL + encodeURIComponent(book)).then(function (data) {
+      const next = data && data.next;
+      return next && typeof next.key === 'string' && next.key ? { key: next.key, title: next.title, queued: null } : null;
+    }, function () { return null; });
+  }
+
+  // At the end of the book: the first queued audiobook, else the next in its
+  // series, offered, never started.
   function askNext(book) {
     if (!book) return;
     dropUpNext();
-    const entry = { book: book, prompt: null };
+    const entry = { book: book, offer: null, prompt: null };
     upNext = entry;
-    getJSON(NEXT_URL + encodeURIComponent(book)).then(function (data) {
-      const next = data && data.next;
-      if (upNext !== entry || player.state().book !== book || !next || typeof next.key !== 'string' || !next.key) return;
-      entry.prompt = ui.prompt({
-        id: 'upnext',
-        message: 'Up next: ' + String(next.title || ''),
-        actions: [
-          { label: 'Play', primary: true, run: function () { playNext(entry, next.key); } },
-          { label: 'Not now', run: function () { if (upNext === entry) upNext = null; } }
-        ]
-      });
-    }, function () { /* no offer: nothing to say */ });
+    queuedNext(book).then(function (offer) {
+      if (upNext !== entry) return null;
+      return offer || seriesNext(book);
+    }).then(function (offer) {
+      if (upNext !== entry || !offer) return;
+      entry.offer = offer;
+      syncUpNext();
+    }).catch(logError);
   }
 
-  function playNext(entry, key) {
-    if (upNext === entry) upNext = null;
+  // Through the normal open (the handoff, conflicts, the files changed and
+  // the safety net all apply). Never over a hold: the offer waits instead.
+  function playNext(entry) {
+    if (upNext !== entry) return;
+    if (holding(player.state())) {
+      syncUpNext();
+      return;
+    }
+    upNext = null;
+    if (entry.prompt) entry.prompt.remove();
+    const offer = entry.offer;
+    dequeue = offer.queued ? { id: offer.queued, key: offer.key } : null;
     let r;
     try {
-      r = player.open(key);
+      r = player.open(offer.key);
     } catch (e) {
       logError(e);
       return;
     }
     if (r && typeof r.catch === 'function') r.catch(logError);
+  }
+
+  // A queued book leaves the queue once it really plays (not a preview while
+  // held); another book opened first forgets it.
+  function takeFromQueue(s) {
+    const d = dequeue;
+    if (!s.book) return;
+    if (s.book !== d.key) {
+      dequeue = null;
+      return;
+    }
+    if (!s.playing || s.filesChanged || s.safetyNet) return;
+    dequeue = null;
+    if (!fetchFn) return;
+    let sent;
+    try {
+      sent = Promise.resolve(fetchFn(QUEUE_URL + encodeURIComponent(d.id) + '/queue', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' }
+      }));
+    } catch (e) {
+      sent = Promise.reject(e);
+    }
+    // Not taken: it stays queued (the queue never offers a book at its own end).
+    sent.catch(function () {});
   }
 
   // ---- The keys ----

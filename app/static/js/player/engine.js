@@ -54,6 +54,7 @@
  *   chapterAt(chapters, bookMs)    -> the chapter's position in the list, -1 if none
  *   mimeFor(container, codec, profile) -> the MIME type for canPlayType, '' if unknown
  *   createEngine(env)              the engine, given its surroundings (tests)
+ *   createSampler(env)             "Try a sample" beside an engine (tests; see below)
  *   boot(win, overrides)           mounts the engine in #wsPlayer as WS.player
  *   UnknownTrack                   open()'s rejection for a place not in the book
  *
@@ -357,6 +358,27 @@
  * Saving (saves.js) is injected as env.saver: the engine hands it every
  * change and opens and stops it with each book. Without one (the engine's
  * own tests) nothing is saved and open() does not look for a place.
+ *
+ * Try a sample (books spec 3b section 7), on WS.player too (boot):
+ *   sample(key) -> Promise<bool>  plays the first SAMPLE_MS (5 min) of that
+ *       book (a Plex book key) from 0:00 in a second engine of its own, made
+ *       with no saver and no lock screen, so nothing is saved anywhere: no
+ *       check-in (so no Plex timeline or scrobble), no local copy, no place
+ *       read, nothing of the Up next queue. The main engine is paused first
+ *       (its own pause, saved as any pause), so only one plays. A sample
+ *       ends at SAMPLE_MS of book time, at the book's end, on an error, at
+ *       stopSample(), or when the main engine plays (the listener's own
+ *       Play, the lock screen): then nothing is given back. Otherwise, if
+ *       the main engine was playing when the first of a run of samples
+ *       began, and still has that book, unheld, it plays again (a Play like
+ *       any other). A new sample replaces one playing. true: it plays.
+ *   stopSample() -> bool   ends the sample; false when none plays
+ *   sampleState()   null, or { book, title, playing, loading, bookMs, leftMs }
+ *   on('sample-change', fn)   fn({ reason, sample: sampleState(), error })
+ *       on every change of the sample: 'start', the sample engine's change
+ *       reasons ('time' several times a second), and at its end 'limit',
+ *       'end', 'stop', 'main' or 'error' (error: { code, message } as the
+ *       engine's 'error', sample null).
  */
 
 export const PROBE_MS = 1500;          // the local connection's probe
@@ -381,6 +403,7 @@ export const FORMAT_UNSUPPORTED = "This book's audio format can't play in this b
 export const PART_FORMAT = "This part's format can't play in this browser";
 export const RECHECK_AFTER_MS = 300000;  // a Play after this long without playing re-reads the saved places
 export const RECHECK_WAIT_MS = 4000;     // ... waiting this long at most, then playing on
+export const SAMPLE_MS = 300000;         // a sample plays this much of a book, from its start
 const PLEX_LATER_MS = 2000;              // Plex's copy of a save of ours is stamped a moment after it
 const SAME_PLACE_MS = 1000;              // another page's place this close to this one is this one
 
@@ -2947,6 +2970,137 @@ export function createEngine(env) {
 }
 
 // ---------------------------------------------------------------------------
+// Try a sample
+// ---------------------------------------------------------------------------
+
+/* env: { main (the page's engine), make() -> a saverless engine for the
+   samples, made at the first one and kept for the document }. See "Try a
+   sample" above. */
+export function createSampler(env) {
+  const main = env.main;
+  const listeners = new Set();
+  let engine = null;
+  let cur = null;       // { key, gen } of the sample playing
+  let resume = null;    // { book } the main engine was playing when the run of samples began
+  let gen = 0;
+
+  function log(e) {
+    console.error('[player] the sample failed', e);
+  }
+
+  function state() {
+    if (!cur || !engine) return null;
+    const s = engine.state();
+    const end = s.bookDurationMs > 0 ? Math.min(SAMPLE_MS, s.bookDurationMs) : SAMPLE_MS;
+    return { book: cur.key, title: s.book === cur.key ? s.title : '', playing: s.playing, loading: s.loading,
+      bookMs: s.bookMs, leftMs: Math.max(0, end - s.bookMs) };
+  }
+
+  function emit(reason, error) {
+    const detail = { reason: reason, sample: state(), error: error || null };
+    for (const fn of Array.from(listeners)) {
+      try {
+        fn(detail);
+      } catch (e) {
+        console.error('[player] a sample-change listener failed', e);
+      }
+    }
+  }
+
+  // The end of a sample. The main engine plays again unless it was what
+  // ended it (reason 'main').
+  function finish(reason, error) {
+    if (!cur) return false;
+    cur = null;
+    try {
+      engine.close();
+    } catch (e) {
+      log(e);
+    }
+    const back = reason === 'main' ? null : resume;
+    resume = null;
+    emit(reason, error);
+    if (back) {
+      const s = main.state();
+      if (s.book === back.book && !s.playing && !s.error && !s.filesChanged && !s.safetyNet) {
+        try {
+          const r = main.play();
+          if (r && typeof r.catch === 'function') r.catch(log);
+        } catch (e) {
+          log(e);
+        }
+      }
+    }
+    return true;
+  }
+
+  function sampleEngine() {
+    if (engine) return engine;
+    engine = env.make();
+    engine.on('change', function (d) {
+      if (!cur) return;
+      const s = d.state;
+      // Its book time, never a timer: a background tab's timers are slowed,
+      // its element's timeupdate is not.
+      if (s.book === cur.key && s.bookMs >= SAMPLE_MS) {
+        finish('limit');
+        return;
+      }
+      emit(d.reason, null);
+    });
+    engine.on('ended', function () { finish('end'); });
+    engine.on('error', function (e) { finish('error', { code: e.code, message: e.message }); });
+    return engine;
+  }
+
+  // The listener plays the main book: one plays at a time.
+  main.on('change', function (d) {
+    if (cur && d.state.playing) finish('main');
+  });
+
+  function sample(key) {
+    key = key == null ? '' : String(key);
+    if (!key) return Promise.resolve(false);
+    const s = main.state();
+    // A sample replacing another keeps what the first one found.
+    if (!cur) resume = s.playing && s.book ? { book: s.book } : null;
+    try {
+      main.pause();
+    } catch (e) {
+      log(e);
+    }
+    const e = sampleEngine();
+    const my = ++gen;
+    cur = { key: key, gen: my };
+    emit('start', null);
+    let opened;
+    try {
+      opened = Promise.resolve(e.open(key));
+    } catch (err) {
+      opened = Promise.reject(err);
+    }
+    return opened.then(function () {
+      return !!cur && cur.gen === my && !e.state().error;
+    }, function (err) {
+      log(err);
+      if (cur && cur.gen === my) finish('error', { code: 'failed', message: "The sample couldn't play." });
+      return false;
+    });
+  }
+
+  return {
+    sample: sample,
+    stopSample: function () { return finish('stop'); },
+    state: state,
+    on: function (fn) {
+      if (typeof fn !== 'function') return function () {};
+      listeners.add(fn);
+      return function () { listeners.delete(fn); };
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Browser
 // ---------------------------------------------------------------------------
 
@@ -2977,7 +3131,7 @@ export function boot(win, overrides) {
       saver = null;
     }
   }
-  const engine = createEngine(Object.assign({
+  const surroundings = {
     host: host,
     createAudio: function () { return doc.createElement('audio'); },
     fetch: win.fetch.bind(win),
@@ -2986,10 +3140,24 @@ export function boot(win, overrides) {
     mediaSession: nav.mediaSession || null,
     permissions: nav.permissions || null,
     MediaMetadata: win.MediaMetadata || null,
-    baseUrl: win.location.href,
-    saver: saver,
-    noSaver: !given && !saver
-  }, overrides || {}));
+    baseUrl: win.location.href
+  };
+  const engine = createEngine(Object.assign({}, surroundings, { saver: saver, noSaver: !given && !saver }, overrides || {}));
+  // Samples: an engine of their own with no saver (whatever the page's is)
+  // and no lock screen, which stays the main book's.
+  const sampler = createSampler({
+    main: engine,
+    make: function () {
+      return createEngine(Object.assign({}, surroundings, overrides || {}, { saver: null, noSaver: false, mediaSession: null }));
+    }
+  });
+  engine.sample = sampler.sample;
+  engine.stopSample = sampler.stopSample;
+  engine.sampleState = sampler.state;
+  const onEngine = engine.on;
+  engine.on = function (type, fn) {
+    return type === 'sample-change' ? sampler.on(fn) : onEngine(type, fn);
+  };
   WS.player = engine;
   return engine;
 }

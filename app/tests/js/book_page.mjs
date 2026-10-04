@@ -1025,6 +1025,8 @@ await run('the reader\'s target: a chapter is read from the address', async () =
   check('a series that is not a number is none', target(q('seriesId=x&chapterId=7')).seriesId === null);
 });
 
+// turn: true turns a page; a function is run instead (doc, win), and what it
+// returns comes back as `seen`.
 async function readerVisit(search, turn) {
   const win = new Window({ url: 'https://ws.test/reader' + search });
   const doc = win.document;
@@ -1038,6 +1040,8 @@ async function readerVisit(search, turn) {
   set('getComputedStyle', win.getComputedStyle.bind(win));
   set('checkAuth', () => Promise.resolve());
   set('WS', { player: null, data: { user: { username: 'sam' } } });
+  const beacons = [];
+  set('navigator', { sendBeacon(url) { beacons.push(String(url)); return true; } });
   win.WS = g.WS;
   const answers = (url) => {
     if (/\/series-detail\?seriesId=5$/.test(url)) return { specials: [], chapters: [], volumes: [{ id: 900, chapters: [{ id: 11, volumeId: 900 }] }], storylineChapters: [] };
@@ -1071,7 +1075,10 @@ async function readerVisit(search, turn) {
   const mounted = reader.mount(ctx).then((fn) => { leave = fn; }, (e) => { thrown = e; });
   await flush();
   await flush();
-  if (turn) {
+  let seen;
+  if (typeof turn === 'function') {
+    seen = await turn(doc, win);
+  } else if (turn) {
     // Turn a page, then leave as a soft navigation does: the writer saves the place.
     doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     await flush();
@@ -1082,7 +1089,7 @@ async function readerVisit(search, turn) {
   if (typeof leave === 'function') leave();
   await flush();
   for (const k of Object.keys(saved)) { if (saved[k]) Object.defineProperty(g, k, saved[k]); else delete g[k]; }
-  return { calls, thrown, posts };
+  return { calls, thrown, posts, beacons, seen };
 }
 
 await run('the reader opens the chapter in its address, not the series\' first', async () => {
@@ -1103,6 +1110,54 @@ await run('the reader opens the chapter in its address, not the series\' first',
   check('under the series Kavita names for the chapter (104), not the address\'s (5)', saved.length >= 1 && saved.every((x) => x.body.seriesId === 104 && x.body.chapterId === 77 && x.body.volumeId === 905), saved.map((x) => x.body));
   const bad = await readerVisit('?seriesId=5&chapterId=abc');
   check('a chapter that is not a number is ignored: the first chapter opens', bad.calls.some((u) => /\/Book\/11\/book-info/.test(u)) && !bad.calls.some((u) => /abc/.test(u)), bad.calls);
+});
+
+await run('the reader\'s sample mode: the first page, no place read or saved, no bookmarks, and a Sample banner', async () => {
+  const v = await readerVisit('?seriesId=5&chapterId=77&sample=1', async (doc, win) => {
+    const key = (k) => doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: k, bubbles: true }));
+    const banner = doc.getElementById('sampleBanner');
+    const seen = {
+      banner: !!banner && !banner.hidden,
+      text: banner ? banner.textContent.replace(/\s+/g, ' ').trim() : '',
+      start: doc.getElementById('sampleStart') ? doc.getElementById('sampleStart').getAttribute('href') : null,
+      bookmarkHidden: doc.getElementById('bookmarkBtn').hidden === true,
+      page: doc.getElementById('pageInfo').textContent
+    };
+    key('ArrowRight'); await flush(); await flush();
+    key('ArrowRight'); await flush(); await flush();
+    seen.turned = doc.getElementById('pageInfo').textContent;
+    doc.getElementById('bookmarkBtn').click();
+    await flush();
+    Object.defineProperty(doc, 'visibilityState', { value: 'hidden', configurable: true });
+    doc.dispatchEvent(new win.Event('visibilitychange'));
+    win.dispatchEvent(new win.Event('pagehide'));
+    await flush();
+    let backs = 0;
+    // Opened from another page of the site: there is somewhere to go back to.
+    win.history.pushState({}, '', win.location.href);
+    win.history.back = () => { backs += 1; };
+    const close = doc.getElementById('sampleClose');
+    if (close) close.click();
+    seen.backs = backs;
+    return seen;
+  });
+  check('it did not throw', v.thrown === null, v.thrown && String(v.thrown));
+  check('it never asked where the reader was', !v.calls.some((u) => /get-progress/.test(u)), v.calls);
+  check('it opened the first page', v.calls.some((u) => /\/Book\/77\/book-page\?page=0$/.test(u)) && v.seen.page === '1 / 30', [v.seen.page, v.calls]);
+  check('pages turn', v.seen.turned === '3 / 30', v.seen.turned);
+  check('no progress POST, no bookmark, no write of any kind', v.posts.length === 0, v.posts);
+  check('no beacon on hiding or leaving', v.beacons.length === 0, v.beacons);
+  check('bookmarks are off', v.seen.bookmarkHidden);
+  check('a Sample banner shows', v.seen.banner && /^Sample\b/.test(v.seen.text) && /Start reading/.test(v.seen.text) && /Close/.test(v.seen.text), v.seen.text);
+  check('Start reading opens the book normally, at the same chapter', v.seen.start === '/reader?seriesId=5&chapterId=77', v.seen.start);
+  check('Close goes back', v.seen.backs === 1, v.seen.backs);
+  const normal = await readerVisit('?seriesId=5&chapterId=77', async (doc) => {
+    const banner = doc.getElementById('sampleBanner');
+    return { banner: !!banner && !banner.hidden, bookmarkHidden: doc.getElementById('bookmarkBtn').hidden === true };
+  });
+  check('without sample=1: no banner, bookmarks on, the place is asked for', !normal.seen.banner && !normal.seen.bookmarkHidden && normal.calls.some((u) => /get-progress\?chapterId=77/.test(u)), [normal.seen, normal.calls]);
+  const other = await readerVisit('?seriesId=5&chapterId=77&sample=yes');
+  check('only sample=1 is a sample', other.calls.some((u) => /get-progress\?chapterId=77/.test(u)), other.calls);
 });
 
 console.log(`${total - failed}/${total} checks passed` + (failed ? `, ${failed} FAILED` : ''));

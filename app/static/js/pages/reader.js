@@ -20,6 +20,15 @@
  * mount returns sends after it, lands last. Each has its own deadline, whose
  * timer is the one timer here not the visit's. They touch nothing on the page.
  * The reading settings are set on #wsPage, so they go with the page.
+ *
+ * Sample mode (/reader?seriesId=&chapterId=&sample=1, books spec 3b section
+ * 7, "Read a sample"): the same reader, read-only. It opens at the first
+ * page and never asks Kavita where the reader is (no get-progress), never
+ * writes a position (no progress POST, no beacon, no last save: there is no
+ * writer, and the position is never known), and bookmarks are off. A
+ * "Sample" banner offers Start reading (the same address without sample=1)
+ * and Close (back). The browser is what enforces it: a hand-made request
+ * through the proxy can still write, which the spec accepts.
  */
 
 const PREFS_KEY = 'webservarr_reader_prefs';
@@ -327,6 +336,8 @@ export async function mount(ctx) {
   // at the start, would overwrite their real place when they leave the page.
   var positionKnown = false;
   var guide = null;
+  // Sample mode (see the top): nothing about this visit is ever saved.
+  var sample = ctx.url.searchParams.get('sample') === '1';
 
   // A new visit for the sign-in helper: nothing blocked, nothing under way.
   if (window.WSKavita && typeof window.WSKavita.init === 'function') window.WSKavita.init();
@@ -574,7 +585,7 @@ export async function mount(ctx) {
       .then(function (html) {
         if (signal.aborted) return;
         renderPage(html);
-        if (!skipSave) {
+        if (!skipSave && !sample) {
           // The reader chose this page: from here it is theirs to save.
           positionKnown = true;
           queueProgress();
@@ -752,6 +763,7 @@ export async function mount(ctx) {
   el('pageJumpInput').addEventListener('blur', closePageJump, { signal: signal });
 
   el('bookmarkBtn').addEventListener('click', function () {
+    if (sample) return;
     kavita('/api/Reader/bookmark', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -804,6 +816,20 @@ export async function mount(ctx) {
   }, { signal: signal });
   window.addEventListener('pagehide', function () { saveProgress(true); }, { signal: signal });
 
+  /* The Sample banner: Start reading is this book read normally (the same
+     chapter, its place restored and saved); Close goes back where the
+     sample was opened from, or to Books on a first page. */
+  function showSample() {
+    el('bookmarkBtn').hidden = true;
+    var read = '/reader?seriesId=' + target.seriesId + (target.chapterId ? '&chapterId=' + target.chapterId : '');
+    el('sampleStart').setAttribute('href', read);
+    el('sampleClose').addEventListener('click', function () {
+      if (window.history.length > 1) window.history.back();
+      else window.location.assign('/books');
+    }, { signal: signal });
+    el('sampleBanner').hidden = false;
+  }
+
   // ---- Boot ----
 
   loadPrefs();
@@ -838,6 +864,7 @@ export async function mount(ctx) {
     return leave;
   }
   book.seriesId = target.seriesId;
+  if (sample) showSample();
 
   checkAuth().then(function () {
     // The book's own chapter when the address names it (its volume comes from
@@ -851,7 +878,8 @@ export async function mount(ctx) {
     // Not once the visit has ended: its cleanup, which lets go of the
     // writer, has already run.
     if (signal.aborted) throw new Error('reconnecting');
-    writer = progressWriter(sendProgress, 'chapter:' + book.chapterId);
+    // A sample has no writer: nothing of it is ever written.
+    if (!sample) writer = progressWriter(sendProgress, 'chapter:' + book.chapterId);
     return kavita('/api/Book/' + book.chapterId + '/book-info');
   }).then(function (r) {
     if (!r.ok) throw new Error('book-info HTTP ' + r.status);
@@ -868,13 +896,14 @@ export async function mount(ctx) {
     el('bookTitle').textContent = book.title;
     ctx.setTitle(book.title);
     loadTOC();
-    return restoreProgress();
+    // A sample opens at the start and never asks where the reader is.
+    return sample ? 0 : restoreProgress();
   }).then(function (page) {
     return loadPage(page, true);
   }).then(function () {
     // Only once there is a rendered page to point at. Starting earlier
     // spotlights an empty loading spinner.
-    if (!signal.aborted && guide) guide.maybeStart();
+    if (!signal.aborted && guide && !sample) guide.maybeStart();
   }).catch(function (err) {
     if (quiet(err)) return;
     showError('Couldn’t open this book', String(err.message || err));
