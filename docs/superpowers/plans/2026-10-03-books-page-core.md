@@ -110,7 +110,7 @@ plan argues from it.
 - Modify: `app/services/notification_poller.py`, or the background loop that owns periodic work,
   to schedule the rebuild
 - Create: a Chaptarr import webhook route, `POST /api/webhooks/chaptarr`. Authenticate it with a
-  shared secret setting, `integration.chaptarr.webhook_secret`, compared in constant time.
+  shared secret setting, `integration.chaptarr.webhook_secret`, compared in constant time. Chaptarr sends it as the HTTP Basic password from its webhook Username/Password fields (any username). The Settings Books panel shows the full webhook URL and can generate and copy the secret.
   - It accepts only Chaptarr's import or "Download" event types.
   - It triggers a rebuild.
   - Unknown events get 204, and nothing runs.
