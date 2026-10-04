@@ -739,7 +739,7 @@ class BookPages(unittest.TestCase):
         code = js_code_only(module_source("book"))
         self.assertIn("p.on('change', syncListen)", module_source("book"))
         self.assertIn("state.unwatch();", code)
-        self.assertIn("p.open(edition.plex_book_key, { autoplay: true })", module_source("book"))
+        self.assertIn("p.open(key, { autoplay: true })", module_source("book"))
 
     def test_the_card_helpers_are_books_js_exports(self):
         books = module_source("books")
