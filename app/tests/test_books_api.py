@@ -75,6 +75,11 @@ def make_book(db, id_, title, author="", series="", number=None, chapter=None, l
     db.commit()
 
 
+def kplace(page, pages, at, chapter=101):
+    """A Kavita place as kavita.book_places gives it."""
+    return {"page": page, "pages": pages, "at": at, "toc_chapter": chapter, "toc_page": page}
+
+
 def place(db, identity, key, at, book_ms=None, duration=None, end=False):
     db.add(ListeningPosition(identity=identity, book_key=key, track_key="t1", offset_ms=0, duration_ms=0,
                              updated_at=at, device="", source="web", book_ms=book_ms, book_duration_ms=duration))
@@ -103,7 +108,9 @@ class BooksBase(unittest.TestCase):
         make_book(self.db, 7, "The Hobbit", "J. R. R. Tolkien", editions=[("14:1", "Rob Inglis")], added=8)
         make_book(self.db, 8, "Slash Tale", "A/B Author", editions=[("15:1", "Le Guin, Ursula K.")], added=9)
         make_book(self.db, 9, "Dune (old row)", "Frank Herbert", merged_into=1, added=1)
-        self.libraries = mock.AsyncMock(return_value={1})
+        # Kavita lists the series the caller's account may see: here, those in the libraries in self.reach.
+        self.reach = {1}
+        self.series_ids = mock.AsyncMock(side_effect=self.reachable_series)
         self.in_progress = mock.AsyncMock(return_value=[])
         self.places = mock.AsyncMock(return_value={})
         self.chapter_number = mock.AsyncMock(return_value=None)
@@ -119,9 +126,9 @@ class BooksBase(unittest.TestCase):
         patches = [
             mock.patch("app.routers.setup.is_setup_completed", return_value=True),
             mock.patch.object(books.kavita_proxy, "kavita_url_for", side_effect=lambda user: KAVITA),
-            mock.patch.object(kavita, "user_library_ids", self.libraries),
+            mock.patch.object(kavita, "user_series_ids", self.series_ids),
             mock.patch.object(kavita, "in_progress_series_ids", self.in_progress),
-            mock.patch.object(kavita, "chapter_places", self.places),
+            mock.patch.object(kavita, "book_places", self.places),
             mock.patch.object(kavita, "chapter_number_at", self.chapter_number),
             mock.patch.object(kavita, "chapter_cover", self.kavita_cover),
             mock.patch.object(pp, "player_on", self.on),
@@ -138,6 +145,13 @@ class BooksBase(unittest.TestCase):
         self.addCleanup(helpers.reset_overrides)
         self.addCleanup(self.db.close)
         self.as_user(A)
+
+    def reachable_series(self, base, token):
+        db = self.Session()
+        try:
+            return {b.kavita_series_id for b in db.query(Book).filter(Book.kavita_library_id.in_(self.reach))}
+        finally:
+            db.close()
 
     def as_user(self, user):
         self.client = helpers.api_client(self.Session, user)
@@ -280,7 +294,7 @@ class KavitaVisibility(BooksBase):
         return found
 
     def test_a_hidden_library_is_hidden_everywhere(self):
-        self.assertEqual(self.libraries.await_count, 0)
+        self.assertEqual(self.series_ids.await_count, 0)
         self.assertNotIn(5, self.every_listing()["grid"])
         self.assertEqual(self.every_listing()["search"], [])
         self.assertEqual(self.get("/api/books/5").status_code, 404)
@@ -291,16 +305,16 @@ class KavitaVisibility(BooksBase):
         self.assertEqual(self.get("/api/books/series", name="Secret Series").status_code, 404)
         self.assertNotIn("Secret Series", [i.get("series") for i in self.ok("/api/books")["items"]])
         self.in_progress.return_value = [1004]
-        self.places.return_value = {104: {"page": 5, "pages": 50, "at": when(30)}}
+        self.places.return_value = {104: kplace(5, 50, when(30), 104)}
         self.assertEqual(self.ok("/api/books/continue")["items"], [])
 
     def test_a_library_the_account_reaches_is_shown(self):
-        self.libraries.return_value = {1, 2}
+        self.reach = {1, 2}
         self.assertIn(5, self.every_listing()["grid"])
         self.assertEqual(self.get("/api/books/5").status_code, 200)
 
     def test_an_ebook_in_a_hidden_library_of_a_paired_book_keeps_only_its_audio(self):
-        self.libraries.return_value = {2}
+        self.reach = {2}
         body = self.ok("/api/books/1")
         self.assertIsNone(body["formats"]["ebook"])
         self.assertEqual([e["plex_book_key"] for e in body["formats"]["audio"]["editions"]], ["10:1", "11:1"])
@@ -309,7 +323,7 @@ class KavitaVisibility(BooksBase):
     def test_unreadable_libraries_show_no_ebooks_not_all_of_them(self):
         for failure in (kavita.KavitaUnavailable("Kavita did not answer"), kavita.KavitaTokenRefused("expired")):
             with self.subTest(failure=type(failure).__name__):
-                self.libraries.side_effect = failure
+                self.series_ids.side_effect = failure
                 body = self.ok("/api/books")
                 for item in body["items"]:
                     self.assertNotIn("ebook", item["formats"], item)
@@ -317,9 +331,9 @@ class KavitaVisibility(BooksBase):
                 self.assertEqual(self.get("/api/books/4/cover").status_code, 404)
                 self.assertEqual([n["source"] for n in body["notes"]], ["kavita"])
                 self.assertEqual(self.ok("/api/books/search", q="emma")["items"], [])
-        self.libraries.side_effect = kavita.KavitaUnavailable("down")
+        self.series_ids.side_effect = kavita.KavitaUnavailable("down")
         self.assertEqual(self.ok("/api/books")["notes"][0]["reason"], "unavailable")
-        self.libraries.side_effect = kavita.KavitaTokenRefused("expired")
+        self.series_ids.side_effect = kavita.KavitaTokenRefused("expired")
         self.assertEqual(self.ok("/api/books")["notes"][0]["reason"], "not_connected")
 
     def test_a_caller_with_no_kavita_token_sees_no_ebooks(self):
@@ -327,12 +341,12 @@ class KavitaVisibility(BooksBase):
         body = self.ok("/api/books")
         self.assertTrue(all("ebook" not in i["formats"] for i in body["items"]))
         self.assertEqual(body["notes"][0]["reason"], "not_connected")
-        self.libraries.assert_not_awaited()
+        self.series_ids.assert_not_awaited()
 
     def test_a_token_from_another_kavita_address_is_not_used(self):
         self.as_user(plex_user("1003", kavita_base="http://old-kavita.test:5000"))
         self.assertTrue(all("ebook" not in i["formats"] for i in self.ok("/api/books")["items"]))
-        self.libraries.assert_not_awaited()
+        self.series_ids.assert_not_awaited()
 
     def test_ebooks_switched_off_for_members_show_no_ebooks_and_no_note(self):
         with mock.patch.object(books.kavita_proxy, "kavita_url_for",
@@ -343,10 +357,10 @@ class KavitaVisibility(BooksBase):
 
     def test_the_callers_own_token_is_what_asks_kavita(self):
         self.ok("/api/books")
-        self.libraries.assert_awaited_with(KAVITA, "jwt-1001")
+        self.series_ids.assert_awaited_with(KAVITA, "jwt-1001")
         self.as_user(B)
         self.ok("/api/books")
-        self.libraries.assert_awaited_with(KAVITA, "jwt-1002")
+        self.series_ids.assert_awaited_with(KAVITA, "jwt-1002")
 
 
 class AudioVisibility(BooksBase):
@@ -431,19 +445,19 @@ class BookPage(BooksBase):
                          "2h 30m left")
 
     def test_ebook_progress_comes_from_kavita_with_the_chapter_number(self):
-        self.places.return_value = {101: {"page": 20, "pages": 41, "at": when(25)}}
+        self.places.return_value = {101: kplace(20, 41, when(25), 101)}
         self.chapter_number.return_value = 12
         progress = self.ok("/api/books/1")["formats"]["ebook"]["progress"]
         self.assertEqual(progress["label"], "Ch. 12 · 50%")
         self.assertEqual(progress["percent"], 50)
         self.assertFalse(progress["finished"])
-        self.places.assert_awaited_with(KAVITA, "jwt-1001", [101])
+        self.places.assert_awaited_with(KAVITA, "jwt-1001", [(101, None)])
         self.chapter_number.assert_awaited_with(KAVITA, "jwt-1001", 101, 20)
         self.chapter_number.return_value = None
         self.assertEqual(self.ok("/api/books/1")["formats"]["ebook"]["progress"]["label"], "50%")
 
     def test_a_finished_ebook(self):
-        self.places.return_value = {101: {"page": 40, "pages": 41, "at": when(25)}}
+        self.places.return_value = {101: kplace(40, 41, when(25), 101)}
         progress = self.ok("/api/books/1")["formats"]["ebook"]["progress"]
         self.assertEqual((progress["label"], progress["percent"], progress["finished"]), ("Finished", 100, True))
         self.chapter_number.assert_not_awaited()
@@ -466,17 +480,19 @@ class BookPage(BooksBase):
         self.assertIsNone(audio_only["request_links"]["audio"])
 
     def test_a_hidden_format_is_not_offered_for_request(self):
-        self.libraries.return_value = {2}                                    # Dune's ebook is not theirs to see
+        self.reach = {2}                                    # Dune's ebook is not theirs to see
         self.assertIsNone(self.ok("/api/books/1")["request_links"]["ebook"])
 
-    def test_a_merged_id_redirects_to_the_surviving_book(self):
+    def test_a_merged_id_redirects_temporarily_to_the_surviving_book(self):
         r = self.get("/api/books/9")
-        self.assertEqual(r.status_code, 301)
+        self.assertEqual(r.status_code, 307)
         self.assertEqual(r.headers["location"], "/api/books/1")
+        self.assertEqual(r.headers["cache-control"], "no-store")       # a split may give the old id its own book back
         followed = self.client.get("/api/books/9")
         self.assertEqual(followed.json()["book"]["id"], 1)
         cover = self.get("/api/books/9/cover")
-        self.assertEqual((cover.status_code, cover.headers["location"]), (301, "/api/books/1/cover"))
+        self.assertEqual((cover.status_code, cover.headers["location"], cover.headers["cache-control"]),
+                         (307, "/api/books/1/cover", "no-store"))
 
     def test_a_chain_of_ghosts_that_leads_nowhere_is_404(self):
         make_book(self.db, 60, "Ghost A", merged_into=61)
@@ -597,7 +613,7 @@ class PeopleAndSeries(BooksBase):
 
     def test_series_entries_carry_the_callers_progress(self):
         place(self.db, "plex:1001", "12:1", when(30), book_ms=1_000_000, duration=4_000_000)
-        self.places.return_value = {102: {"page": 10, "pages": 21, "at": when(31)}}
+        self.places.return_value = {102: kplace(10, 21, when(31), 102)}
         items = {i["id"]: i for i in self.ok("/api/books/series", name="Dune")["items"]}
         self.assertEqual(items[3]["progress"]["audio"]["label"], "50m left")
         self.assertIsNone(items[3]["progress"]["ebook"])
@@ -646,7 +662,7 @@ class Continue(BooksBase):
 
     def ebook_place(self, page=20, pages=41, at=None):
         self.in_progress.return_value = [1101, 1102]
-        self.places.return_value = {101: {"page": page, "pages": pages, "at": at or when(60)}}
+        self.places.return_value = {101: kplace(page, pages, at or when(60), 101)}
 
     def test_an_ebook_item(self):
         self.ebook_place()
@@ -657,7 +673,7 @@ class Continue(BooksBase):
         self.assertEqual(items[0]["progress_label"], "Ch. 12 · 50%")
         self.assertEqual(items[0]["resume"], {"read_url": "/reader?seriesId=1101&chapterId=101"})
         self.in_progress.assert_awaited_with(KAVITA, "jwt-1001")
-        self.assertEqual(sorted(self.places.await_args.args[2]), [101, 102])
+        self.assertEqual(sorted(self.places.await_args.args[2]), [(101, None), (102, None)])
 
     def test_a_finished_ebook_is_not_in_the_row(self):
         self.ebook_place(page=40, pages=41)
@@ -760,7 +776,7 @@ class Cover(BooksBase):
         self.assertEqual(self.get("/api/books/1/cover").status_code, 404)
 
     def test_a_source_the_caller_cannot_see_is_not_read(self):
-        self.libraries.return_value = {2}
+        self.reach = {2}
         self.get("/api/books/1/cover")
         self.kavita_cover.assert_not_awaited()
         self.plex_cover.assert_awaited_with("10:1")
@@ -906,6 +922,178 @@ class Admin(BooksBase):
         self.assertEqual(r.json()["created_by"], "local:uid-7")
 
 
+class FixRoundOne(BooksBase):
+    """What the review of the first version found."""
+
+    # T2H3: a cursor is never parsed recursively.
+    def test_a_deeply_nested_cursor_is_422_not_a_crash(self):
+        for depth in (500, 1000, 3000):
+            for text in ("[" * depth, '{"a":' * depth, "[" * depth + "]" * depth):
+                cursor = base64.urlsafe_b64encode(text.encode()).decode().rstrip("=")
+                with self.subTest(depth=depth, text=text[:6]):
+                    self.assertEqual(self.get("/api/books", cursor=cursor[:4096]).status_code, 422)
+
+    def test_cursors_of_the_wrong_shape_are_422(self):
+        def make(*parts):
+            return base64.urlsafe_b64encode("\x00".join(parts).encode()).decode().rstrip("=")
+
+        for cursor in (make("added", "x", "", "b:1"), make("added", "1.5", "", "b:1"), make("added", "1"),
+                       make("added", "1", "", "b:1", "extra"), make("title", "a", "", "b:1"), make("", "", "", ""),
+                       base64.urlsafe_b64encode(b"\xff\xfe").decode()):
+            with self.subTest(cursor=cursor):
+                self.assertEqual(self.get("/api/books", sort="added", cursor=cursor).status_code, 422)
+        self.assertEqual(self.get("/api/books", sort="added", cursor=make("added", "-5", "", "b:1")).status_code, 200)
+
+    def test_a_name_with_a_nul_still_pages(self):
+        make_book(self.db, 46, "Odd\x00Title", "Zed", chapter=146)
+        make_book(self.db, 47, "Oddly Next", "Zed", chapter=147)
+        first = self.ok("/api/books", sort="title", limit=1)
+        seen = list(first["items"])
+        cursor = first["next_cursor"]
+        while cursor:
+            body = self.ok("/api/books", sort="title", limit=1, cursor=cursor)
+            seen += body["items"]
+            cursor = body["next_cursor"]
+        every = self.ok("/api/books", sort="title")["items"]
+        self.assertEqual([i.get("id") or i["series"] for i in seen], [i.get("id") or i["series"] for i in every])
+
+    # T2H4: preferred
+    def test_preferred_is_the_newest_unfinished_edition_then_the_newest_place_then_the_primary(self):
+        place(self.db, "plex:1001", "10:1", when(20), book_ms=3_000_000, duration=10_000_000)           # in progress
+        place(self.db, "plex:1001", "11:1", when(25), book_ms=9_900_000, duration=10_000_000)           # finished, newer
+        audio = self.ok("/api/books/1")["formats"]["audio"]
+        self.assertEqual(audio["preferred"], "10:1")
+        self.assertEqual(self.ok("/api/books/continue")["items"][0]["resume"], {"plex_book_key": "10:1"})
+        self.db.query(ListeningPosition).filter(ListeningPosition.book_key == "10:1").update(
+            {"book_ms": 9_800_000})
+        self.db.commit()
+        self.assertEqual(self.ok("/api/books/1")["formats"]["audio"]["preferred"], "11:1")   # all finished: the newest
+        self.db.query(ListeningPosition).delete()
+        self.db.commit()
+        self.assertEqual(self.ok("/api/books/1")["formats"]["audio"]["preferred"], "10:1")   # none: the primary
+
+    # T2H5: nothing in progress is hidden by a cap
+    def test_continue_asks_kavita_about_every_ebook_and_every_in_progress_series(self):
+        for n in range(130):
+            make_book(self.db, 300 + n, f"Long Series {n:03d}", "Many", "Long Series", n, 400 + n)
+        self.in_progress.return_value = [1400 + n for n in range(130)]
+        last = 400 + 129
+        self.places.return_value = {last: kplace(5, 50, when(80), last)}
+        items = self.ok("/api/books/continue")["items"]
+        self.assertEqual([i["book_id"] for i in items], [429])
+        asked = {chapter for chapter, _volume in self.places.await_args.args[2]}
+        self.assertEqual(asked, set(range(400, 530)))
+
+    def test_the_series_page_reads_progress_for_every_book(self):
+        for n in range(130):
+            make_book(self.db, 300 + n, f"Long Series {n:03d}", "Many", "Long Series", n, 400 + n)
+        self.ok("/api/books/series", name="Long Series")
+        self.assertEqual(len(self.places.await_args.args[2]), 130)
+
+    # T2H2: a volume is one book
+    def test_a_volume_is_asked_about_whole(self):
+        make_book(self.db, 310, "Two Files", "Many", "Split Series", 1, 410)
+        self.db.query(Book).filter(Book.id == 310).update({"kavita_volume_id": 55})
+        self.db.commit()
+        self.places.return_value = {410: {"page": 40, "pages": 100, "at": when(70), "toc_chapter": 411, "toc_page": 10}}
+        self.chapter_number.return_value = 3
+        self.in_progress.return_value = [1410]
+        item = self.ok("/api/books/continue")["items"][0]
+        self.assertEqual((item["book_id"], item["progress_label"], item["percent"]), (310, "Ch. 3 \u00b7 40%", 40))
+        self.assertIn((410, 55), self.places.await_args.args[2])
+        self.chapter_number.assert_awaited_with(KAVITA, "jwt-1001", 411, 10)       # the chapter they are in, not the first
+        detail = self.ok("/api/books/310")["formats"]["ebook"]["progress"]
+        self.assertEqual(detail["label"], "Ch. 3 \u00b7 40%")
+        self.places.assert_awaited_with(KAVITA, "jwt-1001", [(410, 55)])
+        series = self.ok("/api/books/series", name="Split Series")
+        self.assertEqual(series["items"][0]["progress"]["ebook"]["percent"], 40)
+
+    # T2H7: Kavita's own rules, age restriction included
+    def test_a_series_kavita_hides_from_the_caller_is_hidden_everywhere(self):
+        """Dune and its sequel are in a library they reach, but Kavita leaves them out of their list (an age restriction)."""
+        self.series_ids.side_effect = lambda base, token: {1103, 1105}              # not 1101, 1102 (Dune), nor 1104
+        self.in_progress.return_value = [1101, 1102]
+        self.places.return_value = {101: kplace(10, 50, when(60), 101), 102: kplace(10, 50, when(61), 102)}
+        grid = self.ok("/api/books", sort="title")["items"]
+        dune = next(i for i in grid if i.get("series") == "Dune")
+        self.assertEqual((dune["count"], dune["formats"]), (2, ["audio"]))           # the sequel is gone, no ebook badge
+        self.assertEqual(self.ok("/api/books", format="ebook", sort="title")["items"][0]["title"], "Emma")
+        self.assertIsNone(self.ok("/api/books/1")["formats"]["ebook"])                # its audio remains
+        self.assertEqual(self.ok("/api/books/search", q="messiah")["items"], [])
+        self.assertEqual([i["id"] for i in self.ok("/api/books/search", q="dune")["items"]], [1, 3])
+        series = self.ok("/api/books/series", name="Dune")
+        self.assertEqual([i["id"] for i in series["items"]], [1, 3])
+        self.assertTrue(all(i["formats"] == ["audio"] for i in series["items"]))
+        self.assertEqual(self.get("/api/books/2").status_code, 404)                  # an ebook only
+        self.assertEqual(self.get("/api/books/2/cover").status_code, 404)
+        person = self.ok("/api/books/person", role="author", name="Frank Herbert")
+        self.assertEqual([i["id"] for i in person["items"]], [1, 3])
+        self.assertEqual(self.ok("/api/books/continue")["items"], [])                # even with a place in each
+        self.kavita_cover.assert_not_awaited()
+
+    def test_the_audio_of_a_hidden_ebook_still_shows(self):
+        self.series_ids.side_effect = lambda base, token: set()
+        body = self.ok("/api/books", sort="title", format="ebook")
+        self.assertEqual(body["items"], [])
+        self.assertEqual(self.ok("/api/books/1")["formats"]["ebook"], None)
+
+    # T2H6
+    def test_letters_that_are_not_accents_fold_to_plain_ones(self):
+        for text, plain in (("Str\u00f8m", "strom"), ("\u0141\u00f3d\u017a", "lodz"), ("\u00c6gir", "aegir"),
+                            ("Stra\u00dfe", "strasse"), ("\u0110or\u0111e", "dorde"), ("\u00de\u00f3r", "thor"),
+                            ("\u0153uvre", "oeuvre"), ("Bront\u00eb", "bronte")):
+            with self.subTest(text=text):
+                self.assertEqual(book_catalog.fold(text), plain)
+
+    def test_search_finds_them_by_the_plain_spelling(self):
+        make_book(self.db, 320, "Str\u00f8m", "Jo N\u00f8rdic", chapter=420)
+        make_book(self.db, 321, "Hotel", "Zofia \u0141ukasz", chapter=421)
+        self.assertEqual([i["id"] for i in self.ok("/api/books/search", q="strom")["items"]], [320])
+        self.assertEqual([i["id"] for i in self.ok("/api/books/search", q="STR\u00d8M")["items"]], [320])
+        self.assertEqual([i["id"] for i in self.ok("/api/books/search", q="lukasz")["items"]], [321])
+        self.assertEqual([i["id"] for i in self.ok("/api/books/search", q="nordic")["items"]], [320])
+
+    # Carry-in: a database that cannot be read is 503
+    def test_a_database_that_cannot_be_read_is_503_on_every_route(self):
+        from sqlalchemy.exc import OperationalError
+
+        class Broken:
+            def __getattr__(self, name):
+                def fail(*args, **kwargs):
+                    raise OperationalError("select", {}, Exception("database is locked"))
+                return fail
+
+        from app.database import get_db
+        app.dependency_overrides[get_db] = lambda: Broken()
+        for path in ("/api/books", "/api/books/1", "/api/books/1/cover", "/api/books/search?q=a",
+                     "/api/books/person?role=author&name=a", "/api/books/series?name=a", "/api/books/continue"):
+            with self.subTest(path=path):
+                r = self.client.get(path)
+                self.assertEqual(r.status_code, 503, r.text)
+        self.as_user(ADMIN)
+        app.dependency_overrides[get_db] = lambda: Broken()
+        for path in ("/api/admin/books/unpaired", "/api/admin/books/overrides"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 503)
+        body = {"kavita_chapter_id": 101, "plex_book_key": "10:1", "action": "pair"}
+        self.assertEqual(self.client.post("/api/admin/books/overrides", json=body,
+                                          headers={"Origin": ORIGIN}).status_code, 503)
+        self.assertEqual(self.client.delete("/api/admin/books/overrides?kavita_chapter_id=101&plex_book_key=10:1",
+                                            headers={"Origin": ORIGIN}).status_code, 503)
+
+    def test_unreadable_settings_and_status_are_503(self):
+        from sqlalchemy.exc import OperationalError
+        failure = OperationalError("select", {}, Exception("database is locked"))
+        with mock.patch.object(books.kavita_proxy, "kavita_url_for", side_effect=failure):
+            self.assertEqual(self.client.get("/api/books").status_code, 503)
+        self.as_user(ADMIN)
+        self.status.side_effect = failure
+        self.assertEqual(self.client.get("/api/admin/books/status").status_code, 503)
+        from redis.exceptions import ConnectionError as RedisDown
+        self.rebuild.side_effect = RedisDown("redis is down")
+        self.assertEqual(self.client.post("/api/admin/books/rebuild", headers={"Origin": ORIGIN}).status_code, 503)
+
+
 # --- listening.get_places (the player's position store) -------------------------------------
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -977,63 +1165,118 @@ class KavitaAsThePerson(unittest.TestCase):
         import asyncio
         return asyncio.run(coro)
 
-    def test_library_ids_are_read_with_the_persons_token(self):
-        self.answers["/api/Library/libraries"] = httpx.Response(200, json=[{"id": 1, "name": "a"}, {"id": 3}, "junk"])
-        self.assertEqual(self.run_async(kavita.user_library_ids(KAVITA, self.TOKEN)), {1, 3})
-        self.assertEqual(self.requests[0].headers["authorization"], f"Bearer {self.TOKEN}")
+    def series_pages(self, *pages):
+        """Kavita's all-v2 answering one page of `pages` (lists of series) per request."""
+        seen = []
+
+        def answer(request):
+            number = int(request.url.params["PageNumber"])
+            seen.append((number, request.url.params["PageSize"], json.loads(request.content)))
+            items = pages[number - 1] if number <= len(pages) else []
+            return httpx.Response(200, json=items, headers={
+                "pagination": json.dumps({"currentPage": number, "totalPages": len(pages)})})
+
+        self.answers["/api/Series/all-v2"] = answer
+        return seen
+
+    def test_visible_series_are_every_page_kavita_lists_for_the_persons_token(self):
+        seen = self.series_pages([{"id": 1}, {"id": 2}, {"nope": 1}, "junk"], [{"id": 3}], [{"id": 4}, {"id": 5}])
+        self.assertEqual(self.run_async(kavita.user_series_ids(KAVITA, self.TOKEN)), {1, 2, 3, 4, 5})
+        self.assertEqual([n for n, _size, _body in seen], [1, 2, 3])
+        self.assertEqual(seen[0][2]["statements"], [])               # no filter: what Kavita lets them see
+        for request in self.requests:
+            self.assertEqual(request.headers["authorization"], f"Bearer {self.TOKEN}")
 
     def test_a_refused_token_is_its_own_error_and_other_failures_are_unavailable(self):
-        self.answers["/api/Library/libraries"] = httpx.Response(401)
+        self.answers["/api/Series/all-v2"] = httpx.Response(401)
         with self.assertRaises(kavita.KavitaTokenRefused):
-            self.run_async(kavita.user_library_ids(KAVITA, self.TOKEN))
+            self.run_async(kavita.user_series_ids(KAVITA, self.TOKEN))
         for answer in (httpx.Response(500), httpx.Response(200, text="not json"), httpx.Response(200, json={"a": 1}),
                        httpx.Response(403), httpx.Response(404),
                        httpx.ConnectError(f"connect failed for {KAVITA}/?apiKey={self.KEY} {self.TOKEN}")):
-            self.answers["/api/Library/libraries"] = answer
+            self.answers["/api/Series/all-v2"] = answer
             with self.subTest(answer=repr(answer)):
                 with self.assertRaises(kavita.KavitaUnavailable) as caught:
-                    self.run_async(kavita.user_library_ids(KAVITA, self.TOKEN))
+                    self.run_async(kavita.user_series_ids(KAVITA, self.TOKEN))
                 self.assertNotIsInstance(caught.exception, kavita.KavitaTokenRefused)
                 self.assertNotIn(self.TOKEN, str(caught.exception))
                 self.assertNotIn(self.KEY, str(caught.exception))
                 self.assertNotIn("kavita.test", str(caught.exception))
 
-    def test_in_progress_series_asks_kavita_for_started_and_unfinished(self):
-        seen = {}
-
+    def test_a_page_that_fails_halfway_fails_the_whole_read(self):
         def answer(request):
-            seen["body"] = json.loads(request.content)
-            seen["params"] = dict(request.url.params)
-            return httpx.Response(200, json=[{"id": 11}, {"id": 12}, {"nope": 1}])
+            if request.url.params["PageNumber"] == "1":
+                return httpx.Response(200, json=[{"id": 1}], headers={"pagination": json.dumps({"totalPages": 2})})
+            return httpx.Response(500)
 
         self.answers["/api/Series/all-v2"] = answer
-        self.assertEqual(self.run_async(kavita.in_progress_series_ids(KAVITA, self.TOKEN)), [11, 12])
-        statements = seen["body"]["statements"]
+        with self.assertRaises(kavita.KavitaUnavailable):
+            self.run_async(kavita.user_series_ids(KAVITA, self.TOKEN))
+
+    def test_in_progress_series_asks_kavita_for_started_and_unfinished_across_every_page(self):
+        seen = self.series_pages([{"id": n} for n in range(1, 201)], [{"id": 201}, {"id": 202}])
+        found = self.run_async(kavita.in_progress_series_ids(KAVITA, self.TOKEN))
+        self.assertEqual(found, list(range(1, 203)))                  # more than one page: none are dropped
+        statements = seen[0][2]["statements"]
         self.assertEqual([(s["field"], s["comparison"], s["value"]) for s in statements],
                          [(20, 1, "0"), (20, 3, "100")])
-        self.assertEqual(seen["body"]["combination"], 1)
-        self.assertEqual(seen["params"]["PageSize"], "100")
+        self.assertEqual(seen[0][2]["combination"], 1)
 
-    def test_chapter_places_only_for_chapters_started(self):
-        progress = {1: 0, 2: 7, 3: 4}
-
+    def progress_answers(self, progress, volumes=None, pages=None):
+        """Kavita's per-chapter progress, volumes (volume id -> [(chapter id, pages)]) and chapter sizes."""
         def get_progress(request):
             chapter = int(request.url.params["chapterId"])
             if chapter == 9:
                 return httpx.Response(404)
-            return httpx.Response(200, json={"chapterId": chapter, "pageNum": progress[chapter],
-                                             "lastModifiedUtc": "2026-10-01T08:30:00"})
+            page, at = progress.get(chapter, (0, "0001-01-01T00:00:00"))
+            return httpx.Response(200, json={"chapterId": chapter, "pageNum": page, "lastModifiedUtc": at})
+
+        def volume(request):
+            found = (volumes or {}).get(int(request.url.params["volumeId"]))
+            if found is None:
+                return httpx.Response(404)
+            return httpx.Response(200, json={"id": 1, "chapters": [{"id": c, "pages": n} for c, n in found]})
 
         self.answers["/api/Reader/get-progress"] = get_progress
-        self.answers["/api/Series/chapter"] = lambda r: httpx.Response(200, json={"pages": 40})
-        places = self.run_async(kavita.chapter_places(KAVITA, self.TOKEN, [1, 2, 3, 9, 2]))
-        self.assertEqual(places, {2: {"page": 7, "pages": 40, "at": datetime(2026, 10, 1, 8, 30)},
-                                  3: {"page": 4, "pages": 40, "at": datetime(2026, 10, 1, 8, 30)}})
+        self.answers["/api/Series/volume"] = volume
+        self.answers["/api/Series/chapter"] = lambda r: httpx.Response(
+            200, json={"pages": (pages or {}).get(int(r.url.params["chapterId"]), 40)})
+
+    def test_places_in_books_that_are_one_chapter(self):
+        self.progress_answers({2: (7, "2026-10-01T08:30:00"), 3: (4, "2026-10-01T08:31:00")})
+        places = self.run_async(kavita.book_places(KAVITA, self.TOKEN, [(1, None), (2, None), (3, None), (9, None),
+                                                                        (2, None)]))
+        self.assertEqual(places, {
+            2: {"page": 7, "pages": 40, "at": datetime(2026, 10, 1, 8, 30), "toc_chapter": 2, "toc_page": 7},
+            3: {"page": 4, "pages": 40, "at": datetime(2026, 10, 1, 8, 31), "toc_chapter": 3, "toc_page": 4}})
         asked = [r.url.params["chapterId"] for r in self.requests if r.url.path == "/api/Reader/get-progress"]
         self.assertEqual(sorted(asked), ["1", "2", "3", "9"])             # each once
+        self.progress_answers({})
         self.answers["/api/Reader/get-progress"] = httpx.Response(401)
         with self.assertRaises(kavita.KavitaTokenRefused):
-            self.run_async(kavita.chapter_places(KAVITA, self.TOKEN, [1, 2]))
+            self.run_async(kavita.book_places(KAVITA, self.TOKEN, [(1, None), (2, None)]))
+
+    def test_a_volume_is_read_whole_not_by_its_first_chapter(self):
+        # Volume 50 is one book in three files. The first is read to its last page, the second part way.
+        self.progress_answers({101: (29, "2026-10-01T08:00:00"), 102: (10, "2026-10-02T09:00:00")},
+                              volumes={50: [(101, 30), (102, 30), (103, 40)]})
+        places = self.run_async(kavita.book_places(KAVITA, self.TOKEN, [(101, 50)]))
+        self.assertEqual(places, {101: {"page": 40, "pages": 100, "at": datetime(2026, 10, 2, 9, 0),
+                                        "toc_chapter": 102, "toc_page": 10}})
+        # Only the first chapter was read: it is a place all the same, the volume's, not "finished".
+        self.progress_answers({101: (29, "2026-10-01T08:00:00")}, volumes={50: [(101, 30), (102, 30)]})
+        place = self.run_async(kavita.book_places(KAVITA, self.TOKEN, [(101, 50)]))[101]
+        self.assertEqual((place["page"], place["pages"], place["toc_chapter"]), (30, 60, 101))
+        # Every chapter finished: the volume is finished.
+        self.progress_answers({101: (29, "2026-10-01T08:00:00"), 102: (29, "2026-10-02T09:00:00")},
+                              volumes={50: [(101, 30), (102, 30)]})
+        place = self.run_async(kavita.book_places(KAVITA, self.TOKEN, [(101, 50)]))[101]
+        self.assertEqual((place["page"], place["pages"]), (60, 60))
+        # A volume with no place at all is absent; one Kavita no longer has falls back to its chapter.
+        self.progress_answers({}, volumes={50: [(101, 30)]})
+        self.assertEqual(self.run_async(kavita.book_places(KAVITA, self.TOKEN, [(101, 50)])), {})
+        self.progress_answers({101: (5, "2026-10-01T08:00:00")}, volumes={})
+        self.assertEqual(self.run_async(kavita.book_places(KAVITA, self.TOKEN, [(101, 50)]))[101]["page"], 5)
 
     def test_chapter_number_comes_from_the_contents(self):
         toc = [{"title": "Cover", "page": 0, "children": []},

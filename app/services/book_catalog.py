@@ -622,7 +622,7 @@ def remove_override(db, kavita_chapter_id: int, plex_book_key: str) -> bool:
 #
 # These take the database session and what the caller may see, and touch
 # nothing per person: progress is the router's. A caller sees a book's ebook
-# only in a Kavita library their own account reaches (`libraries`), and its
+# only in a Kavita series their own account may see (`series_ids`), and its
 # audiobook editions only when the player lets them (`audio`). A book that
 # shows neither is not theirs to see.
 
@@ -630,12 +630,19 @@ _QUOTES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": 
 MAX_GHOST_HOPS = 5
 
 
+# Letters that are not an accented form of another (NFKD leaves them whole),
+# folded to what a reader types.
+_LETTERS = str.maketrans({"\u00f8": "o", "\u0142": "l", "\u00e6": "ae", "\u0153": "oe", "\u00df": "ss",
+                          "\u0111": "d", "\u00fe": "th", "\u00f0": "d", "\u0131": "i"})
+
+
 def fold(text) -> str:
     """Text for matching: no accents, no case, typographic quotes made plain,
-    spaces collapsed. "Brontë" and "bronte" fold alike."""
+    spaces collapsed, and letters like \u00f8, \u0142, \u00e6 and \u00df written as plain ones. "Bront\u00eb"
+    and "bronte" fold alike, as do "Str\u00f8m" and "strom"."""
     plain = unicodedata.normalize("NFKD", str(text or "").translate(_QUOTES))
     plain = "".join(ch for ch in plain if not unicodedata.combining(ch))
-    return " ".join(plain.casefold().split())
+    return " ".join(plain.casefold().translate(_LETTERS).split())
 
 
 def name_key(text) -> str:
@@ -660,6 +667,7 @@ class CatalogRow:
     kavita_series_id: Optional[int]
     plex_book_key: Optional[str]
     cover_source: str
+    kavita_volume_id: Optional[int]
     ebook: bool
     audio: bool
 
@@ -668,24 +676,24 @@ class CatalogRow:
         return (["ebook"] if self.ebook else []) + (["audio"] if self.audio else [])
 
 
-def visible_rows(db, libraries: Iterable[int], audio: bool) -> List[CatalogRow]:
+def visible_rows(db, series_ids: Iterable[int], audio: bool) -> List[CatalogRow]:
     """Every live book the caller can see, with the formats they can reach.
-    `libraries` are the Kavita libraries their own account reaches (none: no
+    `series_ids` are the Kavita series their own account may see (none: no
     ebooks), `audio` whether the player lets them in."""
-    reach = set(libraries)
+    reach = set(series_ids)
     has_editions = exists().where(BookAudioEdition.book_id == Book.id)
     rows = (db.query(Book.id, Book.title, Book.sort_title, Book.author, Book.series, Book.series_number,
                      Book.added_at, Book.updated_at, Book.kavita_chapter_id, Book.kavita_series_id,
-                     Book.kavita_library_id, Book.plex_book_key, Book.cover_source, has_editions.label("editions"))
+                     Book.kavita_volume_id, Book.plex_book_key, Book.cover_source, has_editions.label("editions"))
             .filter(Book.merged_into.is_(None)).all())
     out = []
-    for (book_id, title, sort_title, author, series, number, added, updated, chapter, series_id, library,
+    for (book_id, title, sort_title, author, series, number, added, updated, chapter, series_id, volume,
          plex_key, cover, editions) in rows:
-        ebook = chapter is not None and library in reach
+        ebook = chapter is not None and series_id in reach
         heard = bool(editions) and audio
         if ebook or heard:
             out.append(CatalogRow(book_id, title, sort_title or title, author or "", series or "", number, added,
-                                  updated, chapter, series_id, plex_key, cover, ebook, heard))
+                                  updated, chapter, series_id, plex_key, cover, volume, ebook, heard))
     return out
 
 
@@ -743,15 +751,16 @@ def live_editions(db, keys: Optional[Iterable[str]] = None) -> Dict[str, Tuple[i
     return {key: (book_id, narrator or "") for key, book_id, narrator in q}
 
 
-def ebooks_in_series(db, series_ids: Iterable[int], libraries: Iterable[int]) -> List[Book]:
-    """The live books with an ebook in these Kavita series, in the libraries
-    the caller reaches."""
-    wanted, reach = list(series_ids), list(libraries)
-    if not wanted or not reach:
-        return []
-    return (db.query(Book).filter(Book.merged_into.is_(None), Book.kavita_chapter_id.isnot(None),
-                                  Book.kavita_series_id.in_(wanted), Book.kavita_library_id.in_(reach))
-            .order_by(Book.id).all())
+def ebooks_in_series(db, series_ids: Iterable[int], visible: Iterable[int]) -> List[Book]:
+    """The live books with an ebook in these Kavita series, among the series
+    the caller may see (`visible`)."""
+    seen = set(visible)
+    wanted = [s for s in dict.fromkeys(series_ids) if s in seen]
+    books: List[Book] = []
+    for start in range(0, len(wanted), 400):
+        books += (db.query(Book).filter(Book.merged_into.is_(None), Book.kavita_chapter_id.isnot(None),
+                                        Book.kavita_series_id.in_(wanted[start:start + 400])).all())
+    return sorted(books, key=lambda b: b.id)
 
 
 def unpaired(db, limit: int = 1000) -> dict:

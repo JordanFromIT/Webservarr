@@ -303,7 +303,7 @@ async def list_books() -> list:
 
 USER_TIMEOUT = 8.0           # a page waits on these, unlike the rebuild
 USER_CONCURRENCY = 6
-MAX_IN_PROGRESS_SERIES = 100
+USER_PAGE_SIZE = 200
 FINISHED_FROM = 100          # the ReadProgress filter's percent that is "read"
 COVER_MAX_BYTES = 5 * 1024 * 1024
 COVER_TYPES = ("image/jpeg", "image/png", "image/webp", "image/gif")
@@ -327,9 +327,10 @@ def _user_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=USER_TIMEOUT, follow_redirects=False)
 
 
-async def _as_user(client: httpx.AsyncClient, base: str, token: str, method: str, path: str, **kwargs):
-    """The JSON answer to a call made with the person's token; None for a 404
-    (what they asked about is not there), KavitaTokenRefused for a 401."""
+async def _answer_as_user(client: httpx.AsyncClient, base: str, token: str, method: str, path: str, **kwargs):
+    """(the JSON answer, its headers) to a call made with the person's token;
+    (None, headers) for a 404 (what they asked about is not there),
+    KavitaTokenRefused for a 401."""
     try:
         response = await client.request(method, f"{base}{path}", headers={"Authorization": f"Bearer {token}"},
                                         **kwargs)
@@ -338,66 +339,121 @@ async def _as_user(client: httpx.AsyncClient, base: str, token: str, method: str
     if response.status_code == 401:
         raise KavitaTokenRefused("Kavita no longer accepts this sign-in")
     if response.status_code == 404:
-        return None
+        return None, response.headers
     if response.status_code != 200:
         raise KavitaUnavailable(f"Kavita answered HTTP {response.status_code}")
     try:
-        return response.json()
+        return response.json(), response.headers
     except ValueError as exc:
         raise KavitaUnavailable("Kavita's answer could not be read") from exc
+
+
+async def _as_user(client: httpx.AsyncClient, base: str, token: str, method: str, path: str, **kwargs):
+    return (await _answer_as_user(client, base, token, method, path, **kwargs))[0]
 
 
 def _whole(value) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
-async def user_library_ids(base: str, token: str) -> set:
-    """The ids of the libraries this person's own Kavita account can reach."""
+async def _series_ids_as_user(client: httpx.AsyncClient, base: str, token: str, statements: list) -> list:
+    """The ids of every series Kavita lists for this person under the filter,
+    all pages. Kavita applies the person's own library access and age
+    restriction to the list, so it holds nothing they may not see."""
+    body = {"statements": statements, "combination": 1, "limitTo": 0,
+            "sortOptions": {"sortField": 1, "isAscending": True}}
+    found: list = []
+    for page in range(1, MAX_PAGES + 1):
+        items, headers = await _answer_as_user(client, base, token, "POST", "/api/Series/all-v2", json=body,
+                                               params={"PageNumber": page, "PageSize": USER_PAGE_SIZE})
+        if not isinstance(items, list):
+            raise KavitaUnavailable("Kavita's answer could not be read")
+        found.extend(s["id"] for s in items if isinstance(s, dict) and isinstance(s.get("id"), int))
+        try:
+            pages = int(json.loads(headers.get("pagination") or "{}").get("totalPages") or 1)
+        except (ValueError, TypeError, AttributeError):
+            pages = 1
+        if page >= pages or not items:
+            return found
+    raise KavitaUnavailable("Kavita's list is too long to read")
+
+
+async def user_series_ids(base: str, token: str) -> set:
+    """The ids of the Kavita series this person's own account may see: the
+    libraries it reaches, less what its age restriction hides."""
     async with _user_client() as client:
-        data = await _as_user(client, base, token, "GET", "/api/Library/libraries")
-    if not isinstance(data, list):
-        raise KavitaUnavailable("Kavita's answer could not be read")
-    return {lib["id"] for lib in data if isinstance(lib, dict) and isinstance(lib.get("id"), int)
-            and not isinstance(lib["id"], bool)}
+        return set(await _series_ids_as_user(client, base, token, []))
 
 
 async def in_progress_series_ids(base: str, token: str) -> list:
-    """The ids of the series this person has started and not finished (at
-    most MAX_IN_PROGRESS_SERIES), as Kavita counts it for them."""
-    body = {"statements": [
-        {"comparison": COMPARE_GREATER_THAN, "field": FILTER_READ_PROGRESS, "value": "0"},
-        {"comparison": COMPARE_LESS_THAN, "field": FILTER_READ_PROGRESS, "value": str(FINISHED_FROM)}],
-        "combination": 1, "limitTo": 0, "sortOptions": {"sortField": 1, "isAscending": True}}
+    """The ids of the series this person has started and not finished, as
+    Kavita counts it for them, all of them."""
     async with _user_client() as client:
-        data = await _as_user(client, base, token, "POST", "/api/Series/all-v2", json=body,
-                              params={"PageNumber": 1, "PageSize": MAX_IN_PROGRESS_SERIES})
-    if not isinstance(data, list):
-        raise KavitaUnavailable("Kavita's answer could not be read")
-    return [s["id"] for s in data if isinstance(s, dict) and isinstance(s.get("id"), int)]
+        return await _series_ids_as_user(client, base, token, [
+            {"comparison": COMPARE_GREATER_THAN, "field": FILTER_READ_PROGRESS, "value": "0"},
+            {"comparison": COMPARE_LESS_THAN, "field": FILTER_READ_PROGRESS, "value": str(FINISHED_FROM)}])
 
 
-async def chapter_places(base: str, token: str, chapter_ids) -> dict:
-    """This person's place in each chapter (a book) that they have started:
-    {chapter id: {"page": the page they are on, "pages": the book's pages,
-    "at": when they last read it (naive UTC, or None)}}. A chapter with no
-    place, or that Kavita no longer has, is left out."""
-    ids = list(dict.fromkeys(chapter_ids))
+def _volume_place(chapters: list, progress: list) -> Optional[dict]:
+    """One place for a whole volume: the pages read and the pages in all its
+    chapters (a finished chapter counts whole), when they last read it, and the
+    chapter they were last in (`toc_chapter`) at its page (`toc_page`). None
+    when they have not started any of it."""
+    read = total = 0
+    last = None
+    for chapter, (page, at) in zip(chapters, progress):
+        pages = chapter["pages"]
+        total += pages
+        if page <= 0:
+            continue
+        read += pages if pages > 0 and page + 1 >= pages else page
+        if last is None or (at or datetime.min) >= (last[1] or datetime.min):
+            last = (chapter["id"], at, page)
+    if last is None:
+        return None
+    return {"page": read, "pages": total, "at": last[1], "toc_chapter": last[0], "toc_page": last[2]}
+
+
+async def book_places(base: str, token: str, books) -> dict:
+    """This person's place in each book they have started: {the book's chapter
+    id: {"page", "pages", "at" (naive UTC or None), "toc_chapter", "toc_page"}}.
+    `books` are (chapter id, volume id or None). A numbered volume is read
+    whole: its pages read and its pages in all its chapters, a volume being one
+    book whatever files it comes in. A book not in a numbered volume is its one
+    chapter. A book with no place, or that Kavita no longer has, is left
+    out."""
+    wanted = list(dict.fromkeys(books))
     gate = asyncio.Semaphore(USER_CONCURRENCY)
     places: dict = {}
     async with _user_client() as client:
-        async def read(chapter_id: int) -> None:
+        async def ask(path: str, **params):
             async with gate:
-                progress = await _as_user(client, base, token, "GET", "/api/Reader/get-progress",
-                                          params={"chapterId": chapter_id})
-                page = _whole(progress.get("pageNum")) if isinstance(progress, dict) else 0
-                if page <= 0:
-                    return
-                chapter = await _as_user(client, base, token, "GET", "/api/Series/chapter",
-                                         params={"chapterId": chapter_id})
-            pages = _whole(chapter.get("pages")) if isinstance(chapter, dict) else 0
-            places[chapter_id] = {"page": page, "pages": pages, "at": _when(progress.get("lastModifiedUtc"))}
+                return await _as_user(client, base, token, "GET", path, params=params)
 
-        results = await asyncio.gather(*(read(i) for i in ids), return_exceptions=True)
+        async def progress_of(chapter_id: int) -> tuple:
+            progress = await ask("/api/Reader/get-progress", chapterId=chapter_id)
+            if not isinstance(progress, dict):
+                return 0, None
+            return _whole(progress.get("pageNum")), _when(progress.get("lastModifiedUtc"))
+
+        async def read(chapter_id: int, volume_id: Optional[int]) -> None:
+            volume = await ask("/api/Series/volume", volumeId=volume_id) if volume_id else None
+            chapters = [{"id": c["id"], "pages": _whole(c.get("pages"))} for c in
+                        (volume.get("chapters") if isinstance(volume, dict) else None) or []
+                        if isinstance(c, dict) and isinstance(c.get("id"), int)]
+            if volume_id and chapters:
+                found = _volume_place(chapters, await asyncio.gather(*(progress_of(c["id"]) for c in chapters)))
+                if found:
+                    places[chapter_id] = found
+                return
+            page, at = await progress_of(chapter_id)
+            if page <= 0:
+                return
+            chapter = await ask("/api/Series/chapter", chapterId=chapter_id)
+            places[chapter_id] = {"page": page, "pages": _whole(chapter.get("pages")) if isinstance(chapter, dict) else 0,
+                                  "at": at, "toc_chapter": chapter_id, "toc_page": page}
+
+        results = await asyncio.gather(*(read(c, v) for c, v in wanted), return_exceptions=True)
     for result in results:
         if isinstance(result, BaseException):
             raise result
