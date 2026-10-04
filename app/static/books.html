@@ -16,6 +16,10 @@
      page takes it off again when the row comes back empty. */
   #continueHost { display: none; }
   html[data-books-continue] #continueHost { display: block; }
+  /* Up next and My list (the person's own rows) are held the same way. */
+  #upnextHost, #mylistHost { display: none; }
+  html[data-books-upnext] #upnextHost { display: block; }
+  html[data-books-mylist] #mylistHost { display: block; }
 
   /* The Continue row scrolls sideways under a finger or a dragged mouse; its
      scrollbar would only take a strip of height from the cards. */
@@ -65,6 +69,22 @@
           <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
         </div>
       </div>
+      <!-- Up next and My list (pages/books.js): the person's own rows, held like Continue
+           and written in the same frame. Up next's cards carry Play or Read and its moves. -->
+      <div id="upnextHost" class="mb-8" aria-busy="true">
+        <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Up next</span></h2>
+        <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
+          <div class="w-40 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><div class="mt-2 skel h-10 rounded-[10px]"></div><div class="mt-1 h-10"></div></div><div class="w-40 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><div class="mt-2 skel h-10 rounded-[10px]"></div><div class="mt-1 h-10"></div></div><div class="w-40 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><div class="mt-2 skel h-10 rounded-[10px]"></div><div class="mt-1 h-10"></div></div><div class="w-40 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><div class="mt-2 skel h-10 rounded-[10px]"></div><div class="mt-1 h-10"></div></div><div class="w-40 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><div class="mt-2 skel h-10 rounded-[10px]"></div><div class="mt-1 h-10"></div></div><div class="w-40 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p><div class="mt-2 skel h-10 rounded-[10px]"></div><div class="mt-1 h-10"></div></div>
+        </div>
+      </div>
+      <div id="mylistHost" class="mb-8" aria-busy="true">
+        <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">My list</span></h2>
+        <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
+          <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+        </div>
+      </div>
+      <!-- What a press on those rows did, for a screen reader (the cards' own words do not change). -->
+      <p id="booksSaid" class="sr-only" role="status" aria-live="polite"></p>
       <!-- The toolbar, the notes and Continue all arrive in one write with the first
            books (pages/books.js commitFrame), so nothing already on screen moves.
            Until then the toolbar is this skeleton, the controls' own size. -->

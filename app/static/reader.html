@@ -17,6 +17,9 @@
      one-screen-tall <main> is let go while this page style is on (the router
      swaps it with the page). */
   html[data-shell="hidden"] body { overflow: visible; }
+  /* A sample's banner holds its room from the first paint (theme-loader.js
+     sets data-reader-sample); pages/reader.js fills it in. */
+  html[data-reader-sample] #sampleBanner[hidden] { display: block; }
   html[data-shell="hidden"] #desktopSidebar ~ main { height: auto; max-height: none; overflow: visible; }
 
   /* Reader surface. Defaults are seeded from the site theme so a book opens
@@ -253,7 +256,7 @@
   <div id="sampleBanner" hidden class="border-b border-steel-blue/25 bg-background-dark px-3 py-2">
     <div class="max-w-2xl mx-auto flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
       <span class="px-2 py-0.5 rounded-md bg-baltic-blue/30 border border-steel-blue/30 text-xs font-semibold uppercase tracking-wider text-frosted-blue">Sample</span>
-      <span class="flex-1 min-w-0 text-steel-blue">Your place and bookmarks aren’t saved.</span>
+      <span class="flex-1 min-w-[10rem] text-steel-blue">Your place and bookmarks aren’t saved.</span>
       <span class="flex items-center gap-2">
         <a id="sampleStart" href="/books" class="px-3 py-1.5 rounded-xl bg-baltic-blue/30 border border-steel-blue/30 text-frosted-blue hover:bg-baltic-blue/50">Start reading</a>
         <button id="sampleClose" type="button" class="px-3 py-1.5 rounded-xl border border-steel-blue/30 text-frosted-blue hover:bg-baltic-blue/30">Close</button>

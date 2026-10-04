@@ -204,6 +204,10 @@ function visit(o = {}) {
   if (o.branding) WS.data.branding = o.branding;
   win.WSUI = { toast(m, kind) { toasts.push([m, kind]); } };
   set('WSUI', win.WSUI);
+  // Writes (sendBooks) go through window.fetch: the same scripted network.
+  win.fetch = (u, init) => net.fetch(u, init);
+  WS.navigated = [];
+  WS.router = { navigate(u) { WS.navigated.push(u); } };
   if (o.kavita !== false) {
     win.WSKavita = {
       init() { kav.init += 1; },
@@ -822,6 +826,9 @@ await run('a visit comes back from the cache at once and corrects itself', async
   const t = make({ routes: usual({ library: () => ({ body: { items: [ebook(2, 'Emma', 'Jane Austen')], next_cursor: null, notes: [] } }) }) });
   t.WS.cache.set('books:list:all:added', { items: SHELF, next_cursor: null, notes: [] });
   t.WS.cache.set('books:continue', { items: [], notes: [] });
+  // (Up next and My list, kept too: every row above the books has a kept answer.)
+  t.WS.cache.set('books:me:queue', { items: [] });
+  t.WS.cache.set('books:me:list', { items: [] });
   const m = t.mount();
   check('the last list shows before the network answers', t.cards('libraryGrid').length === 5 && t.hidden('#gridSkeleton'));
   await m;
@@ -1032,6 +1039,279 @@ await run('FR2: an empty library with a source down does not offer Request a boo
   const u = make({ routes: usual({ library: () => ({ body: { items: [], next_cursor: null, notes: [], building: false } }) }) });
   await u.mount();
   check('an empty library with every source answering still does', !u.q('#emptyRequest').classList.contains('hidden'));
+});
+
+// ---- Books 3b: Up next and My list ----
+
+// The person's own data on a scripted server: the queue (book cards in order)
+// and the list; every write recorded; moveStatus / removeStatus make the server refuse.
+function mine(o = {}) {
+  const srv = {
+    queue: (o.queue || []).slice(), list: (o.list || []).slice(), writes: [], moveStatus: 200, removeStatus: 200,
+    queueStatus: o.queueStatus || 200, listStatus: o.listStatus || 200, details: o.details || {}, holdQueue: o.holdQueue || null
+  };
+  const cards = () => srv.queue.map((c, i) => Object.assign({}, c, { position: i }));
+  srv.routes = (net) => {
+    net.on('/api/books/me/queue', () => {
+      if (srv.queueStatus !== 200) return { status: srv.queueStatus, body: {} };
+      const answer = { body: { items: cards() } };
+      return srv.holdQueue ? srv.holdQueue.promise.then(() => answer) : answer;
+    });
+    net.on('/api/books/me/list', () => (srv.listStatus !== 200 ? { status: srv.listStatus, body: {} } : { body: { items: srv.list } }));
+    net.on('/api/books/me/queue/move', (url, init) => {
+      const body = JSON.parse(init.body);
+      srv.writes.push({ method: init.method, url, body, credentials: init.credentials });
+      if (srv.moveStatus !== 200) return { status: srv.moveStatus, body: {} };
+      const at = srv.queue.findIndex((c) => c.id === body.book_id);
+      const [card] = srv.queue.splice(at, 1);
+      srv.queue.splice(Math.min(body.to, srv.queue.length), 0, card);
+      return { body: { items: cards() } };
+    });
+    for (const id of [1, 2, 3, 4, 5, 6, 7]) {
+      net.on('/api/books/' + id, (url) => ({ body: srv.details[id] || { book: { id }, formats: {} } }));
+      net.on('/api/books/' + id + '/queue', (url, init) => {
+        srv.writes.push({ method: init && init.method, url, credentials: init && init.credentials });
+        if (srv.removeStatus !== 200) return { status: srv.removeStatus, body: {} };
+        srv.queue = srv.queue.filter((c) => c.id !== id);
+        return { body: { queue_position: null } };
+      });
+    }
+  };
+  return srv;
+}
+const withMine = (srv, over) => (net) => { usual(over)(net); srv.routes(net); };
+const QUEUE = [both(1, 'Dune', 'Frank Herbert'), audio(3, 'The Hobbit', 'J. R. R. Tolkien'), ebook(2, 'Emma', 'Jane Austen')];
+const queued = (t) => t.qa('#upnextHost [data-queued]').map((li) => li.getAttribute('data-queued'));
+const places = (t) => t.qa('#upnextHost [data-place]').map((n) => n.textContent);
+const upBtn = (t, id, kind) => t.q(`#upnextHost [data-queued="${id}"] [data-up="${kind}"]`);
+const fancyPlayer = () => ({
+  opened: [], listeners: [], st: { book: null, playing: false },
+  open(key, opts) { this.opened.push([key, opts]); return Promise.resolve(); },
+  state() { return this.st; },
+  on(name, fn) { this.listeners.push(fn); return () => { this.listeners = this.listeners.filter((x) => x !== fn); }; },
+  change(st) { this.st = Object.assign({}, this.st, st); this.listeners.slice().forEach((fn) => fn({ reason: 'state', state: this.st })); }
+});
+
+await run('3b: Up next and My list rows: in order, with their controls, above the library', async (make) => {
+  const srv = mine({ queue: QUEUE, list: [ebook(5, 'Villette', 'Charlotte Brontë'), both(1, 'Dune', 'Frank Herbert')] });
+  const t = make({ routes: withMine(srv) });
+  await t.mount();
+  const up = t.q('#upnextHost [data-upnext]');
+  check('Up next is a section with its heading', !!up && up.getAttribute('aria-label') === 'Up next' && up.querySelector('h2').textContent === 'Up next');
+  check('an ordered list (a screen reader says the place)', up.querySelector('[data-upnext-list]').tagName === 'OL');
+  check('the queue in order', queued(t).join() === '1,3,2', queued(t));
+  check('each cover carries its place', places(t).join() === '1,2,3');
+  check('the book is a link to its page', t.q('#upnextHost [data-queued="3"] a').getAttribute('href') === '/books/3');
+  check('both formats: Play and Read; audio only: Play; ebook only: Read',
+    t.qa('#upnextHost [data-queued="1"] [data-up="play"], #upnextHost [data-queued="1"] [data-up="read"]').length === 2 &&
+    !!upBtn(t, 3, 'play') && !upBtn(t, 3, 'read') && !upBtn(t, 2, 'play') && !!upBtn(t, 2, 'read'));
+  check('a lone Play or Read spans the card', /col-span-2/.test(upBtn(t, 3, 'play').className) && !/col-span-2/.test(upBtn(t, 1, 'play').className));
+  check('Move earlier, Move later and Remove, named for the book', upBtn(t, 3, 'earlier').getAttribute('aria-label') === 'Move The Hobbit earlier' &&
+    upBtn(t, 3, 'later').getAttribute('aria-label') === 'Move The Hobbit later' && upBtn(t, 3, 'remove').getAttribute('aria-label') === 'Remove The Hobbit from Up next');
+  check('the first cannot go earlier, the last cannot go later', upBtn(t, 1, 'earlier').disabled && !upBtn(t, 1, 'later').disabled && upBtn(t, 2, 'later').disabled && !upBtn(t, 2, 'earlier').disabled);
+  check('keyboard: every control is a real button with a focus ring, nothing nested in the link',
+    t.qa('#upnextHost [data-up]').every((b) => b.tagName === 'BUTTON' && b.getAttribute('type') === 'button' && /focus-visible:outline-2/.test(b.className) && !b.closest('a')));
+  const list = t.q('#mylistHost [data-mylist]');
+  check('My list: newest first, as library cards with their format badges', !!list && list.querySelector('h2').textContent === 'My list' &&
+    t.qa('#mylistHost li > a').map((a) => a.getAttribute('href')).join() === '/books/5,/books/1' && !!t.q('#mylistHost [data-format="audio"]'));
+  check('both rows sit above the toolbar inside the library section, after Continue', (() => {
+    const kids = Array.from(t.q('#librarySection').children).map((c) => c.id);
+    return kids.indexOf('continueHost') < kids.indexOf('upnextHost') && kids.indexOf('upnextHost') < kids.indexOf('mylistHost') && kids.indexOf('mylistHost') < kids.indexOf('toolbar');
+  })());
+  check('both shown, and remembered for the next first paint', t.doc.documentElement.hasAttribute('data-books-upnext') && t.doc.documentElement.hasAttribute('data-books-mylist') &&
+    t.win.localStorage.getItem('webservarr_books_upnext:sam') === '1' && t.win.localStorage.getItem('webservarr_books_mylist:sam') === '1');
+  check('no overflow at 320: the rows scroll sideways inside the page gutter, as Continue does', t.qa('#upnextHost ol.books-row.-mx-4.px-4, #mylistHost ul.books-row.-mx-4.px-4').length === 2);
+  check('each row is handed to the shell\'s drag-to-scroll, with the visit\'s signal', t.WS.drags.length === 2 && t.WS.drags.every((d) => d.opts.signal === t.ctl.signal && d.el.classList.contains('books-row')));
+});
+
+await run('3b: empty rows are not shown, and the next visit does not hold their room', async (make) => {
+  const t = make({ storage: { 'webservarr_books_upnext:sam': '1', 'webservarr_books_mylist:sam': '1' }, routes: withMine(mine()) });
+  const m = t.mount();
+  check('remembered rows are held before the first await', t.doc.documentElement.hasAttribute('data-books-upnext') && t.doc.documentElement.hasAttribute('data-books-mylist'));
+  await t.clock.advance(1600);
+  await m;
+  check('empty: released', !t.doc.documentElement.hasAttribute('data-books-upnext') && !t.doc.documentElement.hasAttribute('data-books-mylist') && !t.q('#upnextHost [data-upnext]') && !t.q('#mylistHost [data-mylist]'));
+  check('and remembered as none', t.win.localStorage.getItem('webservarr_books_upnext:sam') === '0' && t.win.localStorage.getItem('webservarr_books_mylist:sam') === '0');
+  const srv = mine();
+  srv.queueStatus = 503;
+  srv.listStatus = 403;
+  const u = make({ storage: { 'webservarr_books_upnext:sam': '1' }, routes: withMine(srv) });
+  await u.mount();
+  check('a failed read: no row, the library still shows', !u.q('#upnextHost [data-upnext]') && !u.hidden('#libraryGrid'));
+  check('and it does not forget that they had one', u.win.localStorage.getItem('webservarr_books_upnext:sam') === '1');
+  const v = make({ routes: withMine(mine({ queue: QUEUE, list: [ebook(5, 'Villette', 'Charlotte Brontë')] })) });
+  const leave = await v.mount();
+  check('shown', v.doc.documentElement.hasAttribute('data-books-upnext') && v.doc.documentElement.hasAttribute('data-books-mylist'));
+  leave();
+  check('leaving the page takes the flags off', !v.doc.documentElement.hasAttribute('data-books-upnext') && !v.doc.documentElement.hasAttribute('data-books-mylist') && !v.doc.documentElement.hasAttribute('data-books-continue'));
+});
+
+await run('3b: CLS: on a first visit the books wait for Up next and My list too, and all of it lands in one write', async (make) => {
+  const hold = deferred();
+  const srv = mine({ queue: QUEUE, holdQueue: hold });
+  const t = make({ storage: { 'webservarr_books_continue:sam': '0', 'webservarr_books_mylist:sam': '0' }, routes: withMine(srv) });
+  const m = t.mount();
+  await t.clock.advance(900);
+  check('Up next not answered yet (no memory of it): the books wait', t.hidden('#libraryGrid') && !t.hidden('#toolbarSkel'));
+  hold.resolve();
+  await t.clock.advance(50);
+  await m;
+  check('then the row and the books come together', !t.hidden('#libraryGrid') && !!t.q('#upnextHost [data-upnext]') && t.hidden('#toolbarSkel'));
+  // Remembered: not waited for; its room is held, and it comes in with the books.
+  const hold2 = deferred();
+  const lib = deferred();
+  const u = make({ storage: { 'webservarr_books_continue:sam': '0', 'webservarr_books_upnext:sam': '1', 'webservarr_books_mylist:sam': '0' },
+    routes: (net) => { withMine(mine({ queue: QUEUE }))(net); net.on('/api/books?', () => lib.promise); } });
+  const m2 = u.mount();
+  await u.clock.advance(100);
+  check('the room is held by the skeleton, the row is not drawn before the books', u.doc.documentElement.hasAttribute('data-books-upnext') && !!u.q('#upnextHost .skel') && !u.q('#upnextHost [data-upnext]'));
+  lib.resolve({ body: { items: SHELF, next_cursor: null, notes: [], building: false } });
+  await u.clock.advance(100);
+  await m2;
+  check('the row lands with the books, in the room held for it', !!u.q('#upnextHost [data-upnext]') && !u.hidden('#libraryGrid') && !u.q('#upnextHost .skel'));
+  check('the skeleton is the cards\' own shape (cover, two lines, Play/Read row, move row)', /w-40/.test(Array.from(new u.win.DOMParser().parseFromString(BOOKS_HTML, 'text/html').querySelectorAll('#upnextHost .books-row > div')).map((d) => d.className).join()) &&
+    new u.win.DOMParser().parseFromString(BOOKS_HTML, 'text/html').querySelectorAll('#upnextHost .books-row > div:first-child > *').length === 5);
+  void hold2;
+});
+
+await run('3b: Move later and Move earlier: the cards trade places at once, the server is told, the focus stays', async (make) => {
+  const srv = mine({ queue: QUEUE });
+  const t = make({ routes: withMine(srv) });
+  await t.mount();
+  t.WS.cache.set('books:me:queue', { items: [] });
+  const later = upBtn(t, 1, 'later');
+  later.focus();
+  later.click();
+  check('at once: Dune is second', queued(t).join() === '3,1,2' && places(t).join() === '1,2,3');
+  check('the focus is still on the button pressed', t.doc.activeElement === later);
+  check('said for a screen reader', t.text('#booksSaid') === 'Moved later, now number 2 in Up next');
+  check('the kept copy is dropped', !t.WS.cache.has('books:me:queue'));
+  await t.clock.advance(10);
+  check('POST /api/books/me/queue/move {book_id: 1, to: 1}, same-origin', srv.writes.length === 1 && srv.writes[0].method === 'POST' && srv.writes[0].body.book_id === 1 && srv.writes[0].body.to === 1 && srv.writes[0].credentials === 'same-origin', srv.writes);
+  later.click();
+  check('again: Dune is last, Move later is now off', queued(t).join() === '3,2,1' && later.disabled);
+  check('the focus moved to Move earlier on the same card (never lost)', t.doc.activeElement === upBtn(t, 1, 'earlier'));
+  upBtn(t, 1, 'earlier').click();
+  upBtn(t, 2, 'earlier').click();
+  await t.clock.advance(10);
+  check('quick moves are sent one after another, in order', srv.writes.map((w) => w.body.book_id + '>' + w.body.to).join() === '1>1,1>2,1>1,2>1', srv.writes.map((w) => w.body));
+  check('the server agrees: the order on screen is its order', queued(t).join() === srv.queue.map((c) => c.id).join(), [queued(t), srv.queue.map((c) => c.id)]);
+  check('no toast', t.toasts.length === 0);
+});
+
+await run('3b: a move the server refuses: a toast, and the queue as the server has it', async (make) => {
+  const srv = mine({ queue: QUEUE });
+  const t = make({ routes: withMine(srv) });
+  await t.mount();
+  srv.moveStatus = 503;
+  upBtn(t, 1, 'later').click();
+  check('moved at once', queued(t).join() === '3,1,2');
+  await t.clock.advance(10);
+  check('refused: a toast that says what to do', t.toasts.length === 1 && t.toasts[0][0] === 'Couldn’t move it in Up next. Try again.' && t.toasts[0][1] === 'err', t.toasts);
+  check('the queue is read again and drawn as the server has it', queued(t).join() === '1,3,2', queued(t));
+});
+
+await run('3b: Remove: the card goes at once, the focus to its neighbour; the last one hides the row', async (make) => {
+  const srv = mine({ queue: QUEUE.slice(0, 2) });
+  const t = make({ routes: withMine(srv) });
+  await t.mount();
+  const rm = upBtn(t, 1, 'remove');
+  rm.focus();
+  rm.click();
+  check('gone at once, the places renumbered', queued(t).join() === '3' && places(t).join() === '1');
+  check('the focus is on the next card\'s Remove', t.doc.activeElement === upBtn(t, 3, 'remove'));
+  check('the one left can go nowhere', upBtn(t, 3, 'earlier').disabled && upBtn(t, 3, 'later').disabled);
+  await t.clock.advance(10);
+  check('DELETE /api/books/1/queue', srv.writes[0].method === 'DELETE' && srv.writes[0].url === '/api/books/1/queue');
+  check('said', t.text('#booksSaid') === 'Removed from Up next');
+  upBtn(t, 3, 'remove').click();
+  await t.clock.advance(10);
+  check('the last one: the row hides and is remembered as none', !t.q('#upnextHost [data-upnext]') && !t.doc.documentElement.hasAttribute('data-books-upnext') && t.win.localStorage.getItem('webservarr_books_upnext:sam') === '0');
+  check('the focus went on down the page, not lost', t.doc.activeElement && t.doc.activeElement !== t.doc.body && t.doc.activeElement.closest('#formatChips'), t.doc.activeElement && t.doc.activeElement.outerHTML.slice(0, 60));
+  const srv2 = mine({ queue: QUEUE });
+  srv2.removeStatus = 503;
+  const u = make({ routes: withMine(srv2) });
+  await u.mount();
+  upBtn(u, 3, 'remove').click();
+  await u.clock.advance(10);
+  check('refused: a toast, and the card is back where the server has it', u.toasts.length === 1 && queued(u).join() === '1,3,2', [u.toasts, queued(u)]);
+});
+
+await run('3b: Play opens the preferred edition in the player; the book leaves Up next once it really plays', async (make) => {
+  const srv = mine({ queue: QUEUE, details: { 3: { book: { id: 3 }, formats: { ebook: null, audio: { editions: [{ plex_book_key: '14:1' }, { plex_book_key: '14:2' }], preferred: '14:2' } }, notes: [{ source: 'kavita', reason: 'not_connected', text: 'x' }] } } });
+  const t = make({ player: false, routes: withMine(srv) });
+  const p = fancyPlayer();
+  t.win.WS.player = p;
+  await t.mount();
+  const play = upBtn(t, 3, 'play');
+  play.click();
+  check('it says Opening while it reads the book', play.textContent.indexOf('Opening…') !== -1 && play.getAttribute('aria-disabled') === 'true');
+  play.click();
+  await t.clock.advance(10);
+  check('one read of the book, one open: the preferred edition, playing', t.net.urls('/api/books/3').length === 1 && JSON.stringify(p.opened) === JSON.stringify([['14:2', { autoplay: true }]]), [t.net.urls('/api/books/3'), p.opened]);
+  check('a note in that answer starts no hand-off', t.kav.reconnect.length === 0);
+  check('back to Play', play.textContent.indexOf('Play') !== -1 && play.getAttribute('aria-disabled') === 'false');
+  check('it is still queued while it has not played', queued(t).indexOf('3') !== -1 && srv.writes.length === 0);
+  p.change({ book: '14:2', playing: false, safetyNet: true });
+  p.change({ book: '14:2', playing: true, safetyNet: true });
+  check('a preview while the player holds it does not count', srv.writes.length === 0);
+  p.change({ book: '14:2', playing: true, safetyNet: false });
+  await t.clock.advance(10);
+  check('really playing: DELETE /api/books/3/queue, once, and the card goes', srv.writes.length === 1 && srv.writes[0].url === '/api/books/3/queue' && queued(t).join() === '1,2', [srv.writes, queued(t)]);
+  p.change({ book: '14:2', playing: false });
+  p.change({ book: '14:2', playing: true });
+  check('and only once', srv.writes.length === 1 && p.listeners.length === 0);
+  // Another book first: nothing is removed.
+  const srv2 = mine({ queue: QUEUE, details: { 3: { book: { id: 3 }, formats: { audio: { editions: [{ plex_book_key: '14:1' }], preferred: null } } } } });
+  const u = make({ player: false, routes: withMine(srv2) });
+  const q = fancyPlayer();
+  u.win.WS.player = q;
+  await u.mount();
+  upBtn(u, 3, 'play').click();
+  await u.clock.advance(10);
+  check('no preferred: the first edition', q.opened[0][0] === '14:1');
+  q.change({ book: '99:1', playing: true });
+  q.change({ book: '14:1', playing: true });
+  await u.clock.advance(10);
+  check('another book played first: it stays in Up next', srv2.writes.length === 0 && queued(u).indexOf('3') !== -1);
+  const v = make({ player: false, routes: withMine(mine({ queue: QUEUE })) });
+  await v.mount();
+  upBtn(v, 3, 'play').click();
+  check('no player: a quiet toast', v.toasts.length === 1 && /player/.test(v.toasts[0][0]));
+  const srv3 = mine({ queue: QUEUE, details: { 3: { book: { id: 3 }, formats: { audio: null } } } });
+  const x = make({ player: false, routes: withMine(srv3) });
+  x.win.WS.player = fancyPlayer();
+  await x.mount();
+  upBtn(x, 3, 'play').click();
+  await x.clock.advance(10);
+  check('no audiobook in the answer (gone, or its source down): it says so', x.toasts.length === 1 && x.toasts[0][0] === 'This audiobook is unavailable right now. Try again in a moment.' && x.win.WS.player.opened.length === 0);
+});
+
+await run('3b: Read opens the reader at the book through the router', async (make) => {
+  const srv = mine({ queue: QUEUE, details: { 2: { book: { id: 2 }, formats: { ebook: { read_url: '/reader?seriesId=4&chapterId=9' } } }, 1: { book: { id: 1 }, formats: { ebook: { read_url: 'javascript:alert(1)' } } } } });
+  const t = make({ routes: withMine(srv) });
+  await t.mount();
+  upBtn(t, 2, 'read').click();
+  await t.clock.advance(10);
+  check('soft navigation to the reader address the answer gave', JSON.stringify(t.WS.navigated) === '["/reader?seriesId=4&chapterId=9"]', t.WS.navigated);
+  check('reading does not take it out of Up next', srv.writes.length === 0);
+  upBtn(t, 1, 'read').click();
+  await t.clock.advance(10);
+  check('an address that is not the reader\'s is never followed', t.WS.navigated.length === 1 && t.toasts.length === 1 && t.toasts[0][0] === 'This ebook is unavailable right now. Try again in a moment.');
+});
+
+await run('3b: a page that was left draws nothing more and sends nothing it was not asked to', async (make) => {
+  const srv = mine({ queue: QUEUE, details: { 3: { book: { id: 3 }, formats: { audio: { editions: [{ plex_book_key: '14:1' }], preferred: '14:1' } } } } });
+  const t = make({ player: false, routes: withMine(srv) });
+  const p = fancyPlayer();
+  t.win.WS.player = p;
+  await t.mount();
+  upBtn(t, 3, 'play').click();
+  await t.clock.advance(10);
+  t.ctl.abort();
+  p.change({ book: '14:1', playing: true });
+  await t.clock.advance(10);
+  check('left before it played: the player watch ended, nothing removed', p.listeners.length === 0 && srv.writes.length === 0);
 });
 
 // ---- Markup safety ----

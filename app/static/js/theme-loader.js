@@ -200,11 +200,34 @@
   'use strict';
   var data = window.WS_DATA || {};
   if (data.page !== 'books') return;
+  // Up next and My list (books 3b) are held the same way: webservarr_books_upnext:<name>
+  // and webservarr_books_mylist:<name> show #upnextHost and #mylistHost.
+  var rows = [['continue', 'data-books-continue'], ['upnext', 'data-books-upnext'], ['mylist', 'data-books-mylist']];
   try {
-    if (localStorage.getItem('webservarr_books_continue:' + ((data.user || {}).username || '')) === '1') {
-      document.documentElement.setAttribute('data-books-continue', '');
+    var name = (data.user || {}).username || '';
+    for (var i = 0; i < rows.length; i++) {
+      if (localStorage.getItem('webservarr_books_' + rows[i][0] + ':' + name) === '1') {
+        document.documentElement.setAttribute(rows[i][1], '');
+      }
     }
   } catch (e) { /* private mode: no slot reserved, the row arrives when it arrives */ }
+})();
+
+/*
+ * The reader's sample banner (books 3b), shown before the first paint.
+ *
+ * /reader?...&sample=1 opens a sample: pages/reader.js shows #sampleBanner
+ * above the book, but only once it runs, which on a full load is after the
+ * first paint, so the banner would push the page down. <html
+ * data-reader-sample> shows it from the first paint (reader.html's page
+ * style). The same rule as the reader's: the first sample parameter, exactly 1.
+ */
+(function () {
+  'use strict';
+  var data = window.WS_DATA || {};
+  if (data.page !== 'reader') return;
+  var m = /[?&]sample=([^&#]*)/.exec(window.location.search || '');
+  if (m && m[1] === '1') document.documentElement.setAttribute('data-reader-sample', '');
 })();
 
 /*

@@ -19,9 +19,21 @@
  * (and stamped with that file's content hash) in #wsPage's data-ws-dep: so a
  * cached old books.js is never paired with a new page. No import statement.
  *
+ * The person's own (books 3b, from the same answer: my_list, queue_position,
+ * my_rating): "Add to My list" / "On My list", "Add to Up next" (or its place
+ * in the queue with Remove), and their own 1 to 5 stars with Clear. Each
+ * change shows at once and is sent (books.js sendBooks); one the server
+ * refuses is put back, with a toast. And a sample of each format the person
+ * can open: "Read a sample" opens the reader's sample mode (nothing saved),
+ * "Try a sample" plays the first 5 minutes of the picked narrator's edition
+ * (WS.player.sample, which saves nothing) and, while it plays, is "Stop
+ * sample" with the time left. The player's own corner says so too
+ * (features.js), since a sample plays on across pages.
+ *
  * A soft-navigation page (spec 4.2): everything below runs from mount(ctx),
  * each visit has its own state, and every listener, fetch and timer ends with
- * ctx.signal. Markup is built with textContent only.
+ * ctx.signal (a write the person made is let finish: books.js sendBooks).
+ * Markup is built with textContent only.
  */
 const KEEP_MS = 2 * 60 * 1000;      // a kept copy older than this is not painted: places move
 const MOUNT_WAIT_MS = 1500;         // the page is on screen (or its skeleton) before mount resolves
@@ -35,6 +47,16 @@ const MAIN = ' bg-primary text-bright';
 const QUIET = ' bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10';
 const OFF = ' cursor-not-allowed bg-frosted-blue/[0.04] text-frosted-blue/70';
 const PERSON = 'font-semibold text-frosted-blue underline-offset-4 hover:underline ' + LINK_FOCUS + ' rounded-sm';
+// A quiet text button under a format's button (a sample), and the person's own buttons.
+const TEXT_BTN = 'mt-2 -ml-2 inline-flex h-10 max-w-full items-center gap-2 rounded-[10px] px-2 text-[15px] font-semibold text-frosted-blue/70 hover:bg-frosted-blue/[0.07] hover:text-frosted-blue ' + LINK_FOCUS;
+const MINE_BTN = 'ws-lift flex h-11 min-w-0 flex-1 items-center gap-2 rounded-[10px] px-4 text-left text-[15px] font-semibold text-frosted-blue ' + LINK_FOCUS;
+const MINE_OFF = ' bg-frosted-blue/[0.07] hover:bg-frosted-blue/10';
+const MINE_ON = ' bg-frosted-blue/[0.15] hover:bg-frosted-blue/20';
+const STAR = 'grid size-10 place-items-center rounded-[10px] hover:bg-frosted-blue/[0.07] ' + LINK_FOCUS;
+const STAR_FILL = 'text-[28px] text-frosted-blue [font-variation-settings:\'FILL\'_1]';
+const STAR_HINT = 'text-[28px] text-frosted-blue/70 [font-variation-settings:\'FILL\'_1]';
+const STAR_EMPTY = 'text-[28px] text-frosted-blue/45';
+const SAMPLE_PARAM = '&sample=1';
 
 function isAbort(e) { return !!e && e.name === 'AbortError'; }
 
@@ -88,11 +110,26 @@ function when(progress) {
   return isNaN(t) ? 0 : t;
 }
 
+/** 1st, 2nd, 3rd, 4th... 11th, 12th, 13th, 21st. */
+export function ordinal(n) {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return n + 'th';
+  const last = n % 10;
+  return n + (last === 1 ? 'st' : last === 2 ? 'nd' : last === 3 ? 'rd' : 'th');
+}
+
+/** "4:32 left": a sample's time left, seconds rounded up. */
+export function leftText(ms) {
+  const t = Math.max(0, Math.ceil((typeof ms === 'number' && isFinite(ms) ? ms : 0) / 1000));
+  const s = t % 60;
+  return Math.floor(t / 60) + ':' + (s < 10 ? '0' : '') + s + ' left';
+}
+
 export async function mount(ctx) {
   const root = ctx.root;
   const signal = ctx.signal;
   const $ = function (id) { return root.querySelector('#' + id); };
-  const { coverBox, rememberContinue } = await import(root.getAttribute('data-ws-dep') || './books.js');
+  const { coverBox, rememberContinue, rememberRow, sendBooks } = await import(root.getAttribute('data-ws-dep') || './books.js');
   const who = ((ctx.data || {}).user || {}).username || '';
 
   const state = {
@@ -103,6 +140,11 @@ export async function mount(ctx) {
     reconnectTried: false, connectProblem: false, connectView: false,
     opening: '',            // a plex_book_key this page asked the player for, until the player shows it
     unwatch: null,
+    // The person's own: null until the answer has them (an older answer has none: no buttons).
+    mine: null,             // { list: bool, queue: int|null, rating: int|null }
+    busy: {},               // 'list' | 'queue' | 'rating': a write of that kind is on its way
+    sampleAsked: '',        // the edition key this page asked to sample, until it plays or fails
+    sampleFailed: false,
     addressFixed: false,
     embed: ((ctx.data || {}).branding || {}).requests_source === 'seerr_embed'
   };
@@ -161,9 +203,11 @@ export async function mount(ctx) {
     const p = player();
     if (state.unwatch || !p || typeof p.on !== 'function' || signal.aborted) return;
     state.unwatch = p.on('change', syncListen);
+    const unSample = p.on('sample-change', onSample);
     const done = new AbortController();
     signal.addEventListener('abort', function () {
       state.unwatch();
+      if (typeof unSample === 'function') unSample();
       done.abort();
     }, { once: true, signal: done.signal });
   }
@@ -228,6 +272,313 @@ export async function mount(ctx) {
       syncListen();
     });
     syncListen();
+  }
+
+  // ---- Samples ----
+
+  function isMine(key) {
+    return !!editionOf(String(key || ''));
+  }
+
+  /** The sample playing, if it is one of this book's editions. */
+  function mySample() {
+    const p = player();
+    const s = p && typeof p.sampleState === 'function' ? p.sampleState() : null;
+    return s && isMine(s.book) ? s : null;
+  }
+
+  /** "Try a sample": Stop sample with the time left while one of this book's
+      plays; "Sample unavailable right now" after one failed (press to try again). */
+  function syncSample() {
+    if (signal.aborted) return;
+    const btn = root.querySelector('[data-action="sample"]');
+    if (!btn) return;
+    const s = mySample();
+    const starting = !s && !!state.sampleAsked;
+    const label = s ? 'Stop sample' : starting ? 'Starting the sample…' : state.sampleFailed ? 'Sample unavailable right now' : 'Try a sample';
+    btn.querySelector('[data-icon]').textContent = s ? 'stop_circle' : 'play_circle';
+    btn.querySelector('[data-label]').textContent = label;
+    const left = btn.querySelector('[data-left]');
+    left.textContent = !s ? '' : s.loading && !(s.bookMs > 0) ? 'Starting…' : leftText(s.leftMs);
+    left.classList.toggle('hidden', !left.textContent);
+  }
+
+  function onSample(d) {
+    if (signal.aborted) return;
+    // The sample this page asked for could not play.
+    if (d && d.reason === 'error' && state.sampleAsked) state.sampleFailed = true;
+    syncSample();
+  }
+
+  function trySample() {
+    const p = player();
+    if (!p || typeof p.sample !== 'function') {
+      if (window.WSUI && typeof window.WSUI.toast === 'function') {
+        window.WSUI.toast('The player isn’t ready yet. Try again in a moment.', 'err');
+      }
+      return;
+    }
+    watch();
+    if (mySample()) {
+      p.stopSample();
+      return;
+    }
+    if (state.sampleAsked) return;
+    const key = state.edition;
+    if (!editionOf(key)) return;
+    state.sampleAsked = key;
+    state.sampleFailed = false;
+    syncSample();
+    Promise.resolve(p.sample(key)).then(function (ok) {
+      if (signal.aborted) return;
+      if (state.sampleAsked === key) state.sampleAsked = '';
+      if (!ok && !mySample()) state.sampleFailed = true;
+      syncSample();
+    }, function () {
+      if (signal.aborted) return;
+      state.sampleAsked = '';
+      state.sampleFailed = true;
+      syncSample();
+    });
+  }
+
+  /** The quiet button under Listen: the first 5 minutes of the picked narrator, nothing saved. */
+  function sampleButton() {
+    const b = el('button', TEXT_BTN);
+    b.type = 'button';
+    b.setAttribute('data-action', 'sample');
+    b.appendChild(icon('play_circle', 'text-[22px] shrink-0'));
+    b.lastChild.setAttribute('data-icon', '');
+    b.appendChild(el('span', 'truncate', 'Try a sample'));
+    b.lastChild.setAttribute('data-label', '');
+    b.appendChild(el('span', 'hidden shrink-0 font-medium tabular-nums', ''));
+    b.lastChild.setAttribute('data-left', '');
+    b.addEventListener('click', trySample, { signal: signal });
+    return b;
+  }
+
+  /** The quiet link under Read: the reader's sample mode, at the book's first chapter. */
+  function readSampleLink(href) {
+    const a = el('a', TEXT_BTN);
+    a.setAttribute('data-action', 'read-sample');
+    a.href = href + SAMPLE_PARAM;
+    a.appendChild(icon('auto_stories', 'text-[22px] shrink-0'));
+    a.appendChild(el('span', 'truncate', 'Read a sample'));
+    return a;
+  }
+
+  // ---- My list, Up next, rating ----
+
+  function toast(text) {
+    if (window.WSUI && typeof window.WSUI.toast === 'function') window.WSUI.toast(text, 'err');
+  }
+
+  // What a press did, for a screen reader (the buttons' own words change too).
+  function say(text) {
+    const line = root.querySelector('#bookSaid');
+    if (line) line.textContent = text;
+  }
+
+  /** The kept copies of this book and of the Books rows are out of date once
+      the person changes them here. */
+  function forgetKept() {
+    if (typeof WS.dropCache !== 'function') return;
+    WS.dropCache('book:' + state.id);
+    WS.dropCache('books:me:');
+  }
+
+  /** One change of the person's own: shown at once, sent, put back (with a
+      toast) when refused. One at a time per kind; presses meanwhile wait out. */
+  function change(kind, next, method, url, body, words) {
+    if (state.busy[kind] || !state.mine) return;
+    const before = Object.assign({}, state.mine);
+    state.busy[kind] = true;
+    Object.assign(state.mine, next);
+    syncMine();
+    say(words.done);
+    forgetKept();
+    sendBooks(method, url, body).then(function (data) {
+      state.busy[kind] = false;
+      if (signal.aborted) return;
+      // The server's place in the queue is the one shown.
+      if (kind === 'queue' && data && 'queue_position' in data) state.mine.queue = data.queue_position;
+      syncMine();
+    }, function (err) {
+      state.busy[kind] = false;
+      if (signal.aborted) return;
+      state.mine = before;
+      syncMine();
+      say('');
+      toast(err && err.status === 409 ? words.full : words.failed);
+    });
+  }
+
+  function bookUrl(part) {
+    return '/api/books/' + encodeURIComponent(String(state.data.book.id)) + '/' + part;
+  }
+
+  function toggleList() {
+    if (!state.mine) return;
+    if (state.mine.list) {
+      change('list', { list: false }, 'DELETE', bookUrl('list'), undefined,
+        { done: 'Removed from My list', failed: 'Couldn’t update My list. Try again.' });
+    } else {
+      rememberRow('mylist', who);
+      change('list', { list: true }, 'PUT', bookUrl('list'), undefined,
+        { done: 'Added to My list', failed: 'Couldn’t update My list. Try again.', full: 'My list is full. Remove a book to add this one.' });
+    }
+  }
+
+  function addToQueue() {
+    if (!state.mine || state.mine.queue !== null) return;
+    rememberRow('upnext', who);
+    change('queue', { queue: -1 }, 'PUT', bookUrl('queue'), undefined,
+      { done: 'Added to Up next', failed: 'Couldn’t update Up next. Try again.', full: 'Up next is full. Remove a book to add this one.' });
+  }
+
+  function removeFromQueue() {
+    if (!state.mine || state.mine.queue === null) return;
+    const remove = root.querySelector('[data-mine="unqueue"]');
+    const hadFocus = !!remove && remove === document.activeElement;
+    change('queue', { queue: null }, 'DELETE', bookUrl('queue'), undefined,
+      { done: 'Removed from Up next', failed: 'Couldn’t update Up next. Try again.' });
+    // Remove hides itself: the focus goes to Add to Up next, beside it.
+    if (hadFocus) root.querySelector('[data-mine="queue"]').focus();
+  }
+
+  function rate(stars) {
+    if (!state.mine || state.mine.rating === stars) return;
+    if (stars === null) {
+      const clear = root.querySelector('[data-mine="clear"]');
+      const hadFocus = !!clear && clear === document.activeElement;
+      change('rating', { rating: null }, 'DELETE', bookUrl('rating'), undefined,
+        { done: 'Rating cleared', failed: 'Couldn’t clear your rating. Try again.' });
+      // Clear hides itself: the focus goes to the first star, beside it.
+      if (hadFocus) root.querySelector('[data-star="1"]').focus();
+    } else {
+      change('rating', { rating: stars }, 'PUT', bookUrl('rating'), { stars: stars },
+        { done: 'Rated ' + stars + (stars === 1 ? ' star' : ' stars'), failed: 'Couldn’t save your rating. Try again.' });
+    }
+  }
+
+  function mineButton(kind) {
+    const b = el('button', MINE_BTN + MINE_OFF);
+    b.type = 'button';
+    b.setAttribute('data-mine', kind);
+    b.appendChild(icon('add', 'text-[22px] shrink-0'));
+    b.lastChild.setAttribute('data-icon', '');
+    b.appendChild(el('span', 'truncate', ''));
+    b.lastChild.setAttribute('data-label', '');
+    return b;
+  }
+
+  /** "Add to My list" / "On My list"; "Add to Up next" / "2nd in Up next" with
+      Remove; the stars and Clear. Drawn from state.mine whenever it changes. */
+  function syncMine() {
+    if (signal.aborted || !state.mine) return;
+    const m = state.mine;
+    const list = root.querySelector('[data-mine="list"]');
+    if (list) {
+      list.className = MINE_BTN + (m.list ? MINE_ON : MINE_OFF);
+      list.querySelector('[data-icon]').textContent = m.list ? 'check' : 'add';
+      list.querySelector('[data-label]').textContent = m.list ? 'On My list' : 'Add to My list';
+    }
+    const queue = root.querySelector('[data-mine="queue"]');
+    const remove = root.querySelector('[data-mine="unqueue"]');
+    if (queue) {
+      const queued = m.queue !== null && m.queue !== undefined;
+      queue.className = MINE_BTN + (queued ? MINE_ON : MINE_OFF);
+      queue.querySelector('[data-icon]').textContent = queued ? 'playlist_add_check' : 'playlist_add';
+      queue.querySelector('[data-label]').textContent = !queued ? 'Add to Up next'
+        : m.queue >= 0 ? ordinal(m.queue + 1) + ' in Up next' : 'In Up next';
+      // Queued, it is a statement with its own Remove beside it, not a button that does something else.
+      if (queued) queue.setAttribute('aria-disabled', 'true'); else queue.removeAttribute('aria-disabled');
+      remove.classList.toggle('hidden', !queued);
+      remove.classList.toggle('inline-flex', queued);
+    }
+    const stars = root.querySelectorAll('[data-star]');
+    Array.prototype.forEach.call(stars, function (b) {
+      const n = parseInt(b.getAttribute('data-star'), 10);
+      b.setAttribute('aria-pressed', m.rating === n ? 'true' : 'false');
+    });
+    paintStars(0);
+    const clear = root.querySelector('[data-mine="clear"]');
+    // Its room is kept while there is nothing to clear, so the row never changes width.
+    if (clear) clear.classList.toggle('invisible', !m.rating);
+  }
+
+  /** The stars filled to the rating, or (hint) to the one under the pointer. */
+  function paintStars(hint) {
+    const rating = state.mine ? state.mine.rating || 0 : 0;
+    Array.prototype.forEach.call(root.querySelectorAll('[data-star]'), function (b) {
+      const n = parseInt(b.getAttribute('data-star'), 10);
+      const glyph = b.querySelector('[data-icon]');
+      glyph.className = 'material-symbols-outlined ' + (hint ? (n <= hint ? STAR_HINT : STAR_EMPTY) : (n <= rating ? STAR_FILL : STAR_EMPTY));
+    });
+  }
+
+  function ratingRow() {
+    const wrap = el('div', 'mt-5');
+    wrap.setAttribute('data-rating', '');
+    const label = el('p', 'text-[15px] font-medium text-frosted-blue/70', 'Your rating');
+    label.id = 'ratingLabel';
+    wrap.appendChild(label);
+    const row = el('div', 'mt-1 -ml-2 flex items-center');
+    const group = el('div', 'flex items-center');
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-labelledby', 'ratingLabel');
+    for (let n = 1; n <= 5; n++) {
+      const b = el('button', STAR);
+      b.type = 'button';
+      b.setAttribute('data-star', String(n));
+      b.setAttribute('aria-label', n + (n === 1 ? ' star' : ' stars'));
+      b.appendChild(icon('star', STAR_EMPTY));
+      b.lastChild.setAttribute('data-icon', '');
+      b.addEventListener('click', function () { rate(n); }, { signal: signal });
+      b.addEventListener('mouseenter', function () { paintStars(n); }, { signal: signal });
+      group.appendChild(b);
+    }
+    group.addEventListener('mouseleave', function () { paintStars(0); }, { signal: signal });
+    row.appendChild(group);
+    const clear = el('button', 'invisible ml-2 inline-flex h-10 items-center rounded-[10px] px-2 text-[15px] font-semibold text-frosted-blue/70 hover:bg-frosted-blue/[0.07] hover:text-frosted-blue ' + LINK_FOCUS, 'Clear');
+    clear.type = 'button';
+    clear.setAttribute('data-mine', 'clear');
+    clear.setAttribute('aria-label', 'Clear your rating');
+    clear.addEventListener('click', function () { rate(null); }, { signal: signal });
+    row.appendChild(clear);
+    wrap.appendChild(row);
+    return wrap;
+  }
+
+  /** My list and Up next, then the stars; null for an answer without them. */
+  function mineBlock() {
+    if (!state.mine) return null;
+    const box = el('div', 'mt-6 max-w-xl');
+    box.setAttribute('data-mine-block', '');
+    // The same two columns as Read and Listen above, one under the other on a phone.
+    const row = el('div', 'grid gap-3 sm:grid-cols-2');
+    const list = mineButton('list');
+    list.addEventListener('click', toggleList, { signal: signal });
+    row.appendChild(list);
+    const cell = el('div', 'flex min-w-0 items-center gap-2');
+    const queue = mineButton('queue');
+    queue.addEventListener('click', addToQueue, { signal: signal });
+    cell.appendChild(queue);
+    const remove = el('button', 'hidden h-11 shrink-0 items-center rounded-[10px] px-3 text-[15px] font-semibold text-frosted-blue/70 hover:bg-frosted-blue/[0.07] hover:text-frosted-blue ' + LINK_FOCUS, 'Remove');
+    remove.type = 'button';
+    remove.setAttribute('data-mine', 'unqueue');
+    remove.setAttribute('aria-label', 'Remove from Up next');
+    remove.addEventListener('click', removeFromQueue, { signal: signal });
+    cell.appendChild(remove);
+    row.appendChild(cell);
+    box.appendChild(row);
+    box.appendChild(ratingRow());
+    const said = el('p', 'sr-only', '');
+    said.id = 'bookSaid';
+    said.setAttribute('role', 'status');
+    said.setAttribute('aria-live', 'polite');
+    box.appendChild(said);
+    return box;
   }
 
   // ---- Drawing ----
@@ -297,7 +648,9 @@ export async function mount(ctx) {
       const a = control('a', 'read', main ? MAIN : QUIET, 'menu_book', 'Read', sub);
       a.href = href;
       bar(a, f.progress, main);
-      return slot('ebook', a);
+      const cell = slot('ebook', a);
+      cell.appendChild(readSampleLink(href));
+      return cell;
     }
     if (data.request_links.ebook) {
       const href = requestHref(data.request_links.ebook);
@@ -330,6 +683,7 @@ export async function mount(ctx) {
       bar(b, edition && edition.progress, main);
       const cell = slot('audio', b);
       if (f.editions.length > 1) cell.appendChild(narratorPicker(f.editions));
+      cell.appendChild(sampleButton());
       return cell;
     }
     if (data.request_links.audio) {
@@ -466,6 +820,8 @@ export async function mount(ctx) {
       cells.forEach(function (c) { actions.appendChild(c); });
       rest.appendChild(actions);
     }
+    const mine = mineBlock();
+    if (mine) rest.appendChild(mine);
     const text = about(data.book.description);
     if (text) rest.appendChild(text);
     return rest;
@@ -501,10 +857,13 @@ export async function mount(ctx) {
     cover.appendChild(coverBox(b.cover_url, formats, signal, { badges: false, eager: true }));
     swapCover(cover);
     $('bookTitle').textContent = b.title || 'Untitled';
+    state.mine = data.mine;
     swapRest(buildRest(data));
     done(b.title);
     watch();
     syncListen();
+    syncSample();
+    syncMine();
     // A merged book: the address becomes the surviving book's, without a history entry.
     if (b.id !== state.id && !state.addressFixed && typeof b.id === 'number') {
       state.addressFixed = true;
@@ -591,11 +950,20 @@ export async function mount(ctx) {
   function tidy(data) {
     const f = data.formats;
     const audio = f.audio && Array.isArray(f.audio.editions) ? f.audio : null;
+    // The person's own, when the answer has them (all three, or none of them).
+    const has = typeof data.my_list === 'boolean' && 'queue_position' in data && 'my_rating' in data;
+    const place = data.queue_position;
+    const stars = data.my_rating;
     return {
       book: data.book,
       formats: { ebook: f.ebook || null, audio: audio },
       request_links: Object.assign({ ebook: null, audio: null }, data.request_links || {}),
-      notes: Array.isArray(data.notes) ? data.notes : []
+      notes: Array.isArray(data.notes) ? data.notes : [],
+      mine: has ? {
+        list: data.my_list,
+        queue: typeof place === 'number' && place >= 0 ? place : null,
+        rating: typeof stars === 'number' && stars >= 1 && stars <= 5 ? stars : null
+      } : null
     };
   }
 

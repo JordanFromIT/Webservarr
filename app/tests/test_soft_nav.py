@@ -683,6 +683,37 @@ class BooksPage(unittest.TestCase):
         self.assertIn("#continueHost { display: none; }", h)
 
 
+    def test_the_persons_own_writes_go_through_one_helper(self):
+        # Books 3b: My list, Up next and ratings are the only writes on the Books
+        # pages. They go through books.js sendBooks, the one place that calls
+        # fetch (same-origin credentials); every read is still WS.getJSON.
+        code = self.code()
+        body = function_body(code, "sendBooks")
+        self.assertIn("window.fetch(url, init)", body)
+        self.assertNotRegex(code.replace(body, ""), r"\bfetch\(")
+        self.assertIn("credentials: 'same-origin'", module_source("books"))
+        calls = re.findall(r"sendBooks\('(\w+)'", module_source("books"))
+        calls += re.findall(r"change\('\w+', \{[^}]*\}, '(\w+)'", module_source("book"))
+        self.assertTrue(calls)
+        self.assertTrue(set(calls) <= {"PUT", "DELETE", "POST"}, calls)
+
+    def test_up_next_and_my_list_are_held_like_continue(self):
+        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+        self.assertIn("['upnext', 'data-books-upnext']", loader)
+        self.assertIn("['mylist', 'data-books-mylist']", loader)
+        self.assertIn("'webservarr_books_' + rows[i][0] + ':' + name", loader)
+        h = read("books")
+        self.assertIn("#upnextHost, #mylistHost { display: none; }", h)
+        self.assertIn("html[data-books-upnext] #upnextHost { display: block; }", h)
+        self.assertIn("html[data-books-mylist] #mylistHost { display: block; }", h)
+        src = module_source("books")
+        self.assertIn("key: 'webservarr_books_upnext:'", src)
+        self.assertIn("key: 'webservarr_books_mylist:'", src)
+        # Inside the library section, after Continue and before the toolbar: one write with the books.
+        section = h[h.index('id="librarySection"'):h.index('id="toolbar"')]
+        self.assertLess(section.index('id="continueHost"'), section.index('id="upnextHost"'))
+        self.assertLess(section.index('id="upnextHost"'), section.index('id="mylistHost"'))
+
     def test_the_first_visit_guide_is_the_shared_engine_started_once(self):
         # Jordan 2026-10-03: the guide is rebuilt for Books on tour.js (the reader's engine), runs on a
         # person's first visit only, starts when the books are drawn, and the help button runs it again.
@@ -769,6 +800,16 @@ class BookPages(unittest.TestCase):
         book = module_source("book")
         self.assertIn("link.indexOf('/reader?') === 0", book)
         self.assertIn("link.indexOf('/requests?q=') === 0", book)
+        # Read a sample (books 3b) is the checked reader address in sample mode, nothing else.
+        self.assertIn("const SAMPLE_PARAM = '&sample=1';", book)
+        self.assertIn("a.href = href + SAMPLE_PARAM;", book)
+        self.assertIn("cell.appendChild(readSampleLink(href));", book)
+        # Its banner holds its room from the first paint of a full load.
+        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+        self.assertIn("if (m && m[1] === '1') document.documentElement.setAttribute('data-reader-sample', '');", loader)
+        self.assertIn("html[data-reader-sample] #sampleBanner[hidden] { display: block; }", read("reader"))
+        # A queue card's Read follows only the reader's own address too.
+        self.assertIn("f.read_url.indexOf('/reader?') === 0", module_source("books"))
 
     def test_the_hand_off_is_the_books_pages_helper(self):
         for name in ("book", "books-person", "books-series"):
@@ -783,6 +824,9 @@ class BookPages(unittest.TestCase):
         code = js_code_only(module_source("book"))
         self.assertIn("p.on('change', syncListen)", module_source("book"))
         self.assertIn("state.unwatch();", code)
+        # Books 3b: the samples' event too, ended with the visit.
+        self.assertIn("const unSample = p.on('sample-change', onSample);", module_source("book"))
+        self.assertIn("if (typeof unSample === 'function') unSample();", module_source("book"))
         self.assertIn("p.open(key, { autoplay: true })", module_source("book"))
 
     def test_the_card_helpers_are_books_js_exports(self):

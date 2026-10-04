@@ -207,6 +207,8 @@ function visit(kind, o = {}) {
   if (o.branding) WS.data.branding = o.branding;
   win.WSUI = { toast(m, k) { toasts.push([m, k]); } };
   set('WSUI', win.WSUI);
+  // Writes (books.js sendBooks) go through window.fetch: the same scripted network.
+  win.fetch = (u, init) => net.fetch(u, init);
   win.history.replaceState = function (state, title, to) { replaced.push(to); };
   if (o.kavita !== false) {
     win.WSKavita = {
@@ -217,13 +219,34 @@ function visit(kind, o = {}) {
     };
   }
   // The player: which book it holds and whether it plays; change listeners as the engine has them.
+  // Samples as engine.js boot has them: sample(key), stopSample(), sampleState()
+  // and 'sample-change' events (sampleChange() sends one).
   const player = {
     opened: [], toggled: 0, listeners: [], st: { book: null, playing: false, loading: false, error: null },
+    sampled: [], stops: 0, sampleListeners: [], ss: null, sampleAnswer: true,
     open(key, opts) { this.opened.push([key, opts]); return Promise.resolve(); },
     toggle() { this.toggled += 1; },
     state() { return this.st; },
-    on(name, fn) { this.listeners.push(fn); return () => { this.listeners = this.listeners.filter((x) => x !== fn); }; },
-    change(st) { this.st = Object.assign({}, this.st, st); this.listeners.slice().forEach((fn) => fn()); }
+    on(name, fn) {
+      if (name === 'sample-change') {
+        this.sampleListeners.push(fn);
+        return () => { this.sampleListeners = this.sampleListeners.filter((x) => x !== fn); };
+      }
+      this.listeners.push(fn);
+      return () => { this.listeners = this.listeners.filter((x) => x !== fn); };
+    },
+    change(st) { this.st = Object.assign({}, this.st, st); this.listeners.slice().forEach((fn) => fn()); },
+    sample(key) {
+      this.sampled.push(key);
+      this.sampleChange('start', { book: key, title: '', playing: false, loading: true, bookMs: 0, leftMs: 300000 });
+      return Promise.resolve(this.sampleAnswer);
+    },
+    stopSample() { this.stops += 1; const had = !!this.ss; if (had) this.sampleChange('stop', null); return had; },
+    sampleState() { return this.ss; },
+    sampleChange(reason, ss, error) {
+      this.ss = ss;
+      this.sampleListeners.slice().forEach((fn) => fn({ reason, sample: ss, error: error || null }));
+    }
   };
   if (o.player !== false) win.WS.player = player;
   if (o.routes) o.routes(net);
@@ -701,7 +724,7 @@ await run('a repeat visit paints at once from the kept copy and then settles to 
   let m = t.mount();
   await t.clock.advance(1600);
   await m;
-  check('first visit drew the book', t.qa('[data-action]').length === 2);
+  check('first visit drew the book', t.qa('[data-action="read"], [data-action="listen"]').length === 2);
   // Same window, same store: mount again with a changed live answer.
   t.net.on('/api/books/', () => ({ body: detail({ formats: { ebook: Object.assign({}, EBOOK, { progress: Object.assign({}, EBOOK.progress, { label: 'Ch. 13 · 50%', percent: 50 }) }), audio: { available: true, editions: EDITIONS, preferred: '100:2' } } }) }));
   m = bookModule.mount(t.ctx);
@@ -1004,6 +1027,247 @@ await run('the page reads a failed sign-in on arrival, on every Books page', asy
   check('person page', u.kav.failedChecks === 1);
   const v = await openList(make, 'series', seriesAnswer());
   check('series page', v.kav.failedChecks === 1);
+});
+
+// ---------------------------------------------------------------------------
+// The person's own (books 3b): My list, Up next, the stars, and the samples
+// ---------------------------------------------------------------------------
+
+const MINE = { my_list: false, queue_position: null, my_rating: null };
+const mine = (over = {}) => detail(Object.assign({}, MINE, over));
+
+// The writes: each one recorded; `answers` (by "METHOD path") says what the server does.
+function mineRoutes(answers = {}) {
+  const writes = [];
+  const hold = {};
+  return {
+    writes,
+    hold,
+    install(net) {
+      net.on('/api/books/2/', (url, init) => {
+        const method = (init && init.method) || 'GET';
+        const path = url.replace('/api/books/2/', '');
+        const body = init && init.body ? JSON.parse(init.body) : undefined;
+        writes.push({ method, path, body, credentials: init && init.credentials, type: init && init.headers && init.headers['Content-Type'] });
+        const key = method + ' ' + path;
+        const answer = answers[key] || (path === 'list' ? { body: { my_list: method === 'PUT' } }
+          : path === 'queue' ? { body: { queue_position: method === 'PUT' ? 2 : null } }
+          : { body: { my_rating: method === 'PUT' ? body.stars : null } });
+        return hold[key] ? hold[key].promise.then(() => answer) : answer;
+      });
+    }
+  };
+}
+
+async function openMine(make, answer, w, o = {}) {
+  return open(make, answer, Object.assign({ routes: (net) => { bookRoutes(answer)(net); w.install(net); } }, o));
+}
+
+const mineText = (t, kind) => rr(t.text(`[data-mine="${kind}"] [data-label]`));
+const said = (t) => t.text('#bookSaid');
+const pressed = (t) => t.qa('[data-star]').filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('data-star'));
+const filled = (t) => t.qa('[data-star] [data-icon]').filter((g) => /FILL/.test(g.className)).length;
+
+await run('3b: the book page has My list, Up next and the stars, from the answer, under the format buttons', async (make) => {
+  const w = mineRoutes();
+  const t = await openMine(make, mine(), w);
+  const block = t.q('[data-mine-block]');
+  check('the block is there, after the buttons and before the description', !!block && block.previousElementSibling.querySelector('[data-slot]') && block.nextElementSibling === t.q('#bookAbout').parentNode);
+  check('Add to My list', mineText(t, 'list') === 'Add to My list');
+  check('Add to Up next, and no Remove', mineText(t, 'queue') === 'Add to Up next' && t.q('[data-mine="unqueue"]').classList.contains('hidden'));
+  check('five stars, none chosen, Clear\'s room held but unseen', t.qa('[data-star]').length === 5 && pressed(t).length === 0 && filled(t) === 0 && t.q('[data-mine="clear"]').classList.contains('invisible'));
+  check('the stars are a labelled group', t.q('[role="group"]').getAttribute('aria-labelledby') === 'ratingLabel' && t.text('#ratingLabel') === 'Your rating');
+  check('each star says what it gives', t.qa('[data-star]').map((b) => b.getAttribute('aria-label')).join('|') === '1 star|2 stars|3 stars|4 stars|5 stars');
+  check('keyboard: every control is a real button, reachable (no tabindex -1, not disabled) with a visible focus ring',
+    t.qa('[data-mine-block] button').every((b) => b.tagName === 'BUTTON' && b.getAttribute('type') === 'button' && b.getAttribute('tabindex') !== '-1' && !b.disabled && /focus-visible:outline-2/.test(b.className)));
+  check('a status line for a screen reader', t.q('#bookSaid').getAttribute('role') === 'status' && t.q('#bookSaid').classList.contains('sr-only'));
+  check('nothing was written just by looking', w.writes.length === 0);
+  const u = await openMine(make, mine({ my_list: true, queue_position: 0, my_rating: 3 }), mineRoutes());
+  check('on the list: On My list', mineText(u, 'list') === 'On My list');
+  check('first in the queue: 1st in Up next, with Remove', mineText(u, 'queue') === '1st in Up next' && !u.q('[data-mine="unqueue"]').classList.contains('hidden'));
+  check('rated 3: the third star is the one chosen, three filled, Clear shows', pressed(u).join() === '3' && filled(u) === 3 && !u.q('[data-mine="clear"]').classList.contains('invisible'));
+  const v = await openMine(make, mine({ queue_position: 11 }), mineRoutes());
+  check('12th, not 12nd', mineText(v, 'queue') === '12th in Up next', mineText(v, 'queue'));
+  const x = await open(make, detail());
+  check('an answer without them (an older server) has no block at all', !x.q('[data-mine-block]'));
+});
+
+await run('3b: My list toggles at once, is sent, and remembers the Books row', async (make) => {
+  const w = mineRoutes();
+  const t = await openMine(make, mine(), w);
+  t.WS.cache.set('book:2', { stale: true });
+  t.WS.cache.set('books:me:list', { items: [] });
+  t.click('[data-mine="list"]');
+  check('On My list at once', mineText(t, 'list') === 'On My list');
+  check('a screen reader hears it', said(t) === 'Added to My list');
+  await flush();
+  check('PUT /api/books/2/list, same-origin credentials', w.writes.length === 1 && w.writes[0].method === 'PUT' && w.writes[0].path === 'list' && w.writes[0].credentials === 'same-origin', w.writes);
+  check('the Books page will hold My list\'s room next time', t.win.localStorage.getItem('webservarr_books_mylist:sam') === '1');
+  check('the kept copies of this book and the rows are dropped', !t.WS.cache.has('book:2') && !t.WS.cache.has('books:me:list'));
+  t.click('[data-mine="list"]');
+  await flush();
+  check('again: DELETE, and Add to My list', w.writes[1].method === 'DELETE' && w.writes[1].path === 'list' && mineText(t, 'list') === 'Add to My list' && said(t) === 'Removed from My list');
+  check('no toast', t.toasts.length === 0);
+});
+
+await run('3b: a change the server refuses is put back, with a toast; one press at a time', async (make) => {
+  const w = mineRoutes({ 'PUT list': { status: 503, body: {} }, 'PUT queue': { status: 409, body: {} } });
+  w.hold['PUT list'] = deferred();
+  const t = await openMine(make, mine(), w);
+  t.click('[data-mine="list"]');
+  t.click('[data-mine="list"]');
+  await flush();
+  check('a second press while the first is on its way sends nothing', w.writes.length === 1);
+  check('shown at once', mineText(t, 'list') === 'On My list');
+  w.hold['PUT list'].resolve();
+  await flush();
+  check('refused: back to Add to My list', mineText(t, 'list') === 'Add to My list');
+  check('with a toast that says what to do', t.toasts.length === 1 && t.toasts[0][0] === 'Couldn’t update My list. Try again.' && t.toasts[0][1] === 'err', t.toasts);
+  t.click('[data-mine="queue"]');
+  await flush();
+  check('Up next full (409): put back, and told why', mineText(t, 'queue') === 'Add to Up next' && t.toasts[1][0] === 'Up next is full. Remove a book to add this one.', t.toasts);
+});
+
+await run('3b: Up next: added at the end, its place shown, Remove takes it out (the focus moves to Add)', async (make) => {
+  const w = mineRoutes();
+  w.hold['PUT queue'] = deferred();
+  const t = await openMine(make, mine(), w);
+  t.click('[data-mine="queue"]');
+  check('In Up next at once', mineText(t, 'queue') === 'In Up next' && !t.q('[data-mine="unqueue"]').classList.contains('hidden'));
+  check('queued, the button is a statement now (aria-disabled), Remove is the action', t.q('[data-mine="queue"]').getAttribute('aria-disabled') === 'true');
+  w.hold['PUT queue'].resolve();
+  await flush();
+  check('the server\'s place: 3rd in Up next', mineText(t, 'queue') === '3rd in Up next', mineText(t, 'queue'));
+  check('PUT /api/books/2/queue', w.writes[0].method === 'PUT' && w.writes[0].path === 'queue');
+  check('Books will hold Up next\'s room', t.win.localStorage.getItem('webservarr_books_upnext:sam') === '1');
+  t.click('[data-mine="queue"]');
+  await flush();
+  check('pressing the statement does nothing', w.writes.length === 1);
+  const remove = t.q('[data-mine="unqueue"]');
+  remove.focus();
+  remove.click();
+  await flush();
+  check('Remove: DELETE, Add to Up next again, Remove hidden', w.writes[1].method === 'DELETE' && w.writes[1].path === 'queue' && mineText(t, 'queue') === 'Add to Up next' && remove.classList.contains('hidden'));
+  check('the focus is not lost with the hidden button: it is on Add to Up next', t.doc.activeElement === t.q('[data-mine="queue"]'));
+  check('said', said(t) === 'Removed from Up next');
+});
+
+await run('3b: the stars: one press rates, Clear clears, the pointer previews', async (make) => {
+  const w = mineRoutes();
+  const t = await openMine(make, mine(), w);
+  t.click('[data-star="4"]');
+  check('4 at once: the fourth is chosen, four filled', pressed(t).join() === '4' && filled(t) === 4);
+  await flush();
+  check('PUT /rating with {stars: 4} as JSON', w.writes[0].method === 'PUT' && w.writes[0].path === 'rating' && w.writes[0].body.stars === 4 && w.writes[0].type === 'application/json', w.writes);
+  check('said', said(t) === 'Rated 4 stars');
+  check('Clear shows', !t.q('[data-mine="clear"]').classList.contains('invisible'));
+  t.click('[data-star="4"]');
+  await flush();
+  check('the same star again sends nothing', w.writes.length === 1);
+  t.click('[data-star="1"]');
+  await flush();
+  check('1 star', w.writes[1].body.stars === 1 && said(t) === 'Rated 1 star' && filled(t) === 1);
+  t.q('[data-star="5"]').dispatchEvent(new t.win.MouseEvent('mouseenter'));
+  check('the pointer over the fifth previews five (a lighter fill)', filled(t) === 5 && /text-frosted-blue\/70/.test(t.q('[data-star="5"] [data-icon]').className));
+  t.q('[role="group"]').dispatchEvent(new t.win.MouseEvent('mouseleave'));
+  check('and leaving shows the rating again', filled(t) === 1);
+  t.q('[data-mine="clear"]').focus();
+  t.click('[data-mine="clear"]');
+  await flush();
+  check('the focus is not lost with the hidden Clear: it is on the first star', t.doc.activeElement === t.q('[data-star="1"]'));
+  check('Clear: DELETE /rating, nothing chosen, Clear unseen again', w.writes[2].method === 'DELETE' && w.writes[2].path === 'rating' && pressed(t).length === 0 && filled(t) === 0 && t.q('[data-mine="clear"]').classList.contains('invisible'));
+  check('said', said(t) === 'Rating cleared');
+  const f = mineRoutes({ 'PUT rating': { status: 503, body: {} } });
+  const u = await openMine(make, mine({ my_rating: 2 }), f);
+  u.click('[data-star="5"]');
+  await flush();
+  check('refused: the rating it had is back', pressed(u).join() === '2' && filled(u) === 2);
+  check('with a toast', u.toasts.length === 1 && u.toasts[0][0] === 'Couldn’t save your rating. Try again.');
+});
+
+await run('3b: Read a sample opens the reader\'s sample mode; only for a format the person can open', async (make) => {
+  const t = await open(make, detail());
+  const a = t.q('[data-action="read-sample"]');
+  check('a link under Read, in the ebook slot', !!a && a.tagName === 'A' && a.closest('[data-slot]').getAttribute('data-slot') === 'ebook');
+  check('to the book\'s own chapter, in sample mode', a.getAttribute('href') === '/reader?seriesId=5&chapterId=77&sample=1', a.getAttribute('href'));
+  check('it says so', rr(a.textContent).indexOf('Read a sample') !== -1);
+  const u = await open(make, detail({ formats: { ebook: null, audio: { available: true, editions: EDITIONS, preferred: '100:2' } }, request_links: { ebook: '/requests?q=x', audio: null } }));
+  check('no ebook: no Read a sample', !u.q('[data-action="read-sample"]'));
+  const v = await open(make, detail({ formats: { ebook: null, audio: { available: true, editions: EDITIONS, preferred: '100:2' } },
+    notes: [{ source: 'kavita', reason: 'unavailable', text: 'Ebooks are unavailable right now' }] }));
+  check('Kavita down: the disabled Read says why, and no sample is offered', !v.q('[data-action="read-sample"]') && v.q('[data-action="read"]').disabled);
+  const x = await open(make, detail({ formats: { ebook: Object.assign({}, EBOOK, { read_url: 'https://elsewhere.example/' }), audio: null } }));
+  check('a read address that is not the reader\'s: no sample link either', !x.q('[data-action="read-sample"]'));
+});
+
+await run('3b: Try a sample plays the picked narrator\'s first minutes; Stop sample with the time left while it plays', async (make) => {
+  const t = await open(make, detail());
+  const b = t.q('[data-action="sample"]');
+  check('a button under Listen, in the audio slot (after the narrator picker)', !!b && b.tagName === 'BUTTON' && b.closest('[data-slot]').getAttribute('data-slot') === 'audio' && b.previousElementSibling.querySelector('#narratorSelect'));
+  check('Try a sample', rr(t.text('[data-action="sample"] [data-label]')) === 'Try a sample' && t.q('[data-action="sample"] [data-left]').classList.contains('hidden'));
+  t.click('[data-action="sample"]');
+  await flush();
+  check('the preferred narrator\'s edition, preselected', JSON.stringify(t.player.sampled) === '["100:2"]', t.player.sampled);
+  check('the main player was not opened', t.player.opened.length === 0);
+  check('while it starts: Stop sample, Starting…', rr(t.text('[data-action="sample"] [data-label]')) === 'Stop sample' && t.text('[data-action="sample"] [data-left]') === 'Starting…');
+  t.player.sampleChange('time', { book: '100:2', title: 'X', playing: true, loading: false, bookMs: 28000, leftMs: 272000 });
+  check('playing: Stop sample and 4:32 left', rr(t.text('[data-action="sample"] [data-label]')) === 'Stop sample' && t.text('[data-action="sample"] [data-left]') === '4:32 left' && !t.q('[data-action="sample"] [data-left]').classList.contains('hidden'));
+  check('the time is in tabular figures (it ticks)', /tabular-nums/.test(t.q('[data-action="sample"] [data-left]').className));
+  check('the icon says stop', t.text('[data-action="sample"] [data-icon]') === 'stop_circle');
+  t.click('[data-action="sample"]');
+  check('pressed again: stopSample', t.player.stops === 1);
+  check('and it is Try a sample again', rr(t.text('[data-action="sample"] [data-label]')) === 'Try a sample' && t.text('[data-action="sample"] [data-left]') === '');
+  t.change('#narratorSelect', '100:1');
+  t.click('[data-action="sample"]');
+  await flush();
+  check('another narrator picked: that one is sampled', t.player.sampled[1] === '100:1', t.player.sampled);
+  t.player.sampleChange('start', { book: '999:1', title: 'Other', playing: true, loading: false, bookMs: 1000, leftMs: 299000 });
+  check('a sample of another book (started elsewhere) is not this page\'s: Try a sample', rr(t.text('[data-action="sample"] [data-label]')) === 'Try a sample');
+  t.ctl.abort();
+  t.player.sampleChange('stop', null);
+  check('a page that was left stops listening', t.player.sampleListeners.length === 0 && t.player.listeners.length === 0);
+});
+
+await run('3b: a sample that cannot play says it is unavailable right now, and can be tried again', async (make) => {
+  const t = await open(make, detail());
+  t.player.sample = function (key) {
+    this.sampled.push(key);
+    this.sampleChange('start', { book: key, title: '', playing: false, loading: true, bookMs: 0, leftMs: 300000 });
+    this.sampleChange('error', null, { code: 'unreachable', message: "Can't reach the media server" });
+    return Promise.resolve(false);
+  };
+  t.click('[data-action="sample"]');
+  await flush();
+  check('Sample unavailable right now', rr(t.text('[data-action="sample"] [data-label]')) === 'Sample unavailable right now', rr(t.text('[data-action="sample"] [data-label]')));
+  check('the button still works', !t.q('[data-action="sample"]').disabled);
+  t.player.sample = function (key) { this.sampled.push(key); this.sampleChange('start', { book: key, title: '', playing: true, loading: false, bookMs: 500, leftMs: 299500 }); return Promise.resolve(true); };
+  t.click('[data-action="sample"]');
+  await flush();
+  check('tried again, it plays', t.player.sampled.length === 2 && rr(t.text('[data-action="sample"] [data-label]')) === 'Stop sample');
+  const u = await open(make, detail(), { player: false });
+  u.click('[data-action="sample"]');
+  check('no player yet: a quiet toast, nothing breaks', u.toasts.length === 1 && /player/.test(u.toasts[0][0]));
+  const v = await open(make, detail({ formats: { ebook: EBOOK, audio: null }, request_links: { ebook: null, audio: '/requests?q=x' } }));
+  check('no audiobook: no Try a sample', !v.q('[data-action="sample"]'));
+});
+
+await run('3b: CLS: the skeleton has the shape of the new rows; nothing on screen moves when the answer lands', async (make) => {
+  const slow = deferred();
+  const t = make('book', { routes: (net) => net.on('/api/books/', () => slow.promise.then(() => ({ body: mine() }))) });
+  const m = t.mount();
+  await flush();
+  check('the skeleton holds a sample row under each format button', t.qa('#bookRest .skel.h-14').length === 2 && t.qa('#bookRest .skel.h-14 + .mt-2.h-10').length === 2);
+  check('My list and Up next, in the two columns', t.qa('#bookRest .grid.sm\\:grid-cols-2 .skel.h-11').length === 2);
+  check('and the stars\' row', t.qa('#bookRest .skel.h-10').length === 1);
+  const title = t.q('#bookTitle');
+  const cover = t.q('#bookCover');
+  slow.resolve();
+  await t.clock.advance(1600);
+  await m;
+  check('the heading stays the same element (nothing above the new part is touched)', t.q('#bookTitle') === title);
+  check('the new part replaced the skeleton in one write', !!t.q('[data-mine-block]') && !t.q('#bookRest .skel'));
+  check('the cover was replaced once, in the same commit', t.q('#bookCover') !== cover);
+  check('no overflow at 320: labels truncate and the columns may shrink', t.qa('[data-mine] [data-label]').every((s) => /truncate/.test(s.className)) && /min-w-0/.test(t.q('[data-mine="queue"]').parentNode.className) && /max-w-full/.test(t.q('[data-action="sample"]').className));
 });
 
 // ---------------------------------------------------------------------------

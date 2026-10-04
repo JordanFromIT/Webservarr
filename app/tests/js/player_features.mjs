@@ -4072,6 +4072,71 @@ await run('boot gives WS.player sample(), stopSample() and the sample-change eve
   engine.close();
 });
 
+// The features on an engine with samples wired as boot wires them (WS.player.sample and its event).
+async function sampleSetup() {
+  const t = withSampler(await setup({ noFeatures: true }));
+  const onEngine = t.engine.on;
+  t.engine.on = (type, fn) => (type === 'sample-change' ? t.sampler.on(fn) : onEngine(type, fn));
+  t.engine.sample = t.sampler.sample;
+  t.engine.stopSample = t.sampler.stopSample;
+  t.engine.sampleState = t.sampler.state;
+  const matchMedia = () => ({ matches: false, addEventListener() {} });
+  t.features = F.createFeatures({
+    player: t.engine, ui: t.ui, doc: t.doc, win: t.win, fetch: t.fetch,
+    now: t.now, mono: () => t.clock.now, setTimeout: t.clock.setTimeout, clearTimeout: t.clock.clearTimeout,
+    matchMedia, isDialogOpen: () => false, pathname: () => t.path, tourActive: () => false
+  });
+  t.samplePrompt = () => t.qa('.wsp-prompt').find((p) => /^Sample/.test(p.querySelector('.wsp-notice-text').textContent)) || null;
+  return t;
+}
+
+await run('3b: a sample says so in the player\'s corner on every page: what plays, the minutes left, Stop sample', async () => {
+  const t = await sampleSetup();
+  check('nothing before a sample', !t.samplePrompt() && t.q('#wsPlayer').hidden);
+  const started = t.sampler.sample(LONG.key);
+  await t.clock.advance(10);
+  let p = t.samplePrompt();
+  check('a prompt at once, with no main book (the corner shows for it alone)', !!p && !t.q('#wsPlayer').hidden);
+  await started;
+  await t.clock.advance(1000);
+  p = t.samplePrompt();
+  const text = () => p.querySelector('.wsp-notice-text').textContent;
+  check('what plays and the minutes left', text() === 'Sample of Long: 5 min left', text());
+  check('one button: Stop sample', Array.from(p.querySelectorAll('.wsp-notice-btn')).map((b) => b.textContent).join() === 'Stop sample');
+  // The words change once a minute at most: count the writes.
+  let writes = 0;
+  // (Each write of the words adds one new text node.)
+  const obs = new t.win.MutationObserver((m) => { m.forEach((r) => { writes += r.addedNodes.length; }); });
+  obs.observe(p.querySelector('.wsp-notice-text'), { childList: true, characterData: true, subtree: true });
+  await t.clock.advance(30000);
+  await flush();
+  check('half a minute on: the same words, not rewritten every tick', text() === 'Sample of Long: 5 min left' && writes === 0, [text(), writes]);
+  await t.clock.advance(31000);
+  await flush();
+  check('a minute on: 4 min left', text() === 'Sample of Long: 4 min left', text());
+  check('written once for that minute', writes === 1, writes);
+  obs.disconnect();
+  check('the same prompt, not a new one each time', t.samplePrompt() === p && t.qa('.wsp-prompt').length === 1);
+  p.querySelector('.wsp-notice-btn').click();
+  await t.clock.advance(10);
+  check('Stop sample stops it', t.sampler.state() === null && t.sampleEvents[t.sampleEvents.length - 1].reason === 'stop');
+  check('and the prompt is gone', !t.samplePrompt());
+  t.engine.close();
+});
+
+await run('3b: the sample\'s prompt goes when it reaches 5 minutes; one that cannot play says it is unavailable right now', async () => {
+  const t = await sampleSetup();
+  await t.sampler.sample(LONG.key);
+  await t.clock.advance(301000);
+  check('5 minutes: the sample and its prompt are over', t.sampler.state() === null && !t.samplePrompt());
+  check('no error said', t.notices().every((n) => !/unavailable/.test(n)), t.notices());
+  await t.sampler.sample('999:1');
+  await t.clock.advance(100);
+  check('an error: no prompt, a notice that says what happened', !t.samplePrompt() && t.notices().indexOf('This sample is unavailable right now. Try again in a moment.') !== -1, t.notices());
+  check('as an alert', !!t.q('.wsp-notice.is-err[role="alert"]'));
+  t.engine.close();
+});
+
 await run('boot sets WS.playerFeatures once, and only with the player', async () => {
   const t = await setup({ noFeatures: true });
   t.win.WS = { player: t.engine, playerUI: t.ui };

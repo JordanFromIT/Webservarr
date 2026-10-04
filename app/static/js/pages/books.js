@@ -24,7 +24,15 @@
  *   coverBox(url, formats, signal, { badges, eager })  the 2:3 cover frame (the book page's: badges off, eager)
  *   noteLine(text)                                     a quiet line about a source that is down
  *   rememberContinue(user)                             a book was just started: the next visit holds the row's room
+ *   rememberRow(kind, user)                            the same for 'upnext' and 'mylist' (a book was just added)
+ *   sendBooks(method, url, body)                       a write to the person's own Books data
  * They touch no DOM at import time.
+ *
+ * Above the library, as Continue is, two rows of the person's own (books 3b):
+ * Up next (their queue, in order: each book with Play or Read, Move earlier,
+ * Move later and Remove) and My list (newest first). Each is hidden while it
+ * is empty, and held from the first paint for a person who had it last time,
+ * exactly as Continue is (localStorage and an <html> flag each).
  */
 
 const PAGE_SIZE = 36;
@@ -36,6 +44,12 @@ const CONTINUE_WAIT_MS = 1500;
 
 const VIEW_KEY = 'webservarr_books_view:';
 const CONTINUE_KEY = 'webservarr_books_continue:';
+// The person's own rows: where each one's memory is, its <html> flag and its host.
+const ROWS = {
+  upnext: { key: 'webservarr_books_upnext:', flag: 'data-books-upnext', host: 'upnextHost', url: '/api/books/me/queue', cache: 'books:me:queue' },
+  mylist: { key: 'webservarr_books_mylist:', flag: 'data-books-mylist', host: 'mylistHost', url: '/api/books/me/list', cache: 'books:me:list' }
+};
+const MOVE_MS = 200;               // a card trading places with its neighbour
 const GUIDE_KEY = 'webservarr_books_guide_seen:';
 // The cards have their covers by then, so the first spotlight sits on something drawn.
 const GUIDE_WAIT_MS = 900;
@@ -94,6 +108,38 @@ function isAbort(e) { return !!e && e.name === 'AbortError'; }
  */
 export function rememberContinue(user) {
   try { localStorage.setItem(CONTINUE_KEY + (user || ''), '1'); } catch (e) { /* private mode: nothing is kept */ }
+}
+
+/** The same for the person's own rows: a book was just put on My list
+    ('mylist') or in Up next ('upnext'), so the next Books visit holds that row's room. */
+export function rememberRow(kind, user) {
+  const row = ROWS[kind];
+  if (!row) return;
+  try { localStorage.setItem(row.key + (user || ''), '1'); } catch (e) { /* private mode: nothing is kept */ }
+}
+
+/**
+ * A write to the person's own Books data (My list, Up next, a rating): the
+ * answer's JSON, or an Error carrying its status. Not on a page's signal: a
+ * change the person made goes through even when they leave the page at once
+ * (the page only stops drawing its answer).
+ */
+export function sendBooks(method, url, body) {
+  const init = { method: method, credentials: 'same-origin', headers: { 'Accept': 'application/json' } };
+  if (body !== undefined) {
+    init.headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  return window.fetch(url, init).then(function (r) {
+    return r.json().then(function (d) { return d; }, function () { return null; }).then(function (data) {
+      if (!r.ok) {
+        const e = new Error('HTTP ' + r.status);
+        e.status = r.status;
+        throw e;
+      }
+      return data;
+    });
+  });
 }
 
 function el(tag, cls, text) {
@@ -326,13 +372,17 @@ export async function mount(ctx) {
     notes: { library: [], continue: [] },
     reconnectTried: false, connectProblem: false,
     stopBuildingPoll: null,
-    // The first books drawn: the toolbar, the notes and Continue are written
-    // in that one frame (commitFrame), so nothing already on screen moves.
-    committed: false, pendingContinue: null,
-    // A first ever visit has no memory of a Continue row, so the books wait for
-    // its answer (up to CONTINUE_WAIT_MS): a row that comes in after them would
-    // push them down. Later visits know (and reserve its room), so they do not wait.
-    continueSettled: false, waiting: [],
+    // The first books drawn: the toolbar, the notes, Continue, Up next and My
+    // list are written in that one frame (commitFrame), so nothing already on
+    // screen moves. pending: each row's answer ({ row }), held until then.
+    committed: false, pending: {},
+    // A visit with no memory of one of those rows (a first ever visit) has the
+    // books wait for its answer (up to CONTINUE_WAIT_MS): a row that comes in
+    // after them would push them down. Rows it remembers have their room
+    // reserved, so they are not waited for. unsettled: the rows still waited for.
+    unsettled: {}, waiting: [],
+    // Up next: its books in the order on screen; moves sent one after another.
+    queue: [], moving: 0, moveChain: null,
     // Counts every redraw of page 1, so a next page asked for before one is dropped.
     renderGen: 0, building: false, guideOffered: false,
     embed: ((ctx.data || {}).branding || {}).requests_source === 'seerr_embed'
@@ -358,16 +408,22 @@ export async function mount(ctx) {
     storageSet(VIEW_KEY + user, JSON.stringify({ format: state.format, sort: state.sort }));
   }
 
-  // The Continue row is reserved from the first paint for a person who had one
-  // last time (theme-loader.js does the same on a full load); this is the
-  // soft-navigation visit, before anything is awaited.
-  function markContinue(on) {
-    if (on) html.setAttribute('data-books-continue', '');
-    else html.removeAttribute('data-books-continue');
+  // Continue, Up next and My list are each reserved from the first paint for
+  // a person who had that row last time (theme-loader.js does the same on a
+  // full load); this is the soft-navigation visit, before anything is awaited.
+  function markRow(name, on) {
+    const flag = name === 'continue' ? 'data-books-continue' : ROWS[name].flag;
+    if (on) html.setAttribute(flag, '');
+    else html.removeAttribute(flag);
   }
-  const hint = storageGet(CONTINUE_KEY + user);
-  markContinue(hint === '1');
-  state.continueSettled = hint !== null;
+  function rowKey(name) {
+    return (name === 'continue' ? CONTINUE_KEY : ROWS[name].key) + user;
+  }
+  ['continue', 'upnext', 'mylist'].forEach(function (name) {
+    const hint = storageGet(rowKey(name));
+    markRow(name, hint === '1');
+    if (hint === null) state.unsettled[name] = true;
+  });
 
   // ---- Showing one body at a time ----
 
@@ -449,8 +505,10 @@ export async function mount(ctx) {
       so they are looked at on the live answer only: never on a copy kept from
       an earlier visit (which may be a session old), and whether or not the
       answer differs from that copy and gets drawn again. */
-  function readLive(url) {
+  function readLive(url, quietNotes) {
     return WS.getJSON(url, { signal: signal }).then(function (data) {
+      // One book's answer, read to open it from Up next (quietNotes), starts no hand-off of its own.
+      if (quietNotes) return data;
       checkReconnect(data && data.notes);
       return data;
     });
@@ -469,30 +527,48 @@ export async function mount(ctx) {
     $('toolbarSkel').classList.add('hidden');
     $('toolbar').classList.remove('hidden');
     renderNotes();
-    applyContinue();
+    applyRows();
   }
 
-  function applyContinue() {
-    const held = state.pendingContinue;
-    if (!held) return;
-    state.pendingContinue = null;
-    const host = $('continueHost');
-    host.textContent = '';
-    host.setAttribute('aria-busy', 'false');
-    if (held.row) host.appendChild(held.row);
-    markContinue(!!held.row);
+  function hostOf(name) {
+    return $(name === 'continue' ? 'continueHost' : ROWS[name].host);
   }
 
-  /** Continue has answered (or has waited long enough): what waited for it goes on. */
-  function settleContinue() {
-    state.continueSettled = true;
+  /** Every row whose answer is in goes into its host (nothing: the host hides). */
+  function applyRows() {
+    Object.keys(state.pending).forEach(function (name) {
+      const held = state.pending[name];
+      delete state.pending[name];
+      const host = hostOf(name);
+      host.textContent = '';
+      host.setAttribute('aria-busy', 'false');
+      if (held.row) host.appendChild(held.row);
+      markRow(name, !!held.row);
+    });
+  }
+
+  /** A row is drawn with the first books (commitFrame), or at once when they
+      are already in. A live answer (not a kept copy, not a failure) is what
+      the next visit remembers. */
+  function placeRow(name, row, remember) {
+    state.pending[name] = { row: row };
+    if (state.committed) applyRows();
+    if (remember) storageSet(rowKey(name), row ? '1' : '0');
+    settleRow(name);
+  }
+
+  /** A row has answered (or the wait is over): once none is waited for, what waited goes on. */
+  function settleRow(name) {
+    if (name) delete state.unsettled[name];
+    else state.unsettled = {};
+    if (Object.keys(state.unsettled).length) return;
     const go = state.waiting;
     state.waiting = [];
     go.forEach(function (fn) { fn(); });
   }
 
   function afterContinue(fn) {
-    if (state.continueSettled) fn();
+    if (!Object.keys(state.unsettled).length) fn();
     else state.waiting.push(fn);
   }
 
@@ -500,12 +576,7 @@ export async function mount(ctx) {
     if (signal.aborted) return;
     const items = (data && Array.isArray(data.items)) ? data.items : [];
     setNotes('continue', data && data.notes);
-    const row = renderContinueRow(items, [], { signal: signal });
-    // Shown with the first books (commitFrame), or at once when they are already in.
-    state.pendingContinue = { row: row };
-    if (state.committed) applyContinue();
-    if (!fromCache && !failed) storageSet(CONTINUE_KEY + user, row ? '1' : '0');
-    settleContinue();
+    placeRow('continue', renderContinueRow(items, [], { signal: signal }), !fromCache && !failed);
   }
 
   function loadContinue() {
@@ -519,6 +590,365 @@ export async function mount(ctx) {
         if (quiet(err)) return;
         // No Continue is not a reason to hold up the library.
         WS.arrive('continue', function () { renderContinue(null, false, true); });
+      }
+    });
+  }
+
+  // ---- My list and Up next ----
+
+  function player() { return (window.WS && window.WS.player) || null; }
+
+  function toast(text) {
+    if (window.WSUI && typeof window.WSUI.toast === 'function') window.WSUI.toast(text, 'err');
+  }
+
+  function rowHead(text) {
+    return el('h2', 'mb-3 font-bold leading-snug text-xl text-frosted-blue', text);
+  }
+
+  function rowList(tag) {
+    const list = el(tag, 'books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1');
+    if (window.WS && typeof window.WS.dragScroll === 'function') window.WS.dragScroll(list, { signal: signal });
+    return list;
+  }
+
+  /** My list: the person's books, newest first, as library cards. Null when empty. */
+  function myListRow(items) {
+    if (!items.length) return null;
+    const section = el('section', '');
+    section.setAttribute('aria-label', 'My list');
+    section.setAttribute('data-mylist', '');
+    section.appendChild(rowHead('My list'));
+    const list = rowList('ul');
+    items.forEach(function (card) {
+      const li = el('li', 'w-36 shrink-0');
+      li.appendChild(renderBookCard(card, { signal: signal }));
+      list.appendChild(li);
+    });
+    section.appendChild(list);
+    return section;
+  }
+
+  // Class strings are written out whole: Tailwind only builds what it can read.
+  const ROW_BTN = 'ws-lift inline-flex h-10 min-w-0 items-center justify-center gap-1 rounded-[10px] px-2 text-[15px] font-semibold ' + LINK_FOCUS;
+  const ROW_ICON = 'ws-lift grid size-10 place-items-center rounded-[10px] text-frosted-blue/70 hover:bg-frosted-blue/[0.07] hover:text-frosted-blue disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent ' + LINK_FOCUS;
+
+  /** One Up next card: the book (a link to its page) with its place in the
+      queue on the cover, Play and/or Read, and Move earlier, Move later and
+      Remove. Nothing nested: the link and the buttons are siblings. */
+  function upNextCard(card) {
+    const id = String(card.id);
+    const title = card.title || 'Untitled';
+    const li = el('li', 'w-40 shrink-0');
+    li.setAttribute('data-queued', id);
+    const a = el('a', 'group block ws-lift rounded-xl ' + LINK_FOCUS);
+    a.href = '/books/' + encodeURIComponent(id);
+    const box = coverBox(card.cover_url, card.formats, signal);
+    const place = el('span', 'absolute left-2 top-2 grid h-6 min-w-6 place-items-center rounded-full bg-background-dark/80 px-1.5 text-[13px] font-bold tabular-nums text-frosted-blue');
+    place.setAttribute('data-place', '');
+    place.setAttribute('aria-hidden', 'true');
+    box.appendChild(place);
+    a.appendChild(box);
+    a.appendChild(el('span', 'mt-2 text-[15px] font-semibold leading-snug text-frosted-blue line-clamp-2 min-h-[2.75em]', title));
+    a.appendChild(el('span', 'block text-[13px] leading-5 text-frosted-blue/70 truncate min-h-5', card.author || ''));
+    li.appendChild(a);
+
+    const formats = Array.isArray(card.formats) ? card.formats : [];
+    const go = el('div', 'mt-2 grid grid-cols-2 gap-2');
+    if (formats.indexOf('audio') !== -1) go.appendChild(openButton('play', 'play_arrow', 'Play', title, card));
+    if (formats.indexOf('ebook') !== -1) go.appendChild(openButton('read', 'menu_book', 'Read', title, card));
+    if (go.children.length === 1) go.firstChild.classList.add('col-span-2');
+    li.appendChild(go);
+
+    const tools = el('div', 'mt-1 flex items-center justify-between');
+    tools.appendChild(iconButton('earlier', 'chevron_left', 'Move ' + title + ' earlier'));
+    tools.appendChild(iconButton('later', 'chevron_right', 'Move ' + title + ' later'));
+    const gap = el('span', 'flex-1');
+    gap.setAttribute('aria-hidden', 'true');
+    tools.appendChild(gap);
+    tools.appendChild(iconButton('remove', 'close', 'Remove ' + title + ' from Up next'));
+    li.appendChild(tools);
+    return li;
+  }
+
+  function openButton(kind, name, word, title, card) {
+    const b = el('button', ROW_BTN + ' bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10');
+    b.type = 'button';
+    b.setAttribute('data-up', kind);
+    b.setAttribute('aria-label', word + ' ' + title);
+    b.appendChild(icon(name, 'text-[20px] shrink-0'));
+    const words = el('span', 'truncate', word);
+    words.setAttribute('data-word', word);
+    b.appendChild(words);
+    b.addEventListener('click', function () {
+      if (kind === 'play') playQueued(card, b); else readQueued(card, b);
+    }, { signal: signal });
+    return b;
+  }
+
+  function iconButton(kind, name, label) {
+    const b = el('button', ROW_ICON);
+    b.type = 'button';
+    b.setAttribute('data-up', kind);
+    b.setAttribute('aria-label', label);
+    b.title = label;
+    b.appendChild(icon(name, 'text-[24px]'));
+    return b;
+  }
+
+  /** Up next: the queue in order. Null when empty. */
+  function upNextRow(items) {
+    if (!items.length) return null;
+    const section = el('section', '');
+    section.setAttribute('aria-label', 'Up next');
+    section.setAttribute('data-upnext', '');
+    section.appendChild(rowHead('Up next'));
+    // An ordered list: the order is the point (a screen reader says "2 of 5").
+    const list = rowList('ol');
+    list.setAttribute('data-upnext-list', '');
+    items.forEach(function (card) { list.appendChild(upNextCard(card)); });
+    list.addEventListener('click', function (e) {
+      const b = e.target && e.target.closest ? e.target.closest('button[data-up]') : null;
+      if (!b || b.disabled) return;
+      const kind = b.getAttribute('data-up');
+      const li = b.closest('li');
+      if (kind === 'earlier' || kind === 'later') moveQueued(li, kind === 'earlier' ? -1 : 1, b);
+      else if (kind === 'remove') removeQueued(li.getAttribute('data-queued'), true);
+    }, { signal: signal });
+    section.appendChild(list);
+    syncPlaces(list);
+    return section;
+  }
+
+  function queueList() { return root.querySelector('[data-upnext-list]'); }
+
+  /** The numbers on the covers and which moves are possible, from the order on screen. */
+  function syncPlaces(list) {
+    const cards = Array.prototype.slice.call(list.children);
+    cards.forEach(function (li, i) {
+      li.querySelector('[data-place]').textContent = String(i + 1);
+      li.querySelector('[data-up="earlier"]').disabled = i === 0;
+      li.querySelector('[data-up="later"]').disabled = i === cards.length - 1;
+    });
+    state.queue = cards.map(function (li) { return li.getAttribute('data-queued'); });
+  }
+
+  function reduced() {
+    return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  /** Two cards trade places: each slides from where it was (none with reduced motion). */
+  function slide(nodes, before) {
+    if (reduced()) return;
+    nodes.forEach(function (n, i) {
+      const dx = before[i] - n.getBoundingClientRect().left;
+      if (!dx || typeof n.animate !== 'function') return;
+      n.animate([{ transform: 'translateX(' + dx + 'px)' }, { transform: 'none' }], { duration: MOVE_MS, easing: 'ease-out' });
+    });
+  }
+
+  /** Move a queued book one place earlier (-1) or later (1). The cards trade
+      places at once; the server is told, one move after another, and a move
+      it refuses puts the queue back as it has it. The focus stays on the
+      button pressed (the other move, when that one can go no further). */
+  function moveQueued(li, step, btn) {
+    const list = li.parentNode;
+    const other = step < 0 ? li.previousElementSibling : li.nextElementSibling;
+    if (!other) return;
+    const before = [li.getBoundingClientRect().left, other.getBoundingClientRect().left];
+    // The neighbour moves, not this card: a focused element taken out of the page loses the focus.
+    if (step < 0) list.insertBefore(other, li.nextSibling);
+    else list.insertBefore(other, li);
+    syncPlaces(list);
+    slide([li, other], before);
+    if (btn.disabled) {
+      const twin = li.querySelector(step < 0 ? '[data-up="later"]' : '[data-up="earlier"]');
+      if (twin && !twin.disabled) twin.focus();
+    }
+    const id = li.getAttribute('data-queued');
+    const to = state.queue.indexOf(id);
+    say((step < 0 ? 'Moved earlier, ' : 'Moved later, ') + 'now number ' + (to + 1) + ' in Up next');
+    forgetKept('upnext');
+    state.moving += 1;
+    const send = function () { return sendBooks('POST', '/api/books/me/queue/move', { book_id: parseInt(id, 10), to: to }); };
+    // The chain never rejects (each move has its own outcome), so a refused move does not stop the next.
+    state.moveChain = (state.moveChain || Promise.resolve()).then(send).then(function (data) {
+      state.moving -= 1;
+      if (signal.aborted || state.moving) return;
+      const items = data && Array.isArray(data.items) ? data.items : null;
+      // The server's order is the truth: drawn again only when it differs.
+      if (items && items.map(function (c) { return String(c.id); }).join() !== state.queue.join()) redrawQueue(items);
+    }, function () {
+      state.moving -= 1;
+      if (signal.aborted) return;
+      toast('Couldn’t move it in Up next. Try again.');
+      reloadQueue();
+    });
+  }
+
+  /** Take a book out of Up next: its card goes at once (the focus to its
+      neighbour), and comes back if the server refuses. */
+  function removeQueued(id, asked) {
+    const list = queueList();
+    const li = list && list.querySelector('[data-queued="' + id + '"]');
+    if (li) {
+      const next = li.nextElementSibling || li.previousElementSibling;
+      const hadFocus = li.contains(document.activeElement);
+      li.remove();
+      if (next) {
+        syncPlaces(list);
+        if (hadFocus) next.querySelector('[data-up="remove"]').focus();
+      } else {
+        state.queue = [];
+        placeRow('upnext', null, true);
+        if (hadFocus) focusAfterRows();
+      }
+    }
+    forgetKept('upnext');
+    sendBooks('DELETE', '/api/books/' + encodeURIComponent(id) + '/queue').then(function () {
+      if (asked) say('Removed from Up next');
+    }, function () {
+      if (signal.aborted) return;
+      if (asked) toast('Couldn’t remove it from Up next. Try again.');
+      reloadQueue();
+    });
+  }
+
+  /** After the last card of a row goes: the next thing on the page, so the focus is never lost. */
+  function focusAfterRows() {
+    const next = root.querySelector('#mylistHost a, #formatChips button');
+    if (next) next.focus();
+  }
+
+  // A screen reader hears what a press did (the cards' own text does not change).
+  function say(text) {
+    const line = $('booksSaid');
+    if (line) line.textContent = text;
+  }
+
+  /** A kept copy of a row is out of date once the person changes it here. */
+  function forgetKept(name) {
+    if (typeof WS.dropCache === 'function') WS.dropCache(ROWS[name].cache);
+  }
+
+  function redrawQueue(items) {
+    const focused = document.activeElement;
+    const which = focused && focused.closest ? focused.closest('[data-queued]') : null;
+    const kind = focused && focused.getAttribute ? focused.getAttribute('data-up') : null;
+    placeRow('upnext', upNextRow(items), true);
+    if (which && kind) {
+      const back = root.querySelector('[data-queued="' + which.getAttribute('data-queued') + '"] [data-up="' + kind + '"]');
+      if (back && !back.disabled) back.focus();
+    }
+  }
+
+  function reloadQueue() {
+    readLive(ROWS.upnext.url, true).then(function (data) {
+      if (signal.aborted) return;
+      redrawQueue(data && Array.isArray(data.items) ? data.items : []);
+    }, function () { /* the row stays as it is; the next visit reads it again */ });
+  }
+
+  /** The book's own answer (its preferred edition, its reader address), read
+      when Play or Read is pressed: a queue card does not carry them. */
+  function opening(btn, on) {
+    const words = btn.querySelector('[data-word]');
+    btn.setAttribute('aria-disabled', on ? 'true' : 'false');
+    words.textContent = on ? 'Opening…' : words.getAttribute('data-word');
+  }
+
+  function bookAnswer(card) {
+    return readLive('/api/books/' + encodeURIComponent(String(card.id)), true);
+  }
+
+  function playQueued(card, btn) {
+    if (btn.getAttribute('aria-disabled') === 'true') return;
+    const p = player();
+    if (!p || typeof p.open !== 'function') {
+      toast('The player isn’t ready yet. Try again in a moment.');
+      return;
+    }
+    opening(btn, true);
+    bookAnswer(card).then(function (data) {
+      const audio = data && data.formats && data.formats.audio;
+      const editions = audio && Array.isArray(audio.editions) ? audio.editions : [];
+      const keys = editions.map(function (e) { return e.plex_book_key; });
+      const key = keys.indexOf(audio && audio.preferred) !== -1 ? audio.preferred : keys[0];
+      if (!key) throw new Error('No audiobook to play');
+      if (signal.aborted) return null;
+      dequeueWhenPlaying(String(card.id), String(key));
+      rememberContinue(user);
+      // Where the listener left off; a failure is the player's to show.
+      return Promise.resolve(p.open(key, { autoplay: true })).catch(function (e) {
+        console.warn('The player could not open ' + key, e);
+      });
+    }).catch(function (e) {
+      if (signal.aborted || isAbort(e)) return;
+      toast('This audiobook is unavailable right now. Try again in a moment.');
+    }).then(function () {
+      if (!signal.aborted) opening(btn, false);
+    });
+  }
+
+  /** A queued book the person plays leaves Up next once it really plays (not
+      while the player holds it to ask where to start). Another book first, or
+      leaving the page, drops this. */
+  function dequeueWhenPlaying(id, key) {
+    const p = player();
+    if (!p || typeof p.on !== 'function' || typeof p.state !== 'function') return;
+    const done = new AbortController();
+    const off = p.on('change', function () {
+      const st = p.state() || {};
+      if (st.book === null || st.book === undefined || st.book === '') return;
+      if (String(st.book) !== key) { stop(); return; }
+      if (st.playing && !st.filesChanged && !st.safetyNet) {
+        stop();
+        removeQueued(id, false);
+      }
+    });
+    function stop() {
+      off();
+      done.abort();
+    }
+    signal.addEventListener('abort', stop, { once: true, signal: done.signal });
+  }
+
+  function readQueued(card, btn) {
+    if (btn.getAttribute('aria-disabled') === 'true') return;
+    opening(btn, true);
+    bookAnswer(card).then(function (data) {
+      const f = data && data.formats && data.formats.ebook;
+      const href = f && typeof f.read_url === 'string' && f.read_url.indexOf('/reader?') === 0 ? f.read_url : '';
+      if (!href) throw new Error('No ebook to read');
+      if (signal.aborted) return;
+      if (window.WS && WS.router && typeof WS.router.navigate === 'function') WS.router.navigate(href);
+      else window.location.assign(href);
+    }).catch(function (e) {
+      if (signal.aborted || isAbort(e)) return;
+      toast('This ebook is unavailable right now. Try again in a moment.');
+    }).then(function () {
+      if (!signal.aborted) opening(btn, false);
+    });
+  }
+
+  function renderMine(name, data, fromCache, failed) {
+    if (signal.aborted) return;
+    const items = (data && Array.isArray(data.items)) ? data.items : [];
+    if (name === 'upnext' && state.moving) return;    // the person is reordering: theirs is newer
+    placeRow(name, name === 'upnext' ? upNextRow(items) : myListRow(items), !fromCache && !failed);
+  }
+
+  function loadMine(name) {
+    const row = ROWS[name];
+    return WS.swr(row.cache, function () {
+      return readLive(row.url, true);
+    }, function (data, fromCache) {
+      renderMine(name, data, fromCache, false);
+    }, {
+      onError: function (err) {
+        if (quiet(err)) return;
+        // Not there (an account that keeps no books of its own) or failing: no row, and the library goes on.
+        renderMine(name, null, false, true);
       }
     });
   }
@@ -870,10 +1300,10 @@ export async function mount(ctx) {
   // remembers), and the message shows when the answer says they are not connected.
   if (window.WSKavita && typeof window.WSKavita.arrivedFromFailedConnect === 'function') window.WSKavita.arrivedFromFailedConnect();
 
-  const first = Promise.all([loadContinue(), loadLibrary(false)]);
+  const first = Promise.all([loadContinue(), loadMine('upnext'), loadMine('mylist'), loadLibrary(false)]);
   // A library that never answers does not keep the toolbar a skeleton for ever.
   ctx.setTimeout(commitFrame, 4000);
-  if (!state.continueSettled) ctx.setTimeout(settleContinue, CONTINUE_WAIT_MS);
+  if (Object.keys(state.unsettled).length) ctx.setTimeout(function () { settleRow(null); }, CONTINUE_WAIT_MS);
 
   // The sections are on screen (or their skeletons, which have their shape)
   // before mount resolves, so Back and Forward restore the scroll onto them. A
@@ -883,5 +1313,9 @@ export async function mount(ctx) {
     new Promise(function (resolve) { ctx.setTimeout(resolve, 1500); })
   ]);
 
-  return function () { markContinue(false); };
+  return function () {
+    markRow('continue', false);
+    markRow('upnext', false);
+    markRow('mylist', false);
+  };
 }

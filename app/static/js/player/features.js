@@ -114,6 +114,10 @@
  *   is hidden meanwhile and shows again once the hold is over. A queued book
  *   leaves the queue (DELETE /api/books/<id>/queue) once it really plays,
  *   not on a preview while it is held.
+ * - A sample (books 3b, WS.player.sample): while one plays, a prompt says
+ *   "Sample of <title>: N min left" with Stop sample, on every page (a
+ *   sample plays on across pages); its words change once a minute at most.
+ *   A sample that fails says it is unavailable right now.
  *
  * Pure (importable by Node, no DOM at import time):
  *   rewindFor(awayMs)                     ms to go back: 0, 3 s, 10 s or 30 s
@@ -1358,6 +1362,45 @@ export function createFeatures(env) {
       logError(e);
     }
   });
+
+  // ---- A sample playing (books 3b) ----
+
+  // A sample (engine.js sample()) plays on across pages, so the player's own
+  // corner says so while it plays: what it is, the minutes left and Stop
+  // sample. The words change at most once a minute (the notices are read out
+  // as they change). A sample that cannot play says it is unavailable.
+  let sampleNote = null;
+  let sampleWords = '';
+
+  function sampleMessage(s) {
+    const of = s.title ? 'Sample of ' + s.title : 'Sample';
+    if (s.loading && !(num(s.bookMs) > 0)) return of + ': starting';
+    return of + ': ' + Math.max(1, Math.ceil(num(s.leftMs) / 60000)) + ' min left';
+  }
+
+  function onSample(d) {
+    const s = d && d.sample;
+    if (!s) {
+      if (sampleNote) sampleNote.remove();
+      sampleNote = null;
+      sampleWords = '';
+      if (d && d.reason === 'error') ui.notify('This sample is unavailable right now. Try again in a moment.', { tone: 'err', id: 'sample' });
+      return;
+    }
+    const words = sampleMessage(s);
+    if (sampleNote && sampleNote.shown) {
+      if (words !== sampleWords) sampleNote.update({ message: words });
+    } else {
+      sampleNote = ui.prompt({
+        id: 'sample',
+        message: words,
+        actions: [{ label: 'Stop sample', run: function () { if (typeof player.stopSample === 'function') player.stopSample(); } }]
+      });
+    }
+    sampleWords = words;
+  }
+
+  player.on('sample-change', onSample);
 
   // ---- Up next ----
 
