@@ -154,6 +154,9 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         "app_name": get("branding.app_name"),
         "tagline": get("branding.tagline"),
         "logo_url": safe_logo_url(get("branding.logo_url")),
+        # The home-screen icon (manifest and apple-touch-icon), the same rule
+        # as the logo; "" (unset or unsafe) means the bundled pair.
+        "app_icon_url": safe_logo_url(get("branding.app_icon_url")),
         # Font and colours are made safe here, with the page renderer's own
         # rule: theme-loader.js applies them inline on every page, over the
         # server's #ws-theme, so a legacy or hand-edited row would otherwise

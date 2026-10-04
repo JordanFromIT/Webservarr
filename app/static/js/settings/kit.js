@@ -818,13 +818,15 @@
 
   // Saves that change what the page on screen shows from the branding, which
   // a soft navigation never replaces (app/pages.py shell_fragment):
-  //   branding.app_name     the sidebar, drawer and phone-bar name; the title
+  //   branding.app_name     the sidebar name; the title
   //   branding.tagline      the title when there is no name (and link previews)
-  //   branding.logo_url     the sidebar, drawer and phone-bar logo; the favicon
+  //   branding.logo_url     the sidebar logo; the favicon
+  //   branding.app_icon_url the home-screen icon (apple-touch-icon)
   //   icon.*                the nav icons, and the logo mark when there is no logo
   //   sidebar.*, pages.order, integration.kavita.url and integration.plex.audiobook_library
   //                         (Books shows only with one of them)
-  //                         the nav: labels, sublabels, New! flags, switches, order
+  //                         the nav, the phone's tabs and More: labels, sublabels,
+  //                         New! flags, switches, order
   //   theme.*               colours, gauge rings, font (#ws-theme and <html>),
   //                         the font stylesheet (#ws-font), custom CSS
   var SHELL_KEYS = /^(branding\.|icon\.|sidebar\.|pages\.order$|integration\.kavita\.url$|integration\.plex\.audiobook_library$|theme\.)/;
@@ -848,11 +850,12 @@
       // Two saves in a row: only the answer to the latest one is written.
       if (sig.aborted || seq !== shellSeq || !data || typeof data.nav_html !== 'string') return;
       var parts = {};
-      ['nav_html', 'brand_html', 'bar_brand_html', 'favicon', 'title', 'branding'].forEach(function (k) {
+      ['nav_html', 'brand_html', 'tabs_html', 'more_html', 'bar_title', 'touch_icon', 'favicon', 'title',
+       'branding'].forEach(function (k) {
         if (hasOwn(data, k)) parts[k] = data[k];
       });
       if (!SAFE) {
-        ['theme_css', 'font_href', 'custom_css'].forEach(function (k) { if (hasOwn(data, k)) parts[k] = data[k]; });
+        ['theme_css', 'font_href', 'custom_css', 'theme_color'].forEach(function (k) { if (hasOwn(data, k)) parts[k] = data[k]; });
       } else {
         delete parts.branding;            // its colours are not this page's
       }

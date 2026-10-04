@@ -1,10 +1,11 @@
 /**
- * Settings > General: site name, tagline, logo, and settings backup.
+ * Settings > General: site name, tagline, logo, home-screen icon, and
+ * settings backup.
  *
- * The logo upload stores the file straight away but only stages its address;
- * the setting is written when the admin presses Save, like everything else.
- * The logo address is checked by the server when it is saved (its message
- * lands on the field), never by a pattern here.
+ * A logo or icon upload stores the file straight away but only stages its
+ * address; the setting is written when the admin presses Save, like
+ * everything else. The addresses are checked by the server when they are
+ * saved (its message lands on the field), never by a pattern here.
  *
  * A page helper (spec 4.3): loading it only registers the tab. Its mount gets
  * the page's ctx (the kit passes it on each visit); every listener, timer and
@@ -17,7 +18,7 @@
   // The visit the tab was last mounted in: its signal, ctx.setTimeout and
   // ctx.clearTimeout (a re-armed timer is cancelled through the visit).
   var signal = null, later = null, cancel = function () {};
-  var TAB_KEYS = ['branding.app_name', 'branding.tagline', 'branding.logo_url'];
+  var TAB_KEYS = ['branding.app_name', 'branding.tagline', 'branding.logo_url', 'branding.app_icon_url'];
   var LOGO_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
   var MAX_LOGO_BYTES = 2 * 1024 * 1024;       // upload-logo's own limit
   var MAX_IMPORT_BYTES = 1024 * 1024;         // a real backup is a few kilobytes
@@ -38,7 +39,8 @@
     importFailed: 'The import didn’t finish. Nothing was changed. Try again.',
     importUnknown: 'Couldn’t confirm the import finished. Reload the page to see your settings.',
     dirty: 'Save or discard your changes on this tab before importing.',
-    uploading: 'Wait for the logo upload to finish, then import.'
+    uploading: 'Wait for the upload to finish, then import.',
+    notPng: 'The home-screen icon has to be a PNG image.'
   };
 
   // ---- Talking to the server ----
@@ -105,7 +107,7 @@
 
   // ---- Logo ----
 
-  // shared: {uploading, changed()}, so the backup card knows an upload is running.
+  // shared: {logo, icon, changed()}, so the backup card knows an upload is running.
   function logoCard(api, shared) {
     var c = WSSettings.card('Logo', 'Shown at the top of the sidebar and on the sign-in page.');
     var row = el('div', 'flex flex-col sm:flex-row gap-5 sm:items-start');
@@ -207,7 +209,7 @@
     function busy(on) {
       uploading = on;
       upload.setAttribute('aria-disabled', on ? 'true' : 'false');
-      shared.uploading = on;
+      shared.logo = on;
       shared.changed();
     }
     // Any other logo choice (or a Discard) wins over an upload still in
@@ -254,6 +256,139 @@
 
     // The tab waits (briefly) for the preview, so it arrives with the rest.
     return { root: c.root, ready: Promise.race([ready, new Promise(function (r) { later(r, 300); })]) };
+  }
+
+  // ---- Home-screen icon ----
+
+  // The icon a phone puts on its home screen ("Add to home screen"): the web
+  // app manifest and apple-touch-icon (app/pages.py). A square PNG; the
+  // bundled one by default. Uploads go through the logo's upload (PNG only
+  // here) and, like it, are only staged until Save.
+  function iconCard(api, shared) {
+    var c = WSSettings.card('Home-screen icon',
+      'The icon people see when they add the site to their phone’s home screen.');
+    var row = el('div', 'flex flex-col sm:flex-row gap-5 sm:items-start');
+    // An app icon's shape, at a fixed size, so nothing moves while it loads.
+    var box = el('div', 'flex items-center justify-center size-24 shrink-0 rounded-[22px] ' +
+      'bg-frosted-blue/[0.04] border border-frosted-blue/10 overflow-hidden');
+    var img = el('img', 'size-full object-cover hidden');
+    img.alt = 'Home-screen icon preview';
+    var none = el('div', 'flex flex-col items-center gap-1 px-2 text-center text-frosted-blue/60 hidden');
+    none.appendChild(icon('image', 'text-[28px]'));
+    var noneText = el('span', 'text-[13px]');
+    none.appendChild(noneText);
+    box.appendChild(img);
+    box.appendChild(none);
+
+    var controls = el('div', 'flex-1 min-w-0 space-y-4');
+    var buttons = el('div', 'flex flex-wrap gap-2');
+    var file = el('input', 'hidden');
+    file.type = 'file';
+    file.accept = 'image/png';
+    file.tabIndex = -1;
+    file.setAttribute('aria-hidden', 'true');
+    var upload = el('button', cls.btnGhost + ' aria-disabled:opacity-50 aria-disabled:cursor-not-allowed');
+    upload.type = 'button';
+    upload.appendChild(icon('upload', 'text-base'));
+    upload.appendChild(document.createTextNode('Upload a PNG'));
+    var builtIn = el('button', cls.btnQuiet, 'Use the built-in icon');
+    builtIn.type = 'button';
+    buttons.appendChild(file);
+    buttons.appendChild(upload);
+    buttons.appendChild(builtIn);
+    controls.appendChild(buttons);
+    var field = api.text({
+      key: 'branding.app_icon_url', label: 'Or use a web address', placeholder: 'https://',
+      help: 'A square PNG, 512 by 512 pixels for the sharpest result. Uploads can be up to 2 MB.'
+    });
+    controls.appendChild(field);
+    var input = field.querySelector('input');
+    input.inputMode = 'url';
+    input.spellcheck = false;
+    input.setAttribute('autocapitalize', 'off');
+    var status = el('p', 'text-[13px] text-frosted-blue/70 min-h-[1.25rem]');
+    status.setAttribute('aria-live', 'polite');
+    controls.appendChild(status);
+    row.appendChild(box);
+    row.appendChild(controls);
+    c.body.appendChild(row);
+
+    // An empty address means the built-in icon, as the server reads it.
+    function shownSrc(url) { return url || WSSettings.metaFor('branding.app_icon_url').default; }
+    var shownUrl = null, typing = null;
+    function placeholder(text) {
+      img.classList.add('hidden');
+      noneText.textContent = text;
+      none.classList.remove('hidden');
+    }
+    function paint(url) {
+      url = shownSrc(url);
+      if (url === shownUrl) return;
+      shownUrl = url;
+      img.classList.add('hidden');
+      none.classList.add('hidden');
+      img.src = url;
+    }
+    img.addEventListener('load', function () {
+      none.classList.add('hidden');
+      img.classList.remove('hidden');
+    }, { signal: signal });
+    img.addEventListener('error', function () { placeholder('Can’t show this image'); }, { signal: signal });
+    api.onChange('branding.app_icon_url', function (url) {
+      cancel(typing);
+      if (document.activeElement === input) {
+        typing = later(function () { paint(api.get('branding.app_icon_url')); }, 400);
+      } else {
+        paint(url);
+      }
+    });
+    paint(api.get('branding.app_icon_url'));
+
+    var seq = 0, uploading = false;
+    function say(text) { status.textContent = text; }
+    function busy(on) {
+      uploading = on;
+      upload.setAttribute('aria-disabled', on ? 'true' : 'false');
+      shared.icon = on;
+      shared.changed();
+    }
+    function cancelUpload() { seq += 1; busy(false); }
+
+    builtIn.addEventListener('click', function () {
+      cancelUpload();
+      say('');
+      api.set('branding.app_icon_url', WSSettings.metaFor('branding.app_icon_url').default);
+    }, { signal: signal });
+    input.addEventListener('input', function () { cancelUpload(); say(''); }, { signal: signal });
+    upload.addEventListener('click', function () { if (!uploading) file.click(); }, { signal: signal });
+    file.addEventListener('change', function () {
+      var f = file.files[0];
+      file.value = '';
+      if (!f) return;
+      if (f.type !== 'image/png') { say(''); WSSettings.toast(MSG.notPng, 'err'); return; }
+      if (f.size > MAX_LOGO_BYTES) { say(''); WSSettings.toast(MSG.bigImage, 'err'); return; }
+      var mine = ++seq;
+      busy(true);
+      say('Uploading…');
+      var fd = new FormData();
+      fd.append('file', f);
+      request('/api/admin/upload-logo', { method: 'POST', body: fd }).then(function (res) {
+        if (mine !== seq) return;
+        busy(false);
+        var url = res.status === 200 && res.data && typeof res.data.url === 'string' ? res.data.url : '';
+        if (!url) {
+          say('');
+          if (res.status === 200) WSSettings.toast(MSG.uploadFailed, 'err');
+          else tell(res, { 400: MSG.notPng, 413: MSG.bigImage, 415: MSG.notPng, fallback: MSG.uploadFailed });
+          return;
+        }
+        api.set('branding.app_icon_url', url);
+        say('Uploaded. Press Save to use it.');
+      });
+    }, { signal: signal });
+    api.onSaved(function () { say(''); });
+    api.onDiscard(function () { cancelUpload(); say(''); });
+    return c.root;
   }
 
   // ---- Backup ----
@@ -454,8 +589,9 @@
   }
 
   // locked: the tab's other cards, which can't be edited while an import runs
-  // (the upload button included). shared: the logo upload's state; an import
-  // waits for an upload to finish, whose answer the reload would lose.
+  // (the upload buttons included). shared: the logo and icon uploads' state
+  // (shared.logo, shared.icon); an import waits for an upload to finish, whose
+  // answer the reload would lose.
   function backupCard(api, locked, shared) {
     var c = WSSettings.card('Backup',
       'Save your settings to a file, or restore them from one. Passwords, tokens and API keys are never included.');
@@ -489,13 +625,14 @@
     // makes the admin save or discard them.
     function sync() {
       var dirty = api.dirtyKeys().length > 0;
-      imp.disabled = dirty || shared.uploading;
+      var uploading = shared.logo || shared.icon;
+      imp.disabled = dirty || uploading;
       imp.setAttribute('aria-disabled', importing ? 'true' : 'false');
       locked.forEach(function (n) {
         n.inert = importing;
         if (importing) n.setAttribute('aria-busy', 'true'); else n.removeAttribute('aria-busy');
       });
-      note.textContent = dirty ? MSG.dirty : shared.uploading ? MSG.uploading
+      note.textContent = dirty ? MSG.dirty : uploading ? MSG.uploading
         : 'Importing shows every change first. Nothing is applied until you confirm.';
     }
     shared.changed = sync;
@@ -514,14 +651,14 @@
       });
     }, { signal: signal });
     imp.addEventListener('click', function () {
-      if (!importing && !shared.uploading && !api.dirtyKeys().length) file.click();
+      if (!importing && !shared.logo && !shared.icon && !api.dirtyKeys().length) file.click();
     }, { signal: signal });
     file.addEventListener('change', function () {
       var f = file.files[0];
       file.value = '';
       if (!f) return;
       // An upload may have started while the file chooser was open.
-      if (shared.uploading) { WSSettings.toast(MSG.uploading, 'err'); return; }
+      if (shared.logo || shared.icon) { WSSettings.toast(MSG.uploading, 'err'); return; }
       if (api.dirtyKeys().length) { WSSettings.toast(MSG.dirty, 'err'); return; }
       importing = true;
       sync();
@@ -544,12 +681,14 @@
       signal = ctx.signal;
       later = ctx.setTimeout;
       cancel = ctx.clearTimeout;
-      var shared = { uploading: false, changed: function () {} };
+      var shared = { logo: false, icon: false, changed: function () {} };
       var site = siteCard(api);
       var logo = logoCard(api, shared);
+      var appIcon = iconCard(api, shared);
       panel.appendChild(site);
       panel.appendChild(logo.root);
-      panel.appendChild(backupCard(api, [site, logo.root], shared));
+      panel.appendChild(appIcon);
+      panel.appendChild(backupCard(api, [site, logo.root, appIcon], shared));
       return logo.ready;
     }
   });

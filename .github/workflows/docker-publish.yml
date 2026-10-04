@@ -110,6 +110,8 @@ jobs:
           node app/tests/js/books_stats.mjs
           node app/tests/js/home_continue.mjs
           node app/tests/js/settings_books.mjs
+          node app/tests/js/phone_nav.mjs
+          node app/tests/js/install.mjs
 
   build-and-push:
     needs: [test, js-checks]

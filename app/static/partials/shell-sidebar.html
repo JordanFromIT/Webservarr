@@ -1,16 +1,17 @@
 <!--
-  Page shell: desktop sidebar, mobile top bar, mobile drawer, scroll hint.
+  Page shell: desktop sidebar; on phones (below lg) the top bar, the bottom
+  tab bar and the More sheet; the scroll hint.
 
   Rendered on the server for the signed-in user and the operator's branding
   (app/pages.py fills the placeholders), so it is in the document before
   any script runs and is identical on every page. shell.js only wires the
-  drawer, menus and logout. Nothing here is constructed by JavaScript.
+  More sheet, menus and logout. Nothing here is constructed by JavaScript.
 
-  The logo and name ([data-ws-brand], from shell-brand.html) and the phone
-  bar's name or logo ([data-ws-bar-brand], from shell-bar-brand.html; its
-  box is display:contents, so the bar lays out as before) are their own
-  partials: GET /api/admin/settings/shell sends them again, filled the same
-  way, and Settings writes them in after a save, as it does the nav.
+  The logo and name ([data-ws-brand], from shell-brand.html), the nav, the
+  tabs (#wsTabList), the More sheet's pages (#wsMoreNav) and the top bar's
+  words (#wsBarTitle) are sent again by GET /api/admin/settings/shell,
+  rendered the same way, and Settings writes them in after a save.
+  Phone navigation: docs/superpowers/specs/2026-10-04-mobile-nav-and-home-screen-design.md.
 -->
 <aside id="desktopSidebar" class="hidden lg:flex w-64 bg-baltic-blue/20 border-r border-steel-blue/30 flex-col h-screen shrink-0">
   <div class="p-6 flex flex-col items-center" data-ws-brand>
@@ -24,60 +25,76 @@
   </div>
 </aside>
 
-<div id="mobileTopBar" class="lg:hidden sticky top-0 z-40 h-14 bg-background-dark/80 backdrop-blur-md border-b border-steel-blue/20 flex items-center justify-between px-4">
-  <button id="hamburgerBtn" class="p-2 text-steel-blue hover:text-frosted-blue transition-colors" aria-label="Open menu">
-    <span class="material-symbols-outlined">menu</span>
-  </button>
-  <span class="contents" data-ws-bar-brand>
-{{{bar_brand_html}}}
-  </span>
-  <div class="relative flex items-center gap-1 sm:gap-2 min-w-0">
-    <button class="relative p-1.5 sm:p-2 text-steel-blue hover:text-frosted-blue transition-colors shrink-0" title="Notifications" aria-label="Notifications">
-      <span class="material-symbols-outlined">notifications</span>
-    </button>
-    <button id="mobileUserMenuBtn" class="flex items-center gap-1.5 sm:gap-2 cursor-pointer hover:opacity-80 transition-opacity min-w-0" aria-label="Account menu">
-      <div class="text-right min-w-0">
-        <p id="mobileUsername" class="text-xs font-bold text-frosted-blue leading-none truncate max-w-[80px] sm:max-w-[120px]">{{user_name}}</p>
-        <p id="mobileRole" class="text-[10px] text-steel-blue hidden sm:block">{{user_role}}</p>
-      </div>
-    </button>
-    <div id="mobileUserMenuDropdown" class="ws-pop hidden absolute right-0 top-full mt-2 w-48 bg-background-dark/95 border border-steel-blue/30 rounded-xl shadow-xl py-2 z-50">
-      <a href="/settings#sign-in" class="flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors {{admin_block}}">
-        <span class="material-symbols-outlined text-steel-blue text-sm">manage_accounts</span>
-        Account settings
-      </a>
-      <button data-logout class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-frosted-blue hover:bg-primary/20 transition-colors text-left">
-        <span class="material-symbols-outlined text-steel-blue text-sm">logout</span>
-        Sign Out
+<!-- Phone top bar: where you are, and the bell. Account and sign-out are in
+     More. The bell's parent is the positioned box its panel drops from. -->
+<div id="mobileTopBar" class="lg:hidden sticky top-0 z-40 bg-background-dark/80 backdrop-blur-md border-b border-steel-blue/20">
+  <div class="h-14 flex items-center justify-between gap-3 px-4">
+    <p id="wsBarTitle" class="min-w-0 truncate text-[17px] font-bold tracking-[-0.02em] text-frosted-blue">{{bar_title}}</p>
+    <div class="relative flex items-center shrink-0">
+      <button class="relative inline-flex p-2.5 -mr-2.5 rounded-full text-steel-blue hover:text-frosted-blue transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-frosted-blue" title="Notifications" aria-label="Notifications">
+        <span class="material-symbols-outlined">notifications</span>
       </button>
     </div>
   </div>
 </div>
 
-<div id="drawerOverlay" class="lg:hidden fixed inset-0 z-50 ws-scrim hidden" style="backdrop-filter:blur(2px)">
-  <aside id="drawerPanel" class="w-72 bg-background-dark border-r border-steel-blue/30 h-full flex flex-col transform -translate-x-full">
-    <div class="p-6">
-      <div class="flex items-center justify-between mb-3">
-        <div class="flex-1"></div>
-        <button id="drawerCloseBtn" class="p-1 text-steel-blue hover:text-frosted-blue transition-colors" aria-label="Close menu">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </div>
-      <div class="flex flex-col items-center" data-ws-brand>
-{{{brand_html}}}
-      </div>
+<!-- Phone tab bar: the first four pages the user can see, then More
+     (app/pages.py render_tabs). theme.css .ws-tabbar. -->
+<nav id="wsTabBar" class="ws-tabbar lg:hidden" aria-label="Main">
+  <ul id="wsTabList" class="ws-tabbar-list">
+{{{tab_links}}}
+  </ul>
+</nav>
+
+<!-- More: a modal sheet from the bottom (shell.js wireSheet). The pages the
+     tab bar has no room for, then the home-screen row (install.js), Account
+     settings (admins) and Sign out. -->
+<dialog id="wsMoreSheet" class="ws-sheet" aria-labelledby="wsMoreTitle">
+  <div class="ws-sheet-scrim" data-sheet-close></div>
+  <div class="ws-sheet-panel" data-sheet-panel>
+    <div class="ws-sheet-head">
+      <span class="ws-sheet-grip" aria-hidden="true"></span>
+      <h2 id="wsMoreTitle" class="ws-sheet-title">More</h2>
+      <button type="button" class="ws-sheet-close" data-sheet-close aria-label="Close"><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
     </div>
-    <nav id="drawerNav" class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1" aria-label="Main">
-{{{nav_links}}}
+    <nav class="ws-sheet-pages" aria-label="More pages">
+      <ul id="wsMoreNav" class="ws-sheet-list">
+{{{more_links}}}
+      </ul>
     </nav>
-    <div class="p-4 border-t border-steel-blue/20">
-      <button data-logout class="w-full flex items-center justify-center gap-2 py-2 text-sm font-medium text-steel-blue hover:text-frosted-blue transition-colors">
-        <span class="material-symbols-outlined text-sm">logout</span> Sign Out
-      </button>
-      <p class="appVersionMobile text-steel-blue text-[10px] text-center mt-2 {{admin_block}}">{{version}}</p>
-    </div>
-  </aside>
-</div>
+    <ul class="ws-sheet-list ws-sheet-account">
+      <li data-install-row hidden>
+        <button type="button" class="ws-sheet-row" data-install-action aria-expanded="false" aria-controls="wsInstallHelp">
+          <span class="material-symbols-outlined ws-sheet-row-icon" aria-hidden="true">add_to_home_screen</span>
+          <span class="ws-sheet-row-text"><span class="ws-sheet-row-line"><span class="ws-sheet-row-label">Add to home screen</span></span><span class="ws-sheet-row-sub">Open {{install_name}} like an app</span></span>
+        </button>
+        <div id="wsInstallHelp" class="ws-install-help" hidden>
+          <ol class="ws-install-steps" data-install-steps="ios" hidden>
+            <li><span class="ws-step-n" aria-hidden="true">1</span><span>Tap <span class="material-symbols-outlined ws-step-glyph" aria-hidden="true">ios_share</span> <strong>Share</strong> in the browser toolbar</span></li>
+            <li><span class="ws-step-n" aria-hidden="true">2</span><span>Tap <strong>Add to Home Screen</strong></span></li>
+          </ol>
+          <ol class="ws-install-steps" data-install-steps="menu" hidden>
+            <li><span class="ws-step-n" aria-hidden="true">1</span><span>Open the browser menu <span class="material-symbols-outlined ws-step-glyph" aria-hidden="true">more_vert</span></span></li>
+            <li><span class="ws-step-n" aria-hidden="true">2</span><span>Tap <strong>Add to Home screen</strong> or <strong>Install app</strong></span></li>
+          </ol>
+        </div>
+      </li>
+      <li class="{{admin_block}}">
+        <a class="ws-sheet-row" href="/settings#sign-in">
+          <span class="material-symbols-outlined ws-sheet-row-icon" aria-hidden="true">manage_accounts</span>
+          <span class="ws-sheet-row-text"><span class="ws-sheet-row-line"><span class="ws-sheet-row-label">Account settings</span></span><span class="ws-sheet-row-sub">How people sign in, and who is an admin</span></span>
+        </a>
+      </li>
+      <li>
+        <button type="button" class="ws-sheet-row" data-logout>
+          <span class="material-symbols-outlined ws-sheet-row-icon" aria-hidden="true">logout</span>
+          <span class="ws-sheet-row-text"><span class="ws-sheet-row-line"><span class="ws-sheet-row-label">Sign out</span></span><span class="ws-sheet-row-sub">Signed in as {{user_name}}</span></span>
+        </button>
+      </li>
+    </ul>
+    <p class="ws-sheet-version {{admin_block}}">{{version}}</p>
+  </div>
+</dialog>
 
 <!-- Scroll-down hint (mobile only). shell.js shows it only while there is
      content below the fold and hides it at the bottom. -->
@@ -89,6 +106,11 @@
      runs here, before any page script and before router.js, and the pages
      do not load it again. -->
 <script src="/static/js/ui.js?v=1"></script>
+
+<!-- "Add to home screen" (install.js, WS.install): the More sheet's row and
+     Home's card. Before the router, so Home's first mount finds it. A module
+     runs after the page is parsed, so shell.js has made window.WS. -->
+<script type="module" src="/static/js/install.js?v=1"></script>
 
 <!-- Soft navigation (router.js). A module runs after the page is parsed, so
      shell.js (a classic script at the end of every page) has made window.WS. -->

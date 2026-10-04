@@ -192,6 +192,113 @@ def font_href(branding: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# The home-screen app: manifest, icons, browser colour
+# ---------------------------------------------------------------------------
+#
+# Every page (and /login) links /manifest.webmanifest, an apple-touch-icon and
+# a theme-color, so a phone can add the site to its home screen and open it
+# full-screen. All of it follows the branding: the site name, the background
+# colour and the operator's "Home-screen icon" (branding.app_icon_url), whose
+# default is the bundled pair below. Design:
+# docs/superpowers/specs/2026-10-04-mobile-nav-and-home-screen-design.md, Part 2.
+
+APP_ICON_192 = "/static/webservarr-app-192.png"
+APP_ICON_512 = "/static/webservarr-app-512.png"
+# The bundled icon keeps its artwork inside the centre 80% circle, so it is
+# also safe for launchers that crop icons to their own shape (maskable).
+_BUNDLED_ICONS = (
+    {"src": APP_ICON_192, "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": APP_ICON_512, "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": APP_ICON_512, "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+)
+_ICON_TYPES = {".png": "image/png", ".webp": "image/webp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+# Browsers want a square icon of at least this size before they offer to install.
+_MIN_ICON_PX = 144
+# Copy that stands in for the site's name when the operator left it empty.
+NO_NAME = "this site"
+
+
+def _custom_app_icon(branding: dict) -> str:
+    """The operator's own home-screen icon, or "" for the bundled pair."""
+    v = _safe_url(branding.get("app_icon_url"))
+    return "" if v == APP_ICON_512 else v
+
+
+def touch_icon(branding: dict) -> str:
+    """The apple-touch-icon (and Home's "Add to home screen" picture)."""
+    return _custom_app_icon(branding) or APP_ICON_192
+
+
+def theme_color(branding: dict) -> str:
+    """The browser's colour around the page: the theme's background, so the
+    status bar and the installed app's title bar match the top bar."""
+    return safe_color("theme.color_background", (branding.get("colors") or {}).get("background"))
+
+
+def _png_size(static_path: str):
+    """(width, height) of a PNG under /static/, or None."""
+    got = _read_static_bytes(static_path)
+    if not got:
+        return None
+    data = got[0]
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+def app_icons(branding: dict) -> list:
+    """The manifest's icons. A file on this site declares its real size (a
+    browser ignores an icon whose size is wrong) and falls back to the bundled
+    pair when it is not a square PNG a browser would accept; a web address
+    can't be measured here, so it declares the size the setting asks for."""
+    bundled = [dict(i) for i in _BUNDLED_ICONS]
+    src = _custom_app_icon(branding)
+    if not src:
+        return bundled
+    path = urllib.parse.urlsplit(src).path if src.startswith("/") else ""
+    if path.startswith("/static/"):
+        size = _png_size(path)
+        if not size or size[0] != size[1] or size[0] < _MIN_ICON_PX:
+            return bundled
+        return [{"src": src, "sizes": f"{size[0]}x{size[1]}", "type": "image/png", "purpose": "any"}]
+    icon = {"src": src, "sizes": "512x512", "purpose": "any"}
+    kind = _ICON_TYPES.get(os.path.splitext(urllib.parse.urlsplit(src).path)[1].lower())
+    if kind:
+        icon["type"] = kind
+    return [icon]
+
+
+def web_manifest(branding: dict) -> dict:
+    """GET /manifest.webmanifest. An installed app always has a name: the
+    site's, else its tagline, else the shipped one."""
+    tagline = (branding.get("tagline") or "").strip()
+    name = _site_name(branding) or tagline or _REGISTRY["branding.app_name"].default
+    colour = theme_color(branding)
+    manifest = {
+        "id": "/",
+        "name": name,
+        "short_name": name,
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": colour,
+        "theme_color": colour,
+        "icons": app_icons(branding),
+    }
+    if tagline:
+        manifest["description"] = tagline
+    return manifest
+
+
+def app_head_links(branding: dict) -> str:
+    return (
+        '<link rel="manifest" href="/manifest.webmanifest">'
+        f'<link rel="apple-touch-icon" href="{html.escape(touch_icon(branding), quote=True)}">'
+        f'<meta name="theme-color" content="{theme_color(branding)}">'
+    )
+
+
+# ---------------------------------------------------------------------------
 # Data block and user
 # ---------------------------------------------------------------------------
 
@@ -318,6 +425,91 @@ def visible_nav_items(branding: dict, is_admin: bool) -> list:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Phone navigation (below lg): the tab bar, the More sheet, the top bar
+# ---------------------------------------------------------------------------
+#
+# The first TAB_COUNT pages the user can see, in the operator's order, are
+# tabs; the last tab is always More, which holds the rest of the pages and
+# then "Add to home screen", Account settings and Sign out (the partial).
+# More stays even when every page fits as a tab, since sign-out lives there.
+# Design: docs/superpowers/specs/2026-10-04-mobile-nav-and-home-screen-design.md.
+# The active tab is marked by aria-current, which theme.css draws (a filled
+# icon on a primary pill, a bolder label), so it never rests on colour alone.
+
+TAB_COUNT = 4
+
+_TAB = (
+    '<li><a class="ws-navtab" href="{href}"{current}>'
+    '<span class="ws-navtab-icon"><span class="material-symbols-outlined" aria-hidden="true">{icon}</span>{badge}</span>'
+    '<span class="ws-navtab-label">{label}</span></a></li>'
+)
+_TAB_BADGE = '<span data-badge="{bid}" class="ws-navtab-badge hidden"></span>'
+# aria-current="true" (not "page"): More is the current tab while the page is
+# one of its rows; the row itself carries aria-current="page".
+_MORE_TAB = (
+    '<li><button type="button" id="wsMoreBtn" class="ws-navtab" aria-haspopup="dialog" aria-expanded="false" '
+    'aria-controls="wsMoreSheet"{current}>'
+    '<span class="ws-navtab-icon"><span class="material-symbols-outlined" aria-hidden="true">more_horiz</span></span>'
+    '<span class="ws-navtab-label">More</span></button></li>'
+)
+_ROW = (
+    '<li><a class="ws-sheet-row" href="{href}"{current}>'
+    '<span class="material-symbols-outlined ws-sheet-row-icon" aria-hidden="true">{icon}</span>'
+    '<span class="ws-sheet-row-text"><span class="ws-sheet-row-line"><span class="ws-sheet-row-label">{label}</span>'
+    '{flag}</span>{sub}</span>{badge}</a></li>'
+)
+_ROW_SUB = '<span class="ws-sheet-row-sub">{sub}</span>'
+_ROW_BADGE = '<span data-badge="{bid}" class="ws-sheet-badge hidden"></span>'
+
+
+def phone_nav_items(branding: dict, is_admin: bool) -> tuple:
+    """(tabs, more): the pages this user sees, split where the tab bar ends."""
+    items = visible_nav_items(branding, is_admin)
+    return items[:TAB_COUNT], items[TAB_COUNT:]
+
+
+def render_tabs(tabs: list, more: list, active_id: Optional[str]) -> str:
+    parts = []
+    for it in tabs:
+        badge = _TAB_BADGE.format(bid=html.escape(it["badge"], quote=True)) if it.get("badge") else ""
+        parts.append(_TAB.format(
+            href=html.escape(it["href"], quote=True),
+            current=' aria-current="page"' if it["id"] == active_id else "",
+            icon=html.escape(it["icon"]),
+            badge=badge,
+            label=html.escape(it["label"]),
+        ))
+    in_more = any(it["id"] == active_id for it in more)
+    parts.append(_MORE_TAB.format(current=' aria-current="true"' if in_more else ""))
+    return "\n".join(parts)
+
+
+def render_more_links(more: list, active_id: Optional[str]) -> str:
+    parts = []
+    for it in more:
+        sub = it.get("sublabel") or ""
+        parts.append(_ROW.format(
+            href=html.escape(it["href"], quote=True),
+            current=' aria-current="page"' if it["id"] == active_id else "",
+            icon=html.escape(it["icon"]),
+            label=html.escape(it["label"]),
+            flag=_NEW_FLAG if it["new"] else "",
+            sub=_ROW_SUB.format(sub=html.escape(sub)) if sub else "",
+            badge=_ROW_BADGE.format(bid=html.escape(it["badge"], quote=True)) if it.get("badge") else "",
+        ))
+    return "\n".join(parts)
+
+
+def bar_title(branding: dict, active_id: Optional[str], static_title: str = "") -> str:
+    """The phone top bar's words: the label of the nav item the page belongs
+    to (the operator's, so it matches the tab), else the page's own title."""
+    if active_id:
+        return (branding.get("sidebar_labels") or {}).get(active_id) or PAGE_DEFAULTS[active_id][0]
+    m = _TITLE_SUFFIX_RE.match(static_title or "")
+    return m.group("suffix") if m else ""
+
+
 def page_is_off(page_id: str, branding: dict) -> bool:
     """True when the operator switched this page off (Settings > Pages).
     Home and Settings cannot be switched off."""
@@ -367,6 +559,10 @@ def render_nav_links(branding: dict, is_admin: bool, active_id: Optional[str]) -
 
 SIDEBAR_MARKER = "<!-- ws:sidebar -->"
 HEADER_MARKER = "<!-- ws:header -->"
+# In page copy: the site's name, HTML-escaped (render_html).
+APP_NAME_MARKER = "<!-- ws:app-name -->"
+# An <img data-ws-app-icon src="..."> shows the home-screen icon (render_html).
+_APP_ICON_IMG_RE = re.compile(r'(<img data-ws-app-icon src=")[^"]*(")')
 
 
 def _partial(filename: str) -> str:
@@ -400,10 +596,12 @@ def _site_name(branding: dict) -> str:
     return str(value).strip()
 
 
-def shell_values(branding: dict, user: Optional[dict], version: str, name: str) -> dict:
+def shell_values(branding: dict, user: Optional[dict], version: str, name: str, static_title: str = "") -> dict:
     is_admin = bool(user and user.get("is_admin"))
     icons = branding.get("icons") or {}
     site_name = _site_name(branding)
+    active = PAGE_NAV.get(name)
+    tabs, more = phone_nav_items(branding, is_admin)
 
     logo = _safe_url(branding.get("logo_url"))
     logo_icon = html.escape(icons.get("sidebar_logo") or _REGISTRY["icon.sidebar_logo"].default)
@@ -422,20 +620,6 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
             '</div>'
         )
 
-    # The phone top bar carries the site name; with no name it carries the
-    # logo instead, so the bar is never unbranded. A fixed box again, so the
-    # image arriving cannot move the buttons either side of it.
-    bar_logo_html = ""
-    if not site_name:
-        if logo:
-            mark = (f'<img src="{html.escape(logo, quote=True)}" alt="" '
-                    'class="h-8 w-24 object-contain">')
-        else:
-            mark = ('<span class="size-8 bg-primary rounded-md flex items-center justify-center">'
-                    f'<span class="material-symbols-outlined text-bright text-xl">{logo_icon}</span>'
-                    '</span>')
-        bar_logo_html = f'<a href="/" aria-label="Home" class="flex items-center justify-center max-w-[40%]">{mark}</a>'
-
     avatar = (user or {}).get("avatar_url") or ""
     avatar_style = ""
     if avatar:
@@ -449,16 +633,20 @@ def shell_values(branding: dict, user: Optional[dict], version: str, name: str) 
         # May be empty (Settings > General): the sidebar then shows the logo alone.
         "app_name": site_name,
         "app_name_cls": "" if site_name else "hidden",
-        "bar_logo_html": bar_logo_html,
         "logo_html": logo_html,
     }
     return {
         **brand,
-        # The logo and name as the sidebar, the drawer and the phone bar show
-        # them; also sent by GET /api/admin/settings/shell (shell_fragment).
+        # The logo and name as the sidebar shows them; also sent by GET
+        # /api/admin/settings/shell (shell_fragment).
         "brand_html": fill(_partial("shell-brand.html"), brand).strip(),
-        "bar_brand_html": fill(_partial("shell-bar-brand.html"), brand).strip(),
-        "nav_links": render_nav_links(branding, is_admin, PAGE_NAV.get(name)),
+        "nav_links": render_nav_links(branding, is_admin, active),
+        # Phones: the tab bar, the More sheet's pages, the top bar's words.
+        "tab_links": render_tabs(tabs, more, active),
+        "more_links": render_more_links(more, active),
+        "bar_title": bar_title(branding, active, static_title),
+        # "Add to home screen": the site's name, or words that stand in for one.
+        "install_name": site_name or NO_NAME,
         "version": ("v" + version) if version else "",
         "admin_block": "" if is_admin else "hidden",
         "user_name": (user or {}).get("display_name") or (user or {}).get("username") or "",
@@ -578,16 +766,23 @@ def page_title(branding: dict, static_title: str) -> str:
 def shell_fragment(branding: dict, is_admin: bool, active_id: Optional[str], static_title: str) -> dict:
     """Everything a page already on screen shows from the branding and the
     router never swaps (only #wsPage, the title and <html> flags change on a
-    soft navigation): the nav, the logo and name, the <head> theme, font and
-    custom CSS, the favicon, the page's title, and the payload itself.
+    soft navigation): the nav, the phone's tab bar, More pages and top-bar
+    words, the logo and name, the <head> theme, font, custom CSS and browser
+    colour, the favicon and home-screen icon, the page's title, and the
+    payload itself.
     GET /api/admin/settings/shell sends it; Settings writes it in after a save.
     Rendered by the same code as every page, so it cannot drift."""
     values = shell_values(branding, {"is_admin": is_admin}, "", "")
     custom = branding.get("custom_css")
+    tabs, more = phone_nav_items(branding, is_admin)
     return {
         "nav_html": render_nav_links(branding, is_admin, active_id),
         "brand_html": values["brand_html"],
-        "bar_brand_html": values["bar_brand_html"],
+        "tabs_html": render_tabs(tabs, more, active_id),
+        "more_html": render_more_links(more, active_id),
+        "bar_title": bar_title(branding, active_id, static_title),
+        "theme_color": theme_color(branding),
+        "touch_icon": touch_icon(branding),
         "theme_css": theme_css(branding),
         "font_href": font_href(branding),
         "custom_css": custom if isinstance(custom, str) and custom.strip() else "",
@@ -606,7 +801,7 @@ def _inject_head(content: str, branding: dict, user: Optional[dict], version: st
     # A page with no descriptive title of its own, on a site with no name,
     # falls back to the tagline (or nothing) rather than a dangling " - ".
     bare_title = app_name or (branding.get("tagline") or "").strip()
-    extra = "\n".join([tags, theme_style(branding), font_links(branding),
+    extra = "\n".join([tags, app_head_links(branding), theme_style(branding), font_links(branding),
                        data_block(branding, user, version, name, setup)])
 
     def _rewrite(match):
@@ -744,6 +939,21 @@ def _tag_page_styles(content: str) -> str:
     return head + content[head_end:]
 
 
+# A shell page covers the whole screen (viewport-fit=cover), so the phone's
+# tab bar can pad for the home indicator with env(safe-area-inset-bottom),
+# which is 0 otherwise. Added here, once, rather than in every page file.
+_VIEWPORT_RE = re.compile(r'(<meta\b[^>]*\bcontent=")([^"]*)("[^>]*\bname="viewport"[^>]*>)', re.IGNORECASE)
+
+
+def _cover_viewport(content: str) -> str:
+    def _sub(m):
+        value = m.group(2)
+        if "viewport-fit" not in value:
+            value = value.rstrip(" ,") + ", viewport-fit=cover"
+        return m.group(1) + value + m.group(3)
+    return _VIEWPORT_RE.sub(_sub, content, count=1)
+
+
 def _add_shell_slots(content: str) -> str:
     at = content.lower().rfind("</body>")
     if at == -1:
@@ -760,12 +970,20 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
     <html data-safe-theme>, which shows its notice and keeps colour previews
     in the preview cards."""
     safe = bool(flags.get("safe_theme"))
+    title = _TITLE_RE.search(page_html)
+    static_title = title.group(0)[len("<title>"):-len("</title>")] if title else ""
     out = _inject_head(_tag_page_styles(page_html), branding, user, version, name, base_url, path,
                        flags.get("setup"), custom_css=not safe)
 
+    # Page copy that names the site ("Add <name> to your home screen") and
+    # shows its home-screen icon, written by the server like the shell is.
+    out = out.replace(APP_NAME_MARKER, html.escape(_site_name(branding) or NO_NAME))
+    out = _APP_ICON_IMG_RE.sub(lambda m: m.group(1) + html.escape(touch_icon(branding), quote=True) + m.group(2), out)
+
     if SIDEBAR_MARKER in out or HEADER_MARKER in out:
+        out = _cover_viewport(out)
         out = _add_shell_slots(out)
-        values = shell_values(branding, user, version, name)
+        values = shell_values(branding, user, version, name, static_title)
         out = out.replace(SIDEBAR_MARKER, fill(_partial("shell-sidebar.html"), values), 1)
         header = fill(_partial("shell-header.html"), values)
         if flags.get("page_off"):

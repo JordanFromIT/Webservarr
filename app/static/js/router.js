@@ -2,7 +2,7 @@
  * WebServarr — soft navigation router (ES module)
  *
  * Moving between converted pages swaps only #wsPage. The sidebar, header,
- * mobile bar and #wsPlayer are never torn down, so whatever lives in them
+ * phone's bars and #wsPlayer are never torn down, so whatever lives in them
  * (audio, later) keeps going. Design: docs/superpowers/specs/
  * 2026-09-27-soft-navigation-design.md, sections 4 and 5.
  *
@@ -27,7 +27,7 @@
  * once. Without the flag neither loads; anyone else's flag is ignored and
  * cleared.
  *
- * While a navigation loads: the drawer and menus close at once, a thin bar
+ * While a navigation loads: the More sheet and menus close at once, a thin bar
  * (#wsProgress) shows after 150 ms, and the same address again waits for it.
  * A fetched page from another deploy (its #ws-data version, or the stamp on
  * a shared file or loaded helper, differs) is loaded by full navigation.
@@ -692,7 +692,7 @@ function start() {
     showBusy(false);
   }
 
-  // The drawer and the header menus close as soon as a link is taken, not
+  // The More sheet and the header menus close as soon as a link is taken, not
   // when the new page arrives (shell.js).
   function closeChrome() {
     if (typeof WS.closeChrome === 'function') WS.closeChrome();
@@ -719,7 +719,7 @@ function start() {
     }) || null;
   }
 
-  /* Before the page under them changes: the drawer and the header menus
+  /* Before the page under them changes: the More sheet and the header menus
      (shell.js), and any open dialog, answered as its Cancel or Escape would
      be, so no page is left waiting on it (ui.js). */
   function closeOverlays() {
@@ -753,7 +753,7 @@ function start() {
     root.replaceChildren(box);
     // A full-screen view (the reader) hides the shell and brings its own way
     // back, which this box just replaced: the shell comes back, so the
-    // sidebar, or the phone's menu, is a way out. The next swap sets the
+    // sidebar, or the phone's tab bar, is a way out. The next swap sets the
     // flag again from the page it brings.
     document.documentElement.removeAttribute('data-shell');
   }
@@ -856,12 +856,23 @@ function start() {
     });
   }
 
-  /* The active link: the nav links stay the same nodes (focus and hover stay
-     on them), and take the new page's classes and aria-current. A badge is
-     left alone; notifications.js owns it. A nav whose links changed (a
-     settings save) is replaced whole. */
+  /* The active link: the nav links (the sidebar's, the phone's tabs and the
+     More sheet's rows) stay the same nodes (focus and hover stay on them),
+     and take the new page's classes and aria-current. A badge is left alone;
+     the page that counts it owns it. A list whose links changed (a settings
+     save) is replaced whole. The More tab (a button, current while the page
+     is one of its rows) and the phone top bar's words follow the same way. */
   function syncNav(doc) {
-    ['desktopNav', 'drawerNav'].forEach(function (id) {
+    const more = document.getElementById('wsMoreBtn');
+    const freshMore = doc.getElementById('wsMoreBtn');
+    if (more && freshMore) {
+      if (freshMore.hasAttribute('aria-current')) more.setAttribute('aria-current', freshMore.getAttribute('aria-current'));
+      else more.removeAttribute('aria-current');
+    }
+    const title = document.getElementById('wsBarTitle');
+    const freshTitle = doc.getElementById('wsBarTitle');
+    if (title && freshTitle && title.textContent !== freshTitle.textContent) title.textContent = freshTitle.textContent;
+    ['desktopNav', 'wsTabList', 'wsMoreNav'].forEach(function (id) {
       const live = document.getElementById(id);
       const fresh = doc.getElementById(id);
       if (!live || !fresh) return;
@@ -892,10 +903,11 @@ function start() {
   }
 
   /* The branded shell and <head> as the fetched page has them: the logo and
-     name, the phone bar's, the theme (and so the colours, gauge rings and
-     font on <html>), the font stylesheet, the custom CSS and the favicon. A
-     settings save (by this admin, or another) shows on the next page without
-     a reload. Only what differs is written (shell.js WS.applyShell). */
+     name, the theme (and so the colours, gauge rings and font on <html>),
+     the font stylesheet, the custom CSS, the favicon, the browser colour and
+     the home-screen icon. A settings save (by this admin, or another) shows
+     on the next page without a reload. Only what differs is written
+     (shell.js WS.applyShell). */
   function syncShell(doc) {
     if (typeof WS.applyShell !== 'function') return;
     const parts = {};
@@ -905,8 +917,10 @@ function start() {
     };
     const brand = inner(doc, '[data-ws-brand]');
     if (brand !== null && brand !== inner(document, '[data-ws-brand]')) parts.brand_html = brand;
-    const bar = inner(doc, '[data-ws-bar-brand]');
-    if (bar !== null && bar !== inner(document, '[data-ws-bar-brand]')) parts.bar_brand_html = bar;
+    const colour = doc.querySelector('meta[name="theme-color"]');
+    if (colour) parts.theme_color = colour.getAttribute('content') || '';
+    const touch = doc.querySelector('link[rel="apple-touch-icon"]');
+    if (touch) parts.touch_icon = touch.getAttribute('href') || '';
     const theme = doc.getElementById('ws-theme');
     const liveTheme = document.getElementById('ws-theme');
     if (theme && liveTheme && theme.textContent !== liveTheme.textContent) {

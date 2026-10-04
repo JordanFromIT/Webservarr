@@ -13,7 +13,7 @@
  *   WS.debug.leaks.reports                every leak reported so far
  *   WS.debug.soak(urls, rounds, opts)     round trips between urls[0] and the
  *                                         others; see runSoak()
- *   WS.debug.shellIdentity()              sidebar, header, mobile bar and
+ *   WS.debug.shellIdentity()              sidebar, header, phone bars and
  *                                         #wsPlayer are the nodes of first load
  *   WS.debug.tone                         the 440 Hz test tone in #wsPlayer
  *
@@ -64,12 +64,14 @@
 // findplace.js and safetynet.js are the audiobook player's (js/player/), which
 // lives as long as the document.
 export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js', 'auth.js', 'theme-loader.js',
-  'engine.js', 'saves.js', 'features.js', 'findplace.js', 'safetynet.js'];
+  'install.js', 'engine.js', 'saves.js', 'features.js', 'findplace.js', 'safetynet.js'];
 // Shell code whose timers and listeners live as long as the shell's own UI,
 // not the page that called it: ui.js (a toast dismisses itself, a dialog stops
 // listening when it closes) and shell.js's serviceStatus (the one
 // service-status request, shared with the header's pill, that Home asks for
-// but never aborts), and the audiobook player (engine.js, saves.js, ui.js,
+// but never aborts), install.js ("Add to home screen": Home's card is wired
+// for the visit's signal, and its wait for the browser's prompt ends with it),
+// and the audiobook player (engine.js, saves.js, ui.js,
 // features.js, findplace.js, safetynet.js), which owns and ends its own timers, listeners
 // and requests and keeps playing across pages: a book a page's Play button opened, its
 // saves and its sleep timer are the player's, not that page's. 'file' is any
@@ -78,12 +80,12 @@ export const SHELL_FILES = ['router.js', 'shell.js', 'ui.js', 'notifications.js'
 // item is the shell's even though a page asked. Nothing else: WS.poll
 // (shell.js) and ctx.setTimeout (router.js) run a page's own work, so what
 // they create stays the page's.
-export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'engine.js', 'saves.js', 'features.js',
+export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'install.js', 'engine.js', 'saves.js', 'features.js',
   'findplace.js', 'safetynet.js'];
 const SELF_FILE = 'debug-leaks.js';
 const PAGE_RE = /\/static\/js\/pages\/([^/]+)\.js$/;
 const FRAME_RE = /([a-z][\w+.-]*:\/\/[^\s()]+?):\d+(?::\d+)?/i;
-const SHELL_IDS = ['desktopSidebar', 'appHeader', 'mobileTopBar', 'wsPlayer'];
+const SHELL_IDS = ['desktopSidebar', 'appHeader', 'mobileTopBar', 'wsTabBar', 'wsPlayer'];
 const INTERLEAVE_EVERY = 5;
 const SOAK_NOTE = 'Ownership is carried through .then/.catch/.finally, Promise.all/allSettled/race/any, ' +
   'timers, intervals, listeners and requestAnimationFrame, but not through a native await: work after ' +

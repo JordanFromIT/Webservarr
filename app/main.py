@@ -2,7 +2,7 @@
 WebServarr - Main FastAPI Application
 """
 
-from fastapi import FastAPI, Request, Cookie
+from fastapi import FastAPI, Request, Cookie, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from typing import Optional
 from fastapi.staticfiles import StaticFiles
@@ -15,13 +15,14 @@ import logging
 
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.limiter import limiter
-from app.database import init_db, SessionLocal
+from app.database import get_db, init_db, SessionLocal
 from app.auth import session_manager
 from app.seed import seed_secret_key
-from app.pages import render_page
+from app.pages import render_page, web_manifest as build_manifest
 from app.integrations import plex_player
 from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, chaptarr_webhook, books, book_personal, book_discovery
 from app.services.notification_poller import start_poller, stop_poller
@@ -369,6 +370,7 @@ async def setup_redirect_middleware(request: Request, call_next):
         "/api/setup/",
         "/static/",
         "/api/branding",
+        "/manifest.webmanifest",
         "/health",
     )
     if not any(path.startswith(p) for p in setup_exempt):
@@ -414,6 +416,17 @@ app.include_router(kavita_proxy.router, tags=["Kavita"])
 async def health_check():
     """Health check endpoint for Docker healthcheck."""
     return {"status": "healthy", "version": settings.app_version}
+
+
+# The web app manifest (app/pages.py web_manifest): what a phone reads to add
+# the site to its home screen. Public, like /api/branding (a browser fetches
+# it without the session cookie), and revalidated on every use, so a branding
+# change reaches the next install.
+@app.get("/manifest.webmanifest", include_in_schema=False)
+@limiter.limit("60/minute")
+async def manifest(request: Request, db: Session = Depends(get_db)):
+    return JSONResponse(content=build_manifest(branding.load_branding(db, False)),
+                        media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
 
 
 # --- Page auth helper ---

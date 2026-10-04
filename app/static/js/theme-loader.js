@@ -185,6 +185,73 @@
 })();
 
 /*
+ * "Add to home screen" (spec 2026-10-04-mobile-nav-and-home-screen-design.md,
+ * Part 2), decided before the first paint.
+ *
+ * Chromium offers its own install prompt through beforeinstallprompt, which
+ * can arrive at any time after load: it is caught here, in <head>, kept as
+ * window.WSInstallPrompt (install.js uses it once), remembered on this
+ * device ('ws-install-prompt-seen'), and announced as ws:install-prompt on
+ * window. Its default (Chrome's own mini-infobar) is held back: the site
+ * offers it itself, on Home's card and in More.
+ *
+ * WSInstallOffer(key) says which card Home shows: 'ios' (the two Share steps:
+ * Apple has no prompt), 'prompt' (the browser's own, now or as it was last
+ * time, so the card holds its place from the first paint), or '' for none:
+ * signed out, already an installed app, a wide screen, or "Not now" on this
+ * device (localStorage[key]; storage that throws counts as never dismissed,
+ * so the card shows again). A full load of Home marks <html
+ * data-install-offer> (theme.css shows the card); pages/home.js decides
+ * again on every visit. WSInstalled() and WSInstallIOS() for install.js.
+ */
+(function () {
+  'use strict';
+  var DISMISS_KEY = 'ws-install-card-dismissed';
+  var SEEN_KEY = 'ws-install-prompt-seen';
+
+  function matches(q) {
+    try { return !!(window.matchMedia && window.matchMedia(q).matches); } catch (e) { return false; }
+  }
+  function stored(key) {
+    try { return window.localStorage.getItem(key); } catch (e) { return null; }
+  }
+  // Running as a home-screen app: display-mode, or Safari's own flag on iOS.
+  function installed() {
+    return matches('(display-mode: standalone)') || window.navigator.standalone === true;
+  }
+  // An iPhone, or an iPad (which says Macintosh, but has a touch screen).
+  function ios() {
+    var nav = window.navigator || {};
+    var ua = nav.userAgent || '';
+    return /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && nav.maxTouchPoints > 1);
+  }
+
+  window.WSInstallPrompt = null;
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    window.WSInstallPrompt = e;
+    try { window.localStorage.setItem(SEEN_KEY, '1'); } catch (err) { /* this visit only */ }
+    window.dispatchEvent(new CustomEvent('ws:install-prompt'));
+  });
+
+  function offer(key) {
+    if (!(window.WS_DATA || {}).user || installed() || !matches('(max-width: 1023.98px)')) return '';
+    if (stored(key)) return '';
+    if (ios()) return 'ios';
+    if (window.WSInstallPrompt) return 'prompt';
+    if ('onbeforeinstallprompt' in window && stored(SEEN_KEY) === '1') return 'prompt';
+    return '';
+  }
+
+  window.WSInstallOffer = offer;
+  window.WSInstalled = installed;
+  window.WSInstallIOS = ios;
+
+  var mode = (window.WS_DATA || {}).page === 'index' ? offer(DISMISS_KEY) : '';
+  if (mode) document.documentElement.setAttribute('data-install-offer', mode);
+})();
+
+/*
  * The Books page's Continue row, reserved before the first paint.
  *
  * Whether there is a Continue row is only known once its answer is in, but a

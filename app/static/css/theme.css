@@ -535,7 +535,8 @@ html.ws-vt #wsPlayer       { view-transition-name: ws-player; }
  * never replaces it (app/pages.py adds it before </body>). While [hidden] it
  * is display:none and takes no space; no display is set here, or it would
  * beat [hidden]. Fixed to the bottom of the viewport, stacked above the page
- * and the mobile bar (z-40) and below the drawer and the modals (z-50 and
+ * and the phone's top bar (z-40), under the tab bar (z 46, it rises from
+ * behind it), and below the modals (z-50 and
  * up), which still cover it.
  *
  * Whatever shows the player sets --ws-player-h on <html> to its height, and
@@ -545,8 +546,8 @@ html.ws-vt #wsPlayer       { view-transition-name: ws-player; }
  * inside, so they end that much higher (max-height wins over h-screen).
  */
 html { --ws-player-h: 0px; }
-#wsPlayer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; }
-body { padding-bottom: var(--ws-player-h); }
+#wsPlayer { position: fixed; left: 0; right: 0; bottom: var(--ws-tabbar-h); z-index: 45; }
+body { padding-bottom: calc(var(--ws-tabbar-h) + var(--ws-player-h)); }
 @media (min-width: 1024px) {
   #desktopSidebar, #desktopSidebar ~ main { max-height: calc(100vh - var(--ws-player-h)); }
 }
@@ -579,25 +580,25 @@ body { padding-bottom: var(--ws-player-h); }
 
 /* <html data-shell="hidden">: the page has the whole screen (the reader, a
    full-screen view). The player stays: it is not part of the chrome. The
-   drawer needs no rule: only the hidden mobile bar's button opens it. */
+   tab bar and More go with it (Phone navigation, below). */
 /* The mobile scroll hint sits above a visible player (bottom-6 plus the
    player's height; 0px while it is hidden, so nothing moves). */
-#scrollDownHint { bottom: calc(1.5rem + var(--ws-player-h)); }
+#scrollDownHint { bottom: calc(1.5rem + var(--ws-tabbar-h) + var(--ws-player-h)); }
 
 html[data-shell="hidden"] #desktopSidebar,
 html[data-shell="hidden"] #appHeader,
 html[data-shell="hidden"] #mobileTopBar { display: none; }
-/* Nothing of the shell shows or takes focus there: not the drawer (closed
-   before every swap anyway), not the phone's scroll hint (the view scrolls a
-   whole book), not an admin's "page is turned off" notice, which the page it
-   belongs to (eBooks) already shows. */
-html[data-shell="hidden"] #drawerOverlay,
+/* Nothing of the shell shows or takes focus there: not the tab bar, not the
+   phone's scroll hint (the view scrolls a whole book), not an admin's "page
+   is turned off" notice, which the page it belongs to (eBooks) already shows.
+   (More is closed before every swap.) */
+html[data-shell="hidden"] #wsTabBar,
 html[data-shell="hidden"] #scrollDownHint,
 html[data-shell="hidden"] #pageOffBanner { display: none; }
 
 /* ---- Soft open and close ----
  *
- * The account menus, the bell panel and the drawer overlay all show and hide
+ * The account menu and the bell panel both show and hide
  * through display (Tailwind's .hidden), which cannot transition on its own.
  * Each carries two states: the closed one on the element itself (faded, and
  * for a menu 6px up) and .is-open. shell.js opens in two steps, removing
@@ -620,17 +621,6 @@ html[data-shell="hidden"] #pageOffBanner { display: none; }
 }
 .ws-pop.is-open { opacity: 1; transform: none; pointer-events: auto; transition-duration: 180ms; }
 
-/* The drawer: its dim overlay fades while the panel slides in from the left
-   edge; on close both leave together, a little faster. shell.js adds .hidden
-   to the overlay at once and this transition holds it displayed until the
-   panel is gone (shell.js keeps a timer only for a browser without
-   allow-discrete). */
-#drawerOverlay { opacity: 0; transition: opacity 160ms ease-out, display 160ms allow-discrete; }
-#drawerOverlay.is-open { opacity: 1; transition-duration: 200ms; }
-#drawerOverlay.hidden { pointer-events: none; }
-#drawerPanel { transition: transform 200ms ease-out; }
-#drawerPanel.-translate-x-full { transition-duration: 160ms; }
-
 /* The WSUI dialog (ui.js): the dim fades in and the box rises 6px with it;
    on close ui.js marks the overlay .is-closing (and inert, so nothing in it
    can be clicked or focused meanwhile) and removes it after the fade. */
@@ -647,8 +637,195 @@ html[data-shell="hidden"] #pageOffBanner { display: none; }
 .ws-dialog.is-closing > .ws-dialog-box { transform: translateY(4px); transition: transform 130ms ease-out; }
 
 @media (prefers-reduced-motion: reduce) {
-  .ws-pop, #drawerOverlay, #drawerPanel, .ws-dialog, .ws-dialog.is-closing > .ws-dialog-box { transition: none; }
+  .ws-pop, .ws-dialog, .ws-dialog.is-closing > .ws-dialog-box { transition: none; }
   .ws-dialog > .ws-dialog-box { animation: none; }
+}
+
+/* ---- Phone navigation (below lg) ----
+ *
+ * The bottom tab bar, the More sheet and the top bar's safe area
+ * (docs/superpowers/specs/2026-10-04-mobile-nav-and-home-screen-design.md).
+ * The markup is the sidebar partial, filled by app/pages.py; shell.js opens
+ * and closes More.
+ *
+ * The bottom of the screen is shared: the tab bar is --ws-tabbar-h tall
+ * (64px plus the home indicator's inset) below lg and 0 elsewhere or on a
+ * full-screen view, and the player bar, the page's bottom padding, the save
+ * bar, the scroll hint and the player's notices all sit above it. Whoever
+ * is lowest pads for the home indicator: the tab bar when it shows, else the
+ * player bar (--ws-safe-bottom). Pages run edge to edge (viewport-fit=cover),
+ * so a phone held sideways keeps its content clear of the notch.
+ *
+ * The tab bar matches the player bar's surface, so the two read as one dock.
+ * The active tab (aria-current) has a filled icon on a primary pill and a
+ * bolder label: shape and weight as well as colour. Tabs are a full 64px
+ * tall. Text from the theme only: the text colour at 100 and 70%, and the
+ * bright text on primary.
+ */
+html { --ws-tabbar-h: 0px; --ws-safe-bottom: env(safe-area-inset-bottom); }
+@media (max-width: 1023.98px) {
+  html:not([data-shell="hidden"]) {
+    --ws-tabbar-h: calc(64px + env(safe-area-inset-bottom));
+    --ws-safe-bottom: 0px;
+  }
+  html:not([data-shell="hidden"]) body {
+    padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right);
+  }
+  /* A control focused from the keyboard is scrolled clear of the sticky top
+     bar and the bars at the bottom, never under them (WCAG 2.4.11). */
+  html:not([data-shell="hidden"]) {
+    scroll-padding-top: calc(3.5rem + env(safe-area-inset-top));
+    scroll-padding-bottom: calc(var(--ws-tabbar-h) + var(--ws-player-h) + 8px);
+  }
+}
+#mobileTopBar { padding-top: env(safe-area-inset-top); }
+
+.ws-tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 46;
+  color: rgb(var(--color-text) / .7);
+  background: linear-gradient(rgb(var(--color-text) / .05), rgb(var(--color-text) / .05)), rgb(var(--color-background) / .92);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  border-top: 1px solid rgb(var(--color-text) / .08);
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.ws-tabbar-list {
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+  height: 63px; max-width: 36rem; margin: 0 auto;   /* 64px with the bar's top border */
+}
+.ws-navtab {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  width: 100%; height: 100%; min-width: 0; padding: 0 4px; border-radius: 12px;
+  color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent;
+}
+.ws-navtab-icon {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 56px; height: 32px; border-radius: 9999px;
+  transition: background-color 200ms ease-out, color 200ms ease-out, transform 150ms ease-out;
+}
+.ws-navtab-icon .material-symbols-outlined { font-size: 24px; }
+.ws-navtab-label {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; line-height: 16px; font-weight: 500;
+}
+.ws-navtab[aria-current] { color: rgb(var(--color-text)); }
+.ws-navtab[aria-current] .ws-navtab-icon { background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); }
+.ws-navtab[aria-current] .ws-navtab-icon .material-symbols-outlined { font-variation-settings: 'FILL' 1; }
+.ws-navtab[aria-current] .ws-navtab-label { font-weight: 700; }
+@media (hover: hover) and (pointer: fine) {
+  .ws-navtab:not([aria-current]):hover { color: rgb(var(--color-text)); }
+  .ws-navtab:not([aria-current]):hover .ws-navtab-icon { background: rgb(var(--color-text) / .06); }
+}
+.ws-navtab:active .ws-navtab-icon { transform: scale(.94); }
+.ws-navtab:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+/* The pending-requests count (the page that counts it toggles .hidden). */
+.ws-navtab-badge, .ws-sheet-badge {
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 9999px; text-align: center;
+  font-size: 12px; line-height: 20px; font-weight: 700; font-variant-numeric: tabular-nums;
+  background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary));
+}
+.ws-navtab-badge { position: absolute; top: -4px; left: calc(50% + 8px); box-shadow: 0 0 0 2px rgb(var(--color-background)); }
+.ws-sheet-badge { margin-left: auto; flex-shrink: 0; }
+
+/* More: a modal <dialog> the full size of the screen, holding a dim and a
+   panel at the bottom. The panel slides up while the dim fades in; on close
+   both go, a little faster (shell.js SHEET_CLOSE_MS). While it is open the
+   page behind holds still. */
+.ws-sheet {
+  position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none;
+  margin: 0; padding: 0; border: 0; overflow: hidden; background: transparent;
+  color: rgb(var(--color-text));
+}
+.ws-sheet::backdrop { background: transparent; }
+html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
+.ws-sheet-scrim {
+  position: absolute; inset: 0; background: rgb(var(--color-background) / .7);
+  opacity: 0; transition: opacity 160ms ease-out;
+}
+.ws-sheet-panel {
+  position: absolute; left: 0; right: 0; bottom: 0; margin: 0 auto; max-width: 36rem;
+  max-height: calc(100dvh - 3rem - env(safe-area-inset-top)); overflow-y: auto; overscroll-behavior: contain;
+  padding: 0 calc(8px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
+  border-radius: 16px 16px 0 0; border-top: 1px solid rgb(var(--color-text) / .10);
+  background: linear-gradient(rgb(var(--color-text) / .06), rgb(var(--color-text) / .06)), rgb(var(--color-background));
+  box-shadow: 0 -16px 40px -20px var(--ws-shade);
+  transform: translateY(100%); transition: transform 160ms ease-in;
+}
+.ws-sheet.is-open .ws-sheet-scrim { opacity: 1; transition-duration: 200ms; }
+.ws-sheet.is-open .ws-sheet-panel { transform: none; transition: transform 240ms cubic-bezier(.2, .8, .2, 1); }
+.ws-sheet.is-closing { pointer-events: none; }
+.ws-sheet-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
+  padding: 20px 0 8px 12px; background: inherit;
+}
+.ws-sheet-grip {
+  position: absolute; top: 8px; left: 50%; width: 36px; height: 4px; margin-left: -18px;
+  border-radius: 9999px; background: rgb(var(--color-text) / .25);
+}
+.ws-sheet-title { flex: 1; min-width: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+.ws-sheet-close {
+  display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 9999px;
+  color: rgb(var(--color-text) / .7); -webkit-tap-highlight-color: transparent;
+}
+.ws-sheet-close:hover, .ws-sheet-close:active { color: rgb(var(--color-text)); background: rgb(var(--color-text) / .06); }
+.ws-sheet-close:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+.ws-sheet-pages:not(:has(li)) { display: none; }
+.ws-sheet-list { display: flex; flex-direction: column; gap: 2px; }
+.ws-sheet-account { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgb(var(--color-text) / .08); }
+.ws-sheet-pages:not(:has(li)) + .ws-sheet-account { margin-top: 0; padding-top: 0; border-top: 0; }
+.ws-sheet-row {
+  display: flex; align-items: center; gap: 16px; width: 100%; min-height: 56px; padding: 8px 12px;
+  border-radius: 12px; text-align: left; color: rgb(var(--color-text)); text-decoration: none;
+  -webkit-tap-highlight-color: transparent; transition: background-color 150ms ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ws-sheet-row:not([aria-current]):hover { background: rgb(var(--color-text) / .06); }
+}
+.ws-sheet-row:not([aria-current]):active { background: rgb(var(--color-text) / .08); }
+.ws-sheet-row:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: -2px; }
+.ws-sheet-row-icon { font-size: 24px; color: rgb(var(--color-text) / .7); }
+.ws-sheet-row-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.ws-sheet-row-line { display: flex; align-items: baseline; min-width: 0; }
+.ws-sheet-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; line-height: 20px; font-weight: 600; }
+.ws-sheet-row-sub { font-size: 13px; line-height: 18px; color: rgb(var(--color-text) / .7); }
+.ws-sheet-row[aria-current] { background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); }
+.ws-sheet-row[aria-current] .ws-sheet-row-icon,
+.ws-sheet-row[aria-current] .ws-sheet-row-sub { color: rgb(var(--color-text-secondary) / .85); }
+.ws-sheet-row[aria-current] .ws-sheet-row-icon { font-variation-settings: 'FILL' 1; }
+.ws-sheet-version { padding: 12px 12px 0; font-size: 12px; color: rgb(var(--color-text) / .7); }
+
+/* "Add to home screen": the steps, in More and on Home's card. A real
+   sequence, so numbered. */
+.ws-install-help { padding: 4px 12px 12px 52px; }
+.ws-install-steps { display: flex; flex-direction: column; gap: 12px; }
+.ws-install-steps[hidden] { display: none; }
+.ws-install-steps > li { display: flex; align-items: flex-start; gap: 12px; font-size: 15px; line-height: 24px; color: rgb(var(--color-text)); }
+.ws-install-steps strong { font-weight: 700; }
+.ws-step-n {
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: 9999px; text-align: center;
+  font-size: 13px; line-height: 24px; font-weight: 700; background: rgb(var(--color-text) / .08);
+}
+.ws-step-glyph { font-size: 20px; vertical-align: -4px; }
+
+/* Home's card (index.html #installCard). Decided before the first paint:
+   theme-loader.js marks <html data-install-offer> ("ios" or "prompt"), the
+   page module then sets the card's hidden and data-mode. An [hidden] card
+   gets no space-y gap, hence its own margin while the mark shows it. Never
+   on a wide screen. */
+html[data-install-offer] #installCard[hidden] { display: block; margin-bottom: 2rem; }
+@media (min-width: 1024px) { #installCard { display: none !important; } }
+#installCard [data-install-mode="ios"] { display: none; }
+#installCard[data-mode="ios"] [data-install-mode="prompt"],
+html[data-install-offer="ios"] #installCard [data-install-mode="prompt"] { display: none; }
+#installCard[data-mode="ios"] [data-install-mode="ios"],
+html[data-install-offer="ios"] #installCard [data-install-mode="ios"] { display: flex; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-navtab-icon, .ws-sheet-row, .ws-sheet-scrim { transition: none; }
+  .ws-navtab:active .ws-navtab-icon { transform: none; }
+  /* No slide: the sheet fades. */
+  .ws-sheet-panel, .ws-sheet.is-open .ws-sheet-panel { transform: none; opacity: 0; transition: opacity 120ms ease-out; }
+  .ws-sheet.is-open .ws-sheet-panel { opacity: 1; }
 }
 
 /* ---- Hover lift and press ----
@@ -801,7 +978,7 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
   --ws-shade: color-mix(in srgb, rgb(var(--color-background)) 35%, black);
 }
 
-/* The one dim behind a dialog or the phone drawer, from the background colour
+/* The one dim behind a dialog, from the background colour
    (L4). */
 .ws-scrim { background-color: rgb(var(--color-background) / .7); }
 
@@ -927,11 +1104,11 @@ html[data-settings-tab="notifications"] [data-settings-panel="notifications"] { 
 /* Settings' save bar sits above a visible player (the player's height, 0px
    while it is hidden), at the bottom edge on phones and 1.5rem up from lg,
    and hides below both. */
-.ws-savebar { bottom: var(--ws-player-h); transition: transform 200ms ease-out, opacity 200ms ease-out; }
+.ws-savebar { bottom: calc(var(--ws-tabbar-h) + var(--ws-player-h)); transition: transform 200ms ease-out, opacity 200ms ease-out; }
 @media (min-width: 1024px) { .ws-savebar { bottom: calc(1.5rem + var(--ws-player-h)); } }
-.ws-savebar.is-hidden { transform: translateY(calc(100% + 1.5rem + var(--ws-player-h))); opacity: 0; pointer-events: none; }
+.ws-savebar.is-hidden { transform: translateY(calc(100% + 1.5rem + var(--ws-tabbar-h) + var(--ws-player-h))); opacity: 0; pointer-events: none; }
 /* The mobile scroll hint stays; it moves up while the save bar covers the bottom edge. */
-body.ws-savebar-open #scrollDownHint { bottom: calc(6rem + var(--ws-player-h)); }
+body.ws-savebar-open #scrollDownHint { bottom: calc(6rem + var(--ws-tabbar-h) + var(--ws-player-h)); }
 
 @media (prefers-reduced-motion: reduce) {
   .ws-panel-in, .ws-light-checking { animation: none; }
@@ -945,9 +1122,9 @@ body.ws-savebar-open #scrollDownHint { bottom: calc(6rem + var(--ws-player-h)); 
  * #wsPlayer. Theme variables only: text in the text colour at 100 / 70 / 45%,
  * the one fill in the primary colour (the play button, with the bright text
  * colour on it), progress in the accent, the warning in the warn status
- * colour. The bar's height is --ws-player-h (ui.js measures it), safe-area
- * inset included. While the full player is open, <html data-player-full>
- * lifts #wsPlayer above the header, the drawer and the bell panel (below
+ * colour. The bar's height is --ws-player-h (ui.js measures it), with the
+ * home indicator's inset when no tab bar is under it. While the full player is open, <html data-player-full>
+ * lifts #wsPlayer above the header, the tab bar and the bell panel (below
  * the shared toasts and dialogs, z 90 and up) and stops the page behind it
  * scrolling. Reduced motion: nothing slides, rises or spins.
  */
@@ -963,7 +1140,7 @@ html[data-player-full] #scrollDownHint { display: none; }
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
   backdrop-filter: blur(16px) saturate(1.2);
   border-top: 1px solid rgb(var(--color-text) / .08);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--ws-safe-bottom);
   animation: wsp-rise 220ms ease-out both;
 }
 @keyframes wsp-rise { from { transform: translateY(100%); } }
@@ -1201,7 +1378,7 @@ html[data-player-full] #scrollDownHint { display: none; }
  * Above the bar (or the bottom edge while it is hidden); in the full player
  * while it is open, under the warning (ui.js moves the box into its column). */
 .wsp-notices {
-  position: fixed; left: 16px; right: 16px; bottom: calc(max(var(--ws-player-h), env(safe-area-inset-bottom)) + 12px);
+  position: fixed; left: 16px; right: 16px; bottom: calc(var(--ws-tabbar-h) + max(var(--ws-player-h), var(--ws-safe-bottom)) + 12px);
   display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none;
 }
 .wsp-alerts .wsp-notices { position: static; }

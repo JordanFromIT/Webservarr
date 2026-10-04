@@ -158,6 +158,10 @@ def _build() -> List[SettingDef]:
               public=True, max_length=160),
         _url("branding.logo_url", "/static/webservarr.svg", "Logo image (uploaded file or web address)",
              public=True, allow_relative=True),
+        # The icon a phone puts on its home screen (the web app manifest,
+        # apple-touch-icon). The default is the bundled pair (192 and 512).
+        _url("branding.app_icon_url", "/static/webservarr-app-512.png",
+             "Home-screen icon (a square PNG, ideally 512 by 512)", public=True, allow_relative=True),
         _icon("icon.sidebar_logo", "settings_input_component", "Icon shown in place of a logo when none is set",
               public=True),
         # ---- Appearance ----
@@ -437,9 +441,10 @@ def _validate_url(d: SettingDef, v: str) -> Optional[str]:
             httpx.URL(v)
         except httpx.InvalidURL:
             return "That address isn't valid"
-    if d.key == "branding.logo_url":
-        # The branding builder blanks any logo safe_logo_url rejects, so a logo
-        # stored past that rule would silently vanish: store only what it serves.
+    if d.key in ("branding.logo_url", "branding.app_icon_url"):
+        # The branding builder blanks any logo (or home-screen icon)
+        # safe_logo_url rejects, so a value stored past that rule would
+        # silently vanish: store only what it serves.
         from app.routers.branding import safe_logo_url
         if not safe_logo_url(v):
             return "Enter a full address starting with https://, or a path on this site"

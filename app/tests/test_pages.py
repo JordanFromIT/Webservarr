@@ -255,8 +255,8 @@ class ShellRendering(unittest.TestCase):
         self.assertRegex(render(), r'href="/requests"[^\n]*data-badge="requestsBadge"')
 
     def test_shell_has_no_duplicate_ids(self):
-        # The nav links fill both the desktop sidebar and the phone drawer, so
-        # anything with an id inside a link would appear twice, and
+        # The nav items fill the desktop sidebar and the phone's tab bar or
+        # More sheet, so anything with an id inside a link would appear twice, and
         # getElementById would only ever find the first (hidden on a phone).
         # Worst case: every page visible, every New! flag on, and both label
         # layouts (with a sublabel line, and without one). The admin's "this
@@ -275,7 +275,7 @@ class ShellRendering(unittest.TestCase):
                     self.assertTrue(b["sidebar_new"][pid], pid)
                 out = render(user=ADMIN, b=b, flags=flags)
                 self.assertEqual('id="pageOffBanner"' in out, bool(flags.get("page_off")))
-                nav = re.search(r'<nav id="drawerNav".*?</nav>', out, re.S).group(0)
+                nav = re.search(r'<nav id="desktopNav".*?</nav>', out, re.S).group(0)
                 self.assertEqual(len(re.findall(r"<a ", nav)), 8)      # every page is in the nav
                 self.assertEqual(nav.count('class="nav-new-badge"'), 8)
                 ids = re.findall(r'''\sid=["']([^"']+)["']''', out)
@@ -577,8 +577,7 @@ class ShellRendering(unittest.TestCase):
                             self.assertNotIn("og:title", head)
                             self.assertNotIn("twitter:title", head)
                         body = out.split("<body>")[1]
-                        self.assertEqual(len(re.findall(r'<h1 class="[^"]*\bhidden\b[^"]*"></h1>', body)), 2)
-                        self.assertRegex(body, r'<span class="[^"]*\bhidden\b[^"]*"></span>')
+                        self.assertEqual(len(re.findall(r'<h1 class="[^"]*\bhidden\b[^"]*"></h1>', body)), 1)
                         self.assertNotIn("WebServarr", body)
 
     def test_only_a_missing_name_falls_back_to_the_default(self):
@@ -628,27 +627,6 @@ class ShellRendering(unittest.TestCase):
         self.assertIn("setTimeout(revealForm, REVEAL_AFTER_MS);", flat_js)             # failsafe
         self.assertIn("revealForm();", flat_js)                                          # methods applied
 
-    def test_phone_bar_shows_the_logo_when_there_is_no_name(self):
-        def bar(out):
-            return re.search(r'<div id="mobileTopBar".*?<div class="relative', out, re.S).group(0)
-        logo = "/static/uploads/logo.png"
-        out = bar(render(b=branding(**{"branding.app_name": "", "branding.logo_url": logo})))
-        self.assertRegex(out, r'<a href="/" aria-label="Home" class="[^"]*"><img src="/static/uploads/logo\.png" '
-                              r'alt="" class="[^"]*\bh-8\b[^"]*\bw-24\b[^"]*\bobject-contain\b[^"]*"></a>')
-        # No logo, or one that isn't safe to serve: the logo icon, same as the sidebar.
-        for value in ("", "javascript:alert(1)"):
-            with self.subTest(logo=value):
-                out = bar(render(b=branding(**{"branding.app_name": "", "branding.logo_url": value,
-                                                "icon.sidebar_logo": "dns"})))
-                self.assertNotIn("javascript:", out)
-                self.assertNotIn("<img", out)
-                self.assertRegex(out, r'<a href="/" aria-label="Home" class="[^"]*">.*>dns</span>', )
-        # A named site keeps its name there and gets no second logo.
-        out = bar(render(b=branding(**{"branding.app_name": "My Server", "branding.logo_url": logo})))
-        self.assertIn(">My Server</span>", out)
-        self.assertNotIn('aria-label="Home"', out)
-        self.assertNotIn("<img", out)
-
     def test_theme_loader_leaves_a_blank_names_title_alone(self):
         # The server's title for a blank (or all-space) name is just the page
         # name; the client must not prefix it with the spaces and a " - ".
@@ -686,13 +664,17 @@ class ShellFragment(unittest.TestCase):
                         "theme.custom_css": "a{color:red}", "theme.gauges_colourful": "true"})
         out = render(b=b, name="settings")
         frag = pages.shell_fragment(b, True, "settings", "WebServarr - Settings")
-        self.assertEqual(set(frag), {"nav_html", "brand_html", "bar_brand_html", "theme_css", "font_href",
+        self.assertEqual(set(frag), {"nav_html", "brand_html", "tabs_html", "more_html", "bar_title",
+                                     "theme_color", "touch_icon", "theme_css", "font_href",
                                      "custom_css", "favicon", "title", "branding"})
-        # Sidebar, drawer and phone bar carry exactly these fragments.
-        self.assertEqual(out.count(frag["brand_html"]), 2)
-        self.assertIn(frag["bar_brand_html"], out)
-        self.assertEqual(len(re.findall(r"<div [^>]*\bdata-ws-brand>", out)), 2)
-        self.assertEqual(len(re.findall(r'<span class="contents" data-ws-bar-brand>', out)), 1)
+        # The sidebar and the phone's bars carry exactly these fragments.
+        self.assertEqual(out.count(frag["brand_html"]), 1)
+        self.assertEqual(len(re.findall(r"<div [^>]*\bdata-ws-brand>", out)), 1)
+        for part in ("tabs_html", "more_html"):
+            self.assertIn(frag[part], out)
+        self.assertIn('<p id="wsBarTitle"', out)
+        self.assertIn('<meta name="theme-color" content="' + frag["theme_color"] + '">', out)
+        self.assertIn('<link rel="apple-touch-icon" href="' + frag["touch_icon"] + '">', out)
         self.assertIn(frag["nav_html"], out)
         self.assertIn('<style id="ws-theme">' + frag["theme_css"] + "</style>", out)
         self.assertIn('id="ws-font" rel="stylesheet" href="' + frag["font_href"].replace("&", "&amp;") + '"', out)
@@ -710,8 +692,6 @@ class ShellFragment(unittest.TestCase):
         self.assertEqual(frag["title"], "Settings")
         self.assertEqual(frag["favicon"], "/static/webservarr.svg")
         self.assertEqual(frag["custom_css"], "")
-        self.assertIn('class="text-frosted-blue font-bold text-sm truncate max-w-[40%] hidden"', frag["bar_brand_html"])
-        self.assertIn('aria-label="Home"', frag["bar_brand_html"])      # the bar's logo mark stands in
         self.assertEqual(pages.page_title(b, "WebServarr"), "Films")
 
     def test_the_endpoint_sends_it(self):
@@ -821,7 +801,7 @@ class NavModel(unittest.TestCase):
             db.close()
         self.assertEqual(b["requests_source"], "seerr_embed")
         out = render(b=b)
-        for nav_id in ("desktopNav", "drawerNav"):
+        for nav_id in ("desktopNav", "wsTabBar"):
             with self.subTest(nav=nav_id):
                 nav = re.search(r'<nav id="%s".*?</nav>' % nav_id, out, re.S).group(0)
                 links = [ln for ln in nav.split("\n") if "<a " in ln]

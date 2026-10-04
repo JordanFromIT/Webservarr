@@ -554,8 +554,8 @@ class HomePage(unittest.TestCase):
         self.assertNotIn("statusAt = Date.now()", body)
         self.assertNotRegex(body, r"\bsetTimeout\(")
         leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
-        self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'engine.js', 'saves.js', "
-                      "'features.js',\n  'findplace.js', 'safetynet.js'];", leaks)
+        self.assertIn("export const SELF_OWNED_FILES = ['ui.js', 'shell.js#serviceStatus', 'install.js', 'engine.js', "
+                      "'saves.js', 'features.js',\n  'findplace.js', 'safetynet.js'];", leaks)
 
     def test_the_clock_test_runs_locally_and_in_ci(self):
         from app.tests.test_theme_engine import repo_file
@@ -893,7 +893,7 @@ class ReaderPage(unittest.TestCase):
 
     def test_the_shell_is_hidden_and_takes_no_focus(self):
         theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
-        for sid in ("desktopSidebar", "appHeader", "mobileTopBar", "drawerOverlay", "scrollDownHint", "pageOffBanner"):
+        for sid in ("desktopSidebar", "appHeader", "mobileTopBar", "wsTabBar", "scrollDownHint", "pageOffBanner"):
             self.assertRegex(theme, rf'html\[data-shell="hidden"\] #{sid}\b[^{{]*\{{ display: none; \}}', sid)
         self.assertNotRegex(theme, r'html\[data-shell="hidden"\] #wsPlayer')
 
@@ -1910,12 +1910,16 @@ class PlayerView(unittest.TestCase):
     def test_the_open_player_covers_the_top_bar_under_the_dialogs(self):
         theme = self.THEME.read_text(encoding="utf-8")
         lifted = int(re.search(r"html\[data-player-full\] #wsPlayer \{ z-index: (\d+); \}", theme).group(1))
-        resting = int(re.search(r"#wsPlayer \{ position: fixed; left: 0; right: 0; bottom: 0; z-index: (\d+); \}", theme).group(1))
+        resting = int(re.search(r"#wsPlayer \{ position: fixed; left: 0; right: 0; bottom: var\(--ws-tabbar-h\); z-index: (\d+); \}", theme).group(1))
         shell = "".join((STATIC / "partials" / f).read_text(encoding="utf-8") for f in ("shell-sidebar.html", "shell-header.html"))
-        for el in ("appHeader", "mobileTopBar", "drawerOverlay"):
+        for el in ("appHeader", "mobileTopBar"):
             tag = re.search(rf'<[^>]*id="{el}"[^>]*>', shell).group(0)
             z = int(re.search(r"\bz-(\d+)\b", tag).group(1))
             self.assertGreater(lifted, z, el)
+        # The phone's tab bar too (theme.css), which the resting bar rises from behind.
+        tabbar = int(re.search(r"\.ws-tabbar \{[^}]*z-index: (\d+);", theme).group(1))
+        self.assertGreater(lifted, tabbar)
+        self.assertGreater(tabbar, resting)
         self.assertGreater(resting, 40, "the bar sits over the phone's top bar and the page")
         ui = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
         for z in re.findall(r"z-\[(\d+)\]", ui):

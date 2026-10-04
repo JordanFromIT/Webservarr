@@ -35,6 +35,32 @@
 <h1 class="sr-only">Home</h1>
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8" data-home-stack>
+<!-- Add to home screen (phones only). Decided before the page is drawn,
+     like the push offer below: on a full load theme-loader.js marks
+     html[data-install-offer] ("ios" or "prompt"), and pages/home.js decides on
+     every visit, setting hidden and data-mode, then has install.js wire the
+     buttons. "prompt" asks the browser to install; "ios" shows the two Share
+     steps (the same words as the More sheet's). Not a Home section: its place
+     is fixed. The server writes the site name and its home-screen icon. -->
+<section id="installCard" hidden aria-labelledby="installCardTitle" data-dismiss-key="ws-install-card-dismissed">
+<div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4">
+<div class="flex items-start gap-4">
+<img data-ws-app-icon src="/static/webservarr-app-192.png" alt="" width="48" height="48" loading="lazy" decoding="async" class="size-12 shrink-0 rounded-[12px] object-cover">
+<div class="min-w-0 flex-1">
+<h2 id="installCardTitle" class="text-[17px] font-bold tracking-[-0.02em] leading-snug text-frosted-blue [text-wrap:balance]">Add <!-- ws:app-name --> to your home screen</h2>
+<p data-install-mode="prompt" class="text-[15px] leading-relaxed text-frosted-blue/70 mt-1">Open it from an icon like any other app, with no link to find.</p>
+<ol class="ws-install-steps mt-3" data-install-mode="ios">
+<li><span class="ws-step-n" aria-hidden="true">1</span><span>Tap <span class="material-symbols-outlined ws-step-glyph" aria-hidden="true">ios_share</span> <strong>Share</strong> in the browser toolbar</span></li>
+<li><span class="ws-step-n" aria-hidden="true">2</span><span>Tap <strong>Add to Home Screen</strong></span></li>
+</ol>
+</div>
+</div>
+<div class="flex gap-2 mt-4">
+<button type="button" data-install-later class="flex-1 px-4 py-2.5 rounded-[10px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue">Not now</button>
+<button type="button" data-install-add data-install-mode="prompt" class="flex-1 bg-primary hover:bg-primary/90 text-bright px-4 py-2.5 rounded-[10px] text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-frosted-blue focus-visible:ring-offset-2 focus-visible:ring-offset-background-dark aria-disabled:opacity-50 aria-disabled:cursor-wait">Add to home screen</button>
+</div>
+</div>
+</section>
 <!-- Push opt-in. Everything that decides whether to offer it is known before
      the page is drawn, so it never pushes content down after load: on a full
      load theme-loader.js decides in <head> (html[data-push-offer] shows it),
@@ -89,11 +115,14 @@
 </div>
 <!-- Netdata Gauges. Each gauge's detail line holds its one line of height
      before loadSystemStats fills it, so the centred readings don't hop up
-     when it lands. (With no network label set, that line stays empty.) -->
-<div id="netdataGauges" class="bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 mb-4">
-<div class="flex justify-between items-center">
+     when it lands. (With no network label set, that line stays empty.)
+     Three 112px rings need 21rem: in a narrower box (a small phone) they
+     go two over one, from the first paint (a container query, no script),
+     so nothing scrolls sideways. -->
+<div id="netdataGauges" class="@container bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 mb-4">
+<div class="grid grid-cols-2 @[21rem]:grid-cols-3 gap-y-4 items-center">
 <!-- CPU Gauge -->
-<div class="flex flex-col items-center flex-1">
+<div class="flex flex-col items-center">
 <div class="relative w-28 h-28 lg:w-36 lg:h-36">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
@@ -107,7 +136,7 @@
 </div>
 </div>
 <!-- RAM Gauge -->
-<div class="flex flex-col items-center flex-1">
+<div class="flex flex-col items-center">
 <div class="relative w-28 h-28 lg:w-36 lg:h-36">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
@@ -121,7 +150,7 @@
 </div>
 </div>
 <!-- Network Gauge -->
-<div class="flex flex-col items-center flex-1">
+<div class="flex flex-col items-center col-span-2 @[21rem]:col-span-1">
 <div class="relative w-28 h-28 lg:w-36 lg:h-36">
 <svg class="w-full h-full" viewBox="0 0 100 100">
 <circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>

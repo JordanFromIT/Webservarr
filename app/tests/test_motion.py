@@ -145,7 +145,6 @@ def function_body(js: str, name: str) -> str:
 class SoftOpenClose(unittest.TestCase):
     def test_menus_and_the_bell_panel_carry_ws_pop_and_hide_through_the_class(self):
         self.assertIn('id="userMenuDropdown" class="ws-pop hidden ', HEADER)
-        self.assertIn('id="mobileUserMenuDropdown" class="ws-pop hidden ', SIDEBAR)
         self.assertIn("'ws-pop hidden absolute", NOTIF_JS)
         self.assertTrue(live_matches(NOTIF_JS, r"WS\.popOpen\(_dropdown\)"))
         self.assertTrue(live_matches(NOTIF_JS, r"WS\.popClose\(_dropdown\)"))
@@ -177,7 +176,6 @@ class SoftOpenClose(unittest.TestCase):
         # .is-open, and close takes .is-open off again so the next open starts
         # from the closed state.
         self.assertNotRegex(THEME, r"@starting-style\s*\{[^}]*\.ws-pop\b")
-        self.assertNotRegex(THEME, r"@starting-style\s*\{[^}]*#drawerOverlay\b")
         body = function_body(SHELL_JS, "popOpen")
         unhide = live_matches(body, r"el\.classList\.remove\('hidden'\)")
         reflow = live_matches(body, r"void el\.offset(?:Width|Height)")
@@ -194,50 +192,34 @@ class SoftOpenClose(unittest.TestCase):
         self.assertTrue(live_matches(SHELL_JS, r"if \(popIsOpen\(menu\)\) \{ popClose\(menu\); return; \}"))
         self.assertTrue(live_matches(SHELL_JS, r"popOpen\(menu\);"))
         self.assertRegex(js_code_only(SHELL_JS), r"popOpen: popOpen,\s*popClose: popClose,\s*popIsOpen: popIsOpen,")
-        # The drawer overlay: the same two states, .is-open added after the
-        # reflow openDrawer already does, and removed on close.
-        self.assertIn("opacity: 0", css_rule(THEME, "#drawerOverlay"))
-        self.assertIn("opacity: 1", css_rule(THEME, "#drawerOverlay.is-open"))
-        body = function_body(SHELL_JS, "openDrawer")
-        unhide = live_matches(body, r"overlay\.classList\.remove\('hidden'\)")
+        # The phone's More sheet: the same two states. It is shown (showModal)
+        # and drawn closed before .is-open, and loses .is-open on close.
+        self.assertIn("opacity: 0", re.search(r"\n\.ws-sheet-scrim \{([^}]*)\}", THEME).group(1))
+        self.assertIn("opacity: 1", css_rule(THEME, ".ws-sheet.is-open .ws-sheet-scrim"))
+        body = function_body(SHELL_JS, "open")
+        shown = live_matches(body, r"sheet\.showModal\(\)")
         reflow = live_matches(body, r"void panel\.offsetHeight")
-        opened = live_matches(body, r"overlay\.classList\.add\('is-open'\)")
-        self.assertTrue(unhide and reflow and opened, body)
-        self.assertLess(unhide[0].start(), reflow[0].start())
+        opened = live_matches(body, r"sheet\.classList\.add\('is-open'\)")
+        self.assertTrue(shown and reflow and opened, body)
+        self.assertLess(shown[0].start(), reflow[0].start())
         self.assertLess(reflow[0].start(), opened[0].start())
-        self.assertTrue(live_matches(function_body(SHELL_JS, "closeDrawer"), r"overlay\.classList\.remove\('is-open'\)"))
+        self.assertTrue(live_matches(function_body(SHELL_JS, "close"), r"sheet\.classList\.remove\('is-open'\)"))
 
-    def test_drawer_overlay_is_hidden_by_the_stylesheet_not_a_timer(self):
-        self.assertIn("pointer-events: none", css_rule(THEME, "#drawerOverlay.hidden"))
-        self.assertRegex(css_rule(THEME, "#drawerOverlay"), r"display \d+ms allow-discrete")
-        self.assertEqual(properties(css_rule(THEME, "#drawerPanel")), {"transition"})
-        self.assertNotRegex(SIDEBAR, r'id="drawerPanel"[^>]*\b(?:duration-\d+|transition-transform)\b')
-        self.assertTrue(live_matches(
-            SHELL_JS, r"""CSS\.supports\(\s*['"]transition-behavior['"]\s*,\s*['"]allow-discrete['"]\s*\)"""))
-        # The timer is the fallback only, it is kept and cancelled by a reopen
-        # or another close (a stale one must never hide a reopened drawer),
-        # and reduced motion hides at once whatever the support.
-        self.assertFalse(re.search(r"setTimeout\(function \(\) \{ overlay\.classList\.add\('hidden'\); \}, 300\)", SHELL_JS))
-        self.assertTrue(live_matches(SHELL_JS, r"hideTimer = setTimeout\("))
-        self.assertTrue(live_matches(SHELL_JS, r"clearTimeout\(hideTimer\)"))
-        self.assertTrue(live_matches(SHELL_JS, r"if \(discrete \|\| reducedMotion\(\)\) overlay\.classList\.add\('hidden'\);"))
-        # cancelHide clears the pending timer before it forgets it: nulling
-        # the handle first would leave that timer running, unreachable, to
-        # hide a reopened drawer.
-        m = live_matches(SHELL_JS, r"function cancelHide\(\) \{")
-        self.assertTrue(m, "cancelHide")
-        body = SHELL_JS[m[0].end():matching_brace(SHELL_JS, m[0].end() - 1)]
-        clear = live_matches(body, r"clearTimeout\(hideTimer\)")
-        forget = live_matches(body, r"\bhideTimer = null\b")
-        self.assertTrue(clear, "cancelHide must clear the timer")
-        self.assertTrue(forget, "cancelHide must drop the handle")
-        self.assertLess(clear[0].start(), forget[0].start(),
-                        "cancelHide nulls hideTimer before clearing it")
-        for fn in ("openDrawer", "closeDrawer"):
-            m = live_matches(SHELL_JS, rf"function {fn}\(\) \{{")
-            self.assertTrue(m, fn)
-            body = SHELL_JS[m[0].end():matching_brace(SHELL_JS, m[0].end() - 1)]
-            self.assertTrue(live_matches(body, r"cancelHide\(\);"), f"{fn} must cancel a pending hide")
+    def test_the_sheet_closes_after_its_slide_and_never_late(self):
+        # The More sheet stays open (modal) for its slide, then closes; a
+        # reopen or a close "now" (a page swap) ends a pending close first,
+        # so a stale timer can never close a sheet opened again. Reduced
+        # motion closes at once.
+        close = function_body(SHELL_JS, "close")
+        self.assertTrue(live_matches(close, r"hideTimer = setTimeout\(function \(\) \{ finish\(restore\); \}, SHEET_CLOSE_MS\);"))
+        self.assertTrue(live_matches(close, r"if \(now \|\| reducedMotion\(\)\) \{ finish\(restore\); return; \}"))
+        finish = function_body(SHELL_JS, "finish")
+        clear = live_matches(finish, r"clearTimeout\(hideTimer\)")
+        forget = live_matches(finish, r"\bhideTimer = null\b")
+        self.assertTrue(clear and forget)
+        self.assertLess(clear[0].start(), forget[0].start(), "finish nulls hideTimer before clearing it")
+        self.assertTrue(live_matches(function_body(SHELL_JS, "open"), r"finish\(false\);"))
+        self.assertIn("pointer-events: none", css_rule(THEME, ".ws-sheet.is-closing"))
 
     def test_dialog_close_is_inert_before_focus_returns_then_leaves_the_dom(self):
         inert = live_matches(UI_JS, r"overlay\.inert\s*=\s*true")
@@ -254,7 +236,7 @@ class SoftOpenClose(unittest.TestCase):
         self.assertEqual(keyframe_properties(THEME, "ws-dialog-in"), {"transform", "opacity"})
 
     def test_reduced_motion_makes_every_open_and_close_instant(self):
-        for sel in (".ws-pop", "#drawerOverlay", "#drawerPanel", ".ws-dialog"):
+        for sel in (".ws-pop", ".ws-dialog", ".ws-navtab-icon", ".ws-sheet-scrim"):
             self.assertTrue(stilled(THEME, sel, "transition"), sel)
         self.assertTrue(stilled(THEME, ".ws-dialog > .ws-dialog-box", "animation"))
 

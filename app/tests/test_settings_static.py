@@ -563,17 +563,19 @@ class KitApi(unittest.TestCase):
         body = function_body(kit_code(), "patchShell")
         self.assertNotRegex(body, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment")
         self.assertIn("WS.applyShell(parts);", body)
-        self.assertRegex(body, r"if \(!SAFE\) \{\s*\['\s+', '\s+', '\s+'\]")
-        self.assertIn("if (!SAFE) {\n        ['theme_css', 'font_href', 'custom_css']",
+        self.assertRegex(body, r"if \(!SAFE\) \{\s*\['\s+', '\s+', '\s+', '\s+'\]")
+        self.assertIn("if (!SAFE) {\n        ['theme_css', 'font_href', 'custom_css', 'theme_color']",
                       (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8"))
         self.assertNotIn("toast", body)
         shell = js_code_only((STATIC / "js" / "shell.js").read_text(encoding="utf-8"))
         apply = function_body(shell, "applyShell")
         self.assertNotRegex(apply, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment")
-        nav = re.search(r"setHTML\(document\.getElementById\(id\), parts\.nav_html\); \}\);", apply)
-        self.assertIsNotNone(nav, "the navs are written with setHTML")
-        for part in ("brand_html", "bar_brand_html"):
-            self.assertIn(f"setHTML(n, parts.{part})", apply)
+        nav = re.search(r"setHTML\(document\.getElementById\('          '\), parts\.nav_html\);", apply)
+        self.assertIsNotNone(nav, "the nav is written with setHTML")
+        self.assertIn("setHTML(n, parts.brand_html)", apply)
+        for part, where in (("tabs_html", "wsTabList"), ("more_html", "wsMoreNav")):
+            self.assertRegex(apply, rf"setHTML\(document\.getElementById\(' +'\), parts\.{part}\)", part)
+        self.assertIn("barTitle.textContent = parts.bar_title", apply)
         for text in ("theme.textContent = parts.theme_css", "css.textContent = parts.custom_css"):
             self.assertIn(text, apply)
         self.assertIn("window.WSTheme.apply(parts.branding)", apply)
@@ -865,12 +867,14 @@ class GeneralTab(unittest.TestCase):
         # pass; its answer could then land during the reload and be lost.
         # The import waits for it (refused, never a silent cancel).
         logo = general_function("logoCard")
-        self.assertRegex(logo, r"function busy\(on\) \{[^{}]*shared\.uploading = on;[^{}]*shared\.changed\(\)")
+        self.assertRegex(logo, r"function busy\(on\) \{[^{}]*shared\.logo = on;[^{}]*shared\.changed\(\)")
+        # The home-screen icon's upload counts the same.
+        self.assertRegex(general_function("iconCard"), r"function busy\(on\) \{[^{}]*shared\.icon = on;[^{}]*shared\.changed\(\)")
         backup = general_function("backupCard")
-        self.assertRegex(backup, r"imp\.disabled = dirty \|\| shared\.uploading;")
+        self.assertRegex(backup, r"var uploading = shared\.logo \|\| shared\.icon;\s*imp\.disabled = dirty \|\| uploading;")
         self.assertRegex(backup, r"shared\.changed = sync;")
         handler = backup[backup.index("file.addEventListener("):]
-        guard = re.search(r"if \(shared\.uploading\) \{ WSSettings\.toast\(MSG\.uploading, '   '\); return; \}", handler)
+        guard = re.search(r"if \(shared\.logo \|\| shared\.icon\) \{ WSSettings\.toast\(MSG\.uploading, '   '\); return; \}", handler)
         self.assertIsNotNone(guard, "the import doesn't refuse during an upload")
         self.assertLess(guard.start(), handler.index("startImport("))
         self.assertNotRegex(backup, r"cancelUpload\(")
@@ -2222,7 +2226,7 @@ class SwitchOver(unittest.TestCase):
     def test_account_menu_label_is_sentence_case(self):
         for partial in ("shell-header.html", "shell-sidebar.html"):
             text = (STATIC / "partials" / partial).read_text(encoding="utf-8")
-            link = re.search(r'<a href="/settings#sign-in"[^>]*>.*?</a>', text, re.S)
+            link = re.search(r'<a\b[^>]*href="/settings#sign-in"[^>]*>.*?</a>', text, re.S)
             self.assertIsNotNone(link, partial)
             self.assertIn("Account settings", link.group(0), partial)
             self.assertNotIn("Account Settings", text, partial)

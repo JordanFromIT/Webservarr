@@ -323,9 +323,9 @@ class OneScrim(unittest.TestCase):
     def test_every_shared_backdrop_uses_it(self):
         self.assertRegex(UI_JS, r"el\('div', 'ws-dialog [^;]*?\bws-scrim\b")
         self.assertNotIn("bg-background-dark/70", UI_JS)
-        overlay = re.search(r'<div id="drawerOverlay" class="([^"]*)"', SIDEBAR).group(1).split()
-        self.assertIn("ws-scrim", overlay)
-        self.assertFalse([c for c in overlay if c.startswith("bg-")], overlay)
+        # The phone's More sheet dims with the same colour (theme.css).
+        scrim = re.search(r"\n\.ws-sheet-scrim \{([^}]*)\}", THEME).group(1)
+        self.assertIn("background: rgb(var(--color-background) / .7)", scrim)
         self.assertRegex(NOTIF_JS, r"_modal = createEl\('div', '[^']*\bws-scrim\b")
         self.assertNotRegex(NOTIF_JS, r"_modal\.style\.backgroundColor")
 

@@ -1,9 +1,10 @@
 /**
  * WebServarr — page shell (client side)
  *
- * The sidebar, header and mobile bar arrive in the HTML already rendered for
- * this user (see app/pages.py and app/static/partials/). This module only
- * decorates: menus, drawer, logout, notifications, the status pill, the
+ * The sidebar, header and the phone's top bar, tab bar and More sheet arrive
+ * in the HTML already rendered for this user (see app/pages.py and
+ * app/static/partials/). This module only decorates: menus, the More sheet,
+ * logout, notifications, the status pill, the
  * scroll hint, and the shared helpers pages use to load content in a designed
  * order. It never constructs navigation.
  *
@@ -29,7 +30,7 @@
  *                                 soft open and close of a .ws-pop panel (theme.css)
  *   WS.mediaType(type)            { label, icon, accent } for movie/tv/book/audiobook
  *   WS.requestStatus(status)      { label, tone } for a Seerr-style request status
- *   WS.closeChrome()              close the drawer and every open header menu (before a page swap)
+ *   WS.closeChrome()              close the More sheet and every open header menu (before a page swap)
  *   WS.leaveTo(url)               a full navigation the page starts, through the router
  *   WS.router                     the soft navigation router, once router.js has loaded
  *                                 (a module, from the sidebar partial); null before and
@@ -262,9 +263,13 @@
      replaces, brought up to date: after a Settings save (settings/kit.js,
      from GET /api/admin/settings/shell) and on every swap (router.js, from
      the page it fetched). parts, each optional:
-       nav_html        both navs (server-rendered links)
-       brand_html      the logo and name in the sidebar and drawer
-       bar_brand_html  the phone bar's name or logo
+       nav_html        the sidebar's nav (server-rendered links)
+       brand_html      the logo and name in the sidebar
+       tabs_html       the phone's tab bar (#wsTabList)
+       more_html       the More sheet's pages (#wsMoreNav)
+       bar_title       the phone top bar's words (#wsBarTitle)
+       theme_color     the browser's colour (meta theme-color)
+       touch_icon      the home-screen icon (link apple-touch-icon)
        branding        the payload: WS.data, and the colours, gauge rings and
                        font on <html> (theme-loader's WSTheme.apply)
        theme_css       #ws-theme's rule
@@ -276,14 +281,23 @@
      changed; CSS goes in as text. */
   function applyShell(parts) {
     if (!parts) return;
-    if (typeof parts.nav_html === 'string') {
-      ['desktopNav', 'drawerNav'].forEach(function (id) { setHTML(document.getElementById(id), parts.nav_html); });
-    }
+    if (typeof parts.nav_html === 'string') setHTML(document.getElementById('desktopNav'), parts.nav_html);
     if (typeof parts.brand_html === 'string') {
       document.querySelectorAll('[data-ws-brand]').forEach(function (n) { setHTML(n, parts.brand_html); });
     }
-    if (typeof parts.bar_brand_html === 'string') {
-      document.querySelectorAll('[data-ws-bar-brand]').forEach(function (n) { setHTML(n, parts.bar_brand_html); });
+    if (typeof parts.tabs_html === 'string') setHTML(document.getElementById('wsTabList'), parts.tabs_html);
+    if (typeof parts.more_html === 'string') setHTML(document.getElementById('wsMoreNav'), parts.more_html);
+    if (typeof parts.bar_title === 'string') {
+      var barTitle = document.getElementById('wsBarTitle');
+      if (barTitle && barTitle.textContent !== parts.bar_title) barTitle.textContent = parts.bar_title;
+    }
+    if (typeof parts.theme_color === 'string' && /^#[0-9a-fA-F]{6}$/.test(parts.theme_color)) {
+      var tc = document.querySelector('meta[name="theme-color"]');
+      if (tc && tc.getAttribute('content') !== parts.theme_color) tc.setAttribute('content', parts.theme_color);
+    }
+    if (typeof parts.touch_icon === 'string' && parts.touch_icon) {
+      var ti = document.querySelector('link[rel="apple-touch-icon"]');
+      if (ti && ti.getAttribute('href') !== parts.touch_icon) ti.setAttribute('href', parts.touch_icon);
     }
     if (parts.branding && typeof parts.branding === 'object') {
       if (window.WS_DATA) window.WS_DATA.branding = parts.branding;
@@ -413,66 +427,191 @@
     return !!el && el.classList.contains('is-open');
   }
 
-  // ---- Chrome wiring: drawer, menus, logout ----
+  // ---- Chrome wiring: the More sheet, menus, logout ----
 
-  // Set by wireChrome: closes the drawer if it is open.
-  var drawerCloser = null;
+  // Set by wireSheet: closes the More sheet at once if it is open.
+  var sheetCloser = null;
 
   /* Before the router swaps a page: a full load used to close these by
      itself. The header menus (and the bell, notifications.js) each close on
      a ws:menu-open for any menu but their own; detail null is no menu. */
   function closeChrome() {
-    if (drawerCloser) drawerCloser();
+    if (sheetCloser) sheetCloser();
     document.dispatchEvent(new CustomEvent('ws:menu-open', { detail: null }));
   }
 
-  function wireChrome() {
-    var overlay = document.getElementById('drawerOverlay');
-    var panel = document.getElementById('drawerPanel');
-    var hamburger = document.getElementById('hamburgerBtn');
-    var closeBtn = document.getElementById('drawerCloseBtn');
+  // ---- The phone's More sheet ----
+  //
+  // #wsMoreSheet (the sidebar partial) is a native modal <dialog>, opened by
+  // the tab bar's More button (#wsMoreBtn, found on each click: a settings
+  // save or a changed tab set writes new tab nodes). While it is open the
+  // page behind is inert and its scroll is held (html.ws-sheet-open), and
+  // Tab stays inside it. The browser's close request (Escape, Android's Back
+  // where the browser has close watchers) arrives as the dialog's cancel; it
+  // closes it, as do Escape itself, a tap on the dim or on Close, a downward
+  // swipe, a row chosen, a page swap (closeChrome) and the screen growing to
+  // the desktop layout. Elsewhere Back navigates, and the swap closes it.
+  // Focus goes to its first row on open and back to More when it closes,
+  // except for a row chosen: the new page takes focus. It slides up over a
+  // dim (theme.css .ws-sheet); with reduced motion it appears and goes.
+  var SHEET_CLOSE_MS = 200;        // the slide away (theme.css .ws-sheet.is-closing)
+  var SWIPE_CLOSE_PX = 80;         // a swipe down this far closes it...
+  var SWIPE_FLING = 0.5;           // ...or one this fast at the release (px per ms)
+  var FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-    // The overlay's transition (theme.css) holds it displayed while it and the
-    // panel fade out; a browser without allow-discrete would hide both at
-    // once, so there a timer hides the overlay when the panel has left. The
-    // timer is cancelled by a reopen, or by another close, so a stale one can
-    // never hide a drawer that was opened again in the meantime. Reduced
-    // motion has nothing to wait for and hides at once whatever the support.
-    var discrete = !!(window.CSS && CSS.supports && CSS.supports('transition-behavior', 'allow-discrete'));
+  function wireSheet() {
+    var sheet = document.getElementById('wsMoreSheet');
+    if (!sheet) return;
+    var panel = sheet.querySelector('[data-sheet-panel]') || sheet;
+    var root = document.documentElement;
     var hideTimer = null;
-    function cancelHide() {
-      if (hideTimer) clearTimeout(hideTimer);
+
+    function moreBtn() { return document.getElementById('wsMoreBtn'); }
+    function setExpanded(on) {
+      var b = moreBtn();
+      if (b) b.setAttribute('aria-expanded', on ? 'true' : 'false');
+    }
+    function focusables() {
+      return Array.prototype.filter.call(sheet.querySelectorAll(FOCUSABLE), function (el) {
+        return !el.closest('[hidden], .hidden');
+      });
+    }
+    function closing() { return sheet.classList.contains('is-closing'); }
+
+    function finish(restore) {
+      clearTimeout(hideTimer);
       hideTimer = null;
-    }
-    function openDrawer() {
-      cancelHide();
-      overlay.classList.remove('hidden');
-      void panel.offsetHeight;   // reflow: the closed state is drawn before it changes
-      overlay.classList.add('is-open');
-      panel.classList.remove('-translate-x-full');
-      panel.classList.add('translate-x-0');
-    }
-    function closeDrawer() {
-      cancelHide();
-      overlay.classList.remove('is-open');
-      panel.classList.remove('translate-x-0');
-      panel.classList.add('-translate-x-full');
-      if (discrete || reducedMotion()) overlay.classList.add('hidden');
-      else hideTimer = setTimeout(function () { hideTimer = null; overlay.classList.add('hidden'); }, 160);
-    }
-    if (overlay && panel) {
-      drawerCloser = function () { if (overlay.classList.contains('is-open')) closeDrawer(); };
-      if (hamburger) hamburger.addEventListener('click', openDrawer);
-      if (closeBtn) closeBtn.addEventListener('click', closeDrawer);
-      overlay.addEventListener('click', function (e) { if (e.target === overlay) closeDrawer(); });
+      sheet.classList.remove('is-open', 'is-closing');
+      panel.style.transform = '';
+      panel.style.transition = '';
+      if (sheet.open) {
+        if (typeof sheet.close === 'function') sheet.close();
+        else sheet.removeAttribute('open');
+      }
+      root.classList.remove('ws-sheet-open');
+      var b = moreBtn();
+      if (restore && b) b.focus({ preventScroll: true });
     }
 
+    function open() {
+      if (sheet.open && !closing()) return;
+      finish(false);
+      // The bell's panel and any header menu close.
+      document.dispatchEvent(new CustomEvent('ws:menu-open', { detail: sheet }));
+      if (typeof sheet.showModal === 'function') sheet.showModal();
+      else sheet.setAttribute('open', '');
+      root.classList.add('ws-sheet-open');
+      void panel.offsetHeight;   // reflow: the closed state is drawn before it changes
+      sheet.classList.add('is-open');
+      setExpanded(true);
+      var first = focusables().filter(function (el) { return el.classList.contains('ws-sheet-row'); })[0] ||
+        focusables()[0];
+      if (first) first.focus({ preventScroll: true });
+    }
+
+    // restore: focus back on More. now: no slide (a page swap, a resize).
+    function close(restore, now) {
+      if (!sheet.open || (closing() && !now)) return;
+      sheet.classList.remove('is-open');
+      panel.style.transform = '';
+      panel.style.transition = '';
+      setExpanded(false);
+      if (now || reducedMotion()) { finish(restore); return; }
+      sheet.classList.add('is-closing');
+      hideTimer = setTimeout(function () { finish(restore); }, SHEET_CLOSE_MS);
+    }
+    sheetCloser = function () { close(false, true); };
+
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest || !t.closest('#wsMoreBtn')) return;
+      if (sheet.open && !closing()) close(true);
+      else open();
+    });
+
+    sheet.addEventListener('cancel', function (e) {
+      e.preventDefault();
+      close(true);
+    });
+    // A dialog closed some other way (the browser's own) leaves nothing set.
+    sheet.addEventListener('close', function () {
+      if (sheet.classList.contains('is-open') || closing()) finish(false);
+      root.classList.remove('ws-sheet-open');
+      setExpanded(false);
+    });
+    sheet.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      if (t.closest('[data-sheet-close]')) { close(true); return; }
+      // A row chosen: the router (or the browser, for a #fragment here) takes it.
+      if (t.closest('a[href]')) close(false);
+    });
+    sheet.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !e.isComposing) {
+        e.preventDefault();
+        close(true);
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      var f = focusables();
+      if (!f.length) return;
+      var first = f[0];
+      var last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+
+    // Swipe down. Touch events, not pointer events: the browser cancels a
+    // pointer the moment it starts to pan, and the sheet must follow the
+    // finger. Only from the top of the sheet's own scroll, and only downward:
+    // an upward move is a scroll.
+    var drag = null;
+    panel.addEventListener('touchstart', function (e) {
+      drag = null;
+      if (!sheet.open || closing() || e.touches.length !== 1 || panel.scrollTop > 0) return;
+      drag = { y: e.touches[0].clientY, dy: 0, v: 0, t: performance.now(), moved: false };
+    }, { passive: true });
+    panel.addEventListener('touchmove', function (e) {
+      if (!drag || e.touches.length !== 1) return;
+      var dy = e.touches[0].clientY - drag.y;
+      if (!drag.moved && dy <= 0) { drag = null; return; }
+      drag.moved = true;
+      if (e.cancelable) e.preventDefault();
+      dy = Math.max(0, dy);
+      var now = performance.now();
+      drag.v = (dy - drag.dy) / Math.max(1, now - drag.t);
+      drag.t = now;
+      drag.dy = dy;
+      panel.style.transition = 'none';
+      panel.style.transform = 'translateY(' + dy + 'px)';
+    }, { passive: false });
+    function release(cancelled) {
+      var d = drag;
+      drag = null;
+      if (!d || !d.moved) return;
+      if (!cancelled && (d.dy > SWIPE_CLOSE_PX || d.v > SWIPE_FLING)) { close(true); return; }
+      panel.style.transition = '';
+      panel.style.transform = '';
+    }
+    panel.addEventListener('touchend', function () { release(false); });
+    panel.addEventListener('touchcancel', function () { release(true); });
+
+    // The desktop layout has no More: a sheet open as the screen grows goes.
+    if (window.matchMedia) {
+      var wide = window.matchMedia('(min-width: 1024px)');
+      var onWide = function (e) { if (e.matches) close(false, true); };
+      if (wide.addEventListener) wide.addEventListener('change', onWide);
+      else if (wide.addListener) wide.addListener(onWide);
+    }
+  }
+
+  function wireChrome() {
     // Header menus are mutually exclusive. Each menu's button stops its click
     // from reaching document, so another menu's outside-click close never sees
     // it; instead a menu that opens announces itself with a ws:menu-open event
     // (detail: the menu element) and every other menu closes. notifications.js
     // does the same for the bell dropdown.
-    [['userMenuBtn', 'userMenuDropdown'], ['mobileUserMenuBtn', 'mobileUserMenuDropdown']].forEach(function (pair) {
+    [['userMenuBtn', 'userMenuDropdown']].forEach(function (pair) {
       var btn = document.getElementById(pair[0]);
       var menu = document.getElementById(pair[1]);
       if (!btn || !menu) return;
@@ -787,6 +926,7 @@
     if (!document.getElementById('desktopSidebar')) return;   // a page without the shell
     arriveInit();
     wireChrome();
+    wireSheet();
     wireScrollHint();
 
     var cached = cacheGet('status');

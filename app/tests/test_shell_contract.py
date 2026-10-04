@@ -243,11 +243,14 @@ class ShellContract(unittest.TestCase):
         self.assertEqual(side.count('title="Notifications"'), 1)
         self.assertRegex(head, r'<header[^>]*class="[^"]*lg:flex')
         self.assertRegex(side, r'<div class="relative\b[^"]*">\s*<button[^>]*title="Notifications"')
-        for i in ("desktopSidebar", "desktopNav", "drawerNav", "drawerOverlay", "drawerPanel",
-                  "hamburgerBtn", "drawerCloseBtn", "mobileTopBar", "mobileUserMenuBtn",
-                  "mobileUserMenuDropdown", "mobileUsername", "mobileRole", "scrollDownHint",
-                  "appVersion"):
+        for i in ("desktopSidebar", "desktopNav", "mobileTopBar", "wsBarTitle", "wsTabBar", "wsTabList",
+                  "wsMoreSheet", "wsMoreTitle", "wsMoreNav", "wsInstallHelp", "scrollDownHint", "appVersion"):
             self.assertIn(f'id="{i}"', side, i)
+        # The phone menu, its drawer and the phone account menu are gone:
+        # pages live in the tab bar and More, sign-out in More.
+        for i in ("drawerNav", "drawerOverlay", "drawerPanel", "hamburgerBtn", "drawerCloseBtn",
+                  "mobileUserMenuBtn", "mobileUserMenuDropdown", "mobileUsername", "mobileRole"):
+            self.assertNotIn(i, side, i)
         for i in ("appHeader", "systemStatus", "userMenuBtn", "userMenuDropdown",
                   "headerUsername", "headerRole", "headerAvatar"):
             self.assertIn(f'id="{i}"', head, i)
@@ -532,6 +535,152 @@ class ShellContract(unittest.TestCase):
             code = js_code_only(src)
             self.assertIn("frames" + op + " / dt;", code, op)
             self.assertIn("window.WS = { ready: ready, poll: poll };", code, op)
+
+
+def css_rules(css: str, selector: str) -> list:
+    """Every declaration block whose selector list names `selector` exactly."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    out = []
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+        if selector in [s.strip() for s in m.group(1).split(",")]:
+            out.append(m.group(2))
+    return out
+
+
+class PhoneShellContract(unittest.TestCase):
+    """Phone navigation and the home-screen app (spec
+    2026-10-04-mobile-nav-and-home-screen-design.md)."""
+
+    @classmethod
+    def setUpClass(cls):
+        strip = lambda text: re.sub(r"<!--.*?-->", "", text, flags=re.S)
+        cls.side = strip((STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8"))
+        cls.theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        cls.shell = (STATIC / "js" / "shell.js").read_text(encoding="utf-8")
+
+    def test_tab_bar_and_sheet_markup(self):
+        self.assertRegex(self.side, r'<nav id="wsTabBar" class="ws-tabbar lg:hidden" aria-label="Main">\s*'
+                                    r'<ul id="wsTabList" class="ws-tabbar-list">\s*\{\{\{tab_links\}\}\}\s*</ul>\s*</nav>')
+        self.assertRegex(self.side, r'<dialog id="wsMoreSheet" class="ws-sheet" aria-labelledby="wsMoreTitle">')
+        self.assertRegex(self.side, r'<ul id="wsMoreNav" class="ws-sheet-list">\s*\{\{\{more_links\}\}\}\s*</ul>')
+        self.assertRegex(self.side, r'<p id="wsBarTitle"[^>]*>\{\{bar_title\}\}</p>')
+        self.assertEqual(self.side.count("data-logout"), 1)
+        # The sheet's own close button and the scrim close it.
+        self.assertEqual(len(re.findall(r"\bdata-sheet-close\b", self.side)), 2)
+        # Only one list of steps shows: a display on the class must not beat
+        # the hidden attribute install.js sets on the other.
+        self.assertIn(".ws-install-steps[hidden] { display: none; }", self.theme)
+
+    def test_the_bottom_of_the_screen_is_shared(self):
+        t = self.theme
+        self.assertIn("html { --ws-tabbar-h: 0px; --ws-safe-bottom: env(safe-area-inset-bottom); }", t)
+        self.assertRegex(t, r"@media \(max-width: 1023\.98px\) \{\s*html:not\(\[data-shell=\"hidden\"\]\) \{\s*"
+                            r"--ws-tabbar-h: calc\(64px \+ env\(safe-area-inset-bottom\)\);\s*--ws-safe-bottom: 0px;")
+        self.assertIn("#wsPlayer { position: fixed; left: 0; right: 0; bottom: var(--ws-tabbar-h); z-index: 45; }", t)
+        self.assertIn("body { padding-bottom: calc(var(--ws-tabbar-h) + var(--ws-player-h)); }", t)
+        self.assertIn("#scrollDownHint { bottom: calc(1.5rem + var(--ws-tabbar-h) + var(--ws-player-h)); }", t)
+        self.assertIn(".ws-savebar { bottom: calc(var(--ws-tabbar-h) + var(--ws-player-h));", t)
+        # The player bar pads for the home indicator only while no tab bar does.
+        self.assertTrue(any("padding-bottom: var(--ws-safe-bottom);" in r for r in css_rules(t, ".wsp-bar")))
+        # Above the player bar, under the full player (z 80), the dialogs and the toasts.
+        self.assertTrue(any("z-index: 46;" in r for r in css_rules(t, ".ws-tabbar")))
+        # A full-screen view (the reader) has no tab bar.
+        self.assertTrue(css_rules(t, 'html[data-shell="hidden"] #wsTabBar'))
+
+    def test_sheet_motion_respects_reduced_motion(self):
+        m = re.search(r"@media \(prefers-reduced-motion: reduce\) \{(?P<body>(?:[^{}]*\{[^{}]*\})*)\s*\}", self.theme[
+            self.theme.index("/* ---- Phone navigation"):])
+        self.assertIsNotNone(m, "a reduced-motion block in the phone navigation section")
+        self.assertIn(".ws-sheet-panel", m.group("body"))
+        self.assertIn("transform: none", m.group("body"))
+
+    def test_shell_js_wires_the_sheet_not_a_drawer(self):
+        code = js_code_only(self.shell)
+        for gone in ("drawerOverlay", "drawerPanel", "hamburgerBtn", "mobileUserMenuBtn"):
+            self.assertNotIn(gone, self.shell, gone)
+        m = re.search(r"\bfunction wireSheet\(\)\s*\{", code)
+        self.assertIsNotNone(m, "wireSheet()")
+        body = code[m.end():matching_brace(code, m.end() - 1)]
+        self.assertIn(".showModal()", body)
+        self.assertRegex(body, r"addEventListener\('      ', function \(e\) \{\s*e\.preventDefault\(\);")   # cancel: Escape, Back
+        self.assertIn("touchmove", self.shell)                                                          # swipe down
+        self.assertRegex(code, r"\bfunction closeChrome\(\)\s*\{\s*if \(sheetCloser\) sheetCloser\(\);")
+        self.assertRegex(code, r"wireSheet\(\);")
+
+    def test_install_module_is_loaded_and_owned_by_the_shell(self):
+        side = (STATIC / "partials" / "shell-sidebar.html").read_text(encoding="utf-8")
+        tag = '<script type="module" src="/static/js/install.js?v=1"></script>'
+        self.assertEqual(side.count(tag), 1)
+        # Before the router: Home's first mount (a dynamic import) finds WS.install.
+        self.assertLess(side.index(tag), side.index('src="/static/js/router.js?v=1"'))
+        leaks = (STATIC / "js" / "debug-leaks.js").read_text(encoding="utf-8")
+        for name in ("SHELL_FILES", "SELF_OWNED_FILES"):
+            m = re.search(rf"export const {name} = \[([^\]]*)\]", leaks)
+            self.assertIn("'install.js'", m.group(1), name)
+        self.assertRegex(leaks, r"const SHELL_IDS = \[[^\]]*'wsTabBar'")
+
+    def test_the_phone_nav_js_tests_run_locally_and_in_ci(self):
+        from app.tests.test_theme_engine import repo_file
+        for parts in (("package.json",), (".github", "workflows", "docker-publish.yml")):
+            for test in ("node app/tests/js/install.mjs", "node app/tests/js/phone_nav.mjs"):
+                self.assertIn(test, repo_file(self, *parts), "/".join(parts))
+
+    def test_theme_loader_catches_the_install_prompt_before_anything_paints(self):
+        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+        code = js_code_only(loader)
+        self.assertRegex(code, r"window\.addEventListener\('                   ', function \(e\) \{\s*e\.preventDefault\(\);")
+        self.assertIn("window.WSInstallOffer = offer;", loader)
+        self.assertIn("var DISMISS_KEY = 'ws-install-card-dismissed';", loader)
+        self.assertIn("document.documentElement.setAttribute('data-install-offer', mode);", loader)
+
+    def test_home_install_card_contract(self):
+        page = read("index")
+        m = re.search(r"<section\b([^>]*)\bid=\"installCard\"([^>]*)>(.*?)</section>", page, re.S)
+        self.assertIsNotNone(m, "index.html: #installCard")
+        attrs, inner = m.group(1) + m.group(2), m.group(3)
+        self.assertRegex(attrs, r"\bhidden\b")
+        self.assertNotIn("class=", attrs)
+        self.assertIn('data-dismiss-key="ws-install-card-dismissed"', attrs)
+        # A fixed place: the top of Home, ahead of the push offer, not a Home section.
+        self.assertLess(page.index('id="installCard"'), page.index('id="pushPrompt"'))
+        self.assertNotIn("data-arrive", attrs)
+        self.assertIn("<!-- ws:app-name -->", inner)
+        self.assertRegex(inner, r'<img data-ws-app-icon src="/static/webservarr-app-192\.png"[^>]*width="48" height="48"')
+        for hook in ("data-install-later", "data-install-add", 'data-install-mode="prompt"', 'data-install-mode="ios"'):
+            self.assertIn(hook, inner, hook)
+        self.assertNotIn("<script", inner)
+        # The two iOS steps say the same thing on the card and in More.
+        def steps(html):
+            ol = re.search(r'<ol[^>]*data-install-(?:mode|steps)="ios"[^>]*>(.*?)</ol>', html, re.S).group(1)
+            return [re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", li)).strip()
+                    for li in re.findall(r"<li\b[^>]*>(.*?)</li>", ol, re.S)]
+        self.assertEqual(steps(inner), steps(self.side))
+        self.assertEqual(len(steps(inner)), 2)
+        # Decided before the first paint (theme-loader) and again by the page
+        # module before anything it awaits; never on a wide screen.
+        theme = self.theme
+        self.assertIn("html[data-install-offer] #installCard[hidden] { display: block; margin-bottom: 2rem; }", theme)
+        self.assertIn("@media (min-width: 1024px) { #installCard { display: none !important; } }", theme)
+        home = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")
+        mount = home[home.index("export async function mount(ctx) {"):]
+        decide = mount.index("window.WSInstallOffer(install.dataset.dismissKey)")
+        self.assertLess(decide, mount.index("await "))
+        self.assertLess(decide, mount.index("document.documentElement.removeAttribute('data-install-offer');"))
+        self.assertIn("WS.install.wireCard(install, signal);", mount)
+
+    def test_home_gauges_fit_a_small_phone(self):
+        # Three 112px rings do not fit 320px: below 21rem of box they go two
+        # and one, from the first paint (a container query, no script).
+        page = read("index")
+        m = re.search(r'<div id="netdataGauges" class="([^"]*)">\s*<div class="([^"]*)">', page)
+        self.assertIsNotNone(m)
+        self.assertIn("@container", m.group(1).split())
+        inner = m.group(2).split()
+        for c in ("grid", "grid-cols-2", "@[21rem]:grid-cols-3"):
+            self.assertIn(c, inner)
+        self.assertNotIn("justify-between", inner)
+        self.assertIn('<div class="flex flex-col items-center col-span-2 @[21rem]:col-span-1">', page)
+
 
 if __name__ == "__main__":
     unittest.main()
