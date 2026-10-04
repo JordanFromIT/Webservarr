@@ -19,7 +19,6 @@
 <div id="wsPage" data-ws-module="/static/js/pages/issues.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-hidden">
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
-<div class="max-w-[1200px] w-full mx-auto min-w-0">
 
 <!-- Page intro. Users kept landing on the wrong one of the two help pages, so
      each now states what it is for and links to the other. -->
@@ -34,19 +33,35 @@ For anything else, use <a href="/tickets" class="text-frosted-blue underline hov
 <!-- Contextual wiki pointer. Hidden unless an admin has chosen a page. -->
 <div id="wikiHookIssues" class="hidden mb-6"></div>
 
+<!-- Counts -->
+<div class="grid grid-cols-3 gap-3 mb-8" data-arrive="counts">
+<div class="rounded-card bg-frosted-blue/[0.04] p-4 text-center">
+<p class="text-h2 font-bold text-frosted-blue tabular-nums" id="statTotal"><span class="skel skel-num" aria-hidden="true"></span></p>
+<p class="text-label text-frosted-blue/70 font-semibold mt-1 break-words">Total</p>
+</div>
+<div class="rounded-card bg-frosted-blue/[0.04] p-4 text-center">
+<p class="text-h2 font-bold text-frosted-blue tabular-nums" id="statOpen"><span class="skel skel-num" aria-hidden="true"></span></p>
+<p class="text-label text-frosted-blue/70 font-semibold mt-1 break-words">Open</p>
+</div>
+<div class="rounded-card bg-frosted-blue/[0.04] p-4 text-center">
+<p class="text-h2 font-bold text-frosted-blue tabular-nums" id="statClosed"><span class="skel skel-num" aria-hidden="true"></span></p>
+<p class="text-label text-frosted-blue/70 font-semibold mt-1 break-words">Resolved</p>
+</div>
+</div>
+
 <!-- Two columns on a wide screen: report on the left, the list on the right -->
 <div class="flex flex-col lg:flex-row gap-10 lg:gap-12">
 
 <!-- Report an issue -->
 <section class="w-full lg:w-1/2 min-w-0" aria-labelledby="reportTitle">
-<h2 id="reportTitle" class="text-h3 font-bold leading-snug text-frosted-blue mb-4">Report a problem</h2>
+<h2 id="reportTitle" class="text-h3 font-bold text-frosted-blue mb-4">Report a problem</h2>
 
 <!-- Search -->
 <label for="searchInput" class="block text-label font-semibold text-frosted-blue/70 mb-1.5">Which movie or show?</label>
 <div class="relative mb-4">
 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 text-xl pointer-events-none" aria-hidden="true">search</span>
 <input id="searchInput" type="search" autocomplete="off" placeholder="Search the library"
-  class="w-full h-12 pl-10 pr-4 rounded-xl border-0 bg-frosted-blue/[0.07] text-frosted-blue placeholder-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue text-lead"/>
+  class="w-full pl-10 pr-4 py-2.5 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-body"/>
 </div>
 
 <!-- Search results (compact list) -->
@@ -63,8 +78,8 @@ For anything else, use <a href="/tickets" class="text-frosted-blue underline hov
 <!-- Issue form (shown after a title is picked) -->
 <form id="issueFormSection" class="hidden" novalidate>
 <!-- The picked title -->
-<div class="flex items-center gap-3 p-3 rounded-2xl bg-frosted-blue/[0.04] mb-5">
-<img id="selectedMediaPoster" src="" alt="" class="w-12 aspect-[2/3] rounded-lg object-cover shrink-0" data-poster/>
+<div class="flex items-center gap-3 p-3 rounded-inner bg-frosted-blue/[0.04] mb-5">
+<img id="selectedMediaPoster" src="" alt="" class="w-12 h-[72px] rounded-btn object-cover shrink-0" data-poster/>
 <div class="flex-1 min-w-0">
 <p id="selectedMediaTitle" class="text-frosted-blue text-body font-bold truncate"></p>
 <p id="selectedMediaYear" class="text-frosted-blue/70 text-label"></p>
@@ -97,22 +112,22 @@ For anything else, use <a href="/tickets" class="text-frosted-blue underline hov
 <!-- Description -->
 <label for="issueMessage" class="block text-label font-semibold text-frosted-blue/70 mb-1.5">What happened?</label>
 <textarea id="issueMessage" aria-describedby="issueMessageError" placeholder="For example: the audio is out of sync in season 1, episode 3"
-  class="w-full p-3 rounded-xl border-0 bg-frosted-blue/[0.07] text-frosted-blue placeholder-frosted-blue/70 text-body resize-none h-28 focus:outline-none focus:ring-2 focus:ring-frosted-blue"></textarea>
+  class="w-full p-3 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body resize-none h-28 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"></textarea>
 <p id="issueMessageError" class="hidden text-label font-semibold text-status-err-text mt-1.5">Say what went wrong, so it can be fixed.</p>
 
 <!-- Send -->
-<button id="submitIssueBtn" type="submit" class="ws-lift w-full mt-4 inline-flex items-center justify-center gap-2 h-11 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors disabled:opacity-60">
+<button id="submitIssueBtn" type="submit" class="ws-lift w-full mt-4 inline-flex items-center justify-center gap-2 py-2.5 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors disabled:opacity-60">
 Send report
 </button>
 </form>
 </section>
 
-<!-- The list. Its counts are one quiet line under the heading (audit H3:
-     no row of number cards), held at its height so it arrives without moving
-     anything. -->
+<!-- The list -->
 <section class="w-full lg:w-1/2 min-w-0" aria-labelledby="issuesTitle">
-<h2 id="issuesTitle" class="text-h3 font-bold leading-snug text-frosted-blue">Reported problems</h2>
-<p id="issuesCounts" class="mt-1 mb-4 text-label leading-5 min-h-5 text-frosted-blue/70 tabular-nums" data-arrive="counts"></p>
+<div class="flex items-baseline gap-2 mb-4">
+<h2 id="issuesTitle" class="text-h3 font-bold text-frosted-blue">Reported problems</h2>
+<span id="issuesTotalCount" class="text-body text-frosted-blue/70 tabular-nums"></span>
+</div>
 
 <!-- Status filter -->
 <div class="flex flex-wrap gap-2 mb-2" role="group" aria-label="Show by status">
@@ -131,14 +146,13 @@ Send report
 </div>
 
 <!-- Issues list -->
-<div id="issuesList" class="space-y-3" data-arrive="list">
-<div class="skel h-24 rounded-2xl" aria-hidden="true"></div>
-<div class="skel h-24 rounded-2xl" aria-hidden="true"></div>
-<div class="skel h-24 rounded-2xl" aria-hidden="true"></div>
+<div id="issuesList" class="space-y-2" data-arrive="list">
+<div class="skel skel-row" aria-hidden="true"></div>
+<div class="skel skel-row" aria-hidden="true"></div>
+<div class="skel skel-row" aria-hidden="true"></div>
 </div>
 </section>
 
-</div>
 </div>
 </div>
 

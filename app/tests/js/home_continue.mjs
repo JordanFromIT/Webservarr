@@ -5,7 +5,7 @@
 // shell.js does them). The sections below Continue are left to their own
 // tests: here their reads answer nothing.
 //
-// Covers: its place after the news (Home redesign, 2026-10-04); the compact row in place of its skeleton; hidden when nothing is in
+// Covers: the compact row in place of its skeleton; hidden when nothing is in
 // progress, also when the only thing to say is a note; the notes (Kavita down,
 // not connected, which links to Books and never runs the hand-off); the room a
 // row had last time held from the first frame (hidden decided before anything
@@ -262,14 +262,13 @@ const NOTE_KEY = 'webservarr_home_continue_note:sam';
 
 // ---------------------------------------------------------------------------
 
-await run('the section comes after the news (spec section 2), hidden until a visit says otherwise, with a row-shaped skeleton', async (make) => {
+await run('the section is the first to arrive, hidden until a visit says otherwise, with a row-shaped skeleton', async (make) => {
   const t = make({ routes: routes({ items: [], notes: [] }) });
   const host = t.host();
-  const order = t.qa('[data-arrive]').map((n) => n.getAttribute('data-arrive'));
-  check('after the news, before what is playing', host.getAttribute('data-arrive') === 'continue' && order.indexOf('continue') === order.indexOf('news') + 1 && order.indexOf('streams') === order.indexOf('continue') + 1, order);
+  check('it is the first section in the arrival order', t.qa('[data-arrive]')[0] === host && host.getAttribute('data-arrive') === 'continue');
   check('it is hidden in the markup (the stack\'s gap skips it)', host.hidden === true);
   const skel = host.querySelector('[aria-hidden="true"]');
-  check('its skeleton is the row\'s shape: the Books heading, six compact cards, a room for a note', skel.querySelector('h2') && skel.querySelector('h2').className === 'mb-3 font-bold leading-snug text-xl text-frosted-blue' && !skel.querySelector('h2').previousElementSibling && skel.querySelectorAll('.w-28').length === 6 && skel.querySelector('[data-note-slot]'));
+  check('its skeleton is the row\'s shape: a heading (with its icon\'s room), six compact cards, a room for a note', skel.querySelector('h2') && skel.querySelector('h2').previousElementSibling.textContent === 'auto_stories' && skel.querySelector('h2').parentNode.className === 'flex items-center gap-3 mb-4' && skel.querySelectorAll('.w-28').length === 6 && skel.querySelector('[data-note-slot]'));
   check('a card is a cover and two lines', Array.from(skel.querySelectorAll('.w-28')).every((c) => c.children.length === 3));
 });
 
@@ -279,11 +278,11 @@ await run('a row in progress: the compact row replaces the skeleton and is shown
   const host = t.host();
   const row = host.querySelector('[data-continue]');
   check('the row is there', !!row && row.getAttribute('aria-label') === 'Continue');
-  check('compact: narrow cards, and the heading every Home section has (no glyph)', row.querySelectorAll('li > a.w-28, li > button.w-28').length === 2 && row.querySelector('h2').className === 'mb-3 font-bold leading-snug text-xl text-frosted-blue' && !row.querySelector('h2').previousElementSibling);
+  check('compact: narrow cards, and a heading like the other sections\' (an icon, then the title)', row.querySelectorAll('li > a.w-28, li > button.w-28').length === 2 && /text-xl/.test(row.querySelector('h2').className) && row.querySelector('h2').previousElementSibling.textContent === 'auto_stories');
   check('the skeleton is gone and the section is shown', !host.querySelector('.skel') && host.hidden === false && host.getAttribute('aria-busy') === 'false');
   check('an ebook resumes in the reader', row.querySelector('li > a').getAttribute('href') === '/reader?seriesId=4&chapterId=9');
   check('it asked for the person\'s Continue, once, on the page\'s signal', t.net.urls('/api/books/continue').length === 1 && t.net.calls.find((c) => c.url === '/api/books/continue').init.signal === t.ctl.signal);
-  check('Continue arrives in its turn (the sections above answer nothing here)', t.WS.arrived.indexOf('continue') !== -1, t.WS.arrived);
+  check('Continue arrives before every other section', t.WS.arrived[0] === 'continue', t.WS.arrived);
   check('it shares Books\' kept copy', t.WS.swrKeys.indexOf('books:continue') !== -1);
   check('it is remembered for the next first frame', t.win.localStorage.getItem(KEY) === '1' && t.win.localStorage.getItem(NOTE_KEY) === '0');
   check('no hand-off to Kavita from Home', t.hand.reconnect === 0);
@@ -358,7 +357,8 @@ await run('the room a row had last time is held from the first frame, so nothing
 
 await run('the first-paint rules: the room is held only while the section is hidden by its attribute', async (make) => {
   const css = HOME_HTML.slice(HOME_HTML.indexOf('<style>'), HOME_HTML.indexOf('</style>'));
-  check('shown by the flag; the stack\'s flex gap spaces it', /html\[data-home-continue\] #homeContinue\[hidden\] \{ display: block; \}/.test(css) && /data-home-stack/.test(HOME_HTML) && /<div class="[^"]*\bflex flex-col gap-8\b[^"]*" data-home-stack>/.test(HOME_HTML));
+  check('shown by the flag, with the stack\'s gap given by its own margin', /html\[data-home-continue\] #homeContinue\[hidden\] \{ display: block; margin-bottom: 2rem; \}/.test(css));
+  check('and no margin where a flex gap spaces the stack', /html\[data-home-hide\]\[data-home-continue\] #homeContinue\[hidden\] \{ margin-bottom: 0; \}/.test(css));
   check('the note\'s room only for a row that had a note', /html\[data-home-continue="note"\] #homeContinue \[data-note-slot\]\[hidden\] \{ display: block; \}/.test(css));
   const loader = readFileSync(join(STATIC, 'js/theme-loader.js'), 'utf8');
   // The loader's own rule, run: the same memory, only on Home, only while Books is on.

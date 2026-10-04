@@ -75,16 +75,13 @@
     // the fallback path has to inject one. The name is quoted, as the server
     // quotes it: unquoted, a family like "Exo 2" is not a valid font-family.
     if (data.font) {
-      // The shipped font keeps its metric-matched fallback (theme.css), as the
-      // server's stack does (app/pages.py font_stack).
-      var fallback = data.font === 'Spline Sans' ? '"Spline Sans Fallback", ' : '';
-      root.style.setProperty('--font-display', '"' + data.font + '", ' + fallback + 'sans-serif');
+      root.style.setProperty('--font-display', '"' + data.font + '", sans-serif');
       var fontId = 'webservarr-google-font';
       if (!document.getElementById('ws-font') && !document.getElementById(fontId)) {
         var link = document.createElement('link');
         link.id = fontId;
         link.rel = 'stylesheet';
-        link.href = fallback ? '/static/fonts/spline-sans.css?v=1' : 'https://fonts.googleapis.com/css2?family=' +
+        link.href = 'https://fonts.googleapis.com/css2?family=' +
           encodeURIComponent(data.font) + ':wght@300;400;500;600;700&display=optional';
         document.head.appendChild(link);
       }

@@ -43,8 +43,8 @@ wireSignIn();
 // The DOMContentLoaded handler below calls this again, for the rare page
 // whose branding had to be fetched. Every step is safe to repeat.
 function applyLoginBranding(theme) {
-    // Show branding logo if configured. Its box (h-16) is there from the
-    // moment it shows, and the centred column around it keeps the image's
+    // Show branding logo if configured. Its box (h-48) is there from the
+    // moment it shows, and the w-full column around it keeps the image's
     // arriving width from moving anything.
     if (theme.logo_url) {
         var logoEl = document.getElementById('loginLogo');
@@ -92,40 +92,37 @@ function applyLoginBranding(theme) {
 }
 if (window.WEBSERVARR_THEME) applyLoginBranding(window.WEBSERVARR_THEME);
 
-// --- The server's one-line status, under the card ---
+// --- Footer: system status badge ---
 // A .ws-pill like the header's: every colour is in theme.css, keyed on
 // data-state (ok / warn / err; "off" while loading or unavailable). The words
 // stay theme text while all is well and take the status-text colour otherwise.
-// One line only (spec 3): the public summary names at most the one service
-// that is down, and nothing else. Uptime Kuma not answering is "unknown",
-// which never reads as running.
-function statusLine(data) {
-    var overall = data && data.status;
-    if (overall === 'online') return { state: 'ok', text: 'All services running' };
-    if (overall === 'issues') {
-        var name = data && typeof data.down_service === 'string' ? data.down_service.trim() : '';
-        return { state: 'err', text: name ? name + ' is down' : 'Something is down' };
-    }
-    if (overall === 'degraded') return { state: 'warn', text: 'Some services are slow' };
-    return { state: 'off', text: 'Status unavailable right now' };
-}
-
+// The footer comes after this script, so it runs once the page is parsed.
 function loadSystemStatus() {
     var badge = document.getElementById('loginSystemStatus');
     if (!badge) return;
     var text = badge.querySelector('[data-status-text]');
-    function render(line) {
-        badge.setAttribute('data-state', line.state);
-        text.textContent = line.text;
+    function render(state, label) {
+        badge.setAttribute('data-state', state);
+        text.textContent = label;
     }
-    // Public aggregate endpoint (no auth): the login page has no session yet.
+    function showUnavailable() {
+        render('off', 'Can\u2019t check the server right now');
+    }
+    // Public aggregate endpoint (no auth) — the login page has no session yet.
     fetch('/api/integrations/status-summary').then(function(r) {
         return r.ok ? r.json() : null;
     }).then(function(data) {
-        render(statusLine(data));
-    }).catch(function() {
-        render(statusLine(null));
-    });
+        var overall = data && data.status;
+        if (overall === 'issues') {
+            render('err', 'Something\u2019s down');
+        } else if (overall === 'degraded') {
+            render('warn', 'Some things are slow');
+        } else if (overall === 'online') {
+            render('ok', 'Everything\u2019s running');
+        } else {
+            showUnavailable();
+        }
+    }).catch(showUnavailable);
 }
 
 // --- Helper: show login error message ---
@@ -392,7 +389,7 @@ function wireSignIn() {
             originalChildren.push(btn.removeChild(btn.firstChild));
         }
         btn.disabled = true;
-        btn.textContent = 'Connecting to Plex\u2026';
+        btn.textContent = 'Connecting to Plex...';
 
         try {
             var resp = await fetch('/auth/plex-start', { method: 'POST' });

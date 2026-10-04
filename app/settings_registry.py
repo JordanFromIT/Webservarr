@@ -171,34 +171,26 @@ def _build() -> List[SettingDef]:
         _color("theme.color_text", "#BEEEF4", "Text colour"),
         _color("theme.color_text_secondary", "#FFFFFF", "Bright text colour (buttons, highlights)"),
         _color("theme.color_background", "#000000", "Background colour"),
-        # The secondary palette (media, status, gauges) is derived from the brand
-        # palette, not taken from a stock UI kit: each family holds one OKLCH
-        # lightness and chroma (so text on it keeps its contrast whatever the
-        # hue) and spaces its hues around the brand blue (about 245 degrees).
-        #   media:  L 0.86, C 0.09, hues 315 / 190 / 80 (4.75:1 or more on the primary fill)
-        #   status: L 0.74, C 0.13, hues 152 / 75 / 27 (8.6:1 or more on the black page)
-        #   gauges: L 0.72, C 0.12, hues 215 / 312 / 60 (8:1 or more on black)
-        # seed.migrate_secondary_palette_v1 moves an install still on the old
-        # stock defaults to these; a colour an operator chose stays.
         # Media type accents identify what a thing is, so they are three distinct
-        # hues rather than shades of the brand colour.
-        _color("theme.color_media_movie", "#E8C0FA", "Accent for movies"),
-        _color("theme.color_media_tv", "#87E4DE", "Accent for TV shows"),
-        _color("theme.color_media_book", "#F0CB8D", "Accent for books and audiobooks"),
+        # hues rather than shades of the brand colour (defaults clear 4.5:1 on primary).
+        _color("theme.color_media_movie", "#E9D5FF", "Accent for movies"),
+        _color("theme.color_media_tv", "#67E8F9", "Accent for TV shows"),
+        _color("theme.color_media_book", "#FCD34D", "Accent for books and audiobooks"),
         # Status colours: one per state drives the dot, the ring and the words
         # ("status colour only on deviation": the words take it on warn and err).
         # The defaults suit a dark background; a light theme picks darker ones.
-        _color("theme.color_status_ok", "#65C281", "Colour for things that are working"),
-        _color("theme.color_status_warn", "#DA9E3F", "Colour for things that are slow or partly working"),
-        _color("theme.color_status_err", "#F2897E", "Colour for things that are down"),
+        _color("theme.color_status_ok", "#4ADE80", "Colour for things that are working"),
+        _color("theme.color_status_warn", "#FBBF24", "Colour for things that are slow or partly working"),
+        _color("theme.color_status_err", "#F87171", "Colour for things that are down"),
         # The sidebar's New! flag: its gradient, outline and glow are all shades of this.
         _color("theme.color_new_flag", "#FFD60A", "Colour of the New! flag in the sidebar"),
         # Home's CPU, RAM and network gauges. Off (the default), their rings
-        # take the theme's accent; on, each takes its own colour below.
+        # take the theme's accent; on, each takes its own colour below (the
+        # rings' original cyan, purple and orange).
         _bool("theme.gauges_colourful", "false", "Give the Home gauges their own colours", public=True),
-        _color("theme.color_gauge_cpu", "#26B7D3", "Colour of the CPU gauge (with colourful gauges on)"),
-        _color("theme.color_gauge_ram", "#BE8EDB", "Colour of the RAM gauge (with colourful gauges on)"),
-        _color("theme.color_gauge_net", "#DB9152", "Colour of the network gauge (with colourful gauges on)"),
+        _color("theme.color_gauge_cpu", "#06B6D4", "Colour of the CPU gauge (with colourful gauges on)"),
+        _color("theme.color_gauge_ram", "#A855F7", "Colour of the RAM gauge (with colourful gauges on)"),
+        _color("theme.color_gauge_net", "#F97316", "Colour of the network gauge (with colourful gauges on)"),
         _text("theme.font", "Spline Sans", "Google Font family name", public=True, allow_empty=False,
               max_length=60, pattern=r"[A-Za-z0-9 \-]{1,60}", pattern_hint="Use a Google Font family name"),
         _text("theme.custom_css", "", "Custom CSS added to every page", public=True, max_length=20000),

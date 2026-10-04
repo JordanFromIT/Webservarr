@@ -116,9 +116,7 @@ class OneRule(unittest.TestCase):
             with self.subTest(values=values):
                 b = payload(values)
                 style = pages.theme_style(b)
-                # The shipped font carries its metric-matched fallback (audit L8).
-                fallback = '"Spline Sans Fallback",' if b["font"] == "Spline Sans" else ""
-                self.assertIn(f'--font-display:"{b["font"]}",{fallback}sans-serif', style)
+                self.assertIn(f'--font-display:"{b["font"]}",sans-serif', style)
                 for key in COLOR_KEYS:
                     self.assertIn(f'--hex-{key.replace("_", "-")}:{b["colors"][key]}', style)
 

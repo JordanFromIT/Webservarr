@@ -223,8 +223,8 @@ class Hygiene(unittest.TestCase):
             text = f.read_text(encoding="utf-8")
             # Font names are legitimate choices in the Appearance font list, so the
             # default font is not checked here; colours, tagline and icon defaults are.
-            for leaked in ("#125793", "#2C6DA1", "#4684B0", "#BEEEF4", "#E8C0FA", "#87E4DE", "#F0CB8D",
-                           "#65C281", "#DA9E3F", "#F2897E", "#FFD60A", "#26B7D3", "#BE8EDB", "#DB9152",
+            for leaked in ("#125793", "#2C6DA1", "#4684B0", "#BEEEF4", "#E9D5FF", "#67E8F9", "#FCD34D",
+                           "#4ADE80", "#FBBF24", "#F87171", "#FFD60A",
                            "Media Server Management", "health_metrics", "confirmation_number",
                            "settings_input_component", "***masked***"):
                 self.assertNotIn(leaked, text, f"{f.name} carries a default ({leaked}); read it from meta")
@@ -2026,18 +2026,22 @@ class InPlaceNews(unittest.TestCase):
 
     def test_home_news_links_hold_still(self):
         home = (STATIC / "index.html").read_text(encoding="utf-8")
-        # "All news" is in the markup from the first paint, shown, so nothing
-        # in the heading row moves when news arrives; the links never shrink.
+        # "View all" reserves its space from the first paint (invisible, not
+        # hidden), so it cannot push "Manage news" aside when news arrives; the
+        # header row wraps, so on a phone the links sit on their own line
+        # instead of squeezing the heading onto two.
         view_all = re.search(r'<a href="/news" id="newsViewAll" class="([^"]*)"', home)
         self.assertIsNotNone(view_all)
-        self.assertNotIn("invisible", view_all.group(1).split())
+        self.assertIn("invisible", view_all.group(1).split())
         self.assertNotIn("hidden", view_all.group(1).split())
-        row = home[home.index('<section data-arrive="news"'):home.index('id="newsViewAll"')]
-        self.assertIn('<div class="flex items-center gap-4 shrink-0">', row)
+        row = home[home.index('<section data-arrive="news">'):home.index('id="newsViewAll"')]
+        self.assertIn('<div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">', row)
         # Home renders its news in its page module (soft navigation).
         script = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")
         self.assertNotIn("<script>", home)
-        self.assertNotIn("newsViewAll", script)
+        body = function_body(js_code_only(script), "renderNews")
+        self.assertNotIn("classList.add(", body)
+        self.assertEqual(len(live_matches(script, r"viewAll\.classList\.remove\('invisible'\);")), 1)
 
 
 

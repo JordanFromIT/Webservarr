@@ -341,10 +341,8 @@ class ShellContract(unittest.TestCase):
                                                r"document\.documentElement\.setAttribute\('               ', ''\);")
         self.assertIn("'data-push-offer'", loader)
         theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
-        # At the end of Home, spaced by the stack's flex gap: showing it moves nothing.
-        self.assertIn("html[data-push-offer] #pushPrompt[hidden] { display: block; }", theme)
-        self.assertNotIn("#pushPrompt[hidden] { margin", theme)
-        self.assertGreater(page.index('id="pushPrompt"'), page.index('data-arrive="releases"'))
+        self.assertIn("html[data-push-offer] #pushPrompt[hidden] { display: block; margin-bottom: 2rem; }", theme)
+        self.assertIn("html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }", theme)
         # The page module decides again for its visit, before anything it
         # awaits (so before the swapped page is drawn), takes the mark away and
         # has notifications.js wire the card with the visit's signal.
@@ -643,9 +641,7 @@ class PhoneShellContract(unittest.TestCase):
         self.assertRegex(attrs, r"\bhidden\b")
         self.assertNotIn("class=", attrs)
         self.assertIn('data-dismiss-key="ws-install-card-dismissed"', attrs)
-        # A fixed place, not a Home section: after Coming soon (spec section 2),
-        # ahead of the push offer, where showing it moves nothing.
-        self.assertLess(page.index('data-arrive="releases"'), page.index('id="installCard"'))
+        # A fixed place: the top of Home, ahead of the push offer, not a Home section.
         self.assertLess(page.index('id="installCard"'), page.index('id="pushPrompt"'))
         self.assertNotIn("data-arrive", attrs)
         self.assertIn("<!-- ws:app-name -->", inner)
@@ -663,7 +659,7 @@ class PhoneShellContract(unittest.TestCase):
         # Decided before the first paint (theme-loader) and again by the page
         # module before anything it awaits; never on a wide screen.
         theme = self.theme
-        self.assertIn("html[data-install-offer] #installCard[hidden] { display: block; }", theme)
+        self.assertIn("html[data-install-offer] #installCard[hidden] { display: block; margin-bottom: 2rem; }", theme)
         self.assertIn("@media (min-width: 1024px) { #installCard { display: none !important; } }", theme)
         home = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")
         mount = home[home.index("export async function mount(ctx) {"):]
@@ -673,18 +669,17 @@ class PhoneShellContract(unittest.TestCase):
         self.assertIn("WS.install.wireCard(install, signal);", mount)
 
     def test_home_gauges_fit_a_small_phone(self):
-        # Three 112px rings do not fit 320px: below 21rem of box they shrink
-        # to 80px and stay three across, from the first paint (a container
-        # query, no script).
+        # Three 112px rings do not fit 320px: below 21rem of box they go two
+        # and one, from the first paint (a container query, no script).
         page = read("index")
         m = re.search(r'<div id="netdataGauges" class="([^"]*)">\s*<div class="([^"]*)">', page)
         self.assertIsNotNone(m)
         self.assertIn("@container", m.group(1).split())
         inner = m.group(2).split()
-        for c in ("grid", "grid-cols-3"):
+        for c in ("grid", "grid-cols-2", "@[21rem]:grid-cols-3"):
             self.assertIn(c, inner)
         self.assertNotIn("justify-between", inner)
-        self.assertEqual(page.count('<div class="relative size-20 @[21rem]:size-28">'), 3)
+        self.assertIn('<div class="flex flex-col items-center col-span-2 @[21rem]:col-span-1">', page)
 
 
 if __name__ == "__main__":

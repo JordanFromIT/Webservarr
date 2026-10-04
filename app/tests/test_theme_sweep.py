@@ -183,6 +183,7 @@ RAW_ALLOWED = {
     ("reader.js", "getPropertyValue('--hex-background') ||", "#000000", "the shipped default if the theme variable is missing"),
     ("reader.js", "getPropertyValue('--hex-text') ||", "#BEEEF4", "the shipped default if the theme variable is missing"),
     ("theme-loader.js", 'e.g. "#125793"', "#125793", "a comment showing the hex-to-triplet conversion"),
+    ("requests.js", "measured against the button's #125793 fill", "#125793", "a comment about measured contrast"),
     ("pages.py", "'#125793' -> '18 87 147'", "#125793", "a docstring showing the hex-to-triplet conversion"),
 }
 
@@ -355,10 +356,10 @@ class RequestStatusCollapseMarkup(unittest.TestCase):
         # The arrows are markup now, data-actions on the page module's one
         # click listener, which scrolls the row beside the arrow clicked.
         self.assertNotIn('onclick="scrollDiscoverRow', REQUESTS)
-        section = REQUESTS[REQUESTS.index('<div id="discoverSection"'):REQUESTS.index('<section id="rsSection"')]
+        section = REQUESTS[REQUESTS.index('<div id="discoverSection"'):REQUESTS.index('<div id="statsRow"')]
         self.assertNotRegex(section, r"\son[a-z]+\s*=")
         rows = len(re.findall(r'<div id="\w+" class="discover-row ', section))
-        self.assertEqual(rows, 3)
+        self.assertEqual(rows, 7)
         for d in ("-1", "1"):
             self.assertEqual(section.count(f'data-action="discover-scroll" data-dir="{d}"'), rows, d)
         click = REQUESTS_JS[REQUESTS_JS.index("case 'discover-scroll': {"):]
@@ -368,31 +369,27 @@ class RequestStatusCollapseMarkup(unittest.TestCase):
                       "Number(el.getAttribute('data-dir')) || 1);", click)
 
     def test_discover_rows_and_skeletons_are_in_the_first_paint(self):
-        # The shelves lead the browse area; built after the page scripts
-        # loaded, they pushed everything below down. They are markup (Task
-        # 12): no script writes the section, and every shelf the module fills
-        # is in it with its eight skeleton cards (audit M8: three shelves).
+        # With Request Status collapsed, the discover rows lead the page; built
+        # after the page scripts loaded, they pushed everything below down.
+        # They are markup (Task 12): no script writes the section, and every
+        # row the module fills is in it with its eight skeleton cards.
         self.assertNotIn("discoverSection", REQUESTS_JS)
-        section = REQUESTS[REQUESTS.index('<div id="discoverSection"'):REQUESTS.index('<section id="rsSection"')]
-        ids = re.findall(r"\{ id: '(\w+)',", REQUESTS_JS[REQUESTS_JS.index("const SHELVES = ["):])
-        self.assertEqual(ids, ["trendingRow", "comingRow", "booksRow"])
+        section = REQUESTS[REQUESTS.index('<div id="discoverSection"'):REQUESTS.index('<div id="statsRow"')]
+        ids = re.findall(r"\{ id: '(\w+)',", REQUESTS_JS[REQUESTS_JS.index("const DISCOVER_ROWS = ["):])
+        self.assertEqual(len(ids), 7)
         for rid in ids:
             at = section.index(f'<div id="{rid}" class="discover-row ')
             row = section[at:section.index("</div>\n    <button", at)]
-            self.assertEqual(row.count('<div class="w-36 shrink-0" aria-hidden="true">'), 8, rid)
-        # The skeleton card is the real card's box (the Books card): the
-        # 144px 2:3 cover, the title's two lines of room, one 20px line.
-        skel = re.search(r'<div class="w-36 shrink-0" aria-hidden="true">[^\n]*', section).group(0)
+            self.assertEqual(row.count('<div class="skel shrink-0 w-32 '), 8, rid)
+        # The skeleton card is the real card's box: the 128px poster, then two
+        # 20px lines of 13px text (the title, then the type and status).
+        skel = re.search(r'<div class="skel shrink-0 w-32 [^\n]*', section).group(0)
         card = re.search(r"function buildDiscoverCard\([^)]*\) \{(.*?)\n\}", REQUESTS_JS, re.S).group(1)
-        self.assertIn("w-36 shrink-0", card)
-        for token in ("aspect-[2/3] rounded-xl", "leading-snug min-h-[2.75em]", "text-label leading-5 min-h-5"):
+        for token in ("shrink-0 w-32", "rounded-inner", "aspect-[2/3]", "pt-2", "text-label leading-5"):
             self.assertIn(token, skel, token)
-        consts = REQUESTS_JS[REQUESTS_JS.index("const CARD_TITLE"):REQUESTS_JS.index("function subLine")]
-        for token in ("text-body font-semibold leading-snug", "line-clamp-2 min-h-[2.75em]", "text-label leading-5 min-h-5"):
-            self.assertIn(token, consts, token)
-        self.assertIn("CARD_TITLE", card)
-        self.assertIn("subLine(", card)
-        self.assertIn("coverMarkup(", card)
+            self.assertIn(token, card, token)
+        self.assertEqual(skel.count("text-label leading-5"), 2)
+        self.assertEqual(card.count("text-label leading-5"), 2)
         self.assertNotIn("border", skel)          # no glass card, no border to hold
         self.assertNotIn("glass-card", card)
 
@@ -693,11 +690,8 @@ class HomeAndEbooksDetails(unittest.TestCase):
     def test_them(self):
         home = (STATIC / "index.html").read_text(encoding="utf-8") + \
             (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")   # its cards
-        # One clamp for a stream's progress: the bar's width and its value.
-        self.assertIn("function clampPercent(n) { return Math.min(100, Math.max(0, Math.round(n) || 0)); }", home)
-        self.assertIn("var pct = clampPercent(stream.progress);", home)
-        self.assertIn("fill.style.width = pct + '%';", home)
-        self.assertIn("track.setAttribute('aria-valuenow', String(pct));", home)
+        clamp = "${Math.min(100, Math.max(0, Math.round(progress) || 0))}%"
+        self.assertEqual(home.count(clamp), 2)          # the label and the bar
         self.assertNotIn("${Math.round(progress)}%", home)
         self.assertNotIn("generateStatusBars", home)
         books = (STATIC / "books.html").read_text(encoding="utf-8")

@@ -15,8 +15,7 @@ from app.tests.test_shell_contract import STATIC, js_code_only, live_matches, ma
 
 # Pages converted to soft navigation, in conversion order.
 CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index", "books", "reader",
-             "requests", "requests-embed", "player-test", "book", "books-person", "books-series", "books-stats",
-             "status"]
+             "requests", "requests-embed", "player-test", "book", "books-person", "books-series", "books-stats"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -526,18 +525,18 @@ class HomePage(unittest.TestCase):
 
     def test_every_read_is_on_the_pages_signal(self):
         code = self.code()
-        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 6, "status, continue, news, streams, requests, releases")
-        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*?, \{ signal: signal \}\)", code)), 6)
+        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 5, "continue, news, streams, requests, releases")
+        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*?, \{ signal: signal \}\)", code)), 5)
         fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
         self.assertEqual(len(fetches), 2, "the gauges and the sidebar's request badge")
         for at in fetches:
             self.assertIn("signal: signal", ",".join(call_args(code, at + len("fetch"))), code[at:at + 60])
         # A page left mid-request says nothing and writes nothing.
-        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 7,
-                         "six onError handlers and the gauges' catch")
+        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 6,
+                         "five onError handlers and the gauges' catch")
         self.assertRegex(code, r"catch \(e\) \{\s*if \(signal\.aborted \|\| isAbort\(e\)\) return;")
-        for name in ("drawStatus", "renderContinue", "renderNews", "renderActiveStreams", "renderRecentRequests",
-                     "renderServices", "renderUpcomingReleases"):
+        for name in ("renderContinue", "renderNews", "renderActiveStreams", "renderRecentRequests", "renderServices",
+                     "renderUpcomingReleases"):
             self.assertRegex(function_body(code, name), r"^\s*if \(signal\.aborted\) return;", name)
 
     def test_the_service_list_is_the_pills_request(self):
@@ -579,8 +578,8 @@ class HomePage(unittest.TestCase):
         # so nothing there can keep a node (or a visit's state) alive.
         src = module_source("index")
         names = re.findall(r"^(?:const|let|var) (\w+)", src, re.M)
-        self.assertEqual(sorted(names), ["CONTINUE_KEY", "CONTINUE_NOTE_KEY", "FOCUS", "HOMELAB_ICONS", "NEWS_FRESH_MS",
-                                         "NEWS_MAX", "REQUEST_GLYPHS", "SECTIONS", "SERVICE_STATES", "STATUS_LINK"])
+        self.assertEqual(sorted(names), ["CONTINUE_KEY", "CONTINUE_NOTE_KEY", "HOMELAB_ICONS", "NEWS_FRESH_MS",
+                                         "REQUEST_TONE_CLASSES", "SECTIONS", "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE"])
         self.assertNotRegex(src, r"^(?:let|var) ", )
         # Every lookup stays inside the page.
         self.assertNotRegex(self.code(), r"\bdocument\.getElementById\(")
@@ -588,10 +587,8 @@ class HomePage(unittest.TestCase):
     def test_continue_is_the_books_row_in_its_compact_form(self):
         h = read("index")
         page = h[h.index('<div id="wsPage"'):h.index("</main>")]
-        # After the news (Home redesign, spec section 2); hidden (so the stack's gap skips it) until a
-        # visit says otherwise.
-        order = re.findall(r'data-arrive="(\w+)"', page)
-        self.assertEqual(order.index("continue"), order.index("news") + 1, order)
+        # The first section to arrive; hidden (so the stack's gap skips it) until a visit says otherwise.
+        self.assertEqual(re.findall(r'data-arrive="(\w+)"', page)[0], "continue")
         self.assertIn('<div id="homeContinue" data-arrive="continue" hidden aria-busy="true">', h)
         self.assertIn('data-ws-dep="/static/js/pages/books.js?v=1"', h)
         src = module_source("index")
@@ -608,22 +605,20 @@ class HomePage(unittest.TestCase):
         loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
         self.assertIn("data.page !== 'index'", loader)
         self.assertIn("setAttribute('data-home-continue',", loader)
-        self.assertIn("html[data-home-continue] #homeContinue[hidden] { display: block; }", h)
+        self.assertIn("html[data-home-continue] #homeContinue[hidden] { display: block; margin-bottom: 2rem; }", h)
 
     def test_the_buttons_are_data_actions(self):
-        # The streams row scrolls (no pager); a stream's "Why?" is a data-action.
         h = read("index")
-        self.assertNotIn("streams-prev", h)
+        for action in ("streams-prev", "streams-next"):
+            self.assertEqual(h.count(f'data-action="{action}"'), 1, action)
         self.assertNotIn("scrollStreams(", h)
         src = module_source("index")
-        self.assertEqual(src.count("why.setAttribute('data-action', 'stream-info');"), 1)
-        self.assertIn("if (btn.getAttribute('data-action') === 'stream-info') {", src)
-        # One listener, on the page, for them and the news cards' Read more;
-        # the others are an image's own failure, on the visit's signal.
+        self.assertEqual(src.count('data-action="stream-info"'), 1)
+        for action in ("streams-prev", "streams-next", "stream-info"):
+            self.assertIn(f"case '{action}':", src, action)
+        # One listener, on the page, for them and the news cards' Read more.
         code = self.code()
-        found = re.findall(r"\b(\w+)\.addEventListener\(", code)
-        self.assertEqual([f for f in found if f != "img"], ["root"], found)
-        self.assertEqual(len(re.findall(r"img\.addEventListener\('     ', function \(\) \{ img\.classList\.add\(' +'\); \}, \{ once: true, signal: signal \}\);", code)), found.count("img"))
+        self.assertEqual(re.findall(r"\b(\w+)\.addEventListener\(", code), ["root"])
         self.assertIn("var toggle = t.closest('[data-news-toggle]');", src)
 
     def test_sections_follow_the_pages_own_payload(self):
@@ -1015,8 +1010,8 @@ class RequestsPage(unittest.TestCase):
         self.assertEqual(on_search, 2, "the film/TV search and the book search")
         self.assertNotRegex(code, r"\bgetJSON\(")
         # A page left mid-request says nothing and writes nothing.
-        self.assertEqual(len(re.findall(r"if \(signal\.aborted \|\| isAbort\(\w+\)\) return(?: null)?;", code)), 7,
-                         "request status, a shelf source, search, a request, the counts, the summary, the recent requests")
+        self.assertEqual(len(re.findall(r"if \(signal\.aborted \|\| isAbort\(\w+\)\) return;", code)), 7,
+                         "request status, discover, search, a request, the counts, the summary, the recent requests")
 
     def test_timers_and_refresh_are_the_pages(self):
         code = self.code()
@@ -1027,10 +1022,14 @@ class RequestsPage(unittest.TestCase):
         # The search wait is re-armed per keystroke and cancelled through the visit.
         self.assertIn("ctx.clearTimeout(searchTimer);", code)
         self.assertIn("searchTimer = ctx.setTimeout(function () {", code)
-        # The search stays where it is (audit M8): no travelling bar, so no
-        # scroll lock and no animation frame loop to outlive the visit.
-        for gone in ("swallowScroll", "requestAnimationFrame", "_scrollLockFailsafe", "moveSearchBar"):
-            self.assertNotIn(gone, code, gone)
+        # The scroll lock's failsafe and its listeners end with the visit.
+        self.assertIn("_scrollLockFailsafe = ctx.setTimeout(unlockScroll, SEARCH_MOVE_DURATION + 2000);", code)
+        for ev in ("wheel", "touchmove"):
+            self.assertIn(f"window.addEventListener('{ev}', swallowScroll, {{ passive: false, signal: signal }});",
+                          module_source("requests"))
+        # A move still in flight when the page is left touches nothing.
+        frame = function_body(code, "frame")
+        self.assertRegex(frame, r"^\s*if \(signal\.aborted\) \{ _searchMoveRaf = null; return; \}")
         # The first read is the page's own (a poll on screen reads nothing at once).
         self.assertIn("Promise.all([RS.load(), loadRequestCounts(), loadLibrarySummary(), loadExistingRequests()])", code)
 
@@ -1069,7 +1068,7 @@ class RequestsPage(unittest.TestCase):
         self.assertNotRegex(h, r"\son[a-z]+\s*=")
         src = module_source("requests")
         for action, n in (("search-prev", 1), ("search-next", 1), ("requests-prev", 1), ("requests-next", 1),
-                          ("filter", 5), ("close-modal", 2), ("discover-scroll", 6)):
+                          ("filter", 5), ("close-modal", 2), ("discover-scroll", 14)):
             self.assertEqual(h.count(f'data-action="{action}"'), n, action)
             self.assertIn(f"case '{action}':", src, action)
         for action in ("open-media", "request-media", "request-from-modal"):
@@ -1089,14 +1088,15 @@ class RequestsPage(unittest.TestCase):
         self.assertIn('id="mediaModal"', page)
         code = self.code()
         self.assertNotIn("document.body.appendChild", code)
-        # Lookups stay inside the page.
-        self.assertEqual(re.findall(r"\bdocument\.getElementById\(", code), [])
+        # Lookups stay inside the page; the one exception is the shell's phone bar.
+        self.assertEqual(re.findall(r"\bdocument\.getElementById\(", code), ["document.getElementById("])
+        self.assertIn("document.getElementById('mobileTopBar')", module_source("requests"))
 
     def test_module_state_is_data(self):
         # Top level: constants and functions; each visit's state lives in mount.
         src = module_source("requests")
         self.assertNotRegex(src, r"^(?:let|var) ")
-        for name in ("_searchResults", "_allRequests", "_discoverItems", "_dialog"):
+        for name in ("_searchResults", "_allRequests", "_discoverItems", "_searchBarPosition"):
             self.assertIn(f"  var {name} = ", src[src.index("export async function mount"):], name)
 
     def test_the_discover_rows_scroll_with_the_visit(self):

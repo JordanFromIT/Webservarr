@@ -38,7 +38,7 @@ def repo_file(test: unittest.TestCase, *parts: str) -> str:
 
 # The status colours (R138): one setting per state drives the dot, the ring and
 # the words. Defaults suit the shipped dark background.
-STATUS = {"status_ok": "#65C281", "status_warn": "#DA9E3F", "status_err": "#F2897E"}
+STATUS = {"status_ok": "#4ADE80", "status_warn": "#FBBF24", "status_err": "#F87171"}
 
 try:
     from app import pages, seed, settings_registry
@@ -590,7 +590,7 @@ class SafeColours(unittest.TestCase):
 
 # Home's gauges (R189): the rings wear the accent unless Colourful gauges is
 # on, then their original colours (v1.10.11's Tailwind cyan, purple, orange).
-GAUGES = {"gauge_cpu": "#26B7D3", "gauge_ram": "#BE8EDB", "gauge_net": "#DB9152"}
+GAUGES = {"gauge_cpu": "#06B6D4", "gauge_ram": "#A855F7", "gauge_net": "#F97316"}
 INDEX = (STATIC / "index.html").read_text(encoding="utf-8")
 
 
@@ -626,7 +626,7 @@ class GaugeColours(unittest.TestCase):
         for odd in ("TRUE", "yes", "1", ""):
             self.assertIs(payload({"theme.gauges_colourful": odd})["gauges_colourful"], False, odd)
         colors = payload({"theme.color_gauge_cpu": "#123456", "theme.color_gauge_ram": "purple",
-                          "theme.color_gauge_net": "#DB9152;x"})["colors"]
+                          "theme.color_gauge_net": "#F97316;x"})["colors"]
         self.assertEqual(colors["gauge_cpu"], "#123456")
         self.assertEqual(colors["gauge_ram"], GAUGES["gauge_ram"])
         self.assertEqual(colors["gauge_net"], GAUGES["gauge_net"])
@@ -643,7 +643,7 @@ class GaugeColours(unittest.TestCase):
         got = self.ws_theme({"theme.gauges_colourful": "true", "theme.color_gauge_ram": "#123456"})
         for g in ("cpu", "ram", "net"):
             self.assertEqual(got["--ws-gauge-" + g], f"var(--color-gauge-{g})", g)
-        self.assertEqual(got["--color-gauge-cpu"], "38 183 211")
+        self.assertEqual(got["--color-gauge-cpu"], "6 182 212")
         self.assertEqual(got["--color-gauge-ram"], "18 52 86")
         self.assertEqual(got["--hex-gauge-net"], GAUGES["gauge_net"])
 
@@ -659,7 +659,7 @@ class GaugeColours(unittest.TestCase):
         self.assertIs(safe["gauges_colourful"], True)        # the skeleton shows the pickers by it
         style = pages.theme_style(safe)
         self.assertNotIn("1 2 3", style)
-        self.assertIn("--color-gauge-cpu:38 183 211", style)
+        self.assertIn("--color-gauge-cpu:6 182 212", style)
         self.assertIn("--ws-gauge-cpu:var(--color-gauge-cpu)", style)
 
     def test_stylesheet_defaults(self):

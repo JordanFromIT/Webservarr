@@ -30,70 +30,73 @@ function dateLabel(date) {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// One state, one signal: a pinned, new or draft post says so in words at the
-// head of its quiet line (no chip, stripe or per-state icon on top). The
-// Books list row's surface and type: a 16px-radius card, the title, one
-// quiet line, then the excerpt. The skeleton cards in #newsArchive copy
-// this card's geometry. Archive cards start collapsed regardless of age:
-// this is a list to scan, not a feed to read straight through.
+// One state, one signal: a pinned or new post carries a chip, a draft its
+// own; no coloured stripe or per-state icon on top (the homepage's copy of
+// this card still has both, until Home is rebuilt). The skeleton cards in
+// #newsArchive copy this card's geometry.
+// Archive cards start collapsed regardless of age — this is a list to scan,
+// not a feed to read straight through.
 function renderCard(post, isAdmin) {
   const created = new Date(post.created_at);
   const isFresh = (Date.now() - created.getTime()) < FRESH_MS;
-  const FLAG = 'inline-flex items-center gap-1 font-semibold text-frosted-blue';
+  const CHIP = 'shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold ';
 
   let flag = '';
   if (post.pinned) {
-    flag = '<span class="' + FLAG + '"><span class="material-symbols-outlined text-base" aria-hidden="true">push_pin</span>Pinned</span>';
+    flag = '<span class="' + CHIP + 'bg-primary/20 text-frosted-blue">Pinned</span>';
   } else if (isFresh) {
-    flag = '<span class="' + FLAG + '">New</span>';
+    flag = '<span class="' + CHIP + 'bg-frosted-blue/15 text-frosted-blue">New</span>';
   }
   if (!post.published) {
-    flag = '<span class="' + FLAG + '">Draft</span>' + flag;
+    flag = '<span class="' + CHIP + 'bg-frosted-blue/10 text-frosted-blue/70">Draft</span>' + flag;
   }
   const id = escapeHtml(String(post.id));
-  const TOOL = 'inline-flex items-center gap-1 h-8 px-2 rounded-btn text-label font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07]';
 
-  const bodyClasses = 'text-body text-frosted-blue/80 mt-2 prose prose-invert max-w-[70ch] [&>div]:mb-2 [&>p]:mb-2 [&_br]:block';
+  const bodyClasses = 'text-sm text-frosted-blue/80 mt-2 prose prose-invert max-w-none [&>div]:mb-2 [&>p]:mb-2 [&_br]:block';
 
-  // min-w-0: grid items default to min-width:auto and will otherwise
-  // overflow the page on mobile. The min-h on the title (phone) and the
-  // excerpt keep a short post the height of its skeleton card; Read more
-  // drops the title's (see below).
-  return '<article class="rounded-2xl bg-frosted-blue/[0.04] p-4 sm:p-5 min-w-0">' +
-    '<h2 data-news-title class="text-lead sm:text-h3 leading-snug font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0">' + escapeHtml(post.title) + '</h2>' +
-    '<p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-label leading-5 text-frosted-blue/70">' +
-      flag +
-      '<span>' + escapeHtml(dateLabel(created)) + '</span>' +
-      '<span>By ' + escapeHtml(post.author_name || 'the admin') + '</span>' +
-    '</p>' +
-    '<p class="text-body text-frosted-blue/70 mt-1 line-clamp-2 min-h-12 max-w-[70ch]">' + escapeHtml(excerpt(post.content_html, 180)) + '</p>' +
-    '<div class="' + bodyClasses + ' hidden" data-news-body style="white-space:pre-line">' + post.content_html + '</div>' +
-    (isAdmin
-      ? '<div class="mt-2 -ml-2 flex flex-wrap gap-1">' +
-          '<button type="button" data-news-action="edit" data-id="' + id + '" class="' + TOOL + '"><span class="material-symbols-outlined text-base" aria-hidden="true">edit</span>Edit</button>' +
-          '<button type="button" data-news-action="pin" data-id="' + id + '" data-pinned="' + (post.pinned ? '1' : '0') + '" class="' + TOOL + '"><span class="material-symbols-outlined text-base" aria-hidden="true">push_pin</span>' + (post.pinned ? 'Unpin' : 'Pin') + '</button>' +
-          '<button type="button" data-news-action="delete" data-id="' + id + '" data-title="' + escapeHtml(post.title) + '" class="' + TOOL + '"><span class="material-symbols-outlined text-base" aria-hidden="true">delete</span>Delete</button>' +
-        '</div>'
-      : '') +
-    '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 h-6 text-label font-semibold text-frosted-blue/70 hover:text-frosted-blue transition-colors">' +
-      '<span data-news-toggle-text>Read more</span>' +
-      '<span class="material-symbols-outlined text-base transition-transform" data-news-chevron aria-hidden="true">expand_more</span>' +
-    '</button>' +
-  '</article>';
+  // min-w-0: see the matching note on the homepage renderer. Grid items
+  // default to min-width:auto and will otherwise overflow the page on mobile.
+  // The min-h on the title (phone) and the excerpt keep a short post the
+  // height of its skeleton card; Read more drops the title's (see below).
+  return '<div class="bg-frosted-blue/[0.04] p-4 rounded-card min-w-0">' +
+    '<div class="min-w-0">' +
+      '<div class="flex items-start justify-between gap-3">' +
+        '<div class="flex items-start gap-2 min-w-0">' +
+          flag +
+          '<h2 data-news-title class="text-lead leading-6 font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0">' + escapeHtml(post.title) + '</h2>' +
+        '</div>' +
+        '<span class="shrink-0 text-label text-frosted-blue/70 leading-6">' + escapeHtml(dateLabel(created)) + '</span>' +
+      '</div>' +
+      '<p class="text-label text-frosted-blue/70 mt-0.5">By ' + escapeHtml(post.author_name || 'Unknown') + '</p>' +
+      '<p class="text-body text-frosted-blue/70 mt-1 line-clamp-2 min-h-12">' + escapeHtml(excerpt(post.content_html, 180)) + '</p>' +
+      '<div class="' + bodyClasses + ' hidden" data-news-body style="white-space:pre-line">' + post.content_html + '</div>' +
+      (isAdmin
+        ? '<div class="mt-2 -ml-2 flex flex-wrap gap-1">' +
+            '<button type="button" data-news-action="edit" data-id="' + id + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-btn text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">edit</span>Edit</button>' +
+            '<button type="button" data-news-action="pin" data-id="' + id + '" data-pinned="' + (post.pinned ? '1' : '0') + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-btn text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">push_pin</span>' + (post.pinned ? 'Unpin' : 'Pin') + '</button>' +
+            '<button type="button" data-news-action="delete" data-id="' + id + '" data-title="' + escapeHtml(post.title) + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-btn text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">delete</span>Delete</button>' +
+          '</div>'
+        : '') +
+      '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-label font-semibold text-frosted-blue/70 hover:text-frosted-blue transition-colors">' +
+        '<span data-news-toggle-text>Read more</span>' +
+        '<span class="material-symbols-outlined text-sm transition-transform" data-news-chevron>expand_more</span>' +
+      '</button>' +
+    '</div>' +
+  '</div>';
 }
 
-// Empty and failed lists say what is going on in a line, as Books does.
 function emptyState() {
-  return '<div class="py-10 max-w-xl">' +
-    '<p class="text-lead font-semibold text-frosted-blue">No news yet</p>' +
-    '<p class="mt-1 text-body text-frosted-blue/70">Posts from the people who run this server show up here.</p>' +
+  return '<div class="text-center text-steel-blue py-12">' +
+    '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">newspaper</span>' +
+    '<p>No news posts yet.</p>' +
   '</div>';
 }
 
 function errorState() {
-  return '<div class="py-10 max-w-xl">' +
-    '<p class="text-lead font-semibold text-frosted-blue">News can’t be shown right now</p>' +
-    '<p class="mt-1 text-body text-frosted-blue/70">Try again in a minute.</p>' +
+  return '<div class="text-center text-steel-blue py-12">' +
+    '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">cloud_off</span>' +
+    '<p>Could not load news right now.</p>' +
+    '<p class="text-label opacity-60 mt-1">Try refreshing the page.</p>' +
   '</div>';
 }
 

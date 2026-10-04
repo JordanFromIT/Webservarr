@@ -523,20 +523,6 @@ async def news_page(
     return render_page("news", request, user)
 
 
-# Status feed page: open outages and notes pinned, then the last 30 days
-@app.get("/status", response_class=HTMLResponse, tags=["Pages"])
-async def status_page(
-    request: Request,
-    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
-):
-    """Serve the status feed (pages/status.js reads GET /api/status/feed).
-    Signed-in people only; the login page has its one line."""
-    user = await _require_session(session_id)
-    if not user:
-        return RedirectResponse(url="/login", status_code=302)
-    return render_page("status", request, user)
-
-
 # Wiki
 @app.get("/wiki", response_class=HTMLResponse, tags=["Pages"])
 async def wiki_page(

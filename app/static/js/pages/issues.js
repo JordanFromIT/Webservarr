@@ -96,30 +96,20 @@ function buildSearchResultItem(item, index) {
 // ---- Badges ----
 
 // One chip, as the Books pages draw it: sentence case, 13px, fully rounded.
-// Kept for the open state alone (status colour only on deviation) and the
-// detail dialog; on a card the kind is a quiet word with its icon, as Books
-// writes a book's formats.
 var CHIP = 'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-label font-semibold';
-
-var ISSUE_KINDS = {
-  'video':     { icon: 'videocam',   label: 'Video' },
-  'audio':     { icon: 'volume_up',  label: 'Audio' },
-  'subtitles': { icon: 'subtitles',  label: 'Subtitles' },
-  'other':     { icon: 'more_horiz', label: 'Other' }
-};
 
 function getIssueTypeBadge(type) {
   // One neutral chip: the icon and the word say which kind of problem it
   // is, so the kinds don't need a colour each.
-  var c = ISSUE_KINDS[type] || ISSUE_KINDS['other'];
-  return '<span class="' + CHIP + ' bg-frosted-blue/10 text-frosted-blue">' +
+  var configs = {
+    'video':     { bg: 'bg-frosted-blue/10', text: 'text-frosted-blue', icon: 'videocam',  label: 'Video' },
+    'audio':     { bg: 'bg-frosted-blue/10', text: 'text-frosted-blue', icon: 'volume_up', label: 'Audio' },
+    'subtitles': { bg: 'bg-frosted-blue/10', text: 'text-frosted-blue', icon: 'subtitles', label: 'Subtitles' },
+    'other':     { bg: 'bg-frosted-blue/10', text: 'text-frosted-blue', icon: 'more_horiz', label: 'Other' },
+  };
+  var c = configs[type] || configs['other'];
+  return '<span class="' + CHIP + ' ' + c.bg + ' ' + c.text + '">' +
     '<span class="material-symbols-outlined text-[15px]" aria-hidden="true">' + c.icon + '</span>' + c.label + '</span>';
-}
-
-/** The kind on a card: the icon and the word, quiet. */
-function issueKindWord(type) {
-  var c = ISSUE_KINDS[type] || ISSUE_KINDS['other'];
-  return '<span class="inline-flex items-center gap-1"><span class="material-symbols-outlined text-base" aria-hidden="true">' + c.icon + '</span>' + c.label + '</span>';
 }
 
 // Status colour only on deviation: an open issue is waiting on someone, so it
@@ -131,43 +121,29 @@ function getIssueStatusBadge(status) {
   return '<span class="' + CHIP + ' bg-frosted-blue/10 text-frosted-blue/80">Resolved</span>';
 }
 
-/** The counts, in one quiet line: what is open first, since that is the news. */
-function countsLine(counts) {
-  var open = counts.open || 0, closed = counts.closed || 0;
-  if (!open && !closed) return 'Nothing reported yet';
-  return open + ' open, ' + closed + ' resolved';
-}
-
-// The Books list row (pages/books-list.js ROW): a 16px-radius surface, the
-// poster at its 2:3, the title, then one quiet line.
 function buildIssueCard(issue) {
-  var title = escapeHtml(issue.media_title || 'Untitled');
+  var title = escapeHtml(issue.media_title || 'Unknown');
   var posterUrl = issue.poster_url || '';
 
   // A poster that fails to load gives way to the placeholder after it. The
   // title is the button's name, so the poster's alt stays empty.
-  var THUMB = 'w-12 aspect-[2/3] rounded-lg shrink-0';
-  var placeholder = '<span class="material-symbols-outlined text-xl text-frosted-blue/45" aria-hidden="true">movie</span>';
   var posterHtml = posterUrl
-    ? '<img src="' + escapeHtml(posterUrl) + '" alt="" loading="lazy" class="' + THUMB + ' object-cover" data-poster/>' +
-      '<span class="' + THUMB + ' bg-frosted-blue/[0.07] items-center justify-center" style="display:none" data-poster-fallback>' + placeholder + '</span>'
-    : '<span class="' + THUMB + ' bg-frosted-blue/[0.07] flex items-center justify-center">' + placeholder + '</span>';
+    ? '<img src="' + escapeHtml(posterUrl) + '" alt="" class="w-12 h-[72px] rounded-md object-cover shrink-0" data-poster/>' +
+      '<span class="w-12 h-[72px] rounded-md bg-frosted-blue/5 items-center justify-center shrink-0" style="display:none" data-poster-fallback><span class="material-symbols-outlined text-xl text-steel-blue/30" aria-hidden="true">movie</span></span>'
+    : '<span class="w-12 h-[72px] rounded-md bg-frosted-blue/5 flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-xl text-steel-blue/30" aria-hidden="true">movie</span></span>';
 
   var dateStr = issue.created_date ? getTimeAgo(issue.created_date, true) : '';
 
   // A button: the whole card opens the detail, from a click or the keyboard.
-  return '<button type="button" class="w-full text-left rounded-2xl bg-frosted-blue/[0.04] hover:bg-frosted-blue/[0.07] p-3 flex gap-3 items-center transition-colors" data-action="view-issue" data-issue-id="' + escapeHtml(String(issue.id)) + '">' +
+  return '<button type="button" class="w-full text-left rounded-inner bg-frosted-blue/[0.04] hover:bg-frosted-blue/[0.07] p-3 flex gap-3 items-start transition-colors" data-action="view-issue" data-issue-id="' + escapeHtml(String(issue.id)) + '">' +
     posterHtml +
     '<span class="flex-1 min-w-0">' +
-      '<span class="flex items-start justify-between gap-2">' +
-        '<span class="min-w-0 text-frosted-blue text-body sm:text-lead font-semibold leading-snug line-clamp-2">' + title + '</span>' +
-        (issue.status === 'open' ? '<span class="shrink-0">' + getIssueStatusBadge('open') + '</span>' : '') +
+      '<span class="block text-frosted-blue text-body font-semibold truncate">' + title + '</span>' +
+      '<span class="flex flex-wrap items-center gap-1.5 mt-1">' +
+        getIssueTypeBadge(issue.issue_type) +
+        getIssueStatusBadge(issue.status) +
       '</span>' +
-      '<span class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-label leading-5 text-frosted-blue/70">' +
-        issueKindWord(issue.issue_type) +
-        (issue.status === 'open' ? '' : '<span>Resolved</span>') +
-        (dateStr ? '<span>' + escapeHtml(dateStr) + '</span>' : '') +
-      '</span>' +
+      (dateStr ? '<span class="block text-label text-frosted-blue/70 mt-1.5">' + escapeHtml(dateStr) + '</span>' : '') +
     '</span>' +
   '</button>';
 }
@@ -390,13 +366,18 @@ export async function mount(ctx) {
     }, function (counts) {
       if (signal.aborted) return;   // left: the next page owns the arrival order now
       WS.arrive('counts', function () {
-        $('issuesCounts').textContent = countsLine(counts);
+        $('statTotal').textContent = counts.total || 0;
+        $('statOpen').textContent = counts.open || 0;
+        $('statClosed').textContent = counts.closed || 0;
+        $('issuesTotalCount').textContent = String(counts.total || 0);
       });
     }, {
       onError: function (err) {
         if (signal.aborted || isAbort(err)) return;   // left the page: not an error
-        // No figure to show: the line keeps its height, empty.
-        WS.arrive('counts', function () { $('issuesCounts').textContent = ''; });
+        // No figure to show: the box keeps its height with a blank line.
+        WS.arrive('counts', function () {
+          ['statTotal', 'statOpen', 'statClosed'].forEach(function (id) { $(id).textContent = '\u00a0'; });
+        });
       }
     });
   }

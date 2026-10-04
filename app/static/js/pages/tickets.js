@@ -63,15 +63,6 @@ const TICKETS_OFF_DETAIL = 'The ticket system is turned off';
 
 // ---- Helpers ----
 
-/** The counts, in one quiet line: what still needs an answer first. */
-function countsLine(data) {
-  var parts = [];
-  if (data.open) parts.push(data.open + ' open');
-  if (data.in_progress) parts.push(data.in_progress + ' in progress');
-  if (data.resolved) parts.push(data.resolved + ' resolved');
-  return parts.length ? parts.join(', ') : '';
-}
-
 function isAbort(e) { return !!e && e.name === 'AbortError'; }
 
 function createEl(tag, classes, text) {
@@ -102,8 +93,6 @@ export async function mount(ctx) {
   var _currentPage = 0;
   var _total = 0;
   var _isAdmin = !!(ctx.data && ctx.data.user && ctx.data.user.is_admin);
-  // An admin sees everyone's tickets, so the heading says so (same line, same size).
-  if (_isAdmin && ctx.root.querySelector('#ticketsTitle')) ctx.root.querySelector('#ticketsTitle').textContent = 'All tickets';
   var _stopRefresh = null;
   // The open dialogs (WSUI.modal), by overlay id.
   var _dialogs = {};
@@ -268,7 +257,7 @@ export async function mount(ctx) {
     }, {
       onError: function (err) {
         if (signal.aborted || isAbort(err)) return;   // left the page: not an error
-        showToast('Tickets can\u2019t be shown right now. Try again in a minute.', 'error');
+        showToast('Failed to load tickets', 'error');
       }
     });
   }
@@ -278,13 +267,18 @@ export async function mount(ctx) {
     return WS.swr('tickets:counts', function () { return ticketsJSON('/api/tickets/counts'); }, function (data) {
       if (signal.aborted) return;
       WS.arrive('counts', function () {
-        $('ticketsCounts').textContent = countsLine(data);
+        $('statTotal').textContent = data.total || 0;
+        $('statOpen').textContent = data.open || 0;
+        $('statInProgress').textContent = data.in_progress || 0;
+        $('statResolved').textContent = data.resolved || 0;
       });
     }, {
       onError: function (err) {
         if (signal.aborted || isAbort(err)) return;
-        // No figure to show: the line keeps its height, empty.
-        WS.arrive('counts', function () { $('ticketsCounts').textContent = ''; });
+        // No figure to show: the box keeps its height with a blank line.
+        WS.arrive('counts', function () {
+          ['statTotal', 'statOpen', 'statInProgress', 'statResolved'].forEach(function (id) { $(id).textContent = '\u00a0'; });
+        });
       }
     });
   }
@@ -309,33 +303,51 @@ export async function mount(ctx) {
     _tickets.forEach(function(ticket) {
       // A button, so the whole card opens the ticket from a click or the
       // keyboard; the page's click listener opens it (data-action).
-      var card = createEl('button', 'block w-full text-left rounded-2xl bg-frosted-blue/[0.04] hover:bg-frosted-blue/[0.07] p-4 transition-colors');
+      var card = createEl('button', 'block w-full text-left rounded-inner bg-frosted-blue/[0.04] hover:bg-frosted-blue/[0.07] p-4 transition-colors');
       card.type = 'button';
       card.setAttribute('data-action', 'open-ticket');
       card.setAttribute('data-ticket-id', String(ticket.id));
 
-      // The Books list row: the title and where it stands, then one quiet
-      // line (the kind, who sent it for an admin, the time) and the start
-      // of what was written. Only the state is a chip: it is the news.
-      var topRow = createEl('span', 'flex items-start justify-between gap-3');
-      topRow.appendChild(createEl('span', 'min-w-0 text-frosted-blue font-semibold text-body sm:text-lead leading-snug truncate', ticket.title));
-      topRow.appendChild(createEl('span', 'shrink-0 ' + CHIP + (STATUS_COLORS[ticket.status] || STATUS_COLORS.open), STATUS_LABELS[ticket.status] || STATUS_LABELS.open));
+      // Top row: title + badges (stacked on mobile, side-by-side on desktop)
+      var topRow = createEl('span', 'flex flex-col lg:flex-row lg:items-start lg:justify-between gap-1.5 lg:gap-3 mb-2');
+
+      var titleDiv = createEl('span', 'block flex-1 min-w-0');
+      var titleEl = createEl('span', 'block text-frosted-blue font-semibold text-body truncate', ticket.title);
+      titleDiv.appendChild(titleEl);
+
+      // Creator (admin only)
+      if (_isAdmin && ticket.creator_username) {
+        var creatorEl = createEl('span', 'block text-label text-frosted-blue/70 mt-0.5', '@' + ticket.creator_username);
+        titleDiv.appendChild(creatorEl);
+      }
+
+      var badgeDiv = createEl('span', 'flex items-center gap-1.5 flex-wrap lg:shrink-0 lg:justify-end');
+
+      // Category badge
+      var catBadge = createEl('span', CHIP + (CATEGORY_COLORS[ticket.category] || CATEGORY_COLORS.other), CATEGORY_LABELS[ticket.category] || ticket.category);
+      badgeDiv.appendChild(catBadge);
+
+      // Status badge
+      var statusBadge = createEl('span', CHIP + (STATUS_COLORS[ticket.status] || STATUS_COLORS.open), STATUS_LABELS[ticket.status] || STATUS_LABELS.open);
+      badgeDiv.appendChild(statusBadge);
+
+      // Priority badge (if set)
+      if (ticket.priority) {
+        var priBadge = createEl('span', CHIP + (PRIORITY_COLORS[ticket.priority] || ''), PRIORITY_LABELS[ticket.priority] || ticket.priority);
+        badgeDiv.appendChild(priBadge);
+      }
+
+      topRow.appendChild(titleDiv);
+      topRow.appendChild(badgeDiv);
       card.appendChild(topRow);
 
-      var meta = createEl('span', 'mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-label leading-5 text-frosted-blue/70');
-      meta.appendChild(createEl('span', '', CATEGORY_LABELS[ticket.category] || ticket.category));
-      // Creator (admin only)
-      if (_isAdmin && ticket.creator_username) meta.appendChild(createEl('span', '', '@' + ticket.creator_username));
-      // Priority, only where it asks for attention (high, urgent), in its words.
-      if (ticket.priority === 'high' || ticket.priority === 'urgent') {
-        meta.appendChild(createEl('span', CHIP + PRIORITY_COLORS[ticket.priority], PRIORITY_LABELS[ticket.priority]));
-      }
-      meta.appendChild(createEl('span', '', timeAgo(ticket.created_at)));
-      card.appendChild(meta);
-
-      if (ticket.description) {
-        card.appendChild(createEl('span', 'mt-1 block text-label leading-5 text-frosted-blue/70 truncate', ticket.description));
-      }
+      // Bottom row: description snippet + time
+      var bottomRow = createEl('span', 'flex items-center justify-between gap-3');
+      var descSnippet = createEl('span', 'text-label text-frosted-blue/70 truncate flex-1', ticket.description);
+      var timeEl = createEl('span', 'text-label text-frosted-blue/70 shrink-0', timeAgo(ticket.created_at));
+      bottomRow.appendChild(descSnippet);
+      bottomRow.appendChild(timeEl);
+      card.appendChild(bottomRow);
 
       container.appendChild(card);
     });

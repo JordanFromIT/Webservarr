@@ -656,7 +656,7 @@ await run('renderContinueRow: empty is nothing, notes are quiet lines, compact i
   check('the note is under the row, not in it', row.lastElementChild === notes[0]);
   const small = books.renderContinueRow(CONT, [], { compact: true });
   check('compact cards are narrower', small.querySelector('li > a').className.indexOf('w-28') !== -1 && row.querySelector('li > button').className.indexOf('w-36') !== -1);
-  check('and the heading is the Books heading on both (Home\'s sections use it too): no glyph', small.querySelector('h2').className === row.querySelector('h2').className && /text-xl/.test(small.querySelector('h2').className) && !small.querySelector('h2').previousElementSibling && !small.querySelector('.material-symbols-outlined[aria-hidden] + h2'));
+  check('and the heading is Home\'s own section heading: an icon, then the title at the same size', /text-xl/.test(small.querySelector('h2').className) && small.querySelector('h2').previousElementSibling.textContent === 'auto_stories' && small.querySelector('h2').parentNode.className.indexOf('flex items-center gap-3 mb-4') !== -1 && !row.querySelector('h2').previousElementSibling);
 });
 
 await run('Kavita down: Continue keeps the audiobooks, the page shows one quiet note and still loads', async (make) => {

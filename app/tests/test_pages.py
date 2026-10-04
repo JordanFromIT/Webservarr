@@ -63,7 +63,6 @@ def static_text(*parts):
 # Each Home loader and the section switch that must guard every call to it.
 # None: the call is not a home section and must stay unguarded.
 HOME_LOADERS = {
-    "loadStatus": None,
     "loadNews": "news",
     "loadServices": "services",
     "loadSystemStats": "services",
@@ -168,7 +167,7 @@ def home_guard_problems(page: str) -> list:
     for name in HOME_LOADERS:
         if (name, None) not in seen:
             problems.append(f"{name} is not in the initial load")
-    for name in ("loadStatus", "loadServices", "loadActiveStreams", "loadRecentRequests",
+    for name in ("loadServices", "loadActiveStreams", "loadRecentRequests",
                  "loadUpcomingReleases", "loadRequestCount"):
         if (name, 30000) not in seen:
             problems.append(f"{name} is not in the 30 s poll")
@@ -377,22 +376,12 @@ class ShellRendering(unittest.TestCase):
         out = render()
         self.assertIn('<style id="ws-theme">', out)
         self.assertIn("--color-primary:18 87 147", out)
-        # The shipped font: its metric-matched fallback, this site's own file
-        # preloaded, no third-party connection (audit L8).
-        self.assertIn('--font-display:"Spline Sans","Spline Sans Fallback",sans-serif', out)
-        self.assertIn('<link rel="preload" href="/static/fonts/spline-sans-latin.woff2" as="font" type="font/woff2" crossorigin>', out)
-        self.assertRegex(out, r'<link id="ws-font" rel="stylesheet" href="/static/fonts/spline-sans\.css\?v=[^"]+">')
-        self.assertNotIn("fonts.googleapis.com", out)
-        # A font picked in Settings comes from Google Fonts, optional, never swap:
-        # a swap re-lays out the page when the font lands.
-        other = render(b=branding(**{"theme.font": "Exo 2"}))
-        self.assertIn('--font-display:"Exo 2",sans-serif', other)
-        self.assertIn('<link id="ws-font" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2', other)
-        self.assertIn('rel="preconnect" href="https://fonts.gstatic.com" crossorigin', other)
-        self.assertRegex(other, r'<link id="ws-font" rel="stylesheet" href="[^"]*&amp;display=optional"')
-        self.assertNotIn('rel="preload" href="/static/fonts/', other)
-        for page in (out, other):
-            self.assertNotIn("display=swap", page)
+        self.assertIn('--font-display:"Spline Sans",sans-serif', out)
+        self.assertIn('<link id="ws-font" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spline+Sans', out)
+        self.assertIn('rel="preconnect" href="https://fonts.gstatic.com" crossorigin', out)
+        # optional, never swap: a swap re-lays out the page when the font lands.
+        self.assertRegex(out, r'<link id="ws-font" rel="stylesheet" href="[^"]*&amp;display=optional"')
+        self.assertNotIn("display=swap", out)
         data = data_of(out)
         self.assertEqual(data["user"]["username"], "root")
         self.assertIs(data["user"]["is_admin"], True)
@@ -422,7 +411,7 @@ class ShellRendering(unittest.TestCase):
                         "theme.font": 'Evil"; @import'})
         out = render(b=b)
         self.assertIn("--color-primary:18 87 147", out)
-        self.assertIn('href="/static/fonts/spline-sans.css?v=', out)   # the shipped font, served here
+        self.assertIn("family=Spline+Sans", out)
         # The whole head, the #ws-data block included: theme-loader applies
         # that block's font and colours inline, so it carries the safe values too.
         head = out.split("<body>")[0]
@@ -522,38 +511,34 @@ class ShellRendering(unittest.TestCase):
         for sid in ("services", "news", "streams", "releases", "requests"):
             self.assertEqual(rules.get(f'html[data-home-hide~="{sid}"] [data-arrive="{sid}"]', {}).get("display"),
                              "none", sid)
-        # The stack is a flex column with a gap, which skips what is not
-        # displayed, so nothing in theme.css respaces it.
+        for sid in ("services", "news"):
+            self.assertEqual(rules.get(f'html[data-home-hide~="{sid}"] [data-home-pair]', {})
+                             .get("grid-template-columns"), "minmax(0, 1fr)", sid)
+        self.assertEqual(rules.get('html[data-home-hide~="services"][data-home-hide~="news"] [data-home-pair]', {})
+                         .get("display"), "none")
+        stack = rules.get("html[data-home-hide] [data-home-stack]", {})
+        self.assertEqual((stack.get("display"), stack.get("flex-direction"), stack.get("row-gap")),
+                         ("flex", "column", "2rem"))
+        self.assertEqual(rules.get("html[data-home-hide] [data-home-stack] > :not([hidden])", {})
+                         .get("margin-top"), "0")
+        # Nothing touches the pair or the stack while every section is on.
         for sel in rules:
             if re.search(r"data-home-(pair|stack|hide)", sel):
                 self.assertTrue(sel.startswith("html[data-home-hide"), sel)
-                self.assertNotIn("data-home-pair", sel)
-                self.assertNotIn("data-home-stack", sel)
 
-    def test_index_carries_the_stack_hook_and_the_spec_order(self):
+    def test_index_carries_the_pair_and_stack_hooks(self):
         page = static_text("index.html")
         self.assertEqual(page.count("data-home-stack"), 1)
-        self.assertNotIn("data-home-pair", page)
+        self.assertEqual(page.count("data-home-pair"), 1)
         stack = re.search(r'<div class="([^"]*)" data-home-stack>', page)
         self.assertIsNotNone(stack)
-        for c in ("flex", "flex-col", "gap-8", "max-w-[1200px]", "mx-auto"):
-            self.assertIn(c, stack.group(1).split())
-        # Status first, then requests and news, then the rest (spec section 2).
-        at = [page.index(f'data-arrive="{sid}"') for sid in
-              ("status", "services", "requests", "news", "continue", "streams", "releases")]
-        self.assertEqual(at, sorted(at))
-        self.assertTrue(stack.end() < at[0])
-        self.assertTrue(at[-1] < page.index('id="installCard"') < page.index('id="pushPrompt"'))
-
-    def test_index_marks_the_first_paint_shapes(self):
-        # The status strip's shape and the news count, from home_marks.
-        tag = html_tag(render(name="index", flags={"home_status": "card", "home_news": 1}))
-        self.assertIn(' data-home-status="card"', tag)
-        self.assertIn(' data-home-news="1"', tag)
-        tag = html_tag(render(name="index", flags={"home_status": "<x>", "home_news": 7}))
-        self.assertIn(' data-home-status="line"', tag)   # anything else: the common shapes
-        self.assertIn(' data-home-news="2"', tag)
-        self.assertNotIn("data-home-status", html_tag(render(name="calendar")))
+        self.assertIn("space-y-8", stack.group(1).split())
+        pair = page.index("data-home-pair>")
+        services, news, streams = (page.index(f'data-arrive="{sid}"') for sid in ("services", "news", "streams"))
+        self.assertTrue(stack.end() < pair < services < news < streams)
+        # The pair closes before Active Streams: both sections sit inside it.
+        between = page[pair:streams]
+        self.assertEqual(between.count("<div") + 1, between.count("</div>"))
 
     def test_empty_site_name_shows_logo_only_and_page_titles(self):
         out = render(b=branding(**{"branding.app_name": ""}))
@@ -656,9 +641,8 @@ class ShellRendering(unittest.TestCase):
         # 3") is only a valid font-family when quoted. The loader's inline
         # value beats the server's #ws-theme rule, so it quotes the same way.
         src = static_text("js", "theme-loader.js")
-        expr = r"""'"' \+ data\.font \+ '", ' \+ fallback \+ 'sans-serif'"""
+        expr = r"""'"' \+ data\.font \+ '", sans-serif'"""
         self.assertEqual(len(live_matches(src, rf"setProperty\('--font-display', {expr}\)")), 1)
-        self.assertEqual(len(live_matches(src, r"""var fallback = data\.font === 'Spline Sans' \? '"Spline Sans Fallback", ' : '';""")), 1)
         # No other live write of the variable (a comment can't count either way).
         self.assertEqual(len(live_matches(src, r"setProperty\('--font-display',")), 1)
         # Parity with the server for the names that need the quotes.
@@ -666,8 +650,7 @@ class ShellRendering(unittest.TestCase):
             with self.subTest(family=family):
                 server = re.search(r"--font-display:([^;}]*)", pages.theme_style(branding(**{"theme.font": family})))
                 self.assertIsNotNone(server)
-                fallback = '"Spline Sans Fallback", ' if family == "Spline Sans" else ""
-                loader = '"' + family + '", ' + fallback + 'sans-serif'     # what the pinned expression builds
+                loader = '"' + family + '", sans-serif'     # what the pinned expression builds
                 self.assertEqual(loader.replace(", ", ","), server.group(1))
 
 
@@ -959,21 +942,24 @@ class NewsCardsHoldTheirSkeleton(unittest.TestCase):
 
     def test_renderers_and_skeletons_agree(self):
         # The archive's card moved to the contract scale in the audit of
-        # 2026-10-04; Home's card was rebuilt the same day and is checked in
-        # HomeNewsCard. Each page's skeleton copies its own renderer.
+        # 2026-10-04 (17px title on a 24px line, 15px excerpt held at 48px);
+        # Home keeps its own until it is rebuilt. Each page's skeleton copies
+        # its own renderer.
         pages = {
-            # The archive's card is the Books list row since the audit's design
-            # items (2026-10-04): a 16px card, 17px (20px from sm) title, a
-            # quiet line, the 15px excerpt held at 48px.
+            "index.html": dict(tag="h4", cards=2, js="home.js",
+                               title="'<h4 data-news-title class=\"font-bold text-frosted-blue break-words min-w-0' + "
+                                     "(open ? '' : ' min-h-12 sm:min-h-0') + '\">'",
+                               excerpt="'<p class=\"text-sm text-frosted-blue/70 mt-1 line-clamp-2 min-h-10\">'",
+                               skel_title='<p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p>',
+                               skel_excerpt='<p class="text-sm mt-1 min-h-10">&nbsp;</p>',
+                               skel='<div class="skel rounded-xl p-4'),
             "news.html": dict(tag="h2", cards=3, js="news.js",
-                              title="'<h2 data-news-title class=\"text-lead sm:text-h3 leading-snug font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0\">'",
-                              excerpt="'<p class=\"text-body text-frosted-blue/70 mt-1 line-clamp-2 min-h-12 max-w-[70ch]\">'",
-                              skel_title='<p class="text-lead sm:text-h3 leading-snug font-bold min-h-12 sm:min-h-0">&nbsp;</p>',
+                              title="'<h2 data-news-title class=\"text-lead leading-6 font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0\">'",
+                              excerpt="'<p class=\"text-body text-frosted-blue/70 mt-1 line-clamp-2 min-h-12\">'",
+                              skel_title='<p class="text-lead leading-6 font-bold min-h-12 sm:min-h-0">&nbsp;</p>',
                               skel_excerpt='<p class="text-body mt-1 min-h-12">&nbsp;</p>',
-                              skel='<div class="skel rounded-2xl p-4 sm:p-5'),
+                              skel='<div class="skel rounded-card p-4'),
         }
-        # Home's own card (pages/home.js newsCard) is built with
-        # textContent; its skeleton is checked in test_home_news_card_and_skeleton_agree.
         for name, want in pages.items():
             with self.subTest(name):
                 page = static_text(name)
@@ -986,29 +972,6 @@ class NewsCardsHoldTheirSkeleton(unittest.TestCase):
                 self.assertEqual(page.count(want["skel_title"]), want["cards"])
                 self.assertEqual(page.count(want["skel_excerpt"]), want["cards"])
                 self.assertNotIn("<br", page[page.index(want["skel"]):page.index(want["skel"]) + 600])
-
-
-class HomeNewsCard(unittest.TestCase):
-    """Home's news card (pages/home.js newsCard) and its skeleton in
-    index.html hold the same lines, so a post lands on its skeleton."""
-
-    def test_home_news_card_and_skeleton_agree(self):
-        page = static_text("index.html")
-        js = static_text("js", "pages", "home.js")
-        pairs = (
-            ("'text-lead leading-6 font-bold text-frosted-blue break-words line-clamp-2 min-h-12 sm:line-clamp-1 sm:min-h-6'",
-             '<p class="text-lead leading-6 font-bold min-h-12 sm:min-h-6">&nbsp;</p>'),
-            ("'text-label leading-5 mt-0.5 text-frosted-blue/70 flex items-center gap-2 min-w-0'",
-             '<p class="text-label leading-5 mt-0.5">&nbsp;</p>'),
-            ("'text-body leading-6 mt-2 text-frosted-blue/70 line-clamp-3 min-h-[4.5rem]'",
-             '<p class="text-body leading-6 mt-2 min-h-[4.5rem]">&nbsp;</p>'),
-            ("'mt-2 inline-flex items-center gap-1 text-label leading-5 font-semibold",
-             '<p class="mt-2 text-label leading-5 font-semibold">Read more</p>'),
-        )
-        for card, skel in pairs:
-            self.assertIn(card, js)
-            self.assertEqual(page.count(skel), 2, skel)
-        self.assertEqual(page.count("data-news-skel class=\"skel rounded-card p-4 min-w-0\""), 2)
 
 
 class FunctionText(unittest.TestCase):
@@ -1035,7 +998,7 @@ class FunctionText(unittest.TestCase):
         page = static_text("js", "pages", "home.js")
         body = function_text(page, "function renderActiveStreams(streams)")
         # After several comments in the function: cut short, these were lost.
-        self.assertIn("container.appendChild(streamCard(stream, _streamsPreview, signal));", body)
+        self.assertIn("return renderStreamCard(stream, _streamsPreview);", body)
         self.assertTrue(body.rstrip().endswith("});\n    }"), body[-80:])
 
 
@@ -1070,8 +1033,8 @@ class StreamsPreview(unittest.TestCase):
             "if (_streamsPreview) { renderActiveStreams(sampleSet()); return; }"), loader)
         self.assertLess(loader.index("_streamsPreview"), loader.index("/api/integrations/active-streams"))
         # The sample label only shows while the preview is on, laid over the artwork.
-        self.assertIn("if (preview) art.appendChild(el('span', 'absolute top-3 left-3 ", self.page)
-        self.assertEqual(len(live_matches(self.page, r"container\.appendChild\(streamCard\(stream, _streamsPreview, signal\)\);")), 1)
+        self.assertIn("${preview ? '<span class=\"absolute top-3 left-3 ", self.page)
+        self.assertEqual(len(live_matches(self.page, r"return renderStreamCard\(stream, _streamsPreview\);")), 1)
 
     def test_three_samples_direct_play_transcode_and_no_artwork(self):
         samples = self.body_of("function sampleStreams()")
@@ -1083,7 +1046,7 @@ class StreamsPreview(unittest.TestCase):
                          ["Sample Movie", "Sample Show", "Sample Movie Without Artwork"])
 
     def test_sample_data_holds_no_instance_strings_or_real_urls(self):
-        block = self.page[self.page.index("// Sample artwork:"):self.page.index("function clampPercent(n)")]
+        block = self.page[self.page.index("// Sample artwork:"):self.page.index("// A Direct Play card with nothing in it:")]
         self.assertIn("function sampleStreams()", block)
         self.assertNotIn("https:", block)
         self.assertNotIn("/api/", block)
@@ -1093,10 +1056,9 @@ class StreamsPreview(unittest.TestCase):
             self.assertNotIn(bad.lower(), block.lower(), f"instance-specific string #{i}")
 
     def test_card_words_use_the_pure_status_colours(self):
-        card = self.body_of("function streamCard(stream, preview, signal)")
-        for cls in ("'text-status-ok font-semibold truncate', 'Full quality'",
-                    "'text-status-warn font-semibold truncate', 'Not playing at full quality'",
-                    "'shrink-0 text-status-warn underline underline-offset-2"):
+        card = self.body_of("function renderStreamCard(stream, preview)")
+        for cls in ('text-status-ok text-xs font-bold', 'text-status-warn text-[11px] font-bold',
+                    'text-status-warn/70 hover:text-status-warn', 'text-status-warn/80'):
             self.assertIn(cls, card)
         self.assertNotIn("status-ok-text", card)
         self.assertNotIn("status-warn-text", card)
