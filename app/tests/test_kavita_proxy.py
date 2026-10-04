@@ -461,6 +461,152 @@ class ChapterVisibility(unittest.TestCase):
         self.assertEqual(self.fetch("api/Book/136/book-info", visible=False).status_code, 404)
 
 
+class _FakeRedis:
+    """Just the two calls the shortcut makes, with a clock the test moves."""
+    def __init__(self):
+        self.now = 0
+        self.kept = {}
+        self.sets = []
+
+    async def exists(self, key):
+        return 1 if key in self.kept and self.kept[key] > self.now else 0
+
+    async def set(self, key, value, ex=None):
+        self.sets.append((key, ex))
+        self.kept[key] = self.now + ex
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class ChapterShortcut(unittest.TestCase):
+    """T4P1: a chapter found allowed is remembered in Redis for ten minutes,
+    per session, so a page turn does not cost a Kavita call each time."""
+
+    def setUp(self):
+        from app.config import settings
+        from app.tests import helpers
+        self.helpers = helpers
+        self.cookie = settings.session_cookie_name
+        self.Session = helpers.make_sessionmaker()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        helpers.set_rate_limits(False)
+        _RecordingProxyClient.asked = []
+        self.redis = _FakeRedis()
+        self.visible = True
+        self.check = mock.AsyncMock(side_effect=lambda *a: self.visible)
+
+    def tearDown(self):
+        self.helpers.reset_overrides()
+        self.setup_patch.stop()
+        self.helpers.set_rate_limits(True)
+
+    def fetch(self, session="sid-1", token="jwt-sam", chapter=136, redis="fake", raises=None):
+        user = dict(self.helpers.MEMBER, kavita_token=token, kavita_base=KAVITA)
+        client = self.helpers.api_client(self.Session, user)
+        client.cookies.set(self.cookie, session)
+        sm = kavita_proxy.session_manager
+        if redis == "fake":
+            get_redis = mock.AsyncMock(return_value=self.redis)
+        else:
+            get_redis = mock.AsyncMock(side_effect=raises or OSError("redis is down"))
+        if raises is not None:
+            self.check.side_effect = raises
+        with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
+             mock.patch.object(sm, "get_redis", get_redis), \
+             mock.patch.object(kavita_proxy.kavita_api, "chapter_is_visible", self.check), \
+             mock.patch.object(kavita_proxy, "_catalog_series_of_chapter", return_value=104), \
+             mock.patch.object(kavita_proxy.httpx, "AsyncClient", _RecordingProxyClient):
+            return client.get(f"/kavita/api/Book/{chapter}/book-page?page=1")
+
+    def test_the_second_request_skips_the_kavita_call(self):
+        self.assertEqual(self.fetch().status_code, 200)
+        self.assertEqual(self.check.await_count, 1)
+        self.assertEqual(self.fetch().status_code, 200)
+        self.assertEqual(self.fetch().status_code, 200)
+        self.assertEqual(self.check.await_count, 1)                       # a hit skipped it twice
+        self.assertEqual(len(_RecordingProxyClient.asked), 3)             # and every page was served
+        self.assertEqual([ttl for _k, ttl in self.redis.sets], [600])
+
+    def test_after_ten_minutes_it_is_asked_again(self):
+        self.fetch()
+        self.redis.now += 599
+        self.fetch()
+        self.assertEqual(self.check.await_count, 1)
+        self.redis.now += 2
+        self.fetch()
+        self.assertEqual(self.check.await_count, 2)
+        self.fetch()
+        self.assertEqual(self.check.await_count, 2)                       # and kept again
+
+    def test_another_session_is_not_covered_by_this_ones_entry(self):
+        self.fetch(session="sid-1")
+        self.fetch(session="sid-2")
+        self.assertEqual(self.check.await_count, 2)
+        self.fetch(session="sid-2")
+        self.assertEqual(self.check.await_count, 2)
+        keys = {k for k, _ttl in self.redis.sets}
+        self.assertEqual(len(keys), 2)
+
+    def test_another_chapter_and_a_new_sign_in_are_asked(self):
+        self.fetch()
+        self.fetch(chapter=137)
+        self.assertEqual(self.check.await_count, 2)
+        self.fetch(token="jwt-sam-new")                                   # reconnected: a new token, a new entry
+        self.assertEqual(self.check.await_count, 3)
+        self.assertNotIn("jwt-sam", " ".join(k for k, _ttl in self.redis.sets))    # the token itself is never a key
+
+    def test_only_allowed_is_kept(self):
+        self.visible = False
+        for _ in range(3):
+            self.assertEqual(self.fetch().status_code, 404)
+        self.assertEqual(self.check.await_count, 3)
+        self.assertEqual(self.redis.sets, [])
+        for failure in (kavita_proxy.kavita_api.KavitaTokenRefused("x"), kavita_proxy.kavita_api.KavitaUnavailable("x")):
+            self.fetch(raises=failure)
+            self.fetch(raises=failure)
+        self.assertEqual(self.check.await_count, 7)
+        self.assertEqual(self.redis.sets, [])
+        self.assertEqual(_RecordingProxyClient.asked, [])
+
+    def test_with_redis_down_every_request_runs_the_check(self):
+        for _ in range(3):
+            self.assertEqual(self.fetch(redis="down").status_code, 200)
+        self.assertEqual(self.check.await_count, 3)
+        self.visible = False
+        self.assertEqual(self.fetch(redis="down").status_code, 404)       # and a hidden chapter is still hidden
+
+    def test_with_a_redis_that_fails_on_reading_or_writing_the_check_still_runs(self):
+        class Broken(_FakeRedis):
+            async def exists(self, key):
+                raise OSError("read failed")
+
+            async def set(self, key, value, ex=None):
+                raise OSError("write failed")
+        self.redis = Broken()
+        self.assertEqual(self.fetch().status_code, 200)
+        self.assertEqual(self.fetch().status_code, 200)
+        self.assertEqual(self.check.await_count, 2)
+
+    def test_no_session_cookie_no_shortcut(self):
+        user = dict(self.helpers.MEMBER, kavita_token="jwt", kavita_base=KAVITA)
+        client = self.helpers.api_client(self.Session, user)
+        with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
+             mock.patch.object(kavita_proxy.session_manager, "get_redis", mock.AsyncMock(return_value=self.redis)), \
+             mock.patch.object(kavita_proxy.kavita_api, "chapter_is_visible", self.check), \
+             mock.patch.object(kavita_proxy, "_catalog_series_of_chapter", return_value=104), \
+             mock.patch.object(kavita_proxy.httpx, "AsyncClient", _RecordingProxyClient):
+            client.get("/kavita/api/Book/136/book-page?page=1")
+            client.get("/kavita/api/Book/136/book-page?page=1")
+        self.assertEqual(self.check.await_count, 2)
+        self.assertEqual(self.redis.sets, [])
+
+    def test_nothing_is_held_in_the_process(self):
+        import inspect
+        src = inspect.getsource(kavita_proxy._require_visible_chapter)
+        self.assertNotRegex(src, r"\bglobal\b")
+        self.assertNotRegex(inspect.getsource(kavita_proxy), r"(?m)^_chapter_ok\w*\s*[:=]\s*(\{|dict\()")
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class ChapterIsVisible(unittest.IsolatedAsyncioTestCase):
     """The check itself, against a scripted Kavita: the series comes from the

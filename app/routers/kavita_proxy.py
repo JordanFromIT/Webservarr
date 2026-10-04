@@ -15,6 +15,7 @@ shelves). WebServarr stores none of it — it forwards the caller's Kavita JWT,
 which is obtained by the OIDC handoff and kept in their Redis session.
 """
 
+import hashlib
 import logging
 import re
 from typing import Dict, Optional
@@ -62,10 +63,38 @@ def _catalog_series_of_chapter(chapter_id: int) -> Optional[int]:
     return row[0] if row and row[0] else None
 
 
-async def _require_visible_chapter(chapter_id: int, base: str, token: str) -> None:
+# A chapter this session was just found allowed to read is not looked up again
+# for this long (a page turn and every image would each cost a Kavita call).
+CHAPTER_OK_TTL = 600
+
+
+def _chapter_ok_key(session_id: str, token: str, chapter_id: int) -> str:
+    """One session's own entry for one chapter. The token's hash is in it, so a
+    new sign-in (a changed Kavita account or access) starts afresh."""
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+    return f"kavita_chapter_ok:{session_id}:{digest}:{chapter_id}"
+
+
+async def _require_visible_chapter(chapter_id: int, base: str, token: str, session_id: Optional[str] = None) -> None:
     """404 unless the caller's own Kavita account may see the series this
     chapter is in; 401 when Kavita refuses their sign-in; 503 when it does not
-    answer. Looked up for every request (nothing is remembered between them)."""
+    answer.
+
+    A successful check is kept in Redis for CHAPTER_OK_TTL seconds, per session
+    and chapter, and skips the Kavita call meanwhile. Only "allowed" is ever
+    kept: a refusal, an outage or a hidden chapter is asked again every time.
+    Nothing is held in this process (two workers share Redis), and with Redis
+    unreachable every request runs the check, so it fails safe."""
+    key = _chapter_ok_key(session_id, token, chapter_id) if session_id else None
+    redis = None
+    if key:
+        try:
+            redis = await session_manager.get_redis()
+            if await redis.exists(key):
+                return
+        except Exception as exc:  # Redis down: no shortcut, the check runs
+            logger.warning("The chapter check's shortcut could not be read: %s", type(exc).__name__)
+            redis = None
     try:
         visible = await kavita_api.chapter_is_visible(base, token, chapter_id, _catalog_series_of_chapter(chapter_id))
     except kavita_api.KavitaTokenRefused:
@@ -74,6 +103,11 @@ async def _require_visible_chapter(chapter_id: int, base: str, token: str) -> No
         raise HTTPException(status_code=503, detail="Kavita is unavailable")
     if not visible:
         raise HTTPException(status_code=404, detail="Not found")
+    if redis is not None:
+        try:
+            await redis.set(key, "1", ex=CHAPTER_OK_TTL)
+        except Exception as exc:
+            logger.warning("The chapter check's shortcut could not be kept: %s", type(exc).__name__)
 
 
 # Hop-by-hop headers must never be forwarded (RFC 9110 7.6.1).
@@ -697,6 +731,7 @@ async def kavita_proxy(
     path: str,
     request: Request,
     current_user: Dict[str, str] = Depends(get_current_user),
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
     """
     Forward /kavita/<path> to Kavita, attaching this user's Kavita JWT.
@@ -723,7 +758,7 @@ async def kavita_proxy(
         token = api_key = None
     chapter = _CHAPTER_PATH.match(path)
     if chapter and token:
-        await _require_visible_chapter(int(chapter.group(1)), base, token)
+        await _require_visible_chapter(int(chapter.group(1)), base, token, session_id)
     headers = build_forward_headers(request, token)
     body = await request.body()
 
