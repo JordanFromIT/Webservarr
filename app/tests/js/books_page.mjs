@@ -1030,6 +1030,185 @@ await run('leaving the page ends its listeners, polls and requests', async (make
   check('every request carried the visit\'s signal', t.net.calls.every((c) => c.init && c.init.signal === t.ctl.signal));
 });
 
+// ---- Task 5: the first-visit guide (tour.js, the reader's engine) ----
+
+const TOUR_SRC = readFileSync(join(STATIC, 'js/tour.js'), 'utf8');
+
+// The real engine, loaded into the visit's window as the router's page helper is.
+function withTour(t) {
+  new Function('window', 'document', 'localStorage', 'location', TOUR_SRC)(t.win, t.doc, t.win.localStorage, t.win.location);
+  return t;
+}
+
+const GUIDE_FLAG = 'webservarr_books_guide_seen:sam';
+const tourTitle = (t) => t.doc.getElementById('tourTitle').textContent;
+const tourOn = (t) => !!t.doc.getElementById('tourLayer') && !t.doc.getElementById('tourLayer').classList.contains('hidden');
+
+await run('the guide: a first visit shows it once the books are on screen, and never blocks them', async (make) => {
+  const t = withTour(make({ routes: usual({ continue: { items: CONT, notes: [] } }) }));
+  const mounted = t.mount();
+  await t.clock.advance(400);
+  check('the books are drawn and the guide waits a moment for the covers', !t.hidden('#libraryGrid') && !tourOn(t));
+  check('the help button is there, named', t.q('#helpBtn').getAttribute('aria-label') === 'How Books works' && t.q('#helpBtn').getAttribute('type') === 'button');
+  await t.clock.advance(1000);
+  await mounted;
+  check('then it starts', tourOn(t) && tourTitle(t) === 'Find a book', tourOn(t) && tourTitle(t));
+  check('it is marked seen as soon as it is shown, for this person', t.win.localStorage.getItem(GUIDE_FLAG) === '1');
+  check('the page under it is the page: nothing was held back or hidden', !t.hidden('#libraryGrid') && t.cards('libraryGrid').length === 5 && !t.hidden('#toolbar'));
+  const spot = t.doc.getElementById('tourSpotlight');
+  check('it lays nothing out: the spotlight is fixed and ignores the pointer', /\.tour-spotlight\s*\{[^}]*position: fixed;[^}]*pointer-events: none;/.test(readFileSync(join(STATIC, 'css/theme.css'), 'utf8')) && !!spot);
+});
+
+await run('the guide: four short steps, in the order a person meets them, each on something real', async (make) => {
+  const t = withTour(make({ routes: usual({ continue: { items: CONT, notes: [] } }) }));
+  const mounted = t.mount();
+  await t.clock.advance(2600);
+  await mounted;
+  const titles = [];
+  const asked = [];
+  for (let i = 0; i < 4; i++) {
+    titles.push(tourTitle(t));
+    asked.push(t.doc.getElementById('tourBody').textContent);
+    t.doc.getElementById('tourNext').click();
+    await t.clock.advance(10);
+  }
+  check('search, Continue, the chips, then opening a book', titles.join('|') === 'Find a book|Pick up where you left off|Ebooks, audiobooks or both|Open a book', titles);
+  check('the last step is where Read and Listen are named', /Read opens the ebook/.test(asked[3]) && /Listen plays the audiobook/.test(asked[3]), asked[3]);
+  check('the search step says the page can ask for a missing book', /ask for it/.test(asked[0]));
+  check('the last button finishes it', !tourOn(t));
+  // Every step points at something on the page (the Continue one only when there is a row).
+  for (const sel of ['#booksSearch', '#continueHost [data-continue]', '#formatChips', '#libraryGrid > li:first-child']) {
+    check('step target ' + sel + ' is on the page', !!t.q(sel), sel);
+  }
+});
+
+await run('the guide: Skip and Escape end it, and it stays seen', async (make) => {
+  const t = withTour(make({ routes: usual() }));
+  const mounted = t.mount();
+  await t.clock.advance(2600);
+  await mounted;
+  check('running', tourOn(t));
+  t.doc.getElementById('tourSkip').click();
+  check('Skip ends it', !tourOn(t));
+  t.help = t.q('#helpBtn');
+  t.help.click();
+  check('the help button runs it again', tourOn(t) && tourTitle(t) === 'Find a book');
+  t.doc.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  check('Escape ends it', !tourOn(t));
+  check('and it is still marked seen once', t.win.localStorage.getItem(GUIDE_FLAG) === '1');
+});
+
+await run('the guide: a person who has had it is not shown it again, and a different person is', async (make) => {
+  const t = withTour(make({ storage: { [GUIDE_FLAG]: '1' }, routes: usual() }));
+  const mounted = t.mount();
+  await t.clock.advance(2600);
+  await mounted;
+  check('seen: it does not start', !tourOn(t));
+  t.q('#helpBtn').click();
+  check('but the help button still runs it', tourOn(t));
+  t.ctl.abort();
+  const other = withTour(make({ storage: { [GUIDE_FLAG]: '1' }, routes: usual() }));
+  other.WS.data = { user: { username: 'kim' } };
+  other.ctx.data = other.WS.data;
+  const m = other.mount();
+  await other.clock.advance(2600);
+  await m;
+  check('the memory is per person: another person on this browser gets it', tourOn(other) && other.win.localStorage.getItem('webservarr_books_guide_seen:kim') === '1');
+});
+
+await run('the guide: leaving the page mid-way ends it, and it is not shown again next time', async (make) => {
+  const t = withTour(make({ routes: usual() }));
+  const mounted = t.mount();
+  await t.clock.advance(2600);
+  await mounted;
+  check('running, and already marked', tourOn(t) && t.win.localStorage.getItem(GUIDE_FLAG) === '1');
+  t.ctl.abort();
+  check('the layer leaves the page with the visit', !t.doc.getElementById('tourLayer'));
+  const again = withTour(make({ storage: { [GUIDE_FLAG]: '1' }, routes: usual() }));
+  const m = again.mount();
+  await again.clock.advance(2600);
+  await m;
+  check('the next visit does not start it', !tourOn(again));
+});
+
+await run('the guide: never over a page that could not load, a search or a failed sign-in', async (make) => {
+  const failed = withTour(make({ routes: (net) => { usual()(net); net.on('/api/books?', () => ({ status: 503, body: {} })); } }));
+  let m = failed.mount();
+  await failed.clock.advance(2600);
+  await m;
+  check('an error page is not toured', !tourOn(failed) && failed.win.localStorage.getItem(GUIDE_FLAG) === null);
+  const empty = withTour(make({ routes: usual({ library: () => ({ body: { items: [], next_cursor: null, notes: [], building: false } }) }) }));
+  m = empty.mount();
+  await empty.clock.advance(2600);
+  await m;
+  check('an empty library is not toured', !tourOn(empty));
+  const building = withTour(make({ routes: usual({ library: () => ({ body: { items: [], next_cursor: null, notes: [], building: true } }) }) }));
+  m = building.mount();
+  await building.clock.advance(2600);
+  await m;
+  check('a library still being built is not toured', !tourOn(building));
+  const searching = withTour(make({ routes: usual() }));
+  m = searching.mount();
+  await searching.clock.advance(400);
+  searching.type('dune');
+  await searching.clock.advance(400);
+  await searching.clock.advance(2000);
+  await m;
+  check('a visit that has gone to a search is not toured', !tourOn(searching));
+  const connect = withTour(make({ routes: usual({ continue: { items: [], notes: NOT_CONNECTED }, library: () => ({ body: { items: [audio(3, 'The Hobbit', 'Tolkien')], next_cursor: null, notes: NOT_CONNECTED } }) }) }));
+  connect.kav.blockNext = true;
+  m = connect.mount();
+  await connect.clock.advance(2600);
+  await m;
+  check('a failed sign-in message is not toured over', !tourOn(connect));
+});
+
+await run('the guide: with no Continue row yet its step still shows, in the middle of the page', async (make) => {
+  const t = withTour(make({ routes: usual() }));
+  const mounted = t.mount();
+  await t.clock.advance(2600);
+  await mounted;
+  t.doc.getElementById('tourNext').click();
+  await new Promise((r) => setTimeout(r, 450));   // the engine places the bubble after the scroll settles (a real timer)
+  check('step two is the Continue step', tourTitle(t) === 'Pick up where you left off');
+  check('with no row the page has none to point at, and the step says what the row is', !t.q('#continueHost [data-continue]') && /Continue row/.test(t.doc.getElementById('tourBody').textContent));
+  check('so the spotlight cuts no hole (the bubble sits in the middle)', t.doc.getElementById('tourSpotlight').classList.contains('tour-spotlight-empty'));
+});
+
+await run('the guide: reduced motion jumps to each step instead of gliding', async (make) => {
+  const t = withTour(make({ routes: usual({ continue: { items: CONT, notes: [] } }) }));
+  const behaviours = [];
+  const search = t.q('#booksSearch');
+  // A box with a size, so the step has something to scroll to (the test window lays nothing out).
+  search.getBoundingClientRect = () => ({ left: 0, top: 0, right: 300, bottom: 48, width: 300, height: 48 });
+  search.scrollIntoView = (o) => behaviours.push(o.behavior);
+  t.win.matchMedia = () => ({ matches: true, addEventListener() {}, removeEventListener() {} });
+  const mounted = t.mount();
+  await t.clock.advance(400);
+  await mounted;
+  t.q('#helpBtn').click();
+  check('with less motion asked for, the scroll to the first step is instant', behaviours.join() === 'auto', behaviours);
+  t.doc.getElementById('tourSkip').click();
+  t.win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  t.q('#helpBtn').click();
+  check('with motion allowed it glides', behaviours.join() === 'auto,smooth', behaviours);
+});
+
+await run('Home: the "not connected" note becomes a link to Books, the other notes stay plain', async (make) => {
+  make({ html: '<div id="wsPage"></div>' });
+  const notes = [
+    { source: 'kavita', reason: 'not_connected', text: 'Connect to your ebook library to see ebooks' },
+    { source: 'plex', reason: 'unavailable', text: 'Audiobooks are unavailable right now' }
+  ];
+  const home = books.renderContinueRow(CONT.slice(0, 1), notes, { compact: true, connectHref: '/books' });
+  const lines = Array.from(home.querySelectorAll('[data-continue-note]'));
+  check('both notes are quiet lines marked as notes', lines.length === 2);
+  check('the not-connected one is a link to Books', lines[0].querySelector('a') && lines[0].querySelector('a').getAttribute('href') === '/books' && lines[0].textContent.indexOf('Connect to your ebook library to see ebooks') !== -1);
+  check('the one about a source being down is text', !lines[1].querySelector('a') && lines[1].textContent.indexOf('Audiobooks are unavailable right now') !== -1);
+  const books_ = books.renderContinueRow(CONT.slice(0, 1), notes, { compact: false });
+  check('on Books (no connectHref) neither is a link: the page runs the hand-off itself', !books_.querySelector('a[href="/books"]'));
+});
+
 // ---- Requests: ?q= runs the search on arrival ----
 
 // The Requests page logs what it could not load; the sparse network here

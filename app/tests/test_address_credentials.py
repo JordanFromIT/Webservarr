@@ -207,6 +207,80 @@ class ImportNewAddress(AddressBase):
         self.assertEqual(helpers.get(self.db, "integration.plex.token"), "SYNTH-PLEX-TOKEN")
 
 
+KAVITA_URL = "http://192.168.1.20:5000"
+KAVITA_KEY = "SYNTH-KAVITA-KEY-5d3c"
+
+
+class KavitaKeyFollowsItsAddress(AddressBase):
+    """The Books catalog's Kavita API key is exchanged at the Kavita address
+    on every rebuild, so it is paired with that address like any other
+    integration key: a new address needs the key entered again in the same
+    save (or cleared), and an import that moves the address clears it."""
+
+    def setUp(self):
+        super().setUp()
+        helpers.put(self.db, "integration.kavita.url", KAVITA_URL)
+        helpers.put(self.db, "integration.kavita.api_key", KAVITA_KEY)
+        # Moving the address also resets everyone's eBooks connection (Redis): not what is tested here.
+        reset = mock.patch("app.routers.admin_settings.reset_kavita_connections", new=mock.AsyncMock())
+        reset.start()
+        self.addCleanup(reset.stop)
+
+    def test_the_pair_is_in_the_map_the_settings_page_reads(self):
+        from app.integrations.config import ADDRESS_CREDENTIALS
+        self.assertEqual(ADDRESS_CREDENTIALS["integration.kavita.url"], "integration.kavita.api_key")
+        r = self.client.get("/api/admin/settings?view=registry")
+        self.assertEqual(r.json()["address_credentials"]["integration.kavita.url"], "integration.kavita.api_key")
+
+    def test_a_new_address_without_the_key_is_refused_on_the_address(self):
+        r = self.save(("integration.kavita.url", ELSEWHERE))
+        self.assertEqual(r.status_code, 422, r.text)
+        self.assertEqual(r.json()["errors"], {"integration.kavita.url": "Enter the key again for the new address"})
+        self.assertEqual(helpers.get(self.db, "integration.kavita.url"), KAVITA_URL)
+        self.assertEqual(helpers.get(self.db, "integration.kavita.api_key"), KAVITA_KEY)
+
+    def test_the_key_sent_back_masked_does_not_count(self):
+        r = self.save(("integration.kavita.url", ELSEWHERE), ("integration.kavita.api_key", reg.MASK))
+        self.assertEqual(r.status_code, 422, r.text)
+        self.assertEqual(helpers.get(self.db, "integration.kavita.api_key"), KAVITA_KEY)
+
+    def test_a_new_address_with_the_key_entered_again_saves(self):
+        r = self.save(("integration.kavita.url", ELSEWHERE), ("integration.kavita.api_key", "SYNTH-NEW-KAVITA-KEY"))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(helpers.get(self.db, "integration.kavita.url"), ELSEWHERE)
+        self.assertEqual(helpers.get(self.db, "integration.kavita.api_key"), "SYNTH-NEW-KAVITA-KEY")
+
+    def test_a_new_address_with_the_key_cleared_saves(self):
+        r = self.save(("integration.kavita.url", ELSEWHERE), ("integration.kavita.api_key", ""))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(helpers.get(self.db, "integration.kavita.api_key"), "")
+
+    def test_the_same_address_written_differently_keeps_the_key(self):
+        r = self.save(("integration.kavita.url", KAVITA_URL + "/"))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(helpers.get(self.db, "integration.kavita.api_key"), KAVITA_KEY)
+
+    def test_an_import_that_moves_the_address_clears_the_key_and_says_so(self):
+        r = self.importing({"integration.kavita.url": ELSEWHERE})
+        self.assertEqual(r.status_code, 200, r.text)
+        cleared = [c for c in r.json()["changes"] if c["key"] == "integration.kavita.api_key"]
+        self.assertEqual([(c["new"], c["note"]) for c in cleared],
+                         [("", "Kavita API key (for the Books catalog) will be cleared (its address changed)")])
+        self.assertNotIn(KAVITA_KEY, r.text)
+        preview = r.json()
+        applied = self.importing({"integration.kavita.url": ELSEWHERE}, dry=False, token=preview["diff_token"])
+        self.assertEqual(applied.status_code, 200, applied.text)
+        self.assertEqual(helpers.get(self.db, "integration.kavita.api_key"), "")
+
+    def test_the_webhook_secret_is_not_tied_to_an_address(self):
+        # It is what Chaptarr sends to this site, not something this site sends anywhere.
+        helpers.put(self.db, "integration.chaptarr.url", "http://192.168.1.30:8789")
+        helpers.put(self.db, "integration.chaptarr.webhook_secret", "SYNTH-HOOK-SECRET")
+        r = self.save(("integration.chaptarr.url", ELSEWHERE), ("integration.chaptarr.api_key", "SYNTH-CHAPTARR-KEY"))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(helpers.get(self.db, "integration.chaptarr.webhook_secret"), "SYNTH-HOOK-SECRET")
+
+
 class ExfiltrationScenario(AddressBase):
     """The audit's M2 scenario, end to end: a file that changes only the Seerr
     address is imported, then the status lights are checked. No request may

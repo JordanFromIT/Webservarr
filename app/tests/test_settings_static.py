@@ -9,9 +9,10 @@ from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
 FRAME = "settings.html"
-TABS = ["general", "pages", "appearance", "sign-in", "integrations", "notifications"]
+TABS = ["general", "pages", "appearance", "sign-in", "integrations", "books", "notifications"]
 MODULES = {"general": "general.js", "pages": "pages.js", "appearance": "appearance.js",
-           "sign-in": "signin.js", "integrations": "integrations.js", "notifications": "notifications.js"}
+           "sign-in": "signin.js", "integrations": "integrations.js", "books": "books.js",
+           "notifications": "notifications.js"}
 # Text colour from outside the theme engine: a Tailwind palette class, an
 # arbitrary text-[#hex] / text-[rgb(...)] / text-[hsl(...)], or an inline
 # color: #... / rgb(...) / hsl(...) in markup or a JS string. rgb(var(--...))
@@ -353,7 +354,8 @@ class Skeletons(unittest.TestCase):
 
     MODULE = {"general": "settings/general.js", "pages": "settings/pages.js",
               "appearance": "settings/appearance.js", "sign-in": "settings/signin.js",
-              "integrations": "settings/integrations.js", "notifications": "settings/notifications.js"}
+              "integrations": "settings/integrations.js", "books": "settings/books.js",
+              "notifications": "settings/notifications.js"}
 
     def test_every_panel_holds_one_composed_skeleton(self):
         for tab in TABS:
@@ -1464,6 +1466,30 @@ class IntegrationsTab(unittest.TestCase):
         status = live_matches(src, r"var status = el\('p', '([^']*)'\);")
         self.assertEqual(len(status), 1)
         self.assertIn("h-5", status[0].group(1).split())
+
+    def test_the_books_cards_carry_the_catalog_key_and_the_webhook(self):
+        # Task 5: the Kavita key is a card field (so it saves with its address, which pairs it
+        # in the registry's address_credentials); the webhook address is this site's own origin
+        # and the path the router answers on; its secret is made in the browser, never typed in.
+        src = INTEGRATIONS.read_text(encoding="utf-8")
+        self.assertIn("secret: ['integration.kavita.api_key', 'API key',", src)
+        self.assertIn("webhook: ['integration.chaptarr.webhook_secret', 'Webhook secret'] },", src)
+        self.assertIn("field.value = window.location.origin + WEBHOOK_PATH;", src)
+        main = (STATIC.parent / "main.py").read_text(encoding="utf-8")
+        router = (STATIC.parent / "routers" / "chaptarr_webhook.py").read_text(encoding="utf-8")
+        prefix = re.search(r"include_router\(chaptarr_webhook\.router, prefix=\"([^\"]+)\"", main).group(1)
+        route = re.search(r"@router\.post\(\"([^\"]+)\"", router).group(1)
+        self.assertIn(f"var WEBHOOK_PATH = '{prefix}{route}';", src, "the page and the router disagree on the webhook's address")
+        self.assertIn("generate: 32,", src)
+        kit = kit_code()
+        self.assertIn("window.crypto.getRandomValues(bytes);", kit)
+        # Shown only while it is being made: every way back to the saved state hides it again.
+        raw = (STATIC / "js" / "settings" / "kit.js").read_text(encoding="utf-8")
+        self.assertIn("if (v === S.mask) { hide(); input.value = ''; mode('saved'); }", raw)
+        self.assertIn("else if (v === '' && baseline(o.key) === S.mask) { hide(); input.value = ''; mode('cleared'); }", raw)
+        for words in ("In Chaptarr: Settings → Connect → + → Webhook.", "Tick On Release Import and On Upgrade.",
+                      "Method POST.", "Any Username.", "Password = the secret."):
+            self.assertIn(words, src)
 
     def test_saved_secrets_are_compared_with_the_kits_mask(self):
         # R79 (a, b): "address and key saved" reads the saved values through

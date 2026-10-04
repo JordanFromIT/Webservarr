@@ -856,7 +856,8 @@ class Cover(BooksBase):
 class Authentication(BooksBase):
     PATHS = ["/api/books", "/api/books/1", "/api/books/1/cover", "/api/books/search?q=a",
              "/api/books/person?role=author&name=a", "/api/books/series?name=a", "/api/books/continue",
-             "/api/admin/books/status", "/api/admin/books/unpaired", "/api/admin/books/overrides"]
+             "/api/admin/books/status", "/api/admin/books/unpaired", "/api/admin/books/overrides",
+             "/api/admin/books/paired"]
 
     def test_401_without_a_session(self):
         app.dependency_overrides.pop(get_current_user)
@@ -923,6 +924,28 @@ class Admin(BooksBase):
         self.assertEqual(set(body["ebooks"][0]), {"book_id", "kavita_chapter_id", "title", "author", "series"})
         self.assertEqual(set(body["audiobooks"][0]),
                          {"book_id", "plex_book_key", "narrator", "title", "author", "series"})
+
+    def test_paired_lists_each_ebook_with_its_editions_whole(self):
+        body = self.ok("/api/admin/books/paired")
+        by_title = {b["title"]: b for b in body["books"]}
+        # Whole, as unpaired is: no caller's Kavita access filters it.
+        self.assertEqual(sorted(by_title), ["Dune", "Villette"])
+        self.assertEqual(set(by_title["Dune"]), {"book_id", "kavita_chapter_id", "title", "author", "series", "editions"})
+        self.assertEqual((by_title["Dune"]["book_id"], by_title["Dune"]["kavita_chapter_id"]), (1, 101))
+        self.assertEqual(by_title["Dune"]["editions"], [{"plex_book_key": "10:1", "narrator": "Scott Brick"},
+                                                        {"plex_book_key": "11:1", "narrator": "Simon Vance"}])
+        self.assertEqual(by_title["Villette"]["editions"], [{"plex_book_key": "13:1", "narrator": "Nora Reed"}])
+        # Not the unpaired: an ebook alone, an audiobook alone, and a row merged into another.
+        keys = {e["plex_book_key"] for b in body["books"] for e in b["editions"]}
+        self.assertEqual(keys, {"10:1", "11:1", "13:1"})
+
+    def test_a_pair_can_be_kept_apart_from_the_paired_list(self):
+        pair = self.ok("/api/admin/books/paired")["books"][0]
+        edition = pair["editions"][0]["plex_book_key"]
+        r = self.post("/api/admin/books/overrides", {"kavita_chapter_id": pair["kavita_chapter_id"],
+                                                     "plex_book_key": edition, "action": "apart"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.ok("/api/admin/books/overrides")["overrides"][0]["action"], "apart")
 
     def test_overrides_round_trip(self):
         self.assertEqual(self.ok("/api/admin/books/overrides"), {"overrides": []})
@@ -1139,7 +1162,7 @@ class FixRoundOne(BooksBase):
                 self.assertEqual(r.status_code, 503, r.text)
         self.as_user(ADMIN)
         app.dependency_overrides[get_db] = lambda: Broken()
-        for path in ("/api/admin/books/unpaired", "/api/admin/books/overrides"):
+        for path in ("/api/admin/books/unpaired", "/api/admin/books/overrides", "/api/admin/books/paired"):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 503)
         body = {"kavita_chapter_id": 101, "plex_book_key": "10:1", "action": "pair"}

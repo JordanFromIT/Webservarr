@@ -521,17 +521,17 @@ class HomePage(unittest.TestCase):
 
     def test_every_read_is_on_the_pages_signal(self):
         code = self.code()
-        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 4, "news, streams, requests, releases")
-        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*?, \{ signal: signal \}\)", code)), 4)
+        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 5, "continue, news, streams, requests, releases")
+        self.assertEqual(len(re.findall(r"WS\.getJSON\([^;]*?, \{ signal: signal \}\)", code)), 5)
         fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
         self.assertEqual(len(fetches), 2, "the gauges and the sidebar's request badge")
         for at in fetches:
             self.assertIn("signal: signal", ",".join(call_args(code, at + len("fetch"))), code[at:at + 60])
         # A page left mid-request says nothing and writes nothing.
-        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 5,
-                         "four onError handlers and the gauges' catch")
+        self.assertEqual(code.count("if (signal.aborted || isAbort(error)) return;"), 6,
+                         "five onError handlers and the gauges' catch")
         self.assertRegex(code, r"catch \(e\) \{\s*if \(signal\.aborted \|\| isAbort\(e\)\) return;")
-        for name in ("renderNews", "renderActiveStreams", "renderRecentRequests", "renderServices",
+        for name in ("renderContinue", "renderNews", "renderActiveStreams", "renderRecentRequests", "renderServices",
                      "renderUpcomingReleases"):
             self.assertRegex(function_body(code, name), r"^\s*if \(signal\.aborted\) return;", name)
 
@@ -574,11 +574,34 @@ class HomePage(unittest.TestCase):
         # so nothing there can keep a node (or a visit's state) alive.
         src = module_source("index")
         names = re.findall(r"^(?:const|let|var) (\w+)", src, re.M)
-        self.assertEqual(sorted(names), ["HOMELAB_ICONS", "NEWS_FRESH_MS", "REQUEST_TONE_CLASSES", "SECTIONS",
-                                         "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE"])
+        self.assertEqual(sorted(names), ["CONTINUE_KEY", "CONTINUE_NOTE_KEY", "HOMELAB_ICONS", "NEWS_FRESH_MS",
+                                         "REQUEST_TONE_CLASSES", "SECTIONS", "STREAMS_PER_PAGE", "STREAM_CARD_SHAPE"])
         self.assertNotRegex(src, r"^(?:let|var) ", )
         # Every lookup stays inside the page.
         self.assertNotRegex(self.code(), r"\bdocument\.getElementById\(")
+
+    def test_continue_is_the_books_row_in_its_compact_form(self):
+        h = read("index")
+        page = h[h.index('<div id="wsPage"'):h.index("</main>")]
+        # The first section to arrive; hidden (so the stack's gap skips it) until a visit says otherwise.
+        self.assertEqual(re.findall(r'data-arrive="(\w+)"', page)[0], "continue")
+        self.assertIn('<div id="homeContinue" data-arrive="continue" hidden aria-busy="true">', h)
+        self.assertIn('data-ws-dep="/static/js/pages/books.js?v=1"', h)
+        src = module_source("index")
+        # No import statement: the page names the file and the server stamps it (as the Books pages do).
+        self.assertNotRegex(js_code_only(src), r"(?m)^\s*import\b[^(]")
+        self.assertIn("import(root.getAttribute('data-ws-dep') || './books.js')", src)
+        self.assertIn("mod.renderContinueRow(items, notes, { compact: true, signal: signal, connectHref: '/books' })", src)
+        self.assertIn("return WS.getJSON('/api/books/continue', { signal: signal });", src)
+        # Not loaded at all while the Books page is off; decided before anything is awaited.
+        self.assertIn("var booksOn = !!features.books_configured && (branding.sidebar_enabled || {}).library !== false;", src)
+        self.assertLess(src.index("continueHost.hidden = !hadRow;"), src.index("const user = await checkAuth();"))
+        self.assertIn("if (continueHost && booksOn) first.push(loadContinue());", src)
+        # The room a row had last time, from the first paint of a full load.
+        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+        self.assertIn("data.page !== 'index'", loader)
+        self.assertIn("setAttribute('data-home-continue',", loader)
+        self.assertIn("html[data-home-continue] #homeContinue[hidden] { display: block; margin-bottom: 2rem; }", h)
 
     def test_the_buttons_are_data_actions(self):
         h = read("index")
@@ -658,6 +681,27 @@ class BooksPage(unittest.TestCase):
         h = read("books")
         self.assertIn("html[data-books-continue] #continueHost { display: block; }", h)
         self.assertIn("#continueHost { display: none; }", h)
+
+
+    def test_the_first_visit_guide_is_the_shared_engine_started_once(self):
+        # Jordan 2026-10-03: the guide is rebuilt for Books on tour.js (the reader's engine), runs on a
+        # person's first visit only, starts when the books are drawn, and the help button runs it again.
+        h = read("books")
+        self.assertIn('<script src="/static/js/tour.js?v=5" data-ws-page-script></script>', h)
+        self.assertEqual(h.count('id="helpBtn"'), 1)
+        src = module_source("books")
+        self.assertIn("const GUIDE_KEY = 'webservarr_books_guide_seen:';", src)
+        self.assertEqual(len(re.findall(r"^\s+target: '", src[src.index("const GUIDE_STEPS"):src.index("function isAbort")], re.M)), 4)
+        for words in ("#booksSearch", "#continueHost [data-continue]", "#formatChips", "#libraryGrid > li:first-child"):
+            self.assertIn(f"target: '{words}'", src)
+        self.assertIn("window.WebServarrTour.init({", src)
+        self.assertIn("seenKey: GUIDE_KEY + user,", src)
+        self.assertIn("helpBtn: $('helpBtn'),", src)
+        self.assertIn("autoStart: false,", src)
+        self.assertIn("signal: signal", src[src.index("window.WebServarrTour.init({"):])
+        # Offered once the books are drawn, and marked seen as soon as it has been shown.
+        self.assertRegex(function_body(js_code_only(src), "renderLibrary"), r"showBody\('\s*'\);\s*setMore\(data\.next_cursor\);\s*offerGuide\(\);")
+        self.assertIn("if (first && guide.isActive()) storageSet(GUIDE_KEY + user, '1');", src)
 
 
 class BookPages(unittest.TestCase):
