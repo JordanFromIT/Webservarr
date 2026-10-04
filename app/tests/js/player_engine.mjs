@@ -2708,6 +2708,43 @@ for (const [name, own, asks] of [['kept only as the book\'s opening place', fals
   t.engine.close();
 }
 
+current = 'FR1: an opening place kept in this browser, in a part the book no longer has, is not a place that changed';
+for (const [name, own, orphans, expect] of [
+  ['never played here, places on gone books', false, [ORPHAN_A], 'question'],
+  ['never played here, nothing on gone books', false, [], 'new'],
+  ['played here (a real place that changed)', true, [ORPHAN_A], 'helper']
+]) {
+  const saver = heldSaver();
+  const local = { track: '599', offset_ms: 100000, duration_ms: 900000, updated_at: '2026-09-30T10:00:00.000Z', device: 'Chrome', own, acked: false, ackedAt: null };
+  saver.readLocal = () => local;
+  const base = saver.resumeFrom;
+  saver.resumeFrom = (key, p) => base(key, p).concat([Object.assign({ source: 'local' }, local)]);
+  const t = setup({ saver, net: { noLocal: true, positions: { web: null, plex: null }, orphans } });
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(1000);
+  await p;
+  const s = t.engine.state();
+  if (expect === 'question') check(name + ': the safety-net question, not the files-changed helper', s.safetyNet !== null && s.filesChanged === null && !s.playing, [s.safetyNet, s.filesChanged]);
+  else if (expect === 'new') check(name + ': opens as a new book, no helper', s.safetyNet === null && s.filesChanged === null && s.playing && s.position.track === '501' && s.resumedFrom === null, [s.filesChanged, s.resumedFrom]);
+  else check(name + ': the files-changed helper, as ever', s.filesChanged !== null && s.safetyNet === null && s.filesChanged.old.source === 'local', [s.filesChanged, s.safetyNet]);
+  t.engine.close();
+}
+{
+  // An older real place still counts when the newest is only an opening place in a gone part.
+  const saver = heldSaver();
+  const local = { track: '599', offset_ms: 0, duration_ms: 900000, updated_at: '2026-09-30T12:00:00.000Z', device: 'Chrome', own: false, acked: false, ackedAt: null };
+  saver.readLocal = () => local;
+  const base = saver.resumeFrom;
+  saver.resumeFrom = (key, p) => base(key, p).concat([Object.assign({ source: 'local' }, local)]).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+  const web = { track: '502', offset_ms: 300000, duration_ms: 900000, updated_at: '2026-09-30T11:00:00.000Z', device: 'Chrome on Windows' };
+  const t = setup({ saver, net: { noLocal: true, positions: { web, plex: null }, orphans: [ORPHAN_A] } });
+  const p = t.engine.open(MULTI.key);
+  await t.clock.advance(1000);
+  await p;
+  check('an older web place is the one resumed', t.engine.state().filesChanged === null && t.engine.state().safetyNet === null && t.engine.state().position.track === '502', t.engine.state().position);
+  t.engine.close();
+}
+
 current = 'spec 2.6: a lookup that is empty or malformed opens the book as it always did';
 {
   const none = [['no places', []], ['only malformed places', [{ key: '../x', book_title: 'x' }, { key: 5 }, null, 'x', { book_title: 'no key' }]]];

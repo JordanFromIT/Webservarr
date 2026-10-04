@@ -3830,6 +3830,35 @@ current = 'T3H1: "None of these" after more than 5 minutes asks about a Plex app
   u.engine.close();
 }
 
+current = 'FR1: an unplayed open, then the book\'s files replaced, then places on a gone book: the question, not the "files changed" helper';
+{
+  const storage = fakeStorage();
+  const t = withEngine({ storage, book: CHAPTERED });
+  await t.engine.open('500:1', { autoplay: false });
+  await t.clock.advance(1000);
+  const kept = localOf(t);
+  t.engine.close();
+  check('the first open kept an opening place, never played here', kept && kept.own === false && kept.track === '501', kept);
+  // The album is re-ripped: the parts have new keys.
+  const renamed = JSON.parse(JSON.stringify(CHAPTERED));
+  const map = { 501: '601', 502: '602', 503: '603' };
+  renamed.tracks.forEach((x) => { x.key = map[x.key]; });
+  renamed.chapters.forEach((c) => { c.track = map[c.track]; });
+  const u = withEngine({ storage, book: renamed, orphans: ORPHANS });
+  await openBook(u);
+  const s = u.engine.state();
+  check('the question is asked; no helper for a place the listener never had', s.safetyNet !== null && s.filesChanged === null && !s.playing, [s.safetyNet, s.filesChanged]);
+  await u.engine.play();
+  await u.clock.advance(20000);
+  check('nothing saved while it is open', u.server.calls.length === 0);
+  u.engine.close();
+  // No places on gone books: the new files just open from the start.
+  const v = withEngine({ storage, book: renamed });
+  await openBook(v);
+  check('nothing to ask: opens as a new book, no helper', v.engine.state().filesChanged === null && v.engine.state().safetyNet === null && v.engine.state().playing, v.engine.state().filesChanged);
+  v.engine.close();
+}
+
 if (failed) {
   realError(`${failed}/${total} player saves cases FAILED`);
   process.exit(1);

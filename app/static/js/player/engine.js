@@ -1649,7 +1649,15 @@ export function createEngine(env) {
       } catch (e) {
         console.error('[player] saving failed', e);
       }
-      const newest = order[0] || null;
+      // A copy this browser only kept as a book's opening place (never played
+      // or moved here) is no place of the listener's, so one in a part the
+      // book no longer has (its files were replaced since) is not a place
+      // that changed: it is skipped, as the safety net's lookup skips it.
+      const kept = localCopy(key);
+      const untouched = !(kept && kept.own === true);
+      const newest = order.find(function (c) {
+        return !(c.source === 'local' && untouched && toBookMs(book.tracks, c.track, c.offset_ms) === null);
+      }) || null;
       if (newest) {
         const b = toBookMs(book.tracks, newest.track, newest.offset_ms);
         const w = places.web && typeof places.web === 'object' ? places.web : null;
