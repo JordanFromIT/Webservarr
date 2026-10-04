@@ -23,7 +23,7 @@ from app.auth import session_manager
 from app.seed import seed_secret_key
 from app.pages import render_page
 from app.integrations import plex_player
-from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player
+from app.routers import news, status, admin, admin_settings, admin_integrations, simple_auth, integrations, auth as oidc_auth, plex_auth, branding, notifications, tickets, setup as setup_router, kavita_proxy, wiki, request_status, player, chaptarr_webhook
 from app.services.notification_poller import start_poller, stop_poller
 from app.services import request_status as request_status_service
 from app.services.shelf_warmer import start_warmer, stop_warmer
@@ -397,6 +397,7 @@ app.include_router(tickets.router, prefix="/api", tags=["Tickets"])
 app.include_router(wiki.router, prefix="/api/wiki", tags=["Wiki"])
 app.include_router(request_status.router, prefix="/api/request-status", tags=["Request Status"])
 app.include_router(player.router, prefix="/api/player", tags=["Player"])
+app.include_router(chaptarr_webhook.router, prefix="/api/webhooks", tags=["Webhooks"])
 # No /api prefix: this router owns /kavita/* and /signin-oidc at the app root.
 # /signin-oidc must be at root because Kavita sets its OIDC correlation cookies
 # with path=/signin-oidc, and the browser only sends them to that exact path.

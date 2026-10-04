@@ -667,6 +667,39 @@ async def list_books() -> list:
     return [b[4] for b in await _library()]
 
 
+async def catalog_books() -> list:
+    """list_books with what the Books catalog stores about each book:
+    {**list_books fields, work_key, sort_title, description, added_at,
+    series_number}.
+
+    `work_key` is the key the player stores for the book (book_identity's, so
+    a disc of a box set is named as the player names it); None when no key can
+    be made. `added_at` is epoch seconds (None when Plex gives none) and
+    `series_number` the book's place in its series (None when unknown, see the
+    Series notes). Raises PlayerOff or PlayerUnavailable as list_books does."""
+    library = await _library()
+    discs = {}
+    for album, disc, tracks, _count, _summary_ in library:
+        discs.setdefault(str(album.get("ratingKey")), {})[disc] = tracks
+    numbers = {e["book"]["key"]: e["number"] for e in _series_entries(library)}
+    books = []
+    for album, disc, _tracks, disc_count, summary in library:
+        try:
+            title = _disc_work_title(album, disc, discs[str(album.get("ratingKey"))])
+        except Exception as exc:  # noqa: BLE001 - as in _identity: a title no key can be made of is a book with no key
+            logger.warning("No work key could be made of a book's title: %s", type(exc).__name__)
+            title = ""
+        books.append({
+            **summary,
+            "work_key": _hash_work(summary["author"], title) if title else None,
+            "sort_title": (album.get("titleSort") if disc_count < 2 else "") or summary["title"],
+            "description": (album.get("summary") or "").strip(),
+            "added_at": _int(album.get("addedAt")) or None,
+            "series_number": numbers.get(summary["key"]),
+        })
+    return books
+
+
 # --- Series ---------------------------------------------------------------------------
 #
 # Plex keeps no series or series number for a music album. A book's series is

@@ -64,6 +64,7 @@ SECRETS = {
     "integration.plex.token", "integration.seerr.api_key", "integration.chaptarr.api_key",
     "integration.nyt.api_key", "integration.sonarr.api_key", "integration.radarr.api_key",
     "integration.netdata.api_key", "integration.authentik.client_secret",
+    "integration.kavita.api_key", "integration.chaptarr.webhook_secret",
 }
 
 

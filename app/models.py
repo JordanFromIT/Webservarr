@@ -2,7 +2,7 @@
 Database models for WebServarr.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Enum, Float, ForeignKey, Index
+from sqlalchemy import CheckConstraint, Column, Integer, String, Text, Boolean, DateTime, Enum, Float, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.sql import func
 from datetime import datetime
 from app.database import Base
@@ -407,3 +407,81 @@ class PlayerPrefs(Base):
 
     def __repr__(self):
         return f"<PlayerPrefs(identity='{self.identity}')>"
+
+
+class Book(Base):
+    """One work in the Books catalog: an ebook (Kavita), an audiobook (Plex)
+    or both as one entry. Rebuilt from the two sources by
+    app/services/book_catalog.py; nothing per person is kept here.
+
+    A row keeps its id while its Kavita id or Plex key is unchanged. When two
+    rows become one, the losing row stays with merged_into set to the
+    survivor, so an old link still finds the book, and a later split revives
+    it. Only rows with merged_into null are live books."""
+    __tablename__ = "books"
+    __table_args__ = (
+        Index("ix_books_kavita_series_id", "kavita_series_id"),
+        Index("ix_books_plex_book_key", "plex_book_key"),
+        Index("ix_books_merged_into", "merged_into"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    work_key = Column(String(32), nullable=True)
+    title = Column(String(300), nullable=False)
+    sort_title = Column(String(300), nullable=False, default="")
+    author = Column(String(200), nullable=False, default="")
+    narrator = Column(String(200), nullable=False, default="")     # audiobook only
+    series = Column(String(200), nullable=False, default="")
+    series_number = Column(Float, nullable=True)
+    description = Column(Text, nullable=False, default="")
+    kavita_series_id = Column(Integer, nullable=True)
+    kavita_library_id = Column(Integer, nullable=True)
+    plex_book_key = Column(String(64), nullable=True)               # album or album:disc, as the player uses
+    added_at = Column(DateTime, nullable=True)                      # naive UTC; the earlier of the two sources
+    ebook_added_at = Column(DateTime, nullable=True)
+    audio_added_at = Column(DateTime, nullable=True)
+    cover_source = Column(String(10), nullable=False, default="plex")   # kavita or plex
+    updated_at = Column(DateTime, nullable=False)                   # naive UTC
+    merged_into = Column(Integer, nullable=True)
+
+    def __repr__(self):
+        return f"<Book(id={self.id}, title='{self.title}')>"
+
+
+class BookPairOverride(Base):
+    """An admin's decision about one Kavita series and one Plex book: `pair`
+    joins them whatever their work keys say, `apart` keeps them separate even
+    when the keys match. Always wins, and survives every rebuild."""
+    __tablename__ = "book_pair_overrides"
+    __table_args__ = (
+        UniqueConstraint("kavita_series_id", "plex_book_key", name="uq_book_pair_overrides_pair"),
+        CheckConstraint("action IN ('pair', 'apart')", name="ck_book_pair_overrides_action"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    kavita_series_id = Column(Integer, nullable=False)
+    plex_book_key = Column(String(64), nullable=False)
+    action = Column(String(8), nullable=False)
+    created_by = Column(String(255), nullable=False, default="")
+    created_at = Column(DateTime, nullable=False)                   # naive UTC
+
+    def __repr__(self):
+        return f"<BookPairOverride({self.kavita_series_id}, '{self.plex_book_key}', '{self.action}')>"
+
+
+class BookCatalogMeta(Base):
+    """How the last rebuild went. One row, id 1."""
+    __tablename__ = "book_catalog_meta"
+
+    id = Column(Integer, primary_key=True)
+    last_rebuild_at = Column(DateTime, nullable=True)               # naive UTC
+    last_ok_at = Column(DateTime, nullable=True)                    # a rebuild that read at least one source
+    last_reason = Column(String(40), nullable=True)
+    ebook_count = Column(Integer, nullable=False, default=0)
+    audiobook_count = Column(Integer, nullable=False, default=0)
+    book_count = Column(Integer, nullable=False, default=0)
+    kavita_error = Column(String(200), nullable=True)
+    plex_error = Column(String(200), nullable=True)
+
+    def __repr__(self):
+        return f"<BookCatalogMeta(last_rebuild_at={self.last_rebuild_at})>"

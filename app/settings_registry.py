@@ -256,6 +256,8 @@ def _build() -> List[SettingDef]:
         _secret("integration.seerr.api_key", "Seerr API key", seed=False),
         _url("integration.chaptarr.url", "", "Chaptarr address", ssrf_check=True),
         _secret("integration.chaptarr.api_key", "Chaptarr API key"),
+        # Chaptarr's webhook sends it as the HTTP Basic password (any username).
+        _secret("integration.chaptarr.webhook_secret", "Chaptarr webhook secret (for the Books catalog)"),
         _text("integration.chaptarr.root_folder", "", "Chaptarr root folder for eBooks"),
         # Chaptarr ids may be empty: the client falls back to a stock install's profiles.
         _int("integration.chaptarr.quality_profile_id", "1", "Chaptarr quality profile for eBooks", 1, 1000000,
@@ -268,6 +270,7 @@ def _build() -> List[SettingDef]:
         _int("integration.chaptarr.audiobook_metadata_profile_id", "1", "Chaptarr metadata profile for audiobooks",
              1, 1000000, allow_empty=True),
         _url("integration.kavita.url", "", "Kavita address", ssrf_check=True),
+        _secret("integration.kavita.api_key", "Kavita API key (for the Books catalog)"),
         _secret("integration.nyt.api_key", "New York Times Books API key"),
         _url("integration.sonarr.url", "", "Sonarr address", ssrf_check=True, seed=False),
         _secret("integration.sonarr.api_key", "Sonarr API key", seed=False),

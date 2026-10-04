@@ -510,6 +510,16 @@ class Books(BridgeBase):
         self.assertEqual(self.books()["300:1"]["title"], "Copied Book")
         self.assertEqual(self.books()["500:1"]["narrator"], "")
 
+    def test_catalog_books_are_list_books_with_the_players_work_key(self):
+        listed = self.books()
+        catalog = {b["key"]: b for b in self.run_async(pp.catalog_books())}
+        self.assertEqual(set(catalog), set(listed))
+        for key, book in catalog.items():
+            with self.subTest(key=key):
+                self.assertEqual({k: book[k] for k in listed[key]}, listed[key])
+                self.assertEqual(book["work_key"], self.run_async(pp.book_identity(key))["work_key"])
+        self.assertIsNotNone(catalog["100:1"]["work_key"])
+
     def test_a_duplicate_copy_on_one_disc_is_not_played_twice(self):
         b = self.books()["300:1"]
         self.assertEqual(b["duration_ms"], 510_000)

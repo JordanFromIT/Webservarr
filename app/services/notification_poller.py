@@ -906,6 +906,20 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
     last_monitors = 0.0
     last_news = 0.0
     last_tickets = 0.0
+    # The Books catalog is rebuilt in a task of its own: a rebuild reads Kavita
+    # and Plex over the network and must not hold up the notification polls.
+    # Its own Redis lock keeps two rebuilds (this one, a webhook's, an admin's)
+    # from running at once. The first rebuild is due as soon as this worker
+    # leads, so a fresh install has a catalog without waiting out the interval.
+    from app.services import book_catalog
+    last_books = -book_catalog.REBUILD_INTERVAL
+    books_task: Optional[asyncio.Task] = None
+
+    async def _rebuild_books() -> None:
+        try:
+            await book_catalog.rebuild("schedule")
+        except Exception as exc:
+            logger.warning("Poller: books catalog rebuild failed: %s", type(exc).__name__)
 
     while not _stop_event.is_set():
         try:
@@ -971,9 +985,17 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
                 except Exception as exc:
                     logger.warning("Poller: tickets cycle error: %s", exc)
 
+            # --- Books catalog ---
+            if (lease.held and now - last_books >= book_catalog.REBUILD_INTERVAL
+                    and (books_task is None or books_task.done())):
+                last_books = now
+                books_task = asyncio.create_task(_rebuild_books())
+
         except Exception as exc:
             logger.error("Poller: unexpected error in main loop: %s", exc)
 
+    if books_task is not None and not books_task.done():
+        books_task.cancel()
     logger.info("Notification poller stopped.")
 
 
