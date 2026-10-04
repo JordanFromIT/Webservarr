@@ -585,8 +585,10 @@ export async function mount(ctx) {
       .then(function (html) {
         if (signal.aborted) return;
         renderPage(html);
-        if (!skipSave && !sample) {
-          // The reader chose this page: from here it is theirs to save.
+        if (!skipSave) {
+          // The reader chose this page: from here it is theirs to save
+          // (never in a sample, where nothing is saved).
+          if (sample) return;
           positionKnown = true;
           queueProgress();
         }
