@@ -37,9 +37,12 @@ BookCatalogMeta row.
 import asyncio
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
+
+from sqlalchemy import exists
 
 import redis.asyncio as aioredis
 
@@ -613,3 +616,183 @@ def remove_override(db, kavita_chapter_id: int, plex_book_key: str) -> bool:
         BookPairOverride.plex_book_key == plex_book_key).delete()
     db.commit()
     return bool(removed)
+
+
+# --- Reading the catalog (the Books APIs) ------------------------------------------------
+#
+# These take the database session and what the caller may see, and touch
+# nothing per person: progress is the router's. A caller sees a book's ebook
+# only in a Kavita library their own account reaches (`libraries`), and its
+# audiobook editions only when the player lets them (`audio`). A book that
+# shows neither is not theirs to see.
+
+_QUOTES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"'})
+MAX_GHOST_HOPS = 5
+
+
+def fold(text) -> str:
+    """Text for matching: no accents, no case, typographic quotes made plain,
+    spaces collapsed. "Brontë" and "bronte" fold alike."""
+    plain = unicodedata.normalize("NFKD", str(text or "").translate(_QUOTES))
+    plain = "".join(ch for ch in plain if not unicodedata.combining(ch))
+    return " ".join(plain.casefold().split())
+
+
+def name_key(text) -> str:
+    """A person's or series' name for finding its page: case and spacing
+    ignored, accents kept ("Jose" and "Jos\u00e9" are different people)."""
+    return " ".join(unicodedata.normalize("NFC", str(text or "")).casefold().split())
+
+
+@dataclass(frozen=True)
+class CatalogRow:
+    """One live book as the caller may see it: `ebook` and `audio` are the
+    formats they can reach (a book is only a row here when one is)."""
+    id: int
+    title: str
+    sort_title: str
+    author: str
+    series: str
+    series_number: Optional[float]
+    added_at: Optional[datetime]
+    updated_at: datetime
+    kavita_chapter_id: Optional[int]
+    kavita_series_id: Optional[int]
+    plex_book_key: Optional[str]
+    cover_source: str
+    ebook: bool
+    audio: bool
+
+    @property
+    def formats(self) -> List[str]:
+        return (["ebook"] if self.ebook else []) + (["audio"] if self.audio else [])
+
+
+def visible_rows(db, libraries: Iterable[int], audio: bool) -> List[CatalogRow]:
+    """Every live book the caller can see, with the formats they can reach.
+    `libraries` are the Kavita libraries their own account reaches (none: no
+    ebooks), `audio` whether the player lets them in."""
+    reach = set(libraries)
+    has_editions = exists().where(BookAudioEdition.book_id == Book.id)
+    rows = (db.query(Book.id, Book.title, Book.sort_title, Book.author, Book.series, Book.series_number,
+                     Book.added_at, Book.updated_at, Book.kavita_chapter_id, Book.kavita_series_id,
+                     Book.kavita_library_id, Book.plex_book_key, Book.cover_source, has_editions.label("editions"))
+            .filter(Book.merged_into.is_(None)).all())
+    out = []
+    for (book_id, title, sort_title, author, series, number, added, updated, chapter, series_id, library,
+         plex_key, cover, editions) in rows:
+        ebook = chapter is not None and library in reach
+        heard = bool(editions) and audio
+        if ebook or heard:
+            out.append(CatalogRow(book_id, title, sort_title or title, author or "", series or "", number, added,
+                                  updated, chapter, series_id, plex_key, cover, ebook, heard))
+    return out
+
+
+def narrators_by_book(db) -> Dict[int, List[str]]:
+    """{book id: its editions' narrators, the primary edition's first}."""
+    found: Dict[int, List[str]] = {}
+    for book_id, narrator in (db.query(BookAudioEdition.book_id, BookAudioEdition.narrator)
+                              .order_by(BookAudioEdition.added_at.is_(None), BookAudioEdition.added_at,
+                                        BookAudioEdition.plex_book_key)):
+        names = found.setdefault(book_id, [])
+        if narrator and narrator not in names:
+            names.append(narrator)
+    return found
+
+
+def resolve_book(db, book_id: int) -> Tuple[Optional[Book], Optional[int]]:
+    """(the live book, None) for a live id; (None, the surviving id) for an id
+    that was merged into another book; (None, None) for an unknown id, or a
+    chain of ghosts that never reaches a live book."""
+    row = db.get(Book, book_id)
+    if row is None:
+        return None, None
+    if row.merged_into is None:
+        return row, None
+    for _hop in range(MAX_GHOST_HOPS):
+        row = db.get(Book, row.merged_into)
+        if row is None:
+            return None, None
+        if row.merged_into is None:
+            return None, row.id
+    return None, None
+
+
+def editions_of(db, book: Book) -> List[BookAudioEdition]:
+    """The book's audiobook editions, its primary edition first, then by when
+    they were added."""
+    rows = (db.query(BookAudioEdition).filter(BookAudioEdition.book_id == book.id)
+            .order_by(BookAudioEdition.added_at.is_(None), BookAudioEdition.added_at,
+                      BookAudioEdition.plex_book_key).all())
+    return sorted(rows, key=lambda e: e.plex_book_key != book.plex_book_key)
+
+
+def live_editions(db, keys: Optional[Iterable[str]] = None) -> Dict[str, Tuple[int, str]]:
+    """{Plex book key: (the live book it is in, its narrator)}; limited to
+    `keys` when given."""
+    q = (db.query(BookAudioEdition.plex_book_key, BookAudioEdition.book_id, BookAudioEdition.narrator)
+         .join(Book, Book.id == BookAudioEdition.book_id).filter(Book.merged_into.is_(None)))
+    if keys is not None:
+        wanted = list(keys)
+        found: Dict[str, Tuple[int, str]] = {}
+        for start in range(0, len(wanted), 400):
+            for key, book_id, narrator in q.filter(BookAudioEdition.plex_book_key.in_(wanted[start:start + 400])):
+                found[key] = (book_id, narrator or "")
+        return found
+    return {key: (book_id, narrator or "") for key, book_id, narrator in q}
+
+
+def ebooks_in_series(db, series_ids: Iterable[int], libraries: Iterable[int]) -> List[Book]:
+    """The live books with an ebook in these Kavita series, in the libraries
+    the caller reaches."""
+    wanted, reach = list(series_ids), list(libraries)
+    if not wanted or not reach:
+        return []
+    return (db.query(Book).filter(Book.merged_into.is_(None), Book.kavita_chapter_id.isnot(None),
+                                  Book.kavita_series_id.in_(wanted), Book.kavita_library_id.in_(reach))
+            .order_by(Book.id).all())
+
+
+def unpaired(db, limit: int = 1000) -> dict:
+    """For the admin's Books panel, whole (no caller is filtering): the ebooks
+    that have no audiobook and the audiobook editions in books that have no
+    ebook. {"ebooks": [{book_id, kavita_chapter_id, title, author, series}],
+    "audiobooks": [{book_id, plex_book_key, narrator, title, author, series}]},
+    each at most `limit`, by title."""
+    ebooks = [{"book_id": b.id, "kavita_chapter_id": b.kavita_chapter_id, "title": b.title,
+               "author": b.author, "series": b.series}
+              for b in (db.query(Book).filter(Book.merged_into.is_(None), Book.kavita_chapter_id.isnot(None),
+                                              ~exists().where(BookAudioEdition.book_id == Book.id))
+                        .order_by(Book.sort_title, Book.id).limit(limit))]
+    audiobooks = [{"book_id": b.id, "plex_book_key": e.plex_book_key, "narrator": e.narrator or "",
+                   "title": b.title, "author": b.author, "series": b.series}
+                  for e, b in (db.query(BookAudioEdition, Book).join(Book, Book.id == BookAudioEdition.book_id)
+                               .filter(Book.merged_into.is_(None), Book.kavita_chapter_id.is_(None))
+                               .order_by(Book.sort_title, BookAudioEdition.plex_book_key).limit(limit))]
+    return {"ebooks": ebooks, "audiobooks": audiobooks}
+
+
+def overrides(db) -> List[dict]:
+    """Every pairing override, newest first, with the titles of the ebook and
+    the edition's book when the catalog still knows them (null when not)."""
+    rows = db.query(BookPairOverride).order_by(BookPairOverride.created_at.desc(), BookPairOverride.id.desc()).all()
+    ebook_titles = {}
+    for chapter, title in (db.query(Book.kavita_chapter_id, Book.title).filter(
+            Book.merged_into.is_(None), Book.kavita_chapter_id.isnot(None))):
+        ebook_titles[chapter] = title
+    audio_titles = {key: title for key, title in (
+        db.query(BookAudioEdition.plex_book_key, Book.title).join(Book, Book.id == BookAudioEdition.book_id)
+        .filter(Book.merged_into.is_(None)))}
+    return [{"kavita_chapter_id": r.kavita_chapter_id, "plex_book_key": r.plex_book_key, "action": r.action,
+             "created_by": r.created_by, "created_at": r.created_at,
+             "ebook_title": ebook_titles.get(r.kavita_chapter_id), "audio_title": audio_titles.get(r.plex_book_key)}
+            for r in rows]
+
+
+def knows_ebook(db, kavita_chapter_id: int) -> bool:
+    return db.query(Book.id).filter(Book.kavita_chapter_id == kavita_chapter_id).first() is not None
+
+
+def knows_edition(db, plex_book_key: str) -> bool:
+    return db.query(BookAudioEdition.id).filter(BookAudioEdition.plex_book_key == plex_book_key).first() is not None

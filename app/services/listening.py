@@ -599,6 +599,42 @@ def orphan_candidates(db: Session, identity: str, exclude_key: str) -> list:
             .order_by(P.updated_at.desc(), P.book_key).limit(ORPHAN_CANDIDATES).all())
 
 
+# The most places of one listener get_places reads when no keys are given.
+PLACES_MAX = 1000
+# Keys per query, under SQLite's bound-variable limit.
+_PLACES_CHUNK = 400
+
+
+def get_places(db: Session, identity: str, keys=None, limit: int = PLACES_MAX) -> dict:
+    """This listener's places, for a view of several books at once (the Books
+    pages): {book key: {"updated_at" (naive UTC), "book_ms", "book_duration_ms",
+    "finished"}}. `keys` limits it to those books; with none it is their
+    `limit` newest places. A place is finished by the same rule as an orphan
+    candidate: the latest event of its log is an `end` that saved the row, or its
+    book_ms is FINISHED_PERCENT or more of a known book_duration_ms. Scoped by
+    identity."""
+    P, L = ListeningPosition, ListeningLog
+    ended = exists().where(L.identity == P.identity, L.book_key == P.book_key, L.event == "end",
+                           L.at == P.updated_at)
+    places: dict = {}
+
+    def read(extra) -> None:
+        q = db.query(P.book_key, P.updated_at, P.book_ms, P.book_duration_ms, ended.label("ended")).filter(
+            P.identity == identity, *extra)
+        for key, at, ms, total, was_ended in q.order_by(P.updated_at.desc(), P.book_key).limit(limit):
+            known = ms is not None and total is not None and total > 0
+            places[key] = {"updated_at": at, "book_ms": ms, "book_duration_ms": total,
+                           "finished": bool(was_ended) or (known and ms * 100 >= total * FINISHED_PERCENT)}
+
+    if keys is None:
+        read(())
+    else:
+        keys = [k for k in dict.fromkeys(keys) if isinstance(k, str)]
+        for start in range(0, len(keys), _PLACES_CHUNK):
+            read((P.book_key.in_(keys[start:start + _PLACES_CHUNK]),))
+    return places
+
+
 # The most position rows of one listener the successor graph reads.
 GRAPH_ROWS = 5000
 

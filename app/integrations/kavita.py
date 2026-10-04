@@ -289,3 +289,170 @@ async def list_books() -> list:
     folders = {s["id"]: str(s.get("folderPath") or "").strip() for s in series}
     _inherit_authors(books, folders)
     return books
+
+
+# --- Reading as the signed-in person -------------------------------------------------
+#
+# Everything above reads the whole library with the server's key. What a
+# person may see, and where they are in a book, is theirs: it is read with
+# their own Kavita token (the JWT the OIDC hand-off keeps in their session,
+# see kavita_proxy.py), never the server's key. These calls take the address
+# and token the caller already holds. Like the rest of this module, every
+# failure is a KavitaUnavailable with fixed text: nothing carries an address or
+# a token.
+
+USER_TIMEOUT = 8.0           # a page waits on these, unlike the rebuild
+USER_CONCURRENCY = 6
+MAX_IN_PROGRESS_SERIES = 100
+FINISHED_FROM = 100          # the ReadProgress filter's percent that is "read"
+COVER_MAX_BYTES = 5 * 1024 * 1024
+COVER_TYPES = ("image/jpeg", "image/png", "image/webp", "image/gif")
+# Kavita's filter ids: the field (ReadProgress) and the comparisons (GreaterThan, LessThan).
+FILTER_READ_PROGRESS = 20
+COMPARE_GREATER_THAN = 1
+COMPARE_LESS_THAN = 3
+_CHAPTER_TITLE = re.compile(r"^\s*(?:chapter|ch\.?)\s*(\d{1,4})\b", re.IGNORECASE)
+
+
+class KavitaTokenRefused(KavitaUnavailable):
+    """Kavita refused the person's own token (expired or revoked): they have
+    to connect to Kavita again."""
+
+
+class KavitaNoCover(Exception):
+    """Kavita has no cover for the book, or what it sent is not an image."""
+
+
+def _user_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=USER_TIMEOUT, follow_redirects=False)
+
+
+async def _as_user(client: httpx.AsyncClient, base: str, token: str, method: str, path: str, **kwargs):
+    """The JSON answer to a call made with the person's token; None for a 404
+    (what they asked about is not there), KavitaTokenRefused for a 401."""
+    try:
+        response = await client.request(method, f"{base}{path}", headers={"Authorization": f"Bearer {token}"},
+                                        **kwargs)
+    except httpx.HTTPError as exc:
+        raise KavitaUnavailable("Kavita did not answer") from exc
+    if response.status_code == 401:
+        raise KavitaTokenRefused("Kavita no longer accepts this sign-in")
+    if response.status_code == 404:
+        return None
+    if response.status_code != 200:
+        raise KavitaUnavailable(f"Kavita answered HTTP {response.status_code}")
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise KavitaUnavailable("Kavita's answer could not be read") from exc
+
+
+def _whole(value) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+async def user_library_ids(base: str, token: str) -> set:
+    """The ids of the libraries this person's own Kavita account can reach."""
+    async with _user_client() as client:
+        data = await _as_user(client, base, token, "GET", "/api/Library/libraries")
+    if not isinstance(data, list):
+        raise KavitaUnavailable("Kavita's answer could not be read")
+    return {lib["id"] for lib in data if isinstance(lib, dict) and isinstance(lib.get("id"), int)
+            and not isinstance(lib["id"], bool)}
+
+
+async def in_progress_series_ids(base: str, token: str) -> list:
+    """The ids of the series this person has started and not finished (at
+    most MAX_IN_PROGRESS_SERIES), as Kavita counts it for them."""
+    body = {"statements": [
+        {"comparison": COMPARE_GREATER_THAN, "field": FILTER_READ_PROGRESS, "value": "0"},
+        {"comparison": COMPARE_LESS_THAN, "field": FILTER_READ_PROGRESS, "value": str(FINISHED_FROM)}],
+        "combination": 1, "limitTo": 0, "sortOptions": {"sortField": 1, "isAscending": True}}
+    async with _user_client() as client:
+        data = await _as_user(client, base, token, "POST", "/api/Series/all-v2", json=body,
+                              params={"PageNumber": 1, "PageSize": MAX_IN_PROGRESS_SERIES})
+    if not isinstance(data, list):
+        raise KavitaUnavailable("Kavita's answer could not be read")
+    return [s["id"] for s in data if isinstance(s, dict) and isinstance(s.get("id"), int)]
+
+
+async def chapter_places(base: str, token: str, chapter_ids) -> dict:
+    """This person's place in each chapter (a book) that they have started:
+    {chapter id: {"page": the page they are on, "pages": the book's pages,
+    "at": when they last read it (naive UTC, or None)}}. A chapter with no
+    place, or that Kavita no longer has, is left out."""
+    ids = list(dict.fromkeys(chapter_ids))
+    gate = asyncio.Semaphore(USER_CONCURRENCY)
+    places: dict = {}
+    async with _user_client() as client:
+        async def read(chapter_id: int) -> None:
+            async with gate:
+                progress = await _as_user(client, base, token, "GET", "/api/Reader/get-progress",
+                                          params={"chapterId": chapter_id})
+                page = _whole(progress.get("pageNum")) if isinstance(progress, dict) else 0
+                if page <= 0:
+                    return
+                chapter = await _as_user(client, base, token, "GET", "/api/Series/chapter",
+                                         params={"chapterId": chapter_id})
+            pages = _whole(chapter.get("pages")) if isinstance(chapter, dict) else 0
+            places[chapter_id] = {"page": page, "pages": pages, "at": _when(progress.get("lastModifiedUtc"))}
+
+        results = await asyncio.gather(*(read(i) for i in ids), return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+    return places
+
+
+def _toc_entries(items, out: list) -> None:
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, dict):
+            out.append((_whole(item.get("page")), str(item.get("title") or "")))
+            _toc_entries(item.get("children"), out)
+
+
+async def chapter_number_at(base: str, token: str, chapter_id: int, page: int) -> Optional[int]:
+    """The number of the book's own chapter the reader is in at `page` ("Chapter
+    12 - ..." in its table of contents), or None when the contents don't number
+    it. Never raises for a book whose contents can't be read: the label is a
+    nicety."""
+    try:
+        async with _user_client() as client:
+            data = await _as_user(client, base, token, "GET", f"/api/Book/{int(chapter_id)}/chapters")
+    except KavitaUnavailable:
+        return None
+    entries: list = []
+    _toc_entries(data, entries)
+    current = [e for e in entries if e[0] <= page]
+    if not current:
+        return None
+    found = _CHAPTER_TITLE.match(max(current, key=lambda e: e[0])[1])
+    return int(found.group(1)) if found else None
+
+
+async def chapter_cover(chapter_id: int) -> tuple:
+    """(image bytes, content type) of a book's cover, read with the server's
+    key (Kavita's image routes take a key in the query string, never a token).
+    The caller has already checked that the person may see the book. Only a
+    raster image of at most COVER_MAX_BYTES is passed on; anything else is
+    KavitaNoCover. Raises KavitaUnavailable."""
+    base, key = _config()
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
+            async with client.stream("GET", f"{base}/api/image/chapter-cover",
+                                     params={"chapterId": int(chapter_id), "apiKey": key}) as response:
+                if response.status_code == 404:
+                    raise KavitaNoCover()
+                if response.status_code != 200:
+                    raise KavitaUnavailable(f"Kavita answered HTTP {response.status_code}")
+                content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+                if content_type not in COVER_TYPES:
+                    raise KavitaNoCover()
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body += chunk
+                    if len(body) > COVER_MAX_BYTES:
+                        raise KavitaNoCover()
+    except httpx.HTTPError:             # its message would carry the key in the URL
+        raise KavitaUnavailable("Kavita did not answer") from None
+    return bytes(body), content_type
