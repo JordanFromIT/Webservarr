@@ -637,9 +637,11 @@ class Webhook(unittest.TestCase):
         db = self.Session()
         helpers.put(db, "integration.chaptarr.webhook_secret", self.SECRET)
         db.close()
-        patcher = mock.patch("app.integrations.config.SessionLocal", self.Session)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # The setup gate reads the app's own database, which has no tables outside the dev container.
+        for patcher in (mock.patch("app.integrations.config.SessionLocal", self.Session),
+                        mock.patch("app.routers.setup.is_setup_completed", return_value=True)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.client = helpers.api_client(self.Session)
         self.addCleanup(helpers.reset_overrides)
         self.rebuild = mock.AsyncMock(return_value={"ok": True})

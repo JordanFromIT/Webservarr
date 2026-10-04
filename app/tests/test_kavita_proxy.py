@@ -202,6 +202,11 @@ class ConnectFailureLandsOnBooks(unittest.TestCase):
         self.Session = helpers.make_sessionmaker()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
+        # The redirect check reads Authentik's address from the settings table: this test's own database,
+        # not the app's (which has no tables outside the dev container).
+        db_patch = mock.patch.object(kavita_proxy, "SessionLocal", self.Session)
+        db_patch.start()
+        self.addCleanup(db_patch.stop)
         helpers.set_rate_limits(False)
 
     def tearDown(self):
@@ -284,6 +289,10 @@ class HandOffReturns(unittest.TestCase):
         self.Session = helpers.make_sessionmaker()
         self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
         self.setup_patch.start()
+        # As in ConnectFailureLandsOnBooks: the redirect check reads this test's database.
+        db_patch = mock.patch.object(kavita_proxy, "SessionLocal", self.Session)
+        db_patch.start()
+        self.addCleanup(db_patch.stop)
         helpers.set_rate_limits(False)
         self.callback_client = TestClient(app)
         self.callback_client.cookies.set(settings.session_cookie_name, "test-session")
