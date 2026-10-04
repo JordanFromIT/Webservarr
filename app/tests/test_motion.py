@@ -364,7 +364,10 @@ class ShellNamesOnlyDuringATransition(unittest.TestCase):
 
 class HoverLift(unittest.TestCase):
     def test_lift_moves_transform_and_shadow_only_and_hovers_only_for_a_pointer(self):
-        hover = re.search(r"@media \(hover: hover\) and \(pointer: fine\)\s*\{(.*?)\n\}", THEME, re.S)
+        # The pointer-only block that holds the lift (others, the phone tab
+        # bar's, come earlier in the file).
+        hover = next((m for m in re.finditer(r"@media \(hover: hover\) and \(pointer: fine\)\s*\{(.*?)\n\}", THEME, re.S)
+                      if ".ws-lift:hover" in m.group(1)), None)
         self.assertIsNotNone(hover)
         self.assertLessEqual(properties(css_rule(hover.group(1), ".ws-lift:hover")), {"transform", "box-shadow"})
         self.assertLessEqual(properties(css_rule(THEME, ".ws-lift:active")), {"transform", "transition-duration"})
