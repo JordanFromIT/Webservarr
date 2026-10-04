@@ -15,13 +15,14 @@ from app.tests.test_shell_contract import STATIC, js_code_only, live_matches, ma
 
 # Pages converted to soft navigation, in conversion order.
 CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index", "books", "reader",
-             "requests", "requests-embed", "player-test"]
+             "requests", "requests-embed", "player-test", "book", "books-person", "books-series"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
 
-# A page whose module is not named after its file (index.html is Home).
-MODULE_NAMES = {"index": "home"}
+# A page whose module is not named after its file (index.html is Home; the
+# author/narrator page and the series page are one module).
+MODULE_NAMES = {"index": "home", "books-person": "books-list", "books-series": "books-list"}
 
 _SCRIPT_TAG_RE = re.compile(r"<script\b([^>]*)>", re.I)
 _TAG_RE = re.compile(r"<[a-zA-Z][^>]*>")
@@ -657,6 +658,93 @@ class BooksPage(unittest.TestCase):
         h = read("books")
         self.assertIn("html[data-books-continue] #continueHost { display: block; }", h)
         self.assertIn("#continueHost { display: none; }", h)
+
+
+class BookPages(unittest.TestCase):
+    """The book page (pages/book.js) and the author, narrator and series pages
+    (pages/books-list.js, two partials). They read on the page's signal, time
+    everything with the visit, write text only, and put a name in the address
+    only as a query value, encoded."""
+
+    def sources(self):
+        return {"book": module_source("book"), "books-list": module_source("books-list")}
+
+    def test_every_request_is_on_the_pages_signal(self):
+        for name, src in self.sources().items():
+            with self.subTest(name):
+                code = js_code_only(src)
+                self.assertNotRegex(code, r"(?<![.\w])fetch\(", "every read goes through WS.getJSON")
+                self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 1)
+                self.assertRegex(src, r"WS\.getJSON\([^)]*\{ signal: signal \}\)")
+                self.assertRegex(function_body(code, "quiet"), r"return signal\.aborted \|\| isAbort\(err\)")
+
+    def test_timers_are_the_pages(self):
+        for name, src in self.sources().items():
+            with self.subTest(name):
+                code = js_code_only(src)
+                self.assertNotRegex(code, r"(?<![.\w])setTimeout\(", "one-off timers go through ctx.setTimeout")
+                self.assertNotRegex(code, r"\bsetInterval\(|\bWS\.poll\(|\bctx\.poll\(")
+
+    def test_they_write_text_only(self):
+        for name, src in self.sources().items():
+            with self.subTest(name):
+                self.assertNotRegex(js_code_only(src), r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment|document\.write")
+                self.assertNotRegex(js_code_only(src), r"\bdocument\.getElementById\(", "lookups stay inside ctx.root")
+        for name in ("book", "books-person", "books-series"):
+            with self.subTest(name):
+                self.assertNotIn("onerror", read(name))
+
+    def test_each_page_is_one_section_that_arrives_at_once(self):
+        for name, key, src in (("book", "book", "book"), ("books-person", "list", "books-list"),
+                               ("books-series", "list", "books-list")):
+            with self.subTest(name):
+                h = read(name)
+                page = h[h.index('<div id="wsPage"'):h.index("</main>")]
+                self.assertEqual(re.findall(r'data-arrive="(\w+)"', page), [key])
+                self.assertIn(f"WS.arrive('{key}'", module_source(src))
+                self.assertEqual(page.count("<h1"), 1)
+
+    def test_the_two_list_pages_say_which_they_are(self):
+        self.assertIn('data-kind="person"', read("books-person"))
+        self.assertIn('data-kind="series"', read("books-series"))
+        self.assertIn("root.getAttribute('data-kind')", module_source("books-list"))
+
+    def test_names_travel_as_encoded_query_values(self):
+        book = module_source("book")
+        self.assertIn("'/books/person?role=' + role + '&name=' + encodeURIComponent(name)", book)
+        self.assertIn("'/books/series?name=' + encodeURIComponent(b.series)", book)
+        lst = module_source("books-list")
+        self.assertIn("'/api/books/series?name=' + encodeURIComponent(name)", lst)
+        self.assertIn("'/api/books/person?role=' + role + '&name=' + encodeURIComponent(name)", lst)
+        for src in (book, lst):
+            self.assertNotRegex(js_code_only(src), r"/books/(person|series)/")
+        self.assertIn("'/api/books/' + encodeURIComponent(String(state.id))", book)
+
+    def test_read_goes_only_to_the_reader_and_requests_only_to_requests(self):
+        book = module_source("book")
+        self.assertIn("link.indexOf('/reader?') === 0", book)
+        self.assertIn("link.indexOf('/requests?q=') === 0", book)
+
+    def test_the_hand_off_is_the_books_pages_helper(self):
+        for name in ("book", "books-person", "books-series"):
+            with self.subTest(name):
+                self.assertIn('<script src="/static/js/kavita-connect.js?v=1" data-ws-page-script></script>', read(name))
+        for src in self.sources().values():
+            self.assertIn("window.WSKavita.init()", src)
+            self.assertIn("helper.reconnect(connectProblem)", src)
+
+    def test_the_player_is_watched_for_the_visit_only(self):
+        code = js_code_only(module_source("book"))
+        self.assertIn("p.on('change', syncListen)", module_source("book"))
+        self.assertIn("state.unwatch();", code)
+        self.assertIn("p.open(edition.plex_book_key, { autoplay: true })", module_source("book"))
+
+    def test_the_card_helpers_are_books_js_exports(self):
+        books = module_source("books")
+        for name in ("renderBookCard", "coverBox", "noteLine"):
+            self.assertRegex(books, rf"export function {name}\(")
+        self.assertIn("from './books.js'", module_source("book"))
+        self.assertIn("from './books.js'", module_source("books-list"))
 
 
 class ReaderPage(unittest.TestCase):

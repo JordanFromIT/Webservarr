@@ -60,6 +60,9 @@ class OffMeansOff(PageRoutesBase):
         ("/wiki", "sidebar.enabled_wiki"),
         ("/wiki/some-page", "sidebar.enabled_wiki"),
         ("/books", "sidebar.enabled_library"),
+        ("/books/7", "sidebar.enabled_library"),
+        ("/books/person?role=author&name=X", "sidebar.enabled_library"),
+        ("/books/series?name=X", "sidebar.enabled_library"),
         ("/reader", "sidebar.enabled_library"),
     ]
 
@@ -117,6 +120,42 @@ class MovedRoutes(PageRoutesBase):
         r = self.get("/books", MEMBER_SESSION, values)
         self.assertEqual(r.status_code, 200)
         self.assertRegex(r.text, r'<a[^>]*href="/books"[^>]*aria-current="page"')
+
+    def test_a_book_serves_the_book_page_under_books_in_the_nav(self):
+        values = {"integration.kavita.url": "http://192.168.1.50:5000"}
+        r = self.get("/books/7", MEMBER_SESSION, values)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('data-page="book"', r.text)
+        self.assertIn("<title>WebServarr - Book</title>", r.text)
+        self.assertIn('data-ws-module="/static/js/pages/book.js?v=', r.text)
+        self.assertRegex(r.text, r'<a[^>]*href="/books"[^>]*aria-current="page"')
+
+    def test_the_person_and_series_pages_run_the_list_module(self):
+        values = {"integration.kavita.url": "http://192.168.1.50:5000"}
+        for path, page, kind in (("/books/person?role=narrator&name=Jim%20Dale", "books-person", "person"),
+                                 ("/books/series?name=Harry%20Potter", "books-series", "series")):
+            r = self.get(path, MEMBER_SESSION, values)
+            self.assertEqual(r.status_code, 200, path)
+            self.assertIn(f'data-page="{page}"', r.text)
+            self.assertIn('data-ws-module="/static/js/pages/books-list.js?v=', r.text)
+            self.assertIn(f'data-kind="{kind}"', r.text)
+            self.assertRegex(r.text, r'<a[^>]*href="/books"[^>]*aria-current="page"')
+
+    def test_a_person_with_punctuation_in_the_name_is_still_the_page(self):
+        # The name is a query value: a "/", a comma and Unicode never reach the router as a path.
+        values = {"integration.kavita.url": "http://192.168.1.50:5000"}
+        for name in ("Le%20Guin%2C%20Ursula%20K.", "AC%2FDC", "Bront%C3%AB", "%E6%97%A5%E6%9C%AC"):
+            r = self.get("/books/person?role=author&name=" + name, MEMBER_SESSION, values)
+            self.assertEqual(r.status_code, 200, name)
+            self.assertIn('data-page="books-person"', r.text, name)
+
+    def test_the_book_page_wants_a_whole_number_and_a_session(self):
+        values = {"integration.kavita.url": "http://192.168.1.50:5000"}
+        for path in ("/books/abc", "/books/1.5", "/books/-3"):
+            self.assertEqual(self.get(path, MEMBER_SESSION, values).status_code, 404, path)
+        for path in ("/books/7", "/books/person?role=author&name=X", "/books/series?name=X"):
+            r = self.get(path, None, values)
+            self.assertEqual((r.status_code, r.headers["location"]), (302, "/login"), path)
 
     def test_books_is_off_without_either_source(self):
         r = self.get("/", MEMBER_SESSION)

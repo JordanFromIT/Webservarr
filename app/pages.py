@@ -81,6 +81,9 @@ PAGE_NAV = {
     "calendar": "calendar",
     "tickets": "tickets",
     "books": "library",
+    "book": "library",
+    "books-person": "library",
+    "books-series": "library",
     "wiki": "wiki",
     "settings": "settings",
 }

@@ -576,6 +576,47 @@ async def books_page(
     return render_page("books", request, user, gate="library")
 
 
+# A person's or a series' books (names travel in the query string, so a "/" or a
+# comma in one is safe). These are declared before the book route; its id is a
+# whole number, so neither can be taken for a book.
+@app.get("/books/person", response_class=HTMLResponse, tags=["Pages"])
+async def books_person_page(
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve an author's or narrator's page: ?role=author|narrator&name=..."""
+    user = await _require_session(session_id)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    return render_page("books-person", request, user, gate="library")
+
+
+@app.get("/books/series", response_class=HTMLResponse, tags=["Pages"])
+async def books_series_page(
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve a series page: ?name=..., its books in reading order."""
+    user = await _require_session(session_id)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    return render_page("books-series", request, user, gate="library")
+
+
+@app.get("/books/{book_id:int}", response_class=HTMLResponse, tags=["Pages"])
+async def book_page(
+    request: Request,
+    book_id: int,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve one book's page. Whether the book exists, and what this person may
+    see of it, is the page's own question to /api/books/<id>."""
+    user = await _require_session(session_id)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    return render_page("book", request, user, gate="library")
+
+
 # Legacy redirects: /ebooks (the old eBooks page) and /library (before that) → /books (301)
 @app.get("/ebooks", include_in_schema=False)
 @app.get("/library", include_in_schema=False)

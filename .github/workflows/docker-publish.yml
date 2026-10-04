@@ -106,6 +106,7 @@ jobs:
           node app/tests/js/player_features.mjs
           node app/tests/js/player_findplace.mjs
           node app/tests/js/books_page.mjs
+          node app/tests/js/book_page.mjs
 
   build-and-push:
     needs: [test, js-checks]

@@ -288,6 +288,21 @@ function guideSteps(openSettings, closeSettings) {
   ];
 }
 
+/**
+ * What the address asks the reader to open: { seriesId, chapterId }, each a
+ * positive whole number or null. A book (Books, the book page) names its own
+ * chapter; an address with the series alone opens the series' first readable
+ * chapter. A chapter that is not a number is no chapter.
+ */
+export function readerTarget(params) {
+  function id(key) {
+    var raw = params.get(key);
+    var n = /^\d{1,10}$/.test(raw || '') ? parseInt(raw, 10) : 0;
+    return n > 0 ? n : null;
+  }
+  return { seriesId: id('seriesId'), chapterId: id('chapterId') };
+}
+
 export async function mount(ctx) {
   var root = ctx.root;
   var signal = ctx.signal;
@@ -817,14 +832,17 @@ export async function mount(ctx) {
     if (writer) writer.leave(positionKnown ? current.page : null);
   };
 
-  var seriesId = ctx.url.searchParams.get('seriesId');
-  if (!seriesId) {
+  var target = readerTarget(ctx.url.searchParams);
+  if (!target.seriesId) {
     showError('No book selected', 'Open a book from the library.');
     return leave;
   }
-  book.seriesId = parseInt(seriesId, 10);
+  book.seriesId = target.seriesId;
 
   checkAuth().then(function () {
+    // The book's own chapter when the address names it (its volume comes from
+    // book-info below); else the series' first.
+    if (target.chapterId) return { chapterId: target.chapterId, volumeId: null };
     return resolveChapter(book.seriesId);
   }).then(function (res) {
     book.chapterId = res.chapterId;

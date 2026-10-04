@@ -21,6 +21,8 @@
  *   renderContinueRow(items, notes, { compact, signal }) the Continue row (a
  *                                                       <section>), or null
  *                                                       when nothing is in progress
+ *   coverBox(url, formats, signal, { badges })         the 2:3 cover frame (the book page's, badges off)
+ *   noteLine(text)                                     a quiet line about a source that is down
  * They touch no DOM at import time.
  */
 
@@ -88,7 +90,7 @@ function formatBadges(formats) {
  * hides itself), and the format badges on top. An audiobook's cover is square
  * art: shown whole rather than cropped.
  */
-function coverBox(url, formats, signal) {
+export function coverBox(url, formats, signal, opts) {
   const list = formats || [];
   const audioOnly = list.length === 1 && list[0] === 'audio';
   // Spans, so a cover is valid inside a button too.
@@ -104,7 +106,8 @@ function coverBox(url, formats, signal) {
     img.addEventListener('error', function () { img.classList.add('hidden'); }, { once: true, signal: signal });
     box.appendChild(img);
   }
-  box.appendChild(formatBadges(list));
+  // The book's own page has its buttons for this; a card needs the marks.
+  if (!(opts && opts.badges === false)) box.appendChild(formatBadges(list));
   return box;
 }
 
@@ -186,7 +189,7 @@ function continueCard(item, compact, signal) {
 }
 
 /** A quiet line about a source that is not answering. */
-function noteLine(text) {
+export function noteLine(text) {
   const p = el('p', 'flex items-center gap-2 text-[15px] text-frosted-blue/70');
   p.appendChild(icon('info', 'text-[20px]'));
   p.appendChild(el('span', '', text));
