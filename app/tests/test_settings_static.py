@@ -2026,22 +2026,18 @@ class InPlaceNews(unittest.TestCase):
 
     def test_home_news_links_hold_still(self):
         home = (STATIC / "index.html").read_text(encoding="utf-8")
-        # "View all" reserves its space from the first paint (invisible, not
-        # hidden), so it cannot push "Manage news" aside when news arrives; the
-        # header row wraps, so on a phone the links sit on their own line
-        # instead of squeezing the heading onto two.
+        # "All news" is in the markup from the first paint, shown, so nothing
+        # in the heading row moves when news arrives; the links never shrink.
         view_all = re.search(r'<a href="/news" id="newsViewAll" class="([^"]*)"', home)
         self.assertIsNotNone(view_all)
-        self.assertIn("invisible", view_all.group(1).split())
+        self.assertNotIn("invisible", view_all.group(1).split())
         self.assertNotIn("hidden", view_all.group(1).split())
-        row = home[home.index('<section data-arrive="news">'):home.index('id="newsViewAll"')]
-        self.assertIn('<div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">', row)
+        row = home[home.index('<section data-arrive="news"'):home.index('id="newsViewAll"')]
+        self.assertIn('<div class="flex items-center gap-4 shrink-0">', row)
         # Home renders its news in its page module (soft navigation).
         script = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")
         self.assertNotIn("<script>", home)
-        body = function_body(js_code_only(script), "renderNews")
-        self.assertNotIn("classList.add(", body)
-        self.assertEqual(len(live_matches(script, r"viewAll\.classList\.remove\('invisible'\);")), 1)
+        self.assertNotIn("newsViewAll", script)
 
 
 

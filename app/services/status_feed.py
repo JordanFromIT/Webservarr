@@ -229,6 +229,21 @@ def feed(db: Session, days: int, now: datetime) -> dict:
     return {"open": [item(r) for r in pinned], "items": [item(r) for r in history]}
 
 
+def home_shape(db: Session, now: datetime) -> str:
+    """The shape Home's status strip takes at the first paint, from the
+    database alone (no Redis wait on a page render): "card" while an outage or
+    an important note is open, "none" when there is no Uptime Kuma and nothing
+    in the feed's window, else "line". pages/home.js draws the same shape from
+    GET /feed (statusModel), so its answer lands on the skeleton drawn."""
+    if db.query(StatusUpdate.id).filter(_pinned()).first() is not None:
+        return "card"
+    if kuma_configured(db):
+        return "line"
+    changed = func.coalesce(StatusUpdate.resolved_at, StatusUpdate.created_at)
+    recent = db.query(StatusUpdate.id).filter(changed >= now - timedelta(days=FEED_DAYS_DEFAULT)).first()
+    return "line" if recent is not None else "none"
+
+
 def state(configured: bool, answering: bool, open_items: List[dict]) -> str:
     """The one-word state the feed leads with: "off" (no Uptime Kuma set
     up), "unavailable" (it hasn't answered lately: never claim all is well),

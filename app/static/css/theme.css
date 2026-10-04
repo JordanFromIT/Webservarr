@@ -436,8 +436,10 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   stroke-dashoffset: 251;
   transform: rotate(-90deg);
   transform-origin: 50% 50%;
-  transition: stroke-dashoffset 1s ease-out;
+  /* Read every second: a short ease, so the ring is not always moving. */
+  transition: stroke-dashoffset 250ms ease-out;
 }
+@media (prefers-reduced-motion: reduce) { .gauge-circle { transition: none; } }
 
 /* ---- Notification Badge Pulse ---- */
 @keyframes pulse-once {
@@ -832,10 +834,9 @@ html.ws-sheet-open, html.ws-sheet-open body { overflow: hidden; }
 
 /* Home's card (index.html #installCard). Decided before the first paint:
    theme-loader.js marks <html data-install-offer> ("ios" or "prompt"), the
-   page module then sets the card's hidden and data-mode. An [hidden] card
-   gets no space-y gap, hence its own margin while the mark shows it. Never
-   on a wide screen. */
-html[data-install-offer] #installCard[hidden] { display: block; margin-bottom: 2rem; }
+   page module then sets the card's hidden and data-mode. It sits near the
+   end of Home, so showing it moves nothing. Never on a wide screen. */
+html[data-install-offer] #installCard[hidden] { display: block; }
 @media (min-width: 1024px) { #installCard { display: none !important; } }
 #installCard [data-install-mode="ios"] { display: none; }
 #installCard[data-mode="ios"] [data-install-mode="prompt"],
@@ -938,37 +939,23 @@ html[data-install-offer="ios"] #installCard [data-install-mode="ios"] { display:
 /* ---- Home sections switched off (Settings > Pages > Home) ----
  *
  * The server lists them on <html data-home-hide="news streams">, so a section
- * that is off is never painted and index.html never loads it. Service Health
- * and News share a row: with one of them off the other takes the full width,
- * with both off the row goes away.
+ * that is off is never painted and index.html never loads it. The page
+ * spaces its sections with a flex gap, which skips whatever is not displayed.
  */
 html[data-home-hide~="services"] [data-arrive="services"],
 html[data-home-hide~="news"] [data-arrive="news"],
 html[data-home-hide~="streams"] [data-arrive="streams"],
 html[data-home-hide~="releases"] [data-arrive="releases"],
 html[data-home-hide~="requests"] [data-arrive="requests"] { display: none; }
-html[data-home-hide~="services"] [data-home-pair],
-html[data-home-hide~="news"] [data-home-pair] { grid-template-columns: minmax(0, 1fr); }
-html[data-home-hide~="services"][data-home-hide~="news"] [data-home-pair] { display: none; }
-/* space-y-8 spaces every child that follows one without the hidden attribute,
- * and a row hidden by the rules above still counts: with Service Health and
- * News both off, the first section left would open with a stray gap. While
- * anything is off the page spaces its sections with a flex gap instead, which
- * skips whatever is not displayed. */
-html[data-home-hide] [data-home-stack] { display: flex; flex-direction: column; row-gap: 2rem; }
-html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
 
 /* ---- Home's push offer on a full load ----
  *
  * theme-loader.js marks <html data-push-offer> in <head> when Home is to offer
  * push, so the card is there at the first paint. The page module
  * (pages/home.js) then takes the card's hidden attribute off and the mark
- * away. Until it does the card still carries hidden, which space-y-8 skips, so
- * the gap under it is given here and nothing moves when the attribute goes.
- * (With a section off, the stack's flex gap already spaces it.)
+ * away. It sits at the end of Home, so showing it moves nothing.
  */
-html[data-push-offer] #pushPrompt[hidden] { display: block; margin-bottom: 2rem; }
-html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
+html[data-push-offer] #pushPrompt[hidden] { display: block; }
 
 /* ---- Settings ----
  *

@@ -7,6 +7,11 @@
 <link rel="icon" href="/static/webservarr.svg"/>
 <script src="/static/js/theme-loader.js?v=1"></script>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet"/>
+<!-- The request posters are the largest thing on a phone's first screen, and
+     their list is the slowest read (it asks the request service for every
+     title): it starts with the page, and the posters' host is warmed. -->
+<link rel="preload" href="/api/integrations/recent-requests" as="fetch" crossorigin/>
+<link rel="preconnect" href="https://image.tmdb.org"/>
 <link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 <style>
@@ -15,14 +20,33 @@
      and pages/home.js takes it off again once it has decided the section's
      hidden attribute itself. The section carries hidden otherwise, so the
      stack's gap skips it (as the push offer's does). */
-  html[data-home-continue] #homeContinue[hidden] { display: block; margin-bottom: 2rem; }
-  html[data-home-hide][data-home-continue] #homeContinue[hidden] { margin-bottom: 0; }
+  html[data-home-continue] #homeContinue[hidden] { display: block; }
   html[data-home-continue="note"] #homeContinue [data-note-slot][hidden] { display: block; }
 
-  /* The row scrolls sideways under a finger or a dragged mouse; its scrollbar
+  /* The rows scroll sideways under a finger or a dragged mouse; a scrollbar
      would only take a strip of height from the cards (as on Books). */
   .books-row { scrollbar-width: none; -ms-overflow-style: none; overflow-y: hidden; }
   .books-row::-webkit-scrollbar { display: none; }
+  /* A row that overflows takes keyboard focus to scroll (the browser's own
+     rule): it wears the shared ring, not the browser's. */
+  .books-row:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; border-radius: 12px; }
+
+  /* The status strip's shape is known before the first paint: the server
+     marks <html data-home-status> "line" (the slim line), "card" (an outage
+     or an important note is open) or "none" (no status at all), and the
+     skeleton of that shape is the one drawn, so the answer lands on it.
+     pages/home.js keeps the mark in step with what it draws. */
+  #homeStatus [data-status-skel="card"],
+  html[data-home-status="card"] #homeStatus [data-status-skel="line"] { display: none; }
+  html[data-home-status="card"] #homeStatus [data-status-skel="card"] { display: block; }
+  html[data-home-status="none"] #homeStatus { display: none; }
+
+  /* News: the server marks how many posts Home will show (data-home-news,
+     0 to 2), so the skeleton holds that many cards, or the empty line. */
+  #newsContainer [data-news-empty-skel] { display: none; }
+  html[data-home-news="0"] #newsContainer [data-news-empty-skel] { display: block; }
+  html[data-home-news="0"] #newsContainer [data-news-skel],
+  html[data-home-news="1"] #newsContainer [data-news-skel] + [data-news-skel] { display: none; }
 </style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
@@ -33,17 +57,197 @@
 <!-- The page (spec 4.1), swapped by the router -->
 <div id="wsPage" data-ws-module="/static/js/pages/home.js?v=1" data-ws-dep="/static/js/pages/books.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-hidden">
 <h1 class="sr-only">Home</h1>
-<!-- Scrollable Content -->
-<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar space-y-8" data-home-stack>
+<div class="flex-1 lg:overflow-y-auto custom-scrollbar">
+<!-- Top to bottom (Home redesign spec, section 2): the status strip and,
+     under it, the server's gauges and services; Requests; News; then
+     Continue, what is playing, what is coming, and the two offers. Every
+     section's skeleton is built from the markup that replaces it, so nothing
+     moves when an answer lands. A flex gap spaces the sections, and skips
+     whatever is hidden or switched off. -->
+<div class="w-full max-w-[1200px] mx-auto p-4 lg:p-8 flex flex-col gap-8" data-home-stack>
+
+<!-- Status. The strip is a link to the full feed (/status). -->
+<section id="homeStatus" data-arrive="status" aria-label="Server status" aria-busy="true">
+<div data-status-skel="line" aria-hidden="true">
+<div class="skel flex items-center gap-3 h-16 sm:h-12 px-4 rounded-card"></div>
+</div>
+<div data-status-skel="card" aria-hidden="true">
+<div class="skel rounded-card p-4"><div class="flex items-start gap-3 invisible"><span class="size-2.5 mt-2 shrink-0"></span><div class="min-w-0 flex-1"><p class="text-lead leading-6 font-bold min-h-12">&nbsp;</p><p class="text-label leading-5 mt-1">&nbsp;</p><p class="text-body leading-6 font-semibold mt-3">&nbsp;</p></div></div></div>
+</div>
+</section>
+
+<!-- The server: its gauges (when Netdata is set up: html[data-netdata]) and
+     one row of service tiles, problems first. One row whatever the number of
+     services, so the section is one height from the first paint. -->
+<section data-arrive="services" aria-labelledby="servicesTitle">
+<div class="flex items-center justify-between gap-4 mb-3">
+<h2 id="servicesTitle" class="font-bold leading-snug text-xl text-frosted-blue">Services</h2>
+<span id="serviceLastChecked" class="w-44 shrink-0 text-right text-label text-frosted-blue/70 tabular-nums truncate"></span>
+</div>
+<div class="flex flex-col lg:flex-row gap-4">
+<!-- Netdata gauges. The reading sits in the ring; the name and the detail
+     line under it, each holding one line of height before it is filled.
+     Three 112px rings need 21rem: in a narrower box (a small phone) they
+     shrink to 80px and stay three across, from the first paint (a container
+     query, no script). -->
+<div id="netdataGauges" class="@container bg-frosted-blue/[0.04] rounded-card p-4 lg:w-[26rem] lg:shrink-0">
+<div class="grid grid-cols-3 gap-x-2 gap-y-4 items-start">
+<div class="flex flex-col items-center min-w-0">
+<div class="relative size-20 @[21rem]:size-28">
+<svg class="w-full h-full" viewBox="0 0 100 100" aria-hidden="true">
+<circle class="text-frosted-blue/10 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
+<circle id="cpuGaugeCircle" class="text-gauge-cpu stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="absolute inset-0 flex items-center justify-center">
+<span id="cpuGaugeText" class="text-lead @[21rem]:text-xl font-bold text-frosted-blue tabular-nums">--%</span>
+</div>
+</div>
+<p class="mt-2 text-body font-semibold text-frosted-blue">CPU</p>
+<p id="cpuGaugeDetail" class="min-h-5 max-w-full text-label leading-5 text-frosted-blue/70 truncate"></p>
+</div>
+<div class="flex flex-col items-center min-w-0">
+<div class="relative size-20 @[21rem]:size-28">
+<svg class="w-full h-full" viewBox="0 0 100 100" aria-hidden="true">
+<circle class="text-frosted-blue/10 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
+<circle id="ramGaugeCircle" class="text-gauge-ram stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="absolute inset-0 flex items-center justify-center">
+<span id="ramGaugeText" class="text-lead @[21rem]:text-xl font-bold text-frosted-blue tabular-nums">--%</span>
+</div>
+</div>
+<p class="mt-2 text-body font-semibold text-frosted-blue">Memory</p>
+<p id="ramGaugeDetail" class="min-h-5 max-w-full text-label leading-5 text-frosted-blue/70 truncate"></p>
+</div>
+<div class="flex flex-col items-center min-w-0">
+<div class="relative size-20 @[21rem]:size-28">
+<svg class="w-full h-full" viewBox="0 0 100 100" aria-hidden="true">
+<circle class="text-frosted-blue/10 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
+<circle id="netGaugeCircle" class="text-gauge-net stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
+</svg>
+<div class="absolute inset-0 flex flex-col items-center justify-center leading-5 tabular-nums">
+<span class="text-label @[21rem]:text-body font-bold text-frosted-blue"><span class="sr-only">Down </span><span aria-hidden="true">↓ </span><span id="netDownText">0.0</span></span>
+<span class="text-label text-frosted-blue/70"><span class="sr-only">Up </span><span aria-hidden="true">↑ </span><span id="netUpText">0.0</span></span>
+</div>
+</div>
+<p class="mt-2 text-body font-semibold text-frosted-blue">Network</p>
+<p id="netGaugeDetail" class="min-h-5 max-w-full text-label leading-5 text-frosted-blue/70 truncate">Mbps</p>
+</div>
+</div>
+</div>
+<!-- Service tiles. The skeleton tiles are serviceTile's tile with nothing
+     in it (the same box, icon room, two-line name and status line), and the
+     empty and error states hold that height. Change one, change all. -->
+<ul id="servicesContainer" class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex items-start gap-3 py-1 min-w-0 lg:flex-1" aria-label="Services">
+<li class="skel w-28 shrink-0 rounded-inner p-3" aria-hidden="true"><div class="invisible flex flex-col items-center text-center"><span class="size-8"></span><span class="mt-2 text-label leading-5 min-h-10">&nbsp;</span><span class="text-label leading-5">&nbsp;</span></div></li>
+<li class="skel w-28 shrink-0 rounded-inner p-3" aria-hidden="true"><div class="invisible flex flex-col items-center text-center"><span class="size-8"></span><span class="mt-2 text-label leading-5 min-h-10">&nbsp;</span><span class="text-label leading-5">&nbsp;</span></div></li>
+<li class="skel w-28 shrink-0 rounded-inner p-3" aria-hidden="true"><div class="invisible flex flex-col items-center text-center"><span class="size-8"></span><span class="mt-2 text-label leading-5 min-h-10">&nbsp;</span><span class="text-label leading-5">&nbsp;</span></div></li>
+</ul>
+</div>
+</section>
+
+<!-- Requests: the way in, then everyone's recent requests as posters.
+     Admins also get how many wait for approval (it holds its room, unseen,
+     until the count is in). -->
+<section data-arrive="requests" aria-labelledby="requestsTitle">
+<div class="flex items-center justify-between gap-4 mb-3">
+<h2 id="requestsTitle" class="font-bold leading-snug text-xl text-frosted-blue">Requests</h2>
+<a id="requestsWaiting" href="/requests" class="ws-admin-only invisible shrink-0 inline-flex items-center h-8 px-3 rounded-full bg-primary/20 text-label font-semibold text-frosted-blue hover:bg-primary/30 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue"></a>
+</div>
+<a href="/requests" class="flex items-center justify-center sm:inline-flex gap-2 min-h-12 py-2 px-4 sm:px-5 text-center rounded-btn bg-primary text-bright text-body font-semibold hover:bg-primary/90 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
+<span class="material-symbols-outlined text-[20px]" aria-hidden="true">add</span>Request a movie, show or book
+</a>
+<h3 class="mt-6 mb-3 text-body font-semibold text-frosted-blue/70">Asked for lately</h3>
+<!-- Skeleton cards are posterCard's card with nothing in it. -->
+<ul id="requestsRow" class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-label="Recent requests">
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+</ul>
+</section>
+
+<!-- News: the latest one or two posts. Each card is newsCard's collapsed
+     card (a two-line title room on a phone, one line from sm, a three-line
+     excerpt and Read more), so a post lands on its skeleton exactly; Read
+     more opens it in place. -->
+<section data-arrive="news" aria-labelledby="newsTitle">
+<div class="flex items-center justify-between gap-4 mb-3">
+<h2 id="newsTitle" class="font-bold leading-snug text-xl text-frosted-blue">News</h2>
+<div class="flex items-center gap-4 shrink-0">
+<a href="/news" class="ws-admin-only inline-flex items-center gap-1 text-body font-semibold text-frosted-blue/70 hover:text-frosted-blue transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue rounded-btn">Manage news</a>
+<a href="/news" id="newsViewAll" class="inline-flex items-center gap-1 text-body font-semibold text-frosted-blue/70 hover:text-frosted-blue transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue rounded-btn">All news<span class="material-symbols-outlined text-[20px]" aria-hidden="true">chevron_right</span></a>
+</div>
+</div>
+<div id="newsContainer" class="relative grid gap-3 md:grid-cols-2">
+<div data-news-empty-skel class="skel h-12 rounded-card" aria-hidden="true"></div>
+<div data-news-skel class="skel rounded-card p-4 min-w-0" aria-hidden="true"><div class="invisible"><p class="text-lead leading-6 font-bold min-h-12 sm:min-h-6">&nbsp;</p><p class="text-label leading-5 mt-0.5">&nbsp;</p><p class="text-body leading-6 mt-2 min-h-[4.5rem]">&nbsp;</p><p class="mt-2 text-label leading-5 font-semibold">Read more</p></div></div>
+<div data-news-skel class="skel rounded-card p-4 min-w-0" aria-hidden="true"><div class="invisible"><p class="text-lead leading-6 font-bold min-h-12 sm:min-h-6">&nbsp;</p><p class="text-label leading-5 mt-0.5">&nbsp;</p><p class="text-body leading-6 mt-2 min-h-[4.5rem]">&nbsp;</p><p class="mt-2 text-label leading-5 font-semibold">Read more</p></div></div>
+</div>
+</section>
+
+<!-- Continue: the Books page's row of what the person is partway through, in its
+     compact form (pages/home.js). Hidden when there is nothing in progress, and
+     while the Books page is off. Until its answer is in, a row that was there
+     last time shows its skeleton, built like the real row (the same classes,
+     so it is the same height): the heading, six cards, and a line for a note
+     when there was one. Change the row in books.js, change this. -->
+<div id="homeContinue" data-arrive="continue" hidden aria-busy="true">
+<div aria-hidden="true">
+<h2 class="mb-3 font-bold leading-snug text-xl text-frosted-blue"><span class="skel-text">Continue</span></h2>
+<div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1">
+<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+</div>
+<div data-note-slot hidden class="mt-3 h-6"></div>
+</div>
+</div>
+
+<!-- Playing now: everyone's streams, never who is watching, in one
+     sideways row whatever their number. The skeleton cards are streamCard's
+     card, empty. -->
+<section data-arrive="streams" aria-labelledby="streamsTitle">
+<div class="flex items-center justify-between gap-4 mb-3">
+<h2 id="streamsTitle" class="font-bold leading-snug text-xl text-frosted-blue">Playing now</h2>
+</div>
+<div id="streamsContainer" class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1">
+<article class="skel w-[17rem] sm:w-72 shrink-0 rounded-card overflow-hidden" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 invisible"><p class="text-body leading-6 font-semibold">&nbsp;</p><p class="text-label leading-5 mt-1">&nbsp;</p><div class="mt-3 h-1"></div></div></article>
+<article class="skel w-[17rem] sm:w-72 shrink-0 rounded-card overflow-hidden" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 invisible"><p class="text-body leading-6 font-semibold">&nbsp;</p><p class="text-label leading-5 mt-1">&nbsp;</p><div class="mt-3 h-1"></div></div></article>
+<article class="skel w-[17rem] sm:w-72 shrink-0 rounded-card overflow-hidden" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 invisible"><p class="text-body leading-6 font-semibold">&nbsp;</p><p class="text-label leading-5 mt-1">&nbsp;</p><div class="mt-3 h-1"></div></div></article>
+</div>
+</section>
+
+<!-- Coming soon: the next week's releases as posters; the full month is on Calendar. -->
+<section id="upcomingReleasesSection" data-arrive="releases" aria-labelledby="releasesTitle">
+<div class="flex items-center justify-between gap-4 mb-3">
+<h2 id="releasesTitle" class="font-bold leading-snug text-xl text-frosted-blue">Coming soon</h2>
+<a href="/calendar" class="inline-flex items-center gap-1 shrink-0 text-body font-semibold text-frosted-blue/70 hover:text-frosted-blue transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue rounded-btn">Calendar<span class="material-symbols-outlined text-[20px]" aria-hidden="true">chevron_right</span></a>
+</div>
+<ul id="releasesContainer" class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-label="Coming soon">
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+<li class="w-28 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></li>
+</ul>
+</section>
+
 <!-- Add to home screen (phones only). Decided before the page is drawn,
      like the push offer below: on a full load theme-loader.js marks
      html[data-install-offer] ("ios" or "prompt"), and pages/home.js decides on
      every visit, setting hidden and data-mode, then has install.js wire the
      buttons. "prompt" asks the browser to install; "ios" shows the two Share
      steps (the same words as the More sheet's). Not a Home section: its place
-     is fixed. The server writes the site name and its home-screen icon. -->
+     is fixed, at the end, where showing it moves nothing. The server writes
+     the site name and its home-screen icon. -->
 <section id="installCard" hidden aria-labelledby="installCardTitle" data-dismiss-key="ws-install-card-dismissed">
-<div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4">
+<div class="bg-frosted-blue/[0.04] rounded-card p-4">
 <div class="flex items-start gap-4">
 <img data-ws-app-icon src="/static/webservarr-app-192.png" alt="" width="48" height="48" loading="lazy" decoding="async" class="size-12 shrink-0 rounded-[12px] object-cover">
 <div class="min-w-0 flex-1">
@@ -62,16 +266,15 @@
 </div>
 </section>
 <!-- Push opt-in. Everything that decides whether to offer it is known before
-     the page is drawn, so it never pushes content down after load: on a full
-     load theme-loader.js decides in <head> (html[data-push-offer] shows it),
-     and pages/home.js decides on every visit and sets the hidden attribute.
-     notifications.js wires the buttons and writes the dismissal under
-     data-dismiss-key. The section has no display utility (one would override
-     the hidden attribute). -->
+     the page is drawn: on a full load theme-loader.js decides in <head>
+     (html[data-push-offer] shows it), and pages/home.js decides on every visit
+     and sets the hidden attribute. notifications.js wires the buttons and
+     writes the dismissal under data-dismiss-key. The section has no display
+     utility (one would override the hidden attribute). -->
 <section id="pushPrompt" hidden aria-labelledby="pushPromptTitle" data-dismiss-key="ws-push-prompt-dismissed" data-dismiss-days="30">
-<div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 lg:p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+<div class="bg-frosted-blue/[0.04] rounded-card p-4 lg:p-6 flex flex-col sm:flex-row sm:items-center gap-4">
 <div class="flex items-start gap-4 flex-1 min-w-0">
-<span class="material-symbols-outlined text-steel-blue bg-primary/20 rounded-full size-11 shrink-0 flex items-center justify-center" aria-hidden="true">notifications_active</span>
+<span class="material-symbols-outlined text-frosted-blue bg-primary/20 rounded-full size-11 shrink-0 flex items-center justify-center" aria-hidden="true">notifications_active</span>
 <div class="min-w-0">
 <h2 id="pushPromptTitle" class="text-[17px] font-bold tracking-[-0.02em] leading-snug text-frosted-blue">Get notified when your requests are ready</h2>
 <p class="text-[15px] leading-relaxed text-frosted-blue/70 mt-1">We'll send an alert to this device when something you asked for is ready to watch or someone replies to you.</p>
@@ -84,213 +287,7 @@
 </div>
 </div>
 </section>
-<!-- Continue: the Books page's row of what the person is partway through, in its
-     compact form (pages/home.js). Hidden when there is nothing in progress, and
-     while the Books page is off. Until its answer is in, a row that was there
-     last time shows its skeleton, built like the real row (the same classes,
-     so it is the same height): the heading, six cards, and a line for a note
-     when there was one. Change the row in books.js, change this. -->
-<div id="homeContinue" data-arrive="continue" hidden aria-busy="true">
-<div aria-hidden="true">
-<div class="flex items-center gap-3 mb-4"><span class="material-symbols-outlined text-steel-blue invisible">auto_stories</span><h2 class="text-xl font-bold text-frosted-blue"><span class="skel-text">Continue</span></h2></div>
-<div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1">
-<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
-<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
-<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
-<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
-<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
-<div class="w-28 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
 </div>
-<div data-note-slot hidden class="mt-3 h-6"></div>
-</div>
-</div>
-<!-- Service Health + News Side by Side -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start" data-home-pair>
-<!-- Service Health -->
-<section data-arrive="services">
-<div class="flex items-center gap-3 mb-4">
-<span id="iconSectionServices" class="material-symbols-outlined text-steel-blue">health_metrics</span>
-<h3 class="text-xl font-bold text-frosted-blue">Service Health</h3>
-<span id="serviceLastChecked" class="text-[10px] text-steel-blue ml-auto"></span>
-</div>
-<!-- Netdata Gauges. Each gauge's detail line holds its one line of height
-     before loadSystemStats fills it, so the centred readings don't hop up
-     when it lands. (With no network label set, that line stays empty.)
-     Three 112px rings need 21rem: in a narrower box (a small phone) they
-     go two over one, from the first paint (a container query, no script),
-     so nothing scrolls sideways. -->
-<div id="netdataGauges" class="@container bg-baltic-blue/10 border border-steel-blue/20 rounded-2xl p-4 mb-4">
-<div class="grid grid-cols-2 @[21rem]:grid-cols-3 gap-y-4 items-center">
-<!-- CPU Gauge -->
-<div class="flex flex-col items-center">
-<div class="relative w-28 h-28 lg:w-36 lg:h-36">
-<svg class="w-full h-full" viewBox="0 0 100 100">
-<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
-<circle id="cpuGaugeCircle" class="text-gauge-cpu stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
-</svg>
-<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
-<span class="text-xs text-steel-blue font-medium">CPU</span>
-<span id="cpuGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
-<span id="cpuGaugeDetail" class="min-h-[1.5em] text-[10px] text-frosted-blue/70"></span>
-</div>
-</div>
-</div>
-<!-- RAM Gauge -->
-<div class="flex flex-col items-center">
-<div class="relative w-28 h-28 lg:w-36 lg:h-36">
-<svg class="w-full h-full" viewBox="0 0 100 100">
-<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
-<circle id="ramGaugeCircle" class="text-gauge-ram stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
-</svg>
-<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center">
-<span class="text-xs text-steel-blue font-medium">RAM</span>
-<span id="ramGaugeText" class="text-xl font-bold text-frosted-blue">--%</span>
-<span id="ramGaugeDetail" class="min-h-[1.5em] text-[10px] text-frosted-blue/70"></span>
-</div>
-</div>
-</div>
-<!-- Network Gauge -->
-<div class="flex flex-col items-center col-span-2 @[21rem]:col-span-1">
-<div class="relative w-28 h-28 lg:w-36 lg:h-36">
-<svg class="w-full h-full" viewBox="0 0 100 100">
-<circle class="text-steel-blue/20 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="8"></circle>
-<circle id="netGaugeCircle" class="text-gauge-net stroke-current gauge-circle" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="8" style="stroke-dashoffset: 251;"></circle>
-</svg>
-<div class="absolute top-0 left-0 w-full h-full flex flex-col items-center justify-center pt-1">
-<span class="text-xs text-steel-blue font-medium uppercase">Network</span>
-<div class="flex flex-col items-center leading-none mt-1">
-<div class="flex items-center text-[11px] text-frosted-blue space-x-0.5">
-<span class="material-symbols-outlined text-[11px]">arrow_upward</span>
-<span id="netUpText">0.0</span>
-<span id="netUpUnit" class="text-frosted-blue/70">Mbps</span>
-</div>
-<div class="flex items-center text-[11px] text-frosted-blue space-x-0.5 mt-0.5">
-<span class="material-symbols-outlined text-[11px]">arrow_downward</span>
-<span id="netDownText">0.0</span>
-<span id="netDownUnit" class="text-frosted-blue/70">Mbps</span>
-</div>
-</div>
-<span id="netGaugeDetail" class="min-h-[1.5em] text-[9px] text-frosted-blue/70 mt-0.5"></span>
-</div>
-</div>
-</div>
-</div>
-</div>
-<!-- Service Tiles -->
-<!-- Skeleton tiles are built like the real tile in renderServices: the same
-     border, the same fixed-height top (a 32px icon and a two-line label slot)
-     and the same status bar, with nothing in them. Change one, change both. -->
-<div id="servicesContainer" class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr))">
-<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="min-h-[calc(4rem_+_27.5px)]"></div><div class="py-1 text-[10px]">&nbsp;</div></div>
-<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="min-h-[calc(4rem_+_27.5px)]"></div><div class="py-1 text-[10px]">&nbsp;</div></div>
-<div class="skel rounded-xl border border-transparent flex flex-col" aria-hidden="true"><div class="min-h-[calc(4rem_+_27.5px)]"></div><div class="py-1 text-[10px]">&nbsp;</div></div>
-</div>
-</section>
-<!-- News & Updates -->
-<section data-arrive="news">
-<div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">
-<span id="iconSectionNews" class="material-symbols-outlined text-steel-blue">newspaper</span>
-<h3 class="text-xl font-bold text-frosted-blue">News &amp; Updates</h3>
-<div class="ml-auto flex items-center gap-4">
-<a href="/news" class="ws-admin-only inline-flex items-center gap-1 text-sm font-bold text-steel-blue hover:text-frosted-blue transition-colors">
-Manage news<span class="material-symbols-outlined text-sm">edit</span>
-</a>
-<a href="/news" id="newsViewAll" class="invisible inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors">
-View all<span class="material-symbols-outlined text-sm">chevron_right</span>
-</a>
-</div>
-</div>
-<!-- Skeleton cards are renderNewsCard's collapsed card with nothing in it
-     (the title, two lines on a phone and one from sm, a two-line excerpt
-     and Read more), so an older post lands on its
-     skeleton exactly. A pinned or new post opens in full and is as tall as
-     it is written, which no skeleton can know. -->
-<div id="newsContainer" class="grid gap-3">
-<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
-<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
-</div>
-</section>
-</div>
-<!-- Now Playing Section -->
-<section data-arrive="streams">
-<div class="flex items-center justify-between mb-6">
-<div class="flex items-center gap-3">
-<span id="iconSectionStreams" class="material-symbols-outlined text-steel-blue">play_circle</span>
-<h3 class="text-xl font-bold text-frosted-blue">Active Streams</h3>
-</div>
-<div id="streamChevrons" class="flex items-center gap-2 hidden">
-<button type="button" data-action="streams-prev" aria-label="Previous streams" class="p-1 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:bg-frosted-blue/10 transition-all">
-<span class="material-symbols-outlined">chevron_left</span>
-</button>
-<button type="button" data-action="streams-next" aria-label="Next streams" class="p-1 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:bg-frosted-blue/10 transition-all">
-<span class="material-symbols-outlined">chevron_right</span>
-</button>
-</div>
-</div>
-<!-- One row of skeleton cards (one on a phone, two from md, three from lg),
-     each built like a real Direct Play card in renderActiveStreams: the 16:9
-     artwork, then the play line and the progress block with nothing in them.
-     So one row of streams lands without moving anything; more rows grow
-     downward. STREAM_CARD_SHAPE below is the same card. Change one, change all. -->
-<div id="streamsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-<div class="skel rounded-xl overflow-hidden border border-transparent" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 space-y-3 invisible"><span class="text-xs font-bold">Direct Play</span><div class="space-y-1"><div class="flex text-[10px] font-bold uppercase"><span>Progress</span></div><div class="h-1"></div></div></div></div>
-<div class="skel rounded-xl overflow-hidden border border-transparent hidden md:block" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 space-y-3 invisible"><span class="text-xs font-bold">Direct Play</span><div class="space-y-1"><div class="flex text-[10px] font-bold uppercase"><span>Progress</span></div><div class="h-1"></div></div></div></div>
-<div class="skel rounded-xl overflow-hidden border border-transparent hidden lg:block" aria-hidden="true"><div class="aspect-video"></div><div class="p-4 space-y-3 invisible"><span class="text-xs font-bold">Direct Play</span><div class="space-y-1"><div class="flex text-[10px] font-bold uppercase"><span>Progress</span></div><div class="h-1"></div></div></div></div>
-</div>
-</section>
-<!-- Upcoming Releases -->
-<section id="upcomingReleasesSection" data-arrive="releases">
-<div class="flex items-center justify-between mb-6">
-<div class="flex items-center gap-3">
-<span id="iconSectionReleases" class="material-symbols-outlined text-steel-blue">calendar_month</span>
-<h3 class="text-xl font-bold text-frosted-blue">Upcoming Releases</h3>
-</div>
-<a href="/calendar" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors uppercase tracking-wider">
-View Calendar
-<span class="material-symbols-outlined text-sm">arrow_forward</span>
-</a>
-</div>
-<div id="releasesContainer">
-<div class="skel rounded-lg h-40" aria-hidden="true"></div>
-</div>
-</section>
-<!-- Recent Requests -->
-<section data-arrive="requests">
-<div class="flex items-center justify-between mb-6">
-<div class="flex items-center gap-3">
-<span id="iconSectionRequests" class="material-symbols-outlined text-steel-blue">shopping_cart</span>
-<h3 class="text-xl font-bold text-frosted-blue">Recent Requests</h3>
-</div>
-<a id="viewRequestsLink" href="/requests" class="flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors uppercase tracking-wider">
-View Requests
-<span class="material-symbols-outlined text-sm">arrow_forward</span>
-</a>
-</div>
-<div class="bg-baltic-blue/10 border border-steel-blue/20 rounded-xl overflow-hidden">
-<!-- table-fixed so the title column takes what is left and truncates: with
-     auto layout a long title sets the table's min-content width and the table
-     overflows the card on a phone. Below sm the Type column folds into a pill
-     under the title (see renderRecentRequests). -->
-<table class="w-full table-fixed text-left text-sm">
-<thead class="bg-frosted-blue/5 text-steel-blue uppercase text-[10px] font-bold">
-<tr>
-<th class="px-4 lg:px-6 py-3">Content</th>
-<th class="hidden sm:table-cell w-36 px-4 lg:px-6 py-3">Type</th>
-<th class="w-36 lg:w-40 px-4 lg:px-6 py-3">Status</th>
-</tr>
-</thead>
-<!-- Skeleton rows are built like the real rows in renderRecentRequests (same
-     padding, 32px thumbnail, one text line, and below sm the type pill, made
-     from the real pill's markup with its content hidden) so each row is the
-     height of the row that replaces it: 60px wide, 72px on a phone. -->
-<tbody id="requestsBody" class="divide-y divide-steel-blue/10">
-<tr aria-hidden="true"><td colspan="3" class="px-4 lg:px-6 py-3.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-2/3 align-middle"></span></p><div class="sm:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-4 lg:px-6 py-3.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="sm:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-<tr aria-hidden="true"><td colspan="3" class="px-4 lg:px-6 py-3.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-3/5 align-middle"></span></p><div class="sm:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
-</tbody>
-</table>
-</div>
-</section>
 </div>
 </div>
 

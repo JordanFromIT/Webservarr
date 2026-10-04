@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Status</title>
+<link rel="icon" href="/static/webservarr.svg"/>
+<script src="/static/js/theme-loader.js?v=1"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
+<link href="/static/css/app.css?v=1" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<!-- ws:sidebar -->
+
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<!-- ws:header -->
+
+<div id="wsPage" data-ws-module="/static/js/pages/status.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-y-auto">
+<div class="p-4 lg:p-8 max-w-3xl w-full mx-auto">
+
+  <div class="mb-6">
+    <a href="/" class="inline-flex items-center gap-1 text-body font-semibold text-frosted-blue/70 hover:text-frosted-blue transition-colors mb-3 rounded-btn focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
+      <span class="material-symbols-outlined text-[20px]" aria-hidden="true">chevron_left</span>Back to home
+    </a>
+    <div class="flex items-end justify-between gap-4 flex-wrap">
+      <div class="min-w-0">
+        <h1 class="text-h2 sm:text-h1 font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue">Status</h1>
+        <p class="mt-2 text-body text-frosted-blue/70">How the server has been doing over the last 30 days, newest first.</p>
+      </div>
+      <button id="statusComposeOpen" type="button" aria-expanded="false" aria-controls="statusComposer" class="ws-admin-only inline-flex items-center gap-2 h-11 px-4 rounded-btn bg-primary text-bright text-body font-semibold hover:bg-primary/90 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
+        <span class="material-symbols-outlined text-[20px]" aria-hidden="true">add</span>Post a note
+      </button>
+    </div>
+  </div>
+
+  <!-- Admins post short notes here (up to 280 characters). Opened by
+       "Post a note", which only admins see (ws-admin-only). -->
+  <form id="statusComposer" hidden class="mb-8 bg-frosted-blue/[0.04] rounded-card p-4" novalidate>
+    <label for="statusNote" class="block text-label font-semibold text-frosted-blue/70 mb-1.5">Your note</label>
+    <textarea id="statusNote" maxlength="280" rows="3" aria-describedby="statusNoteCount statusNoteError" class="w-full px-3.5 py-2.5 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder:text-frosted-blue/70 text-body resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"></textarea>
+    <div class="mt-1.5 flex items-start justify-between gap-3">
+      <p id="statusNoteError" class="hidden text-label font-semibold text-frosted-blue">Write the note first.</p>
+      <p id="statusNoteCount" class="ml-auto shrink-0 text-label text-frosted-blue/70 tabular-nums">0 of 280</p>
+    </div>
+    <div class="mt-3 grid gap-3 sm:grid-cols-2 sm:items-end">
+      <div>
+        <label for="statusNoteService" class="block text-label font-semibold text-frosted-blue/70 mb-1.5">Service (optional)</label>
+        <input id="statusNoteService" type="text" maxlength="100" autocomplete="off" class="w-full px-3.5 py-2.5 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder:text-frosted-blue/70 text-body focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors">
+      </div>
+      <label class="flex items-center gap-3 min-h-11 cursor-pointer">
+        <input id="statusNoteImportant" type="checkbox" class="size-5 rounded border-frosted-blue/30 bg-transparent text-primary focus:ring-primary focus:ring-offset-background-dark">
+        <span class="text-body text-frosted-blue">Important: pin it and send a notification</span>
+      </label>
+    </div>
+    <div class="mt-4 flex justify-end gap-2">
+      <button id="statusNoteCancel" type="button" class="inline-flex items-center justify-center h-11 px-4 rounded-btn text-body font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Cancel</button>
+      <button id="statusNotePost" type="submit" class="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-btn bg-primary text-bright text-body font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Post note</button>
+    </div>
+  </form>
+
+  <!-- The feed: what is happening now (or the one-line state), then the last
+       30 days by day. The skeleton is the state line and a few rows; the
+       answer replaces it in one write, and nothing sits under it. -->
+  <div id="statusFeed" data-arrive="feed" aria-busy="true">
+    <div aria-hidden="true">
+      <div class="skel h-16 sm:h-12 rounded-card"></div>
+      <div class="skel-text inline-block mt-8 mb-3 text-xl font-bold leading-snug">Last 30 days</div>
+      <div class="space-y-3">
+        <div class="skel h-12 rounded-inner"></div>
+        <div class="skel h-12 rounded-inner"></div>
+        <div class="skel h-12 rounded-inner"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+</main>
+
+<script src="/static/js/auth.js?v=1"></script>
+<script src="/static/js/shell.js?v=1"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+</body>
+</html>

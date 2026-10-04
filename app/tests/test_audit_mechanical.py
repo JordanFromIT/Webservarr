@@ -22,8 +22,9 @@ except Exception:  # pragma: no cover
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
 
-# Rebuilt elsewhere (Home and the shell); not judged here.
-DEFERRED = {"index.html", "js/pages/home.js", "js/shell.js", "partials/shell-sidebar.html",
+# Rebuilt elsewhere (the shell); not judged here. Home was rebuilt on
+# 2026-10-04 (index.html, pages/home.js) and is judged like every page.
+DEFERRED = {"js/shell.js", "partials/shell-sidebar.html",
             "partials/shell-header.html", "partials/shell-brand.html"}
 
 

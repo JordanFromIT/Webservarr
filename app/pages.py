@@ -1038,6 +1038,12 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
         off = [sid for sid, on in (branding.get("home_sections") or {}).items() if on is False]
         if off:
             attrs += f' data-home-hide="{html.escape(" ".join(off), quote=True)}"'
+        # The shapes Home's status strip and news take, known before the
+        # first paint (home_marks), so their answers land on their skeletons.
+        status_shape = flags.get("home_status")
+        attrs += f' data-home-status="{status_shape if status_shape in HOME_STATUS_SHAPES else "line"}"'
+        news = flags.get("home_news")
+        attrs += f' data-home-news="{news if news in (0, 1, 2) else 2}"'
     if flags.get("netdata"):
         attrs += " data-netdata"
     if safe:
@@ -1049,6 +1055,46 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
     out = re.sub(r"<html\b", "<html" + attrs, out, count=1)
 
     return _stamp_asset_versions(out)
+
+
+HOME_STATUS_SHAPES = ("line", "card", "none")
+# Home shows at most this many news posts (spec: "the latest one or two").
+HOME_NEWS_MAX = 2
+
+
+def home_marks(branding: dict) -> dict:
+    """{"home_status", "home_news"} for render_html: the status strip's shape
+    (status_feed.home_shape) and how many news posts Home will show (0 to 2,
+    by the rules GET /api/news applies to Home's request: published, and
+    pinned or inside the age window). Own short session; a database that
+    can't be read gives the common shapes (a line, two posts)."""
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import or_
+
+    from app.models import NewsPost
+    from app.services import status_feed
+
+    cfg = branding.get("news") or {}
+    want = min(HOME_NEWS_MAX, cfg.get("homepage_count") or 3)
+    max_age = cfg.get("homepage_max_age_days")
+    max_age = 0 if max_age == 0 else (max_age or 30)
+    db = None
+    try:
+        db = SessionLocal()
+        shape = status_feed.home_shape(db, status_feed.now_utc())
+        query = db.query(NewsPost.id).filter(NewsPost.published.is_(True))
+        if max_age > 0:
+            cutoff = datetime.utcnow() - timedelta(days=max_age)
+            query = query.filter(or_(NewsPost.pinned.is_(True), NewsPost.created_at >= cutoff))
+        news = len(query.limit(want).all())
+        return {"home_status": shape, "home_news": news}
+    except Exception:  # pragma: no cover - defensive: a page is never refused for this
+        logger.warning("Could not read Home's first-paint shapes; using the defaults", exc_info=True)
+        return {"home_status": "line", "home_news": want}
+    finally:
+        if db is not None:
+            db.close()
 
 
 def load_context(signed_in: bool) -> tuple:
@@ -1147,6 +1193,8 @@ def render_page(name: str, request: Optional[Request], user: Optional[dict],
         flags = dict(flags, page_off=True)
     if pick is not None:
         name = pick(branding)
+    if name == "index" and user:
+        flags = dict(flags, **home_marks(branding))
     if name == "settings" and user and user.get("is_admin") == "true":
         flags = dict(flags, setup=settings_setup())
         # The way back from an unreadable theme: Settings in the shipped

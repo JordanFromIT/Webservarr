@@ -342,15 +342,8 @@ export function renderContinueRow(items, notes, opts) {
   const section = el('section', '');
   section.setAttribute('aria-label', 'Continue');
   section.setAttribute('data-continue', '');
-  if (o.compact) {
-    // Home's own section heading (an icon, then the title), so it reads as one of its sections.
-    const head = el('div', 'flex items-center gap-3 mb-4');
-    head.appendChild(icon('auto_stories', 'text-steel-blue'));
-    head.appendChild(el('h2', 'text-xl font-bold text-frosted-blue', 'Continue'));
-    section.appendChild(head);
-  } else {
-    section.appendChild(el('h2', 'mb-3 font-bold leading-snug text-xl text-frosted-blue', 'Continue'));
-  }
+  // One heading on Books and Home (Home's sections use the Books heading too).
+  section.appendChild(el('h2', 'mb-3 font-bold leading-snug text-xl text-frosted-blue', 'Continue'));
   const row = el('ul', 'books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1');
   list.forEach(function (item) {
     const li = el('li', 'shrink-0');

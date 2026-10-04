@@ -693,8 +693,11 @@ class HomeAndEbooksDetails(unittest.TestCase):
     def test_them(self):
         home = (STATIC / "index.html").read_text(encoding="utf-8") + \
             (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")   # its cards
-        clamp = "${Math.min(100, Math.max(0, Math.round(progress) || 0))}%"
-        self.assertEqual(home.count(clamp), 2)          # the label and the bar
+        # One clamp for a stream's progress: the bar's width and its value.
+        self.assertIn("function clampPercent(n) { return Math.min(100, Math.max(0, Math.round(n) || 0)); }", home)
+        self.assertIn("var pct = clampPercent(stream.progress);", home)
+        self.assertIn("fill.style.width = pct + '%';", home)
+        self.assertIn("track.setAttribute('aria-valuenow', String(pct));", home)
         self.assertNotIn("${Math.round(progress)}%", home)
         self.assertNotIn("generateStatusBars", home)
         books = (STATIC / "books.html").read_text(encoding="utf-8")
