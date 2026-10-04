@@ -1829,6 +1829,16 @@ export async function mount(ctx) {
   var user = await checkAuth();
   if (!user || signal.aborted) return;
 
+  // /requests?q=<text>, as the Books page links it when a search finds
+  // nothing ("Can't find it? Request it"): the search for that text runs on
+  // arrival, as if it had been typed there.
+  var arrivedWith = (ctx.url.searchParams.get('q') || '').trim().slice(0, 200);
+  if (arrivedWith) {
+    searchInput.value = arrivedWith;
+    moveSearchBar('dock');
+    performSearch(arrivedWith);
+  }
+
   // The discover rows are not waited for: they already hold their final
   // height, and their sources take seconds.
   loadDiscoverLists();

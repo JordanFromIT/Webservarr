@@ -186,8 +186,37 @@ class Library(BooksBase):
         self.assertEqual(by[("book", "The Hobbit")]["formats"], ["audio"])
         self.assertEqual(body["next_cursor"], None)
         self.assertEqual(body["notes"], [])
+        self.assertIs(body["building"], False)
         self.assertNotIn(("book", "Dune"), by)                  # collapsed into its series
         self.assertNotIn(("book", "Dune (old row)"), by)        # a ghost is never a book
+
+    def stage(self, books, running=False, built=True):
+        self.status.return_value = {
+            "last_rebuild_at": T0, "last_ok_at": T0 if built else None,
+            "counts": {"ebooks": books, "audiobooks": 0, "books": books},
+            "errors": {"kavita": None, "plex": None}, "running": running}
+
+    def test_building_is_only_an_empty_catalog_that_is_not_built(self):
+        self.assertIs(self.ok("/api/books")["building"], False)         # books: never building
+        self.db.query(Book).delete()
+        self.db.commit()
+        self.stage(0)                                                    # built, and really empty
+        self.assertIs(self.ok("/api/books")["building"], False)
+        self.stage(0, built=False)                                       # never built: the first run
+        self.assertIs(self.ok("/api/books")["building"], True)
+        self.stage(0, running=True)                                      # a rebuild is running now
+        self.assertIs(self.ok("/api/books")["building"], True)
+        # Only the whole library's first page can be "building": not a filter, not a later page.
+        self.assertIs(self.ok("/api/books", format="ebook")["building"], False)
+        self.assertIs(self.ok("/api/books", format="audio")["building"], False)
+
+    def test_a_caller_who_sees_nothing_of_a_built_catalog_is_not_told_it_is_building(self):
+        self.reach = set()
+        self.on.return_value = False                    # no ebooks, no audiobooks for them
+        self.stage(8, running=True)                     # a rebuild is running, the catalog has books
+        body = self.ok("/api/books")
+        self.assertEqual(body["items"], [])
+        self.assertIs(body["building"], False)
 
     def test_a_series_of_one_visible_book_is_shown_as_the_book(self):
         make_book(self.db, 20, "Lonely One", "Ann Author", "Solo Series", 1, 120)

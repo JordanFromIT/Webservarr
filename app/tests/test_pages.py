@@ -479,7 +479,7 @@ class ShellRendering(unittest.TestCase):
         self.assertIn(' data-shell="hidden"', html_tag(out))
         self.assertIn('id="wsPlayer"', out)
         self.assertIn('id="desktopSidebar"', out)
-        for name in ("index", "library", "news", "login"):
+        for name in ("index", "books", "news", "login"):
             self.assertNotIn("data-shell", html_tag(render(name=name)), name)
 
     def test_index_skips_sections_that_are_off(self):
@@ -749,12 +749,15 @@ class NavModel(unittest.TestCase):
         out = render(b=branding(**{"sidebar.enabled_home": "false"}))
         self.assertEqual(self.nav_hrefs(out)[0], "/")
 
-    def test_ebooks_needs_kavita(self):
-        self.assertNotIn('>eBooks<', render())
-        b = branding(**{"integration.kavita.url": "http://192.168.1.50:5000"})
-        self.assertIn("eBooks", render(b=b))
-        b = branding(**{"integration.kavita.url": "http://192.168.1.50:5000", "sidebar.enabled_library": "false"})
-        self.assertNotIn("eBooks", re.search(r'<nav id="desktopNav".*?</nav>', render(b=b), re.S).group(0))
+    def test_books_needs_kavita_or_audiobooks(self):
+        nav = lambda b: re.search(r'<nav id="desktopNav".*?</nav>', render(b=b), re.S).group(0)
+        self.assertNotIn('>Books<', render())
+        for name, values in (("kavita", {"integration.kavita.url": "http://192.168.1.50:5000"}),
+                             ("audiobooks", {"integration.plex.audiobook_library": "7"})):
+            with self.subTest(name):
+                self.assertIn("Books", nav(branding(**values)))
+                self.assertNotIn("Books", nav(branding(**dict(values, **{"sidebar.enabled_library": "false"}))))
+        self.assertNotIn("Books", nav(branding(**{"integration.plex.audiobook_library": "  "})))
 
     def test_payload_carries_the_new_fields(self):
         b = branding()
@@ -767,9 +770,11 @@ class NavModel(unittest.TestCase):
         self.assertNotIn("show_requests", b["features"])
         # "Kavita is set up" is its own name, not the retired features.show_books key.
         self.assertNotIn("show_books", b["features"])
-        self.assertFalse(b["features"]["ebooks_configured"])
-        self.assertTrue(branding(**{"integration.kavita.url": "http://192.168.1.50:5000"})["features"]["ebooks_configured"])
-        self.assertEqual([i.get("feature") for i in NAV_ITEMS if i["id"] == "library"], ["ebooks_configured"])
+        self.assertFalse(b["features"]["books_configured"])
+        self.assertNotIn("ebooks_configured", b["features"])
+        self.assertTrue(branding(**{"integration.kavita.url": "http://192.168.1.50:5000"})["features"]["books_configured"])
+        self.assertTrue(branding(**{"integration.plex.audiobook_library": "7"})["features"]["books_configured"])
+        self.assertEqual([i.get("feature") for i in NAV_ITEMS if i["id"] == "library"], ["books_configured"])
         b = branding(**{"requests.source": "seerr_embed", "home.section_news": "false"})
         self.assertEqual(b["requests_source"], "seerr_embed")
         self.assertFalse(b["home_sections"]["news"])
@@ -789,7 +794,7 @@ class NavModel(unittest.TestCase):
         self.assertEqual(list(reg.PAGE_ADDRESSES), list(reg.SIDEBAR_PAGE_IDS))
         for item in NAV_ITEMS:
             self.assertEqual(item["href"], reg.PAGE_ADDRESSES[item["id"]], item["id"])
-        # Every page shown (eBooks needs Kavita), in a custom order: the
+        # Every page shown (Books needs Kavita or audiobooks), in a custom order: the
         # rendered links are the registry's addresses in that order.
         order = ["home", "library", "wiki", "tickets", "calendar", "issues", "requests", "settings"]
         b = branding(**{"integration.kavita.url": "http://192.168.1.50:5000", "pages.order": json.dumps(order)})
@@ -945,7 +950,8 @@ class SettingsSetupFlags(unittest.TestCase):
              mock.patch.object(push, "status_reason", return_value=None):
             got = pages.settings_setup()
         self.assertEqual(got, {"plex": False, "seerr": True, "chaptarr": False, "sonarr": False, "radarr": False,
-                               "kavita": False, "authentik_url": False, "authentik_secret": True, "push_reason": None})
+                               "kavita": False, "audiobooks": False, "authentik_url": False, "authentik_secret": True,
+                               "push_reason": None})
         session.close.assert_called_once()
 
 

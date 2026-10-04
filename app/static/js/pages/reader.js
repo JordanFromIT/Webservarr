@@ -282,7 +282,7 @@ function guideSteps(openSettings, closeSettings) {
       target: '#readerBack',
       icon: 'arrow_back',
       title: 'When you are done',
-      body: 'The arrow at the top left goes back to the library. Nothing needs saving first, and the book reappears under Your Bookshelf.',
+      body: 'The arrow at the top left goes back to your books. Nothing needs saving first, and the book reappears under Continue.',
       before: closeSettings
     }
   ];

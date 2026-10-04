@@ -313,11 +313,15 @@ async def library(request: Request,
                   limit: int = Query(PAGE_DEFAULT, ge=1, le=PAGE_MAX),
                   who: Scope = Depends(caller), db: Session = Depends(get_db)):
     """One page of the library the caller may see: {"items": [BookCard],
-    "next_cursor", "notes"}. A series of SERIES_MIN_BOOKS or more books is one
-    card {kind "series", series, count, cover_book_id, cover_url, author,
-    formats}; the rest are {kind "book", id, title, author, cover_url,
+    "next_cursor", "notes", "building"}. A series of SERIES_MIN_BOOKS or more
+    books is one card {kind "series", series, count, cover_book_id, cover_url,
+    author, formats}; the rest are {kind "book", id, title, author, cover_url,
     formats}. `format` keeps the books that have it (a book in both still
-    lists both badges)."""
+    lists both badges).
+
+    `building` is true only for an empty first page of the whole library while
+    the catalog itself is empty and has never been built or is being built
+    now: the page says it is being put together instead of "no books"."""
     after = _decode_cursor(cursor, sort) if cursor else None
     rows = _kept_by_format(book_catalog.visible_rows(db, who.series, who.audio), format)
     cards = _cards(rows, sort)
@@ -325,9 +329,13 @@ async def library(request: Request,
         cards = [c for c in cards if c[0] > after]
     page = cards[:limit]
     more = len(cards) > limit
+    building = False
+    if not page and after is None and format == "all":
+        status_ = await book_catalog.catalog_status()
+        building = status_["counts"]["books"] == 0 and (status_["running"] or status_["last_ok_at"] is None)
     return {"items": [card for _key, card in page],
             "next_cursor": _encode_cursor(sort, page[-1][0]) if more and page else None,
-            "notes": who.notes}
+            "notes": who.notes, "building": building}
 
 
 # --- Search, people and series ----------------------------------------------------------

@@ -21,9 +21,11 @@ from app.utils import safe_http_url, same_origin_path
 router = APIRouter()
 
 # Every key the branding builder reads, with its registry default. The Kavita
-# URL is not public (it never leaves the server) but the builder needs it to
-# decide whether the eBooks page exists.
-DEFAULTS = {**public_defaults(), "integration.kavita.url": REGISTRY["integration.kavita.url"].default}
+# URL and the Plex audiobook library are not public (they never leave the
+# server) but the builder needs them to decide whether the Books page exists.
+DEFAULTS = {**public_defaults(),
+            "integration.kavita.url": REGISTRY["integration.kavita.url"].default,
+            "integration.plex.audiobook_library": REGISTRY["integration.plex.audiobook_library"].default}
 
 
 def _int_setting(raw: str, fallback: int, low: int, high: int) -> int:
@@ -170,10 +172,11 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
             "show_plex_auth": get("features.show_plex_auth") != "false",
             "show_authentik_auth": get("features.show_authentik_auth") == "true",
             "login_backgrounds": get("features.login_backgrounds") == "true",
-            # eBooks can only exist while Kavita is configured. The page's own
+            # Books can only exist while there is something to read or hear: a
+            # Kavita address (ebooks) or a Plex audiobook library. The page's own
             # on/off switch is sidebar_enabled["library"]. Named apart from the
             # retired features.show_books setting, which this is not.
-            "ebooks_configured": bool(get("integration.kavita.url")),
+            "books_configured": bool(get("integration.kavita.url").strip() or get("integration.plex.audiobook_library").strip()),
         },
         "requests_source": source if source in ("native", "seerr_embed") else "native",
         "pages_order": normalize_page_order(get("pages.order")),

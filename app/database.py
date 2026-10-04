@@ -95,6 +95,7 @@ def init_db():
         migrate_listening_book_fields, migrate_listening_claims, migrate_no_email_identity,
         migrate_tickets_page_switch_v1,
         migrate_ebooks_page_switch_v1, migrate_requests_source_v1, migrate_books_catalog_v2,
+        migrate_books_nav_v1,
     )
     db = SessionLocal()
     try:
@@ -120,6 +121,7 @@ def init_db():
         migrate_nav_sublabels_v2(db)
         migrate_home_sublabel_v3(db)
         migrate_wiki_sublabel_v4(db)
+        migrate_books_nav_v1(db)
         # v1.11: one switch per page, one Requests page with a source.
         migrate_tickets_page_switch_v1(db)
         migrate_ebooks_page_switch_v1(db)

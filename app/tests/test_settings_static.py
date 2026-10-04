@@ -435,7 +435,7 @@ class Skeletons(unittest.TestCase):
                      "'push-ready': !s.push_reason,",
                      "'push-reason': !!s.push_reason",
                      "if (s.push_reason) document.querySelector('[data-skel-when=\"push-reason\"] .skel-text').textContent = s.push_reason;",
-                     "library: s.kavita ? '' : 'kavita',",
+                     "library: s.kavita || s.audiobooks ? '' : 'kavita',",
                      "requests: b.requests_source === 'seerr_embed' && !s.seerr ? 'seerr-embed' : (!s.seerr && !s.chaptarr ? 'requests' : ''),",
                      "calendar: s.sonarr || s.radarr ? '' : 'arr'",
                      "(b.pages_order || []).forEach(function (id) {"):
@@ -445,7 +445,7 @@ class Skeletons(unittest.TestCase):
                     "all-off", "css-open", "gauges-on", "push-ready", "push-reason"):
             self.assertIn(f'data-skel-when="{key}"', h, key)
         pages = (STATIC / "js" / "settings" / "pages.js").read_text(encoding="utf-8")
-        for key, text in (("kavita", "eBooks needs Kavita. It stays out of the sidebar until Kavita is set up."),
+        for key, text in (("kavita", "Books needs Kavita or a Plex audiobook library. It stays out of the sidebar until one is set up."),
                           ("seerr-embed", "The Seerr page needs the Seerr connection."),
                           ("requests", "Requests needs Seerr for movies and TV, or Chaptarr for books."),
                           ("arr", "Calendar needs Sonarr or Radarr.")):
@@ -536,7 +536,7 @@ class KitApi(unittest.TestCase):
         decls = live_matches(src, r"\bvar SHELL_KEYS = (?=/)")
         self.assertEqual(len(decls), 1, "one live SHELL_KEYS declaration")
         literal = src[decls[0].end():src.index(";", decls[0].end())]
-        self.assertEqual(literal, r"/^(branding\.|icon\.|sidebar\.|pages\.order$|integration\.kavita\.url$|theme\.)/")
+        self.assertEqual(literal, r"/^(branding\.|icon\.|sidebar\.|pages\.order$|integration\.kavita\.url$|integration\.plex\.audiobook_library$|theme\.)/")
         self.assertRegex(function_body(kit_code(), "refreshShell"),
                          r"if \(keys\.some\(function \((\w+)\) \{ return SHELL_KEYS\.test\(\1\); \}\)\) patchShell\(\);")
         # Against the registry: every key the shell or <head> renders from
@@ -549,7 +549,8 @@ class KitApi(unittest.TestCase):
         shell = ("branding.", "theme.", "icon.", "sidebar.")
         for key in REGISTRY:
             with self.subTest(key):
-                expected = key.startswith(shell) or key in ("pages.order", "integration.kavita.url")
+                expected = key.startswith(shell) or key in ("pages.order", "integration.kavita.url",
+                                                            "integration.plex.audiobook_library")
                 self.assertEqual(bool(pattern.search(key)), expected, key)
 
     def test_shell_patch_goes_through_apply_shell(self):
@@ -1282,7 +1283,7 @@ class PagesTab(unittest.TestCase):
         self.assertEqual(len(live_matches(src, r"WSSettings\.view\('page_order'\)")), 1)
         self.assertEqual(len(live_matches(src, r"WSSettings\.view\('page_addresses'\)")), 1)
         self.assertNotRegex(code, r"\b(?:parseOrder|defaultOrder|ADDRESS(?:ES)?|normali[sz]e\w*)\b")
-        for route in ("/ebooks", "/requests", "/issues", "/calendar", "/tickets", "/wiki", "/settings"):
+        for route in ("/books", "/requests", "/issues", "/calendar", "/tickets", "/wiki", "/settings"):
             self.assertNotIn(f"'{route}'", src, route)
         ids = "|".join(PAGE_IDS)
         self.assertIsNone(re.search(rf"\[[^\[\]]*'(?:{ids})'[^\[\]]*'(?:{ids})'[^\[\]]*\]", src),

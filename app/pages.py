@@ -59,8 +59,9 @@ _NAV_HREF = PAGE_ADDRESSES
 _NAV_EXTRA = {
     # The pending-requests count rides on the one Requests item.
     "requests": {"badge": "requestsBadge"},
-    # eBooks only exists while Kavita is configured (features.ebooks_configured).
-    "library": {"feature": "ebooks_configured"},
+    # Books only exists while there is something to read or hear: Kavita, or
+    # the Plex audiobook library (features.books_configured).
+    "library": {"feature": "books_configured"},
     "settings": {"admin_only": True},
 }
 NAV_ITEMS = [
@@ -79,7 +80,7 @@ PAGE_NAV = {
     "issues": "issues",
     "calendar": "calendar",
     "tickets": "tickets",
-    "library": "library",
+    "books": "library",
     "wiki": "wiki",
     "settings": "settings",
 }
@@ -827,6 +828,7 @@ def load_context(signed_in: bool) -> tuple:
 _SETUP_KEYS = (
     "integration.plex.url", "integration.plex.token", "integration.seerr.url", "integration.chaptarr.url",
     "integration.sonarr.url", "integration.radarr.url", "integration.kavita.url",
+    "integration.plex.audiobook_library",
     "integration.authentik.url", "integration.authentik.client_secret",
 )
 
@@ -862,6 +864,7 @@ def settings_setup() -> dict:
         "sonarr": has("integration.sonarr.url"),
         "radarr": has("integration.radarr.url"),
         "kavita": has("integration.kavita.url"),
+        "audiobooks": has("integration.plex.audiobook_library"),
         "authentik_url": has("integration.authentik.url"),
         "authentik_secret": has("integration.authentik.client_secret"),
         "push_reason": push_reason,

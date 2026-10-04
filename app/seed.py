@@ -772,6 +772,47 @@ def migrate_wiki_sublabel_v4(db: Session) -> None:
     logger.info("Wiki sublabel migration: %s", "updated" if changed else "nothing to change (customised)")
 
 
+def migrate_books_nav_v1(db: Session) -> None:
+    """
+    One-time migration: the eBooks nav entry becomes Books.
+
+    The page now holds ebooks and audiobooks, so its label and sublabel change.
+    Conditional on the stored values, as the other nav rewordings are: a label
+    or sublabel an admin wrote themselves stays.
+
+    Guarded by migration.books_nav_v1.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    if db.query(Setting).filter(Setting.key == "migration.books_nav_v1").first():
+        return
+
+    changed = []
+    for key, old, new in (
+        ("sidebar.label_library", "eBooks", "Books"),
+        ("sidebar.sublabel_library", "Read books in your browser", "Read and listen to books"),
+    ):
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row and (row.value or "").strip() == old:
+            row.value = new
+            changed.append(key)
+
+    db.add(Setting(
+        key="migration.books_nav_v1",
+        value="done",
+        description="One-time eBooks to Books nav rename (label and sublabel)",
+    ))
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.debug("migration.books_nav_v1 marker already exists (race), skipping")
+        return
+
+    logger.info("Books nav migration: %s", ", ".join(changed) if changed else "nothing to change (customised)")
+
+
 def migrate_home_sublabel_v3(db: Session) -> None:
     """
     One-time migration: Home's sublabel becomes "See what's happening".

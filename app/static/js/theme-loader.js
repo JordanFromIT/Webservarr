@@ -185,48 +185,26 @@
 })();
 
 /*
- * The eBooks shelves' reserved space (#shelves, library.html), decided before
- * the first paint so the grid below never moves when the shelves arrive.
+ * The Books page's Continue row, reserved before the first paint.
  *
- * WSShelfPlan(username, search) is [[shelf id, covers], ...]: the shelves
- * this person had last visit (localStorage webservarr_library_shelves:<name>,
- * which pages/library.js writes), Recently Added with eight on a first visit,
- * and none after a failed Kavita sign-in (?kavita=error: the page shows that
- * message and loads no shelves). WSShelfMark(plan) writes it on <html> as
- * data-shelf-<id>="<covers>", which shows that shelf's slot with that many
- * covers (library.html's page style), and clears any shelf not in it. A full
- * load of eBooks marks here; the page module marks again on every visit (the
- * router takes the marks off when the next page is swapped in).
+ * Whether there is a Continue row is only known once its answer is in, but a
+ * row that appears (or goes) after the first paint pushes the library below it
+ * down (or up). So a person who had a row last visit gets its slot from the
+ * first paint: <html data-books-continue> shows #continueHost (books.html's
+ * page style), whose skeleton is the row's own shape. pages/books.js writes
+ * the flag (localStorage webservarr_books_continue:<name>, "1" or "0") and
+ * marks again on every soft visit; a full load of Books marks here. The router
+ * takes the attribute off when the next page is swapped in.
  */
 (function () {
   'use strict';
-  var SHELVES = ['bookshelf', 'recent', 'toprated'];
-
-  function plan(username, search) {
-    if (/[?&]kavita=error(&|$)/.test(search || '')) return [];
-    var out = [['recent', 8]];
-    try {
-      var saved = JSON.parse(localStorage.getItem('webservarr_library_shelves:' + (username || '')) || 'null');
-      if (Array.isArray(saved)) {
-        out = saved.filter(function (s) {
-          return Array.isArray(s) && SHELVES.indexOf(s[0]) !== -1 && s[1] >= 1 && s[1] <= 8;
-        });
-      }
-    } catch (e) { /* private mode or an old value: the first-visit shape */ }
-    return out;
-  }
-
-  function mark(p) {
-    var root = document.documentElement;
-    SHELVES.forEach(function (id) { root.removeAttribute('data-shelf-' + id); });
-    (p || []).forEach(function (s) { root.setAttribute('data-shelf-' + s[0], String(Math.round(s[1]))); });
-  }
-
-  window.WSShelfPlan = plan;
-  window.WSShelfMark = mark;
-
   var data = window.WS_DATA || {};
-  if (data.page === 'library') mark(plan((data.user || {}).username, location.search));
+  if (data.page !== 'books') return;
+  try {
+    if (localStorage.getItem('webservarr_books_continue:' + ((data.user || {}).username || '')) === '1') {
+      document.documentElement.setAttribute('data-books-continue', '');
+    }
+  } catch (e) { /* private mode: no slot reserved, the row arrives when it arrives */ }
 })();
 
 /*

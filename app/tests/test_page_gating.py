@@ -1,6 +1,6 @@
 """
 Off means off: a page switched off redirects members home and shows admins a
-banner; /library moved to /ebooks; /requests shows the Seerr embed when that
+banner; /library and /ebooks moved to /books; /requests shows the Seerr embed when that
 is the chosen source.
 """
 import unittest
@@ -59,7 +59,7 @@ class OffMeansOff(PageRoutesBase):
         ("/tickets", "sidebar.enabled_tickets"),
         ("/wiki", "sidebar.enabled_wiki"),
         ("/wiki/some-page", "sidebar.enabled_wiki"),
-        ("/ebooks", "sidebar.enabled_library"),
+        ("/books", "sidebar.enabled_library"),
         ("/reader", "sidebar.enabled_library"),
     ]
 
@@ -96,18 +96,31 @@ class OffMeansOff(PageRoutesBase):
 
 
 class MovedRoutes(PageRoutesBase):
-    def test_library_moves_to_ebooks_keeping_the_query(self):
-        r = self.get("/library", MEMBER_SESSION)
-        self.assertEqual((r.status_code, r.headers["location"]), (301, "/ebooks"))
-        r = self.get("/library?kavita=error&x=1", MEMBER_SESSION)
-        self.assertEqual((r.status_code, r.headers["location"]), (301, "/ebooks?kavita=error&x=1"))
+    def test_the_old_addresses_move_to_books_keeping_the_query(self):
+        for old in ("/library", "/ebooks"):
+            r = self.get(old, MEMBER_SESSION)
+            self.assertEqual((r.status_code, r.headers["location"]), (301, "/books"), old)
+            r = self.get(old + "?kavita=error&x=1", MEMBER_SESSION)
+            self.assertEqual((r.status_code, r.headers["location"]), (301, "/books?kavita=error&x=1"), old)
 
-    def test_ebooks_serves_the_ebooks_page(self):
-        r = self.get("/ebooks", MEMBER_SESSION, {"integration.kavita.url": "http://192.168.1.50:5000"})
+    def test_books_serves_the_books_page(self):
+        r = self.get("/books", MEMBER_SESSION, {"integration.kavita.url": "http://192.168.1.50:5000"})
         self.assertEqual(r.status_code, 200)
-        self.assertIn('data-page="library"', r.text)
-        self.assertIn("<title>WebServarr - eBooks</title>", r.text)
-        self.assertRegex(r.text, r'<a[^>]*href="/ebooks"[^>]*aria-current="page"')
+        self.assertIn('data-page="books"', r.text)
+        self.assertIn("<title>WebServarr - Books</title>", r.text)
+        self.assertIn('data-ws-module="/static/js/pages/books.js?v=', r.text)
+        self.assertRegex(r.text, r'<a[^>]*href="/books"[^>]*aria-current="page"')
+
+    def test_books_shows_for_audiobooks_alone(self):
+        # Plex audiobooks without Kavita: the nav still carries Books, and the page opens.
+        values = {"integration.plex.audiobook_library": "7"}
+        r = self.get("/books", MEMBER_SESSION, values)
+        self.assertEqual(r.status_code, 200)
+        self.assertRegex(r.text, r'<a[^>]*href="/books"[^>]*aria-current="page"')
+
+    def test_books_is_off_without_either_source(self):
+        r = self.get("/", MEMBER_SESSION)
+        self.assertNotIn('href="/books"', r.text)
 
     def test_requests_embed_redirects(self):
         r = self.get("/requests-embed", MEMBER_SESSION)

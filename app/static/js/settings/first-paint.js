@@ -84,7 +84,7 @@ var WSSettingsFirstPaint = (function () {
       if (r) rows.appendChild(r);
     });
     var warn = {
-      library: s.kavita ? '' : 'kavita',
+      library: s.kavita || s.audiobooks ? '' : 'kavita',
       requests: b.requests_source === 'seerr_embed' && !s.seerr ? 'seerr-embed' : (!s.seerr && !s.chaptarr ? 'requests' : ''),
       calendar: s.sonarr || s.radarr ? '' : 'arr'
     };

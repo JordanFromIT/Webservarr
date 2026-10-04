@@ -1,17 +1,17 @@
 /*
- * eBooks: getting this browser a Kavita session without ever going in circles.
+ * Books: getting this browser a Kavita session without ever going in circles.
  *
- * The eBooks page and the reader call Kavita through WebServarr's proxy. A 401
- * there means this session has no Kavita sign-in yet (or it lapsed), and the
- * only way to get one is a full-page trip through /kavita/connect, which comes
- * back to /ebooks. Done blindly on every 401, a sign-in that fails - or one
+ * The Books page (when its answer says this person is not connected) and the
+ * reader (a 401 from WebServarr's Kavita proxy) need this session to have a
+ * Kavita sign-in, and the only way to get one is a full-page trip through
+ * /kavita/connect, which comes back to /books. Done blindly every time, a sign-in that fails - or one
  * that "works" but still leaves Kavita saying no - becomes a loop: the page
  * flashes until the rate limit answers with raw JSON.
  *
  * So the pages ask here instead:
  *   - at most one automatic attempt a minute (the time is kept in
  *     sessionStorage, so it survives the round trip);
- *   - none at all after a sign-in reported failure (/ebooks?kavita=error);
+ *   - none at all after a sign-in reported failure (/books?kavita=error);
  *   - otherwise the page shows a plain message with a "Try again" button.
  * If storage can't be read, the answer is the message: never a loop.
  *
@@ -32,7 +32,7 @@
   var blocked = false;   // the problem is showing; no automatic attempt this visit
   var leaving = false;   // an attempt is under way; later 401s just wait for it
 
-  /** A new visit to eBooks or the reader (the page module's mount). */
+  /** A new visit to Books or the reader (the page module's mount). */
   function init() {
     blocked = false;
     leaving = false;

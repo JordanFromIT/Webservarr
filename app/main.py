@@ -563,25 +563,26 @@ async def tickets_page(
     return render_page("tickets", request, user, gate="tickets")
 
 
-# eBooks page (the Kavita library browser)
-@app.get("/ebooks", response_class=HTMLResponse, tags=["Pages"])
-async def ebooks_page(
+# Books page (ebooks from Kavita and audiobooks from Plex, in one library)
+@app.get("/books", response_class=HTMLResponse, tags=["Pages"])
+async def books_page(
     request: Request,
     session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
 ):
-    """Serve the ebook library browse page."""
+    """Serve the Books page: search, Continue and the library grid."""
     user = await _require_session(session_id)
     if not user:
         return RedirectResponse(url="/login", status_code=302)
-    return render_page("library", request, user, gate="library")
+    return render_page("books", request, user, gate="library")
 
 
-# Legacy redirect: /library → /ebooks (301)
+# Legacy redirects: /ebooks (the old eBooks page) and /library (before that) → /books (301)
+@app.get("/ebooks", include_in_schema=False)
 @app.get("/library", include_in_schema=False)
-async def library_redirect(request: Request):
-    """eBooks moved from /library to /ebooks; old links and bookmarks keep working."""
+async def ebooks_redirect(request: Request):
+    """The eBooks page became Books; old links and bookmarks keep working."""
     query = request.url.query
-    return RedirectResponse(url="/ebooks" + ("?" + query if query else ""), status_code=301)
+    return RedirectResponse(url="/books" + ("?" + query if query else ""), status_code=301)
 
 
 # Ebook reader page

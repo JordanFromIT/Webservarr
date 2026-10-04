@@ -587,7 +587,7 @@ async def signin_oidc(
 
     if not token:
         logger.warning("Kavita handshake completed without a token (HTTP %d)", callback.status_code)
-        return RedirectResponse("/ebooks?kavita=error", status_code=302)
+        return RedirectResponse("/books?kavita=error", status_code=302)
 
     # The address is stored with the token: the proxy sends the token only to
     # the address it came from, so one obtained just before the Kavita address
@@ -596,7 +596,7 @@ async def signin_oidc(
         session_id,
         {"kavita_token": token, "kavita_api_key": kavita_api_key or "", "kavita_base": base},
     )
-    return RedirectResponse("/ebooks", status_code=302)
+    return RedirectResponse("/books", status_code=302)
 
 
 @router.api_route(

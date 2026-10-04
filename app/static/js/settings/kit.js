@@ -763,11 +763,12 @@
   //   branding.tagline      the title when there is no name (and link previews)
   //   branding.logo_url     the sidebar, drawer and phone-bar logo; the favicon
   //   icon.*                the nav icons, and the logo mark when there is no logo
-  //   sidebar.*, pages.order, integration.kavita.url (Library shows only with it)
+  //   sidebar.*, pages.order, integration.kavita.url and integration.plex.audiobook_library
+  //                         (Books shows only with one of them)
   //                         the nav: labels, sublabels, New! flags, switches, order
   //   theme.*               colours, gauge rings, font (#ws-theme and <html>),
   //                         the font stylesheet (#ws-font), custom CSS
-  var SHELL_KEYS = /^(branding\.|icon\.|sidebar\.|pages\.order$|integration\.kavita\.url$|theme\.)/;
+  var SHELL_KEYS = /^(branding\.|icon\.|sidebar\.|pages\.order$|integration\.kavita\.url$|integration\.plex\.audiobook_library$|theme\.)/;
   var shellSeq = 0;
 
   // After a save that changes any of it, the shell is fetched as every page

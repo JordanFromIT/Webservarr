@@ -688,9 +688,9 @@ class HomeAndEbooksDetails(unittest.TestCase):
         self.assertEqual(home.count(clamp), 2)          # the label and the bar
         self.assertNotIn("${Math.round(progress)}%", home)
         self.assertNotIn("generateStatusBars", home)
-        library = (STATIC / "library.html").read_text(encoding="utf-8")
-        self.assertIn("placeholder:text-frosted-blue/70", library)
-        self.assertNotIn("placeholder:text-frosted-blue/60", library)
+        books = (STATIC / "books.html").read_text(encoding="utf-8")
+        self.assertIn("placeholder:text-frosted-blue/70", books)
+        self.assertNotIn("placeholder:text-frosted-blue/60", books)
 
 
 class FormControlsFollowTheTheme(unittest.TestCase):

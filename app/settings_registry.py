@@ -56,7 +56,7 @@ PAGE_DEFAULTS: Dict[str, Tuple[str, str, str]] = {
     "issues": ("Issues", "Report a problem with media", "report_problem"),
     "calendar": ("Calendar", "See upcoming releases", "calendar_month"),
     "tickets": ("Tickets", "Get help from the admin", "confirmation_number"),
-    "library": ("eBooks", "Read books in your browser", "menu_book"),
+    "library": ("Books", "Read and listen to books", "menu_book"),
     "wiki": ("Wiki", "Read guides and how-tos", "library_books"),
     "settings": ("Settings", "Manage the site", "settings"),
 }
@@ -66,7 +66,7 @@ PAGE_DEFAULTS: Dict[str, Tuple[str, str, str]] = {
 # it to the Pages tab.
 PAGE_ADDRESSES: Dict[str, str] = {
     "home": "/", "requests": "/requests", "issues": "/issues", "calendar": "/calendar",
-    "tickets": "/tickets", "library": "/ebooks", "wiki": "/wiki", "settings": "/settings",
+    "tickets": "/tickets", "library": "/books", "wiki": "/wiki", "settings": "/settings",
 }
 
 _HOME_SECTION_DEFAULTS = {

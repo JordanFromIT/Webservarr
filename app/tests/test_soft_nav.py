@@ -14,7 +14,7 @@ from app.tests.test_settings_static import function_body
 from app.tests.test_shell_contract import STATIC, js_code_only, live_matches, matching_brace, read
 
 # Pages converted to soft navigation, in conversion order.
-CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index", "library", "reader",
+CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index", "books", "reader",
              "requests", "requests-embed", "player-test"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
@@ -603,52 +603,60 @@ class HomePage(unittest.TestCase):
         self.assertIn("if (a.name.indexOf('     ') === 0 && !fresh.hasAttribute(a.name)) root.removeAttribute(a.name);", router)
 
 
-class LibraryPage(unittest.TestCase):
-    """eBooks calls Kavita on the page's signal and times everything with the
-    visit; its detail sheet is inside #wsPage; Read opens the reader through
-    the router; the guide and the sign-in helper start from mount (Task 11)."""
+class BooksPage(unittest.TestCase):
+    """Books reads everything on the page's signal and times everything with the
+    visit; its Continue row and library are inside #wsPage; the sign-in helper
+    starts from mount (the hand-off itself is pinned in test_kavita_connect)."""
 
     def code(self):
-        return js_code_only(module_source("library"))
+        return js_code_only(module_source("books"))
 
     def test_every_request_is_on_the_pages_signal(self):
         code = self.code()
-        fetches = [m.start() for m in re.finditer(r"(?<![.\w])fetch\(", code)]
-        self.assertEqual(len(fetches), 2, "the Kavita proxy call and the rating")
-        kav = function_body(code, "kavita")
-        self.assertIn("if (!options.signal) options.signal = signal;", kav)
-        self.assertIn("fetch(url, { credentials: 'include', signal: signal })", module_source("library"))
-        # A page left mid-request neither reconnects nor explains.
-        self.assertIn("if (!signal.aborted) reconnectKavita();", kav)
+        self.assertNotRegex(code, r"(?<![.\w])fetch\(", "every read goes through WS.getJSON")
+        self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 2, "readLive (every list) and the next page")
+        src = module_source("books")
+        self.assertIn("WS.getJSON(url, { signal: signal })", src)
+        self.assertIn("WS.getJSON(libraryUrl(state.cursor), { signal: signal })", src)
+        # A page left mid-request says nothing.
         self.assertRegex(function_body(code, "quiet"), r"return signal\.aborted \|\| isAbort\(err\)")
 
     def test_timers_are_the_pages(self):
         code = self.code()
         self.assertNotRegex(code, r"(?<![.\w])setTimeout\(", "one-off timers go through ctx.setTimeout")
         self.assertNotRegex(code, r"\bWS\.poll\(")
+        self.assertIn("ctx.poll(", code)
+        self.assertIn("ctx.clearTimeout(searchTimer);", module_source("books"))
 
-    def test_the_detail_sheet_is_inside_the_page(self):
-        h = read("library")
+    def test_the_sections_are_marked_to_arrive_top_down(self):
+        h = read("books")
         page = h[h.index('<div id="wsPage"'):h.index("</main>")]
-        self.assertEqual(h.count('id="bookDetail"'), 1)
-        self.assertIn('<div id="bookDetail" class="hidden fixed inset-0 z-[65] ', page)
-        self.assertNotIn("document.body.appendChild", self.code())
+        order = re.findall(r'data-arrive="(\w+)"', page)
+        self.assertEqual(order, ["continue", "library"])
+        src = module_source("books")
+        for key in order:
+            self.assertIn(f"WS.arrive('{key}'", src)
         self.assertNotRegex(self.code(), r"\bdocument\.getElementById\(", "lookups stay inside ctx.root")
 
-    def test_read_opens_the_reader_in_this_document(self):
-        src = module_source("library")
-        self.assertIn("if (window.WS && WS.router && typeof WS.router.navigate === 'function') WS.router.navigate(href);", src)
+    def test_it_writes_text_only(self):
+        code = self.code()
+        self.assertNotRegex(code, r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment|document\.write")
+        self.assertNotIn("onerror", read("books"))
 
-    def test_a_cover_that_fails_is_hidden_without_an_inline_handler(self):
-        src = module_source("library")
-        self.assertNotIn("onerror", read("library"))
-        self.assertIn("root.addEventListener('error', function (e) {", src)
-        self.assertIn("}, { capture: true, signal: signal });", src)
+    def test_the_search_wait_and_the_cards_links(self):
+        src = module_source("books")
+        self.assertIn("const SEARCH_WAIT_MS = 300;", src)
+        self.assertIn("'/books/' + encodeURIComponent(String(card.id))", src)
+        self.assertIn("'/books/series?name=' + encodeURIComponent(card.series || '')", src)
 
-    def test_the_guide_and_the_helper_start_with_the_visit(self):
-        src = module_source("library")
-        self.assertRegex(src, r"guide = window\.WebServarrTour\.init\(\{[^}]*signal: signal\s*\}\);")
-        self.assertNotIn("window.ebooksTour", src)
+    def test_the_continue_row_is_reserved_only_when_this_person_had_one(self):
+        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+        self.assertIn("data.page !== 'books'", loader)
+        self.assertIn("'webservarr_books_continue:'", loader)
+        self.assertIn("const CONTINUE_KEY = 'webservarr_books_continue:';", module_source("books"))
+        h = read("books")
+        self.assertIn("html[data-books-continue] #continueHost { display: block; }", h)
+        self.assertIn("#continueHost { display: none; }", h)
 
 
 class ReaderPage(unittest.TestCase):
@@ -924,7 +932,7 @@ class FixRound11(unittest.TestCase):
     def test_the_viewport_follows_the_page(self):
         self.assertIn('<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>',
                       read("reader"))
-        self.assertNotIn("viewport-fit", read("library"))
+        self.assertNotIn("viewport-fit", read("books"))
         body = function_body(self.router(), "syncViewport")
         self.assertIn("if (live.getAttribute('       ') !== content) live.setAttribute('       ', content);", body)
         swap = function_body(self.router(), "swapDom")
@@ -943,7 +951,7 @@ class FixRound11(unittest.TestCase):
     def test_re_armed_timers_are_cancelled_through_the_visit(self):
         # A native clearTimeout on a ctx timer leaves its id pending until the
         # visit ends; every re-armed ctx timer goes through ctx.clearTimeout.
-        self.assertIn("ctx.clearTimeout(searchTimer);", module_source("library"))
+        self.assertIn("ctx.clearTimeout(searchTimer);", module_source("books"))
         self.assertIn("ctx.clearTimeout(saveTimer);", module_source("reader"))
         settings = STATIC / "js" / "settings"
         for name, timer in (("pages", "liveTimer"), ("general", "typing"), ("appearance", "fontTimer")):

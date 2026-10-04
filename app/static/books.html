@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Books</title>
+<link rel="icon" href="/static/webservarr.svg"/>
+<script src="/static/js/theme-loader.js?v=1"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet"/>
+<link href="/static/css/app.css?v=1" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+<style>
+  /* The Continue row is reserved from the first paint only for a person who
+     had one last visit: theme-loader.js (a full load) and pages/books.js (every
+     visit, before its first await) put data-books-continue on <html>, and the
+     page takes it off again when the row comes back empty. */
+  #continueHost { display: none; }
+  html[data-books-continue] #continueHost { display: block; }
+
+  /* The Continue row scrolls sideways under a finger or a dragged mouse; its
+     scrollbar would only take a strip of height from the cards. */
+  .books-row { scrollbar-width: none; -ms-overflow-style: none; overflow-y: hidden; }
+  .books-row::-webkit-scrollbar { display: none; }
+</style>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<!-- ws:sidebar -->
+
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<!-- ws:header -->
+<!-- The page (spec 4.1), swapped by the router -->
+<div id="wsPage" data-ws-module="/static/js/pages/books.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-hidden">
+<!-- Sections arrive top-down (data-arrive, shell.js WS.arrive): Continue, then
+     the library. Each holds its final layout as a skeleton until its data is in. -->
+<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+<div class="max-w-[1200px] w-full mx-auto min-w-0 space-y-8">
+<h1 class="sr-only">Books</h1>
+
+  <!-- Search. Everything below it steps aside while there is a search. -->
+  <div class="relative max-w-xl">
+    <label for="booksSearch" class="sr-only">Search books</label>
+    <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-frosted-blue/70 pointer-events-none" aria-hidden="true">search</span>
+    <input id="booksSearch" type="search" maxlength="100" autocomplete="off" placeholder="Search by title, author or narrator"
+           class="w-full h-12 rounded-xl border-0 bg-frosted-blue/[0.07] pl-12 pr-4 text-[17px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
+  </div>
+
+  <!-- The ebook sign-in failed, or was just tried and still doesn't work (see
+       /static/js/kavita-connect.js). The audiobooks still show; this says why
+       the ebooks don't. -->
+  <div id="connectState" class="hidden flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-frosted-blue/[0.07] p-4" role="status">
+    <span class="material-symbols-outlined text-frosted-blue/70" aria-hidden="true">link_off</span>
+    <p class="min-w-0 flex-1 text-[15px] text-frosted-blue">We couldn't connect you to the eBook library right now. Please try again in a few minutes.</p>
+    <button id="connectRetry" type="button" class="ws-lift shrink-0 h-10 px-4 rounded-[10px] bg-primary text-bright text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Try again</button>
+  </div>
+
+  <!-- Quiet notes about a source that is not answering: written by the page. -->
+  <div id="notes" class="hidden space-y-2" role="status"></div>
+
+  <div id="browseArea" class="space-y-8">
+
+    <div id="continueHost" data-arrive="continue" aria-busy="true">
+      <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Continue</span></h2>
+      <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
+        <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+      </div>
+    </div>
+
+    <section id="librarySection" data-arrive="library" aria-labelledby="libraryTitle">
+      <h2 id="libraryTitle" class="sr-only">Library</h2>
+      <div class="mb-6 flex flex-wrap items-center gap-3">
+        <div id="formatChips" class="flex flex-wrap items-center gap-2" role="group" aria-label="Show">
+          <button type="button" data-format="all" aria-pressed="true" class="inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-primary text-bright">All</button>
+          <button type="button" data-format="ebook" aria-pressed="false" class="inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue">Ebooks</button>
+          <button type="button" data-format="audio" aria-pressed="false" class="inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue">Audiobooks</button>
+        </div>
+        <div class="relative lg:ml-auto">
+          <label for="sortSelect" class="sr-only">Sort by</label>
+          <select id="sortSelect" class="appearance-none h-10 rounded-[10px] border-0 bg-frosted-blue/[0.07] pl-4 pr-10 text-[15px] text-frosted-blue cursor-pointer focus:outline-none focus:ring-2 focus:ring-frosted-blue">
+            <option value="added">Recently added</option>
+            <option value="title">Title</option>
+            <option value="author">Author</option>
+          </select>
+          <span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-frosted-blue/70 pointer-events-none" aria-hidden="true">expand_more</span>
+        </div>
+      </div>
+
+      <!-- One of these shows at a time (pages/books.js showBody). The skeleton
+           is the grid's own shape: same columns, a cover and two lines of text. -->
+      <div id="gridSkeleton" class="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6" aria-hidden="true">
+        <div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+      </div>
+
+      <ul id="libraryGrid" class="hidden grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6"></ul>
+
+      <div id="errorState" class="hidden py-16 text-center">
+        <span class="material-symbols-outlined text-4xl text-frosted-blue/70" aria-hidden="true">cloud_off</span>
+        <p class="mt-3 text-[17px] font-semibold text-frosted-blue">We couldn't load the library</p>
+        <p class="mt-1 text-[15px] text-frosted-blue/70 max-w-md mx-auto">Everything else on the site is unaffected. Try again in a moment.</p>
+        <button id="retryBtn" type="button" class="ws-lift mt-4 h-10 px-4 rounded-[10px] bg-primary text-bright text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Try again</button>
+      </div>
+
+      <div id="buildingState" class="hidden py-16 text-center" role="status">
+        <span class="material-symbols-outlined text-4xl text-frosted-blue/70" aria-hidden="true">auto_stories</span>
+        <p class="mt-3 text-[17px] font-semibold text-frosted-blue">We're putting the library together</p>
+        <p class="mt-1 text-[15px] text-frosted-blue/70 max-w-md mx-auto">This takes a few minutes the first time. Your books will show up here on their own.</p>
+      </div>
+
+      <div id="emptyState" class="hidden py-16 text-center">
+        <span class="material-symbols-outlined text-4xl text-frosted-blue/70" aria-hidden="true">menu_book</span>
+        <p id="emptyTitle" class="mt-3 text-[17px] font-semibold text-frosted-blue">No books yet</p>
+        <p id="emptyText" class="mt-1 text-[15px] text-frosted-blue/70 max-w-md mx-auto">Books you request show up here once they're ready.</p>
+        <div class="mt-4 flex flex-wrap items-center justify-center gap-3">
+          <button id="emptyReset" type="button" class="hidden ws-lift h-10 px-4 rounded-[10px] bg-primary text-bright text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Show all books</button>
+          <a id="emptyRequest" href="/requests" class="ws-lift inline-flex items-center h-10 px-4 rounded-[10px] bg-primary text-bright text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Request a book</a>
+        </div>
+      </div>
+
+      <div id="moreWrap" class="hidden mt-8 flex justify-center">
+        <button id="moreBtn" type="button" class="ws-lift h-11 min-w-[10rem] px-6 rounded-[10px] bg-frosted-blue/[0.07] text-[15px] font-semibold text-frosted-blue hover:bg-frosted-blue/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Show more</button>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Search results: take the place of Continue and the library. -->
+  <section id="searchSection" class="hidden" aria-labelledby="searchTitle">
+    <h2 id="searchTitle" class="sr-only">Search results</h2>
+    <p id="searchStatus" class="mb-4 text-[15px] text-frosted-blue/70" role="status" aria-live="polite">&nbsp;</p>
+    <div id="searchSkeleton" class="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6" aria-hidden="true">
+      <div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+    </div>
+    <ul id="searchGrid" class="hidden grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6"></ul>
+    <div id="searchEmpty" class="hidden py-12 text-center">
+      <span class="material-symbols-outlined text-4xl text-frosted-blue/70" aria-hidden="true">search_off</span>
+      <p id="searchEmptyTitle" class="mt-3 text-[17px] font-semibold text-frosted-blue break-words">No matches</p>
+      <p class="mt-1 text-[15px] text-frosted-blue/70">Check the spelling, or ask for it.</p>
+      <a id="searchRequest" href="/requests" class="ws-lift mt-4 inline-flex items-center h-10 px-4 rounded-[10px] bg-primary text-bright text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Can't find it? Request it</a>
+    </div>
+    <div id="searchError" class="hidden py-12 text-center">
+      <span class="material-symbols-outlined text-4xl text-frosted-blue/70" aria-hidden="true">cloud_off</span>
+      <p class="mt-3 text-[17px] font-semibold text-frosted-blue">The search didn't go through</p>
+      <p class="mt-1 text-[15px] text-frosted-blue/70">Try again in a moment.</p>
+    </div>
+  </section>
+
+</div>
+</div>
+</div>
+</main>
+
+<script src="/static/js/auth.js?v=1"></script>
+<script src="/static/js/shell.js?v=1"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+<script src="/static/js/kavita-connect.js?v=1" data-ws-page-script></script>
+</body></html>

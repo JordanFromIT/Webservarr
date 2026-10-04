@@ -89,6 +89,35 @@ class PageSwitches(MigrationBase):
             self.run_case(migrate, flag_key, switch_key, "false", "1", "false")
 
 
+class BooksNav(MigrationBase):
+    """The eBooks nav entry becomes Books: only what is still the old default changes."""
+
+    def test_the_old_defaults_are_renamed(self):
+        self.rows(sidebar__label_library="eBooks", sidebar__sublabel_library="Read books in your browser")
+        seed.migrate_books_nav_v1(self.db)
+        self.assertEqual(helpers.get(self.db, "sidebar.label_library"), "Books")
+        self.assertEqual(helpers.get(self.db, "sidebar.sublabel_library"), "Read and listen to books")
+        self.assertEqual(helpers.get(self.db, "migration.books_nav_v1"), "done")
+
+    def test_an_admins_own_words_stay(self):
+        self.rows(sidebar__label_library="Reading Room", sidebar__sublabel_library="")
+        seed.migrate_books_nav_v1(self.db)
+        self.assertEqual(helpers.get(self.db, "sidebar.label_library"), "Reading Room")
+        self.assertEqual(helpers.get(self.db, "sidebar.sublabel_library"), "")
+
+    def test_it_runs_once(self):
+        self.rows(sidebar__label_library="eBooks")
+        seed.migrate_books_nav_v1(self.db)
+        helpers.put(self.db, "sidebar.label_library", "eBooks")     # the admin chose it back
+        seed.migrate_books_nav_v1(self.db)
+        self.assertEqual(helpers.get(self.db, "sidebar.label_library"), "eBooks")
+
+    def test_a_fresh_install_has_nothing_to_change(self):
+        seed.migrate_books_nav_v1(self.db)
+        self.assertIsNone(helpers.get(self.db, "sidebar.label_library"))
+        self.assertEqual(helpers.get(self.db, "migration.books_nav_v1"), "done")
+
+
 class RequestsSource(MigrationBase):
     """Spec section 7, migration 3 - the four-row table, exactly."""
 

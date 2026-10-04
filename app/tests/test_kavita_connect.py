@@ -1,14 +1,15 @@
 """
-eBooks never loops through a failed Kavita sign-in.
+Books never loops through a failed Kavita sign-in.
 
-A 401 from the Kavita proxy sends the browser to /kavita/connect, which comes
-back to /ebooks. When that sign-in fails (/ebooks?kavita=error), or "succeeds"
-but the session still does not work, a blind redirect on every 401 turns into
-a loop until the rate limit answers with raw JSON. The shared helper
+A 401 from the Kavita proxy (the reader), or the Books APIs saying this person
+is not connected (the Books page), sends the browser to /kavita/connect, which
+comes back to /books. When that sign-in fails (/books?kavita=error), or
+"succeeds" but the session still does not work, a blind redirect every time
+turns into a loop until the rate limit answers with raw JSON. The shared helper
 /static/js/kavita-connect.js decides instead: at most one automatic attempt a
 minute, none after a reported failure, and a plain message otherwise.
 
-Both pages are soft-navigation page modules (pages/library.js and
+Both pages are soft-navigation page modules (pages/books.js and
 pages/reader.js) and the helper is a page helper script, loaded once per
 document, whose per-visit state each module starts with WSKavita.init().
 
@@ -273,7 +274,7 @@ def check_retry(t, src):
 
 
 # ---------------------------------------------------------------------------
-# The pages (library.html, reader.html)
+# The pages (books.html, reader.html)
 # ---------------------------------------------------------------------------
 
 def check_page_uses_helper(t, html, js, retry_id, retry_handler):
@@ -319,9 +320,58 @@ def check_page_uses_helper(t, html, js, retry_id, retry_handler):
     return js
 
 
-def check_library(t, html, js):
-    js = check_page_uses_helper(t, html, js, "connectRetry", "retryConnect")
-    # The message lives in the markup, reserved like the other states.
+def check_books(t, html, js):
+    """The Books page: the helper is a declared page helper started by each
+    visit; the hand-off runs only when a live answer from the server says "not
+    connected" (never from a copy kept from an earlier visit, and once per
+    visit); a missing helper never breaks the page or redirects; and the
+    failure message is in the markup with a real Try again button."""
+    t.assertRegex(html, rf'<script src="{re.escape(HELPER)}\?v=\d+" data-ws-page-script></script>',
+                  f"the page does not declare {HELPER} as a page helper")
+    t.assertNotIn("<script>", html, "an inline script")
+    t.assertTrue(live_matches(js, r"if \(window\.WSKavita && typeof window\.WSKavita\.init === 'function'\) "
+                                  r"window\.WSKavita\.init\(\);"), "the visit does not start the helper")
+    t.assertTrue(live_matches(js, r"if \(window\.WSKavita && typeof window\.WSKavita\.arrivedFromFailedConnect === 'function'\) "
+                                  r"window\.WSKavita\.arrivedFromFailedConnect\(\);"),
+                 "a failed arrival is not read (and a missing helper is not guarded)")
+    # No page sends the browser to /kavita/connect on its own.
+    t.assertFalse(live_matches(js, r"""\blocation\.href\s*=\s*['"]/kavita/connect['"]"""))
+
+    # The hand-off: once per visit, only for a "not connected" note from Kavita,
+    # and only from a live answer (a copy kept from before may be a session old).
+    check = body_of(t, js, "checkReconnect")
+    t.assertRegex(check, r"\bif\s*\(\s*state\.reconnectTried\s*\)\s*return\b", "the hand-off can run twice")
+    t.assertTrue(live_matches(check, r"""n\.source\s*===\s*['"]kavita['"]"""))
+    t.assertTrue(live_matches(check, r"""n\.reason\s*===\s*['"]not_connected['"]"""),
+                 "the hand-off is not tied to the not_connected note")
+    t.assertLess(check.index("state.reconnectTried = true"), check.index("reconnectKavita("),
+                 "the visit is not marked before the hand-off")
+    live = body_of(t, js, "readLive")
+    t.assertTrue(live_matches(live, r"\bcheckReconnect\(\s*data\s*&&\s*data\.notes\s*\)"),
+                 "a live answer's notes do not decide the hand-off")
+    t.assertEqual(len(live_matches(js, r"\bcheckReconnect\(")), 2, "the hand-off has another caller (a cached copy?)")
+    t.assertEqual(len(live_matches(js, r"\bWS\.getJSON\(")), 2, "a list is read outside readLive (and the next page)")
+
+    # Without the helper (it failed to load) the page explains and stays put.
+    for fn, call, fallback in (("reconnectKavita", r"\bhelper\.reconnect\(\s*showConnectProblem\s*\)",
+                                r"\bshowConnectProblem\(\s*\)"),
+                               ("retryConnect", r"\bhelper\.retry\(\s*\)", r"\blocation\.reload\(\s*\)")):
+        body = js_code_only(body_of(t, js, fn))
+        t.assertRegex(body, r"\bconst\s+helper\s*=\s*window\.WSKavita\b", fn)
+        m = re.search(r"\bif\s*\(\s*!\s*helper\s*\|\|", body)
+        t.assertIsNotNone(m, f"{fn}: no guard for a missing helper")
+        open_b = body.index("{", matching_paren(body, body.index("(", m.start())))
+        end_b = matching_brace(body, open_b)
+        t.assertRegex(body[open_b:end_b], fallback, f"{fn}: a missing helper is not handled")
+        t.assertRegex(body[open_b:end_b], r"\breturn\b", f"{fn}: falls through without the helper")
+        t.assertRegex(body[end_b:], call, f"{fn}: never uses the helper")
+    # Every other use of the helper checks it is there first.
+    for m in live_matches(js, r"\bwindow\.WSKavita\.\w+\("):
+        line_start = js.rfind("\n", 0, m.start()) + 1
+        t.assertIn("window.WSKavita &&", js[line_start:m.start()], f"unguarded {m.group(0)}")
+
+    # The message lives in the markup, reserved like the other states, and
+    # Try again is a real button (Space and Enter work), going through the helper.
     block = re.search(r'<div id="connectState"[^>]*>.*?</div>', html, re.S)
     t.assertIsNotNone(block, "no #connectState block")
     block = block.group(0)
@@ -329,33 +379,12 @@ def check_library(t, html, js):
     t.assertRegex(block, r'<span [^>]*aria-hidden="true"[^>]*>link_off</span>',
                   "the icon is read out as 'link off'")
     t.assertNotRegex(block, r"\b(text|bg|border)-(slate|gray|red|green|amber|yellow|blue)-\d")
-    t.assertTrue(live_matches(body_of(t, js, "show"), r"""['"]connectState['"]"""),
-                 "show() does not know the connect state")
-    t.assertTrue(live_matches(body_of(t, js, "showConnectProblem"), r"""\bshow\(\s*['"]connectState['"]\s*\)"""))
-    # A reported failure shows the message and loads nothing (no 401s, no redirect).
-    t.assertTrue(live_matches(js, r"\bconnectFailed\s*=\s*!!\(\s*window\.WSKavita\s*&&\s*window\.WSKavita\.arrivedFromFailedConnect\(\s*\)\s*\)"))
-    mount = body_of(t, js, "mount")
-    stop = first(t, mount, r"\bif\s*\(\s*connectFailed\s*\)\s*\{[^}]*\bshowConnectProblem\(\s*\)\s*;?\s*return\b",
-                 "boot does not stop on a reported failure")
-    # What mount itself runs (not what the functions it declares run later):
-    # no shelf or page is asked for before that stop.
-    from app.tests.test_settings_static import top_level
-    boot = top_level(js_code_only(mount))
-    at = re.search(r"\bif \(connectFailed\) \{", boot)
-    t.assertIsNotNone(at, "boot does not stop on a reported failure")
-    for load in (r"\bloadShelves\(\s*\)", r"\bloadPage\(\s*\)"):
-        calls = [m.start() for m in re.finditer(load, boot) if not boot[:m.start()].endswith("function ")]
-        t.assertTrue(calls, f"mount never calls {load}")
-        t.assertLess(at.start(), min(calls), f"{load} runs before the stop")
-    # Once Kavita said no, the remaining shelves must not ask again.
-    shelves = body_of(t, js, "loadShelves")
-    catches = live_matches(shelves, r"\.catch\(\s*function\s*\(\s*(\w*)\s*\)\s*\{")
-    t.assertTrue(catches, "loadShelves has no catch")
-    inner = shelves[catches[0].end():matching_brace(shelves, catches[0].end() - 1)]
-    err = catches[0].group(1) or "err"
-    t.assertTrue(live_matches(inner, rf"""\bif\s*\(\s*{err}\s*&&\s*{err}\.message\s*===\s*['"]reconnecting['"]\s*\)\s*throw\s+{err}\b"""),
-                 "a shelf swallows 'reconnecting' and the chain goes on asking")
-    t.assertGreaterEqual(len(catches), 2, "the stopped chain needs a final catch (unhandled rejection)")
+    t.assertRegex(html, r'<button id="connectRetry" type="button"', "#connectRetry is not a button")
+    t.assertTrue(live_matches(js, r"""\$\(\s*['"]connectRetry['"]\s*\)\.addEventListener\(\s*['"]click['"]\s*,\s*retryConnect\s*,\s*\{\s*signal:\s*signal\s*\}\s*\)"""),
+                 "#connectRetry is not wired to retryConnect")
+    t.assertTrue(live_matches(body_of(t, js, "showConnectProblem"), r"""\$\(\s*['"]connectState['"]\s*\)\.classList\.remove\(\s*['"]hidden['"]\s*\)"""),
+                 "showConnectProblem does not show the message")
+    return js
 
 
 READER_PANELS = ("loading", "errorState", "bookContent")
@@ -527,8 +556,8 @@ class ConnectHelper(unittest.TestCase):
 
 
 class PagesUseTheHelper(unittest.TestCase):
-    def test_library_shows_the_problem_and_stops(self):
-        check_library(self, page("library"), module("library"))
+    def test_books_hands_off_once_and_explains_when_it_must(self):
+        check_books(self, page("books"), module("books"))
 
     def test_reader_keeps_reading_and_explains_only_when_it_must(self):
         check_reader(self, page("reader"), module("reader"))
@@ -616,19 +645,23 @@ MUTATIONS = [
     ("reader: a failed page's Try again gated away", "reader",
      "{\n          loadPage(page, skipSave);", "{\n          goToPage(page, skipSave);", check_reader),
 
-    ("library: Try again is a link", "library",
-     '<button id="connectRetry" type="button"', '<a id="connectRetry" href="/kavita/connect"', check_library),
-    ("library: icon read aloud", "library",
-     '<span class="material-symbols-outlined text-4xl text-steel-blue/60" aria-hidden="true">link_off</span>',
-     '<span class="material-symbols-outlined text-4xl text-steel-blue/60">link_off</span>', check_library),
-    ("library: shelves go on asking", "library",
-     "          if (err && err.message === 'reconnecting') throw err;\n", "", check_library),
-    ("library: no guard for a missing helper", "library",
-     "var connectFailed = !!(window.WSKavita && window.WSKavita.arrivedFromFailedConnect());",
-     "var connectFailed = window.WSKavita.arrivedFromFailedConnect();", check_library),
-    ("library: retry without the helper guard", "library",
-     "    if (!helper || typeof helper.retry !== 'function') {\n      window.location.reload();\n      return;\n    }\n",
-     "", check_library),
+    ("books: Try again is a link", "books",
+     '<button id="connectRetry" type="button"', '<a id="connectRetry" href="/kavita/connect"', check_books),
+    ("books: icon read aloud", "books",
+     '<span class="material-symbols-outlined text-frosted-blue/70" aria-hidden="true">link_off</span>',
+     '<span class="material-symbols-outlined text-frosted-blue/70">link_off</span>', check_books),
+    ("books: the hand-off runs again and again", "books",
+     "    if (state.reconnectTried) return;\n", "", check_books),
+    ("books: the hand-off never runs", "books",
+     "      checkReconnect(data && data.notes);\n", "", check_books),
+    ("books: the hand-off runs without the note", "books",
+     "n && n.source === 'kavita' && n.reason === 'not_connected'", "n && n.source === 'kavita'", check_books),
+    ("books: no guard for a missing helper", "books",
+     "if (window.WSKavita && typeof window.WSKavita.arrivedFromFailedConnect === 'function') window.WSKavita.arrivedFromFailedConnect();",
+     "window.WSKavita.arrivedFromFailedConnect();", check_books),
+    ("books: retry without the helper guard", "books",
+     "    if (!helper || typeof helper.retry !== 'function') { window.location.reload(); return; }\n",
+     "", check_books),
 ]
 
 
@@ -651,7 +684,7 @@ class Mutations(unittest.TestCase):
     def test_each_check_notices_its_breakage(self):
         sources = {"helper": helper_src(),
                    "reader": (page("reader"), module("reader")),
-                   "library": (page("library"), module("library"))}
+                   "books": (page("books"), module("books"))}
         for name, where, original, broken, check in MUTATIONS:
             with self.subTest(name):
                 if where == "helper":
@@ -670,123 +703,3 @@ class Mutations(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class LibraryShelvesAndGuide(unittest.TestCase):
-    """Polish A fix round 1 on the eBooks page: the shelves swap in at once
-    into slots reserved per person, and Try again reaches the guide."""
-
-    def setUp(self):
-        self.html = page("library")
-        self.js = module("library")
-
-    def test_try_again_goes_the_way_the_first_load_did(self):
-        self.assertTrue(live_matches(self.js, r"el\('retryBtn'\)\.addEventListener\('click', function \(\) \{ "
-                                              r"Promise\.all\(\[loadPage\(\), loadShelves\(\)\]\)\.then\(startGuide\); \}, \{ signal: signal \}\);"))
-        self.assertTrue(live_matches(self.js, r"var first = Promise\.all\(\[loadShelves\(\), loadPage\(\)\]\);\s*first\.then\(startGuide\);"))
-        guide = body_of(self, self.js, "startGuide")
-        self.assertTrue(live_matches(guide, r"\['loadingState', 'unavailableState', 'connectState'\]"))
-
-    def test_the_shelves_arrive_in_one_write(self):
-        shelves = body_of(self, self.js, "loadShelves")
-        self.assertEqual(len(live_matches(shelves, r"\bbox\.replaceChildren\.apply\(box, ")), 1)
-        render = body_of(self, self.js, "renderShelf")
-        self.assertFalse(live_matches(render, r"appendChild\(section\)|replaceChild\(|el\('shelves'\)"),
-                         "a shelf still goes in on its own")
-        self.assertTrue(live_matches(render, r"return section;"))
-
-    def test_the_slots_are_the_shelves_this_person_had(self):
-        # The plan is per person, and each slot carries its shelf's own title;
-        # the slots are static markup in SHELVES order, and <html> marks which
-        # show and with how many covers (theme-loader.js, before the first paint).
-        shelves = re.findall(r"id: '(\w+)', title: '([^']+)'", self.js)
-        slots = re.findall(r'<section data-shelf-slot="(\w+)" aria-hidden="true">.*?<span class="skel-text">([^<]+)</span>',
-                           self.html)
-        self.assertEqual(slots, shelves, "one slot per shelf, in SHELVES order, with its title")
-        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
-        self.assertIn("var SHELVES = ['bookshelf', 'recent', 'toprated'];", loader)
-        self.assertEqual([s[0] for s in shelves], ["bookshelf", "recent", "toprated"])
-        # One key: written by the module, read by the loader.
-        self.assertEqual(len(live_matches(self.js, r"var SHELF_PLAN_KEY = 'webservarr_library_shelves:' \+ user;")), 1)
-        self.assertEqual(len(live_matches(loader, r"localStorage\.getItem\('webservarr_library_shelves:' \+")), 1)
-        self.assertTrue(live_matches(loader, r"var out = \[\['recent', 8\]\];"))
-        self.assertTrue(live_matches(loader, r"if \(data\.page === 'library'\) mark\(plan\("))
-        # The module marks again on every visit, before its first await.
-        mount = self.js[self.js.index("export async function mount(ctx) {"):]
-        marked = mount.index("window.WSShelfMark(window.WSShelfPlan(user, ctx.url.search));")
-        self.assertLess(marked, mount.index("await "))
-        # A slot's covers are the real card's shape, titles included, eight of
-        # them, and the page style shows as many as the mark says.
-        for sid, _title in slots:
-            slot = re.search(rf'<section data-shelf-slot="{sid}".*?</section>', self.html).group(0)
-            self.assertEqual(slot.count('<p class="mt-2 text-sm leading-snug min-h-[2.75em]">&nbsp;</p>'), 8, sid)
-            self.assertIn(f'html[data-shelf-{sid}] [data-shelf-slot="{sid}"]', self.html)
-            for n in range(1, 8):
-                self.assertIn(f'html[data-shelf-{sid}="{n}"] [data-shelf-slot="{sid}"] [data-shelf-row] > :nth-child(n+{n + 1})',
-                              self.html, (sid, n))
-        self.assertTrue(live_matches(self.js, r"'<p class=\"mt-2 text-sm text-frosted-blue leading-snug line-clamp-2 min-h-\[2\.75em\]\">'"))
-
-
-class LibraryShelvesDontWaitForEachOther(unittest.TestCase):
-    """Polish A R126: one hung shelf can't hold back the others. The shelves
-    are asked for together, each request gives up, and the swap happens when
-    all have answered or at a deadline, whichever is first."""
-
-    def setUp(self):
-        self.js = module("library")
-        self.shelves = body_of(self, self.js, "loadShelves")
-
-    def test_asked_for_together_not_one_after_another(self):
-        self.assertTrue(live_matches(self.shelves, r"var requests = SHELVES\.map\(function \(shelf, i\) \{"))
-        self.assertFalse(live_matches(self.shelves, r"\.reduce\("), "the shelves are chained again")
-        table = self.js[self.js.index("var SHELVES = ["):self.js.index("function renderShelf(")]
-        self.assertEqual(len(re.findall(r"load: function \(signal\) \{", table)), 3)
-        self.assertEqual(len(re.findall(r"signal: signal\s*\}\);", table)), 3)
-
-    def test_each_request_gives_up_and_the_swap_has_a_deadline(self):
-        self.assertTrue(live_matches(self.js, r"const SHELF_DEADLINE = 3000, SHELF_TIMEOUT = 8000;"))
-        # Both limits are the visit's timers, and a shelf's own signal ends
-        # with the visit (and is let go once the shelf is done).
-        self.assertTrue(live_matches(self.shelves, r"ctx\.setTimeout\(function \(\) \{ ctl\.abort\(\); \}, SHELF_TIMEOUT\)"))
-        self.assertTrue(live_matches(self.shelves, r"signal\.addEventListener\('abort', stop, \{ once: true, signal: ctl\.signal \}\);"))
-        self.assertTrue(live_matches(self.shelves, r"shelf\.load\(ctl\.signal\)"))
-        self.assertTrue(live_matches(self.shelves, r"ctx\.setTimeout\(done, SHELF_DEADLINE\)"))
-        self.assertFalse(live_matches(self.shelves, r"(?<![.\w])setTimeout\("), "a raw timer outlives the page")
-        self.assertTrue(live_matches(self.shelves, r"Promise\.race\(\[settled, deadline\]\)"))
-        # A failed or timed-out shelf drops out; a late one goes in below.
-        self.assertTrue(live_matches(self.shelves, r"results\[i\] = null;"))
-        self.assertTrue(live_matches(self.shelves, r"if \(swapped && section && !stopped\) placeLate\(i, section\);"))
-        # Nothing goes in once Kavita has said no.
-        self.assertTrue(live_matches(self.shelves, r"if \(stopped \|\| signal\.aborted\) return;"))
-
-    def test_a_late_shelf_takes_its_place_in_shelves_order(self):
-        # R129: after the swap a shelf goes in before the first shelf already
-        # showing that comes later in SHELVES, else at the end - never in the
-        # order the network happened to answer.
-        late = body_of(self, self.shelves, "placeLate")
-        self.assertTrue(live_matches(late, r"for \(var j = i \+ 1; j < SHELVES\.length; j\+\+\) \{"))
-        self.assertTrue(live_matches(late, r"var next = results\[j\] && results\[j\]\.section;"))
-        self.assertTrue(live_matches(late, r"if \(next && next\.parentNode === box\) \{ box\.insertBefore\(section, next\); return; \}"))
-        self.assertTrue(live_matches(late, r"box\.appendChild\(section\);\s*$"), "no append when nothing later is showing")
-        # The only other append-like write in loadShelves is the one swap.
-        rest = self.shelves.replace(late, "")
-        self.assertFalse(live_matches(rest, r"appendChild\(section\)"), "a late shelf is appended in arrival order again")
-        # The model of that rule, in arrival orders the network can produce:
-        # the result is always SHELVES order.
-        import itertools
-
-        def place(box, i, present):
-            for j in range(i + 1, 3):
-                if j in present:
-                    box.insert(box.index(j), i)
-                    return
-            box.append(i)
-        for arrival in itertools.permutations(range(3)):
-            for swapped_with in range(4):          # how many had arrived by the swap
-                box = sorted(arrival[:swapped_with])
-                present = set(box)
-                for i in arrival[swapped_with:]:
-                    place(box, i, present)
-                    present.add(i)
-                self.assertEqual(box, sorted(box), (arrival, swapped_with))
-

@@ -110,9 +110,9 @@ class _FakeKavita:
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
-class HandshakeLandsOnEbooks(unittest.TestCase):
-    """The Kavita sign-in finishes on the eBooks page itself (/ebooks), not on
-    the old /library address, which would cost a second redirect."""
+class HandshakeLandsOnBooks(unittest.TestCase):
+    """The Kavita sign-in finishes on the Books page itself (/books), not on
+    the old /ebooks or /library addresses, which would cost a second redirect."""
 
     def setUp(self):
         from fastapi.testclient import TestClient
@@ -142,13 +142,13 @@ class HandshakeLandsOnEbooks(unittest.TestCase):
              mock.patch.object(kavita_proxy.httpx, "AsyncClient", _FakeKavita):
             return self.client.post("/signin-oidc", data={"code": "c"}, follow_redirects=False)
 
-    def test_success_lands_on_ebooks(self):
+    def test_success_lands_on_books(self):
         r = self.finish(".AspNetCore.Cookies=abc")
-        self.assertEqual((r.status_code, r.headers["location"]), (302, "/ebooks"))
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/books"))
 
-    def test_failure_lands_on_ebooks_with_the_error_flag(self):
+    def test_failure_lands_on_books_with_the_error_flag(self):
         r = self.finish("")
-        self.assertEqual((r.status_code, r.headers["location"]), (302, "/ebooks?kavita=error"))
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/books?kavita=error"))
 
     def test_members_get_no_token_while_ebooks_is_off(self):
         # eBooks switched off mid-handshake: go home (the page gate's answer)
@@ -165,7 +165,7 @@ class HandshakeLandsOnEbooks(unittest.TestCase):
 
     def test_admins_finish_the_handshake_while_ebooks_is_off(self):
         r = self.finish(".AspNetCore.Cookies=abc", {"username": "admin", "is_admin": "true"}, "false")
-        self.assertEqual((r.status_code, r.headers["location"]), (302, "/ebooks"))
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/books"))
         self.update.assert_called_once()
 
 

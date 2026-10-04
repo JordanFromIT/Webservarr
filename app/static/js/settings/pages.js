@@ -69,8 +69,8 @@
 
   // [message, service] when a page can't work yet, else null.
   function needsSetup(id, api) {
-    if (id === 'library' && !api.saved('integration.kavita.url')) {
-      return ['eBooks needs Kavita. It stays out of the sidebar until Kavita is set up.', 'kavita'];
+    if (id === 'library' && !api.saved('integration.kavita.url') && !api.saved('integration.plex.audiobook_library')) {
+      return ['Books needs Kavita or a Plex audiobook library. It stays out of the sidebar until one is set up.', 'kavita'];
     }
     if (id === 'requests') {
       var seerr = !!api.saved('integration.seerr.url'), chaptarr = !!api.saved('integration.chaptarr.url');
