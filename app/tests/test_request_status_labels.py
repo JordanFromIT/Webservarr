@@ -33,64 +33,51 @@ def body_of(src: str, fn: str) -> str:
 
 
 class DiscoverCardStatusLabel(unittest.TestCase):
+    """Audit M3/M8: the shelf card is the Books card, and where a title stands
+    is a mark on its cover, where Books marks a new book (top left), in
+    words from the shared vocabulary."""
+
     def setUp(self):
         self.card = body_of(REQUESTS, "buildDiscoverCard")
-        self.label = body_of(REQUESTS, "discoverStatusLabel")
+        self.label = body_of(REQUESTS, "statusMark")
 
-    def test_the_poster_dot_is_gone(self):
-        for gone in ("dotHtml", "dotColor", "rounded-full", "top-2 left-2", "bg-status-ok", "bg-status-warn"):
-            self.assertNotIn(gone, self.card, gone)
+    def test_the_mark_sits_on_the_cover(self):
+        self.assertTrue(live_matches(self.card, r"\bstatusHtml\s*=\s*statusMark\(\s*status\s*\)"))
+        self.assertTrue(live_matches(self.card, r"coverMarkup\(\s*item\.poster_url \|\| '',\s*mediaType,\s*statusHtml,\s*index >= 8\s*\)"))
+        self.assertIn("absolute left-2 top-2 inline-flex h-6 max-w-[calc(100%-1rem)]", self.label)
+        self.assertIn("'<span class=\"truncate\">' + escapeHtml(shown)", self.label)
 
-    def test_the_label_sits_in_the_badge_row_after_the_type(self):
-        # The card's second line: the type in its media colour, then the
-        # status (audit 2026-10-04: 13px, no 8px badges).
-        row = re.search(r"'<span class=\"flex items-center gap-1\.5 min-w-0 text-label leading-5\">' \+(.*?)'</span>' \+\s*'</span>'", self.card, re.S)
-        self.assertIsNotNone(row, "the type and status line")
-        inner = row.group(1)
-        badge = inner.index("typeBadge + '</span>'")
-        self.assertLess(badge, inner.index("statusHtml"), "the status follows the type")
-        self.assertIn("shrink-0 font-semibold ' + mediaTypeNounColor(mediaType)", inner)
-        self.assertTrue(live_matches(self.card, r"\bstatusHtml\s*=\s*discoverStatusLabel\(\s*status\s*\)"))
-
-    def test_the_label_matches_the_badge_and_gives_way(self):
-        # The line's own type size, so the card keeps its height; it truncates
-        # rather than wrapping or pushing the type out.
-        self.assertIn("min-w-0 truncate text-frosted-blue/70", self.label)
-        self.assertIn("flex items-center gap-1.5 min-w-0 text-label leading-5", self.card)
-        self.assertNotIn("flex-wrap", self.card)
+    def test_on_the_server_takes_the_accent_and_the_rest_are_quiet(self):
+        self.assertIn("(known.tone === 'ready' ? 'bg-primary text-bright' : 'bg-background-dark/80 text-frosted-blue')", self.label)
 
     def test_words_are_the_shared_vocabulary(self):
-        # The words come from WS.requestStatus; on the card the status is
-        # quiet text, no tone (status colour only where the state is the point).
         self.assertTrue(live_matches(self.label, r"\bWS\.requestStatus\(\s*status\s*\)"))
-        self.assertTrue(live_matches(self.label, r"\bescapeHtml\(\s*known\.label\s*\)"))
+        self.assertTrue(live_matches(body_of(REQUESTS, "statusWord"), r"\bWS\.requestStatus\(\s*status\s*\)\.label"))
 
-    def test_no_status_means_no_label(self):
+    def test_no_status_means_no_mark(self):
         # Never requested, or Seerr's "unknown": nothing, not the word Unknown.
         self.assertTrue(live_matches(
             self.label,
             r"if\s*\(\s*!status\s*\|\|\s*status\s*===\s*'unknown'\s*\)\s*return\s*''\s*;"))
         self.assertNotIn("Unknown", self.label)
+        # And "unknown" can be requested from a search card and the dialog.
+        self.assertTrue(live_matches(body_of(REQUESTS, "knownStatus"), r"return s === 'unknown' \? null : s;"))
+        self.assertIn("var status = knownStatus(item.media_status);", body_of(REQUESTS, "buildSearchCard"))
 
     def test_partly_available_is_short_on_the_card_only(self):
-        # R183: "Partly Available" beside "TV Show" always truncated. The card
-        # shows "Partial"; the title keeps the shared label, and the shared
-        # vocabulary (Home, the search block, the modal) is untouched.
-        self.assertRegex(REQUESTS, r"const DISCOVER_SHORT_LABELS = \{ partially_available: 'Partial' \};")
+        # The full words stay in the mark's title and everywhere else.
+        self.assertRegex(REQUESTS, r"const DISCOVER_SHORT_LABELS = \{ partially_available: 'Partly here' \};")
         self.assertTrue(live_matches(
-            self.label, r"\bshown\s*=\s*DISCOVER_SHORT_LABELS\[status\]\s*\|\|\s*known\.label\b"))
-        self.assertRegex(self.label, r"title=\"' \+ escapeHtml\(known\.label\) \+")
-        self.assertTrue(live_matches(self.label, r"\bescapeHtml\(\s*shown\s*\)\s*\+\s*'</span>'"))
-        shell = (STATIC / "js" / "shell.js").read_text(encoding="utf-8")
-        self.assertIn("partially_available: { label: 'Partly Available', tone: 'go' }", shell)
-        self.assertNotIn("Partial'", shell)
+            self.label, r"\bshown\s*=\s*DISCOVER_SHORT_LABELS\[status\]\s*\|\|\s*statusWord\(status\)"))
+        self.assertRegex(self.label, r"title=\"' \+ escapeHtml\(statusWord\(status\)\) \+")
 
-    def test_the_skeleton_card_carries_the_same_row(self):
-        skel = re.search(r'<div class="skel shrink-0 w-32 [^\n]*', REQUESTS_HTML).group(0)
-        for token in ("aspect-[2/3]", "pt-2", "text-label leading-5"):
-            self.assertIn(token, skel, token)
-            self.assertIn(token, self.card, token)
-        self.assertEqual(skel.count("text-label leading-5"), self.card.count("text-label leading-5"))
+    def test_the_skeleton_card_is_the_cards_box(self):
+        skel = re.search(r'<div class="w-36 shrink-0" aria-hidden="true">[^\n]*', REQUESTS_HTML).group(0)
+        self.assertIn("aspect-[2/3] rounded-xl", skel)
+        self.assertIn("min-h-[2.75em]", skel)
+        self.assertIn("text-label leading-5 min-h-5", skel)
+        self.assertIn("'flex w-36 shrink-0 flex-col", self.card.replace('"', "'").replace("class='", "'"))
+
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class BookFormatStatus(unittest.TestCase):

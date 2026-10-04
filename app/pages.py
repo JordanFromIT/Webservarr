@@ -143,7 +143,7 @@ def theme_css(branding: dict) -> str:
     colourful = branding.get("gauges_colourful") is True
     for g in GAUGE_IDS:
         decls.append(f"--ws-gauge-{g}:var(--color-{'gauge-' + g if colourful else 'accent'})")
-    decls.append(f'--font-display:"{_safe_font(branding.get("font"))}",sans-serif')
+    decls.append(f"--font-display:{font_stack(branding)}")
     return ":root{" + ";".join(decls) + "}"
 
 
@@ -163,19 +163,47 @@ def custom_css_style(branding: dict) -> str:
     return '<style id="webservarr-custom-css">' + css.replace("</", "<\\/") + "</style>"
 
 
+# The shipped display font is served from this site (static/fonts), so the
+# page can preload it; a font picked in Settings comes from Google Fonts.
+BUNDLED_FONT = "Spline Sans"
+BUNDLED_FONT_CSS = "/static/fonts/spline-sans.css"
+BUNDLED_FONT_FILE = "/static/fonts/spline-sans-latin.woff2"
+# Arial (or a metric twin) scaled to Spline Sans's widths and line metrics
+# (theme.css), so a page that paints before the font lands lays out the same.
+BUNDLED_FALLBACK = "Spline Sans Fallback"
+
+
+def font_stack(branding: dict) -> str:
+    """--font-display: the family, its metric-matched fallback when it is the
+    shipped one, then the generic family. theme-loader.js builds the same."""
+    family = _safe_font(branding.get("font"))
+    fallback = f'"{BUNDLED_FALLBACK}",' if family == BUNDLED_FONT else ""
+    return f'"{family}",{fallback}sans-serif'
+
+
 def font_links(branding: dict) -> str:
     """
-    The display font, loaded statically with preconnects (no runtime injection).
+    The display font, loaded statically (no runtime injection).
 
     display=optional, not swap: each page is a new document, and with swap its
     first frame paints in the fallback font whenever the (cached) font file
     hasn't been read back yet, then re-lays out every line in the real one -
     titles rewrap, tabs change width, buttons hop. optional gives the font a
-    short wait, which a cached file always makes, and otherwise keeps the
-    fallback for that page instead of swapping. A first-ever visit may show
-    the fallback once; every page after that has the font from its first frame.
+    short wait and otherwise keeps the fallback for that page instead of
+    swapping.
+
+    The shipped font is this site's own file, preloaded from the first bytes of
+    the page, so even a first visit usually has it inside that wait; if not,
+    the fallback it keeps is metric-matched (theme.css), so nothing moves.
+    #ws-font is always the font's stylesheet, so Settings can point it at
+    another font's after a save (shell.js applyShell).
     """
     href = font_href(branding)
+    if _safe_font(branding.get("font")) == BUNDLED_FONT:
+        return (
+            f'<link rel="preload" href="{BUNDLED_FONT_FILE}" as="font" type="font/woff2" crossorigin>'
+            f'<link id="ws-font" rel="stylesheet" href="{html.escape(href, quote=True)}">'
+        )
     return (
         '<link rel="preconnect" href="https://fonts.googleapis.com">'
         '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
@@ -186,6 +214,9 @@ def font_links(branding: dict) -> str:
 def font_href(branding: dict) -> str:
     """The display font's stylesheet address (#ws-font; font_links)."""
     family = _safe_font(branding.get("font"))
+    if family == BUNDLED_FONT:
+        # Stamped as the page stamps it, so Settings applies the same address.
+        return f"{BUNDLED_FONT_CSS}?v={asset_stamp(BUNDLED_FONT_CSS)}"
     return (
         "https://fonts.googleapis.com/css2?family="
         + urllib.parse.quote_plus(family)

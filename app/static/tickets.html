@@ -19,6 +19,7 @@
 <div id="wsPage" data-ws-module="/static/js/pages/tickets.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-hidden">
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+<div class="max-w-[1200px] w-full mx-auto min-w-0">
 
 <!-- Page intro. Paired with the same block on /issues so the two help pages
      each say what they are for and point at the other. -->
@@ -30,42 +31,27 @@ For a problem with a particular movie or show, use <a href="/issues" class="text
 </p>
 </div>
 
-<!-- Counts -->
-<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8" data-arrive="counts">
-<div class="rounded-card bg-frosted-blue/[0.04] p-4 text-center">
-<p class="text-h2 font-bold text-frosted-blue tabular-nums" id="statTotal"><span class="skel skel-num" aria-hidden="true"></span></p>
-<p class="text-label text-frosted-blue/70 font-semibold mt-1 break-words">Total</p>
-</div>
-<div class="rounded-card bg-frosted-blue/[0.04] p-4 text-center">
-<p class="text-h2 font-bold text-frosted-blue tabular-nums" id="statOpen"><span class="skel skel-num" aria-hidden="true"></span></p>
-<p class="text-label text-frosted-blue/70 font-semibold mt-1 break-words">Open</p>
-</div>
-<div class="rounded-card bg-frosted-blue/[0.04] p-4 text-center">
-<p class="text-h2 font-bold text-frosted-blue tabular-nums" id="statInProgress"><span class="skel skel-num" aria-hidden="true"></span></p>
-<p class="text-label text-frosted-blue/70 font-semibold mt-1 break-words">In progress</p>
-</div>
-<div class="rounded-card bg-frosted-blue/[0.04] p-4 text-center">
-<p class="text-h2 font-bold text-frosted-blue tabular-nums" id="statResolved"><span class="skel skel-num" aria-hidden="true"></span></p>
-<p class="text-label text-frosted-blue/70 font-semibold mt-1 break-words">Resolved</p>
-</div>
-</div>
-
 <!-- Contextual wiki pointer. Renders only when an admin has chosen a page in
      the wiki page editor; otherwise it stays hidden and takes no space. -->
 <div id="wikiHookTickets" class="hidden mb-6"></div>
 
-<!-- New ticket + status filter -->
-<div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-2">
-<button type="button" data-action="open-create" class="ws-lift self-start shrink-0 inline-flex items-center gap-2 h-10 px-4 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors">
+<!-- The page's one action, then the person's tickets. Their counts are one
+     quiet line under the heading (audit H3: no row of number cards), held at
+     its height so it arrives without moving anything. -->
+<button type="button" data-action="open-create" class="ws-lift inline-flex items-center gap-2 h-11 pl-4 pr-5 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors">
 <span class="material-symbols-outlined text-xl" aria-hidden="true">add</span>New ticket
 </button>
-<div class="flex flex-wrap gap-2" role="group" aria-label="Show by status">
+
+<h2 id="ticketsTitle" class="mt-8 text-h3 font-bold leading-snug text-frosted-blue">Your tickets</h2>
+<p id="ticketsCounts" class="mt-1 mb-4 text-label leading-5 min-h-5 text-frosted-blue/70 tabular-nums" data-arrive="counts"></p>
+
+<!-- Status filter -->
+<div class="flex flex-wrap gap-2 mb-2" role="group" aria-label="Show by status">
 <button type="button" data-action="filter" data-filter="all" aria-pressed="true" class="filter-tab ws-filter">All</button>
 <button type="button" data-action="filter" data-filter="open" aria-pressed="false" class="filter-tab ws-filter">Open</button>
 <button type="button" data-action="filter" data-filter="in_progress" aria-pressed="false" class="filter-tab ws-filter">In progress</button>
 <button type="button" data-action="filter" data-filter="resolved" aria-pressed="false" class="filter-tab ws-filter">Resolved</button>
 <button type="button" data-action="filter" data-filter="closed" aria-pressed="false" class="filter-tab ws-filter">Closed</button>
-</div>
 </div>
 
 <!-- Category filter -->
@@ -79,10 +65,10 @@ For a problem with a particular movie or show, use <a href="/issues" class="text
 </div>
 
 <!-- Ticket list -->
-<div id="ticketList" class="space-y-2" data-arrive="list">
-<div class="skel skel-row" aria-hidden="true"></div>
-<div class="skel skel-row" aria-hidden="true"></div>
-<div class="skel skel-row" aria-hidden="true"></div>
+<div id="ticketList" class="space-y-3" data-arrive="list">
+<div class="skel h-24 rounded-2xl" aria-hidden="true"></div>
+<div class="skel h-24 rounded-2xl" aria-hidden="true"></div>
+<div class="skel h-24 rounded-2xl" aria-hidden="true"></div>
 </div>
 
 <!-- Pagination -->
@@ -102,6 +88,7 @@ Next<span class="material-symbols-outlined" aria-hidden="true">chevron_right</sp
 <p class="mt-1 text-body text-frosted-blue/70">Use New ticket to ask the server admin anything. Replies show up here.</p>
 </div>
 
+</div>
 </div>
 
 <!-- New ticket: a dialog (WSUI.modal in pages/tickets.js) -->

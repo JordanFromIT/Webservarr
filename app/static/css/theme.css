@@ -19,19 +19,22 @@
   --color-text-secondary: 255 255 255;
   --color-background: 0 0 0;
 
-  /* Media type accents. Three distinct hues rather than shades of the brand
-     palette, because they identify what a thing is rather than decorate it.
+  /* The secondary palette's defaults (media, status, gauges) are derived
+     from the brand palette: one OKLCH lightness and chroma per family, hues
+     spaced around the brand blue (app/settings_registry.py has the numbers).
+     Media type accents are three distinct hues rather than shades of the
+     brand, because they identify what a thing is rather than decorate it.
      Defaults clear 4.5:1 against the primary fill they sit on. */
-  --color-media-movie: 233 213 255;
-  --color-media-tv: 103 232 249;
-  --color-media-book: 252 211 77;
+  --color-media-movie: 232 192 250;
+  --color-media-tv: 135 228 222;
+  --color-media-book: 240 203 141;
 
   /* Status colours (Settings > Appearance > Status colours). --ws-status-*
      below point at these, so one setting per state drives the dot, the ring
      and, on warn and err, the words. */
-  --color-status-ok: 74 222 128;
-  --color-status-warn: 251 191 36;
-  --color-status-err: 248 113 113;
+  --color-status-ok: 101 194 129;
+  --color-status-warn: 218 158 63;
+  --color-status-err: 242 137 126;
 
   /* The "New" flag (Settings > Appearance). Bright gold by default: no palette
      entry is a true yellow-gold, and the eBook amber turns orange under a glow. */
@@ -40,9 +43,9 @@
   /* Home's gauges (Settings > Appearance > Home gauges). Each ring paints
      --ws-gauge-*: the accent by default, or its own --color-gauge-* colour
      while colourful gauges are on (the server's #ws-theme picks which). */
-  --color-gauge-cpu: 6 182 212;
-  --color-gauge-ram: 168 85 247;
-  --color-gauge-net: 249 115 22;
+  --color-gauge-cpu: 38 183 211;
+  --color-gauge-ram: 190 142 219;
+  --color-gauge-net: 219 145 82;
   --ws-gauge-cpu: var(--color-accent);
   --ws-gauge-ram: var(--color-accent);
   --ws-gauge-net: var(--color-accent);
@@ -54,18 +57,38 @@
   --hex-text-secondary: #FFFFFF;
   --hex-background: #000000;
 
-  --hex-media-movie: #E9D5FF;
-  --hex-media-tv: #67E8F9;
-  --hex-media-book: #FCD34D;
-  --hex-status-ok: #4ADE80;
-  --hex-status-warn: #FBBF24;
-  --hex-status-err: #F87171;
+  --hex-media-movie: #E8C0FA;
+  --hex-media-tv: #87E4DE;
+  --hex-media-book: #F0CB8D;
+  --hex-status-ok: #65C281;
+  --hex-status-warn: #DA9E3F;
+  --hex-status-err: #F2897E;
   --hex-new-flag: #FFD60A;
-  --hex-gauge-cpu: #06B6D4;
-  --hex-gauge-ram: #A855F7;
-  --hex-gauge-net: #F97316;
+  --hex-gauge-cpu: #26B7D3;
+  --hex-gauge-ram: #BE8EDB;
+  --hex-gauge-net: #DB9152;
 
-  --font-display: "Spline Sans", sans-serif;
+  --font-display: "Spline Sans", "Spline Sans Fallback", sans-serif;
+}
+
+/* ---- The shipped font's fallback ----
+ *
+ * The shipped font (Spline Sans, static/fonts/spline-sans.css) is preloaded
+ * and shown with font-display: optional. A page painted before it lands keeps
+ * this face instead: Arial, or the metric twin a system has, scaled to Spline
+ * Sans's average width (size-adjust) with its ascent, descent and line gap,
+ * so every line breaks and sits where Spline Sans would put it. Measured from
+ * the font files: Spline Sans 400 (2000 units, ascent 1927, descent 473, no
+ * gap) against Liberation Sans, which shares Arial's widths. Roboto comes
+ * within 0.2% of the same numbers.
+ */
+@font-face {
+  font-family: "Spline Sans Fallback";
+  src: local("Arial"), local("ArialMT"), local("Liberation Sans"), local("Arimo"), local("Roboto"), local("Helvetica");
+  size-adjust: 101.44%;
+  ascent-override: 94.98%;
+  descent-override: 23.31%;
+  line-gap-override: 0%;
 }
 
 /* ---- Base ---- */

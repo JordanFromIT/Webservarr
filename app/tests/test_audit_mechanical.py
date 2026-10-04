@@ -133,9 +133,9 @@ class TypeFloorAndSentenceCase(unittest.TestCase):
         self.assertEqual(hits, [], "\n".join(hits))
 
     def test_no_uppercase_labels(self):
-        # The login's Plex wordmark is the login card's own finding (M7, a
-        # design decision); the settings hex field is a colour code.
-        allowed = {("login.html", 2), ("js/settings/kit.js", 1)}
+        # The settings hex field is a colour code. (The login's faked Plex
+        # wordmark went with the card's restyle, M7.)
+        allowed = {("js/settings/kit.js", 1)}
         counts = {}
         for rel, src in static_files():
             n = len(re.findall(r"(?<![-\w:])uppercase(?![-\w])", src)) + \
@@ -188,7 +188,7 @@ class EveryCardIsAControl(unittest.TestCase):
         self.assertEqual(len(re.findall(r"document\.createElement\('button'\);\s*\w+\.type = 'button';", cal)), 2)
         self.assertIn("aria-label', dayLabel(", cal)
         requests = read("js/pages/requests.js")
-        self.assertRegex(requests, r"""'<button type="button" class="shrink-0 w-32 text-left rounded-inner ws-lift group" ' \+\s*'data-action="open-media" """)
+        self.assertRegex(requests, r"""'<button type="button" class="flex w-36 shrink-0 flex-col text-left rounded-xl ws-lift group" ' \+\s*'data-action="open-media" """)
 
     def test_no_clickable_divs_and_no_hover_zoom(self):
         for rel in ("js/pages/issues.js", "js/pages/tickets.js", "js/pages/calendar.js", "js/pages/requests.js"):

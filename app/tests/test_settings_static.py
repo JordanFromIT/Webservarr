@@ -223,8 +223,8 @@ class Hygiene(unittest.TestCase):
             text = f.read_text(encoding="utf-8")
             # Font names are legitimate choices in the Appearance font list, so the
             # default font is not checked here; colours, tagline and icon defaults are.
-            for leaked in ("#125793", "#2C6DA1", "#4684B0", "#BEEEF4", "#E9D5FF", "#67E8F9", "#FCD34D",
-                           "#4ADE80", "#FBBF24", "#F87171", "#FFD60A",
+            for leaked in ("#125793", "#2C6DA1", "#4684B0", "#BEEEF4", "#E8C0FA", "#87E4DE", "#F0CB8D",
+                           "#65C281", "#DA9E3F", "#F2897E", "#FFD60A", "#26B7D3", "#BE8EDB", "#DB9152",
                            "Media Server Management", "health_metrics", "confirmation_number",
                            "settings_input_component", "***masked***"):
                 self.assertNotIn(leaked, text, f"{f.name} carries a default ({leaked}); read it from meta")

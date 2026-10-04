@@ -1010,8 +1010,8 @@ class RequestsPage(unittest.TestCase):
         self.assertEqual(on_search, 2, "the film/TV search and the book search")
         self.assertNotRegex(code, r"\bgetJSON\(")
         # A page left mid-request says nothing and writes nothing.
-        self.assertEqual(len(re.findall(r"if \(signal\.aborted \|\| isAbort\(\w+\)\) return;", code)), 7,
-                         "request status, discover, search, a request, the counts, the summary, the recent requests")
+        self.assertEqual(len(re.findall(r"if \(signal\.aborted \|\| isAbort\(\w+\)\) return(?: null)?;", code)), 7,
+                         "request status, a shelf source, search, a request, the counts, the summary, the recent requests")
 
     def test_timers_and_refresh_are_the_pages(self):
         code = self.code()
@@ -1022,14 +1022,10 @@ class RequestsPage(unittest.TestCase):
         # The search wait is re-armed per keystroke and cancelled through the visit.
         self.assertIn("ctx.clearTimeout(searchTimer);", code)
         self.assertIn("searchTimer = ctx.setTimeout(function () {", code)
-        # The scroll lock's failsafe and its listeners end with the visit.
-        self.assertIn("_scrollLockFailsafe = ctx.setTimeout(unlockScroll, SEARCH_MOVE_DURATION + 2000);", code)
-        for ev in ("wheel", "touchmove"):
-            self.assertIn(f"window.addEventListener('{ev}', swallowScroll, {{ passive: false, signal: signal }});",
-                          module_source("requests"))
-        # A move still in flight when the page is left touches nothing.
-        frame = function_body(code, "frame")
-        self.assertRegex(frame, r"^\s*if \(signal\.aborted\) \{ _searchMoveRaf = null; return; \}")
+        # The search stays where it is (audit M8): no travelling bar, so no
+        # scroll lock and no animation frame loop to outlive the visit.
+        for gone in ("swallowScroll", "requestAnimationFrame", "_scrollLockFailsafe", "moveSearchBar"):
+            self.assertNotIn(gone, code, gone)
         # The first read is the page's own (a poll on screen reads nothing at once).
         self.assertIn("Promise.all([RS.load(), loadRequestCounts(), loadLibrarySummary(), loadExistingRequests()])", code)
 
@@ -1068,7 +1064,7 @@ class RequestsPage(unittest.TestCase):
         self.assertNotRegex(h, r"\son[a-z]+\s*=")
         src = module_source("requests")
         for action, n in (("search-prev", 1), ("search-next", 1), ("requests-prev", 1), ("requests-next", 1),
-                          ("filter", 5), ("close-modal", 2), ("discover-scroll", 14)):
+                          ("filter", 5), ("close-modal", 2), ("discover-scroll", 6)):
             self.assertEqual(h.count(f'data-action="{action}"'), n, action)
             self.assertIn(f"case '{action}':", src, action)
         for action in ("open-media", "request-media", "request-from-modal"):
@@ -1088,15 +1084,14 @@ class RequestsPage(unittest.TestCase):
         self.assertIn('id="mediaModal"', page)
         code = self.code()
         self.assertNotIn("document.body.appendChild", code)
-        # Lookups stay inside the page; the one exception is the shell's phone bar.
-        self.assertEqual(re.findall(r"\bdocument\.getElementById\(", code), ["document.getElementById("])
-        self.assertIn("document.getElementById('mobileTopBar')", module_source("requests"))
+        # Lookups stay inside the page.
+        self.assertEqual(re.findall(r"\bdocument\.getElementById\(", code), [])
 
     def test_module_state_is_data(self):
         # Top level: constants and functions; each visit's state lives in mount.
         src = module_source("requests")
         self.assertNotRegex(src, r"^(?:let|var) ")
-        for name in ("_searchResults", "_allRequests", "_discoverItems", "_searchBarPosition"):
+        for name in ("_searchResults", "_allRequests", "_discoverItems", "_dialog"):
             self.assertIn(f"  var {name} = ", src[src.index("export async function mount"):], name)
 
     def test_the_discover_rows_scroll_with_the_visit(self):

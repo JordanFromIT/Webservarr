@@ -376,12 +376,22 @@ class ShellRendering(unittest.TestCase):
         out = render()
         self.assertIn('<style id="ws-theme">', out)
         self.assertIn("--color-primary:18 87 147", out)
-        self.assertIn('--font-display:"Spline Sans",sans-serif', out)
-        self.assertIn('<link id="ws-font" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spline+Sans', out)
-        self.assertIn('rel="preconnect" href="https://fonts.gstatic.com" crossorigin', out)
-        # optional, never swap: a swap re-lays out the page when the font lands.
-        self.assertRegex(out, r'<link id="ws-font" rel="stylesheet" href="[^"]*&amp;display=optional"')
-        self.assertNotIn("display=swap", out)
+        # The shipped font: its metric-matched fallback, this site's own file
+        # preloaded, no third-party connection (audit L8).
+        self.assertIn('--font-display:"Spline Sans","Spline Sans Fallback",sans-serif', out)
+        self.assertIn('<link rel="preload" href="/static/fonts/spline-sans-latin.woff2" as="font" type="font/woff2" crossorigin>', out)
+        self.assertRegex(out, r'<link id="ws-font" rel="stylesheet" href="/static/fonts/spline-sans\.css\?v=[^"]+">')
+        self.assertNotIn("fonts.googleapis.com", out)
+        # A font picked in Settings comes from Google Fonts, optional, never swap:
+        # a swap re-lays out the page when the font lands.
+        other = render(b=branding(**{"theme.font": "Exo 2"}))
+        self.assertIn('--font-display:"Exo 2",sans-serif', other)
+        self.assertIn('<link id="ws-font" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2', other)
+        self.assertIn('rel="preconnect" href="https://fonts.gstatic.com" crossorigin', other)
+        self.assertRegex(other, r'<link id="ws-font" rel="stylesheet" href="[^"]*&amp;display=optional"')
+        self.assertNotIn('rel="preload" href="/static/fonts/', other)
+        for page in (out, other):
+            self.assertNotIn("display=swap", page)
         data = data_of(out)
         self.assertEqual(data["user"]["username"], "root")
         self.assertIs(data["user"]["is_admin"], True)
@@ -411,7 +421,7 @@ class ShellRendering(unittest.TestCase):
                         "theme.font": 'Evil"; @import'})
         out = render(b=b)
         self.assertIn("--color-primary:18 87 147", out)
-        self.assertIn("family=Spline+Sans", out)
+        self.assertIn('href="/static/fonts/spline-sans.css?v=', out)   # the shipped font, served here
         # The whole head, the #ws-data block included: theme-loader applies
         # that block's font and colours inline, so it carries the safe values too.
         head = out.split("<body>")[0]
@@ -641,8 +651,9 @@ class ShellRendering(unittest.TestCase):
         # 3") is only a valid font-family when quoted. The loader's inline
         # value beats the server's #ws-theme rule, so it quotes the same way.
         src = static_text("js", "theme-loader.js")
-        expr = r"""'"' \+ data\.font \+ '", sans-serif'"""
+        expr = r"""'"' \+ data\.font \+ '", ' \+ fallback \+ 'sans-serif'"""
         self.assertEqual(len(live_matches(src, rf"setProperty\('--font-display', {expr}\)")), 1)
+        self.assertEqual(len(live_matches(src, r"""var fallback = data\.font === 'Spline Sans' \? '"Spline Sans Fallback", ' : '';""")), 1)
         # No other live write of the variable (a comment can't count either way).
         self.assertEqual(len(live_matches(src, r"setProperty\('--font-display',")), 1)
         # Parity with the server for the names that need the quotes.
@@ -650,7 +661,8 @@ class ShellRendering(unittest.TestCase):
             with self.subTest(family=family):
                 server = re.search(r"--font-display:([^;}]*)", pages.theme_style(branding(**{"theme.font": family})))
                 self.assertIsNotNone(server)
-                loader = '"' + family + '", sans-serif'     # what the pinned expression builds
+                fallback = '"Spline Sans Fallback", ' if family == "Spline Sans" else ""
+                loader = '"' + family + '", ' + fallback + 'sans-serif'     # what the pinned expression builds
                 self.assertEqual(loader.replace(", ", ","), server.group(1))
 
 
@@ -953,12 +965,15 @@ class NewsCardsHoldTheirSkeleton(unittest.TestCase):
                                skel_title='<p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p>',
                                skel_excerpt='<p class="text-sm mt-1 min-h-10">&nbsp;</p>',
                                skel='<div class="skel rounded-xl p-4'),
+            # The archive's card is the Books list row since the audit's design
+            # items (2026-10-04): a 16px card, 17px (20px from sm) title, a
+            # quiet line, the 15px excerpt held at 48px.
             "news.html": dict(tag="h2", cards=3, js="news.js",
-                              title="'<h2 data-news-title class=\"text-lead leading-6 font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0\">'",
-                              excerpt="'<p class=\"text-body text-frosted-blue/70 mt-1 line-clamp-2 min-h-12\">'",
-                              skel_title='<p class="text-lead leading-6 font-bold min-h-12 sm:min-h-0">&nbsp;</p>',
+                              title="'<h2 data-news-title class=\"text-lead sm:text-h3 leading-snug font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0\">'",
+                              excerpt="'<p class=\"text-body text-frosted-blue/70 mt-1 line-clamp-2 min-h-12 max-w-[70ch]\">'",
+                              skel_title='<p class="text-lead sm:text-h3 leading-snug font-bold min-h-12 sm:min-h-0">&nbsp;</p>',
                               skel_excerpt='<p class="text-body mt-1 min-h-12">&nbsp;</p>',
-                              skel='<div class="skel rounded-card p-4'),
+                              skel='<div class="skel rounded-2xl p-4 sm:p-5'),
         }
         for name, want in pages.items():
             with self.subTest(name):

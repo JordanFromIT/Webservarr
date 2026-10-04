@@ -81,7 +81,7 @@ body.rs-resizing { cursor: col-resize; user-select: none; }
   border-bottom: 1px solid rgb(var(--color-accent) / 0.1);
 }
 .rs-row:hover .rs-td { background: rgb(var(--color-text) / 0.04); }
-/* The title column stays put while the rest scrolls — without it a wide grid
+/* The title column stays put while the rest scrolls: without it a wide grid
    loses the only thing identifying each row. */
 @media (min-width: 1024px) {
   .rs-th.rs-sticky, .rs-td.rs-sticky {
@@ -109,17 +109,18 @@ body.rs-resizing { cursor: col-resize; user-select: none; }
 .rs-chip-wait  { background: rgb(var(--color-accent) / 0.18);  color: rgb(var(--color-text) / 0.85); }
 .rs-chip-stuck { background: rgb(var(--color-secondary) / 0.3); color: rgb(var(--color-text)); }
 .rs-chip-dead  { background: rgb(var(--color-accent) / 0.12);  color: rgb(var(--color-text) / 0.8); }
+/* The Books select (pages: books.html #sortSelect): 40px, 10px radius, the
+   7% surface, no border. */
 .rs-select {
-  background: rgb(var(--color-text) / 0.04);
-  border: 1px solid rgb(var(--color-accent) / 0.2);
-  border-radius: 0.5rem; padding: 0.5rem 0.75rem;
-  font-size: 0.8125rem; color: rgb(var(--color-text));
+  height: 2.5rem; border: 0; border-radius: 10px;
+  background-color: rgb(var(--color-text) / 0.07);
+  padding: 0 2.25rem 0 1rem;
+  font-size: 15px; color: rgb(var(--color-text));
 }
-.rs-select:focus { outline: none; border-color: rgb(var(--color-primary) / 0.6); }
+.rs-select:focus { outline: none; box-shadow: none; }
 .rs-select:focus-visible { outline: 2px solid rgb(var(--color-text)); outline-offset: 2px; }
-.poster-placeholder {
-  background: linear-gradient(135deg, rgba(var(--color-primary) / 0.3), rgba(var(--color-secondary) / 0.15));
-}
+/* A poster that never loads: the Books cover's empty frame, with the type's glyph. */
+.poster-placeholder { background: rgb(var(--color-text) / 0.07); }
 /* Discover rows */
 .discover-row {
   scrollbar-width: none;
@@ -188,188 +189,115 @@ html[data-rs-empty] #rsSection { display: none; }
 <div id="wsPage" data-ws-module="/static/js/pages/requests.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-hidden">
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+<!-- The Books layout (audit M3, M8): the title and one line, then the page's
+     job, one search for everything. While there is a search its results take
+     the place of everything under it, as on Books; the rest is grouped by
+     what people come for, not by which service answers: shelves to browse,
+     then where earlier requests stand. -->
+<div class="max-w-[1200px] w-full mx-auto min-w-0">
 <div class="mb-6">
 <h1 class="text-h2 sm:text-h1 font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue">Requests</h1>
 <p class="mt-2 text-body text-frosted-blue/70 max-w-[65ch]">Ask for a movie, show or book that isn&rsquo;t on the server yet, and see where earlier requests stand.</p>
 </div>
 
-<!-- Zero-height host: the bar floats in the empty space to the right of the
-     first "Trending" heading, so nothing on the page is displaced by it.
-     The slot carries the absolute positioning rather than the bar itself - the
-     bar must stay position:relative for its own search icon. -->
-<!-- sticky, not relative: a user who scrolls down before searching would
-     otherwise lose the search field entirely and find only the gap held open
-     for it further down the page, which reads as a broken layout. Sticking it
-     keeps the field reachable from anywhere on the page. h-0 means it still
-     occupies no space, and at rest it sits below the sticky threshold, so the
-     unscrolled view is unchanged.
-     top-0, not a positive inset: sticky offsets resolve against the
-     scrollport's padding box, which already sits 32px in, so any positive top
-     would push the bar below where it sits today and change the resting view.
-     At 0 the sticky edge coincides with the natural position, so the unscrolled
-     page is pixel-identical and the bar only holds still once scrolled.
-     Sticky - unlike transform - does not become a containing block for the
-     position:fixed the bar takes during its move, so pinning still resolves
-     against the viewport. -->
-<div id="searchHome" class="sticky top-0 h-0 z-20">
-  <!-- Centred with auto margins, NOT a transform: a transformed ancestor makes
-       position:fixed resolve against that element instead of the viewport,
-       which breaks pinning the bar during its move. Nudged up so it centres on
-       the heading band rather than hanging into the poster row. -->
-  <div id="searchHomeSlot" class="absolute inset-x-0 -top-1 w-full max-w-lg mx-auto"></div>
+<!-- One search: movies and shows, and books, together (pages/requests.js performSearch). -->
+<div id="searchBar" class="relative w-full max-w-[36rem]">
+<label for="searchInput" class="sr-only">Search movies, TV shows and books</label>
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-frosted-blue/70 pointer-events-none" aria-hidden="true">search</span>
+<input id="searchInput" type="search" autocomplete="off" maxlength="200" placeholder="Movie, show or book"
+  class="w-full h-12 rounded-xl border-0 bg-frosted-blue/[0.07] pl-12 pr-4 text-lead text-ellipsis text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
 </div>
+<!-- The library summary's one figure a requester cares about, in one quiet
+     line (audit H3): how long a request usually takes. Both wordings are the
+     same length and the line holds two lines on a phone (one from sm), so the
+     figure arriving moves nothing. -->
+<p id="requestWait" class="mt-2 text-label leading-5 min-h-10 sm:min-h-5 text-frosted-blue/70">Requests are handled automatically, and most arrive within the hour.</p>
 
-<!-- Discover Section.
-     The rows and their skeletons are markup, so they are in the first paint:
-     built by script they arrived as a block that pushed everything below them
-     down. The skeleton card is the real card (buildDiscoverCard in
-     pages/requests.js) with nothing in it: the glass card's 1px border, the
-     poster box, and the badge row and title line at their real sizes, so a
-     row is the same height before and after its data. The row ids are the
-     ones pages/requests.js fills (DISCOVER_ROWS); the arrows are data-actions
-     on the page's one click listener. -->
-<div id="discoverSection" class="mb-8">
-<section class="mb-6" aria-labelledby="trendingTitle">
-  <h2 id="trendingTitle" class="text-lead font-bold text-frosted-blue mb-3">Trending</h2>
+<!-- Search results: only while there is a search (hidden, so nothing is held for them before). -->
+<section id="searchResultsSection" class="hidden mt-8" aria-labelledby="searchTitle">
+<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-4">
+<h2 id="searchTitle" class="text-h3 font-bold leading-snug text-frosted-blue">Results</h2>
+<span id="searchResultCount" class="text-body text-frosted-blue/70 tabular-nums" aria-live="polite"></span>
+</div>
+<div id="searchResultsGrid" class="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6"></div>
+<div id="searchPagination" class="flex items-center justify-center gap-3 mt-8 hidden">
+<button id="searchPrevBtn" type="button" data-action="search-prev" class="inline-flex items-center gap-1 h-10 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed pl-2 pr-2 sm:pr-4">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span><span class="sr-only sm:not-sr-only">Previous</span>
+</button>
+<span id="searchPageInfo" class="text-body text-frosted-blue/70 tabular-nums whitespace-nowrap"></span>
+<button id="searchNextBtn" type="button" data-action="search-next" class="inline-flex items-center gap-1 h-10 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed pl-2 sm:pl-4 pr-2">
+<span class="sr-only sm:not-sr-only">Next</span><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+</button>
+</div>
+</section>
+
+<!-- Everything else, out of the way while there is a search. -->
+<div id="browseArea" class="mt-8 space-y-8">
+
+<!-- The shelves. Each is one want (what's popular, what's coming, books),
+     filled from several sources (pages/requests.js SHELVES). Rows and their
+     skeleton cards are markup, so they are in the first paint at their final
+     height: a skeleton card is the real card (buildDiscoverCard) with nothing
+     in it, the Books cover and its two lines. The arrows are data-actions on
+     the page's one click listener. -->
+<div id="discoverSection" class="space-y-8">
+<section class="discover-shelf" aria-labelledby="trendingTitle">
+  <h2 id="trendingTitle" class="text-h3 font-bold leading-snug text-frosted-blue mb-3">Trending</h2>
   <div class="discover-row-wrapper relative">
     <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
       <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
     </button>
-    <div id="trendingRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+    <div id="trendingRow" class="discover-row -mx-4 px-4 lg:mx-0 lg:px-0 flex items-start gap-4 overflow-x-auto scroll-smooth py-1">
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
     </div>
     <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
       <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
     </button>
   </div>
 </section>
-<section class="mb-6" aria-labelledby="popularMoviesTitle">
-  <h2 id="popularMoviesTitle" class="text-lead font-bold text-frosted-blue mb-3">Popular movies</h2>
+<section class="discover-shelf" aria-labelledby="comingTitle">
+  <h2 id="comingTitle" class="text-h3 font-bold leading-snug text-frosted-blue mb-3">Coming soon</h2>
   <div class="discover-row-wrapper relative">
     <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
       <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
     </button>
-    <div id="popularMoviesRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+    <div id="comingRow" class="discover-row -mx-4 px-4 lg:mx-0 lg:px-0 flex items-start gap-4 overflow-x-auto scroll-smooth py-1">
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
     </div>
     <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
       <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
     </button>
   </div>
 </section>
-<section class="mb-6" aria-labelledby="upcomingMoviesTitle">
-  <h2 id="upcomingMoviesTitle" class="text-lead font-bold text-frosted-blue mb-3">Upcoming movies</h2>
+<section class="discover-shelf" aria-labelledby="booksTitle">
+  <h2 id="booksTitle" class="text-h3 font-bold leading-snug text-frosted-blue mb-3">Books</h2>
   <div class="discover-row-wrapper relative">
     <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
       <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
     </button>
-    <div id="upcomingMoviesRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-    </div>
-    <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
-      <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
-    </button>
-  </div>
-</section>
-<section class="mb-6" aria-labelledby="popularSeriesTitle">
-  <h2 id="popularSeriesTitle" class="text-lead font-bold text-frosted-blue mb-3">Popular TV shows</h2>
-  <div class="discover-row-wrapper relative">
-    <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
-      <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
-    </button>
-    <div id="popularSeriesRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-    </div>
-    <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
-      <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
-    </button>
-  </div>
-</section>
-<section class="mb-6" aria-labelledby="upcomingSeriesTitle">
-  <h2 id="upcomingSeriesTitle" class="text-lead font-bold text-frosted-blue mb-3">Upcoming TV shows</h2>
-  <div class="discover-row-wrapper relative">
-    <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
-      <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
-    </button>
-    <div id="upcomingSeriesRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-    </div>
-    <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
-      <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
-    </button>
-  </div>
-</section>
-<section class="mb-6" aria-labelledby="trendingBooksTitle">
-  <h2 id="trendingBooksTitle" class="text-lead font-bold text-frosted-blue mb-3">Trending books</h2>
-  <div class="discover-row-wrapper relative">
-    <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
-      <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
-    </button>
-    <div id="trendingBooksRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-    </div>
-    <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
-      <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
-    </button>
-  </div>
-</section>
-<section class="mb-6" aria-labelledby="trendingAudiobooksTitle">
-  <h2 id="trendingAudiobooksTitle" class="text-lead font-bold text-frosted-blue mb-3">Trending audiobooks</h2>
-  <div class="discover-row-wrapper relative">
-    <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
-      <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
-    </button>
-    <div id="trendingAudiobooksRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+    <div id="booksRow" class="discover-row -mx-4 px-4 lg:mx-0 lg:px-0 flex items-start gap-4 overflow-x-auto scroll-smooth py-1">
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+      <div class="w-36 shrink-0" aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
     </div>
     <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
       <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
@@ -378,129 +306,11 @@ html[data-rs-empty] #rsSection { display: none; }
 </section>
 </div>
 
-<!-- Library summary. Also the scroll anchor for the search bar's move: the view
-     settles with these figures on screen above the search field.
-
-     Three named sections, each led by one dominant figure. A flat rail of
-     thirteen equal numbers was scannable on a desktop and a wall on a phone,
-     where it wrapped to five undifferentiated rows; grouping gives the eye
-     somewhere to land, and the hero gives each group an answer rather than a
-     list.
-
-     The grouping is not cosmetic. LIBRARY is what exists, QUEUE is what is
-     moving, COMPLETENESS is how much of what was wanted actually arrived -
-     which is why Requests Fulfilled sits with the completeness figures and
-     Added This Month with the queue, rather than the other way round. -->
-<div id="statsRow" class="mb-8">
-  <div class="flex flex-col gap-6 lg:flex-row lg:gap-10">
-
-    <section class="flex-1 min-w-0">
-      <h2 class="text-body font-semibold text-frosted-blue pb-2 mb-3 border-b border-frosted-blue/10">Library</h2>
-      <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-h1 font-bold text-frosted-blue tabular-nums leading-none" id="statSize"><span class="skel skel-num" style="width:5ch" aria-hidden="true"></span></span>
-        <span class="text-label text-frosted-blue/70 font-semibold">On disk</span>
-      </div>
-      <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statMovies"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">Movies</p>
-        </div>
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statShows"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">TV shows</p>
-        </div>
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statEpisodes"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">Episodes</p>
-        </div>
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statEbooks"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">Ebooks</p>
-        </div>
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statAudiobooks"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">Audiobooks</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="flex-1 min-w-0">
-      <h2 class="text-body font-semibold text-frosted-blue pb-2 mb-3 border-b border-frosted-blue/10">Queue</h2>
-      <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-h1 font-bold text-frosted-blue tabular-nums leading-none" id="statWait"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
-        <span class="text-label text-frosted-blue/70 font-semibold">Typical wait</span>
-      </div>
-      <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statInProgress"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">In progress</p>
-        </div>
-        <!-- Kept apart from In Progress: a film awaiting its cinema release is
-             not a stuck request, and counting it as one makes the queue look
-             broken. -->
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statUnreleased"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">Not out yet</p>
-        </div>
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statAdded"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">Added this month</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Resolution split. The hero is the share of everything that is 1080p or
-         better, because that is the question behind "is this a good library" -
-         the per-bucket counts underneath answer "how much 4K have you got". -->
-    <section class="flex-1 min-w-0">
-      <h2 class="text-body font-semibold text-frosted-blue pb-2 mb-3 border-b border-frosted-blue/10">Quality</h2>
-      <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-h1 font-bold text-frosted-blue tabular-nums leading-none" id="statHdPct"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
-        <span class="text-label text-frosted-blue/70 font-semibold">HD or better</span>
-      </div>
-      <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kMovies"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">4K movies</p>
-        </div>
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kEpisodes"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">4K episodes</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="flex-1 min-w-0">
-      <h2 class="text-body font-semibold text-frosted-blue pb-2 mb-3 border-b border-frosted-blue/10">Completeness</h2>
-      <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-h1 font-bold text-frosted-blue tabular-nums leading-none" id="statFulfilled"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
-        <span class="text-label text-frosted-blue/70 font-semibold">Requests fulfilled</span>
-      </div>
-      <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
-        <!-- Shows and seasons answer different questions - a show counts only
-             when every one of its seasons does - so both are given rather than
-             one standing in for the other. -->
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statComplete"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">Complete shows</p>
-        </div>
-        <div class="min-w-0">
-          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statSeasons"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-label text-frosted-blue/70 leading-tight">Complete seasons</p>
-        </div>
-      </div>
-    </section>
-
-  </div>
-</div>
-
-<!-- Request status grid.
-     Full width and above the search columns: it answers "where is the thing I
-     already asked for", which is the question people arrive with, and it would
-     be buried under discover + stats + search anywhere lower. -->
-<section id="rsSection" class="mb-8">
+<!-- Where requests stand. Collapsed from the first paint when nothing is
+     waiting (html[data-rs-empty], the server's), so it never pulls the page up. -->
+<section id="rsSection" aria-labelledby="rsTitle">
   <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1">
-    <h2 class="text-h3 font-bold text-frosted-blue">Where requests stand</h2>
+    <h2 id="rsTitle" class="text-h3 font-bold leading-snug text-frosted-blue">Where requests stand</h2>
     <span id="rsCount" class="text-body text-frosted-blue/70 tabular-nums"></span>
     <span id="rsFresh" class="ml-auto text-label text-frosted-blue/70"></span>
   </div>
@@ -515,7 +325,7 @@ html[data-rs-empty] #rsSection { display: none; }
       <label for="rsSearch" class="sr-only">Find a request</label>
       <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 text-lg pointer-events-none" aria-hidden="true">search</span>
       <input id="rsSearch" type="search" placeholder="Find a title"
-        class="w-full pl-10 pr-3 py-2 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"/>
+        class="w-full h-10 pl-10 pr-3 rounded-btn border-0 bg-frosted-blue/[0.07] text-frosted-blue placeholder-frosted-blue/70 text-body focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
     </div>
     <select id="rsFilterStatus" class="rs-select" aria-label="Status"><option value="">All statuses</option></select>
     <select id="rsFilterType" class="rs-select" aria-label="Kind">
@@ -526,7 +336,7 @@ html[data-rs-empty] #rsSection { display: none; }
   </div>
 
   <!-- The grid. Scrolls inside itself; the page never scrolls sideways. -->
-  <div id="rsScroll" class="rs-scroll rounded-card border border-frosted-blue/10">
+  <div id="rsScroll" class="rs-scroll rounded-card bg-frosted-blue/[0.04]">
     <table class="rs-grid" id="rsGrid">
       <thead>
         <tr id="rsHead"></tr>
@@ -537,85 +347,39 @@ html[data-rs-empty] #rsSection { display: none; }
   <p id="rsEmpty" class="hidden text-body text-frosted-blue/70 py-6"></p>
 </section>
 
-<!-- Two-column layout: Search (left) + Requests (right) on desktop, stacked on mobile -->
-<div class="flex flex-col lg:flex-row gap-10 lg:gap-12">
-
-<!-- Left column: Search -->
-<section class="w-full lg:w-1/2 min-w-0" aria-labelledby="searchTitle">
-<!-- Where the search bar lands once a search is under way -->
-<div id="searchDock" class="mb-4">
-<!-- Movable search bar. Starts life here so it inherits the dock's width, then
-     is floated up to the trending heading on load. -->
-<div id="searchBar" class="relative w-full">
-<label for="searchInput" class="sr-only">Search movies, TV shows and books</label>
-<!-- z-10: the field's backdrop blur makes it a layer of its own, painted over an icon without one. -->
-<span class="material-symbols-outlined absolute z-10 left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 text-xl pointer-events-none" aria-hidden="true">search</span>
-<input id="searchInput" type="search" autocomplete="off" placeholder="Search movies, TV shows and books"
-  class="w-full pl-10 pr-4 py-2.5 bg-cornflower-ocean/25 backdrop-blur-xl border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-body shadow-lg shadow-black/30"/>
-</div>
-</div>
-<p class="mb-5 text-label leading-relaxed text-frosted-blue/70">Requests are handled automatically and usually arrive within an hour, though not everything can be found.</p>
-<div class="flex items-baseline gap-2 mb-4">
-<h2 id="searchTitle" class="text-h3 font-bold text-frosted-blue">Search results</h2>
-<span id="searchResultCount" class="text-body text-frosted-blue/70 tabular-nums"></span>
-</div>
-<!-- Search Results Section (hidden by default) -->
-<section id="searchResultsSection" class="hidden">
-<div id="searchResultsGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-</div>
-<!-- Search pagination -->
-<div id="searchPagination" class="flex items-center justify-center gap-3 mt-6 hidden">
-<button id="searchPrevBtn" type="button" data-action="search-prev" class="inline-flex items-center gap-1 h-10 pl-2 pr-4 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
-<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>Previous
-</button>
-<span id="searchPageInfo" class="text-body text-frosted-blue/70 tabular-nums"></span>
-<button id="searchNextBtn" type="button" data-action="search-next" class="inline-flex items-center gap-1 h-10 pl-4 pr-2 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
-Next<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
-</button>
-</div>
-</section>
-
-<!-- Search empty state (shown by default) -->
-<div id="searchEmptyState" class="text-frosted-blue/70 py-6">
-<p class="text-body">Search above for something to request.</p>
-</div>
-</section>
-
-<!-- Right column: recent requests -->
-<section class="w-full lg:w-1/2 min-w-0" aria-labelledby="recentTitle">
-<div class="flex items-baseline gap-2 mb-4">
-<h2 id="recentTitle" class="text-h3 font-bold text-frosted-blue">Recent requests</h2>
+<!-- Recent requests: the posters, as on Books, with where each one stands. -->
+<section aria-labelledby="recentTitle">
+<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
+<h2 id="recentTitle" class="text-h3 font-bold leading-snug text-frosted-blue">Recent requests</h2>
 <span id="requestsTotalCount" class="text-body text-frosted-blue/70 tabular-nums"></span>
 </div>
-<div>
-<!-- Filter chips -->
-<div class="flex flex-wrap gap-2 mb-4" role="group" aria-label="Show by status">
+<div class="flex flex-wrap gap-2 mb-5" role="group" aria-label="Show by status">
 <button type="button" data-action="filter" data-filter="all" aria-pressed="true" class="filter-tab ws-filter">All</button>
 <button type="button" data-action="filter" data-filter="pending" aria-pressed="false" class="filter-tab ws-filter">Requested</button>
 <button type="button" data-action="filter" data-filter="approved" aria-pressed="false" class="filter-tab ws-filter">Approved</button>
 <button type="button" data-action="filter" data-filter="available" aria-pressed="false" class="filter-tab ws-filter">Available</button>
 <button type="button" data-action="filter" data-filter="declined" aria-pressed="false" class="filter-tab ws-filter">Declined</button>
 </div>
-
-<!-- Requests Grid -->
-<div id="requestsGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-<div class="skel rounded-card h-24" aria-hidden="true"></div>
-<div class="skel rounded-card h-24" aria-hidden="true"></div>
-<div class="skel rounded-card h-24" aria-hidden="true"></div>
+<div id="requestsGrid" class="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6">
+<div aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+<div aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+<div aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+<div aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+<div aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
+<div aria-hidden="true"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-body leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-label leading-5 min-h-5">&nbsp;</p></div>
 </div>
-<!-- Requests pagination -->
-<div id="requestsPagination" class="flex items-center justify-center gap-3 mt-6 hidden">
-<button id="requestsPrevBtn" type="button" data-action="requests-prev" class="inline-flex items-center gap-1 h-10 pl-2 pr-4 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
-<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>Previous
+<div id="requestsPagination" class="flex items-center justify-center gap-3 mt-8 hidden">
+<button id="requestsPrevBtn" type="button" data-action="requests-prev" class="inline-flex items-center gap-1 h-10 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed pl-2 pr-2 sm:pr-4">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span><span class="sr-only sm:not-sr-only">Previous</span>
 </button>
-<span id="requestsPageInfo" class="text-body text-frosted-blue/70 tabular-nums"></span>
-<button id="requestsNextBtn" type="button" data-action="requests-next" class="inline-flex items-center gap-1 h-10 pl-4 pr-2 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
-Next<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+<span id="requestsPageInfo" class="text-body text-frosted-blue/70 tabular-nums whitespace-nowrap"></span>
+<button id="requestsNextBtn" type="button" data-action="requests-next" class="inline-flex items-center gap-1 h-10 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed pl-2 sm:pl-4 pr-2">
+<span class="sr-only sm:not-sr-only">Next</span><span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
 </button>
-</div>
 </div>
 </section>
 
+</div>
 </div>
 </div>
 <!-- Media detail: a dialog (WSUI.modal in pages/requests.js). Inside
@@ -629,21 +393,21 @@ Next<span class="material-symbols-outlined" aria-hidden="true">chevron_right</sp
     </button>
     <div class="flex gap-4 p-5">
       <div class="w-28 shrink-0">
-        <div class="aspect-[2/3] rounded-inner overflow-hidden bg-frosted-blue/[0.04] relative">
+        <div class="aspect-[2/3] rounded-xl overflow-hidden bg-frosted-blue/[0.07] relative">
           <img id="modalPoster" src="" alt="" class="absolute inset-0 w-full h-full object-cover" data-fallback/>
           <div class="absolute inset-0 items-center justify-center poster-placeholder" style="display:none">
-            <span class="material-symbols-outlined text-4xl text-steel-blue/40">movie</span>
+            <span class="material-symbols-outlined text-[32px] text-frosted-blue/45" aria-hidden="true">movie</span>
           </div>
         </div>
       </div>
       <div class="flex-1 min-w-0 pr-8">
-        <h2 id="modalTitle" class="text-frosted-blue font-bold text-lead leading-tight mb-1"></h2>
-        <div class="flex items-center flex-wrap gap-2 mb-3">
+        <h2 id="modalTitle" class="text-frosted-blue font-bold text-h3 leading-snug mb-1"></h2>
+        <div class="flex items-center flex-wrap gap-x-3 gap-y-1 mb-3">
+          <span id="modalTypeBadge" class="inline-flex"></span>
           <span id="modalYear" class="text-frosted-blue/70 text-label tabular-nums"></span>
-          <span id="modalTypeBadge" class="inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold"></span>
           <span id="modalRating" class="text-label text-frosted-blue/70 tabular-nums"></span>
         </div>
-        <p id="modalOverview" class="text-frosted-blue/70 text-label leading-relaxed line-clamp-4 mb-4"></p>
+        <p id="modalOverview" class="text-frosted-blue/70 text-body leading-relaxed line-clamp-5 mb-4"></p>
         <div id="modalActionArea"></div>
       </div>
     </div>

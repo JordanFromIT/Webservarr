@@ -1,11 +1,15 @@
 /**
  * WebServarr — Requests (page module)
  *
- * Ask for something new and see where earlier asks stand: the discover
- * shelves (Seerr's trending and popular lists, books from Chaptarr), the
- * library summary, the Request Status grid, search with Request buttons, the
- * recent requests with their filter tabs, and a detail modal for a discover
- * poster.
+ * Ask for something new and see where earlier asks stand, in the Books
+ * layout (audit M3, M8): one search for everything, whose results take the
+ * place of the rest while there is a search; three shelves grouped by what
+ * people want (Trending, Coming soon, Books), each filled from several
+ * sources; the Request Status grid; the recent requests with their filter
+ * chips; and a detail modal for a shelf poster. Cards are the Books card: the
+ * cover, two lines of title, one quiet line, where a title stands as a mark
+ * on its cover. The library summary is one quiet line, how long requests
+ * usually take (audit H3).
  *
  * A soft-navigation page (spec 4.2): everything below runs from mount(ctx),
  * each visit has its own state, and every listener, fetch and timer ends with
@@ -22,25 +26,44 @@
  * is requests-embed.html instead, run by pages/requests-embed.js.
  */
 
-const CARDS_PER_PAGE = 9;
+const CARDS_PER_PAGE = 12;
 const REFRESH_MS = 30000;
 const SEARCH_WAIT_MS = 300;
 
-// Discover row sources, by the id of their row in requests.html.
-//
-// Most rows come from Seerr's discover endpoints and are named by their
-// endpoint suffix. A row can instead carry an explicit `url` when its source is
-// something else entirely - books come from Open Library by way of Chaptarr,
-// not from Seerr.
-const DISCOVER_ROWS = [
-  { id: 'trendingRow',       endpoint: 'trending' },
-  { id: 'popularMoviesRow',  endpoint: 'popular-movies' },
-  { id: 'upcomingMoviesRow', endpoint: 'upcoming-movies' },
-  { id: 'popularSeriesRow',  endpoint: 'popular-series' },
-  { id: 'upcomingSeriesRow', endpoint: 'upcoming-series' },
-  { id: 'trendingBooksRow',      endpoint: 'books-trending',      url: '/api/integrations/books-trending' },
-  { id: 'trendingAudiobooksRow', endpoint: 'audiobooks-trending', url: '/api/integrations/audiobooks-trending' }
+// The shelves, by the id of their row in requests.html: one want each, filled
+// from several sources and interleaved (mergeShelf), so a shelf is never one
+// service's list. A source is a Seerr discover endpoint by its suffix, or a
+// path of its own (books come from Chaptarr). A books shelf shows covers only.
+const SHELVES = [
+  { id: 'trendingRow', sources: ['trending', 'popular-movies', 'popular-series'] },
+  { id: 'comingRow',   sources: ['upcoming-movies', 'upcoming-series'] },
+  { id: 'booksRow',    sources: ['/api/integrations/books-trending', '/api/integrations/audiobooks-trending'], coversOnly: true }
 ];
+
+function sourceUrl(source) {
+  return source.charAt(0) === '/' ? source : '/api/integrations/seerr-discover/' + source;
+}
+
+/**
+ * One shelf from its sources' lists: taken in turn, one from each, so a
+ * shelf mixes movies and shows (or ebooks and audiobooks) from the start,
+ * and a title two sources both carry is shown once.
+ */
+function mergeShelf(lists) {
+  var out = [], seen = {}, longest = 0;
+  lists.forEach(function (l) { longest = Math.max(longest, l.length); });
+  for (var i = 0; i < longest; i++) {
+    lists.forEach(function (l) {
+      var item = l[i];
+      if (!item) return;
+      var key = (item.media_type || 'movie') + ':' + item.id;
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push(item);
+    });
+  }
+  return out;
+}
 
 function isAbort(e) { return !!e && e.name === 'AbortError'; }
 
@@ -191,46 +214,34 @@ function rsCellValue(r, key) {
 }
 
 // ---------------------------------------------------------------------------
-// Media types and request statuses (shared vocabulary, shell.js)
+// Media types and request statuses
+//
+// The words, in sentence case as Books writes them; the icon and the accent
+// colour come from the shared vocabulary in shell.js (WS.mediaType), and the
+// states from WS.requestStatus, so Home and this page agree on what each
+// state is called.
 
-/**
- * Media type presentation. Three kinds share this page: films and TV from
- * Seerr, books from Chaptarr.
- *
- * The badge is a corner overlay to match the pattern already used here. Labels
- * are short enough that it stays legible over cover art.
- */
-function mediaTypeLabel(mediaType) {
-  return WS.mediaType(mediaType).label;   // shared with the home page (shell.js)
+const TYPE_WORDS = { movie: 'Movie', tv: 'TV show', book: 'Ebook', audiobook: 'Audiobook' };
+
+function typeWord(mediaType) {
+  return TYPE_WORDS[mediaType] || TYPE_WORDS.movie;
+}
+
+/** What a Request button asks for, said in the button's sentence. */
+function requestNoun(mediaType) {
+  return mediaType === 'tv' ? 'TV show' : typeWord(mediaType).toLowerCase();
 }
 
 /**
  * Media type accent, as a theme class rather than a fixed palette value.
  *
  * The three hues are theme settings (theme.color_media_movie / _tv / _book),
- * so an admin retheming the site retints these too, and a media type keeps one
- * colour across the badge and the Request button alike. The classes live in
- * theme.css - see the note there.
+ * so an admin retheming the site retints these too. The classes live in
+ * theme.css. On a card it is a small dot beside the type's word: the word
+ * says it, the dot lets a shelf be scanned by kind.
  */
 function mediaTypeAccent(mediaType) {
   return WS.mediaType(mediaType).accent;
-}
-
-function mediaTypeBadgeColor(mediaType) {
-  return 'badge-' + mediaTypeAccent(mediaType);
-}
-
-/**
- * Colour for the media-type noun inside a Request button.
- *
- * The shipped defaults are measured against the button's #125793 fill - cyan
- * 5.16, amber 5.18, purple 5.49, all clearing 4.5:1. The button's 13px
- * semibold counts as normal text for contrast rather than large, which is why
- * the obvious purple-300 (4.23) was not good enough. An admin picking their own
- * accents owns that tradeoff.
- */
-function mediaTypeNounColor(mediaType) {
-  return 'text-' + mediaTypeAccent(mediaType);
 }
 
 /** Placeholder glyph when a title has no artwork. */
@@ -238,179 +249,147 @@ function mediaTypeIcon(mediaType) {
   return WS.mediaType(mediaType).icon;
 }
 
-// Labels and tones come from the shared vocabulary in shell.js
-// (WS.requestStatus), so the home page's Recent Requests says the same words
-// in the same colours for the same state: finished reads on a primary tint,
-// things in motion in the text colour, not-yet-started on the accent, and a
-// request that will not happen dimmed rather than alarming. Theme colours
-// only; each tone keeps its 1px border so the block's box never changes.
+/** Seerr's state for a title, or null for none: its "unknown" means nobody
+    asked for it, so the title can be requested (never a "Requested" badge). */
+function knownStatus(raw) {
+  var s = raw ? String(raw).toLowerCase() : null;
+  return s === 'unknown' ? null : s;
+}
+
+/** A state's word in sentence case ("Partly available"). */
+function statusWord(status) {
+  var label = WS.requestStatus(status).label;
+  return label.charAt(0) + label.slice(1).toLowerCase();
+}
+
+// Tones for the status block under a search result, theme colours only:
+// finished reads on a primary tint, things in motion in the text colour,
+// not-yet-started and will-not-happen quiet.
 const STATUS_TONE_CLASSES = {
-  ready: {bg: 'bg-primary/30',      text: 'text-frosted-blue',    border: 'border-primary/40'},
-  go:    {bg: 'bg-frosted-blue/15', text: 'text-frosted-blue',    border: 'border-frosted-blue/20'},
-  wait:  {bg: 'bg-steel-blue/20',   text: 'text-frosted-blue/80', border: 'border-steel-blue/30'},
-  dead:  {bg: 'bg-steel-blue/10',   text: 'text-frosted-blue/80', border: 'border-steel-blue/20'}
+  ready: 'bg-primary/30 text-frosted-blue',
+  go:    'bg-frosted-blue/15 text-frosted-blue',
+  wait:  'bg-frosted-blue/[0.07] text-frosted-blue/80',
+  dead:  'bg-frosted-blue/[0.07] text-frosted-blue/80'
 };
 
-/**
- * Where a discover card's title stands, as a label beside its type badge.
- *
- * The words and tones are the site's shared request vocabulary
- * (WS.requestStatus, styled by STATUS_TONE_CLASSES above), so a card says what
- * Home's Recent Requests says for the same state. Words rather than a coloured
- * dot on the poster, which nobody could decode without a key. Nothing is shown
- * for a title no one has asked for, or for Seerr's "unknown": no label, never
- * the word "Unknown". It shares the card's second line with the type, so the
- * card is one height whether a title has a status or not.
- */
-// Card-only short words, for labels that cannot fit beside the type on a
-// 128px card: "Partly Available" beside "TV show" always ended "Partly Av…".
-// The full shared label stays in the title, and everywhere else says it whole.
-const DISCOVER_SHORT_LABELS = { partially_available: 'Partial' };
+// The card's lines, as Books draws them (pages/books.js renderBookCard): two
+// lines of room for the title whatever it is, then one quiet line, so every
+// card is one height and lands on its skeleton in requests.html.
+// line-clamp is its own display (a -webkit-box), so no display class beside it.
+const CARD_TITLE = 'mt-2 text-body font-semibold leading-snug text-frosted-blue line-clamp-2 min-h-[2.75em]';
+const CARD_SUB = 'flex items-center gap-1.5 min-w-0 text-label leading-5 min-h-5 text-frosted-blue/70';
 
-function discoverStatusLabel(status) {
+/** The quiet line: the type's dot and word, then the year, author or date. */
+function subLine(mediaType, extra) {
+  return '<span class="' + CARD_SUB + '">' +
+    '<span class="size-2 shrink-0 rounded-full bg-' + mediaTypeAccent(mediaType) + '" aria-hidden="true"></span>' +
+    '<span class="min-w-0 truncate">' + escapeHtml(typeWord(mediaType) + (extra ? ', ' + extra : '')) + '</span>' +
+  '</span>';
+}
+
+/**
+ * Where a title stands, as a mark on the top left of its cover (where Books
+ * marks a new book): the shared state's word, in the accent once it is on the
+ * server, quiet otherwise. Nothing for a title no one has asked for, or for
+ * Seerr's "unknown": no mark, never the word Unknown. Its words are part of
+ * the card's name.
+ */
+// Card-only short words, for the marks that cannot fit a 144px cover.
+const DISCOVER_SHORT_LABELS = { partially_available: 'Partly here' };
+
+function statusMark(status) {
   if (!status || status === 'unknown') return '';
   var known = WS.requestStatus(status);
-  var shown = DISCOVER_SHORT_LABELS[status] || known.label;
-  return '<span data-discover-status title="' + escapeHtml(known.label) + '" ' +
-    'class="min-w-0 truncate text-frosted-blue/70">' +
-    escapeHtml(shown) + '</span>';
+  var shown = DISCOVER_SHORT_LABELS[status] || statusWord(status);
+  return '<span data-discover-status title="' + escapeHtml(statusWord(status)) + '" ' +
+    'class="absolute left-2 top-2 inline-flex h-6 max-w-[calc(100%-1rem)] items-center rounded-full px-2 text-label font-semibold leading-none ' +
+    (known.tone === 'ready' ? 'bg-primary text-bright' : 'bg-background-dark/80 text-frosted-blue') + '">' +
+    '<span class="truncate">' + escapeHtml(shown) + '</span></span>';
 }
 
 // A poster image, or its placeholder glyph when there is none. The image
 // carries data-fallback: the page's capturing error listener hides one that
 // fails and shows the placeholder beside it.
-function posterMarkup(posterUrl, alt, imgClass, iconClass, mediaType) {
-  var glyph = '<span class="material-symbols-outlined ' + iconClass + ' text-steel-blue/40">' + mediaTypeIcon(mediaType) + '</span>';
+// lazy: only for a poster that starts off screen (a card far along a shelf,
+// the recent requests below the shelves); the first screenful is eager, as
+// the page's largest picture is one of them.
+function posterMarkup(posterUrl, alt, imgClass, iconClass, mediaType, lazy) {
+  var glyph = '<span class="material-symbols-outlined ' + iconClass + ' text-frosted-blue/45" aria-hidden="true">' + mediaTypeIcon(mediaType) + '</span>';
   if (!posterUrl) {
-    return '<div class="absolute inset-0 flex items-center justify-center poster-placeholder">' + glyph + '</div>';
+    return '<span class="absolute inset-0 flex items-center justify-center poster-placeholder">' + glyph + '</span>';
   }
-  return '<img src="' + escapeHtml(posterUrl) + '" alt="' + alt + '" class="' + imgClass + '" data-fallback/>' +
-    '<div class="absolute inset-0 items-center justify-center poster-placeholder" style="display:none">' + glyph + '</div>';
+  return '<img src="' + escapeHtml(posterUrl) + '" alt="' + alt + '"' + (lazy ? ' loading="lazy"' : '') + ' decoding="async" class="' + imgClass + '" data-fallback/>' +
+    '<span class="absolute inset-0 items-center justify-center poster-placeholder" style="display:none">' + glyph + '</span>';
 }
 
-// The discover poster. rowId and index name the item in the visit's shelf
-// data; the page's click listener opens it (data-action="open-media").
+/** The Books cover frame: 2:3, rounded, holding its shape before the picture lands. */
+function coverMarkup(posterUrl, mediaType, mark, lazy) {
+  return '<span class="relative block aspect-[2/3] overflow-hidden rounded-xl bg-frosted-blue/[0.07]">' +
+    posterMarkup(posterUrl, '', 'absolute inset-0 w-full h-full object-cover', 'text-[32px]', mediaType, lazy) +
+    (mark || '') +
+  '</span>';
+}
+
+// A shelf poster. rowId and index name the item in the visit's shelf data;
+// the page's click listener opens it (data-action="open-media").
 function buildDiscoverCard(item, rowId, index) {
-  var title = escapeHtml(item.title || 'Unknown');
   var mediaType = item.media_type || 'movie';
-  var typeBadge = mediaTypeLabel(mediaType);
-  var posterUrl = item.poster_url || '';
   var status = item.media_status ? item.media_status.toLowerCase() : null;
-  var statusHtml = discoverStatusLabel(status);
+  var statusHtml = statusMark(status);
+  var extra = item.author || (item.year ? String(item.year) : '');
 
-  // The title names the button, so the poster's alt stays empty.
-  var posterHtml = posterMarkup(posterUrl, '', 'absolute inset-0 w-full h-full object-cover', 'text-3xl', mediaType);
-
-  // A button, as the Books covers are links: the poster, then two lines (the
-  // title, then the type and any status), the same box as the skeleton in
-  // requests.html. ws-lift on the card: the card is what is clicked.
+  // A button, as the Books covers are links: the cover, then the title on
+  // two lines of room and the quiet line, the same box as the skeleton in
+  // requests.html. The title names the button, so the poster's alt stays
+  // empty. ws-lift on the card: the card is what is clicked.
   return (
-    '<button type="button" class="shrink-0 w-32 text-left rounded-inner ws-lift group" ' +
+    '<button type="button" class="flex w-36 shrink-0 flex-col text-left rounded-xl ws-lift group" ' +
         'data-action="open-media" data-row="' + escapeHtml(rowId) + '" data-index="' + index + '">' +
-      '<span class="block aspect-[2/3] relative overflow-hidden rounded-inner bg-frosted-blue/[0.04]">' +
-        posterHtml +
-      '</span>' +
-      '<span class="block pt-2">' +
-        '<span class="block text-label leading-5 font-semibold text-frosted-blue truncate">' + title + '</span>' +
-        // One line that never wraps: the type keeps its width and the status
-        // gives way, ending in an ellipsis on the longest label.
-        '<span class="flex items-center gap-1.5 min-w-0 text-label leading-5">' +
-          '<span class="shrink-0 font-semibold ' + mediaTypeNounColor(mediaType) + '">' + typeBadge + '</span>' +
-          statusHtml +
-        '</span>' +
-      '</span>' +
+      coverMarkup(item.poster_url || '', mediaType, statusHtml, index >= 8) +
+      '<span class="' + CARD_TITLE + '">' + escapeHtml(item.title || 'Untitled') + '</span>' +
+      subLine(mediaType, extra) +
     '</button>'
   );
 }
 
-/**
- * One definition of what each status looks like and is called.
- *
- * Colour carries the meaning at a glance: green means you can watch or read it
- * now, amber means it is coming, red means it is not.
- *
- * Wording is written from the requester's side. "Pending" describes the
- * request queue rather than what the person did, so it reads "Requested".
- * "Processing" is internal vocabulary, so it reads "Downloading".
- */
-function getStatusPresentation(status, mediaType, item) {
+/** A state's words for the block under a search result. */
+function getStatusPresentation(status, item) {
   var known = WS.requestStatus(status);
-  var tone = STATUS_TONE_CLASSES[known.tone] || STATUS_TONE_CLASSES.wait;
-  var p = {bg: tone.bg, text: tone.text, border: tone.border, label: known.label};
-  switch (status) {
-    case 'available':
-    case 'completed':
-    case 'approved':
-    case 'pending':
-    case 'declined':
-      return p;
-
-    case 'processing':
-    case 'downloading':
-      // Not "Downloading". Seerr's processing state only means the
-      // request was handed to Sonarr or Radarr - it may be searching
-      // indexers, waiting on an upgrade, or stalled with no release
-      // found at all. Claiming a download is in progress sets an
-      // expectation nothing here can actually verify.
-      return p;
-
-    case 'partially_available':
-      // A count beats any adjective: "48 of 62 Episodes" tells someone
-      // exactly what they are getting, where "Partial" tells them
-      // nothing. Falls back to words when the count is unavailable.
-      if (item && item.episodes_total) {
-        p.label = item.episodes_available + ' of ' + item.episodes_total + ' Episodes';
-        p.selfDescribing = true;
-      }
-      return p;
-
-    default:
-      p = {bg: STATUS_TONE_CLASSES.wait.bg, text: STATUS_TONE_CLASSES.wait.text, border: STATUS_TONE_CLASSES.wait.border};
-      p.label = status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Unknown';
-      return p;
+  var label = statusWord(status);
+  // A count beats any adjective: "48 of 62 episodes" says exactly what is
+  // here, where "Partly available" does not.
+  if (status === 'partially_available' && item && item.episodes_total) {
+    label = item.episodes_available + ' of ' + item.episodes_total + ' episodes';
   }
+  return { tone: STATUS_TONE_CLASSES[known.tone] || STATUS_TONE_CLASSES.wait, label: label };
 }
 
 /**
- * Full-width status block, sized to match the Request button.
- *
- * A card should not change shape depending on whether an item is requestable -
- * the action slot stays the same rectangle and only its colour and words
- * change.
+ * The status block, the Request button's own box: a card does not change
+ * shape depending on whether a title can be requested; only the words and
+ * the colour of that box change.
  */
-function getStatusBlock(status, mediaType, typeLabel, item) {
-  var s = getStatusPresentation(status, mediaType, item);
-  // An episode count already says "TV Show" by implication, and "TV Show ·
-  // 48 of 62 Episodes" overflows the block at this width.
-  if (s.selfDescribing) typeLabel = '';
-  var prefix = typeLabel ? typeLabel + ' ' : '';
-  return '<div class="w-full py-2 px-1 rounded-btn border text-center text-label font-semibold ' +
-    s.bg + ' ' + s.text + ' ' + s.border + '">' + prefix + s.label + '</div>';
+function getStatusBlock(status, item) {
+  var s = getStatusPresentation(status, item);
+  return '<div class="flex h-10 w-full items-center justify-center rounded-btn px-2 text-label font-semibold ' + s.tone + '">' +
+    '<span class="truncate">' + escapeHtml(s.label) + '</span></div>';
 }
 
-/** Compact pill, for request cards and the detail modal: the one chip. */
-function getStatusBadge(status, mediaType) {
-  var s = getStatusPresentation(status, mediaType);
-  return '<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold ' + s.bg + ' ' + s.text + '">' +
-    s.label + '</span>';
+/** The detail modal's state: a quiet line in the type's place. */
+function getStatusBadge(status) {
+  var s = getStatusPresentation(status);
+  return '<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold ' + s.tone + '">' +
+    escapeHtml(s.label) + '</span>';
 }
 
 function buildSearchCard(item) {
-  var title = escapeHtml(item.title || 'Unknown');
-  var year = item.year ? escapeHtml(String(item.year)) : '';
+  var title = escapeHtml(item.title || 'Untitled');
   var mediaType = item.media_type || 'movie';
-  var typeBadge = mediaTypeLabel(mediaType);
-  var posterUrl = item.poster_url || '';
-  var status = item.media_status ? item.media_status.toLowerCase() : null;
-  var status4k = item.media_status_4k ? item.media_status_4k.toLowerCase() : null;
-  var mediaId = item.id;
+  var status = knownStatus(item.media_status);
+  var status4k = knownStatus(item.media_status_4k);
 
-  // The card is not a link, so its poster does not zoom on hover.
-  var posterHtml = posterMarkup(posterUrl, title, 'absolute inset-0 w-full h-full object-cover', 'text-4xl', mediaType);
-
-  // Request button or status badge (combined standard + 4K: show best available status)
+  // Request button or status block (standard and 4K together: the best state).
   var combinedStatus = status;
-  // If standard has a status, use it; also consider 4K status for "available"/"partially_available"
   if (!combinedStatus && status4k) {
     combinedStatus = status4k;
   } else if (combinedStatus && status4k) {
@@ -421,243 +400,59 @@ function buildSearchCard(item) {
     }
   }
 
-  var stdHtml;
+  var action;
   if (!combinedStatus) {
-    // The media type lives on the button rather than a separate pill, so
-    // what is being requested is stated at the moment of committing to it.
-    //
     // Type and id ride in data-* attributes, read by the page's click
     // listener (data-action="request-media"), so a provider id like
     // "gr:3634639" never meets JavaScript source: HTML-escaping would not
     // stop a JS-context breakout. Chaptarr book ids are strings; Seerr's
-    // numeric ids coerce back to int server-side.
-    // border-transparent so the button matches the status block's height
-    // exactly - otherwise the card jumps 2px depending on its state.
-    // ws-lift on the button, not the card: the button is what is clicked.
-    stdHtml = '<button type="button" data-action="request-media" data-request-type="' + escapeHtml(mediaType) + '" data-request-id="' + escapeHtml(String(mediaId)) + '" data-request-title="' + title + '" class="ws-lift w-full py-2 px-1 rounded-btn border border-transparent bg-primary hover:bg-primary/90 text-bright text-label font-semibold transition-colors">Request <span class="' + mediaTypeNounColor(mediaType) + '">' + typeBadge + '</span></button>';
+    // numeric ids coerce back to int server-side. The button says what it
+    // asks for; the title is in its name for a screen reader. ws-lift on
+    // the button, not the card: the button is what is clicked.
+    action = '<button type="button" data-action="request-media" data-request-type="' + escapeHtml(mediaType) + '" data-request-id="' + escapeHtml(String(item.id)) + '" data-request-title="' + title + '" class="ws-lift h-10 w-full rounded-btn bg-primary hover:bg-primary/90 px-2 text-body font-semibold text-bright transition-colors">' +
+      'Request ' + escapeHtml(requestNoun(mediaType)) + '<span class="sr-only">: ' + title + '</span></button>';
   } else {
-    // Same rectangle as the button, so the card keeps its shape. The type
-    // is carried here too, since there is no button to state it.
-    stdHtml = getStatusBlock(combinedStatus, mediaType, typeBadge, item);
+    action = getStatusBlock(combinedStatus, item);
   }
 
-  // No type pill on the card: the media type is carried by the action itself
-  // ("Request eBook"), which states it where the decision is made and keeps
-  // the card free of a floating label.
-  return '<div class="rounded-card bg-frosted-blue/[0.04] overflow-hidden flex flex-col">' +
-    '<div class="aspect-[2/3] relative overflow-hidden">' +
-      posterHtml +
-    '</div>' +
-    '<div class="p-3 flex flex-col gap-2 flex-1">' +
-      '<div class="flex-1">' +
-        '<p class="text-frosted-blue text-body font-semibold leading-tight line-clamp-2">' + title + '</p>' +
-        // Books have no cover art (Chaptarr's are behind its UI login),
-        // so the author does the work the artwork would have done.
-        (item.author ? '<p class="text-frosted-blue/70 text-label mt-0.5 truncate">' + escapeHtml(item.author) + '</p>' : '') +
-        (year ? '<p class="text-frosted-blue/70 text-label mt-0.5 tabular-nums">' + year + '</p>' : '') +
-      '</div>' +
-      '<div class="space-y-1.5">' + stdHtml + '</div>' +
-    '</div>' +
+  // Books have no cover art more often than films, so the author does the
+  // work the artwork would have done; films and shows give their year.
+  var extra = item.author || (item.year ? String(item.year) : '');
+  return '<div class="min-w-0">' +
+    coverMarkup(item.poster_url || '', mediaType, '') +
+    '<span class="' + CARD_TITLE + '">' + title + '</span>' +
+    subLine(mediaType, extra) +
+    '<div class="mt-2">' + action + '</div>' +
   '</div>';
 }
 
 function buildRequestCard(req) {
-  var title = escapeHtml(req.media_title || 'Unknown');
   var mediaType = req.media_type || 'movie';
-  var typeBadge = mediaTypeLabel(mediaType);
-  var typeBadgeColor = mediaTypeBadgeColor(mediaType);
-  var posterUrl = req.poster_url || '';
   var status = (req.status || 'pending').toLowerCase();
   var requestedDate = req.requested_date ? getTimeAgo(req.requested_date, true) : '';
 
-  // The card is not a link, so its poster does not zoom on hover.
-  var posterHtml = posterMarkup(posterUrl, title, 'absolute inset-0 w-full h-full object-cover', 'text-4xl', mediaType);
-
-  return '<div class="rounded-card bg-frosted-blue/[0.04] overflow-hidden" data-status="' + status + '">' +
-    '<div class="aspect-[2/3] relative overflow-hidden">' +
-      posterHtml +
-    '</div>' +
-    // Status sits below the artwork rather than over it. As an overlay it
-    // read as a watermark stamped across the cover, and it obscured the
-    // part of the poster people recognise a title by.
-    '<div class="p-3 space-y-1">' +
-      '<div class="flex items-center gap-1.5 flex-wrap">' +
-        '<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold ' + typeBadgeColor + '">' + typeBadge + '</span>' +
-        getStatusBadge(status, mediaType) +
-      '</div>' +
-      '<p class="text-frosted-blue text-body font-semibold leading-tight line-clamp-2">' + title + '</p>' +
-      (requestedDate ? '<p class="text-label text-frosted-blue/70">' + escapeHtml(requestedDate) + '</p>' : '') +
-    '</div>' +
+  // Not a control: the card shows where a request stands, on its cover.
+  return '<div class="min-w-0" data-status="' + escapeHtml(status) + '">' +
+    coverMarkup(req.poster_url || '', mediaType, statusMark(status), true) +
+    '<span class="' + CARD_TITLE + '">' + escapeHtml(req.media_title || 'Untitled') + '</span>' +
+    subLine(mediaType, requestedDate) +
   '</div>';
 }
 
-// ---- Library summary formats ----
+// ---- Library summary ----
 
-/** Thousands separators, so 39710 reads as a quantity rather than a serial. */
-function formatCount(n) {
-  return (n || 0).toLocaleString();
-}
-
-/**
- * A wait in the largest unit that still reads naturally.
- *
- * Minutes up to an hour, then hours, then days - "11 min" and "3 days" are
- * both immediately meaningful where "0.18 h" and "4,320 min" are not.
- */
-function formatWait(minutes) {
-  if (minutes === undefined || minutes === null) return '--';
-  if (minutes < 60) return Math.round(minutes) + ' min';
-  if (minutes < 60 * 48) return Math.round(minutes / 60) + ' hr';
-  return Math.round(minutes / 1440) + ' days';
-}
-
-/** Binary units, matching what Sonarr, Radarr and the NAS all report. */
-function formatBytes(bytes) {
-  if (!bytes) return '0 GB';
-  var tb = bytes / Math.pow(1024, 4);
-  if (tb >= 1) return tb.toFixed(1) + ' TB';
-  return Math.round(bytes / Math.pow(1024, 3)) + ' GB';
+/** A wait in the largest unit that still reads naturally, in words. */
+function waitWords(minutes) {
+  if (typeof minutes !== 'number' || !isFinite(minutes) || minutes <= 0) return '';
+  function n(v, one, many) { return v + ' ' + (v === 1 ? one : many); }
+  if (minutes < 60) return n(Math.max(1, Math.round(minutes)), 'minute', 'minutes');
+  if (minutes < 60 * 48) return n(Math.round(minutes / 60), 'hour', 'hours');
+  return n(Math.round(minutes / 1440), 'day', 'days');
 }
 
 // The site's one toast (ui.js): theme colours, a status light for the tone.
 function showToast(message, type) {
   WSUI.toast(message, type === 'success' ? 'ok' : 'err');
-}
-
-// ---- Search bar motion: timings and placement ----
-//
-// The bar lives above the trending rows on arrival, where it is the first thing
-// seen, and slides down into the results panel once a search begins. It is one
-// element that moves, not two that swap, so focus and the caret survive.
-
-function reducedMotion() {
-  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-}
-
-/**
- * True on phones and tablets - anything driven by a finger rather than a
- * pointer.
- *
- * Touch still gets the glide - jumping straight to the end state read as a
- * broken page on a real device (confirmed on a Galaxy S26+), not a
- * considered one. What touch loses is the duration: SEARCH_MOVE_DURATION_TOUCH
- * keeps the scroll lock brief instead of holding it for the full pointer-length
- * animation, which is what made the instant jump seem worth it in the first
- * place.
- */
-function coarsePointer() {
-  return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-}
-
-// Where the search field comes to rest, measured from the top of whatever is
-// scrolling. Both numbers were taken from the positions Jordan scrolled to by
-// hand rather than guessed at.
-//
-// Desktop scrolls the inner panel, which has nothing overlapping it, so the
-// field sits just below its top edge.
-const SLOT_SCROLL_GAP = 34;
-
-// Mobile scrolls the document, and the nav bar is sticky across the top, so a
-// field placed at the same 34px would sit underneath it. The bar is measured
-// rather than hardcoded so this stays correct if its height changes.
-const SLOT_SCROLL_CLEARANCE_MOBILE = 61;
-
-function slotScrollGap() {
-  if (window.innerWidth >= 1024) return SLOT_SCROLL_GAP;
-  var bar = document.getElementById('mobileTopBar');   // the shell's phone bar
-  var barHeight = bar ? Math.round(bar.getBoundingClientRect().height) : 0;
-  return barHeight + SLOT_SCROLL_CLEARANCE_MOBILE;
-}
-
-// How long the bar takes to travel. This is scenery rather than a response to
-// an action, and it runs while the user is still typing, so it should never
-// look like it is hurrying them - but it also holds the scroll for its whole
-// duration, so it cannot linger either.
-const SEARCH_MOVE_DURATION = 3000;
-
-// Touch runs shorter than pointer, but 700ms turned out to be too short to read
-// as movement at all -- on a phone it looked like the bar snapped rather than
-// travelled. The constraint it was protecting is real: a scroll lock lingering
-// for multiple seconds on a real device (confirmed on a Galaxy S26+) reads as a
-// hung page. 1800ms sits between the two, long enough to be visibly a glide and
-// short enough that the hold is never mistaken for the page having stopped
-// responding.
-const SEARCH_MOVE_DURATION_TOUCH = 1800;
-
-/**
- * Work out how far to scroll to bring a slot into view, without doing it.
- *
- * Returned as a plan rather than applied, because the scroll has to be driven
- * frame by frame alongside the bar rather than performed up front.
- *
- * scrollIntoView cannot be used here: it scrolls *every* scrollable ancestor,
- * so the inner panel and the window both move and the two compound into an
- * overshoot that pushes the bar up under the header and clips it. This walks up
- * to the one element that actually scrolls, clamped to its real range, so the
- * slot lands exactly slotScrollGap() below the top.
- */
-function scrollPlanFor(slot) {
-  var node = slot.parentElement;
-  var container = null;
-  while (node && node !== document.body) {
-    var overflowY = window.getComputedStyle(node).overflowY;
-    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
-      container = node;
-      break;
-    }
-    node = node.parentElement;
-  }
-
-  if (container) {
-    var delta = slot.getBoundingClientRect().top
-              - container.getBoundingClientRect().top
-              - slotScrollGap();
-    var max = Math.max(0, container.scrollHeight - container.clientHeight);
-    return {
-      el: container,
-      from: container.scrollTop,
-      to: Math.max(0, Math.min(container.scrollTop + delta, max)),
-    };
-  }
-
-  // Narrow layouts scroll the document instead - the panel is only
-  // overflow-y-auto at the lg breakpoint.
-  var top = window.scrollY + slot.getBoundingClientRect().top - slotScrollGap();
-  var docMax = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-  return {el: null, from: window.scrollY, to: Math.max(0, Math.min(top, docMax))};
-}
-
-function applyScroll(plan, value) {
-  if (plan.el) plan.el.scrollTop = value;
-  else window.scrollTo(0, value);
-}
-
-/**
- * What the page scrolls to bring into view when the search bar moves.
- *
- * The panel that CONTAINS the bar, not a nearby landmark. This used to anchor
- * on the stats row, which worked only because the search columns sat directly
- * beneath it -- scrolling the stats to the top happened to leave the bar just
- * below. That coupling was invisible until the request-status grid was inserted
- * between them, at which point the same scroll put the stats at the top and the
- * bar roughly 400px below the fold.
- *
- * Anchoring on the search columns themselves states the actual intent: land the
- * panel the bar is flying into at the top of the view. Nothing added above it
- * can break that again.
- */
-function searchScrollAnchor(slot) {
-  return slot;
-}
-
-function scrollSlotIntoPlace(slot) {
-  var plan = scrollPlanFor(searchScrollAnchor(slot));
-  applyScroll(plan, plan.to);
-}
-
-/** Gentle at both ends, so nothing in the move starts or stops abruptly. */
-function easeInOutCubic(t) {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -680,9 +475,6 @@ export async function mount(ctx) {
   var _currentFilter = 'all';
   var _requestsDisplayPage = 1;
   var _discoverItems = {};          // row id -> that row's items, for the modal
-  var _searchBarPosition = 'home';
-  var _searchMoveRaf = null;
-  var _scrollLockFailsafe = 0;
   var _dialog = null;               // the open media detail (WSUI.modal), or null
 
   // -------------------------------------------------------------------------
@@ -940,15 +732,15 @@ export async function mount(ctx) {
     return { load: load };
   })();
 
-  // ---- Discover lists ----
+  // ---- Shelves ----
 
   function discoverRow(id) { return $(id); }
 
   // The rows and their skeletons are already in the page (markup in
   // requests.html, in the first paint); this wires them for the visit.
   function buildDiscoverSection() {
-    DISCOVER_ROWS.forEach(function (row) {
-      var el = discoverRow(row.id);
+    SHELVES.forEach(function (shelf) {
+      var el = discoverRow(shelf.id);
       if (!el) return;
       // Set the arrows correctly from the outset - the skeleton row starts at its
       // left edge, so the left arrow must not be offered before any data arrives.
@@ -960,29 +752,40 @@ export async function mount(ctx) {
     });
   }
 
-  function loadDiscoverLists() {
-    return Promise.all(DISCOVER_ROWS.map(function (row) {
-      return fetch(row.url || ('/api/integrations/seerr-discover/' + row.endpoint), { signal: signal })
+  // Every source of a shelf is read at once; one that fails gives nothing and
+  // the shelf shows the others. Only a shelf whose sources all failed says so.
+  function loadShelf(shelf) {
+    var failed = 0;
+    return Promise.all(shelf.sources.map(function (source) {
+      return fetch(sourceUrl(source), { signal: signal })
         .then(function (resp) {
           if (!resp.ok) throw new Error('HTTP ' + resp.status);
           return resp.json();
         })
-        .then(function (items) {
-          if (signal.aborted) return;
-          renderDiscoverRow(row.id, items);
-        })
+        .then(function (items) { return Array.isArray(items) ? items : []; })
         .catch(function (err) {
-          if (signal.aborted || isAbort(err)) return;   // left the page: not an error
-          console.warn('Discover list ' + row.endpoint + ' failed:', err);
-          renderDiscoverRowError(row.id);
+          if (signal.aborted || isAbort(err)) return null;   // left the page: not an error
+          console.warn('Shelf source ' + source + ' failed:', err);
+          failed += 1;
+          return [];
         });
-    }));
+    })).then(function (lists) {
+      if (signal.aborted) return;
+      if (failed === shelf.sources.length) { renderDiscoverRowError(shelf.id); return; }
+      renderDiscoverRow(shelf.id, mergeShelf(lists.filter(Boolean)));
+    });
   }
 
-  // The book shelves show covers only: a trending book with no cover is left
-  // out, and one whose cover fails to load leaves the row (dropCover below).
-  // A shelf of blank tiles read as an unfinished page.
-  function coversOnly(rowId) { return rowId === 'trendingBooksRow' || rowId === 'trendingAudiobooksRow'; }
+  function loadDiscoverLists() {
+    return Promise.all(SHELVES.map(loadShelf));
+  }
+
+  // The book shelf shows covers only: a book with no cover is left out, and
+  // one whose cover fails to load leaves the row (dropCover below). A shelf
+  // of blank tiles read as an unfinished page.
+  function coversOnly(rowId) {
+    return SHELVES.some(function (shelf) { return shelf.id === rowId && shelf.coversOnly; });
+  }
 
   function renderDiscoverRow(rowId, items) {
     var row = discoverRow(rowId);
@@ -1059,13 +862,10 @@ export async function mount(ctx) {
     if (searchCtl) searchCtl.abort();
     var ctl = searchCtl = new AbortController();
     signal.addEventListener('abort', function () { ctl.abort(); }, { once: true, signal: ctl.signal });
-    var section = $('searchResultsSection');
-    var emptyState = $('searchEmptyState');
     var grid = $('searchResultsGrid');
 
-    // Show section, hide empty state
-    section.classList.remove('hidden');
-    emptyState.classList.add('hidden');
+    // The results take the place of everything under the search, as on Books.
+    showResults(true);
 
     // Show loading
     grid.textContent = '';
@@ -1131,7 +931,7 @@ export async function mount(ctx) {
         // there is no sensible way to page two independent sources
         // together.
         //
-        // They are interleaved rather than appended: with 9 cards per
+        // They are interleaved rather than appended: with 12 cards per
         // display page and ~20 Seerr results, appending would push every
         // book past the first page and make book search effectively
         // invisible. Books are slotted in after the top few screen results
@@ -1166,14 +966,20 @@ export async function mount(ctx) {
     grid.innerHTML = pageItems.map(buildSearchCard).join('');
   }
 
+  // While there is a search its results are the page; cleared, the shelves
+  // and the requests come back where they were.
+  function showResults(on) {
+    $('searchResultsSection').classList.toggle('hidden', !on);
+    $('browseArea').classList.toggle('hidden', on);
+  }
+
   function clearSearch() {
     if (searchCtl) searchCtl.abort();
     _currentSearchQuery = '';
     _currentSearchPage = 1;
     _searchResults = [];
     _searchDisplayPage = 1;
-    $('searchResultsSection').classList.add('hidden');
-    $('searchEmptyState').classList.remove('hidden');
+    showResults(false);
     $('searchResultsGrid').textContent = '';
     $('searchResultCount').textContent = '';
     $('searchPagination').classList.add('hidden');
@@ -1262,7 +1068,7 @@ export async function mount(ctx) {
 
       // Swap the button for the matching status block, so the card holds its
       // shape and the click reads as the same element changing state.
-      buttonEl.outerHTML = getStatusBlock('pending', mediaType, mediaTypeLabel(mediaType));
+      buttonEl.outerHTML = getStatusBlock('pending');
 
       // Plain past tense naming the thing: "Requested Dune".
       showToast(title ? 'Requested ' + title : 'Requested', 'success');
@@ -1283,209 +1089,6 @@ export async function mount(ctx) {
     }
   }
 
-  // ---- Search bar motion ----
-
-  function searchSlot(position) {
-    return $(position === 'dock' ? 'searchDock' : 'searchHomeSlot');
-  }
-
-  // ---- Scroll lock ----
-  //
-  // While the bar is travelling it owns the scroll position, so wheel and touch
-  // input are swallowed for the duration. A stuck lock would leave the page
-  // unscrollable with nothing to show why, so unlocking is made unconditional:
-  // the animation unlocks when it finishes, a failsafe timer unlocks anyway
-  // if it somehow never does, and leaving the page ends both listeners and
-  // the timer with the visit.
-
-  function swallowScroll(e) {
-    e.preventDefault();
-  }
-
-  function lockScroll() {
-    if (_scrollLockFailsafe) ctx.clearTimeout(_scrollLockFailsafe);
-    // passive:false is required - a passive listener may not preventDefault,
-    // and wheel/touchmove default to passive on window in most browsers.
-    window.addEventListener('wheel', swallowScroll, { passive: false, signal: signal });
-    window.addEventListener('touchmove', swallowScroll, { passive: false, signal: signal });
-    _scrollLockFailsafe = ctx.setTimeout(unlockScroll, SEARCH_MOVE_DURATION + 2000);
-  }
-
-  function unlockScroll() {
-    window.removeEventListener('wheel', swallowScroll, { passive: false });
-    window.removeEventListener('touchmove', swallowScroll, { passive: false });
-    if (_scrollLockFailsafe) {
-      ctx.clearTimeout(_scrollLockFailsafe);
-      _scrollLockFailsafe = 0;
-    }
-  }
-
-  function wireSearchBarMotion() {
-    var bar = $('searchBar');
-    var slot = searchSlot('home');
-    var dock = searchSlot('dock');
-    if (!bar || !slot || bar.parentElement === slot) return;
-
-    // Hold the dock open at the height the bar occupies, before lifting the bar
-    // out of it.
-    //
-    // The bar spends the whole visit somewhere else - floated at the trending
-    // heading, then in flight - and an empty dock collapses to nothing, so
-    // everything below it sits a bar's height too high until the moment the bar
-    // lands, at which point the copy underneath drops. Measuring the dock while
-    // the bar is still inside it reserves exactly the right space, so the
-    // returning bar displaces nothing.
-    //
-    // The measurement is taken here rather than hardcoded so it stays correct
-    // if the field's padding or type size ever changes. mount runs with the
-    // page in the document and its styles applied, so the box is real.
-    if (dock && bar.parentElement === dock) {
-      var occupied = dock.getBoundingClientRect().height
-                  || bar.getBoundingClientRect().height;
-      if (occupied > 0) dock.style.minHeight = occupied + 'px';
-    }
-
-    slot.appendChild(bar);
-  }
-
-  /**
-   * Move the search bar between the trending heading and the results panel.
-   *
-   * The two slots are roughly 1700px apart, so no animation can show that whole
-   * journey - the bar would spend it off screen. Instead the bar is lifted out of
-   * the flow and pinned to its current screen position while the page scrolls
-   * beneath it, then glides the short remaining distance into its slot. What the
-   * user sees is the bar travelling to its new home, rather than the page moving
-   * under a stationary bar.
-   */
-  function moveSearchBar(position) {
-    if (position === _searchBarPosition) return;
-    _searchBarPosition = position;
-
-    var bar = $('searchBar');
-    var target = searchSlot(position);
-    if (!bar || !target) return;
-
-    if (_searchMoveRaf !== null) {
-      cancelAnimationFrame(_searchMoveRaf);
-      _searchMoveRaf = null;
-      // A cancelled move never reaches its own unlock, so release here too.
-      unlockScroll();
-    }
-
-    var input = $('searchInput');
-
-    function settle() {
-      // The caret is read here, immediately before the move - NOT when the
-      // move was scheduled. The animation runs for seconds and the user keeps
-      // typing throughout; restoring a caret captured back then drops it into
-      // the middle of what they have since written, so "Test" comes out
-      // "Tste".
-      var hadFocus = document.activeElement === input;
-      var selStart = hadFocus ? input.selectionStart : null;
-      var selEnd = hadFocus ? input.selectionEnd : null;
-
-      target.appendChild(bar);
-      bar.style.cssText = '';
-
-      // Reparenting blurs a focused descendant, so focus and caret go back.
-      if (hadFocus) {
-        input.focus({preventScroll: true});
-        try { input.setSelectionRange(selStart, selEnd); } catch (e) { /* not selectable */ }
-      }
-    }
-
-    if (reducedMotion()) {
-      settle();
-      scrollSlotIntoPlace(target);
-      return;
-    }
-
-    // 1. Pin the bar where it currently appears, so the scroll cannot drag it.
-    var start = bar.getBoundingClientRect();
-    bar.style.position = 'fixed';
-    bar.style.top = start.top + 'px';
-    bar.style.left = start.left + 'px';
-    bar.style.width = start.width + 'px';
-    bar.style.maxWidth = 'none';
-    bar.style.margin = '0';
-    bar.style.zIndex = '50';
-    bar.style.transition = 'none';
-
-    // 2. Work out how far to scroll. The bar's destination is deliberately NOT
-    //    precomputed - see the frame loop.
-    var anchor = searchScrollAnchor(target);
-    var plan = scrollPlanFor(anchor);
-    var scrollFrom = plan.from;
-
-    // 3. Drive the scroll and the bar from one clock, with one easing curve.
-    //
-    // Previously the page jumped in a single frame and only then did the bar
-    // glide, which read as two separate events - a lurch, then a slide. Moving
-    // both together at the same rate means the page slides beneath a bar that
-    // is itself travelling, and the whole thing reads as one movement. A CSS
-    // transition cannot do this: the bar is position:fixed, so its viewport
-    // coordinates have to be recomputed against the scroll on every frame.
-    var DURATION = coarsePointer() ? SEARCH_MOVE_DURATION_TOUCH : SEARCH_MOVE_DURATION;
-    var started = null;
-
-    // The move owns the scroll position for its whole duration, so wheel and
-    // touch scrolling are held off rather than allowed to fight it. Keyboard is
-    // deliberately left alone: the user is typing in the search field, where
-    // arrows move the caret and space is a character.
-    lockScroll();
-
-    function frame(now) {
-      // Left mid-move: the bar went with the page, and the scroller this
-      // would drive is the next page's.
-      if (signal.aborted) { _searchMoveRaf = null; return; }
-      if (started === null) started = now;
-      var progress = Math.min(1, (now - started) / DURATION);
-      var eased = easeInOutCubic(progress);
-
-      // The scroll DESTINATION is re-read every frame for the same reason the
-      // bar's is, one block down: the page reflows underneath the animation.
-      // It used to be computed once and eased toward, which was correct only
-      // as long as nothing above the dock changed height mid-flight. The
-      // request-status grid does exactly that -- it loads asynchronously and
-      // then caps itself to five rows -- so a target measured before it
-      // settled left the page scrolled short of where the bar landed.
-      //
-      // Only the destination is live; the starting point stays fixed, or the
-      // easing would be measured from a position that is itself moving.
-      var live = scrollPlanFor(anchor);
-      applyScroll(live, progress < 1 ? scrollFrom + (live.to - scrollFrom) * eased : live.to);
-
-      // The destination is re-read every frame, after the scroll for that
-      // frame has been applied, rather than computed once up front.
-      //
-      // A precomputed coordinate goes stale: the page reflows underneath the
-      // animation as results render and discover rows resolve, so by the time
-      // the bar arrives, the slot is no longer where it was predicted to be -
-      // and the bar visibly snaps into place when it is finally reparented.
-      // Tracking the live slot means the last frame and the reparented
-      // position are the same position, so there is nothing left to snap.
-      //
-      // The slot is empty while the bar is in flight, so its box is exactly
-      // where the bar will sit once dropped back in.
-      var dest = target.getBoundingClientRect();
-      bar.style.top = (start.top + (dest.top - start.top) * eased) + 'px';
-      bar.style.left = (start.left + (dest.left - start.left) * eased) + 'px';
-      bar.style.width = (start.width + (dest.width - start.width) * eased) + 'px';
-
-      if (progress < 1) {
-        _searchMoveRaf = requestAnimationFrame(frame);
-        return;
-      }
-
-      _searchMoveRaf = null;
-      unlockScroll();
-      settle();
-    }
-
-    _searchMoveRaf = requestAnimationFrame(frame);
-  }
-
   // ---- Request counts and library summary ----
 
   async function loadRequestCounts() {
@@ -1502,53 +1105,19 @@ export async function mount(ctx) {
     }
   }
 
+  // The summary's one figure a requester cares about, in the quiet line under
+  // the search. Without it the line keeps its general words.
   async function loadLibrarySummary() {
     try {
       var resp = await fetch('/api/integrations/library-summary', { signal: signal });
       if (!resp.ok) throw new Error('API error');
       var s = await resp.json();
       if (signal.aborted) return;
-
-      $('statMovies').textContent = formatCount(s.movies);
-      $('statShows').textContent = formatCount(s.shows);
-      $('statEpisodes').textContent = formatCount(s.episodes);
-      $('statEbooks').textContent = formatCount(s.ebooks);
-      $('statAudiobooks').textContent = formatCount(s.audiobooks);
-      $('statSize').textContent = formatBytes(s.bytes);
-      $('statAdded').textContent = formatCount(s.added_recently);
-      $('statInProgress').textContent = formatCount(s.in_progress);
-      $('statUnreleased').textContent = formatCount(s.unreleased);
-
-      var waits = s.wait_minutes || {};
-      $('statWait').textContent = formatWait(waits.total);
-
-      $('statFulfilled').textContent = (s.fulfilled_percent || 0) + '%';
-      $('statComplete').textContent = (s.percent || 0) + '%';
-
-      var seasonPct = s.seasons
-        ? Math.round(100 * (s.complete_seasons || 0) / s.seasons)
-        : 0;
-      $('statSeasons').textContent = seasonPct + '%';
-
-      var q = s.quality || {};
-      var qm = q.movies || {};
-      var qe = q.episodes || {};
-      $('statHdPct').textContent = (q.hd_or_better_pct || 0) + '%';
-      $('stat4kMovies').textContent = formatCount(qm['4k']);
-      $('stat4kEpisodes').textContent = formatCount(qe['4k']);
+      var wait = waitWords((s.wait_minutes || {}).total);
+      if (wait) $('requestWait').textContent = 'Requests are handled automatically. Most arrive in about ' + wait + '.';
     } catch (e) {
       if (signal.aborted || isAbort(e)) return;
-      // Labels with no figures beside them say nothing: one line instead,
-      // over the panel's own box (kept, unseen), so nothing below it moves.
-      var row = $('statsRow');
-      if (row.querySelector('[data-stats-note]')) return;
-      row.classList.add('relative');
-      if (row.firstElementChild) row.firstElementChild.classList.add('invisible');
-      var note = document.createElement('p');
-      note.className = 'absolute inset-0 text-body text-frosted-blue/70';
-      note.setAttribute('data-stats-note', '');
-      note.textContent = 'Library figures aren\u2019t available right now.';
-      row.appendChild(note);
+      // The general line stays: nothing here is worth an error.
     }
   }
 
@@ -1655,7 +1224,7 @@ export async function mount(ctx) {
     if (!item) return;
     var modal = $('mediaModal');
     var mediaType = item.media_type || 'movie';
-    var status = item.media_status ? item.media_status.toLowerCase() : null;
+    var status = knownStatus(item.media_status);
 
     // Poster: reset the error fallback each time
     var poster = $('modalPoster');
@@ -1665,15 +1234,13 @@ export async function mount(ctx) {
     poster.alt = item.title || '';
 
     // Text content
-    $('modalTitle').textContent = item.title || 'Unknown';
+    $('modalTitle').textContent = item.title || 'Untitled';
     $('modalYear').textContent = item.year || '';
     $('modalOverview').textContent = item.overview || 'No description available.';
 
-    // Type badge. Driven by the same theme accents as the cards, so a type reads
-    // identically here and in the grid - and so books are not labelled "Movie".
+    // The type, as the cards say it: the accent's dot and the word.
     var typeBadge = $('modalTypeBadge');
-    typeBadge.textContent = mediaTypeLabel(mediaType);
-    typeBadge.className = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold ' + mediaTypeBadgeColor(mediaType);
+    typeBadge.innerHTML = subLine(mediaType, '');
 
     // Rating
     var ratingEl = $('modalRating');
@@ -1690,13 +1257,13 @@ export async function mount(ctx) {
           'data-media-type="' + escapeHtml(mediaType) + '" ' +
           'data-media-id="' + escapeHtml(String(item.id)) + '" ' +
           'data-request-title="' + escapeHtml(item.title || '') + '" ' +
-          'class="ws-lift w-full py-2.5 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors">' +
-          'Request <span class="' + mediaTypeNounColor(mediaType) + '">' + mediaTypeLabel(mediaType) + '</span>' +
+          'class="ws-lift w-full h-11 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors">' +
+          'Request ' + escapeHtml(requestNoun(mediaType)) +
         '</button>';
     } else {
       actionArea.innerHTML =
         '<div class="w-full py-2 flex items-center justify-center">' +
-          getStatusBadge(status, mediaType) +
+          getStatusBadge(status) +
         '</div>';
     }
 
@@ -1803,7 +1370,7 @@ export async function mount(ctx) {
 
   // Widening the window can make a row fit entirely, which retires both arrows.
   window.addEventListener('resize', function () {
-    DISCOVER_ROWS.forEach(function (r) { updateDiscoverArrows(discoverRow(r.id)); });
+    SHELVES.forEach(function (r) { updateDiscoverArrows(discoverRow(r.id)); });
   }, { signal: signal });
 
   // Search with a short wait after the last keystroke; the wait is the
@@ -1812,11 +1379,6 @@ export async function mount(ctx) {
   searchInput.addEventListener('input', function () {
     var query = searchInput.value.trim();
     ctx.clearTimeout(searchTimer);
-    // One-way: once the bar has settled into the results panel it stays
-    // there. Sending it back up on an empty field means the bar flies away
-    // the moment someone clears the box to retype, taking the field out
-    // from under them mid-correction.
-    if (query.length) moveSearchBar('dock');
     if (query.length === 0) {
       clearSearch();
       return;
@@ -1829,9 +1391,7 @@ export async function mount(ctx) {
   }, { signal: signal });
 
   // Before the first await, so the first frame of the page has them: the
-  // search bar floated up to the trending heading and the discover arrows
-  // set for rows that start at their left edge.
-  wireSearchBarMotion();
+  // shelf arrows set for rows that start at their left edge.
   buildDiscoverSection();
 
   var user = await checkAuth();
@@ -1843,12 +1403,11 @@ export async function mount(ctx) {
   var arrivedWith = (ctx.url.searchParams.get('q') || '').trim().slice(0, 200);
   if (arrivedWith) {
     searchInput.value = arrivedWith;
-    moveSearchBar('dock');
     performSearch(arrivedWith);
   }
 
-  // The discover rows are not waited for: they already hold their final
-  // height, and their sources take seconds.
+  // The shelves are not waited for: they already hold their final height,
+  // and their sources take seconds.
   loadDiscoverLists();
 
   // Refresh every 30 s (a poll on a page already on screen reads nothing at

@@ -82,12 +82,12 @@ function buildToc(bodyEl) {
 }
 
 function tocNode(items) {
-  var nav = el('nav', 'text-sm');
+  var nav = el('nav', 'text-body');
   nav.appendChild(el('p', 'text-label font-semibold text-frosted-blue/70 mb-2', 'On this page'));
-  var ul = el('ul', 'space-y-1.5 border-l border-steel-blue/30 pl-3');
+  var ul = el('ul', 'space-y-1.5 border-l border-frosted-blue/15 pl-3');
   items.forEach(function (it) {
     var li = el('li', it.level === 3 ? 'pl-3' : '');
-    var a = el('a', 'text-steel-blue hover:text-frosted-blue transition-colors block', it.text);
+    var a = el('a', 'text-frosted-blue/70 hover:text-frosted-blue transition-colors block', it.text);
     a.href = '#' + it.id;
     li.appendChild(a);
     ul.appendChild(li);
@@ -99,7 +99,7 @@ function tocNode(items) {
 function snippetNode(item) {
   // Built from text nodes and a <mark>, never innerHTML: the snippet is raw
   // page source and must never be interpreted as markup.
-  var p = el('p', 'text-sm text-steel-blue mt-1');
+  var p = el('p', 'text-body text-frosted-blue/70 mt-1');
   var text = item.snippet || '';
   var off = item.match_offset || 0;
   var len = item.match_length || 0;
@@ -219,9 +219,9 @@ export async function mount(ctx) {
       }
     } else {
       wrap.appendChild(el('div', 'wiki-skel h-8 w-48 mb-3'));
-      wrap.appendChild(el('div', 'wiki-skel h-12 w-full mb-8'));
+      wrap.appendChild(el('div', 'wiki-skel h-12 w-full max-w-[36rem] mb-8'));
       var grid = el('div', 'grid gap-4 sm:grid-cols-2');
-      for (var j = 0; j < 4; j++) grid.appendChild(el('div', 'wiki-skel h-28'));
+      for (var j = 0; j < 4; j++) grid.appendChild(el('div', 'wiki-skel h-28 rounded-2xl'));
       wrap.appendChild(grid);
     }
     root.appendChild(wrap);
@@ -231,33 +231,30 @@ export async function mount(ctx) {
 
   function pageHeader(titleText, subtitleText, backHref, backText) {
     var head = el('div', 'mb-6');
-    var back = el('a', 'inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors mb-3');
+    var back = el('a', 'inline-flex items-center gap-1 h-8 mb-2 text-label font-semibold text-frosted-blue/70 hover:text-frosted-blue transition-colors');
     back.href = backHref || '/';
-    back.appendChild(icon('chevron_left', 'text-sm'));
+    back.appendChild(icon('chevron_left', 'text-[16px]'));
     back.appendChild(document.createTextNode(backText || 'Back to home'));
     head.appendChild(back);
 
-    var row = el('div', 'flex items-center gap-3');
-    row.appendChild(icon('library_books', 'text-steel-blue text-3xl'));
-    var col = el('div', 'min-w-0');
-    col.appendChild(el('h1', 'text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight', titleText));
-    if (subtitleText) col.appendChild(el('p', 'text-sm text-steel-blue mt-0.5', subtitleText));
-    row.appendChild(col);
-    head.appendChild(row);
+    // The Books page head: the h1 and one quiet line, no icon beside it.
+    head.appendChild(el('h1', 'text-h2 sm:text-h1 font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue', titleText));
+    if (subtitleText) head.appendChild(el('p', 'mt-2 text-body text-frosted-blue/70 max-w-[65ch]', subtitleText));
     return head;
   }
 
   function searchBox(initial, vs) {
-    var form = el('form', 'relative mb-8');
+    var form = el('form', 'relative mb-8 max-w-[36rem]');
     var input = el('input',
-      'w-full pl-11 pr-4 py-3 rounded-lg bg-baltic-blue/20 border border-steel-blue/30 ' +
-      'text-frosted-blue placeholder:text-steel-blue focus:border-primary focus:ring-0 transition-colors');
+      'w-full h-12 pl-12 pr-4 rounded-xl border-0 bg-frosted-blue/[0.07] text-lead ' +
+      'text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue');
     input.type = 'search';
     input.name = 'q';
     input.placeholder = 'Search the wiki…';
     input.value = initial || '';
     input.setAttribute('aria-label', 'Search the wiki');
-    var mag = icon('search', 'text-steel-blue absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none');
+    var mag = icon('search', 'text-frosted-blue/70 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none');
+    mag.setAttribute('aria-hidden', 'true');
     form.appendChild(mag);
     form.appendChild(input);
     form.addEventListener('submit', function (e) {
@@ -273,10 +270,10 @@ export async function mount(ctx) {
     var bar = el('div', 'flex flex-wrap justify-end gap-2 mb-4');
     function button(glyph, label, handler, primary) {
       var btn = el('button', primary
-        ? 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 text-frosted-blue border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all'
-        : 'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-frosted-blue/70 border border-frosted-blue/10 text-sm font-bold hover:text-frosted-blue hover:bg-frosted-blue/[0.06] transition-all disabled:opacity-50 disabled:cursor-not-allowed');
+        ? 'ws-lift inline-flex items-center gap-2 h-10 pl-3 pr-4 rounded-btn bg-primary text-bright text-body font-semibold hover:bg-primary/90 transition-colors'
+        : 'inline-flex items-center gap-2 h-10 pl-3 pr-4 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue text-body font-semibold hover:bg-frosted-blue/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed');
       btn.type = 'button';
-      btn.appendChild(icon(glyph, 'text-base'));
+      btn.appendChild(icon(glyph, 'text-[18px]'));
       btn.appendChild(document.createTextNode(label));
       btn.addEventListener('click', handler, { signal: vs });
       bar.appendChild(btn);
@@ -293,10 +290,11 @@ export async function mount(ctx) {
   }
 
   function emptyState(iconName, title, detail) {
-    var box = el('div', 'text-center text-steel-blue py-12');
-    box.appendChild(icon(iconName, 'text-4xl mb-2 block opacity-50'));
-    box.appendChild(el('p', 'text-frosted-blue font-bold', title));
-    if (detail) box.appendChild(el('p', 'text-sm mt-1', detail));
+    // A line that says what is going on, as Books says it: no big glyph.
+    var box = el('div', 'py-10 max-w-xl');
+    box.setAttribute('data-icon', iconName);
+    box.appendChild(el('p', 'text-lead font-semibold text-frosted-blue', title));
+    if (detail) box.appendChild(el('p', 'mt-1 text-body text-frosted-blue/70', detail));
     return box;
   }
 
@@ -311,42 +309,46 @@ export async function mount(ctx) {
   // A plain link: the router hands it back to render() through the claim.
   function categoryCard(cat) {
     var a = el('a',
-      'group flex flex-col gap-2 p-5 rounded-xl bg-baltic-blue/20 border border-steel-blue/30 ' +
-      'hover:border-primary/50 hover:bg-baltic-blue/30 transition-all');
+      'group flex flex-col gap-1 p-4 sm:p-5 rounded-2xl bg-frosted-blue/[0.04] ' +
+      'hover:bg-frosted-blue/[0.07] transition-colors');
     a.href = '/wiki?category=' + encodeURIComponent(cat.slug);
 
-    var top = el('div', 'flex items-center gap-3');
-    top.appendChild(icon(cat.icon || 'folder', 'text-steel-blue group-hover:text-frosted-blue transition-colors'));
-    top.appendChild(el('h2', 'font-bold text-frosted-blue', cat.name));
+    var top = el('div', 'flex items-center gap-2');
+    var glyph = icon(cat.icon || 'folder', 'text-[20px] text-frosted-blue/70');
+    glyph.setAttribute('aria-hidden', 'true');
+    top.appendChild(glyph);
+    top.appendChild(el('h2', 'text-lead font-semibold leading-snug text-frosted-blue', cat.name));
     a.appendChild(top);
 
-    if (cat.description) a.appendChild(el('p', 'text-sm text-steel-blue', cat.description));
+    if (cat.description) a.appendChild(el('p', 'text-body text-frosted-blue/70', cat.description));
 
     var count = cat.page_count === 1 ? '1 page' : cat.page_count + ' pages';
     if (cat.draft_count) count += ' · ' + cat.draft_count + ' draft' + (cat.draft_count === 1 ? '' : 's');
-    a.appendChild(el('p', 'text-xs text-steel-blue mt-auto pt-1', count));
+    a.appendChild(el('p', 'text-label leading-5 text-frosted-blue/70 mt-auto pt-1', count));
     return a;
   }
 
   function pageRow(page, showCategory) {
     var a = el('a',
-      'flex items-start gap-3 p-4 rounded-lg bg-baltic-blue/15 border border-steel-blue/25 ' +
-      'hover:border-primary/50 hover:bg-baltic-blue/25 transition-all');
+      'flex items-start gap-3 p-4 rounded-2xl bg-frosted-blue/[0.04] ' +
+      'hover:bg-frosted-blue/[0.07] transition-colors');
     a.href = '/wiki/' + encodeURIComponent(page.slug);
-    a.appendChild(icon('description', 'text-steel-blue shrink-0'));
+    var doc = icon('description', 'text-[20px] text-frosted-blue/70 shrink-0');
+    doc.setAttribute('aria-hidden', 'true');
+    a.appendChild(doc);
 
     var col = el('div', 'min-w-0 flex-1');
     var titleRow = el('div', 'flex items-center gap-2 flex-wrap');
-    titleRow.appendChild(el('span', 'font-bold text-frosted-blue', page.title));
+    titleRow.appendChild(el('span', 'text-body sm:text-lead font-semibold leading-snug text-frosted-blue', page.title));
     if (!page.published) {
       titleRow.appendChild(el('span',
         'inline-flex items-center shrink-0 rounded-full px-2.5 py-0.5 text-label font-semibold bg-frosted-blue/10 text-frosted-blue/80',
         'Draft'));
     }
     col.appendChild(titleRow);
-    if (page.summary) col.appendChild(el('p', 'text-sm text-steel-blue mt-0.5', page.summary));
+    if (page.summary) col.appendChild(el('p', 'text-body text-frosted-blue/70 mt-0.5', page.summary));
     if (showCategory && page.category_name) {
-      col.appendChild(el('p', 'text-xs text-steel-blue mt-1', page.category_name));
+      col.appendChild(el('p', 'text-label leading-5 text-frosted-blue/70 mt-1', page.category_name));
     }
     a.appendChild(col);
     return a;
@@ -421,9 +423,9 @@ export async function mount(ctx) {
 
     var loose = pages.filter(function (p) { return !p.category_slug; });
     if (loose.length) {
-      root.appendChild(el('h2', 'text-lead font-bold text-frosted-blue mb-3',
+      root.appendChild(el('h2', 'text-h3 font-bold leading-snug text-frosted-blue mb-3',
         _cats.length ? 'Uncategorised' : 'Pages'));
-      var list = el('div', 'grid gap-2 mb-8');
+      var list = el('div', 'grid gap-3 mb-8');
       loose.forEach(function (p) { list.appendChild(pageRow(p, false)); });
       root.appendChild(list);
     }
@@ -432,9 +434,9 @@ export async function mount(ctx) {
       return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
     }).slice(0, 5);
     if (recent.length && _cats.length) {
-      root.appendChild(el('h2', 'text-lead font-bold text-frosted-blue mb-3',
+      root.appendChild(el('h2', 'text-h3 font-bold leading-snug text-frosted-blue mb-3',
         'Recently updated'));
-      var rlist = el('div', 'grid gap-2');
+      var rlist = el('div', 'grid gap-3');
       recent.forEach(function (p) { rlist.appendChild(pageRow(p, true)); });
       root.appendChild(rlist);
     }
@@ -526,14 +528,14 @@ export async function mount(ctx) {
     var list = el('div', 'grid gap-2');
     results.forEach(function (item) {
       var a = el('a',
-        'block p-4 rounded-lg bg-baltic-blue/15 border border-steel-blue/25 ' +
-        'hover:border-primary/50 hover:bg-baltic-blue/25 transition-all');
+        'block p-4 rounded-2xl bg-frosted-blue/[0.04] ' +
+        'hover:bg-frosted-blue/[0.07] transition-colors');
       a.href = '/wiki/' + encodeURIComponent(item.slug);
 
       var row = el('div', 'flex items-center gap-2 flex-wrap');
-      row.appendChild(el('span', 'font-bold text-frosted-blue', item.title));
+      row.appendChild(el('span', 'text-body sm:text-lead font-semibold leading-snug text-frosted-blue', item.title));
       if (item.category_name) {
-        row.appendChild(el('span', 'text-xs text-steel-blue', item.category_name));
+        row.appendChild(el('span', 'text-label text-frosted-blue/70', item.category_name));
       }
       if (item.matched_in === 'body') {
         row.appendChild(el('span',
@@ -587,16 +589,16 @@ export async function mount(ctx) {
     var backText = page.category_name ? 'Back to ' + page.category_name : 'Back to the wiki';
 
     var head = el('div', 'mb-6');
-    var back = el('a', 'inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors mb-3');
+    var back = el('a', 'inline-flex items-center gap-1 h-8 mb-2 text-label font-semibold text-frosted-blue/70 hover:text-frosted-blue transition-colors');
     back.href = backHref;
-    back.appendChild(icon('chevron_left', 'text-sm'));
+    back.appendChild(icon('chevron_left', 'text-[16px]'));
     back.appendChild(document.createTextNode(backText));
     head.appendChild(back);
 
     var titleRow = el('div', 'flex items-start justify-between gap-4 flex-wrap');
     var titleCol = el('div', 'min-w-0');
     var h1Row = el('div', 'flex items-center gap-2 flex-wrap');
-    h1Row.appendChild(el('h1', 'text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight', page.title));
+    h1Row.appendChild(el('h1', 'text-h2 sm:text-h1 font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue', page.title));
     if (!page.published) {
       h1Row.appendChild(el('span',
         'inline-flex items-center shrink-0 rounded-full px-2.5 py-0.5 text-label font-semibold bg-frosted-blue/10 text-frosted-blue/80',
@@ -604,15 +606,15 @@ export async function mount(ctx) {
     }
     titleCol.appendChild(h1Row);
     var meta = 'Last updated ' + dateLabel(page.updated_at);
-    titleCol.appendChild(el('p', 'text-sm text-steel-blue mt-1', meta));
+    titleCol.appendChild(el('p', 'mt-2 text-label leading-5 text-frosted-blue/70', meta));
     titleRow.appendChild(titleCol);
 
     if (isAdmin()) {
       var editBtn = el('button',
-        'shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 text-frosted-blue ' +
-        'border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all');
+        'shrink-0 inline-flex items-center gap-2 h-10 pl-3 pr-4 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue ' +
+        'text-body font-semibold hover:bg-frosted-blue/10 transition-colors');
       editBtn.type = 'button';
-      editBtn.appendChild(icon('edit', 'text-base'));
+      editBtn.appendChild(icon('edit', 'text-[18px]'));
       editBtn.appendChild(document.createTextNode('Edit this page'));
       editBtn.addEventListener('click', function () {
         openEditor(page.slug);
@@ -626,9 +628,9 @@ export async function mount(ctx) {
     // act on it and no reason to distrust the content.
     if (page.is_example && isAdmin()) {
       var banner = el('div',
-        'flex items-start gap-3 p-4 rounded-lg bg-baltic-blue/25 border border-steel-blue/40 mb-6');
-      banner.appendChild(icon('info', 'text-steel-blue shrink-0'));
-      banner.appendChild(el('p', 'text-sm text-steel-blue',
+        'flex items-start gap-3 p-4 rounded-2xl bg-frosted-blue/[0.04] mb-6');
+      banner.appendChild(icon('info', 'text-frosted-blue/70 shrink-0'));
+      banner.appendChild(el('p', 'text-body text-frosted-blue/80',
         'This is an example page shipped with WebServarr. Edit it or delete it.'));
       root.appendChild(banner);
     }
@@ -646,11 +648,11 @@ export async function mount(ctx) {
       layout.appendChild(bodyWrap);
       layout.appendChild(aside);
 
-      var details = el('details', 'lg:hidden mb-6 rounded-lg bg-baltic-blue/20 border border-steel-blue/30 p-4');
-      var summary = el('summary', 'text-sm font-bold text-frosted-blue cursor-pointer', 'On this page');
+      var details = el('details', 'lg:hidden mb-6 rounded-2xl bg-frosted-blue/[0.04] p-4');
+      var summary = el('summary', 'text-body font-semibold text-frosted-blue cursor-pointer', 'On this page');
       details.appendChild(summary);
       var inner = tocNode(toc);
-      inner.className = 'text-sm mt-3';
+      inner.className = 'text-body mt-3';
       details.appendChild(inner);
       root.appendChild(details);
     } else {
@@ -659,17 +661,17 @@ export async function mount(ctx) {
     root.appendChild(layout);
 
     if (page.siblings && page.siblings.length) {
-      var more = el('div', 'mt-10 pt-6 border-t border-steel-blue/25');
-      more.appendChild(el('h2', 'text-lead font-bold text-frosted-blue mb-3',
+      var more = el('div', 'mt-10 pt-6 border-t border-frosted-blue/10');
+      more.appendChild(el('h2', 'text-h3 font-bold leading-snug text-frosted-blue mb-3',
         'More in ' + (page.category_name || 'this category')));
       var list = el('div', 'grid gap-2');
       page.siblings.forEach(function (s) {
         var a = el('a',
-          'flex items-center gap-3 p-3 rounded-lg bg-baltic-blue/15 border border-steel-blue/25 ' +
-          'hover:border-primary/50 transition-all');
+          'flex items-center gap-3 p-3 rounded-2xl bg-frosted-blue/[0.04] ' +
+          'hover:bg-frosted-blue/[0.07] transition-colors');
         a.href = '/wiki/' + encodeURIComponent(s.slug);
-        a.appendChild(icon('description', 'text-steel-blue shrink-0'));
-        a.appendChild(el('span', 'text-frosted-blue', s.title));
+        a.appendChild(icon('description', 'text-[20px] text-frosted-blue/70 shrink-0'));
+        a.appendChild(el('span', 'text-body font-semibold text-frosted-blue', s.title));
         list.appendChild(a);
       });
       more.appendChild(list);

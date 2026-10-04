@@ -10,8 +10,14 @@
 <link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
 <style>
+    /* The scrim over the artwork: light in the middle, so the picture reads as
+       a picture (audit M7: 0.4 to 0.9 turned it to mud), darker toward the
+       edges and the foot, where the status line sits. The card's own words
+       carry their outline (below), so they read over any picture. */
     .cinematic-overlay {
-      background: radial-gradient(circle, rgb(var(--color-background) / 0.4) 0%, rgb(var(--color-background) / 0.9) 100%);
+      background:
+        linear-gradient(to bottom, transparent 55%, rgb(var(--color-background) / 0.45) 100%),
+        radial-gradient(circle, rgb(var(--color-background) / 0.25) 0%, rgb(var(--color-background) / 0.65) 100%);
     }
     /* Light glass over the rotating artwork. The hues are the search bar's
        (#searchInput on the requests page: the secondary tint and the
@@ -34,9 +40,10 @@
        dark edge whatever sits behind it (a 4px blur lets real detail
        through), then a tight and a wide glow that quiet the art around the
        words. */
+    .login-glass-card h1,
     .login-glass-card label,
     #ssoDivider span,
-    #loginForm .material-symbols-outlined,
+    #loginSystemStatus [data-status-text],
     #loginForm input::placeholder {
       text-shadow: 0 0 1px rgb(var(--color-background) / 0.9),
                    0 1px 2px rgb(var(--color-background) / 0.9),
@@ -139,66 +146,48 @@
 </div>
 <!-- Dark Overlay -->
 <div class="fixed inset-0 z-10 cinematic-overlay"></div>
-<!-- Main Content Container -->
-<main class="relative z-20 flex-1 flex flex-col items-center justify-center px-4">
-<!-- Login Card -->
-<div class="w-full max-w-[440px] login-glass-card rounded-xl p-8 shadow-2xl flex flex-col items-center">
-<!-- Logo Section -->
-<div class="mb-8 w-full flex flex-col items-center">
-<img id="loginLogo" alt="Logo" class="h-48 w-auto object-contain border-none mb-2 hidden"/>
-<h1 id="loginAppName" class="text-frosted-blue text-2xl font-bold mt-4 tracking-tight text-center">WebServarr</h1>
-</div>
+<!-- The card and, under it, the server's one-line status -->
+<main class="relative z-20 flex-1 flex flex-col items-center justify-center px-4 py-10">
+<!-- Login Card: the logo at 64px, the site's name once (the server writes it,
+     app/pages.py _fill_login_name, or hides it when there is none), then the
+     sign-in. No product name a family member has to parse. -->
+<div class="w-full max-w-[400px] login-glass-card rounded-card p-6 sm:p-8 flex flex-col items-center">
+<!-- Decorative: the heading under it names the site. -->
+<img id="loginLogo" alt="" class="h-16 w-auto max-w-full object-contain mb-4 hidden"/>
+<h1 id="loginAppName" class="text-frosted-blue text-h2 font-extrabold leading-tight tracking-[-0.02em] text-center text-balance">WebServarr</h1>
 <!-- Login Form -->
-<form id="loginForm" method="post" class="w-full space-y-5">
-<div class="flex flex-col gap-1.5">
-<label for="username" class="text-frosted-blue text-sm font-medium px-1">Username</label>
-<div class="relative group">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-frosted-blue text-h3" aria-hidden="true">person</span>
-<input id="username" name="username" autocomplete="username" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="admin" type="text" required/>
+<form id="loginForm" method="post" class="w-full mt-8 space-y-4">
+<div>
+<label for="username" class="block mb-1.5 text-label font-semibold text-frosted-blue">Username</label>
+<input id="username" name="username" autocomplete="username" class="w-full h-12 rounded-btn border-0 bg-frosted-blue/[0.07] px-4 text-lead text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue transition-colors" type="text" required/>
 </div>
+<div>
+<label for="password" class="block mb-1.5 text-label font-semibold text-frosted-blue">Password</label>
+<input id="password" name="password" autocomplete="current-password" class="w-full h-12 rounded-btn border-0 bg-frosted-blue/[0.07] px-4 text-lead text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue transition-colors" type="password" required/>
 </div>
-<div class="flex flex-col gap-1.5">
-<div class="flex justify-between items-center px-1">
-<label for="password" class="text-frosted-blue text-sm font-medium">Password</label>
-</div>
-<div class="relative group">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-frosted-blue text-h3" aria-hidden="true">lock</span>
-<input id="password" name="password" autocomplete="current-password" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="••••••••" type="password" required/>
-</div>
-</div>
-<button type="submit" class="w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98]">
-                    Sign in
-                </button>
+<button type="submit" class="ws-lift w-full h-12 rounded-btn bg-primary hover:bg-primary/90 text-bright text-lead font-semibold transition-colors">Sign in</button>
 <!-- Divider -->
-<div id="ssoDivider" class="flex items-center gap-4 py-2">
-<div class="h-[1px] flex-1 bg-frosted-blue/10"></div>
-<span class="text-frosted-blue/80 text-label font-semibold">Or continue with</span>
-<div class="h-[1px] flex-1 bg-frosted-blue/10"></div>
+<div id="ssoDivider" class="flex items-center gap-3 py-1">
+<div class="h-px flex-1 bg-frosted-blue/15"></div>
+<span class="text-label text-frosted-blue">or</span>
+<div class="h-px flex-1 bg-frosted-blue/15"></div>
 </div>
-<!-- Plex SSO Button -->
-<button id="plexLoginBtn" class="w-full bg-[#E5A00D] hover:bg-[#cc8f0c] text-black font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all active:scale-[0.98]" type="button">
-<span class="text-sm font-medium">Sign in with</span>
-<span class="font-black text-xl tracking-tight leading-none uppercase" style="font-family: 'Arial Black', 'Helvetica Neue', sans-serif">PLEX</span>
-</button>
-<!-- Authentik SSO Button (hidden by default, shown when configured) -->
-<button id="authentikLoginBtn" class="hidden w-full bg-[#E5A00D] hover:bg-[#cc8f0c] text-black font-bold py-3 rounded-lg flex flex-col items-center justify-center transition-all active:scale-[0.98]" type="button">
-<div class="flex items-center gap-2">
-<span class="text-sm font-medium">Sign in with</span>
-<span class="font-black text-xl tracking-tight leading-none uppercase" style="font-family: 'Arial Black', 'Helvetica Neue', sans-serif">PLEX</span>
-</div>
-<span class="text-label font-medium opacity-70">via Authentik</span>
-</button>
+<!-- Plex sign-in, in Plex's own colour (the one sanctioned brand colour, audit M10); plain words, no imitation of its wordmark -->
+<button id="plexLoginBtn" class="ws-lift w-full h-12 rounded-btn bg-[#E5A00D] hover:bg-[#cc8f0c] text-black text-lead font-semibold transition-colors" type="button">Continue with Plex</button>
+<!-- The same Plex sign-in through the operator's Authentik (hidden unless it is on). How it is routed is not the visitor's concern. -->
+<button id="authentikLoginBtn" class="hidden ws-lift w-full h-12 rounded-btn bg-[#E5A00D] hover:bg-[#cc8f0c] text-black text-lead font-semibold transition-colors" type="button">Continue with Plex</button>
 </form>
 <!-- Shown by CSS alone, only when login.js never ran (see #loginLoadHint above). -->
-<p id="loginLoadHint" class="w-full text-status-err-text text-sm text-center" role="status">Sign-in didn’t load. Reload the page.</p>
+<p id="loginLoadHint" class="w-full text-status-err-text text-body text-center" role="status">Sign-in didn’t load. Reload the page.</p>
 </div>
-<script src="/static/js/login.js?v=1"></script>
-</main>
-<footer class="relative z-20 p-8 flex items-center justify-center">
-<div id="loginSystemStatus" data-state="off" class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border">
+<!-- One line about the server (/api/integrations/status-summary, public):
+     "All services running" or "<Service> is down", nothing more. A .ws-pill,
+     so its colours are the theme's status colours, keyed on data-state. -->
+<p id="loginSystemStatus" data-state="off" class="ws-pill mt-6 inline-flex items-center gap-2 rounded-full px-3 py-1.5" role="status">
 <span class="ws-status-dot" aria-hidden="true"></span>
 <span data-status-text class="ws-pill-label text-frosted-blue text-label font-semibold">Checking the server&hellip;</span>
-</div>
-</footer>
+</p>
+<script src="/static/js/login.js?v=1"></script>
+</main>
 
 </body></html>

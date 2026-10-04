@@ -96,7 +96,7 @@ def init_db():
         migrate_tickets_page_switch_v1,
         migrate_ebooks_page_switch_v1, migrate_requests_source_v1, migrate_books_catalog_v2,
         migrate_books_nav_v1, migrate_book_announced, migrate_welcome_post_v2,
-        migrate_status_feed_fields, migrate_status_preferences,
+        migrate_status_feed_fields, migrate_status_preferences, migrate_secondary_palette_v1,
     )
     db = SessionLocal()
     try:
@@ -127,6 +127,8 @@ def init_db():
         migrate_home_sublabel_v3(db)
         migrate_wiki_sublabel_v4(db)
         migrate_books_nav_v1(db)
+        # The stock media, status and gauge colours become the brand-derived ones.
+        migrate_secondary_palette_v1(db)
         # v1.11: one switch per page, one Requests page with a source.
         migrate_tickets_page_switch_v1(db)
         migrate_ebooks_page_switch_v1(db)
