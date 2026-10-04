@@ -4,6 +4,8 @@ Fetches service status from Uptime Kuma's public status page API.
 """
 
 import logging
+from typing import Optional
+
 import httpx
 from app.integrations import config as integration_config
 
@@ -34,11 +36,19 @@ def _get_config() -> dict:
 async def get_monitors() -> list:
     """
     Fetch monitor status from Uptime Kuma's public status page API.
-    Returns list of monitor dicts compatible with our Service model format.
+    Returns list of monitor dicts compatible with our Service model format,
+    or [] when Uptime Kuma is not set up or can't be read.
     """
+    return await read_monitors() or []
+
+
+async def read_monitors() -> Optional[list]:
+    """Like get_monitors, but None when Uptime Kuma is not set up or could not
+    be read, so a caller can tell "no monitors" from "no answer" (the status
+    feed must never say everything is running when it simply doesn't know)."""
     config = _get_config()
     if not config["url"]:
-        return []
+        return None
 
     slug = config["slug"]
 
@@ -48,7 +58,7 @@ async def get_monitors() -> list:
             resp = await client.get(f"{config['url']}/api/status-page/heartbeat/{slug}")
             if resp.status_code != 200:
                 logger.warning("Uptime Kuma heartbeat returned HTTP %d", resp.status_code)
-                return []
+                return None
 
             data = resp.json()
             heartbeat_list = data.get("heartbeatList", {})
@@ -117,10 +127,10 @@ async def get_monitors() -> list:
 
     except httpx.TimeoutException:
         logger.warning("Uptime Kuma connection timed out")
-        return []
+        return None
     except httpx.ConnectError:
         logger.warning("Could not connect to Uptime Kuma at %s", config["url"])
-        return []
+        return None
     except Exception as e:
         logger.error("Uptime Kuma integration error: %s", str(e))
-        return []
+        return None

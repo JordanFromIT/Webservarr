@@ -3,7 +3,7 @@ Database models for WebServarr.
 """
 
 from sqlalchemy import CheckConstraint, Column, Date, Integer, String, Text, Boolean, DateTime, Enum, Float, ForeignKey, Index, UniqueConstraint
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 from datetime import datetime
 from app.database import Base
 import enum
@@ -71,18 +71,29 @@ class Service(Base):
 
 
 class StatusUpdate(Base):
-    """Incident and maintenance updates."""
+    """One item of the status feed (app/services/status_feed.py): an outage
+    Uptime Kuma reported (source "auto") or an admin's note ("admin").
+
+    `message` holds the line people read; `title` is its first 200
+    characters. An outage is one row: opened as "<Service> is down", closed
+    as "<Service> is back, down <duration>". The columns from `source` on
+    are added to older databases by seed.migrate_status_feed_fields."""
     __tablename__ = "status_updates"
+    # At most one open outage per monitor, whichever worker records it.
+    __table_args__ = (
+        Index("ux_status_updates_open_monitor", "monitor_id", unique=True,
+              sqlite_where=text("active = 1 AND source = 'auto'")),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(200), nullable=False)
     message = Column(Text, nullable=False)
 
     # Type of update
-    update_type = Column(String(20), nullable=False)  # incident, maintenance, resolved
+    update_type = Column(String(20), nullable=False)  # incident, maintenance, resolved, note
     severity = Column(String(20), nullable=False)  # info, warning, critical
 
-    # Associated service (optional)
+    # Associated service (optional): the monitor's name for an outage
     service_name = Column(String(100), nullable=True)
 
     # Metadata
@@ -93,6 +104,13 @@ class StatusUpdate(Base):
     # Status
     active = Column(Boolean, default=True, nullable=False)
     resolved_at = Column(DateTime, nullable=True)
+
+    source = Column(String(10), nullable=False, default="admin", server_default="admin")  # auto, admin
+    important = Column(Boolean, nullable=False, default=False, server_default=text("0"))
+    monitor_id = Column(Integer, nullable=True)  # the Uptime Kuma monitor, for an outage
+    started_at = Column(DateTime, nullable=True)  # when the outage began
+    ended_at = Column(DateTime, nullable=True)  # when it was seen back up
+    pushed_at = Column(DateTime, nullable=True)  # set once, when its push is claimed
 
     def __repr__(self):
         return f"<StatusUpdate(id={self.id}, type='{self.update_type}')>"

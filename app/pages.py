@@ -70,11 +70,13 @@ NAV_ITEMS = [
     for pid in SIDEBAR_PAGE_IDS
 ]
 
-# Which nav item a page highlights. The news archive is part of Home; the
-# Seerr embed is what Requests shows when its source is "seerr_embed".
+# Which nav item a page highlights. The news archive and the status feed are
+# part of Home; the Seerr embed is what Requests shows when its source is
+# "seerr_embed".
 PAGE_NAV = {
     "index": "home",
     "news": "home",
+    "status": "home",
     "requests": "requests",
     "requests-embed": "requests",
     "issues": "issues",

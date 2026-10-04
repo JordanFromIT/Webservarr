@@ -96,6 +96,7 @@ def init_db():
         migrate_tickets_page_switch_v1,
         migrate_ebooks_page_switch_v1, migrate_requests_source_v1, migrate_books_catalog_v2,
         migrate_books_nav_v1, migrate_book_announced, migrate_welcome_post_v2,
+        migrate_status_feed_fields, migrate_status_preferences,
     )
     db = SessionLocal()
     try:
@@ -115,6 +116,8 @@ def init_db():
         migrate_books_catalog_v2(db)
         # The catalog's books before "New in your series" are never announced.
         migrate_book_announced(db)
+        # The status feed's queries (and the poller's) select its columns.
+        migrate_status_feed_fields(db)
         migrate_requests_rename(db)
         migrate_overseerr_to_seerr(db)
         seed_default_settings(db)
@@ -131,6 +134,8 @@ def init_db():
         migrate_setup_completed(db)
         migrate_drop_push_username_rows(db)
         migrate_no_email_identity(db)
+        # After that one: no preference filed under no email is carried.
+        migrate_status_preferences(db)
         seed_vapid_keys(db)
         seed_default_news(db)
         # After seeding: a fresh install already has the new post (the marker

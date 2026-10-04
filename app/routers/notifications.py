@@ -27,7 +27,11 @@ class PreferencesUpdate(BaseModel):
     """Schema for updating notification preferences per category."""
     request: Optional[bool] = None
     issue: Optional[bool] = None
-    service: Optional[bool] = None
+    # The status feed: an outage down 10 minutes, an important admin note
+    # (app/services/status_feed.py). It replaced "service", the alert on
+    # every monitor change; seed.migrate_status_preferences carried each
+    # "off" over.
+    status: Optional[bool] = None
     news: Optional[bool] = None
     ticket: Optional[bool] = None
     # "New in your series" (app/services/book_discovery.py).
@@ -60,7 +64,7 @@ class PushSubscribeRequest(BaseModel):
 
 # --- Helpers ---
 
-NOTIFICATION_CATEGORIES = ("request", "issue", "service", "news", "ticket", "books")
+NOTIFICATION_CATEGORIES = ("request", "issue", "status", "news", "ticket", "books")
 
 
 def _email_hash(email: str) -> str:

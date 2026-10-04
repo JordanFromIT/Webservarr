@@ -2,10 +2,10 @@
 Background notification poller.
 
 Runs three independent polling loops that detect events from
-Seerr (requests/issues), Uptime Kuma (monitor status), and
-the local NewsPost table. When an event is detected it creates a
-Notification row (with dedup) and dispatches a Web Push via
-send_push_to_users().
+Seerr (requests/issues), Uptime Kuma (monitor status, which keeps the status
+feed's outages: app/services/status_feed.py), and the local NewsPost table.
+When an event is detected it creates a Notification row (with dedup) and
+dispatches a Web Push via send_push_to_users().
 
 Architecture:
     start_poller()  -- launched as asyncio.create_task in main.py lifespan
@@ -34,6 +34,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import Notification, NewsPost, PushSubscription, Setting, Ticket, TicketComment
 from app.services.push import send_push_to_users
+from app.services import status_feed
 from app.utils import identity_email
 
 logger = logging.getLogger(__name__)
@@ -356,16 +357,6 @@ async def _ticket_creator_email(r: aioredis.Redis, db: Session, ticket) -> Optio
             return None
 
 
-def _monitor_ref(monitor_id, status_label: str, since: str) -> str:
-    """Dedup reference for one monitor transition.
-
-    Includes when the monitor entered the status, so the next outage of the
-    same monitor is a new notification while re-detecting the same transition
-    still hits the dedup check. Fits Notification.reference_id (100 chars).
-    """
-    return f"monitor:{monitor_id}:{status_label}:{since}"[:100]
-
-
 # ---------------------------------------------------------------------------
 # Seerr config helper
 # ---------------------------------------------------------------------------
@@ -619,74 +610,97 @@ async def _poll_seerr_issues(r: aioredis.Redis) -> None:
 # Poll: Uptime Kuma monitors
 # ---------------------------------------------------------------------------
 
-async def _poll_monitors(r: aioredis.Redis) -> None:
-    try:
-        from app.integrations.uptime_kuma import get_monitors
-    except ImportError:
-        logger.debug("Poller: uptime_kuma module not available")
-        return
+async def _poll_monitors(r: aioredis.Redis,
+                         kuma_ok_ttl: int = status_feed.KUMA_OK_POLLS * DEFAULT_MONITORS_INTERVAL) -> None:
+    """Read Uptime Kuma and keep the status feed's outages in step with it.
+
+    An outage opens on the second poll in a row that finds a monitor down, so
+    one that flaps (down, up, down) opens nothing, and closes on the first
+    poll that finds it up. A monitor switched off in Settings opens nothing.
+    When Uptime Kuma doesn't answer nothing opens or closes, and the feed is
+    told so (status_feed.KUMA_OK_KEY, kept for `kuma_ok_ttl` seconds after
+    each answer). The pushes are push_status_updates' job.
+    """
+    from app.integrations.uptime_kuma import read_monitors
 
     try:
-        monitors = await get_monitors()
+        monitors = await read_monitors()
     except Exception as exc:
         logger.warning("Poller: monitor fetch error: %s", exc)
+        monitors = None
+
+    if monitors is None:
+        await r.delete(status_feed.KUMA_OK_KEY)
         return
+    await r.set(status_feed.KUMA_OK_KEY, "1", ex=kuma_ok_ttl)
 
-    if not monitors:
-        return
+    now = status_feed.now_utc()
+    db = SessionLocal()
+    try:
+        for mon in monitors:
+            await _track_monitor(r, db, mon, now)
+    finally:
+        db.close()
 
-    for mon in monitors:
-        monitor_id = mon.get("id", 0)
-        name = mon.get("name", f"Monitor {monitor_id}")
-        status_label = mon.get("status", "unknown")
 
-        redis_key = f"poller:monitor:{monitor_id}"
-        prev_status, _ = _parse_monitor_snapshot(await r.get(redis_key))
-        if status_label == prev_status:
-            continue  # unchanged: keep the transition marker already stored
+async def _track_monitor(r: aioredis.Redis, db: Session, mon: dict, now: datetime) -> None:
+    """One monitor's poll: record what it is now and open or close its outage."""
+    monitor_id = mon.get("id", 0)
+    name = mon.get("name") or f"Monitor {monitor_id}"
+    status_label = mon.get("status", "unknown")
 
-        # A new status. Its transition marker is fixed once, here, and stored
-        # with the snapshot: the start of the run when the status page still
-        # shows it, else the time we noticed. Recomputing it from the sliding
-        # heartbeat window on later polls would give the same outage a new
-        # dedup reference each time.
-        since = mon.get("status_since") or datetime.now(timezone.utc).isoformat(timespec="seconds")
-        # SET ... GET returns the value this write replaced, atomically, so if
-        # two pollers ever see the change at once only one finds the old status.
-        replaced = await r.set(redis_key, f"{status_label}|{since}", get=True)
-        prev_status, _ = _parse_monitor_snapshot(replaced)
+    # The last status seen and when it began, kept in Redis between polls.
+    redis_key = f"poller:monitor:{monitor_id}"
+    seen, since = _parse_monitor_snapshot(await r.get(redis_key))
+    if status_label != seen:
+        # A new status. Its marker is fixed once, here: the start of the run
+        # when the status page still shows it, else the time we noticed. The
+        # page only returns the last few dozen beats, so recomputing it on
+        # later polls would slide with every poll during a long outage.
+        since = mon.get("status_since") or now.isoformat(timespec="seconds")
+        await r.set(redis_key, f"{status_label}|{since}")
 
-        if prev_status is None:
-            continue  # no baseline yet: seed silently
-        if status_label == prev_status:
-            continue  # another poller recorded this transition first
+    if status_label == "down" and seen == "down":
+        if status_feed.monitor_enabled(db, monitor_id):
+            status_feed.open_outage(db, monitor_id, name, status_feed.parse_time(since, now), now)
+    elif status_label == "up":
+        status_feed.close_outage(db, monitor_id, now)
 
-        ref_id = _monitor_ref(monitor_id, status_label, since)
-        title = f"{name} is {status_label}"
-        body = f"Service status changed from {prev_status} to {status_label}"
 
-        db = SessionLocal()
-        try:
-            emails = await _collect_recipient_emails(r, db)
-            if not emails:
-                continue
+async def push_status_updates(r: aioredis.Redis) -> int:
+    """Push every status update that is due (status_feed.due_pushes): an
+    outage down PUSH_AFTER or longer, while Uptime Kuma is still answering
+    (never on a reading that may be stale), and an important note.
 
-            notified_emails = []
-            for email in emails:
-                notif = await _create_notification_once(r, db, email, "service", title, body, ref_id)
-                if notif:
-                    notified_emails.append(email)
-
-            if notified_emails:
-                await send_push_to_users(
-                    notified_emails,
-                    title,
-                    body,
-                    "service",
-                    url="/",
-                )
-        finally:
-            db.close()
+    Each update is pushed at most once across workers: its push is claimed
+    in the database before anything is sent, so a failed send is not
+    retried. Everyone a broadcast reaches gets an in-app notification in the
+    "status" category, unless they turned it off, and a push to their
+    devices. Returns how many updates were pushed.
+    """
+    include_outages = await r.get(status_feed.KUMA_OK_KEY) is not None
+    now = status_feed.now_utc()
+    pushed = 0
+    db = SessionLocal()
+    try:
+        for row in status_feed.due_pushes(db, now, include_outages):
+            if not status_feed.claim_push(db, row.id, now):
+                continue  # another worker has it
+            pushed += 1
+            title, body = status_feed.push_text(row, now)
+            ref_id = f"status:{row.id}"
+            notified = []
+            for email in await _collect_recipient_emails(r, db):
+                if await _create_notification_once(r, db, email, "status", title, body, ref_id):
+                    notified.append(email)
+            if notified:
+                try:
+                    await send_push_to_users(notified, title, body, "status", url="/status")
+                except Exception as exc:  # noqa: BLE001 - the notifications are saved; a push is best effort
+                    logger.warning("Poller: a status push could not be sent: %s", type(exc).__name__)
+    finally:
+        db.close()
+    return pushed
 
 
 # ---------------------------------------------------------------------------
@@ -990,9 +1004,17 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
             if lease.held and now - last_monitors >= interval_monitors:
                 last_monitors = now
                 try:
-                    await _poll_monitors(r)
+                    await _poll_monitors(r, status_feed.KUMA_OK_POLLS * interval_monitors)
                 except Exception as exc:
                     logger.warning("Poller: monitors cycle error: %s", exc)
+
+            # --- Status feed pushes: every tick, so an important note goes
+            # out within seconds whatever the monitor interval ---
+            if lease.held:
+                try:
+                    await push_status_updates(r)
+                except Exception as exc:
+                    logger.warning("Poller: status push error: %s", exc)
 
             # --- News ---
             if lease.held and now - last_news >= interval_news:

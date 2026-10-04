@@ -172,20 +172,21 @@ async def get_service_status(
 @router.get("/status-summary")
 @limiter.limit("60/minute")
 async def get_status_summary(request: Request, db: Session = Depends(get_db)):
-    """Public aggregate service health for the login page badge.
+    """Public aggregate service health for the login page's one line.
 
-    Returns ONLY an overall indicator ("online"/"degraded"/"issues"/"unknown")
-    with no per-service names or topology, so it is safe for unauthenticated
-    callers on the login page. Authenticated pages use the detailed
-    /service-status endpoint (which requires a session) instead.
+    Returns ONLY the current state: an overall indicator
+    ("online"/"degraded"/"issues"/"unknown") and, while something is down,
+    the name of one service that is (down_service, else null), so the line
+    can read "<Service> is down". Nothing else: no other names, no count,
+    no history, no monitor switched off in Settings. Uptime Kuma not
+    answering is "unknown", never "online". Authenticated pages use the
+    detailed /service-status endpoint (which requires a session) instead.
     """
-    monitors = await uptime_kuma.get_monitors()
-    statuses = [
-        m.get("status")
-        for m in monitors
-        if _get_monitor_preferences(db, m["id"])["enabled"]
-    ]
-    if any(s == "down" for s in statuses):
+    monitors = [m for m in await uptime_kuma.get_monitors()
+                if _get_monitor_preferences(db, m["id"])["enabled"]]
+    statuses = [m.get("status") for m in monitors]
+    down = [m for m in monitors if m.get("status") == "down"]
+    if down:
         overall = "issues"
     elif any(s == "degraded" for s in statuses):
         overall = "degraded"
@@ -193,7 +194,7 @@ async def get_status_summary(request: Request, db: Session = Depends(get_db)):
         overall = "online"
     else:
         overall = "unknown"
-    return {"status": overall}
+    return {"status": overall, "down_service": (down[0].get("name") or None) if down else None}
 
 
 # --- Seerr Endpoints ---

@@ -293,6 +293,81 @@ def migrate_book_announced(db: Session) -> None:
     logger.info("Counted %d existing book(s) as announced", filled)
 
 
+# The status feed's columns on status_updates (app/services/status_feed.py).
+STATUS_FEED_COLUMNS = (
+    ("source", "VARCHAR(10) NOT NULL DEFAULT 'admin'"),
+    ("important", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("monitor_id", "INTEGER"),
+    ("started_at", "DATETIME"),
+    ("ended_at", "DATETIME"),
+    ("pushed_at", "DATETIME"),
+)
+
+
+def migrate_status_feed_fields(db: Session) -> None:
+    """One-time migration: add the status feed's columns to status_updates
+    (source, important, monitor_id, started_at, ended_at, pushed_at) and its
+    one-open-outage-per-monitor index, in existing databases.
+
+    Rows already there were posted by an admin, so they read as admin notes,
+    not important. Guarded by PRAGMA table_info and idempotent, like
+    migrate_listening_book_fields: a worker that loses the race to the other
+    one ignores its "duplicate column" error, and the index is created with
+    IF NOT EXISTS.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    columns = {row[1] for row in db.execute(text("PRAGMA table_info(status_updates)"))}
+    if not columns:
+        return  # no table yet: create_all makes it with the columns and the index
+    for name, kind in STATUS_FEED_COLUMNS:
+        if name in columns:
+            continue
+        try:
+            db.execute(text(f"ALTER TABLE status_updates ADD COLUMN {name} {kind}"))
+            db.commit()
+            logger.info("Added status_updates.%s", name)
+        except OperationalError as exc:
+            db.rollback()
+            if "duplicate column" not in str(exc).lower():
+                raise
+    db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_status_updates_open_monitor "
+                    "ON status_updates (monitor_id) WHERE active = 1 AND source = 'auto'"))
+    db.commit()
+
+
+STATUS_PREFERENCES_MARKER = "migration.status_preferences_v1"
+
+
+def migrate_status_preferences(db: Session) -> None:
+    """One-time migration: whoever turned off "service" notifications (one on
+    every monitor change) starts with the status feed's "status" ones off
+    too, since "status" replaced it. A "status" choice already made is kept.
+
+    Idempotent and safe with two workers: the copy is an INSERT OR IGNORE
+    and the transaction's first write, and the marker goes in the same
+    commit; the worker that loses the race to it rolls back.
+    """
+    from sqlalchemy import text
+
+    if not list(db.execute(text("PRAGMA table_info(settings)"))):
+        return  # no tables yet: create_all makes them (and there is nothing to carry)
+    if _setting_row(db, STATUS_PREFERENCES_MARKER):
+        return
+    copied = db.execute(text(
+        "INSERT OR IGNORE INTO settings (key, value, description) "
+        "SELECT substr(key, 1, length(key) - length('service')) || 'status', 'false', "
+        "'Notification preference: status' FROM settings "
+        "WHERE key LIKE 'notify.%.service' AND lower(value) = 'false'"
+    )).rowcount
+    if not _finish_migration(db, STATUS_PREFERENCES_MARKER,
+                             "One-time: service notifications turned off carried to status"):
+        return
+    if copied:
+        logger.info("Carried %d service notification choice(s) over to status", copied)
+
+
 def migrate_user_uid(db: Session) -> None:
     """One-time migration: add users.uid (unique) and give every existing
     user a permanent random one.

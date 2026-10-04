@@ -17,10 +17,13 @@
   var _modalOpen = false;
 
   // ---- Category config ----
+  // "service" is no longer sent (the status feed's "status" replaced it) but
+  // keeps its icon and link for the notifications filed before.
   var CATEGORY_ICONS = {
     request: 'movie',
     issue: 'report_problem',
     service: 'health_metrics',
+    status: 'health_metrics',
     news: 'newspaper',
     ticket: 'confirmation_number',
     books: 'menu_book'
@@ -29,6 +32,7 @@
     request: '/requests',
     issue: '/issues',
     service: '/',
+    status: '/status',
     news: '/',
     ticket: '/tickets',
     books: '/books'
@@ -36,7 +40,7 @@
   var CATEGORY_LABELS = {
     request: 'Requests',
     issue: 'Issues',
-    service: 'Service Status',
+    status: 'Server status',
     news: 'Announcements',
     ticket: 'Ticket replies and updates',
     books: 'New books in your series'
@@ -417,7 +421,7 @@
     body.id = 'notifPrefsBody';
 
     // Category toggles: every category the server sends (NOTIFICATION_CATEGORIES)
-    var categories = ['request', 'issue', 'service', 'news', 'ticket', 'books'];
+    var categories = ['request', 'issue', 'status', 'news', 'ticket', 'books'];
     // Books only on a site that has books (features.books_configured).
     var features = (((window.WS_DATA || {}).branding || {}).features) || {};
     categories.forEach(function(cat) {
