@@ -374,7 +374,7 @@ await run('keeping a pair apart: one edition, from the matched list', async (mak
   const t = await make();
   await t.open();
   const buttons = t.qa('#booksMatched button');
-  check('every edition has its own button, named by its narrator and book', buttons.length === 3 && buttons.some((b) => /Keep the audiobook read by Simon Vance apart from the ebook of Dune/.test(b.getAttribute('aria-label'))), buttons.map((b) => b.getAttribute('aria-label')));
+  check('every edition has its own button, named by its narrator and book, and the name starts with the button\'s own words (WCAG 2.5.3)', buttons.length === 3 && buttons.every((b) => b.getAttribute('aria-label').indexOf(b.textContent.trim()) === 0) && buttons.some((b) => /^Keep apart: the audiobook read by Simon Vance and the ebook of Dune$/.test(b.getAttribute('aria-label'))), buttons.map((b) => b.getAttribute('aria-label')));
   await t.press(buttons.find((b) => /Simon Vance/.test(b.getAttribute('aria-label'))));
   const post = t.calls('POST', '/api/admin/books/overrides')[0];
   const body = post && JSON.parse(post.init.body);

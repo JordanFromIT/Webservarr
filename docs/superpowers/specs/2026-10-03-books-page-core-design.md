@@ -152,6 +152,14 @@ All pages are page modules in the soft-navigation shell. They follow the design 
      page.
    - Books not in a series appear individually.
    - The grid is paged or progressively loaded so it stays fast with hundreds of books.
+4. **Help button and first-visit guide.**
+   - A help button beside the search box runs a four-step guide (the shared coach-mark engine,
+     `tour.js`): search, the Continue row, the format chips, and opening a book (where Read and
+     Listen live).
+   - It starts by itself once, on a person's first visit, when the books are on screen. It is
+     marked seen as soon as it has been shown, per person on that browser.
+   - It never holds up the page: its layer is fixed, so nothing moves, and the page stays usable
+     under it. A step with nothing to point at (no Continue row yet) is shown in the middle.
 
 ### 4.2 Book page (`/books/<id>`)
 
@@ -192,19 +200,34 @@ All pages are page modules in the soft-navigation shell. They follow the design 
 - **Each card** shows the cover, a format badge, and progress: "Ch. 12 · 43%" for ebooks, or
   "2h 10m left" for audiobooks.
 - **Tapping a card** resumes in that format.
-- **Home** shows the same row in a compact form. If the person has nothing in progress, the row
-  is hidden.
+- **Home** shows the same row in a compact form, as its first section. If the person has
+  nothing in progress, the row is hidden; it is also hidden, and never asked for, while the Books
+  page is off. A note about a source (Kavita down, not connected) shows under the row; the "not
+  connected" note links to Books, which runs the sign-in.
+- **No layout shift.** Whether a person has a row (and a note) is remembered per person, so a
+  person who had one last time gets its room from the first paint. A book started with Listen
+  tells the next visit at once.
 
 ## 7. Admin: pairing in Settings
 
-- A "Books" panel lists the catalog's unpaired ebooks and audiobooks, plus the current overrides.
+- A "Books" tab in Settings lists the catalog's unpaired ebooks and audiobook editions, the
+  matched books, and the current overrides.
 - From it an admin can:
-  - pair an ebook with an audiobook;
-  - mark a matched pair "keep apart";
+  - pair an ebook with one audiobook edition (pick one of each);
+  - keep one edition of a matched book apart from its ebook;
   - remove an override.
+- A change shows at the next rebuild, and the tab says when one is waiting.
 - It also shows when the catalog was last rebuilt, the count from each source, any source errors,
   and a "Rebuild now" button.
-- Admin only.
+- Admin only (a member is sent away from Settings, and every admin route answers 403).
+- The settings the catalog needs sit on their own cards under Integrations, so each saves with
+  its address:
+  - **Kavita** takes an API key (write-only: it shows "Saved", never the value). It is paired
+    with the Kavita address (`ADDRESS_CREDENTIALS`): a new address needs the key entered again
+    in the same save, and an import that moves the address clears it.
+  - **Chaptarr** shows this site's webhook address (built from the address the page was opened
+    at) and a webhook secret. The secret is made in the browser, shown once so it can be copied,
+    and afterwards only "Saved". The steps to give Chaptarr are written beside it.
 
 ## 8. Errors
 

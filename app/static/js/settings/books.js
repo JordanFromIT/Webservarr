@@ -375,8 +375,9 @@
               var btn = el('button', cls.btnQuiet + ' shrink-0 h-10');
               btn.type = 'button';
               btn.textContent = 'Keep apart';
-              btn.setAttribute('aria-label', 'Keep ' + (e.narrator ? 'the audiobook read by ' + e.narrator : 'this audiobook') +
-                ' apart from the ebook of ' + (b.title || 'this book'));
+              // Starts with the words on the button, so the name holds the label (WCAG 2.5.3).
+              btn.setAttribute('aria-label', 'Keep apart: ' + (e.narrator ? 'the audiobook read by ' + e.narrator : 'this audiobook') +
+                ' and the ebook of ' + (b.title || 'this book'));
               btn.addEventListener('click', function () { keepApart(b, e, btn); }, { signal: signal });
               li.appendChild(btn);
             }
