@@ -335,6 +335,7 @@ await run('the skeleton holds the page, then one write replaces what follows the
   check('the tab is titled with the book', t.titles.indexOf('Harry Potter and the Prisoner of Azkaban') !== -1, t.titles);
   check('the cover is the book\'s own', !!t.q('#bookCover img') && t.q('#bookCover img').getAttribute('src') === '/api/books/2/cover?v=1');
   check('the cover holds a 2:3 box', /aspect-\[2\/3\]/.test(t.q('#bookCover').innerHTML));
+  check('the cover is what the page waits for: loaded at once, not lazily', t.q('#bookCover img').getAttribute('loading') === 'eager' && t.q('#bookCover img').getAttribute('fetchpriority') === 'high');
   check('the cover has no format badges (the buttons say it)', t.qa('#bookCover [data-format]').length === 0);
   check('the page arrived as one section', t.WS.arrived.join(',') === 'book', t.WS.arrived);
 });

@@ -480,7 +480,7 @@ export async function mount(ctx) {
     if (data.formats.ebook) formats.push('ebook');
     if (data.formats.audio) formats.push('audio');
     const cover = el('div', 'w-40 sm:w-full');
-    cover.appendChild(coverBox(b.cover_url, formats, signal, { badges: false }));
+    cover.appendChild(coverBox(b.cover_url, formats, signal, { badges: false, eager: true }));
     swapCover(cover);
     $('bookTitle').textContent = b.title || 'Untitled';
     swapRest(buildRest(data));

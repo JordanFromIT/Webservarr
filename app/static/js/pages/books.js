@@ -21,7 +21,7 @@
  *   renderContinueRow(items, notes, { compact, signal }) the Continue row (a
  *                                                       <section>), or null
  *                                                       when nothing is in progress
- *   coverBox(url, formats, signal, { badges })         the 2:3 cover frame (the book page's, badges off)
+ *   coverBox(url, formats, signal, { badges, eager })  the 2:3 cover frame (the book page's: badges off, eager)
  *   noteLine(text)                                     a quiet line about a source that is down
  * They touch no DOM at import time.
  */
@@ -102,7 +102,9 @@ export function coverBox(url, formats, signal, opts) {
   if (url) {
     const img = el('img', audioOnly ? 'absolute inset-0 h-full w-full object-contain' : 'absolute inset-0 h-full w-full object-cover');
     img.alt = '';
-    img.loading = 'lazy';
+    // The book page's own cover is what the page is waiting for (eager); a card's is below some fold.
+    img.loading = opts && opts.eager ? 'eager' : 'lazy';
+    if (opts && opts.eager) img.setAttribute('fetchpriority', 'high');
     img.decoding = 'async';
     img.src = url;
     img.addEventListener('error', function () { img.classList.add('hidden'); }, { once: true, signal: signal });
