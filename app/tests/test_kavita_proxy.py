@@ -407,8 +407,8 @@ class ChapterVisibility(unittest.TestCase):
     def fetch(self, path, visible=True, catalog=None, raises=None):
         check = mock.AsyncMock(return_value=visible, side_effect=raises)
         with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
-             mock.patch.object(kavita_proxy.kavita_api, "chapter_is_visible", check), \
-             mock.patch.object(kavita_proxy, "_catalog_series_of_chapter", return_value=catalog), \
+             mock.patch.object(kavita_proxy.kavita_api, "items_are_visible", check), \
+             mock.patch.object(kavita_proxy, "_catalog_series_of", return_value=catalog), \
              mock.patch.object(kavita_proxy.httpx, "AsyncClient", _RecordingProxyClient):
             r = self.client.get("/kavita/" + path)
         self.check = check
@@ -422,7 +422,7 @@ class ChapterVisibility(unittest.TestCase):
                 r = self.fetch(path, visible=True, catalog=104)
                 self.assertEqual(r.status_code, 200)
                 self.assertEqual(len(_RecordingProxyClient.asked), 1)
-                self.check.assert_awaited_once_with(KAVITA, "jwt-sam", 136, 104)
+                self.check.assert_awaited_once_with(KAVITA, "jwt-sam", [("chapter", 136, 104)])
 
     def test_a_hidden_chapter_is_404_and_never_asked_of_kavita(self):
         for path in ("api/Book/136/book-info", "api/Book/136/book-page?page=3", "api/Book/136/chapters",
@@ -436,7 +436,7 @@ class ChapterVisibility(unittest.TestCase):
     def test_a_chapter_nobody_knows_is_404(self):
         r = self.fetch("api/Book/999999/book-info", visible=False, catalog=None)
         self.assertEqual(r.status_code, 404)
-        self.check.assert_awaited_once_with(KAVITA, "jwt-sam", 999999, None)
+        self.check.assert_awaited_once_with(KAVITA, "jwt-sam", [("chapter", 999999, None)])
         self.assertEqual(_RecordingProxyClient.asked, [])
 
     def test_kavita_refusing_the_token_is_401_and_not_answering_is_503(self):
@@ -446,19 +446,202 @@ class ChapterVisibility(unittest.TestCase):
         self.assertEqual(r.status_code, 503)
         self.assertEqual(_RecordingProxyClient.asked, [])
 
-    def test_other_paths_are_not_asked_about(self):
-        for path in ("api/Series/series-detail?seriesId=5", "api/Reader/get-progress?chapterId=136",
-                     "api/image/chapter-cover?chapterId=1"):
+    def test_a_request_that_names_nothing_is_not_asked_about(self):
+        for path in ("api/Series/all-v2?PageNumber=1", "api/Series/series-detail", "api/search/search?queryString=x"):
             with self.subTest(path=path):
                 r = self.fetch(path)
                 self.assertEqual(r.status_code, 200)
                 self.check.assert_not_awaited()
+
+    def test_other_ids_are_asked_about_too(self):
+        # (every path, in ScopedPaths)
+        r = self.fetch("api/Reader/get-progress?chapterId=136", visible=False, catalog=104)
+        self.assertEqual(r.status_code, 404)
+        self.check.assert_awaited_once_with(KAVITA, "jwt-sam", [("chapter", 136, 104)])
 
     def test_nothing_is_remembered_between_requests(self):
         self.fetch("api/Book/136/book-info", visible=True)
         self.fetch("api/Book/136/book-info", visible=False)
         self.assertEqual(self.check.await_count, 1)         # asked again, answered fresh
         self.assertEqual(self.fetch("api/Book/136/book-info", visible=False).status_code, 404)
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class ScopedItems(unittest.TestCase):
+    """FR4: what a proxied request names (chapter, volume or series ids in the
+    path, the query or a JSON body), read the way Kavita reads them."""
+
+    def items(self, path, query="", body=None, content_type="application/json"):
+        from urllib.parse import parse_qsl
+        raw = b"" if body is None else (body if isinstance(body, bytes) else __import__("json").dumps(body).encode())
+        return kavita_proxy.scoped_items(path, parse_qsl(query, keep_blank_values=True), raw, content_type)
+
+    def test_ids_in_the_path(self):
+        self.assertEqual(self.items("api/Book/136/book-info"), {("chapter", 136)})
+        self.assertEqual(self.items("api/book/136/book-resources", "file=a.png"), {("chapter", 136)})
+        self.assertEqual(self.items("api/Series/104"), {("series", 104)})
+        self.assertEqual(self.items("api/Download/volume/134"), {("volume", 134)})
+
+    def test_ids_in_the_query_in_any_case_and_more_than_once(self):
+        self.assertEqual(self.items("api/Series/chapter", "chapterId=135"), {("chapter", 135)})
+        self.assertEqual(self.items("api/Series/chapter", "CHAPTERID=135"), {("chapter", 135)})
+        self.assertEqual(self.items("api/image/volume-cover", "volumeid=7&apiKey=k"), {("volume", 7)})
+        self.assertEqual(self.items("api/Series/metadata", "seriesId=1&seriesId=2"), {("series", 1), ("series", 2)})
+
+    def test_ids_in_a_json_body(self):
+        body = {"libraryId": 1, "seriesId": 104, "volumeId": 134, "chapterId": 135, "pageNum": 3}
+        self.assertEqual(self.items("api/Reader/progress", body=body), {("series", 104), ("volume", 134), ("chapter", 135)})
+        self.assertEqual(self.items("api/Series/series-by-ids", body={"seriesIds": [1, 2, "3"]}),
+                         {("series", 1), ("series", 2), ("series", 3)})
+        self.assertEqual(self.items("api/Reader/mark-multiple-read", body={"volumeIds": [5], "chapterIds": [6]}),
+                         {("volume", 5), ("chapter", 6)})
+
+    def test_a_request_about_nothing_in_particular_names_nothing(self):
+        self.assertEqual(self.items("api/Series/all-v2", "PageNumber=1&PageSize=50", body={"statements": []}), set())
+        self.assertEqual(self.items("api/Series/series-detail"), set())
+        self.assertEqual(self.items("api/Reader/progress", body=b"not json"), set())
+        self.assertEqual(self.items("api/Reader/progress", body={"seriesId": 5}, content_type="text/plain"), set())
+
+    def test_an_id_that_is_not_a_plain_id_refuses_the_request(self):
+        for query in ("chapterId=abc", "chapterId=", "chapterId=-1", "chapterId=0", "chapterId=1.5", "seriesId=99999999999",
+                      "volumeId=1e3", "chapterId=0x10", "seriesId=%201"):
+            with self.subTest(query=query):
+                self.assertIsNone(self.items("api/Series/chapter", query))
+        for body in ({"seriesId": "abc"}, {"chapterId": True}, {"seriesIds": "1"}, {"seriesIds": [1, None]},
+                     {"chapterId": [1]}, {"volumeId": 0}):
+            with self.subTest(body=body):
+                self.assertIsNone(self.items("api/Reader/progress", body=body))
+
+    def test_a_number_in_the_path_that_cannot_be_placed_refuses_the_request(self):
+        for path in ("api/Reader/5", "api/image/9/cover", "api/Series/series-detail/5", "api/metadata/genres/3",
+                     "api/Book/99999999999/book-info"):
+            with self.subTest(path=path):
+                self.assertIsNone(self.items(path))
+
+    def test_naming_too_much_is_refused(self):
+        self.assertIsNotNone(self.items("api/Series/series-by-ids", body={"seriesIds": list(range(1, 201))}))
+        self.assertIsNone(self.items("api/Series/series-by-ids", body={"seriesIds": list(range(1, 202))}))
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class ScopedPaths(unittest.TestCase):
+    """FR4: every path the reader and the Books pages use, and every one the
+    proxy admits that takes a chapter, volume or series, is served for a
+    visible item, 404 for a hidden one and 404 for one nobody knows; nothing
+    is forwarded unless it is the person's to see."""
+
+    GET = [
+        ("api/Book/136/book-info", "", "chapter"), ("api/Book/136/book-page", "page=2", "chapter"),
+        ("api/Book/136/chapters", "", "chapter"), ("api/Book/136/book-resources", "file=a.png", "chapter"),
+        ("api/Series/series-detail", "seriesId=104", "series"), ("api/Series/104", "", "series"),
+        ("api/Series/metadata", "seriesId=104", "series"), ("api/Series/related", "seriesId=104", "series"),
+        ("api/Series/volume", "volumeId=134", "volume"), ("api/Series/chapter", "chapterId=135", "chapter"),
+        ("api/Series/chapter-metadata", "chapterId=135", "chapter"),
+        ("api/image/chapter-cover", "chapterId=135", "chapter"), ("api/image/volume-cover", "volumeId=134", "volume"),
+        ("api/image/series-cover", "seriesId=104", "series"),
+        ("api/download/chapter", "chapterId=135", "chapter"), ("api/download/volume", "volumeId=134", "volume"),
+        ("api/download/series", "seriesId=104", "series"),
+        ("api/Reader/get-progress", "chapterId=135", "chapter"), ("api/Reader/chapter-info", "chapterId=135", "chapter"),
+        ("api/Reader/continue-point", "seriesId=104", "series"), ("api/Reader/image", "chapterId=135&page=1", "chapter"),
+        ("api/Series/chapter", "ChapterId=135", "chapter"),
+    ]
+    POST = [
+        ("api/Reader/progress", {"libraryId": 1, "seriesId": 104, "volumeId": 134, "chapterId": 135, "pageNum": 2},
+         {("series", 104), ("volume", 134), ("chapter", 135)}),
+        ("api/Reader/bookmark", {"seriesId": 104, "volumeId": 134, "chapterId": 135, "page": 3},
+         {("series", 104), ("volume", 134), ("chapter", 135)}),
+        ("api/Series/series-by-ids", {"seriesIds": [104, 105]}, {("series", 104), ("series", 105)}),
+    ]
+
+    def setUp(self):
+        from app.tests import helpers
+        self.helpers = helpers
+        self.Session = helpers.make_sessionmaker()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        helpers.set_rate_limits(False)
+        _RecordingProxyClient.asked = []
+        user = dict(helpers.MEMBER, kavita_token="jwt-sam", kavita_base=KAVITA)
+        self.client = helpers.api_client(self.Session, user)
+
+    def tearDown(self):
+        self.helpers.reset_overrides()
+        self.setup_patch.stop()
+        self.helpers.set_rate_limits(True)
+
+    def call(self, method, path, query="", body=None, visible=True):
+        check = mock.AsyncMock(return_value=visible)
+        url = "/kavita/" + path + ("?" + query if query else "")
+        with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
+             mock.patch.object(kavita_proxy.kavita_api, "items_are_visible", check), \
+             mock.patch.object(kavita_proxy, "_catalog_series_of", return_value=104), \
+             mock.patch.object(kavita_proxy.httpx, "AsyncClient", _RecordingProxyClient):
+            r = self.client.get(url) if method == "get" else self.client.post(url, json=body)
+        self.check = check
+        return r
+
+    def test_a_visible_item_is_served_and_asked_about_once(self):
+        for path, query, kind in self.GET:
+            with self.subTest(path=path, query=query):
+                _RecordingProxyClient.asked = []
+                r = self.call("get", path, query, visible=True)
+                self.assertEqual(r.status_code, 200)
+                self.assertEqual(len(_RecordingProxyClient.asked), 1)
+                (base, token, items), _kw = self.check.await_args
+                self.assertEqual((base, token), (KAVITA, "jwt-sam"))
+                self.assertEqual([k for k, _i, _s in items], [kind])
+                self.assertTrue(all(known == 104 for _k, _i, known in items))
+
+    def test_a_hidden_or_foreign_item_is_404_and_nothing_is_forwarded(self):
+        for path, query, _kind in self.GET:
+            with self.subTest(path=path, query=query):
+                _RecordingProxyClient.asked = []
+                r = self.call("get", path, query, visible=False)
+                self.assertEqual(r.status_code, 404)
+                self.assertEqual(_RecordingProxyClient.asked, [])
+
+    def test_a_write_names_its_ids_in_the_body_and_every_one_must_be_visible(self):
+        for path, body, kinds in self.POST:
+            with self.subTest(path=path):
+                _RecordingProxyClient.asked = []
+                r = self.call("post", path, body=body, visible=True)
+                self.assertEqual(r.status_code, 200)
+                (_b, _t, items), _kw = self.check.await_args
+                self.assertEqual({(k, i) for k, i, _s in items}, kinds)
+                _RecordingProxyClient.asked = []
+                r = self.call("post", path, body=body, visible=False)
+                self.assertEqual(r.status_code, 404)
+                self.assertEqual(_RecordingProxyClient.asked, [])
+
+    def test_a_request_that_names_nothing_is_forwarded_without_a_question(self):
+        for path, query in (("api/Series/all-v2", "PageNumber=1&PageSize=50"), ("api/Series/series-detail", ""),
+                            ("api/search/search", "queryString=harry")):
+            with self.subTest(path=path):
+                r = self.call("get", path, query)
+                self.assertEqual(r.status_code, 200)
+                self.check.assert_not_awaited()
+
+    def test_an_id_that_is_not_a_plain_number_is_refused_not_forwarded(self):
+        for path, query in (("api/Series/chapter", "chapterId=abc"), ("api/Series/chapter", "chapterId=-1"),
+                            ("api/Series/chapter", "chapterId=0"), ("api/image/series-cover", "seriesId=1&seriesId=x"),
+                            ("api/Reader/5", ""), ("api/Series/series-detail/5", "")):
+            with self.subTest(path=path, query=query):
+                _RecordingProxyClient.asked = []
+                r = self.call("get", path, query)
+                self.assertEqual(r.status_code, 404)
+                self.assertEqual(_RecordingProxyClient.asked, [])
+                self.check.assert_not_awaited()
+
+    def test_a_second_hidden_id_among_visible_ones_hides_the_request(self):
+        r = self.call("get", "api/Series/metadata", "seriesId=104&seriesId=105", visible=False)
+        self.assertEqual(r.status_code, 404)
+        (_b, _t, items), _kw = self.check.await_args
+        self.assertEqual({i for _k, i, _s in items}, {104, 105})
+
+    def test_the_paths_outside_the_allowlist_are_still_refused_first(self):
+        r = self.call("get", "api/account/login", "chapterId=1")
+        self.assertEqual(r.status_code, 404)
+        self.check.assert_not_awaited()
 
 
 class _FakeRedis:
@@ -513,8 +696,8 @@ class ChapterShortcut(unittest.TestCase):
             self.check.side_effect = raises
         with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
              mock.patch.object(sm, "get_redis", get_redis), \
-             mock.patch.object(kavita_proxy.kavita_api, "chapter_is_visible", self.check), \
-             mock.patch.object(kavita_proxy, "_catalog_series_of_chapter", return_value=104), \
+             mock.patch.object(kavita_proxy.kavita_api, "items_are_visible", self.check), \
+             mock.patch.object(kavita_proxy, "_catalog_series_of", return_value=104), \
              mock.patch.object(kavita_proxy.httpx, "AsyncClient", _RecordingProxyClient):
             return client.get(f"/kavita/api/Book/{chapter}/book-page?page=1")
 
@@ -592,8 +775,8 @@ class ChapterShortcut(unittest.TestCase):
         client = self.helpers.api_client(self.Session, user)
         with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
              mock.patch.object(kavita_proxy.session_manager, "get_redis", mock.AsyncMock(return_value=self.redis)), \
-             mock.patch.object(kavita_proxy.kavita_api, "chapter_is_visible", self.check), \
-             mock.patch.object(kavita_proxy, "_catalog_series_of_chapter", return_value=104), \
+             mock.patch.object(kavita_proxy.kavita_api, "items_are_visible", self.check), \
+             mock.patch.object(kavita_proxy, "_catalog_series_of", return_value=104), \
              mock.patch.object(kavita_proxy.httpx, "AsyncClient", _RecordingProxyClient):
             client.get("/kavita/api/Book/136/book-page?page=1")
             client.get("/kavita/api/Book/136/book-page?page=1")
@@ -602,9 +785,9 @@ class ChapterShortcut(unittest.TestCase):
 
     def test_nothing_is_held_in_the_process(self):
         import inspect
-        src = inspect.getsource(kavita_proxy._require_visible_chapter)
+        src = inspect.getsource(kavita_proxy._require_visible_items)
         self.assertNotRegex(src, r"\bglobal\b")
-        self.assertNotRegex(inspect.getsource(kavita_proxy), r"(?m)^_chapter_ok\w*\s*[:=]\s*(\{|dict\()")
+        self.assertNotRegex(inspect.getsource(kavita_proxy), r"(?m)^_item_ok\w*\s*[:=]\s*(\{|dict\()")
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -670,6 +853,39 @@ class ChapterIsVisible(unittest.IsolatedAsyncioTestCase):
             ok, _calls = await self.run_check(500, None, info=info)
             self.assertFalse(ok, info)
 
+    async def items(self, items, **kwargs):
+        from app.integrations import kavita
+        fake, calls = self.client(**kwargs)
+        with mock.patch.object(kavita, "_user_client", return_value=fake):
+            return await kavita.items_are_visible(KAVITA, "jwt", items), calls
+
+    async def test_a_volume_names_its_series_in_its_own_answer(self):
+        ok, calls = await self.items([("volume", 134, None)], info={"id": 134, "seriesId": 2})
+        self.assertTrue(ok)
+        self.assertEqual([m for m, _u in calls], ["GET", "POST"])
+        self.assertIn("/api/Series/volume", calls[0][1])
+        ok, _calls = await self.items([("volume", 134, None)], info={"id": 134, "seriesId": 77})
+        self.assertFalse(ok)
+        ok, _calls = await self.items([("volume", 99999999, None)], info_status=404)
+        self.assertFalse(ok)
+
+    async def test_a_series_is_its_own_and_costs_only_the_list(self):
+        ok, calls = await self.items([("series", 2, None)])
+        self.assertTrue(ok)
+        self.assertEqual([m for m, _u in calls], ["POST"])
+        ok, _calls = await self.items([("series", 77, None)])
+        self.assertFalse(ok)
+
+    async def test_several_items_read_the_list_once_and_all_must_be_visible(self):
+        ok, calls = await self.items([("series", 1, None), ("chapter", 5, None), ("volume", 6, 1)], info={"seriesId": 1})
+        self.assertTrue(ok)
+        self.assertEqual([m for m, _u in calls], ["GET", "POST"])
+        ok, _calls = await self.items([("series", 1, None), ("chapter", 5, 77)])
+        self.assertFalse(ok)
+        ok, calls = await self.items([])
+        self.assertTrue(ok)
+        self.assertEqual(calls, [])
+
     async def test_refused_and_unreachable_are_errors_not_answers(self):
         from app.integrations import kavita
         with self.assertRaises(kavita.KavitaTokenRefused):
@@ -678,6 +894,78 @@ class ChapterIsVisible(unittest.IsolatedAsyncioTestCase):
             await self.run_check(500, None, info_status=503)
         with self.assertRaises(kavita.KavitaTokenRefused):
             await self.run_check(136, 2, list_status=401)
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class ScanLibraries(unittest.IsolatedAsyncioTestCase):
+    """FR3: Kavita is asked to scan through its admin API with the key's own
+    account; the answer is only whether it was asked."""
+
+    def fake(self, libraries=({"id": 1}, {"id": 2}), scan_status=200, token_status=200):
+        calls = []
+
+        class Resp:
+            def __init__(self, status, body=None):
+                self.status_code, self._body, self.headers = status, body, {}
+
+            def json(self):
+                return self._body
+
+        class Client:
+            def __init__(self, *a, **k):
+                pass
+
+            async def __aenter__(self_):
+                return self_
+
+            async def __aexit__(self_, *exc):
+                return False
+
+            async def post(self_, url, params=None, headers=None, **kw):
+                calls.append(("POST", url.replace(KAVITA, ""), dict(params or {}), bool(headers)))
+                if "Plugin/authenticate" in url:
+                    return Resp(token_status, {"token": "admin-jwt"})
+                return Resp(scan_status)
+
+            async def request(self_, method, url, headers=None, **kw):
+                calls.append((method, url.replace(KAVITA, ""), {}, bool(headers)))
+                return Resp(200, list(libraries) if libraries is not None else None)
+        return Client, calls
+
+    async def run_scan(self, **kwargs):
+        from app.integrations import kavita
+        Client, calls = self.fake(**kwargs)
+        with mock.patch.object(kavita, "_config", return_value=(KAVITA, "key")), \
+             mock.patch.object(kavita.httpx, "AsyncClient", Client):
+            return await kavita.scan_libraries(), calls
+
+    async def test_every_library_is_asked_once_without_forcing(self):
+        asked, calls = await self.run_scan()
+        self.assertEqual(asked, 2)
+        scans = [c for c in calls if c[1] == "/api/Library/scan"]
+        self.assertEqual([c[2] for c in scans], [{"libraryId": 1, "force": "false"}, {"libraryId": 2, "force": "false"}])
+        self.assertTrue(all(c[0] == "POST" and c[3] for c in scans))           # with the admin's token
+
+    async def test_the_number_of_libraries_asked_is_capped(self):
+        asked, calls = await self.run_scan(libraries=[{"id": i} for i in range(1, 60)])
+        self.assertEqual(asked, 20)
+
+    async def test_odd_library_lists_ask_for_nothing(self):
+        for libraries in ([], None, [{"name": "x"}, {"id": "1"}, 5]):
+            asked, calls = await self.run_scan(libraries=libraries)
+            self.assertEqual(asked, 0)
+            self.assertEqual([c for c in calls if c[1] == "/api/Library/scan"], [])
+
+    async def test_refusals_and_failures_are_fixed_sentences(self):
+        from app.integrations import kavita
+        for status, text in ((401, "not an admin"), (403, "not an admin"), (500, "HTTP 500"), (404, "HTTP 404")):
+            with self.assertRaises(kavita.KavitaUnavailable) as caught:
+                await self.run_scan(scan_status=status)
+            self.assertIn(text, str(caught.exception))
+            self.assertNotIn("key", str(caught.exception).replace("the key's account", ""))
+            self.assertNotIn(KAVITA, str(caught.exception))
+        with self.assertRaises(kavita.KavitaUnavailable):
+            await self.run_scan(token_status=401)
 
 
 if __name__ == "__main__":

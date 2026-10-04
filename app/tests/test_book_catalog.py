@@ -646,6 +646,30 @@ class Webhook(unittest.TestCase):
         patcher = mock.patch("app.routers.chaptarr_webhook.book_catalog.rebuild", self.rebuild)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # FR3: the scan, the two claims (one Redis each, as the two workers share them) and the waits are fakes.
+        self.scan = mock.AsyncMock(return_value=1)
+        self.sleeps = []
+        self.claimed = set()
+        self.redis_up = True
+
+        async def claim(key, seconds):
+            self.claim_log.append((key, seconds))
+            if not self.redis_up or key in self.claimed:
+                return False
+            self.claimed.add(key)
+            return True
+
+        async def sleep(seconds):
+            self.sleeps.append(seconds)
+        self.claim_log = []
+        from app.routers import chaptarr_webhook
+        self.real_claim = chaptarr_webhook._claim
+        for target, value in (("app.routers.chaptarr_webhook.kavita.scan_libraries", self.scan),
+                              ("app.routers.chaptarr_webhook._claim", claim),
+                              ("app.routers.chaptarr_webhook.asyncio.sleep", sleep)):
+            patcher = mock.patch(target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def post(self, body, password=SECRET, user="chaptarr", raw=None):
         headers = {}
@@ -689,7 +713,101 @@ class Webhook(unittest.TestCase):
     def test_an_import_event_triggers_a_rebuild(self):
         r = self.post({"eventType": "Download", "book": {"title": "Dune"}}, user="anything")
         self.assertEqual(r.status_code, 202)
+        self.rebuild.assert_awaited_with("chaptarr")
+
+    # FR3: Kavita only looks for new files on its own schedule, so an import asks it to scan
+    def test_an_import_asks_kavita_to_scan_and_rebuilds_now_and_twice_after(self):
+        self.assertEqual(self.post({"eventType": "Download"}).status_code, 202)
+        self.scan.assert_awaited_once_with()
+        self.assertEqual(self.rebuild.await_count, 3)              # at once, then after the scan
+        self.assertEqual(self.sleeps, [20, 100])                   # 20 s after the scan, and 120 s after it
+        self.assertEqual(sorted(self.claimed), ["books:kavita-scan", "books:post-import"])
+        self.assertEqual(dict(self.claim_log), {"books:kavita-scan": 30, "books:post-import": 150})
+
+    def test_the_scan_is_asked_before_the_waits_and_the_first_rebuild_does_not_wait_for_it(self):
+        order = []
+        self.rebuild.side_effect = lambda reason: order.append("rebuild")
+        self.scan.side_effect = lambda: order.append("scan")
+        self.post({"eventType": "Download"})
+        self.assertEqual(order, ["rebuild", "scan", "rebuild", "rebuild"])
+
+    def test_a_burst_of_imports_is_bounded(self):
+        for _ in range(5):
+            self.assertEqual(self.post({"eventType": "Download"}).status_code, 202)
+        self.assertEqual(self.scan.await_count, 1)                 # one scan request for the burst
+        self.assertEqual(self.sleeps, [20, 100])                   # one follow-up sequence
+        self.assertEqual(self.rebuild.await_count, 3 + 4)          # every import still rebuilds at once
+
+    def test_an_import_after_the_scan_gap_asks_again_but_starts_no_second_sequence(self):
+        self.post({"eventType": "Download"})
+        self.claimed.discard("books:kavita-scan")                  # 30 s later; the sequence (150 s) is still running
+        self.post({"eventType": "Download"})
+        self.assertEqual(self.scan.await_count, 2)
+        self.assertEqual(self.sleeps, [20, 100])
+        self.claimed.clear()                                       # a long time later: both are free again
+        self.post({"eventType": "Download"})
+        self.assertEqual(self.scan.await_count, 3)
+        self.assertEqual(self.sleeps, [20, 100, 20, 100])
+
+    def test_with_redis_unreachable_only_the_immediate_rebuild_runs(self):
+        self.redis_up = False
+        self.assertEqual(self.post({"eventType": "Download"}).status_code, 202)
         self.rebuild.assert_awaited_once_with("chaptarr")
+        self.scan.assert_not_awaited()
+        self.assertEqual(self.sleeps, [])
+
+    def test_a_scan_that_fails_does_not_stop_the_rebuilds_or_fail_the_webhook(self):
+        from app.integrations import kavita
+        for failure in (kavita.KavitaUnavailable("Kavita did not answer"), RuntimeError("boom")):
+            self.scan.side_effect = failure
+            self.claimed.clear()
+            self.sleeps.clear()
+            self.rebuild.reset_mock()
+            self.assertEqual(self.post({"eventType": "Download"}).status_code, 202)
+            self.assertEqual(self.rebuild.await_count, 3)
+            self.assertEqual(self.sleeps, [20, 100])
+
+    def test_a_rebuild_that_fails_does_not_stop_the_scan_or_the_later_rebuilds(self):
+        self.rebuild.side_effect = RuntimeError("database is locked")
+        self.assertEqual(self.post({"eventType": "Download"}).status_code, 202)
+        self.scan.assert_awaited_once_with()
+        self.assertEqual(self.rebuild.await_count, 3)
+
+    def test_other_events_ask_nothing_of_kavita(self):
+        self.post({"eventType": "Test"})
+        self.post({"eventType": "Grab"})
+        self.scan.assert_not_awaited()
+        self.assertEqual(self.claim_log, [])
+
+    def test_the_answer_is_not_held_up_by_any_of_it(self):
+        import inspect
+        from app.routers import chaptarr_webhook
+        src = inspect.getsource(chaptarr_webhook.chaptarr_import)
+        self.assertIn("background.add_task(_after_import)", src)
+        for word in ("sleep", "scan", "rebuild(", "_claim"):
+            self.assertNotIn(word, src.replace("_after_import", ""))
+        module = inspect.getsource(chaptarr_webhook)
+        self.assertNotRegex(module, r"(?m)^_?[a-z_]+\s*(:\s*[\w\[\], ]+)?=\s*(\{|\[|set\(|dict\()")      # no module-level store
+        self.assertNotRegex(module, r"\bglobal\b")
+
+    def test_the_claim_is_one_set_nx_with_an_expiry_and_fails_closed(self):
+        from app.routers import chaptarr_webhook
+        calls = []
+
+        class Redis:
+            async def set(self, key, value, nx=False, ex=None):
+                calls.append((key, nx, ex))
+                return True if len(calls) == 1 else None
+
+            async def aclose(self):
+                calls.append("closed")
+
+        with mock.patch.object(chaptarr_webhook.aioredis, "from_url", return_value=Redis()):
+            self.assertTrue(asyncio.run(self.real_claim("k", 30)))
+            self.assertFalse(asyncio.run(self.real_claim("k", 30)))
+        self.assertEqual(calls, [("k", True, 30), "closed", ("k", True, 30), "closed"])
+        with mock.patch.object(chaptarr_webhook.aioredis, "from_url", side_effect=OSError("down")):
+            self.assertFalse(asyncio.run(self.real_claim("k", 30)))
 
     def test_a_failing_rebuild_does_not_fail_the_webhook(self):
         self.rebuild.side_effect = RuntimeError("database is locked")

@@ -1001,6 +1001,39 @@ await run('T3H6: with the Seerr embed as the Requests source there is no request
   check('native Requests keeps the link', !v.q('#searchRequest').classList.contains('hidden') && v.text('#searchEmptyTitle') === 'No books match “zzzz”');
 });
 
+await run('FR2: while a source is not answering, an empty search offers no request and says why', async (make) => {
+  const down = { source: 'kavita', reason: 'unavailable', text: 'Ebooks are unavailable right now' };
+  const t = make({ routes: usual({ search: { items: [], request_url: null, notes: [down] } }) });
+  await t.mount();
+  t.type('emma');
+  await t.clock.advance(350);
+  check('no request link', t.q('#searchRequest').classList.contains('hidden'));
+  check('the note is said instead', t.text('#searchEmptyTitle') === 'No matches right now' && /Ebooks are unavailable right now/.test(t.text('#searchEmptyText')), [t.text('#searchEmptyTitle'), t.text('#searchEmptyText')]);
+  check('and it does not claim the book is not there', !/Not in the library|No books match/.test(t.text('#searchEmptyTitle')));
+  const nc = { source: 'kavita', reason: 'not_connected', text: 'Connect to your ebook library to see ebooks' };
+  const u = make({ routes: usual({ search: { items: [], request_url: null, notes: [nc] } }) });
+  await u.mount();
+  u.type('emma');
+  await u.clock.advance(350);
+  check('not connected: the note, with no "try again in a moment"', /Connect to your ebook library/.test(u.text('#searchEmptyText')) && !/moment/.test(u.text('#searchEmptyText')) && u.q('#searchRequest').classList.contains('hidden'));
+  // The usual answer still has the link (above), and a null request_url is the server's word, not a guess.
+  const v = make({ routes: usual({ search: { items: [], request_url: '/requests?q=emma', notes: [] } }) });
+  await v.mount();
+  v.type('emma');
+  await v.clock.advance(350);
+  check('with every source answering the link is there', !v.q('#searchRequest').classList.contains('hidden'));
+});
+
+await run('FR2: an empty library with a source down does not offer Request a book', async (make) => {
+  const down = { source: 'kavita', reason: 'unavailable', text: 'Ebooks are unavailable right now' };
+  const t = make({ routes: usual({ library: () => ({ body: { items: [], next_cursor: null, notes: [down], building: false } }) }) });
+  await t.mount();
+  check('no Request a book while a source is down', t.q('#emptyRequest').classList.contains('hidden') && /Check back/.test(t.text('#emptyText')), t.text('#emptyText'));
+  const u = make({ routes: usual({ library: () => ({ body: { items: [], next_cursor: null, notes: [], building: false } }) }) });
+  await u.mount();
+  check('an empty library with every source answering still does', !u.q('#emptyRequest').classList.contains('hidden'));
+});
+
 // ---- Markup safety ----
 
 await run('titles, authors and series are text, never markup', async (make) => {

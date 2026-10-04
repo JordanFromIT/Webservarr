@@ -128,6 +128,26 @@ def _note(source: str, reason: str, text: str) -> dict:
     return {"source": source, "reason": reason, "text": text}
 
 
+def _blocked_answer(who: "Scope", rows) -> Optional[JSONResponse]:
+    """The 404 for a lookup that found nothing the caller can see, when the
+    reason is a source they cannot reach rather than something they may not
+    see: {"detail", "reason": "not_connected" | "unavailable", "notes": [note]}.
+
+    `rows` are the catalog rows the lookup matched, whoever may see them. It is
+    only given when one of them has a format whose source is the problem (an
+    ebook and Kavita not connected or not answering, an audiobook and Plex not
+    answering), so a lookup that matches nothing, or whose cause is the
+    caller's own lack of access, stays a plain 404. Nothing about the rows is
+    in the answer (it fails closed): the page says what to do, not what is there."""
+    wants_ebook = any(r.kavita_chapter_id is not None for r in rows)
+    wants_audio = any(r.audio for r in rows)
+    for note in who.notes:
+        if (note["source"] == "kavita" and wants_ebook) or (note["source"] == "plex" and wants_audio):
+            return JSONResponse(status_code=404, content={"detail": note["text"], "reason": note["reason"],
+                                                          "notes": [note]})
+    return None
+
+
 async def _kavita_reach(user: dict) -> Tuple[set, Optional[Tuple[str, str]], Optional[dict]]:
     """(series ids, (address, token), note) for this person's own Kavita account.
     Nothing readable is no series, never all of them."""
@@ -352,7 +372,8 @@ async def search(request: Request,
                  limit: int = Query(SEARCH_DEFAULT, ge=1, le=PAGE_MAX),
                  who: Scope = Depends(caller), db: Session = Depends(get_db)):
     """Books matching `q` in their title, series, author or narrator, ignoring
-    case and accents: {"items": [BookCard], "request_url", "notes"}. Title
+    case and accents: {"items": [BookCard], "request_url" (null while a source is
+    not reachable), "notes"}. Title
     matches come first, then series, then people; within a group a match at the
     start of the field first, then by title."""
     needle = book_catalog.fold(q)
@@ -370,8 +391,10 @@ async def search(request: Request,
         if hits:
             ranked.append((min(hits), book_catalog.fold(row.sort_title), row.id, row))
     ranked.sort(key=lambda r: r[:3])
-    return {"items": [_book_card(r[3]) for r in ranked[:limit]], "request_url": _request_url(q.strip()),
-            "notes": who.notes}
+    # A source that cannot be reached may be hiding books the library already has:
+    # no "request it" then (null), and the page says why instead.
+    return {"items": [_book_card(r[3]) for r in ranked[:limit]],
+            "request_url": None if who.notes else _request_url(q.strip()), "notes": who.notes}
 
 
 @router.get("/person")
@@ -403,6 +426,17 @@ async def person(request: Request,
                 found.append(r)
                 shown = shown or match
     if not found:
+        if who.notes:
+            everyone = book_catalog.all_rows(db)
+            if role == "author":
+                matched = [r for r in everyone if book_catalog.name_key(r.author) == wanted]
+            else:
+                heard = book_catalog.narrators_by_book(db)
+                matched = [r for r in everyone if r.audio and any(book_catalog.name_key(n) == wanted
+                                                                   for n in heard.get(r.id, []))]
+            blocked = _blocked_answer(who, matched)
+            if blocked:
+                return blocked
         raise HTTPException(status_code=404, detail="Nobody by that name in the library")
     found.sort(key=lambda r: (book_catalog.fold(r.series or r.sort_title), *_reading_order(r)))
     return {"name": shown, "role": role, "items": [_book_card(r) for r in found[:PERSON_MAX]], "notes": who.notes}
@@ -424,6 +458,10 @@ async def series(request: Request,
     found = sorted((r for r in book_catalog.visible_rows(db, who.series, who.audio)
                     if book_catalog.name_key(r.series) == wanted), key=_reading_order)
     if not found:
+        if who.notes:
+            blocked = _blocked_answer(who, [r for r in book_catalog.all_rows(db) if book_catalog.name_key(r.series) == wanted])
+            if blocked:
+                return blocked
         raise HTTPException(status_code=404, detail="No series by that name in the library")
     found = found[:PERSON_MAX]
     audio = _audio_progress_by_book(db, who, [r.id for r in found if r.audio])
@@ -645,13 +683,16 @@ async def book_detail(request: Request, book_id: BookId, who: Scope = Depends(ca
     ebook_visible = _is_visible_ebook(book, who)
     audio_visible = who.audio and bool(editions)
     if not (ebook_visible or audio_visible):
-        # An ebook this person cannot see only because they are not connected to
-        # Kavita yet: say so (the page runs the hand-off and asks again), rather
-        # than "no such book". Nothing about the book itself is in the answer.
-        not_connected = [n for n in who.notes if n["source"] == "kavita" and n["reason"] == "not_connected"]
-        if book.kavita_chapter_id is not None and not_connected:
-            return JSONResponse(status_code=404, content={"detail": EBOOKS_NOT_CONNECTED, "reason": "not_connected",
-                                                          "notes": not_connected})
+        # Hidden only because a source cannot be reached (Kavita not connected or
+        # not answering for an ebook, Plex not answering for an audiobook): say so
+        # (the page runs the hand-off, or says "unavailable right now"), rather than
+        # "no such book". Nothing about the book itself is in the answer.
+        if who.notes:
+            blocked = _blocked_answer(who, [book_catalog.CatalogRow(
+                book.id, "", "", "", "", None, None, book.updated_at, book.kavita_chapter_id, book.kavita_series_id,
+                book.plex_book_key, "", book.kavita_volume_id, book.kavita_chapter_id is not None, bool(editions))])
+            if blocked:
+                return blocked
         raise HTTPException(status_code=404, detail="No such book")
 
     notes = list(who.notes)

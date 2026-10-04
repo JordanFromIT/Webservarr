@@ -697,6 +697,14 @@ def visible_rows(db, series_ids: Iterable[int], audio: bool) -> List[CatalogRow]
     return out
 
 
+def all_rows(db) -> List[CatalogRow]:
+    """Every live book with every format it has, whoever is asking. Only for
+    deciding why a lookup found nothing (a source that cannot be reached, or
+    that the person is not connected to); never shown to anyone."""
+    series_ids = {sid for (sid,) in db.query(Book.kavita_series_id).filter(Book.kavita_series_id.isnot(None))}
+    return visible_rows(db, series_ids, True)
+
+
 def narrators_by_book(db) -> Dict[int, List[str]]:
     """{book id: its editions' narrators, the primary edition's first}."""
     found: Dict[int, List[str]] = {}

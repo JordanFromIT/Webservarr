@@ -931,6 +931,37 @@ await run('the series page: not found and error', async (make) => {
   check('error with Try again', !!u.q('[data-state="error"]') && !!u.q('#retryBtn'));
 });
 
+await run('FR1: a person or series page of ebooks for someone not connected runs the hand-off once and comes back to it', async (make) => {
+  const nc = { status: 404, body: { detail: 'Connect to your ebook library to see ebooks', reason: 'not_connected', notes: [{ source: 'kavita', reason: 'not_connected', text: 'Connect to your ebook library to see ebooks' }] } };
+  for (const [kind, url] of [['series', 'https://ws.test/books/series?name=Fae%20%26%20Alchemy'], ['person', 'https://ws.test/books/person?role=author&name=Callie%20Hart']]) {
+    const t = await openList(make, kind, () => nc, { url });
+    check(`${kind}: the hand-off was started once`, t.kav.reconnect.length === 1, t.kav.reconnect.length);
+    const box = t.q('[data-state="connect"]');
+    check(`${kind}: it says it is connecting, not that nothing was found`, !!box && /Connecting you now/.test(box.textContent) && /Connect your ebook library/.test(t.text('#listTitle')) && !t.q('[data-state="notfound"]'), t.text('#listTitle'));
+    check(`${kind}: no button while it is under way`, !t.q('#connectBtn'));
+    check(`${kind}: a failed sign-in coming back here is read first`, t.kav.failedChecks === 1);
+    const u = make(kind, { url, routes: (net) => net.on('/api/books/', () => nc) });
+    u.kav.blockNext = true;
+    const m = u.mount();
+    await u.clock.advance(1600);
+    await m;
+    check(`${kind}: a refused hand-off says so and offers Connect`, /couldn.t connect/i.test(u.text('[data-state="connect"]')) && !!u.q('#connectBtn'));
+    u.click('#connectBtn');
+    check(`${kind}: Connect tries once more through the helper, and nothing loops`, u.kav.retry === 1 && u.net.urls('/api/books/').length === 1 && u.kav.reconnect.length === 1);
+  }
+});
+
+await run('FR2: a list page with a source not answering says unavailable, never not found', async (make) => {
+  for (const [kind, url, source, text] of [['series', 'https://ws.test/books/series?name=Fae', 'kavita', 'Ebooks are unavailable right now'], ['person', 'https://ws.test/books/person?role=narrator&name=Jim%20Dale', 'plex', 'Audiobooks are unavailable right now']]) {
+    const body = { detail: text, reason: 'unavailable', notes: [{ source, reason: 'unavailable', text }] };
+    const t = await openList(make, kind, () => ({ status: 404, body }), { url });
+    const box = t.q('[data-state="unavailable"]');
+    check(`${kind}: the page says the source is unavailable`, !!box && box.textContent.indexOf(text) !== -1, box && box.textContent);
+    check(`${kind}: never not found, and no hand-off`, !t.q('[data-state="notfound"]') && !/couldn.t find/i.test(t.text('#listView')) && t.kav.reconnect.length === 0);
+    check(`${kind}: it can try again`, !!t.q('#retryBtn'));
+  }
+});
+
 await run('the list pages leave nothing behind and write only text', async (make) => {
   const t = await openList(make, 'person', personAnswer({ name: '<img src=x onerror=alert(1)>', items: [card(7, '<b>bold</b>', '<i>i</i>')] }), { url: 'https://ws.test/books/person?role=author&name=x' });
   check('a name with markup is shown as text', t.text('#listTitle') === '<img src=x onerror=alert(1)>' && !t.q('#listTitle img'));
@@ -941,6 +972,29 @@ await run('the list pages leave nothing behind and write only text', async (make
   await u.clock.advance(1600);
   await m.catch(() => {});
   check('a visit that was left before it began draws nothing', u.qa('#seriesList').length === 0);
+});
+
+await run('FR2: a source that is not answering is "unavailable", never "removed from the library"', async (make) => {
+  const kav = { status: 404, body: { detail: 'Ebooks are unavailable right now', reason: 'unavailable', notes: [{ source: 'kavita', reason: 'unavailable', text: 'Ebooks are unavailable right now' }] } };
+  const t = await open(make, () => kav);
+  const box = t.q('[data-state="unavailable"]');
+  check('the heading is the note', t.text('#bookTitle') === 'Ebooks are unavailable right now', t.text('#bookTitle'));
+  check('the book is said to be there', !!box && /still has this book/.test(box.textContent));
+  check('never "removed" or "couldn\'t find"', !/removed|couldn.t find/i.test(t.text('#bookView')), t.text('#bookView'));
+  check('no hand-off for a source that is down', t.kav.reconnect.length === 0);
+  check('no not-found state', !t.q('[data-state="notfound"]'));
+  let up = false;
+  const u = make('book', { routes: bookRoutes(() => (up ? { body: detail() } : kav)) });
+  const m = u.mount();
+  await u.clock.advance(1600);
+  await m;
+  up = true;
+  u.click('#retryBtn');
+  await u.clock.advance(1600);
+  check('Try again loads the book once the source is back', u.text('#bookTitle') === 'Harry Potter and the Prisoner of Azkaban' && !u.q('[data-state="unavailable"]'));
+  const plex = { status: 404, body: { detail: 'Audiobooks are unavailable right now', reason: 'unavailable', notes: [{ source: 'plex', reason: 'unavailable', text: 'Audiobooks are unavailable right now' }] } };
+  const v = await open(make, () => plex);
+  check('Plex down says so the same way', v.text('#bookTitle') === 'Audiobooks are unavailable right now' && !!v.q('[data-state="unavailable"]'));
 });
 
 await run('the page reads a failed sign-in on arrival, on every Books page', async (make) => {

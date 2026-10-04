@@ -16,6 +16,7 @@ which is obtained by the OIDC handoff and kept in their Redis session.
 """
 
 import hashlib
+import json
 import logging
 import re
 from typing import Dict, Optional
@@ -47,56 +48,128 @@ PROXY_TIMEOUT = 60.0
 # rewrite_book_html), so they are buffered rather than streamed.
 _BOOK_PAGE_PATH = re.compile(r"^api/[Bb]ook/\d+/book-page$", re.IGNORECASE)
 
-# A chapter's own endpoints (book-info, book-page, resources, contents). Kavita
-# does not check library access on these, so the proxy does (see
-# _require_visible_chapter).
-_CHAPTER_PATH = re.compile(r"^api/book/(\d{1,10})(?:/|$)", re.IGNORECASE)
+# What a proxied request can name, so the proxy can ask whether this person may
+# see it (Kavita does not check library access on its book, chapter, volume,
+# image or download endpoints): a chapterId, volumeId or seriesId in the query
+# or in a JSON body (also seriesIds, ...), or a number in the path after
+# "book", "chapter", "volume" or "series" (api/Book/<chapter>/book-info,
+# api/Series/<series>). Names are matched ignoring case, as Kavita reads them.
+_SCOPE_PARAMS = {"chapterid": "chapter", "volumeid": "volume", "seriesid": "series"}
+_SCOPE_LISTS = {"chapterids": "chapter", "volumeids": "volume", "seriesids": "series"}
+_SCOPE_PATH = {"book": "chapter", "chapter": "chapter", "volume": "volume", "series": "series"}
+_MAX_SCOPED = 200          # a request naming more than this is refused (the work is bounded)
+_ID_TEXT = re.compile(r"^\d{1,10}$")
 
 
-def _catalog_series_of_chapter(chapter_id: int) -> Optional[int]:
-    """The Kavita series the Books catalog says this chapter is in, if it knows the chapter."""
+def _whole_id(value) -> Optional[int]:
+    """A positive id from a number or its digits; None for anything else."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, str) and _ID_TEXT.match(value):
+        number = int(value)
+    else:
+        return None
+    return number if 0 < number <= 2147483647 else None
+
+
+def scoped_items(path: str, query_pairs, body: bytes, content_type: str = ""):
+    """The set of (kind, id) a request names, or None when it names one that is
+    not a plain id (refused: nothing is forwarded on a guess). An empty set is a
+    request about nothing in particular (a list Kavita filters itself)."""
+    found = set()
+    segments = path.split("/")
+    for at, segment in enumerate(segments[2:], start=2):
+        if not segment.isdigit():
+            continue
+        kind = _SCOPE_PATH.get(segments[at - 1].lower())
+        item_id = _whole_id(segment)
+        if kind is None or item_id is None:
+            return None            # a number in the path that this proxy cannot place
+        found.add((kind, item_id))
+    for key, value in query_pairs:
+        kind = _SCOPE_PARAMS.get(key.lower())
+        if kind is None:
+            continue
+        item_id = _whole_id(value)
+        if item_id is None:
+            return None
+        found.add((kind, item_id))
+    if body and "json" in (content_type or "").lower():
+        try:
+            data = json.loads(body)
+        except (ValueError, RecursionError):
+            data = None
+        if isinstance(data, dict):
+            for key, value in data.items():
+                lowered = str(key).lower()
+                if lowered in _SCOPE_PARAMS:
+                    item_id = _whole_id(value)
+                    if item_id is None:
+                        return None
+                    found.add((_SCOPE_PARAMS[lowered], item_id))
+                elif lowered in _SCOPE_LISTS:
+                    if not isinstance(value, list):
+                        return None
+                    for entry in value:
+                        item_id = _whole_id(entry)
+                        if item_id is None:
+                            return None
+                        found.add((_SCOPE_LISTS[lowered], item_id))
+    return found if len(found) <= _MAX_SCOPED else None
+
+
+def _catalog_series_of(kind: str, item_id: int) -> Optional[int]:
+    """The Kavita series the Books catalog says this chapter or volume is in, if it knows it."""
+    column = {"chapter": Book.kavita_chapter_id, "volume": Book.kavita_volume_id}.get(kind)
+    if column is None:
+        return None
     db = SessionLocal()
     try:
-        row = db.query(Book.kavita_series_id).filter(Book.kavita_chapter_id == chapter_id).first()
+        row = db.query(Book.kavita_series_id).filter(column == item_id).first()
     finally:
         db.close()
     return row[0] if row and row[0] else None
 
 
-# A chapter this session was just found allowed to read is not looked up again
-# for this long (a page turn and every image would each cost a Kavita call).
-CHAPTER_OK_TTL = 600
+# An item found allowed for this session is not looked up again for this long (a
+# page turn and every image would each cost a Kavita call).
+ITEM_OK_TTL = 600
 
 
-def _chapter_ok_key(session_id: str, token: str, chapter_id: int) -> str:
-    """One session's own entry for one chapter. The token's hash is in it, so a
+def _item_ok_key(session_id: str, token: str, kind: str, item_id: int) -> str:
+    """One session's own entry for one item. The token's hash is in it, so a
     new sign-in (a changed Kavita account or access) starts afresh."""
     digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
-    return f"kavita_chapter_ok:{session_id}:{digest}:{chapter_id}"
+    return f"kavita_ok:{session_id}:{digest}:{kind}:{item_id}"
 
 
-async def _require_visible_chapter(chapter_id: int, base: str, token: str, session_id: Optional[str] = None) -> None:
-    """404 unless the caller's own Kavita account may see the series this
-    chapter is in; 401 when Kavita refuses their sign-in; 503 when it does not
-    answer.
+async def _require_visible_items(items, base: str, token: str, session_id: Optional[str] = None) -> None:
+    """404 unless the caller's own Kavita account may see the series of every
+    item (chapter, volume or series); 401 when Kavita refuses their sign-in;
+    503 when it does not answer.
 
-    A successful check is kept in Redis for CHAPTER_OK_TTL seconds, per session
-    and chapter, and skips the Kavita call meanwhile. Only "allowed" is ever
-    kept: a refusal, an outage or a hidden chapter is asked again every time.
-    Nothing is held in this process (two workers share Redis), and with Redis
-    unreachable every request runs the check, so it fails safe."""
-    key = _chapter_ok_key(session_id, token, chapter_id) if session_id else None
+    A successful check is kept in Redis for ITEM_OK_TTL seconds, per session and
+    item, and skips the Kavita call meanwhile. Only "allowed" is ever kept: a
+    refusal, an outage or a hidden item is asked again every time. Nothing is
+    held in this process (two workers share Redis), and with Redis unreachable
+    every request runs the check, so it fails safe."""
     redis = None
-    if key:
+    pending = list(items)
+    if session_id:
         try:
             redis = await session_manager.get_redis()
-            if await redis.exists(key):
-                return
+            pending = [(k, i) for k, i in pending if not await redis.exists(_item_ok_key(session_id, token, k, i))]
         except Exception as exc:  # Redis down: no shortcut, the check runs
-            logger.warning("The chapter check's shortcut could not be read: %s", type(exc).__name__)
+            logger.warning("The visibility check's shortcut could not be read: %s", type(exc).__name__)
             redis = None
+            pending = list(items)
+    if not pending:
+        return
     try:
-        visible = await kavita_api.chapter_is_visible(base, token, chapter_id, _catalog_series_of_chapter(chapter_id))
+        visible = await kavita_api.items_are_visible(
+            base, token, [(k, i, _catalog_series_of(k, i)) for k, i in pending])
     except kavita_api.KavitaTokenRefused:
         raise HTTPException(status_code=401, detail="Kavita session expired")
     except kavita_api.KavitaUnavailable:
@@ -105,9 +178,10 @@ async def _require_visible_chapter(chapter_id: int, base: str, token: str, sessi
         raise HTTPException(status_code=404, detail="Not found")
     if redis is not None:
         try:
-            await redis.set(key, "1", ex=CHAPTER_OK_TTL)
+            for k, i in pending:
+                await redis.set(_item_ok_key(session_id, token, k, i), "1", ex=ITEM_OK_TTL)
         except Exception as exc:
-            logger.warning("The chapter check's shortcut could not be kept: %s", type(exc).__name__)
+            logger.warning("The visibility check's shortcut could not be kept: %s", type(exc).__name__)
 
 
 # Hop-by-hop headers must never be forwarded (RFC 9110 7.6.1).
@@ -756,11 +830,16 @@ async def kavita_proxy(
         # recorded with it): never sent here. Kavita answers 401 and the page
         # reconnects, which stores a token for this address.
         token = api_key = None
-    chapter = _CHAPTER_PATH.match(path)
-    if chapter and token:
-        await _require_visible_chapter(int(chapter.group(1)), base, token, session_id)
-    headers = build_forward_headers(request, token)
     body = await request.body()
+    if token:
+        # Without a token Kavita answers 401 itself. With one, whatever the
+        # request names (a chapter, a volume, a series) must be this person's to see.
+        items = scoped_items(path, request.query_params.multi_items(), body, request.headers.get("content-type", ""))
+        if items is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        if items:
+            await _require_visible_items(sorted(items), base, token, session_id)
+    headers = build_forward_headers(request, token)
 
     params = dict(request.query_params)
     # Kavita's asset endpoints reject the Bearer token and require an apiKey

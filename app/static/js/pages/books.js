@@ -590,7 +590,8 @@ export async function mount(ctx) {
     $('emptyText').textContent = text;
     $('emptyReset').classList.toggle('hidden', !filtered);
     // Requests is Seerr's own page then, which cannot ask for a book.
-    $('emptyRequest').classList.toggle('hidden', filtered || state.embed);
+    // (Nor while a source is not answering: the book may be there.)
+    $('emptyRequest').classList.toggle('hidden', filtered || state.embed || hasNotes);
     showBody('emptyState');
   }
 
@@ -778,7 +779,15 @@ export async function mount(ctx) {
         return;
       }
       setStatus('No matches', true);
-      if (state.embed) {
+      const held = data && data.request_url === null;
+      if (held) {
+        // A source is not answering, so a book may be there that cannot be listed: no "request it".
+        const why = (data.notes || []).filter(function (n) { return n && n.text; })[0];
+        $('searchEmptyTitle').textContent = 'No matches right now';
+        $('searchEmptyText').textContent = !why ? 'Try the search again in a moment.'
+          : why.reason === 'not_connected' ? why.text + '.' : why.text + '. Try the search again in a moment.';
+        $('searchRequest').classList.add('hidden');
+      } else if (state.embed) {
         // Requests is Seerr's own page, which cannot ask for a book and drops the search.
         $('searchEmptyTitle').textContent = 'Not in the library yet';
         $('searchEmptyText').textContent = 'No books match “' + query + '”. Check the spelling.';

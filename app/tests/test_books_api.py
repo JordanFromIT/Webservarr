@@ -398,17 +398,106 @@ class KavitaVisibility(BooksBase):
         self.assertNotIn("reason", self.get("/api/books/99999").json())         # no such id
         self.assertEqual(self.get("/api/books/99999").status_code, 404)
         self.as_user(A)
-        self.series_ids.side_effect = kavita.KavitaUnavailable("down")
-        r = self.get("/api/books/4")                                        # Kavita down: not "connect", it would not help
-        self.assertEqual(r.status_code, 404)
-        self.assertNotIn("reason", r.json())
-        self.series_ids.side_effect = self.reachable_series
         self.reach = {2}                                                    # connected, but this library is not theirs
         r = self.get("/api/books/4")
         self.assertEqual(r.status_code, 404)
         self.assertNotIn("reason", r.json())
         self.as_user(plex_user("1003", kavita_token=""))
         self.assertEqual(self.get("/api/books/1").status_code, 200)         # paired: the audio shows, the page handles the note
+
+    # FR2: a source that cannot be reached is not "removed from the library"
+    def test_with_kavita_down_an_ebook_only_book_says_unavailable_not_missing(self):
+        self.series_ids.side_effect = kavita.KavitaUnavailable("down")
+        r = self.get("/api/books/4")
+        self.assertEqual(r.status_code, 404)
+        body = r.json()
+        self.assertEqual(body["reason"], "unavailable")
+        self.assertEqual(body["notes"], [{"source": "kavita", "reason": "unavailable", "text": "Ebooks are unavailable right now"}])
+        self.assertEqual(body["detail"], "Ebooks are unavailable right now")
+        self.assertNotIn("Emma", r.text)                                    # fails closed: nothing about the book
+        self.assertEqual(self.get("/api/books/1").status_code, 200)         # a paired book still shows its audio
+
+    def test_with_plex_down_an_audio_only_book_says_unavailable_not_missing(self):
+        self.library_access.side_effect = pp.PlayerUnavailable("down")
+        r = self.get("/api/books/7")                                        # The Hobbit: audio only
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual((r.json()["reason"], r.json()["notes"][0]["source"]), ("unavailable", "plex"))
+        self.assertEqual(r.json()["detail"], "Audiobooks are unavailable right now")
+        self.assertEqual(self.get("/api/books/4").status_code, 200)         # an ebook is not Plex's to hide
+
+    def test_a_source_that_is_not_the_books_own_is_not_blamed(self):
+        self.library_access.side_effect = pp.PlayerUnavailable("down")
+        r = self.get("/api/books/4")                                        # Emma has no audio: Plex down is not why
+        self.assertEqual(r.status_code, 200)
+        self.series_ids.side_effect = kavita.KavitaUnavailable("down")
+        r = self.get("/api/books/7")                                        # The Hobbit has no ebook: nor is Kavita
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r.json()["reason"], "unavailable")                 # (Plex is down in this test too)
+        self.assertEqual(r.json()["notes"][0]["source"], "plex")
+
+    # FR1 + FR2 on the person and series pages
+    def test_a_series_of_ebooks_for_someone_not_connected_says_not_connected(self):
+        make_book(self.db, 60, "Quicksilver", "Callie Hart", "Fae & Alchemy", 1, 160)
+        self.as_user(plex_user("1003", kavita_token=""))
+        for path, params in (("/api/books/series", {"name": "Fae & Alchemy"}),
+                             ("/api/books/person", {"role": "author", "name": "Callie Hart"})):
+            with self.subTest(path=path):
+                r = self.get(path, **params)
+                self.assertEqual(r.status_code, 404)
+                self.assertEqual(r.json()["reason"], "not_connected")
+                self.assertEqual([n["reason"] for n in r.json()["notes"]], ["not_connected"])
+                self.assertNotIn("Quicksilver", r.text)
+                self.assertNotIn("Callie", r.text)
+
+    def test_with_kavita_down_an_ebook_series_and_author_say_unavailable(self):
+        make_book(self.db, 60, "Quicksilver", "Callie Hart", "Fae & Alchemy", 1, 160)
+        self.series_ids.side_effect = kavita.KavitaUnavailable("down")
+        for path, params in (("/api/books/series", {"name": "Fae & Alchemy"}),
+                             ("/api/books/person", {"role": "author", "name": "Callie Hart"})):
+            with self.subTest(path=path):
+                r = self.get(path, **params)
+                self.assertEqual((r.status_code, r.json()["reason"]), (404, "unavailable"))
+                self.assertEqual(r.json()["notes"][0]["text"], "Ebooks are unavailable right now")
+
+    def test_with_plex_down_a_narrators_page_says_unavailable(self):
+        self.library_access.side_effect = pp.PlayerUnavailable("down")
+        r = self.get("/api/books/person", role="narrator", name="Rob Inglis")
+        self.assertEqual((r.status_code, r.json()["reason"], r.json()["notes"][0]["source"]), (404, "unavailable", "plex"))
+        r = self.get("/api/books/person", role="narrator", name="Nobody At All")
+        self.assertEqual(r.status_code, 404)
+        self.assertNotIn("reason", r.json())
+
+    def test_a_name_that_matches_nothing_or_only_what_is_theirs_to_lack_stays_plain(self):
+        self.as_user(plex_user("1003", kavita_token=""))
+        for path, params in (("/api/books/series", {"name": "No Such Series"}),
+                             ("/api/books/person", {"role": "author", "name": "Nobody Here"})):
+            r = self.get(path, **params)
+            self.assertEqual(r.status_code, 404, path)
+            self.assertNotIn("reason", r.json(), path)
+        self.as_user(A)
+        self.reach = {2}                                                    # connected; Secret Series is in a library they lack
+        make_book(self.db, 50, "Secret Two", "Hidden Author", "Secret Series", 1, 150, library=2)
+        self.reach = {1}
+        r = self.get("/api/books/series", name="Secret Series")
+        self.assertEqual(r.status_code, 404)
+        self.assertNotIn("reason", r.json())
+
+    def test_a_page_with_something_to_show_still_shows_it_with_the_note(self):
+        self.as_user(plex_user("1003", kavita_token=""))
+        body = self.ok("/api/books/series", name="Dune")                    # Dune has audio: 200, ebooks missing, a note
+        self.assertTrue(body["items"])
+        self.assertEqual(body["notes"][0]["reason"], "not_connected")
+
+    # FR2: search must not offer to request what a source is hiding
+    def test_search_offers_no_request_while_a_source_is_not_reachable(self):
+        self.assertTrue(self.ok("/api/books/search", q="zzzz")["request_url"].startswith("/requests?q="))
+        self.series_ids.side_effect = kavita.KavitaUnavailable("down")
+        body = self.ok("/api/books/search", q="emma")
+        self.assertEqual(body["items"], [])
+        self.assertIsNone(body["request_url"])
+        self.assertEqual(body["notes"][0]["reason"], "unavailable")
+        self.as_user(plex_user("1003", kavita_token=""))
+        self.assertIsNone(self.ok("/api/books/search", q="emma")["request_url"])
 
     def test_a_token_from_another_kavita_address_is_not_used(self):
         self.as_user(plex_user("1003", kavita_base="http://old-kavita.test:5000"))

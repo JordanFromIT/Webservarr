@@ -89,7 +89,7 @@ export async function mount(ctx) {
     if (role !== 'author' && role !== 'narrator') return null;
     return { url: '/api/books/person?role=' + role + '&name=' + encodeURIComponent(name), key: 'books:person:' + role + ':' + name };
   })();
-  const state = { gen: 0, reconnectTried: false, connectProblem: false };
+  const state = { gen: 0, reconnectTried: false, connectProblem: false, connectView: false };
 
   const skeleton = {
     title: Array.prototype.slice.call($('listTitle').childNodes).map(function (n) { return n.cloneNode(true); }),
@@ -116,6 +116,7 @@ export async function mount(ctx) {
   function connectProblem() {
     if (signal.aborted) return;
     state.connectProblem = true;
+    if (state.connectView) { showConnect(); return; }
     // After the page is drawn (a helper that answers late): the line goes in last.
     const rest = $('listRest');
     if (rest && !rest.querySelector('[data-connect]') && rest.getAttribute('data-ready') === 'true') rest.appendChild(connectLine());
@@ -260,6 +261,32 @@ export async function mount(ctx) {
         : 'There’s nobody by that name in the library, or this link is out of date.', back);
   }
 
+  /** Nothing to show only because Kavita does not know this person yet (the API's
+      404 says so): the hand-off runs once, from here, and comes back to this
+      page; if it cannot (it was just tried, or failed) they are told, with a button. */
+  function showConnect() {
+    state.connectView = true;
+    const action = el('button', 'ws-lift mt-6 h-11 rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Connect');
+    action.id = 'connectBtn';
+    action.type = 'button';
+    action.addEventListener('click', retryConnect, { signal: signal });
+    message('connect', 'Connect your ebook library',
+      state.connectProblem ? 'We couldn’t connect you to the ebook library just now. Try again in a moment.'
+        : 'These books are in the ebook library. Connecting you now.',
+      state.connectProblem ? action : null);
+  }
+
+  /** A source is not answering (the API's 404 says "unavailable"): the books are
+      there, they just cannot be listed now. Never "not found". */
+  function showUnavailable(note) {
+    const retry = el('button', 'ws-lift mt-6 h-11 rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Try again');
+    retry.id = 'retryBtn';
+    retry.type = 'button';
+    retry.addEventListener('click', function () { showSkeleton(); load(true); }, { signal: signal });
+    message('unavailable', name || 'Books',
+      (note && note.text ? note.text + '. ' : '') + 'The library still has these books. Try again in a moment.', retry);
+  }
+
   function showError() {
     const retry = el('button', 'ws-lift mt-6 h-11 rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Try again');
     retry.id = 'retryBtn';
@@ -311,6 +338,9 @@ export async function mount(ctx) {
         WS.arrive('list', function () {
           if (signal.aborted || gen !== state.gen) return;
           const status = statusOf(err);
+          const reason = err && err.body ? err.body.reason : '';
+          if (status === 404 && reason === 'not_connected') { startConnect(); showConnect(); return; }
+          if (status === 404 && reason === 'unavailable') { showUnavailable((err.body.notes || [])[0]); return; }
           if (status === 404 || status === 422) showNotFound(); else showError();
         });
       }

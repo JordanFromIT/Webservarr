@@ -551,6 +551,17 @@ export async function mount(ctx) {
       state.connectProblem ? action : null);
   }
 
+  /** A source that is not answering (the API's 404 says "unavailable"): the book is
+      there, it just cannot be opened now. Never "removed from the library". */
+  function showUnavailable(note) {
+    const retry = el('button', 'ws-lift mt-6 h-11 rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Try again');
+    retry.id = 'retryBtn';
+    retry.type = 'button';
+    retry.addEventListener('click', function () { showSkeleton(); load(true); }, { signal: signal });
+    message('unavailable', note && note.text ? note.text : 'Books are unavailable right now',
+      'The library still has this book. It will open as soon as it answers again. Try again in a moment.', retry);
+  }
+
   function showError() {
     const retry = el('button', 'ws-lift mt-6 h-11 rounded-[10px] bg-primary px-5 text-[15px] font-semibold text-bright ' + LINK_FOCUS, 'Try again');
     retry.id = 'retryBtn';
@@ -614,6 +625,7 @@ export async function mount(ctx) {
         WS.arrive('book', function () {
           if (signal.aborted || gen !== state.gen) return;
           if (statusOf(err) === 404 && err.body && err.body.reason === 'not_connected') { startConnect(); showConnect(); return; }
+          if (statusOf(err) === 404 && err.body && err.body.reason === 'unavailable') { showUnavailable((err.body.notes || [])[0]); return; }
           if (statusOf(err) === 404) showNotFound(); else showError();
         });
       }

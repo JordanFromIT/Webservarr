@@ -385,38 +385,92 @@ async def user_series_ids(base: str, token: str) -> set:
         return set(await _series_ids_as_user(client, base, token, []))
 
 
-async def chapter_is_visible(base: str, token: str, chapter_id: int, known_series_id: Optional[int] = None) -> bool:
-    """True when the person's own account may see the series this chapter is in.
+MAX_SCANS = 20                 # libraries asked to scan in one go
 
-    Kavita's book endpoints (book-info, book-page, resources) do not check
-    library access, so the proxy asks here first. The series comes from the
-    catalog when it knows the chapter (known_series_id), else from the chapter's
-    own book-info (a number is all that is taken from it); it is then looked for
-    in the list Kavita gives this person, which holds only what their library
-    access and age restriction allow. A chapter Kavita does not know is not
-    visible. KavitaTokenRefused for a 401, KavitaUnavailable when Kavita is
-    not answering."""
-    async with _user_client() as client:
-        series_id = known_series_id
-        if series_id is None:
+
+async def scan_libraries() -> int:
+    """Ask Kavita to scan its libraries for new and changed files (not a forced
+    rescan), as the account the API key belongs to, which must be an admin.
+    Returns how many libraries were asked. Kavita does the scanning in its own
+    time: this only queues it. Every failure is a KavitaUnavailable with a
+    fixed sentence."""
+    base, key = _config()
+    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
+        headers = {"Authorization": f"Bearer {await _token(client, base, key)}"}
+        libraries, _ = await _get_json(client, "GET", f"{base}/api/Library/libraries", headers)
+        ids = [lib["id"] for lib in libraries if isinstance(lib, dict) and isinstance(lib.get("id"), int)] \
+            if isinstance(libraries, list) else []
+        asked = 0
+        for library_id in ids[:MAX_SCANS]:
             try:
-                response = await client.get(f"{base}/api/Book/{int(chapter_id)}/book-info",
-                                            headers={"Authorization": f"Bearer {token}"})
+                response = await client.post(f"{base}/api/Library/scan", headers=headers,
+                                             params={"libraryId": library_id, "force": "false"})
             except httpx.HTTPError as exc:
                 raise KavitaUnavailable("Kavita did not answer") from exc
-            if response.status_code == 401:
-                raise KavitaTokenRefused("Kavita no longer accepts this sign-in")
-            if response.status_code >= 500:
+            if response.status_code in (401, 403):
+                raise KavitaUnavailable("Kavita refused the scan: the key's account is not an admin")
+            if response.status_code not in (200, 204):
                 raise KavitaUnavailable(f"Kavita answered HTTP {response.status_code}")
-            if response.status_code != 200:
+            asked += 1
+        return asked
+
+
+async def _series_of(client: httpx.AsyncClient, base: str, token: str, kind: str, item_id: int) -> Optional[int]:
+    """The series a chapter or a volume is in, as Kavita names it (a number is
+    all that is taken from the answer); a series is its own. None when Kavita
+    does not know it. KavitaTokenRefused for a 401, KavitaUnavailable for a
+    server error or no answer."""
+    if kind == "series":
+        return item_id
+    if kind == "chapter":
+        path, params = f"/api/Book/{int(item_id)}/book-info", None
+    elif kind == "volume":
+        path, params = "/api/Series/volume", {"volumeId": int(item_id)}
+    else:
+        return None
+    try:
+        response = await client.get(f"{base}{path}", params=params, headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError as exc:
+        raise KavitaUnavailable("Kavita did not answer") from exc
+    if response.status_code == 401:
+        raise KavitaTokenRefused("Kavita no longer accepts this sign-in")
+    if response.status_code >= 500:
+        raise KavitaUnavailable(f"Kavita answered HTTP {response.status_code}")
+    if response.status_code != 200:
+        return None
+    try:
+        series_id = (response.json() or {}).get("seriesId")
+    except (ValueError, AttributeError):
+        return None
+    return series_id if isinstance(series_id, int) and not isinstance(series_id, bool) else None
+
+
+async def items_are_visible(base: str, token: str, items) -> bool:
+    """True when the person's own account may see the series of every item.
+
+    items: [(kind, id, known_series_id)], kind "series", "chapter" or "volume".
+    Kavita does not check library access on its book, chapter, volume, image and
+    download endpoints, so the proxy asks here first. A series comes from the
+    catalog when it knows the item (known_series_id), else from Kavita (see
+    _series_of); each is then looked for in the list Kavita gives this person,
+    which holds only what their library access and age restriction allow (read
+    once for all the items). An item Kavita does not know is not visible.
+    KavitaTokenRefused for a 401, KavitaUnavailable when Kavita is not answering."""
+    async with _user_client() as client:
+        wanted = set()
+        for kind, item_id, known in items:
+            series_id = known if known is not None else await _series_of(client, base, token, kind, item_id)
+            if series_id is None:
                 return False
-            try:
-                series_id = (response.json() or {}).get("seriesId")
-            except (ValueError, AttributeError):
-                return False
-            if not isinstance(series_id, int) or isinstance(series_id, bool):
-                return False
-        return series_id in set(await _series_ids_as_user(client, base, token, []))
+            wanted.add(series_id)
+        if not wanted:
+            return True
+        return wanted <= set(await _series_ids_as_user(client, base, token, []))
+
+
+async def chapter_is_visible(base: str, token: str, chapter_id: int, known_series_id: Optional[int] = None) -> bool:
+    """items_are_visible for one chapter."""
+    return await items_are_visible(base, token, [("chapter", chapter_id, known_series_id)])
 
 
 async def in_progress_series_ids(base: str, token: str) -> list:
