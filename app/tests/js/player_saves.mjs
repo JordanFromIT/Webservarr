@@ -1021,10 +1021,10 @@ function withEngine(o = {}) {
       let m = /^\/api\/player\/book\/([^?]+)/.exec(url);
       if (m) return reply(200, Object.assign({}, o.book || BOOK, { stream: { token: 'tok', uris: { local: [], remote: o.noStream ? [] : [REMOTE] } } }));
       // The safety net (spec 2.6): o.orphans answers GET /api/player/orphans/<key>
-      // (an array of places, or nothing: a 404); a POST to .../dismiss is kept in dismissals.
+      // (an array of places; none by default; o.orphansFail: a 503); a POST to .../dismiss is kept in dismissals.
       if (/^\/api\/player\/orphans\//.test(url)) {
         if (init && init.method === 'POST') { dismissals.push(url); return reply(200, { dismissed: true }); }
-        return o.orphans ? reply(200, { orphans: o.orphans, dismissed: false }) : reply(404, { detail: 'Not Found' });
+        return o.orphansFail ? reply(503, { detail: 'down' }) : reply(200, { orphans: o.orphans || [], dismissed: false });
       }
       m = /^\/api\/player\/position\/(.+)$/.exec(url);
       if (m && o.slowPosition && got.filter((u) => u.indexOf('/position/') !== -1).length > 1) {
@@ -3791,11 +3791,11 @@ current = 'spec 2.6: "None of these" releases the hold; the book then saves as a
   t.engine.close();
 }
 
-current = 'spec 2.6: a lookup that failed at one open is asked again at the next, though this browser kept the opening place';
+current = 'spec 2.6: a book opened with nothing to ask is asked about at the next open if places turn up, though this browser kept its opening place';
 {
-  // The first open's lookup failed (a 404 here); the book opened and kept its opening place.
+  // The first open found no places on gone books; the book opened and kept its opening place.
   const storage2 = fakeStorage();
-  const v = withEngine({ storage: storage2, book: CHAPTERED, orphans: undefined, places: { web: null, plex: null } });
+  const v = withEngine({ storage: storage2, book: CHAPTERED, places: { web: null, plex: null } });
   await v.engine.open('500:1', { autoplay: false });
   await v.clock.advance(1000);
   const opening = localOf(v);
@@ -3805,6 +3805,29 @@ current = 'spec 2.6: a lookup that failed at one open is asked again at the next
   check('the opening place is kept, not played here', opening && opening.own === false, opening);
   check('so the next open asks', w.engine.state().safetyNet !== null && w.engine.state().resumedFrom === null && !w.engine.state().playing, [w.engine.state().safetyNet, w.engine.state().resumedFrom]);
   w.engine.close();
+}
+
+current = 'T3H1: "None of these" after more than 5 minutes asks about a Plex app\'s newer place and never saves 0:00 over it';
+{
+  const t = withEngine({ book: CHAPTERED, orphans: ORPHANS, wallClock: true });
+  await openBook(t);
+  check('the question is open', t.engine.state().safetyNet !== null);
+  await t.clock.advance(5 * 60000 + 1000);
+  t.places.plex = { track: '502', offset_ms: 100000, duration_ms: 900000, updated_at: new Date(t.clock.now + 100 * 1000).toISOString(), device: 'Plexamp', source: 'plex' };
+  t.engine.dismissOrphans();
+  await t.clock.advance(5000);
+  const q = t.log.warning.filter((w) => w.kind === 'conflict');
+  check('the listener is asked about the Plexamp place', q.length === 1 && q[0].conflict.track === '502' && q[0].conflict.device === 'Plexamp', t.log.warning.map((w) => w.kind));
+  check('0 saves, 0:00 never sent', t.server.calls.length === 0 && !t.engine.state().playing, t.server.calls.map((c) => c.body));
+  t.engine.close();
+  // The same wait with no newer place: plays and saves from the start.
+  const u = withEngine({ book: CHAPTERED, orphans: ORPHANS, wallClock: true });
+  await openBook(u);
+  await u.clock.advance(5 * 60000 + 1000);
+  u.engine.dismissOrphans();
+  await u.clock.advance(15000);
+  check('nothing newer: it plays and saves from the start', u.engine.state().playing && u.server.calls.length >= 1 && u.server.calls[0].body.offset_ms < 5000, u.server.calls.map((c) => c.body.offset_ms));
+  u.engine.close();
 }
 
 if (failed) {

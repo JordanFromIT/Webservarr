@@ -25,6 +25,13 @@
  * (WS.player.dismissOrphans: stored on the server for this listener and
  * book, so it holds on every device; the book opens as a new book).
  *
+ * When the lookup itself failed (state().safetyNet.failed: a 503, a slow
+ * answer, or Plex unreadable) the book is held all the same, never started on
+ * its own, and the panel says "We couldn't check for an earlier place." with
+ * "Try again" (WS.player.retryOrphans: the lookup is made again) and "Start
+ * this book" (WS.player.startAsNew: the listener's explicit choice to open it
+ * as a new book).
+ *
  * Closing it (its back button, Escape, the phone's Back, closing the full
  * player) is "decide later": nothing is saved and the book stays held. A
  * prompt then stays above the bar, or at the top of the full player, until
@@ -48,6 +55,9 @@
 
 export const PANEL = 'safetynet';
 export const TITLE = 'Were you listening to one of these?';
+// The lookup failed (state().safetyNet.failed): the book is held all the same.
+export const FAILED_TITLE = 'Couldn\'t check for an earlier place';
+export const FAILED_TEXT = 'We couldn\'t check for an earlier place.';
 
 function num(v) {
   const n = Number(v);
@@ -139,16 +149,26 @@ export function createSafetyNet(env) {
   // ---- The panel ----
 
   const panel = ui.panel(PANEL, { title: TITLE, onHide: onPanelHidden });
-  const lede = h('p', {
-    class: 'wsp-fp-lede',
-    text: 'This book is new to you. If you were listening to one of these before it was replaced, pick it and we\'ll help you find your place. Nothing is saved until you do.'
-  });
+  const LEDE = 'This book is new to you. If you were listening to one of these before it was replaced, pick it and we\'ll help you find your place. Nothing is saved until you do.';
+  const lede = h('p', { class: 'wsp-fp-lede', text: LEDE });
   const list = h('ul', { class: 'wsp-fp-cands', role: 'list' });
   const noneBtn = h('button', { type: 'button', class: 'wsp-fp-btn wsp-sn-none', text: 'None of these' });
-  panel.body.appendChild(h('div', { class: 'wsp-opt-sec wsp-fp wsp-sn' }, [lede, list, noneBtn]));
+  const tryBtn = h('button', { type: 'button', class: 'wsp-fp-btn is-primary wsp-sn-try', text: 'Try again' });
+  const startBtn = h('button', { type: 'button', class: 'wsp-fp-btn wsp-sn-start', text: 'Start this book' });
+  const failedActions = h('div', { class: 'wsp-fp-actions wsp-sn-failed', hidden: true }, [tryBtn, startBtn]);
+  panel.body.appendChild(h('div', { class: 'wsp-opt-sec wsp-fp wsp-sn' }, [lede, list, noneBtn, failedActions]));
+  // The panel's own heading (ui.js gives it the id wspPanel-<name>): it
+  // names the question, or says it could not be asked.
+  const heading = doc.getElementById('wspPanel-' + PANEL);
 
   noneBtn.addEventListener('click', safely(function () {
     player.dismissOrphans();
+  }));
+  tryBtn.addEventListener('click', safely(function () {
+    player.retryOrphans();
+  }));
+  startBtn.addEventListener('click', safely(function () {
+    player.startAsNew();
   }));
 
   function line(cls, text) {
@@ -180,12 +200,19 @@ export function createSafetyNet(env) {
     ]);
   }
 
-  // The list for the question open now (drawn again only when it changes).
+  // The panel for the question open now: the list (drawn again only when it
+  // changes), or the failed lookup's two choices.
   function draw() {
     const s = player.state();
     const q = s.safetyNet;
     if (!q) return;
-    const key = s.book + '#' + JSON.stringify(q.orphans);
+    const failed = !!q.failed;
+    if (heading) heading.textContent = failed ? FAILED_TITLE : TITLE;
+    lede.textContent = failed ? FAILED_TEXT + ' Try again, or start this book from the beginning. Nothing is saved until you choose.' : LEDE;
+    list.hidden = failed;
+    noneBtn.hidden = failed;
+    failedActions.hidden = !failed;
+    const key = s.book + '#' + failed + '#' + JSON.stringify(q.orphans);
     if (key === drawnFor) return;
     drawnFor = key;
     list.textContent = '';
@@ -208,9 +235,10 @@ export function createSafetyNet(env) {
   // Put off while the question is open: a way back stays in view.
   function ensurePrompt() {
     if (promptEntry || isShown || !asking()) return;
+    const failed = !!player.state().safetyNet.failed;
     promptEntry = ui.prompt({
       id: 'safetynet',
-      message: TITLE,
+      message: failed ? FAILED_TEXT : TITLE,
       actions: [{ label: 'Take a look', primary: true, run: function () { promptEntry = null; open(null); } }]
     });
   }

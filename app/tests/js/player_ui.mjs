@@ -1371,6 +1371,37 @@ await run('no markup from strings', () => {
 });
 
 const summary = `${total - failed}/${total} player UI cases pass`;
+await run('T3U2: while the safety net asks, the Play buttons and Retry are aria-disabled, and wake when it is answered', async () => {
+  const t = setup({ state: Object.assign({}, BOOK, { playing: false }) });
+  t.engine.set({}, 'open');
+  const big = t.q('.wsp-play-lg');
+  const bar = t.q('.wsp-bar .wsp-play');
+  check('enabled as ever', big.getAttribute('aria-disabled') === null && bar.getAttribute('aria-disabled') === null);
+  t.engine.set({ safetyNet: { orphans: [], failed: false } }, 'safety-net');
+  check('both aria-disabled', big.getAttribute('aria-disabled') === 'true' && bar.getAttribute('aria-disabled') === 'true');
+  check('still buttons that can be focused (not disabled)', !big.disabled && !bar.disabled);
+  t.engine.set({ safetyNet: null }, 'safety-net');
+  check('answered: enabled again', big.getAttribute('aria-disabled') === null && bar.getAttribute('aria-disabled') === null);
+  // The error's Retry, shown while the question is open.
+  t.engine.set({ safetyNet: { orphans: [], failed: false }, error: { code: 'unreachable', message: "Can't reach the media server" } }, 'safety-net');
+  t.engine.emit('error', { code: 'unreachable', message: "Can't reach the media server", retry: () => Promise.resolve() });
+  const retry = () => t.qa('.wsp-notice-btn').find((b) => b.textContent === 'Retry');
+  check('the Retry is aria-disabled', retry() && retry().getAttribute('aria-disabled') === 'true', retry() && retry().getAttribute('aria-disabled'));
+  t.engine.set({ safetyNet: null }, 'safety-net');
+  check('answered: the Retry works again', retry().getAttribute('aria-disabled') === 'false');
+  // No question: a Retry is as ever.
+  const u = setup({ state: Object.assign({}, BOOK, { playing: false }) });
+  u.engine.set({ error: { code: 'unreachable', message: "Can't reach the media server" } }, 'open');
+  u.engine.emit('error', { code: 'unreachable', message: "Can't reach the media server", retry: () => Promise.resolve() });
+  const r2 = u.qa('.wsp-notice-btn').find((b) => b.textContent === 'Retry');
+  check('no question: the Retry is untouched', r2 && r2.getAttribute('aria-disabled') === null);
+  // The still dimming is in the theme, from its variables only.
+  const css = readFileSync(join(here, '../../static/css/theme.css'), 'utf8');
+  const m = /\.wsp-play\[aria-disabled="true"\]\s*\{([^}]*)\}/.exec(css);
+  check('a dimming rule, no raw colour, no animation', m && /opacity/.test(m[1]) && !/#[0-9a-f]{3,8}\b|rgb\(\s*\d|animation|transition/i.test(m[1]), m && m[1]);
+  check('the hover brighten leaves it alone', /\.wsp-play:hover:not\(\[aria-disabled="true"\]\)/.test(css));
+});
+
 if (failed) {
   console.error(summary.replace('pass', 'checked') + `, ${failed} failed`);
   process.exit(1);

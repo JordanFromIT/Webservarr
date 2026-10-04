@@ -973,8 +973,13 @@ html[data-player-full] #scrollDownHint { display: none; }
 .wsp-play-sm .material-symbols-outlined { font-size: 28px; }
 .wsp-play-lg { width: 72px; height: 72px; }
 .wsp-play-lg .material-symbols-outlined { font-size: 44px; }
+/* The safety net's question is open (ui.js sets aria-disabled): nothing plays
+   until it is answered, so the button looks it. No new motion: it is a still
+   dimming, and the press neither scales nor brightens. */
+.wsp-play[aria-disabled="true"] { opacity: .45; cursor: default; }
+.wsp-play[aria-disabled="true"]:active { transform: none; }
 @media (hover: hover) and (pointer: fine) {
-  .wsp-play:hover { filter: brightness(1.12); }
+  .wsp-play:hover:not([aria-disabled="true"]) { filter: brightness(1.12); }
 }
 .wsp-spin { animation: wsp-spin 900ms linear infinite; }
 @keyframes wsp-spin { to { transform: rotate(360deg); } }

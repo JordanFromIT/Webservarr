@@ -52,8 +52,19 @@ break: no lost place, no wrong place, no out-of-order tracks. This closes all fo
   work-key match.
 - **"None of these".** It is stored on the server per listener and book key, so it holds on every
   device. The question never shows again for that book. The book then opens as a new book.
-- **Errors.** If the orphan lookup fails (503 or timeout), the book opens as it does today, and
-  the question is asked at the next open.
+- **Errors.** A failed lookup (503, 5 s without an answer, or Plex unreadable with no other place
+  known) is not "none of these", and the book never plays or saves on its own: it stays held,
+  with nothing saved. The panel says "We couldn't check for an earlier place." with "Try again"
+  (the saved places and the lookup are read again, and what they find decides) and "Start this
+  book" (the listener's explicit choice: a new book, nothing stored on the server, playing if the
+  open was a Play). A book started after "Start this book" has its own place, so the question is
+  not asked again for it.
+- **After a pick, before the confirm.** "Not this book" in the helper goes back to the list
+  (nothing saved, the hold goes on), so a wrong pick is never final.
+- **While the question is open.** The big Play button, the bar's Play and the error's Retry are
+  aria-disabled and dimmed (they do nothing). "None of these" and "Start this book" leave the
+  late Play's re-read in place: after 5 minutes or more of waiting, a Plex app's or another
+  device's newer place is asked about before 0:00 is saved over it.
 - **History.** Entries from a manually linked copy show the "earlier copy" label, as in the 2.5
   spec section 6.
 

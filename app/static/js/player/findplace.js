@@ -408,8 +408,13 @@ export function createFindPlace(env) {
   const startRow = h('button', { type: 'button', class: 'wsp-row wsp-fp-row' }, [
     icon('restart_alt', 'wsp-fp-row-icon'), h('span', { class: 'wsp-row-text', text: 'Start from the beginning' })
   ]);
+  // "Not this book": only for a place picked from the safety net, before it
+  // is confirmed: back to the list of places.
+  const notRow = h('button', { type: 'button', class: 'wsp-row wsp-fp-row' }, [
+    icon('undo', 'wsp-fp-row-icon'), h('span', { class: 'wsp-row-text', text: 'Not this book' })
+  ]);
   const others = h('ul', { class: 'wsp-rows wsp-fp-others', role: 'list' }, [
-    h('li', null, [historyRow]), h('li', null, [startRow])
+    h('li', null, [historyRow]), h('li', null, [startRow]), h('li', null, [notRow])
   ]);
   panel.body.appendChild(h('div', { class: 'wsp-opt-sec wsp-fp' }, [lede, oldCard, status, candHead, candList, none, others]));
 
@@ -633,6 +638,9 @@ export function createFindPlace(env) {
     setAttr(nudgeBack, 'aria-label', 'Back ' + n + ' seconds');
     setAttr(nudgeFwd, 'aria-label', 'Forward ' + n + ' seconds');
     setHidden(historyRow.parentNode, !features());
+    // Back to the list, only while held by a pick and nothing waits on it.
+    setHidden(notRow.parentNode, !(isHeld && old.manual));
+    notRow.disabled = waiting;
   }
 
   // The scrubber spans the nudge's reach either side of its card (and the
@@ -749,6 +757,12 @@ export function createFindPlace(env) {
   historyRow.addEventListener('click', safely(function () {
     const f = features();
     if (f && typeof f.showHistory === 'function') f.showHistory(historyRow);
+  }));
+  notRow.addEventListener('click', safely(function () {
+    if (!live() || mode !== 'held' || !held()) return;
+    // The helper goes with the hold (the change handler); the question's
+    // panel opens on its own warning.
+    if (!player.unpickOrphan()) draw();
   }));
   startRow.addEventListener('click', safely(function () {
     if (!live()) return;

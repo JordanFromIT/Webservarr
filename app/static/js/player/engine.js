@@ -104,9 +104,14 @@
  *       stricter: nothing plays, not even a preview. play(), toggle(),
  *       retry(), the lock screen's Play, the element's own controls, and every
  *       move (seek, skip, chapter jump, seekto, rewind) do nothing until
- *       pickOrphan or dismissOrphans answers it. A lookup that fails, is
- *       empty or is slow gives no question: the book opens as it always did,
- *       and the question comes at the next open. A reload asks again, since
+ *       pickOrphan or dismissOrphans answers it. A lookup that finds none
+ *       gives no question: the book opens as it always did. A lookup that
+ *       FAILS (an error status, a network error, ORPHANS_WAIT_MS without an
+ *       answer, or Plex unreadable with no other place known) is not "none":
+ *       the book is held the same way with state().safetyNet.failed true and
+ *       no places, and never plays or saves on its own. retryOrphans() opens
+ *       it afresh (what the second try finds decides); startAsNew() is the
+ *       listener's explicit choice of a new book. A reload asks again, since
  *       nothing was saved.
  *       Booted without its saves (saves.js failed to load or run), open()
  *       never opens a book: an 'unsupported' error, "The player couldn't
@@ -166,13 +171,26 @@
  *                     is saved yet; confirmPlace sends linked_from with
  *                     link_manual: true (startOver sends no link). false: no
  *                     question open, or a key that was not offered.
+ *   unpickOrphan() -> bool  "Not this book": from a pick, before it is
+ *                     confirmed (nothing waiting on a read or a question),
+ *                     back to the question with the same places: the book at
+ *                     its start, held, nothing saved. false otherwise.
+ *   retryOrphans() -> bool  "Try again" after a failed lookup: the book is
+ *                     opened afresh as it was; false when no failed lookup
+ *                     waits.
+ *   startAsNew() -> bool  "Start this book" after a failed lookup: a new
+ *                     book (as dismissOrphans, but nothing is told to the
+ *                     server); false when no failed lookup waits.
  *   dismissOrphans() -> bool  "None of these": the server is told
  *                     (POST /api/player/orphans/<key>/dismiss, in the
  *                     background; per listener and book, so it holds on every
  *                     device), the hold ends, and the book is a new book:
  *                     nothing is saved until it is played (a start-over
  *                     release of the saves, no place moved), and it plays now
- *                     when the open was to play. false: no question open.
+ *                     when the open was to play, through the late Play's
+ *                     re-read as any Play (after RECHECK_AFTER_MS a newer
+ *                     place elsewhere is asked about, never overwritten by
+ *                     0:00). false: no question open.
  *   confirmPlace(bookMs) -> bool  held: the listener places the book at bookMs.
  *                     An explicit move (a 'seek' change marked { place: true })
  *                     that ends the hold and is saved once (it ends any smart
@@ -280,7 +298,7 @@
  *                       filesChanged: { old: { track, offset_ms, book_ms,
  *                         book_duration_ms, chapter_label, updated_at, source,
  *                         linked_from, book_title, narrator, manual }, spot } | null,
- *                       safetyNet: { orphans: [{ key, book_title, narrator,
+ *                       safetyNet: { failed, orphans: [{ key, book_title, narrator,
  *                         book_ms, book_duration_ms, chapter_label, updated_at }] } | null }
  *       filesChanged: the book's files changed (see open): the place saved
  *       before (source 'web', 'plex' or 'local'; a field that copy lacks is
@@ -322,7 +340,7 @@
  *     'warning'  { kind: 'part-skipped', message }
  *                { kind: 'files-changed', book, old } (see open; old as in
  *                  state().filesChanged)
- *                { kind: 'safety-net', book, orphans } (see open; orphans as in
+ *                { kind: 'safety-net', book, failed, orphans } (see open; as in
  *                  state().safetyNet)
  *                { kind: 'part-format', message, landing } (a seek, preview or
  *                  confirm into a part that can't play; landing: true when a
@@ -816,7 +834,7 @@ export function createEngine(env) {
       saveError: saver ? !!saver.warning : false,
       resumedFrom: resumedFrom,
       filesChanged: book && files ? { old: Object.assign({}, files.old), spot: files.spot } : null,
-      safetyNet: book && net ? { orphans: net.orphans.map(function (o) { return Object.assign({}, o); }) } : null
+      safetyNet: book && net ? { failed: net.failed, orphans: net.orphans.map(function (o) { return Object.assign({}, o); }) } : null
     };
   }
 
@@ -1492,9 +1510,9 @@ export function createEngine(env) {
 
 
   /* The listener's places on books that left the library, which this book
-     might be (GET /api/player/orphans/<key>): a list, or null for none, a
-     failed lookup or one taking ORPHANS_WAIT_MS (the book then opens as it
-     always did, and the question comes at the next open). */
+     might be (GET /api/player/orphans/<key>): a list (empty: none), or null
+     for a lookup that failed or took ORPHANS_WAIT_MS. A failed lookup is not
+     "none": the book stays held (see open). */
   async function lookupOrphans(key) {
     let timer = null;
     const timeout = new Promise(function (resolve) {
@@ -1511,8 +1529,8 @@ export function createEngine(env) {
       });
       if (!resp.ok) return null;
       const data = await resp.json();
-      const list = orphanList(data && data.orphans);
-      return list.length ? list : null;
+      if (!data || !Array.isArray(data.orphans)) return null;
+      return orphanList(data.orphans);
     })().catch(function () { return null; });
     const got = await Promise.race([asked, timeout]);
     if (timer !== null) clearT(timer);
@@ -1550,26 +1568,30 @@ export function createEngine(env) {
     // The safety net (spec 2.6): with no place of the listener's in the book
     // at all, their places on books that left the library are asked for,
     // alongside the book. Never an error: a lookup that fails is no question.
-    // The copies are weighed once (the open weighs them again below).
+    // The copies are weighed once (the open weighs them again below). What
+    // comes of it: undefined (not asked), a list (the answer, empty or not)
+    // or null (a lookup that failed, or one that could not be made because
+    // Plex could not be read: a place there may be unseen).
     let weighed = null;
     const orphansAsked = placesAsked ? placesAsked.then(function (got) {
-      if (!got.places || opts.at) return null;
+      if (!got.places || opts.at) return undefined;
       try {
         weighed = saver.resumeFrom(key, got.places) || [];
       } catch (e) {
         console.error('[player] saving failed', e);
-        return null;
+        return undefined;
       }
       // A copy this browser only kept as the book's opening place (opened,
       // never played or moved here) is no place of the listener's: a lookup
       // that failed at the last open must not hide the question now.
       const local = localCopy(key);
       const mine = weighed.filter(function (c) { return !(c.source === 'local' && !(local && local.own === true)); });
-      return !mine.length && !got.places.plexError ? lookupOrphans(key) : null;
+      if (mine.length) return undefined;
+      return got.places.plexError ? null : lookupOrphans(key);
     }) : null;
     let data;
     let places = null;
-    let orphans = null;
+    let orphans;
     try {
       data = await fetchBook(key, false);
       if (placesAsked) {
@@ -1659,7 +1681,8 @@ export function createEngine(env) {
     if (places && places.plex && typeof places.plex === 'object') plexCopy = copyFrom('plex', places.plex);
     // The files changed: the listener places the book first; the handoff
     // and conflict rules then apply to that place (through its save).
-    const asking = !!(orphans && orphans.length && !changedFrom);
+    const lookupFailed = orphans === null && !changedFrom;
+    const asking = !changedFrom && (lookupFailed || !!(orphans && orphans.length));
     // The question starts the book at its start, whatever opening place this
     // browser kept (the lookup found it is no place of the listener's).
     if (asking && resumed) {
@@ -1711,7 +1734,7 @@ export function createEngine(env) {
     resumedFrom = resumed ? { source: resumed.source, device: resumed.device, updated_at: resumed.updated_at, age_ms: age } : null;
     // spot: the helper's chosen spot (book ms), where Play previews while held.
     files = changedFrom ? { old: changedFrom, spot: startMs, pending: null, reading: false, asked: false, timer: null, play: false } : null;
-    net = asking ? { orphans: orphans, autoplay: autoplay } : null;
+    net = asking ? { orphans: lookupFailed ? [] : orphans, failed: lookupFailed, autoplay: autoplay } : null;
     if (saver) {
       try {
         saver.start(key, {
@@ -1748,7 +1771,7 @@ export function createEngine(env) {
     quietSince = wallNow();
     changed('open');
     if (files) emit('warning', { kind: 'files-changed', book: key, old: Object.assign({}, files.old) });
-    if (net) emit('warning', { kind: 'safety-net', book: key, orphans: net.orphans.map(function (o) { return Object.assign({}, o); }) });
+    if (net) emit('warning', { kind: 'safety-net', book: key, failed: net.failed, orphans: net.orphans.map(function (o) { return Object.assign({}, o); }) });
     if (cannot) {
       unchosen = true;
       // The place as it was given: a saved place at the very end of the part
@@ -2121,10 +2144,33 @@ export function createEngine(env) {
     const key = String(orphanKey);
     const picked = net.orphans.find(function (o) { return o.key === key; });
     if (!picked) return false;
+    // fromNet: where "Not this book" (unpickOrphan) goes back to.
+    const fromNet = { orphans: net.orphans, autoplay: net.autoplay };
     net = null;
-    files = { old: oldPlaceOfOrphan(picked), spot: bookMsNow(), pending: null, reading: false, asked: false, timer: null, play: false };
+    files = { old: oldPlaceOfOrphan(picked), spot: bookMsNow(), pending: null, reading: false, asked: false, timer: null, play: false, fromNet: fromNet };
     changed('safety-net');
     emit('warning', { kind: 'files-changed', book: book.key, old: Object.assign({}, files.old) });
+    return true;
+  }
+
+  /* "Not this book": the listener picked a place and has not confirmed it;
+     back to the list of places. Nothing was saved and nothing is: the book
+     goes back to its start, held, as the question was. false when the book
+     is not held by a pick, or a confirm is already waiting (on its read or
+     the question that read asked). */
+  function unpickOrphan() {
+    if (!files || !files.fromNet || !book || !playhead) return false;
+    if (files.pending || files.reading || files.asked) return false;
+    const back = files.fromNet;
+    // A preview stops; the held playhead goes back to the start (still held,
+    // so nothing is saved for either).
+    preview = null;
+    if (wantPlay) pause();
+    seek(0, 'seek');
+    files = null;
+    net = { orphans: back.orphans, failed: false, autoplay: back.autoplay };
+    changed('safety-net');
+    emit('warning', { kind: 'safety-net', book: book.key, failed: false, orphans: net.orphans.map(function (o) { return Object.assign({}, o); }) });
     return true;
   }
 
@@ -2134,7 +2180,7 @@ export function createEngine(env) {
      server is told in the background; if that fails the question comes again
      at the next open, and this open goes on. false when no question is open. */
   function dismissOrphans() {
-    if (!net || !book) return false;
+    if (!net || !book || net.failed) return false;
     const mine = net;
     const key = book.key;
     net = null;
@@ -2152,6 +2198,17 @@ export function createEngine(env) {
     } catch (e) {
       console.error('[player] "None of these" was not stored', e);
     }
+    releaseAsNew(key, mine);
+    return true;
+  }
+
+  /* The hold ends and the book is a new book: the saves released with no
+     place moved (nothing is saved until it is played), and it plays now when
+     the open was to play. quietSince is left as the open set it: a Play after
+     RECHECK_AFTER_MS reads the saved places first, so a place another device
+     or a Plex app saved while the question was open is asked about, never
+     overwritten with 0:00. */
+  function releaseAsNew(key, held) {
     if (saver && typeof saver.releaseFiles === 'function') {
       try {
         saver.releaseFiles(key, null, { startOver: true });
@@ -2159,12 +2216,36 @@ export function createEngine(env) {
         console.error('[player] saving failed', e);
       }
     }
-    quietSince = wallNow();
     changed('safety-net');
-    if (mine.autoplay) {
+    if (held.autoplay) {
       const p = play();
       if (p && typeof p.catch === 'function') p.catch(function (e) { console.error('[player] playing failed', e); });
     }
+  }
+
+  /* The safety net's lookup failed (state().safetyNet.failed): the listener
+     chose to start this book as a new book anyway. Nothing is stored on the
+     server (nothing was asked); otherwise as "None of these". false when no
+     failed lookup is waiting. */
+  function startAsNew() {
+    if (!net || !book || !net.failed) return false;
+    const mine = net;
+    net = null;
+    releaseAsNew(book.key, mine);
+    return true;
+  }
+
+  /* "Try again" after a failed lookup: the book is opened afresh as it was
+     (the saved places read again, the lookup made again), so whatever the
+     second try finds decides: a place to resume, the question, or a new
+     book. Held meanwhile; if it fails again, the same hold returns. false
+     when no failed lookup is waiting. */
+  function retryOrphans() {
+    if (!net || !book || !net.failed || !lastOpen) return false;
+    const again = lastOpen;
+    teardown();
+    const p = open(again.key, again.opts);
+    if (p && typeof p.catch === 'function') p.catch(function (e) { console.error('[player] opening failed', e); });
     return true;
   }
 
@@ -2798,6 +2879,9 @@ export function createEngine(env) {
     rewind: function (bookMs) { if (!files) seek(bookMs, 'seek', true); },
     previewAt: previewAt,
     pickOrphan: pickOrphan,
+    unpickOrphan: unpickOrphan,
+    startAsNew: startAsNew,
+    retryOrphans: retryOrphans,
     dismissOrphans: dismissOrphans,
     confirmPlace: function (bookMs) { return place(bookMs, true); },
     startOver: function () { return place(0, false); },

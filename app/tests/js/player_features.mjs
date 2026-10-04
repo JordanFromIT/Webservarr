@@ -388,6 +388,8 @@ async function setup(o = {}) {
       const k = decodeURIComponent(m[1]);
       return response(200, { next: t.nextBooks[k] || null });
     }
+    // The safety net's lookup (spec 2.6): none of the listener's places is on a gone book.
+    if (/^\/api\/player\/orphans\//.test(url)) return response(200, { orphans: [], dismissed: false });
     m = /^\/api\/player\/position\/(.+)$/.exec(url);
     if (m) {
       t.positionCalls += 1;

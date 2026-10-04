@@ -241,6 +241,8 @@ export function createUI(env) {
   let scrubSpan = null;        // the chapter it was taken in
   let clockTimer = null;
   let isOpen = false;
+  let errorNote = null;       // the error notice, for its Retry (drawRetry)
+  let retryHeld = false;      // the safety net's question is open: that Retry waits
   let lastFocus = null;        // focus before the full player opened
   let closing = null;          // { timer, onEnd } while the slide down runs
   let drag = null;             // a swipe: { id, y0, dy, moving, samples: [[t, y]] }
@@ -837,6 +839,11 @@ export function createUI(env) {
     setText(ic, name);
     ic.classList.toggle('wsp-spin', busy);
     setAttr(btn, 'aria-label', label);
+    // The safety net's question is open: nothing plays until it is answered.
+    // aria-disabled, not disabled (a disabled button can't keep the focus),
+    // and dimmed by theme.css; the press does nothing (the engine holds), but
+    // the bar's opens the full player on the question.
+    setAttr(btn, 'aria-disabled', s.safetyNet ? 'true' : null);
   }
 
   function drawBook(s) {
@@ -919,6 +926,7 @@ export function createUI(env) {
     }
     drawPlay(barPlay, s);
     drawPlay(fullPlay, s);
+    drawRetry(!!s.safetyNet);
     drawSkip();
     drawTime(s);
     if (!s.saveError) setWarn('');
@@ -1313,12 +1321,28 @@ export function createUI(env) {
     if (w.kind === 'not-saved') setWarn(w.active ? w.message : '');
     else if (w.kind === 'part-skipped' || w.kind === 'resume-lost' || w.kind === 'part-format') notify(w.message, { id: w.kind });
   });
+  // The error's Retry while the safety net's question is open: it would play
+  // nothing, so it waits like a busy prompt's buttons (aria-disabled, dimmed)
+  // and comes back to life when the question is answered.
+  function drawRetry(held) {
+    if (held === retryHeld) return;
+    retryHeld = held;
+    if (errorNote && errorNote.shown) errorNote.update({ busy: held });
+  }
+
   player.on('error', function (e) {
     if (!e) return;
     let action = null;
     if (typeof e.retry === 'function') action = { label: 'Retry', run: guarded(e.retry) };
     else if (e.code === 'signed-out' && typeof env.leaveTo === 'function') action = { label: 'Sign in', run: function () { env.leaveTo('/login'); } };
-    notify(e.message, { tone: 'err', id: 'error', duration: 0, action: action });
+    errorNote = notify(e.message, { tone: 'err', id: 'error', duration: 0, action: action });
+    let held = false;
+    try {
+      const s = player.state();
+      held = !!(s && s.safetyNet);
+    } catch (err) { /* not held */ }
+    if (action && held) errorNote.update({ busy: true });
+    retryHeld = held;
   });
 
   // Where the address is now: the router's (location), as it records a page's

@@ -310,7 +310,7 @@ async function setup(o = {}) {
     m = /^\/api\/player\/history\/([^?]+)(?:\?before=(.+))?$/.exec(url);
     if (m) return response(200, t.history[m[2] ? decodeURIComponent(m[2]) : ''] || { entries: [], next_before: null });
     // The safety net: t.orphans (an array of places, a status number, or
-    // undefined: a 404) answers GET /api/player/orphans/<key>; once the
+    // undefined: none) answers GET /api/player/orphans/<key>; once the
     // listener has said "None of these" for a book, the server answers with
     // none and says it was dismissed.
     m = /^\/api\/player\/orphans\/([^/]+?)(\/dismiss)?$/.exec(url);
@@ -323,7 +323,7 @@ async function setup(o = {}) {
       }
       if (t.orphansDelay) await new Promise((r) => clock.setTimeout(r, t.orphansDelay));
       if (typeof t.orphans === 'number') return response(t.orphans, { detail: 'no' });
-      if (t.orphans === undefined) return response(404, { detail: 'Not Found' });
+      if (t.orphans === undefined) return response(200, { orphans: [], dismissed: false });
       return response(200, { orphans: t.dismissed.has(key) ? [] : t.orphans, dismissed: t.dismissed.has(key) });
     }
     m = /^\/api\/player\/position\/(.+)$/.exec(url);
@@ -563,8 +563,9 @@ await run('the panel opens with the hold, in the full player, and shows the old 
   }));
   check('the first is chosen, with the nudge', cards[0].classList.contains('is-chosen') && !!cards[0].querySelector('.wsp-fp-nudge') && !cards[1].querySelector('.wsp-fp-nudge'));
   check('the chosen spot is the engine\'s, at it', t.st().filesChanged.spot === 720000 && t.st().bookMs === 720000, t.st().filesChanged.spot);
-  check('Show history and Start from the beginning', t.qa('.wsp-fp-row').map((b) => b.textContent.replace(/^\w+(?=[A-Z])/, '')).join() === 'Show history,Start from the beginning',
+  check('Show history and Start from the beginning', t.qa('.wsp-fp-row').filter((b) => !b.closest('[hidden]')).map((b) => b.textContent.replace(/^\w+(?=[A-Z])/, '')).join() === 'Show history,Start from the beginning',
     t.qa('.wsp-fp-row').map((b) => b.textContent));
+  check('"Not this book" is only for a pick from the safety net', t.qa('.wsp-fp-row').filter((b) => b.textContent.indexOf('Not this book') !== -1).every((b) => b.closest('[hidden]')));
   check('no "nothing to match" note', t.q('.wsp-fp-none').hidden);
   check('not playing, nothing saved', !t.st().playing && t.posts.length === 0, t.posts);
   await t.clock.advance(20000);
@@ -1653,15 +1654,12 @@ await run('spec 2.6: it shows only when ruled', async () => {
     ['files changed (a place in a part the book lacks)', null],
     ['a linked earlier copy', null],
     ['no places left on gone books', { orphans: [] }],
-    ['the server says dismissed', { dismissed: new Set([MULTI.key]) }],
-    ['the lookup answering 503', { orphans: 503 }],
-    ['the lookup answering 404', { orphans: undefined, force404: true }]
+    ['the server says dismissed', { dismissed: new Set([MULTI.key]) }]
   ];
   for (const [name, o] of cases) {
     let t;
     if (name.startsWith('files changed')) { t = await held({}); t.orphans = orphansFor(t); }
     else if (name === 'a linked earlier copy') { t = await held({}); }
-    else if (o.force404) { t = await setup(); t.orphans = undefined; const p = t.engine.open(MULTI.key); await t.clock.advance(300); await p; }
     else { t = await asking(o); }
     check(name + ': no question, no panel', t.st().safetyNet === null && !t.snShown() && t.snRows().length === 0, t.st().safetyNet);
     if (name.startsWith('files changed') || name === 'a linked earlier copy') check(name + ': the "Find your place" helper has it', t.st().filesChanged !== null && t.shown());
@@ -1835,19 +1833,111 @@ await run('spec 2.6: "None of these" with the open not to play leaves it ready; 
   t.engine.close();
 });
 
-await run('spec 2.6: a lookup that is slow or fails opens the book as it always did', async () => {
+await run('T3H2: a failed or slow lookup holds the book and the panel says so', async () => {
+  const cases = [['a 503', 503], ['a 404', 404], ['slow (over 5 s)', 'slow']];
+  for (const [name, mode] of cases) {
+    const t = await setup();
+    t.orphans = mode === 'slow' ? orphansFor(t) : mode;
+    if (mode === 'slow') t.orphansDelay = 9000;
+    const p = t.engine.open(MULTI.key);
+    await t.clock.advance(mode === 'slow' ? 6000 : 300);
+    await p;
+    check(name + ': held as failed, the panel is up with the words', t.st().safetyNet && t.st().safetyNet.failed === true && t.snShown() &&
+      t.snPanel().textContent.indexOf("We couldn't check for an earlier place.") !== -1, t.snPanel() && t.snPanel().textContent.slice(0, 160));
+    check(name + ': titled for it, no list, no None of these', t.q('#wspPanel-safetynet').textContent === "Couldn't check for an earlier place" && t.q('.wsp-sn-none').hidden &&
+      t.snPanel().querySelector('.wsp-fp-cands').hidden && t.snRows().length === 0, [t.q('#wspPanel-safetynet').textContent, t.q('.wsp-sn-none').hidden]);
+    const names = t.qa('.wsp-sn-failed button').map((b) => b.textContent);
+    check(name + ': Try again and Start this book', names.join() === 'Try again,Start this book' && !t.q('.wsp-sn-failed').hidden, names);
+    await t.engine.play();
+    t.ms.handlers.get('play')();
+    await t.clock.advance(20000);
+    check(name + ': nothing plays, nothing saved', !t.st().playing && t.audioEl.paused && t.posts.length === 0);
+    check(name + ': Escape puts it off with a prompt that says so', (t.key(t.q('#wspPanel-safetynet'), 'Escape'), t.prompts().length === 1 && t.prompts()[0] === "We couldn't check for an earlier place."), t.prompts());
+    t.promptBtn('Take a look').click();
+    await t.clock.advance(50);
+    check(name + ': and brings it back', t.snShown());
+    t.engine.close();
+  }
+});
+
+await run('T3H2: Try again runs the lookup again; Start this book is the explicit choice', async () => {
   const t = await setup();
-  t.orphans = orphansFor(t);
-  t.orphansDelay = 9000;
-  const p = t.engine.open(MULTI.key);
-  await t.clock.advance(4000);
-  check('waiting at 4 s: no panel yet', !t.snShown() && t.st().safetyNet === null);
-  await t.clock.advance(2000);
+  t.orphans = 503;
+  let p = t.engine.open(MULTI.key);
+  await t.clock.advance(300);
   await p;
-  check('at 5 s it opened and plays, no panel', t.st().playing && !t.snShown() && t.st().safetyNet === null && t.prompts().length === 0);
-  await t.clock.advance(10000);
-  check('the late answer changes nothing', t.st().safetyNet === null && !t.snShown() && t.st().playing);
+  const before = asked(t).length;
+  t.qa('.wsp-sn-failed button')[0].click();
+  await t.clock.advance(600);
+  check('Try again asked again, and it still fails: the same panel', asked(t).length === before + 1 && t.snShown() && t.st().safetyNet.failed === true && !t.st().playing && t.posts.length === 0);
+  t.orphans = orphansFor(t);
+  t.qa('.wsp-sn-failed button')[0].click();
+  await t.clock.advance(600);
+  check('then it answers: the question, with the places', t.snShown() && t.st().safetyNet.failed === false && t.snRows().length === 2 && t.q('.wsp-sn-failed').hidden &&
+    t.q('#wspPanel-safetynet').textContent === SN_TITLE && !t.q('.wsp-sn-none').hidden, t.q('#wspPanel-safetynet').textContent);
   t.engine.close();
+  const u = await setup();
+  u.orphans = 503;
+  p = u.engine.open(MULTI.key);
+  await u.clock.advance(300);
+  await p;
+  u.qa('.wsp-sn-failed button')[1].click();
+  await u.clock.advance(3000);
+  check('Start this book: the panel is gone, it plays from the start, nothing stored on the server', !u.snShown() && u.st().safetyNet === null && u.st().playing &&
+    u.dismissals.length === 0 && u.posts.length >= 1 && u.posts[0].offset_ms < 5000, [u.st().playing, u.dismissals, u.posts.length]);
+  u.engine.close();
+});
+
+await run('T3U1: "Not this book" goes back from the helper to the list; nothing is saved', async () => {
+  const t = await asking();
+  const row = () => t.qa('.wsp-fp-row').find((b) => b.textContent.indexOf('Not this book') !== -1);
+  check('not there for the question itself', t.snShown() && (!row() || row().closest('[hidden]')));
+  t.snRows()[0].querySelector('.wsp-sn-pick').click();
+  await t.clock.advance(100);
+  check('shown in the helper after a pick', t.shown() && row() && !row().closest('[hidden]') && !row().disabled);
+  t.card('time').querySelector('.wsp-fp-preview').click();
+  await t.clock.advance(3000);
+  row().click();
+  await t.clock.advance(200);
+  check('the helper is gone, the question is back with the same places', !t.shown() && t.snShown() && t.snRows().length === 2 && t.st().safetyNet !== null && t.st().filesChanged === null);
+  check('the book is back at its start, not playing, nothing saved', t.st().bookMs === 0 && !t.st().playing && t.posts.length === 0 && t.audioEl.paused);
+  t.snRows()[1].querySelector('.wsp-sn-pick').click();
+  await t.clock.advance(100);
+  check('pick another: the helper has that one', t.shown() && t.st().filesChanged.old.linked_from === '410:1');
+  // While a confirm waits it is not offered.
+  t.card('time') && t.cards()[0].querySelector('.wsp-fp-use').click();
+  await t.clock.advance(5000);
+  check('confirmed: the hold is over, the row is not in the way', t.st().filesChanged === null && t.posts.length === 1 && t.posts[0].linked_from === '410:1');
+  t.engine.close();
+  // The automatic link (no pick) never shows it.
+  const u = await held({});
+  check('files changed or a linked copy: no "Not this book"', u.qa('.wsp-fp-row').filter((b) => b.textContent.indexOf('Not this book') !== -1).every((b) => b.closest('[hidden]')));
+  u.engine.close();
+});
+
+await run('T3U2: while the question is open the Play buttons and Retry look disabled', async () => {
+  const t = await asking();
+  const big = t.q('.wsp-play-lg');
+  const bar = t.q('.wsp-bar .wsp-play');
+  check('the big Play and the bar Play are aria-disabled', big.getAttribute('aria-disabled') === 'true' && bar.getAttribute('aria-disabled') === 'true');
+  big.click();
+  await t.clock.advance(500);
+  check('pressing it plays nothing', !t.st().playing && t.posts.length === 0);
+  t.snRows()[0].querySelector('.wsp-sn-pick').click();
+  await t.clock.advance(100);
+  check('after a pick (the helper: a Play is a preview) they are enabled', big.getAttribute('aria-disabled') === null && bar.getAttribute('aria-disabled') === null);
+  t.q('.wsp-fp-row') && t.qa('.wsp-fp-row').find((b) => b.textContent.indexOf('Not this book') !== -1).click();
+  await t.clock.advance(100);
+  check('back at the question: disabled again', big.getAttribute('aria-disabled') === 'true');
+  t.q('.wsp-sn-none').click();
+  await t.clock.advance(2000);
+  check('answered: enabled', big.getAttribute('aria-disabled') === null && bar.getAttribute('aria-disabled') === null);
+  t.engine.close();
+  // The error's Retry, shown while the question is open, is disabled and comes back to life.
+  const u = await asking();
+  u.engine.close();
+  const css = readFileSync(join(here, '../../static/css/theme.css'), 'utf8');
+  check('a dimmed style from theme variables, still when reduced motion', /\.wsp-play\[aria-disabled="true"\][^{]*\{[^}]*opacity/.test(css) && !/\.wsp-play\[aria-disabled="true"\][^{]*\{[^}]*(#[0-9a-f]{3,6}|rgb\(\d)/i.test(css));
 });
 
 await run('spec 2.6: a page without the safety net module still works (the engine holds, nothing plays)', async () => {
