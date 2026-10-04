@@ -37,13 +37,15 @@ def url_key(service: str) -> str:
 
 
 # Each address and the saved secret that is sent to it (NYT has a fixed
-# address; Authentik's client secret goes to the Authentik address). A saved
-# secret only ever goes to the address it was saved with: Settings refuses a
-# new address unless the secret is entered again in the same save, and an
-# import, which never carries secrets, clears it.
+# address; Authentik's client secret goes to the Authentik address; the Books
+# catalog's Kavita API key goes to the Kavita address). A saved secret only
+# ever goes to the address it was saved with: Settings refuses a new address
+# unless the secret is entered again in the same save, and an import, which
+# never carries secrets, clears it.
 ADDRESS_CREDENTIALS: Dict[str, str] = {
     **{url_key(service): key for service, key in CREDENTIAL_KEYS.items() if service != "nyt"},
     "integration.authentik.url": "integration.authentik.client_secret",
+    "integration.kavita.url": "integration.kavita.api_key",
 }
 
 KUMA_SLUG_KEY = "integration.uptime_kuma.slug"

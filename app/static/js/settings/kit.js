@@ -25,9 +25,9 @@
   var UI = window.WSUI;
   var el = UI.el, icon = UI.icon, cls = UI.cls;
   var HEX = /^#[0-9a-fA-F]{6}$/;
-  var TABS = ['general', 'pages', 'appearance', 'sign-in', 'integrations', 'notifications'];
+  var TABS = ['general', 'pages', 'appearance', 'sign-in', 'integrations', 'books', 'notifications'];
   var TITLES = { general: 'General', pages: 'Pages', appearance: 'Appearance', 'sign-in': 'Sign-in',
-                 integrations: 'Integrations', notifications: 'Notifications' };
+                 integrations: 'Integrations', books: 'Books', notifications: 'Notifications' };
   // Choices for the icon picker. Any Material Symbols name can also be typed.
   var ICONS = [
     'home', 'settings', 'movie', 'tv', 'play_circle', 'download', 'upload', 'monitor_heart', 'newspaper',
@@ -539,8 +539,18 @@
       undo.type = 'button';
       clearedRow.appendChild(undo);
 
-      var inputRow = el('div', 'hidden flex items-center gap-2');
-      var input = el('input', cls.input);
+      // o.generate (a length): the secret can be made here instead of typed, for
+      // a key this site hands out (a webhook's password). It is shown, once, so
+      // it can be copied; after the save only "Saved" remains.
+      var genBtn = null, copyBtn = null, generated = false;
+      if (o.generate) {
+        genBtn = el('button', cls.btnQuiet, 'Generate new secret');
+        genBtn.type = 'button';
+        savedRow.appendChild(genBtn);
+      }
+
+      var inputRow = el('div', 'hidden flex flex-wrap items-center gap-2');
+      var input = el('input', cls.input + (o.generate ? ' flex-1 min-w-0 basis-52' : ''));
       input.type = 'password';
       input.id = uid(o.key);
       input.autocomplete = 'new-password';
@@ -555,6 +565,17 @@
       var cancel = el('button', cls.btnQuiet, 'Cancel');
       cancel.type = 'button';
       inputRow.appendChild(input);
+      if (o.generate) {
+        var again = el('button', cls.btnQuiet, 'Generate secret');
+        again.type = 'button';
+        copyBtn = el('button', cls.btnGhost + ' hidden', 'Copy');
+        copyBtn.type = 'button';
+        inputRow.appendChild(copyBtn);
+        inputRow.appendChild(again);
+        genBtn.addEventListener('click', generate, { signal: signal });
+        again.addEventListener('click', generate, { signal: signal });
+        copyBtn.addEventListener('click', copyIt, { signal: signal });
+      }
       inputRow.appendChild(cancel);
 
       root.appendChild(savedRow);
@@ -581,10 +602,48 @@
         cancel.classList.toggle('hidden', baseline(o.key) !== S.mask);
       }
       // Never writes a secret into the input: the browser only ever holds the mask.
+      // (Except one made here: the admin has to be able to copy it, once.)
+      function hide() {
+        generated = false;
+        input.type = 'password';
+        if (copyBtn) copyBtn.classList.add('hidden');
+      }
       function paint(v) {
-        if (v === S.mask) { input.value = ''; mode('saved'); }
-        else if (v === '' && baseline(o.key) === S.mask) { input.value = ''; mode('cleared'); }
-        else { if (v === '') input.value = ''; mode('input'); }
+        if (v === S.mask) { hide(); input.value = ''; mode('saved'); }
+        else if (v === '' && baseline(o.key) === S.mask) { hide(); input.value = ''; mode('cleared'); }
+        else { if (v === '') { hide(); input.value = ''; } mode('input'); }
+      }
+      function generate() {
+        var bytes = new Uint8Array(Math.max(16, o.generate));
+        window.crypto.getRandomValues(bytes);
+        // Letters and digits only: it goes into another program's password box.
+        var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789', out = '';
+        for (var i = 0; i < bytes.length; i++) out += chars.charAt(bytes[i] % chars.length);
+        generated = true;
+        input.type = 'text';
+        input.value = out;
+        stage(o.key, out, true);
+        mode('input');
+        if (copyBtn) copyBtn.classList.remove('hidden');
+        input.focus();
+        input.select();
+        UI.toast('Secret made. Copy it now: after you save it, it can’t be shown again.', 'info');
+      }
+      function copyIt() {
+        var value = input.value;
+        function done() { UI.toast('Copied', 'ok'); }
+        function fallback() {
+          input.focus();
+          input.select();
+          var ok = false;
+          try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+          if (ok) done(); else UI.toast('Couldn’t copy. Select it and copy by hand.', 'err');
+        }
+        if (window.navigator.clipboard && window.navigator.clipboard.writeText) {
+          window.navigator.clipboard.writeText(value).then(done, fallback);
+        } else {
+          fallback();
+        }
       }
       replaceBtn.addEventListener('click', function () { mode('input'); input.focus(); }, { signal: signal });
       clearBtn.addEventListener('click', function () { stage(o.key, '', false); }, { signal: signal });

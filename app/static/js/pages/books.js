@@ -18,9 +18,9 @@
  *
  * Also exports what the other Books pages and Home draw with:
  *   renderBookCard(card, { signal })                   a cover card (an <a>)
- *   renderContinueRow(items, notes, { compact, signal }) the Continue row (a
- *                                                       <section>), or null
- *                                                       when nothing is in progress
+ *   renderContinueRow(items, notes, { compact, signal, connectHref }) the
+ *                                                       Continue row (a <section>), or
+ *                                                       null when nothing is in progress
  *   coverBox(url, formats, signal, { badges, eager })  the 2:3 cover frame (the book page's: badges off, eager)
  *   noteLine(text)                                     a quiet line about a source that is down
  * They touch no DOM at import time.
@@ -35,6 +35,40 @@ const CONTINUE_WAIT_MS = 1500;
 
 const VIEW_KEY = 'webservarr_books_view:';
 const CONTINUE_KEY = 'webservarr_books_continue:';
+const GUIDE_KEY = 'webservarr_books_guide_seen:';
+// The cards have their covers by then, so the first spotlight sits on something drawn.
+const GUIDE_WAIT_MS = 900;
+
+// The first-visit guide (the engine is js/tour.js, shared with the reader): what
+// the page can do, in the order a person meets it. A step whose target is not
+// on screen (no Continue row yet) is shown in the middle of the page instead.
+const GUIDE_STEPS = [
+  {
+    target: '#booksSearch',
+    icon: 'search',
+    title: 'Find a book',
+    body: 'Type a title, an author or a narrator. If we don’t have it yet, the search lets you ask for it.'
+  },
+  {
+    target: '#continueHost [data-continue]',
+    icon: 'bookmark',
+    title: 'Pick up where you left off',
+    body: 'Books you’ve started, to read or to listen to, wait in a Continue row. Tap one to carry on from your place.'
+  },
+  {
+    target: '#formatChips',
+    icon: 'tune',
+    title: 'Ebooks, audiobooks or both',
+    body: 'Show everything, only the books you can read, or only the ones you can listen to.'
+  },
+  {
+    target: '#libraryGrid > li:first-child',
+    fallback: '#libraryGrid',
+    icon: 'menu_book',
+    title: 'Open a book',
+    body: 'Tap a cover to see the book. Read opens the ebook and Listen plays the audiobook, and each keeps your place.'
+  }
+];
 
 const FORMATS = ['all', 'ebook', 'audio'];
 const SORTS = ['added', 'title', 'author'];
@@ -193,10 +227,17 @@ function continueCard(item, compact, signal) {
 }
 
 /** A quiet line about a source that is not answering. */
-export function noteLine(text) {
+export function noteLine(text, href) {
   const p = el('p', 'flex items-center gap-2 text-[15px] text-frosted-blue/70');
   p.appendChild(icon('info', 'text-[20px]'));
-  p.appendChild(el('span', '', text));
+  if (href) {
+    // A page that cannot run the Kavita hand-off itself (Home) sends the person to the one that can.
+    const a = el('a', 'underline underline-offset-2 hover:text-frosted-blue ' + LINK_FOCUS, text);
+    a.href = href;
+    p.appendChild(a);
+  } else {
+    p.appendChild(el('span', '', text));
+  }
   return p;
 }
 
@@ -205,7 +246,9 @@ export function noteLine(text) {
  * section with a heading and a sideways row of cards. Null when there is
  * nothing (the caller hides the row). `notes` ([{source, reason, text}]) are
  * shown quietly beneath it, so a source that is down says so without taking
- * the other format's cards away. compact is Home's smaller row.
+ * the other format's cards away. compact is Home's smaller row; connectHref,
+ * when given, makes the "not connected" note a link to the page that can
+ * connect (Books runs that itself and passes none).
  */
 export function renderContinueRow(items, notes, opts) {
   const o = opts || {};
@@ -239,8 +282,9 @@ export function renderContinueRow(items, notes, opts) {
   (notes || []).forEach(function (n) {
     if (!n || !n.text || seen[n.text]) return;
     seen[n.text] = true;
-    const line = noteLine(n.text);
+    const line = noteLine(n.text, o.connectHref && n.reason === 'not_connected' ? o.connectHref : '');
     line.className += ' mt-3';
+    line.setAttribute('data-continue-note', '');
     section.appendChild(line);
   });
   return section;
@@ -271,7 +315,7 @@ export async function mount(ctx) {
     // push them down. Later visits know (and reserve its room), so they do not wait.
     continueSettled: false, waiting: [],
     // Counts every redraw of page 1, so a next page asked for before one is dropped.
-    renderGen: 0, building: false,
+    renderGen: 0, building: false, guideOffered: false,
     embed: ((ctx.data || {}).branding || {}).requests_source === 'seerr_embed'
   };
 
@@ -531,6 +575,25 @@ export async function mount(ctx) {
     showBody('emptyState');
   }
 
+  // ---- The first-visit guide ----
+
+  let guide = null;
+
+  /** Once the books are on screen, so its spotlights sit on real covers, and never over a
+      page that could not load or a search: a person's first visit gets it, once. */
+  function offerGuide() {
+    if (!guide || state.guideOffered || signal.aborted) return;
+    state.guideOffered = true;
+    ctx.setTimeout(function () {
+      if (signal.aborted || state.searching || state.connectProblem) return;
+      const first = !guide.hasBeenSeen();
+      guide.maybeStart();
+      // Seen as soon as it has been shown, not only when it is finished: a person who
+      // leaves the page half way is not walked through it again on every visit.
+      if (first && guide.isActive()) storageSet(GUIDE_KEY + user, '1');
+    }, GUIDE_WAIT_MS);
+  }
+
   function renderLibrary(data) {
     if (signal.aborted) return;
     const items = (data && Array.isArray(data.items)) ? data.items : [];
@@ -545,6 +608,7 @@ export async function mount(ctx) {
       appendCards($('libraryGrid'), items);
       showBody('libraryGrid');
       setMore(data.next_cursor);
+      offerGuide();
       return;
     }
     if (data && data.building) {
@@ -760,6 +824,17 @@ export async function mount(ctx) {
   // the first frame, and the skeletons already have their shape.
   readView();
   syncControls();
+  // The help button runs it on request, whenever.
+  if (window.WebServarrTour && typeof window.WebServarrTour.init === 'function') {
+    guide = window.WebServarrTour.init({
+      seenKey: GUIDE_KEY + user,
+      steps: GUIDE_STEPS,
+      helpBtn: $('helpBtn'),
+      // Started by offerGuide, once the books are drawn.
+      autoStart: false,
+      signal: signal
+    });
+  }
   if (window.WSKavita && typeof window.WSKavita.init === 'function') window.WSKavita.init();
   // A sign-in that just failed: no automatic attempt on this visit (the helper
   // remembers), and the message shows when the answer says they are not connected.

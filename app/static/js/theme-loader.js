@@ -208,6 +208,33 @@
 })();
 
 /*
+ * Home's Continue row, reserved before the first paint.
+ *
+ * The same memory as Books' (localStorage webservarr_books_continue:<name>),
+ * for the same reason: a row that appears after the first paint pushes the
+ * sections below it down. A person who had one last time gets its room from
+ * the first paint: <html data-home-continue> (the value "note" when the row
+ * had a note under it, webservarr_home_continue_note:<name>) shows #homeContinue
+ * (index.html's page style), whose skeleton is the row's own shape. Only while
+ * the Books page is on. pages/home.js decides the section's hidden attribute
+ * itself on every visit and takes the flag off.
+ */
+(function () {
+  'use strict';
+  var data = window.WS_DATA || {};
+  if (data.page !== 'index') return;
+  var b = data.branding || {};
+  if (!(b.features || {}).books_configured || (b.sidebar_enabled || {}).library === false) return;
+  try {
+    var name = (data.user || {}).username || '';
+    if (localStorage.getItem('webservarr_books_continue:' + name) === '1') {
+      document.documentElement.setAttribute('data-home-continue',
+        localStorage.getItem('webservarr_home_continue_note:' + name) === '1' ? 'note' : '');
+    }
+  } catch (e) { /* private mode: no room reserved, the row arrives when it arrives */ }
+})();
+
+/*
  * The shell's view-transition names, only while a transition runs.
  *
  * theme.css names the sidebar, header, mobile bar and <main> under

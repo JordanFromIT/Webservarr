@@ -40,6 +40,11 @@
     return /[?&]tour=1\b/.test(location.search);
   }
 
+  /* A person who asked for less motion gets a jump, not a glide, to each step. */
+  function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
   /* One layer serves every tour on the page; it is built once, on first init. */
   function ensureLayer() {
     var existing = document.getElementById('tourLayer');
@@ -228,7 +233,7 @@
       }
 
       var el = targetFor(s);
-      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
       // Let the scroll settle before measuring, or the bubble lands where the
       // target used to be.
       clearTimeout(placeTimer);

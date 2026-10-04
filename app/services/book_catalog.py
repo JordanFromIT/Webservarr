@@ -782,6 +782,26 @@ def unpaired(db, limit: int = 1000) -> dict:
     return {"ebooks": ebooks, "audiobooks": audiobooks}
 
 
+def paired(db, limit: int = 1000) -> dict:
+    """For the admin's Books panel: the books that are an ebook and one or more
+    audiobook editions together, so one edition can be kept apart from the
+    ebook. {"books": [{book_id, kavita_chapter_id, title, author, series,
+    editions: [{plex_book_key, narrator}]}]}, at most `limit`, by title; the
+    editions are in key order."""
+    rows = (db.query(Book).filter(Book.merged_into.is_(None), Book.kavita_chapter_id.isnot(None),
+                                  exists().where(BookAudioEdition.book_id == Book.id))
+            .order_by(Book.sort_title, Book.id).limit(limit).all())
+    ids = [b.id for b in rows]
+    editions: Dict[int, List[dict]] = {}
+    if ids:
+        for e in (db.query(BookAudioEdition).filter(BookAudioEdition.book_id.in_(ids))
+                  .order_by(BookAudioEdition.plex_book_key)):
+            editions.setdefault(e.book_id, []).append({"plex_book_key": e.plex_book_key, "narrator": e.narrator or ""})
+    return {"books": [{"book_id": b.id, "kavita_chapter_id": b.kavita_chapter_id, "title": b.title,
+                       "author": b.author, "series": b.series, "editions": editions.get(b.id, [])}
+                      for b in rows]}
+
+
 def overrides(db) -> List[dict]:
     """Every pairing override, newest first, with the titles of the ebook and
     the edition's book when the catalog still knows them (null when not)."""

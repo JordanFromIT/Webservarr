@@ -787,6 +787,16 @@ async def admin_unpaired(request: Request, _admin: dict = Depends(require_admin)
     return book_catalog.unpaired(db)
 
 
+@admin_router.get("/paired")
+@limiter.limit(ADMIN_LIMIT)
+@_db_503
+async def admin_paired(request: Request, _admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    """The books that are an ebook with audiobook editions, for keeping one
+    edition apart by hand: {"books": [{book_id, kavita_chapter_id, title,
+    author, series, editions: [{plex_book_key, narrator}]}]}."""
+    return book_catalog.paired(db)
+
+
 def _override_body(row: dict) -> dict:
     return {**row, "created_at": utc_iso(row["created_at"])}
 

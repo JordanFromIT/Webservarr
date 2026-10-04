@@ -36,12 +36,19 @@
 <div class="max-w-[1200px] w-full mx-auto min-w-0 space-y-8">
 <h1 class="sr-only">Books</h1>
 
-  <!-- Search. Everything below it steps aside while there is a search. -->
-  <div class="relative max-w-xl">
-    <label for="booksSearch" class="sr-only">Search books</label>
-    <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-frosted-blue/70 pointer-events-none" aria-hidden="true">search</span>
-    <input id="booksSearch" type="search" maxlength="100" autocomplete="off" placeholder="Title, author or narrator"
-           class="w-full h-12 rounded-xl border-0 bg-frosted-blue/[0.07] pl-12 pr-4 text-[17px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
+  <!-- Search. Everything below it steps aside while there is a search. The help
+       button next to it runs the first-visit guide again (pages/books.js). -->
+  <div class="flex items-center gap-2 max-w-[calc(36rem+3.5rem)]">
+    <div class="relative min-w-0 flex-1">
+      <label for="booksSearch" class="sr-only">Search books</label>
+      <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-frosted-blue/70 pointer-events-none" aria-hidden="true">search</span>
+      <input id="booksSearch" type="search" maxlength="100" autocomplete="off" placeholder="Title, author or narrator"
+             class="w-full h-12 rounded-xl border-0 bg-frosted-blue/[0.07] pl-12 pr-4 text-[17px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
+    </div>
+    <button id="helpBtn" type="button" title="How Books works" aria-label="How Books works"
+            class="shrink-0 grid place-items-center size-12 rounded-xl text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
+      <span class="material-symbols-outlined" aria-hidden="true">help</span>
+    </button>
   </div>
 
   <div id="browseArea">
@@ -166,4 +173,5 @@
 <script src="/static/js/shell.js?v=1"></script>
 <script src="/static/js/notifications.js?v=3"></script>
 <script src="/static/js/kavita-connect.js?v=1" data-ws-page-script></script>
+<script src="/static/js/tour.js?v=5" data-ws-page-script></script>
 </body></html>

@@ -14,6 +14,8 @@
 
   var el = WSSettings.el, icon = WSSettings.icon, cls = WSSettings.cls;
   var HEALTH_URL = '/api/admin/integrations/health';
+  // Where this site takes Chaptarr's import calls (app/routers/chaptarr_webhook.py).
+  var WEBHOOK_PATH = '/api/webhooks/chaptarr';
   var GROUPS = [
     ['Media server', ['plex']],
     ['Requests', ['seerr']],
@@ -31,11 +33,13 @@
     seerr: { name: 'Seerr', icon: 'download', purpose: 'Movie and TV requests, and the artwork on the sign-in page.',
       url: 'integration.seerr.url', placeholder: 'http://192.168.1.10:5055',
       secret: ['integration.seerr.api_key', 'API key', 'In Seerr: Settings → General → API key.'] },
-    chaptarr: { name: 'Chaptarr', icon: 'auto_stories', purpose: 'Book and audiobook requests.',
+    chaptarr: { name: 'Chaptarr', icon: 'auto_stories', purpose: 'Book and audiobook requests, and new books on the Books page right after they arrive.',
       url: 'integration.chaptarr.url', placeholder: 'http://192.168.1.10:8789',
-      secret: ['integration.chaptarr.api_key', 'API key', 'In Chaptarr: Settings → General → API key.'], chaptarr: true },
-    kavita: { name: 'Kavita', icon: 'menu_book', purpose: 'The eBooks page. Each person signs in to Kavita through your sign-in provider.',
-      url: 'integration.kavita.url', placeholder: 'http://192.168.1.10:5000' },
+      secret: ['integration.chaptarr.api_key', 'API key', 'In Chaptarr: Settings → General → API key.'], chaptarr: true,
+      webhook: ['integration.chaptarr.webhook_secret', 'Webhook secret'] },
+    kavita: { name: 'Kavita', icon: 'menu_book', purpose: 'The ebooks on the Books page. Each person signs in to Kavita through your sign-in provider.',
+      url: 'integration.kavita.url', placeholder: 'http://192.168.1.10:5000',
+      secret: ['integration.kavita.api_key', 'API key', 'Lets the Books page list your ebooks for everyone. In Kavita: your account settings → API Key. It only goes to the address above.'] },
     nyt: { name: 'New York Times Books', icon: 'newspaper', purpose: 'Bestseller shelves on the Requests page.',
       secret: ['integration.nyt.api_key', 'API key', 'Free from developer.nytimes.com.'] },
     sonarr: { name: 'Sonarr', icon: 'tv', purpose: 'TV episodes on the Calendar.',
@@ -79,7 +83,8 @@
     choicesLoading: 'Loading choices from Chaptarr…',
     choicesLoaded: 'Choices come from your Chaptarr.',
     choicesFailed: 'Couldn’t load choices from Chaptarr. Type the values instead.',
-    typeInstead: 'Type the values instead.'
+    typeInstead: 'Type the values instead.',
+    webhookSteps: 'In Chaptarr: Settings → Connect → + → Webhook. Tick On Release Import and On Upgrade. Method POST. Any Username. Password = the secret.'
   };
 
   function keysOf(id) {
@@ -88,6 +93,7 @@
     if (c.secret) keys.push(c.secret[0]);
     (c.extra || []).forEach(function (x) { keys.push(x[0]); });
     if (c.chaptarr) CHAPTARR_KEYS.forEach(function (x) { keys.push(x[0]); });
+    if (c.webhook) keys.push(c.webhook[0]);
     if (c.netdata) keys = keys.concat(NETDATA_KEYS);
     return keys;
   }
@@ -328,6 +334,52 @@
         });
       }
 
+      // New books show up on the Books page at once instead of at the next
+      // 15-minute rebuild: Chaptarr calls this site when it imports one. The
+      // address is this page's own origin (never typed in), so it is the one
+      // Chaptarr can reach when it can reach this page.
+      function webhookFields(body, c) {
+        var box = el('div', 'space-y-5 border-t border-frosted-blue/10 pt-5');
+        box.appendChild(el('h3', 'text-[15px] font-semibold text-frosted-blue', 'Tell Chaptarr to ping this site'));
+        var addr = el('div', 'min-w-0 ' + cls.fieldWidth);
+        var label = el('label', cls.label, 'Webhook address');
+        var row = el('div', 'flex flex-wrap items-center gap-2');
+        var field = el('input', cls.input + ' flex-1 min-w-0 basis-52');
+        field.id = 'chaptarrWebhookUrl';
+        field.type = 'text';
+        field.readOnly = true;
+        field.value = window.location.origin + WEBHOOK_PATH;
+        label.htmlFor = field.id;
+        var copy = el('button', cls.btnGhost);
+        copy.type = 'button';
+        copy.appendChild(icon('content_copy', 'text-base'));
+        copy.appendChild(document.createTextNode('Copy'));
+        copy.addEventListener('click', function () {
+          var done = function () { WSSettings.toast('Copied', 'ok'); };
+          var fallback = function () {
+            field.focus();
+            field.select();
+            var ok = false;
+            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+            if (ok) done(); else WSSettings.toast('Couldn’t copy. Select it and copy by hand.', 'err');
+          };
+          if (window.navigator.clipboard && window.navigator.clipboard.writeText) {
+            window.navigator.clipboard.writeText(field.value).then(done, fallback);
+          } else {
+            fallback();
+          }
+        }, { signal: signal });
+        row.appendChild(field);
+        row.appendChild(copy);
+        addr.appendChild(label);
+        addr.appendChild(row);
+        box.appendChild(addr);
+        box.appendChild(api.secret({ key: c.webhook[0], label: c.webhook[1], generate: 32,
+          help: 'Chaptarr sends it as the password. Make one here, copy it, then save.' }));
+        box.appendChild(el('p', cls.help + ' ' + cls.fieldWidth, MSG.webhookSteps));
+        body.appendChild(box);
+      }
+
       function netdataFields(body) {
         var grid = el('div', 'grid sm:grid-cols-2 gap-5 ' + cls.fieldWidth);
         grid.appendChild(api.text({ key: 'netdata.cpu_label', label: 'CPU gauge label', placeholder: 'For example 8 cores' }));
@@ -388,6 +440,7 @@
         });
         body.appendChild(grid);
         if (c.chaptarr) chaptarrFields(body);
+        if (c.webhook) webhookFields(body, c);
         if (c.netdata) netdataFields(body);
         if (c.note) body.appendChild(el('p', cls.help, c.note));
 
