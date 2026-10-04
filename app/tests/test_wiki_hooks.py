@@ -468,7 +468,7 @@ class WikiEditorHelp(unittest.TestCase):
     def test_holder_titles_go_in_as_text(self):
         src = editor_js()
         self.assertEqual(len(live_matches(
-            src, r"line\.appendChild\(el\('span', '[^']*', '\(now on “' \+ holders\[h\[0\]\]\.title \+ '” — ticking moves it here\)'\)\);")), 1)
+            src, r"line\.appendChild\(el\('span', '[^']*', '\(now on “' \+ holders\[h\[0\]\]\.title \+ '”; ticking moves it here\)'\)\);")), 1)
         # el() writes its text with textContent; the only innerHTML is the
         # server-sanitised preview.
         self.assertIn("if (text !== undefined && text !== null) n.textContent = text;", js_code_only(src))
@@ -560,7 +560,7 @@ class WikiEditorHelp(unittest.TestCase):
         self.assertRegex(save, r"if \(!res\.ok\) setBusy\(s, false\);")
         self.assertLess(save.index("if (res.status === 404) {"), save.index("if (!res.ok) {"))
         self.assertEqual(len(live_matches(src, r"'This page was deleted while you were editing, so it can’t be saved\. "
-                                               r"Your text is still here — copy it before you leave\.'")), 1)
+                                               r"Your text is still here, so copy it before you leave\.'")), 1)
 
     def test_every_write_clears_the_page_cache(self):
         code = js_code_only(editor_js())

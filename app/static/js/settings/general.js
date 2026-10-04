@@ -34,7 +34,7 @@
     bigFile: 'That file is too big to be a settings file.',
     unreadable: 'The file couldn’t be read. Try again.',
     checkFailed: 'The file couldn’t be checked. Try again.',
-    stale: 'Settings changed since the preview — preview again.',
+    stale: 'Settings changed since the preview. Preview again.',
     importFailed: 'The import didn’t finish. Nothing was changed. Try again.',
     importUnknown: 'Couldn’t confirm the import finished. Reload the page to see your settings.',
     dirty: 'Save or discard your changes on this tab before importing.',
@@ -392,7 +392,7 @@
         var warnings = plainObject(d.warnings);
         if (!changes.length) {
           if (!Object.keys(warnings).length) {
-            WSSettings.toast('Nothing to import — this file matches your current settings.', 'info');
+            WSSettings.toast('Nothing to import: this file matches your current settings.', 'info');
             return;
           }
           var same = el('div');

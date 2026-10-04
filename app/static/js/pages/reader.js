@@ -259,7 +259,7 @@ function guideSteps(openSettings, closeSettings) {
       fallback: '#bookContent',
       icon: 'auto_stories',
       title: 'Turning pages',
-      body: 'Click either edge of the page to move forward or back, or use the arrow keys. Your place saves itself as you go, so you can close the tab and pick up here on any device.'
+      body: 'Tap or click either edge of the page to move forward or back, or use the arrow keys. Your place saves itself as you go, so you can close the tab and pick up here on any device.'
     },
     {
       target: '#pageInfo',
@@ -284,7 +284,7 @@ function guideSteps(openSettings, closeSettings) {
       fallback: '#settingsBtn',
       icon: 'text_fields',
       title: 'Make it comfortable',
-      body: 'Text size, line spacing, how wide the lines run, and two columns if you prefer. The five swatches change the page colour, from black through to paper white. Your choices carry to every book you open.',
+      body: 'Text size, line spacing, how wide the lines run, and two columns if you prefer. The five page colours run from black through to paper white. Your choices carry to every book you open.',
       before: openSettings
     },
     {
@@ -435,13 +435,24 @@ export async function mount(ctx) {
     el('fontSize').value = prefs.fontSize;
     el('lineHeight').value = prefs.lineHeight;
     el('measure').value = prefs.measure;
-    el('columns').checked = !!prefs.columns;
-    el('fsVal').textContent = prefs.fontSize + 'px';
-    el('lhVal').textContent = (prefs.lineHeight / 10).toFixed(1);
-    el('mwVal').textContent = prefs.measure + 'rem';
+    el('columns').setAttribute('aria-checked', prefs.columns ? 'true' : 'false');
+    // In reader terms: the size as a number, spacing and line length
+    // as a word.
+    el('fsVal').textContent = prefs.fontSize + ' px';
+    el('lhVal').textContent = prefs.lineHeight <= 14 ? 'Tight' : prefs.lineHeight <= 18 ? 'Normal' : 'Loose';
+    el('mwVal').textContent = prefs.measure <= 38 ? 'Narrow' : prefs.measure <= 54 ? 'Medium' : 'Wide';
+    // The player's slider (theme.css .wsp-range) fills to --wsp-p.
+    ['fontSize', 'lineHeight', 'measure'].forEach(function (id) {
+      var r = el(id), min = Number(r.min), max = Number(r.max);
+      r.style.setProperty('--wsp-p', Math.round((Number(r.value) - min) / (max - min) * 100) + '%');
+    });
+    el('lineHeight').setAttribute('aria-valuetext', el('lhVal').textContent);
+    el('measure').setAttribute('aria-valuetext', el('mwVal').textContent);
 
     Array.prototype.forEach.call(el('themeButtons').children, function (b) {
-      b.classList.toggle('bg-baltic-blue/40', b.dataset.theme === prefs.theme);
+      var on = b.dataset.theme === prefs.theme;
+      b.classList.toggle('bg-baltic-blue/40', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
   }
 
@@ -802,7 +813,10 @@ export async function mount(ctx) {
   bindPref('fontSize', 'fontSize');
   bindPref('lineHeight', 'lineHeight');
   bindPref('measure', 'measure');
-  bindPref('columns', 'columns', function (t) { return t.checked; });
+  el('columns').addEventListener('click', function () {
+    prefs.columns = !prefs.columns;
+    applyPrefs(); savePrefs();
+  }, { signal: signal });
 
   Array.prototype.forEach.call(el('themeButtons').children, function (b) {
     b.addEventListener('click', function () {

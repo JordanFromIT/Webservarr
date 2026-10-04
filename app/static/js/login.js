@@ -106,7 +106,7 @@ function loadSystemStatus() {
         text.textContent = label;
     }
     function showUnavailable() {
-        render('off', 'Status Unavailable');
+        render('off', 'Can\u2019t check the server right now');
     }
     // Public aggregate endpoint (no auth) — the login page has no session yet.
     fetch('/api/integrations/status-summary').then(function(r) {
@@ -114,11 +114,11 @@ function loadSystemStatus() {
     }).then(function(data) {
         var overall = data && data.status;
         if (overall === 'issues') {
-            render('err', 'System Issues Detected');
+            render('err', 'Something\u2019s down');
         } else if (overall === 'degraded') {
-            render('warn', 'Degraded Performance');
+            render('warn', 'Some things are slow');
         } else if (overall === 'online') {
-            render('ok', 'All Systems Online');
+            render('ok', 'Everything\u2019s running');
         } else {
             showUnavailable();
         }

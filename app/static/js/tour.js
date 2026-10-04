@@ -69,14 +69,14 @@
           '<div class="flex items-start gap-2">' +
             '<span id="tourIcon" class="material-symbols-outlined text-[20px] text-bright shrink-0">auto_stories</span>' +
             '<h3 id="tourTitle" class="flex-1 font-bold text-bright text-sm leading-snug"></h3>' +
-            '<button id="tourSkip" type="button" class="text-[11px] text-bright/80 hover:text-bright shrink-0">Skip</button>' +
+            '<button id="tourSkip" type="button" class="text-label text-bright/80 hover:text-bright shrink-0">Skip</button>' +
           '</div>' +
           '<p id="tourBody" class="mt-2 text-[13px] text-bright/90 leading-relaxed"></p>' +
           '<div class="mt-3 flex items-center gap-3">' +
             '<div id="tourDots" class="flex items-center gap-1.5"></div>' +
             '<div class="ml-auto flex items-center gap-2">' +
-              '<button id="tourBack" type="button" class="px-2.5 py-1 rounded-lg text-[12px] text-bright/80 hover:text-bright hover:bg-bright/10">Back</button>' +
-              '<button id="tourNext" type="button" class="px-3 py-1.5 rounded-lg bg-bright text-primary text-[12px] font-bold hover:bg-bright/90">Continue</button>' +
+              '<button id="tourBack" type="button" class="px-2.5 py-1 rounded-lg text-label text-bright/80 hover:text-bright hover:bg-bright/10">Back</button>' +
+              '<button id="tourNext" type="button" class="px-3 py-1.5 rounded-lg bg-bright text-primary text-label font-bold hover:bg-bright/90">Continue</button>' +
             '</div>' +
           '</div>' +
         '</div>' +

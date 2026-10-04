@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 
-<html class="light" lang="en"><head>
+<html class="dark" lang="en"><head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>WebServarr - Login</title>
@@ -151,28 +151,28 @@
 <!-- Login Form -->
 <form id="loginForm" method="post" class="w-full space-y-5">
 <div class="flex flex-col gap-1.5">
-<label class="text-frosted-blue text-sm font-medium px-1">Username</label>
+<label for="username" class="text-frosted-blue text-sm font-medium px-1">Username</label>
 <div class="relative group">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-frosted-blue text-[20px]">person</span>
-<input id="username" name="username" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="admin" type="text" required/>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-frosted-blue text-h3" aria-hidden="true">person</span>
+<input id="username" name="username" autocomplete="username" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="admin" type="text" required/>
 </div>
 </div>
 <div class="flex flex-col gap-1.5">
 <div class="flex justify-between items-center px-1">
-<label class="text-frosted-blue text-sm font-medium">Password</label>
+<label for="password" class="text-frosted-blue text-sm font-medium">Password</label>
 </div>
 <div class="relative group">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-frosted-blue text-[20px]">lock</span>
-<input id="password" name="password" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="••••••••" type="password" required/>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/80 group-focus-within:text-frosted-blue text-h3" aria-hidden="true">lock</span>
+<input id="password" name="password" autocomplete="current-password" class="w-full bg-frosted-blue/5 border border-frosted-blue/10 rounded-lg py-3 pl-10 pr-4 text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" placeholder="••••••••" type="password" required/>
 </div>
 </div>
 <button type="submit" class="w-full bg-primary hover:bg-primary/90 text-bright font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-primary/20 active:scale-[0.98]">
-                    Sign In
+                    Sign in
                 </button>
 <!-- Divider -->
 <div id="ssoDivider" class="flex items-center gap-4 py-2">
 <div class="h-[1px] flex-1 bg-frosted-blue/10"></div>
-<span class="text-frosted-blue text-[10px] font-bold uppercase tracking-widest">Or continue with</span>
+<span class="text-frosted-blue/80 text-label font-semibold">Or continue with</span>
 <div class="h-[1px] flex-1 bg-frosted-blue/10"></div>
 </div>
 <!-- Plex SSO Button -->
@@ -186,7 +186,7 @@
 <span class="text-sm font-medium">Sign in with</span>
 <span class="font-black text-xl tracking-tight leading-none uppercase" style="font-family: 'Arial Black', 'Helvetica Neue', sans-serif">PLEX</span>
 </div>
-<span class="text-[10px] font-medium opacity-70">via Authentik</span>
+<span class="text-label font-medium opacity-70">via Authentik</span>
 </button>
 </form>
 <!-- Shown by CSS alone, only when login.js never ran (see #loginLoadHint above). -->
@@ -194,11 +194,10 @@
 </div>
 <script src="/static/js/login.js?v=1"></script>
 </main>
-<!-- Footer: System Status -->
 <footer class="relative z-20 p-8 flex items-center justify-center">
 <div id="loginSystemStatus" data-state="off" class="ws-pill flex items-center gap-2 px-3 py-1.5 rounded-full border">
 <span class="ws-status-dot" aria-hidden="true"></span>
-<span data-status-text class="ws-pill-label text-frosted-blue text-xs font-bold uppercase tracking-widest">Loading...</span>
+<span data-status-text class="ws-pill-label text-frosted-blue text-label font-semibold">Checking the server&hellip;</span>
 </div>
 </footer>
 

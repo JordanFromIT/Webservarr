@@ -81,7 +81,7 @@
             stepWrapper.className = 'flex flex-col items-center gap-1';
             stepWrapper.appendChild(circle);
             var label = document.createElement('span');
-            label.className = 'text-[10px] font-semibold uppercase tracking-wider';
+            label.className = 'text-xs font-semibold';
             label.className += i <= currentStep ? ' text-frosted-blue/80' : ' text-frosted-blue/60';
             label.textContent = labels[i];
             stepWrapper.appendChild(label);

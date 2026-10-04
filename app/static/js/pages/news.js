@@ -24,34 +24,31 @@ function excerpt(html, limit) {
   return text.length > limit ? text.slice(0, limit).trimEnd() + '…' : text;
 }
 
+// The site's one relative date (auth.js) for the last week, then the date.
 function dateLabel(date) {
-  const secondsAgo = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (secondsAgo < 60) return 'Just now';
-  if (secondsAgo < 3600) return Math.floor(secondsAgo / 60) + 'm ago';
-  if (secondsAgo < 86400) return Math.floor(secondsAgo / 3600) + 'h ago';
-  if (secondsAgo < 604800) return Math.floor(secondsAgo / 86400) + 'd ago';
+  if (Date.now() - date.getTime() < 604800000) return getTimeAgo(date, true);
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// Same card shape as the homepage so a post is recognisable in both places.
-// The skeleton cards in #newsArchive copy this card's geometry.
+// One state, one signal: a pinned or new post carries a chip, a draft its
+// own; no coloured stripe or per-state icon on top (the homepage's copy of
+// this card still has both, until Home is rebuilt). The skeleton cards in
+// #newsArchive copy this card's geometry.
 // Archive cards start collapsed regardless of age — this is a list to scan,
 // not a feed to read straight through.
 function renderCard(post, isAdmin) {
   const created = new Date(post.created_at);
   const isFresh = (Date.now() - created.getTime()) < FRESH_MS;
-  const accent = post.pinned ? 'border-l-primary' : (isFresh ? 'border-l-frosted-blue' : 'border-l-steel-blue/40');
-  const icon = post.pinned ? 'push_pin' : (isFresh ? 'campaign' : 'article');
-  const iconColor = post.pinned ? 'text-frosted-blue' : (isFresh ? 'text-frosted-blue' : 'text-steel-blue');
+  const CHIP = 'shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold ';
 
   let flag = '';
   if (post.pinned) {
-    flag = '<span class="shrink-0 mt-0.5 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-primary/20 text-frosted-blue">Pinned</span>';
+    flag = '<span class="' + CHIP + 'bg-primary/20 text-frosted-blue">Pinned</span>';
   } else if (isFresh) {
-    flag = '<span class="shrink-0 mt-0.5 text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-frosted-blue/15 text-frosted-blue">New</span>';
+    flag = '<span class="' + CHIP + 'bg-frosted-blue/15 text-frosted-blue">New</span>';
   }
   if (!post.published) {
-    flag = '<span class="shrink-0 mt-0.5 text-xs font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-frosted-blue/10 text-frosted-blue/70">Draft</span>' + flag;
+    flag = '<span class="' + CHIP + 'bg-frosted-blue/10 text-frosted-blue/70">Draft</span>' + flag;
   }
   const id = escapeHtml(String(post.id));
 
@@ -61,27 +58,26 @@ function renderCard(post, isAdmin) {
   // default to min-width:auto and will otherwise overflow the page on mobile.
   // The min-h on the title (phone) and the excerpt keep a short post the
   // height of its skeleton card; Read more drops the title's (see below).
-  return '<div class="glass-card p-4 rounded-xl flex items-start gap-4 border-l-4 min-w-0 ' + accent + '">' +
-    '<span class="material-symbols-outlined ' + iconColor + ' mt-0.5 shrink-0">' + icon + '</span>' +
-    '<div class="flex-1 min-w-0">' +
+  return '<div class="bg-frosted-blue/[0.04] p-4 rounded-card min-w-0">' +
+    '<div class="min-w-0">' +
       '<div class="flex items-start justify-between gap-3">' +
         '<div class="flex items-start gap-2 min-w-0">' +
           flag +
-          '<h2 data-news-title class="font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0">' + escapeHtml(post.title) + '</h2>' +
+          '<h2 data-news-title class="text-lead leading-6 font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0">' + escapeHtml(post.title) + '</h2>' +
         '</div>' +
-        '<span class="shrink-0 text-[10px] text-steel-blue font-bold uppercase">' + escapeHtml(dateLabel(created)) + '</span>' +
+        '<span class="shrink-0 text-label text-frosted-blue/70 leading-6">' + escapeHtml(dateLabel(created)) + '</span>' +
       '</div>' +
-      '<p class="text-xs text-frosted-blue/70 mt-0.5">By ' + escapeHtml(post.author_name || 'Unknown') + '</p>' +
-      '<p class="text-sm text-frosted-blue/70 mt-1 line-clamp-2 min-h-10">' + escapeHtml(excerpt(post.content_html, 180)) + '</p>' +
+      '<p class="text-label text-frosted-blue/70 mt-0.5">By ' + escapeHtml(post.author_name || 'Unknown') + '</p>' +
+      '<p class="text-body text-frosted-blue/70 mt-1 line-clamp-2 min-h-12">' + escapeHtml(excerpt(post.content_html, 180)) + '</p>' +
       '<div class="' + bodyClasses + ' hidden" data-news-body style="white-space:pre-line">' + post.content_html + '</div>' +
       (isAdmin
         ? '<div class="mt-2 -ml-2 flex flex-wrap gap-1">' +
-            '<button type="button" data-news-action="edit" data-id="' + id + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">edit</span>Edit</button>' +
-            '<button type="button" data-news-action="pin" data-id="' + id + '" data-pinned="' + (post.pinned ? '1' : '0') + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">push_pin</span>' + (post.pinned ? 'Unpin' : 'Pin') + '</button>' +
-            '<button type="button" data-news-action="delete" data-id="' + id + '" data-title="' + escapeHtml(post.title) + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-[8px] text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">delete</span>Delete</button>' +
+            '<button type="button" data-news-action="edit" data-id="' + id + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-btn text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">edit</span>Edit</button>' +
+            '<button type="button" data-news-action="pin" data-id="' + id + '" data-pinned="' + (post.pinned ? '1' : '0') + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-btn text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">push_pin</span>' + (post.pinned ? 'Unpin' : 'Pin') + '</button>' +
+            '<button type="button" data-news-action="delete" data-id="' + id + '" data-title="' + escapeHtml(post.title) + '" class="inline-flex items-center gap-1 px-2 py-1 rounded-btn text-sm font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.06]"><span class="material-symbols-outlined text-base" aria-hidden="true">delete</span>Delete</button>' +
           '</div>'
         : '') +
-      '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-[11px] font-bold text-steel-blue hover:text-frosted-blue transition-colors">' +
+      '<button type="button" data-news-toggle class="mt-2 flex items-center gap-1 text-label font-semibold text-frosted-blue/70 hover:text-frosted-blue transition-colors">' +
         '<span data-news-toggle-text>Read more</span>' +
         '<span class="material-symbols-outlined text-sm transition-transform" data-news-chevron>expand_more</span>' +
       '</button>' +
@@ -100,7 +96,7 @@ function errorState() {
   return '<div class="text-center text-steel-blue py-12">' +
     '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">cloud_off</span>' +
     '<p>Could not load news right now.</p>' +
-    '<p class="text-xs opacity-60 mt-1">Try refreshing the page.</p>' +
+    '<p class="text-label opacity-60 mt-1">Try refreshing the page.</p>' +
   '</div>';
 }
 

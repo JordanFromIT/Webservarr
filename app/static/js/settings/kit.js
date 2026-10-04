@@ -717,7 +717,7 @@
     barDiscard.tabIndex = show ? 0 : -1;
     barSave.tabIndex = show ? 0 : -1;
     document.body.classList.toggle('ws-savebar-open', show);
-    if (show) setText(barText, S.failed ? 'Couldn’t save — try again' : changes(n));
+    if (show) setText(barText, S.failed ? 'Couldn’t save. Try again.' : changes(n));
     barSave.setAttribute('aria-disabled', S.busy ? 'true' : 'false');
     barDiscard.setAttribute('aria-disabled', S.busy ? 'true' : 'false');
     setText(barSave, S.saving ? 'Saving…' : 'Save');

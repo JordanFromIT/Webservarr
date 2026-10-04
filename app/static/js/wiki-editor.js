@@ -157,7 +157,7 @@ var WikiEditor = (function () {
 
   function field(labelText, control, hint) {
     var wrap = el('div');
-    var label = el('label', 'block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5', labelText);
+    var label = el('label', 'block text-label font-semibold text-frosted-blue/70 mb-1.5', labelText);
     label.htmlFor = control.id;
     wrap.appendChild(label);
     wrap.appendChild(control);
@@ -272,7 +272,7 @@ var WikiEditor = (function () {
       clearPageCache();
       if (sig.aborted) return;        // the page was left: nothing to tell
       setBusy(s, false);
-      if (_session === s) status('Could not reach the server. Your text is safe here — try again.', 'bad');
+      if (_session === s) status('Could not reach the server. Your text is safe here, so try again.', 'bad');
       return;
     }
     clearPageCache();
@@ -301,7 +301,7 @@ var WikiEditor = (function () {
     }
 
     if (res.status === 401) {
-      status('Your session expired. Sign in again in a new tab, then press save — nothing is lost.', 'bad');
+      status('Your session expired. Sign in again in a new tab, then press save. Nothing is lost.', 'bad');
       var link = document.getElementById('wikiEditReauth');
       if (link) link.classList.remove('hidden');
       return;
@@ -318,12 +318,12 @@ var WikiEditor = (function () {
       var gone = await res.json().catch(function () { return {}; });
       status(gone.detail === 'Category not found'
         ? 'That category no longer exists. Pick another one and save again.'
-        : 'This page was deleted while you were editing, so it can’t be saved. Your text is still here — copy it before you leave.', 'bad');
+        : 'This page was deleted while you were editing, so it can’t be saved. Your text is still here, so copy it before you leave.', 'bad');
       return;
     }
 
     if (!res.ok) {
-      status('The save failed (HTTP ' + res.status + '). Your text is still here — try again.', 'bad');
+      status('The save failed (HTTP ' + res.status + '). Your text is still here, so try again.', 'bad');
       return;
     }
 
@@ -620,7 +620,7 @@ var WikiEditor = (function () {
     form.appendChild(row);
 
     var help = el('fieldset', 'grid gap-2');
-    help.appendChild(el('legend', 'block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5', 'Show as help on'));
+    help.appendChild(el('legend', 'block text-label font-semibold text-frosted-blue/70 mb-1.5', 'Show as help on'));
     var holders = _session.holders;
     HELP_PLACES.forEach(function (h) {
       var line = el('label', 'inline-flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-frosted-blue cursor-pointer');
@@ -633,14 +633,14 @@ var WikiEditor = (function () {
       line.appendChild(box);
       line.appendChild(document.createTextNode(h[1]));
       // The other page's title goes in as text, never as markup.
-      if (holders[h[0]]) line.appendChild(el('span', 'text-xs text-steel-blue', '(now on “' + holders[h[0]].title + '” — ticking moves it here)'));
+      if (holders[h[0]]) line.appendChild(el('span', 'text-xs text-steel-blue', '(now on “' + holders[h[0]].title + '”; ticking moves it here)'));
       help.appendChild(line);
     });
     help.appendChild(el('p', 'text-xs text-steel-blue', 'A link to this page appears above that form once the page is published. Only one page can be linked in each place.'));
     form.appendChild(help);
 
     var contentWrap = el('div');
-    var contentLabel = el('label', 'block text-xs font-bold uppercase tracking-wider text-steel-blue mb-1.5', 'Content');
+    var contentLabel = el('label', 'block text-label font-semibold text-frosted-blue/70 mb-1.5', 'Content');
     contentLabel.htmlFor = 'wikiEditContent';
     contentWrap.appendChild(contentLabel);
     contentWrap.appendChild(toolbar(vs));
@@ -705,7 +705,7 @@ var WikiEditor = (function () {
     // CDN, which is both a new dependency and a CSP change; showing the real
     // server-rendered HTML after each save is honest and costs nothing.
     var prev = el('div', 'rounded-lg bg-baltic-blue/15 border border-steel-blue/25 p-4');
-    prev.appendChild(el('p', 'text-xs font-bold uppercase tracking-wider text-steel-blue mb-2', 'Preview'));
+    prev.appendChild(el('p', 'text-label font-semibold text-frosted-blue/70 mb-2', 'Preview'));
     if (page && page.content_html) {
       var body = el('article', 'wiki-body text-frosted-blue');
       body.innerHTML = page.content_html;   // server-sanitized on write
@@ -752,7 +752,7 @@ var WikiEditor = (function () {
     var statusEl = el('p', 'text-sm text-steel-blue');
     statusEl.id = 'wikiEditStatus';
     statusEl.textContent = page
-      ? (page.published ? 'This page is published.' : 'This page is a draft — only admins can see it.')
+      ? (page.published ? 'This page is published.' : 'This page is a draft. Only admins can see it.')
       : 'Not saved yet.';
     statusRow.appendChild(statusEl);
 

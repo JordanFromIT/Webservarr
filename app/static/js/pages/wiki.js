@@ -83,7 +83,7 @@ function buildToc(bodyEl) {
 
 function tocNode(items) {
   var nav = el('nav', 'text-sm');
-  nav.appendChild(el('p', 'text-xs font-bold uppercase tracking-wider text-steel-blue mb-2', 'On this page'));
+  nav.appendChild(el('p', 'text-label font-semibold text-frosted-blue/70 mb-2', 'On this page'));
   var ul = el('ul', 'space-y-1.5 border-l border-steel-blue/30 pl-3');
   items.forEach(function (it) {
     var li = el('li', it.level === 3 ? 'pl-3' : '');
@@ -340,7 +340,7 @@ export async function mount(ctx) {
     titleRow.appendChild(el('span', 'font-bold text-frosted-blue', page.title));
     if (!page.published) {
       titleRow.appendChild(el('span',
-        'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-frosted-blue/80',
+        'inline-flex items-center shrink-0 rounded-full px-2.5 py-0.5 text-label font-semibold bg-frosted-blue/10 text-frosted-blue/80',
         'Draft'));
     }
     col.appendChild(titleRow);
@@ -421,7 +421,7 @@ export async function mount(ctx) {
 
     var loose = pages.filter(function (p) { return !p.category_slug; });
     if (loose.length) {
-      root.appendChild(el('h2', 'text-sm font-bold uppercase tracking-wider text-steel-blue mb-3',
+      root.appendChild(el('h2', 'text-lead font-bold text-frosted-blue mb-3',
         _cats.length ? 'Uncategorised' : 'Pages'));
       var list = el('div', 'grid gap-2 mb-8');
       loose.forEach(function (p) { list.appendChild(pageRow(p, false)); });
@@ -432,7 +432,7 @@ export async function mount(ctx) {
       return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
     }).slice(0, 5);
     if (recent.length && _cats.length) {
-      root.appendChild(el('h2', 'text-sm font-bold uppercase tracking-wider text-steel-blue mb-3',
+      root.appendChild(el('h2', 'text-lead font-bold text-frosted-blue mb-3',
         'Recently updated'));
       var rlist = el('div', 'grid gap-2');
       recent.forEach(function (p) { rlist.appendChild(pageRow(p, true)); });
@@ -537,12 +537,12 @@ export async function mount(ctx) {
       }
       if (item.matched_in === 'body') {
         row.appendChild(el('span',
-          'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-frosted-blue/80',
-          'in body'));
+          'inline-flex items-center shrink-0 rounded-full px-2.5 py-0.5 text-label font-semibold bg-frosted-blue/10 text-frosted-blue/80',
+          'In the text'));
       }
       if (!item.published) {
         row.appendChild(el('span',
-          'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-frosted-blue/80',
+          'inline-flex items-center shrink-0 rounded-full px-2.5 py-0.5 text-label font-semibold bg-frosted-blue/10 text-frosted-blue/80',
           'Draft'));
       }
       a.appendChild(row);
@@ -599,7 +599,7 @@ export async function mount(ctx) {
     h1Row.appendChild(el('h1', 'text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight', page.title));
     if (!page.published) {
       h1Row.appendChild(el('span',
-        'text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded bg-steel-blue/25 text-frosted-blue/80',
+        'inline-flex items-center shrink-0 rounded-full px-2.5 py-0.5 text-label font-semibold bg-frosted-blue/10 text-frosted-blue/80',
         'Draft'));
     }
     titleCol.appendChild(h1Row);
@@ -660,7 +660,7 @@ export async function mount(ctx) {
 
     if (page.siblings && page.siblings.length) {
       var more = el('div', 'mt-10 pt-6 border-t border-steel-blue/25');
-      more.appendChild(el('h2', 'text-sm font-bold uppercase tracking-wider text-steel-blue mb-3',
+      more.appendChild(el('h2', 'text-lead font-bold text-frosted-blue mb-3',
         'More in ' + (page.category_name || 'this category')));
       var list = el('div', 'grid gap-2');
       page.siblings.forEach(function (s) {

@@ -216,37 +216,37 @@
 
 <!-- Table of contents -->
 <aside id="tocPanel" class="closed custom-scrollbar fixed top-14 bottom-0 left-0 z-40 w-72 max-w-[85vw] bg-background-dark border-r border-steel-blue/25 overflow-y-auto p-4">
-  <p class="text-xs uppercase tracking-wider text-steel-blue mb-3">Contents</p>
+  <p class="text-label font-semibold text-frosted-blue/70 mb-3">Contents</p>
   <div id="tocList" class="space-y-1 text-sm"></div>
 </aside>
 
 <!-- Reading settings -->
-<div id="settingsPanel" class="hidden fixed top-14 right-2 z-40 w-72 bg-background-dark border border-steel-blue/30 rounded-xl p-4 space-y-4 shadow-2xl">
+<div id="settingsPanel" role="group" aria-label="Reading settings" class="hidden fixed top-14 right-2 z-40 w-72 bg-background-dark border border-frosted-blue/15 rounded-card p-4 space-y-4 shadow-2xl">
   <div>
-    <label class="block text-xs uppercase tracking-wider text-steel-blue mb-2">Theme</label>
-    <div class="grid grid-cols-5 gap-1.5" id="themeButtons">
-      <button data-theme="site"  class="px-1 py-2 rounded-lg border border-steel-blue/30 text-[11px]">Site</button>
-      <button data-theme="light" class="px-1 py-2 rounded-lg border border-steel-blue/30 text-[11px]">Light</button>
-      <button data-theme="sepia" class="px-1 py-2 rounded-lg border border-steel-blue/30 text-[11px]">Sepia</button>
-      <button data-theme="dark"  class="px-1 py-2 rounded-lg border border-steel-blue/30 text-[11px]">Dark</button>
-      <button data-theme="black" class="px-1 py-2 rounded-lg border border-steel-blue/30 text-[11px]">Black</button>
+    <p id="themeLabel" class="block text-label font-semibold text-frosted-blue/70 mb-2">Page colour</p>
+    <div class="grid grid-cols-5 gap-1.5" id="themeButtons" role="group" aria-labelledby="themeLabel">
+      <button type="button" data-theme="site"  aria-pressed="false" class="px-1 py-2 rounded-btn border border-frosted-blue/20 text-label text-frosted-blue">Site</button>
+      <button type="button" data-theme="light" aria-pressed="false" class="px-1 py-2 rounded-btn border border-frosted-blue/20 text-label text-frosted-blue">Light</button>
+      <button type="button" data-theme="sepia" aria-pressed="false" class="px-1 py-2 rounded-btn border border-frosted-blue/20 text-label text-frosted-blue">Sepia</button>
+      <button type="button" data-theme="dark"  aria-pressed="false" class="px-1 py-2 rounded-btn border border-frosted-blue/20 text-label text-frosted-blue">Dark</button>
+      <button type="button" data-theme="black" aria-pressed="false" class="px-1 py-2 rounded-btn border border-frosted-blue/20 text-label text-frosted-blue">Black</button>
     </div>
   </div>
   <div>
-    <label class="block text-xs uppercase tracking-wider text-steel-blue mb-1">Font size <span id="fsVal" class="text-frosted-blue"></span></label>
-    <input id="fontSize" type="range" min="14" max="28" step="1" class="w-full"/>
+    <label for="fontSize" class="flex justify-between text-label font-semibold text-frosted-blue/70 mb-1">Text size <span id="fsVal" class="text-frosted-blue font-normal"></span></label>
+    <input id="fontSize" type="range" min="14" max="28" step="1" class="wsp-range"/>
   </div>
   <div>
-    <label class="block text-xs uppercase tracking-wider text-steel-blue mb-1">Line height <span id="lhVal" class="text-frosted-blue"></span></label>
-    <input id="lineHeight" type="range" min="12" max="24" step="1" class="w-full"/>
+    <label for="lineHeight" class="flex justify-between text-label font-semibold text-frosted-blue/70 mb-1">Line spacing <span id="lhVal" class="text-frosted-blue font-normal"></span></label>
+    <input id="lineHeight" type="range" min="12" max="24" step="1" class="wsp-range"/>
   </div>
   <div>
-    <label class="block text-xs uppercase tracking-wider text-steel-blue mb-1">Text width <span id="mwVal" class="text-frosted-blue"></span></label>
-    <input id="measure" type="range" min="28" max="70" step="2" class="w-full"/>
+    <label for="measure" class="flex justify-between text-label font-semibold text-frosted-blue/70 mb-1">Line length <span id="mwVal" class="text-frosted-blue font-normal"></span></label>
+    <input id="measure" type="range" min="28" max="70" step="2" class="wsp-range"/>
   </div>
   <div class="flex items-center justify-between">
-    <label class="text-xs uppercase tracking-wider text-steel-blue">Two columns</label>
-    <input id="columns" type="checkbox" class="rounded"/>
+    <span id="columnsLabel" class="text-label font-semibold text-frosted-blue/70">Two columns</span>
+    <button id="columns" type="button" role="switch" aria-checked="false" aria-labelledby="columnsLabel" class="ws-switch"></button>
   </div>
 </div>
 
@@ -255,7 +255,7 @@
   <!-- Sample mode only (pages/reader.js): nothing of this visit is saved. -->
   <div id="sampleBanner" hidden class="border-b border-steel-blue/25 bg-background-dark px-3 py-2">
     <div class="max-w-2xl mx-auto flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
-      <span class="px-2 py-0.5 rounded-md bg-baltic-blue/30 border border-steel-blue/30 text-xs font-semibold uppercase tracking-wider text-frosted-blue">Sample</span>
+      <span class="px-2.5 py-0.5 rounded-full bg-baltic-blue/30 text-label font-semibold text-frosted-blue">Sample</span>
       <span class="flex-1 min-w-[10rem] text-steel-blue">Your place and bookmarks aren’t saved.</span>
       <span class="flex items-center gap-2">
         <a id="sampleStart" href="/books" class="px-3 py-1.5 rounded-xl bg-baltic-blue/30 border border-steel-blue/30 text-frosted-blue hover:bg-baltic-blue/50">Start reading</a>

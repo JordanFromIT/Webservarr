@@ -206,8 +206,15 @@ export async function mount(ctx) {
     h.id = 'readingTitle';
     section.appendChild(h);
     if (r && typeof r === 'object') {
-      const row = el('div', 'mt-4 grid grid-cols-2 gap-x-8 gap-y-6 sm:flex sm:flex-wrap sm:items-end sm:gap-x-12');
       const pages = num(r.pages);
+      // Nothing read: one line, not a row of zeros.
+      if (pages <= 0 && num(r.hours) <= 0) {
+        const none = el('p', 'mt-3 text-[15px] leading-6 text-frosted-blue/70', 'Nothing read yet.');
+        none.setAttribute('data-reading-none', '');
+        section.appendChild(none);
+        return section;
+      }
+      const row = el('div', 'mt-4 grid grid-cols-2 gap-x-8 gap-y-6 sm:flex sm:flex-wrap sm:items-end sm:gap-x-12');
       row.appendChild(figure(pages.toLocaleString(), pages === 1 ? 'Page read' : 'Pages read', false));
       row.appendChild(figure(duration(num(r.hours) * 3600000), 'Time reading', false));
       section.appendChild(row);

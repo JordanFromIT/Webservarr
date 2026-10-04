@@ -95,7 +95,7 @@ def init_db():
         migrate_listening_book_fields, migrate_listening_claims, migrate_no_email_identity,
         migrate_tickets_page_switch_v1,
         migrate_ebooks_page_switch_v1, migrate_requests_source_v1, migrate_books_catalog_v2,
-        migrate_books_nav_v1, migrate_book_announced,
+        migrate_books_nav_v1, migrate_book_announced, migrate_welcome_post_v2,
     )
     db = SessionLocal()
     try:
@@ -133,6 +133,9 @@ def init_db():
         migrate_no_email_identity(db)
         seed_vapid_keys(db)
         seed_default_news(db)
+        # After seeding: a fresh install already has the new post (the marker
+        # is then all this writes); an older one has its untouched post rewritten.
+        migrate_welcome_post_v2(db)
         seed_wiki_example(db)
         # The audiobook player's log keeps 180 days. Check-ins prune it at
         # most once a day after this; the marker row keeps the two workers

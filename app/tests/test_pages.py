@@ -961,21 +961,37 @@ class NewsCardsHoldTheirSkeleton(unittest.TestCase):
     home page and the archive."""
 
     def test_renderers_and_skeletons_agree(self):
-        titles = {"index.html": "'<h4 data-news-title class=\"font-bold text-frosted-blue break-words min-w-0' + "
-                                "(open ? '' : ' min-h-12 sm:min-h-0') + '\">'",
-                  "news.html": "'<h2 data-news-title class=\"font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0\">'"}
-        for name, tag, cards in (("index.html", "h4", 2), ("news.html", "h2", 3)):
+        # The archive's card moved to the contract scale in the audit of
+        # 2026-10-04 (17px title on a 24px line, 15px excerpt held at 48px);
+        # Home keeps its own until it is rebuilt. Each page's skeleton copies
+        # its own renderer.
+        pages = {
+            "index.html": dict(tag="h4", cards=2, js="home.js",
+                               title="'<h4 data-news-title class=\"font-bold text-frosted-blue break-words min-w-0' + "
+                                     "(open ? '' : ' min-h-12 sm:min-h-0') + '\">'",
+                               excerpt="'<p class=\"text-sm text-frosted-blue/70 mt-1 line-clamp-2 min-h-10\">'",
+                               skel_title='<p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p>',
+                               skel_excerpt='<p class="text-sm mt-1 min-h-10">&nbsp;</p>',
+                               skel='<div class="skel rounded-xl p-4'),
+            "news.html": dict(tag="h2", cards=3, js="news.js",
+                              title="'<h2 data-news-title class=\"text-lead leading-6 font-bold text-frosted-blue break-words min-w-0 min-h-12 sm:min-h-0\">'",
+                              excerpt="'<p class=\"text-body text-frosted-blue/70 mt-1 line-clamp-2 min-h-12\">'",
+                              skel_title='<p class="text-lead leading-6 font-bold min-h-12 sm:min-h-0">&nbsp;</p>',
+                              skel_excerpt='<p class="text-body mt-1 min-h-12">&nbsp;</p>',
+                              skel='<div class="skel rounded-card p-4'),
+        }
+        for name, want in pages.items():
             with self.subTest(name):
                 page = static_text(name)
                 # Each renders its cards in its page module (soft navigation).
-                cards_js = static_text("js", "pages", "news.js" if name == "news.html" else "home.js")
-                self.assertIn(titles[name], cards_js)
+                cards_js = static_text("js", "pages", want["js"])
+                self.assertIn(want["title"], cards_js)
                 # Fix round 2: an open card (pinned, new, or after Read more) has no title gap.
                 self.assertIn("if (title) title.classList.toggle('min-h-12', !nowOpen);", cards_js)
-                self.assertIn("'<p class=\"text-sm text-frosted-blue/70 mt-1 line-clamp-2 min-h-10\">'", cards_js)
-                self.assertEqual(page.count('<p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p>'), cards)
-                self.assertEqual(page.count('<p class="text-sm mt-1 min-h-10">&nbsp;</p>'), cards)
-                self.assertNotIn("<br", page[page.index('<div class="skel rounded-xl p-4'):page.index('<div class="skel rounded-xl p-4') + 600])
+                self.assertIn(want["excerpt"], cards_js)
+                self.assertEqual(page.count(want["skel_title"]), want["cards"])
+                self.assertEqual(page.count(want["skel_excerpt"]), want["cards"])
+                self.assertNotIn("<br", page[page.index(want["skel"]):page.index(want["skel"]) + 600])
 
 
 class FunctionText(unittest.TestCase):

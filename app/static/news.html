@@ -138,12 +138,11 @@
       <span class="material-symbols-outlined text-sm">chevron_left</span>Back to home
     </a>
     <div class="flex items-center gap-3 flex-wrap">
-      <span class="material-symbols-outlined text-steel-blue text-3xl">newspaper</span>
       <div class="min-w-0 flex-1">
-        <h1 class="text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight">News &amp; Updates</h1>
-        <p class="text-sm text-steel-blue mt-0.5">Everything posted so far, newest first.</p>
+        <h1 class="text-h2 sm:text-h1 font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue">News</h1>
+        <p class="mt-2 text-body text-frosted-blue/70">Everything posted so far, newest first.</p>
       </div>
-      <button id="newsNewPost" type="button" class="ws-admin-only inline-flex items-center gap-2 px-4 py-2.5 rounded-[10px] bg-primary text-bright text-sm font-semibold hover:bg-primary/90 transition-colors">
+      <button id="newsNewPost" type="button" class="ws-admin-only inline-flex items-center gap-2 px-4 py-2.5 rounded-btn bg-primary text-bright text-sm font-semibold hover:bg-primary/90 transition-colors">
         <span class="material-symbols-outlined text-base" aria-hidden="true">add</span>New post
       </button>
     </div>
@@ -152,21 +151,21 @@
   <div id="newsEditor" class="hidden mb-6"></div>
 
   <!-- Post list. Each skeleton card is renderCard's card with nothing in it:
-       the same border and padding, the title (two lines on a phone, where
+       the same padding, the title (two lines on a phone, where
        most wrap beside the date; one from sm), the byline, a two-line
        excerpt, the admins' Edit/Pin/Delete row (ws-admin-only, so it is there
        only when the real one will be) and Read more. So a card lands on its
        skeleton without anything inside moving. Change one, change both. -->
   <div id="newsArchive" class="grid gap-3" data-arrive="posts">
-    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
-    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
-    <div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-xs mt-0.5">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+    <div class="skel rounded-card p-4 min-w-0" aria-hidden="true"><div class="min-w-0 invisible"><p class="text-lead leading-6 font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-label mt-0.5">&nbsp;</p><p class="text-body mt-1 min-h-12">&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-label font-semibold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+    <div class="skel rounded-card p-4 min-w-0" aria-hidden="true"><div class="min-w-0 invisible"><p class="text-lead leading-6 font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-label mt-0.5">&nbsp;</p><p class="text-body mt-1 min-h-12">&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-label font-semibold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+    <div class="skel rounded-card p-4 min-w-0" aria-hidden="true"><div class="min-w-0 invisible"><p class="text-lead leading-6 font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-label mt-0.5">&nbsp;</p><p class="text-body mt-1 min-h-12">&nbsp;</p><div class="ws-admin-only mt-2 -ml-2 flex flex-wrap gap-1"><span class="inline-flex items-center gap-1 px-2 py-1 text-sm font-semibold"><span class="material-symbols-outlined text-base">edit</span>Edit</span></div><div class="mt-2 flex items-center gap-1 text-label font-semibold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
   </div>
 
   <!-- Pagination -->
   <div class="flex justify-center mt-6">
     <button id="newsLoadMore" type="button"
-      class="hidden items-center gap-2 px-5 py-2.5 rounded-lg bg-primary/15 text-frosted-blue border border-primary/30 text-sm font-bold hover:bg-primary/25 transition-all">
+      class="hidden items-center gap-2 h-10 px-5 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue text-body font-semibold hover:bg-frosted-blue/10 transition-colors">
       <span class="material-symbols-outlined text-base">expand_more</span>
       <span id="newsLoadMoreText">Load older posts</span>
     </button>

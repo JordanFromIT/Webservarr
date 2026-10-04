@@ -338,6 +338,9 @@ await run('reading: shown while the ebook library is linked, otherwise why not',
   check('down: said quietly, not a link', /Ebooks are unavailable right now/.test(v.text('[data-reading-note]')) && !v.q('[data-reading-note] a'));
   const w = await open(make, answer({ reading: null, notes: [] }));
   check('no ebook library on this site: no reading section at all', !w.q('[data-reading]'));
+  const z = await open(make, answer({ reading: { pages: 0, words: 0, hours: 0 } }));
+  check('linked but nothing read: one line, not a row of zeros (audit L7)',
+    !z.q('[data-reading] dl') && /Nothing read yet/.test(z.text('[data-reading-none]')) && !/\b0 /.test(z.text('[data-reading]')));
 });
 
 await run('nothing listened to yet: what the page will show, and the way to start', async (make) => {

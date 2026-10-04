@@ -529,6 +529,62 @@ def seed_secret_key(db: Session) -> str:
     return key
 
 
+# The welcome post every fresh install starts with. Written for the people
+# who use the site, not the admin who set it up: no feature tour, no product
+# names, not pinned. Before 2026-10 it was a pinned feature list for the
+# admin; migrate_welcome_post_v2 rewrites that post where it is untouched.
+WELCOME_POST_TITLE = "Welcome"
+WELCOME_POST_CONTENT = (
+    "This is where the people who run this server post news: new arrivals, "
+    "planned downtime, and anything else worth knowing.\n\n"
+    "Your admin can edit or remove this post."
+)
+
+# The pre-2026-10 welcome post, exactly as seeded, so the migration only ever
+# touches a post nobody has edited.
+_OLD_WELCOME_TITLE = "Welcome to WebServarr"
+_OLD_WELCOME_CONTENT = (
+    "## Welcome to WebServarr\n\n"
+    "WebServarr is your self-hosted media server portal. Here's what you can do:\n\n"
+    "- **Plex Streams** \u2014 Monitor active streams and playback quality in real time\n"
+    "- **Service Health** \u2014 Status tiles powered by Uptime Kuma\n"
+    "- **System Gauges** \u2014 CPU, RAM, and network stats from Netdata\n"
+    "- **Media Requests** \u2014 Search and request movies and TV shows via Seerr\n"
+    "- **Release Calendar** \u2014 Upcoming movies and episodes from Radarr and Sonarr\n"
+    "- **Notifications** \u2014 In-app and browser push notifications\n"
+    "- **Theme Engine** \u2014 Colors, fonts, logos, and custom CSS\n\n"
+    "Head to **Settings** to connect your integrations and get started."
+)
+
+
+def migrate_welcome_post_v2(db: Session) -> None:
+    """One-time migration: the seeded welcome post becomes the members' one.
+
+    Rewrites the system-authored post only while it still holds the old
+    title and text exactly; an admin's edited post (or one they deleted) is
+    left alone. The new post is not pinned. Guarded by
+    migration.welcome_post_v2, so it runs once.
+    """
+    from app.models import NewsPost
+    from app.content import render_markdown
+
+    marker = "migration.welcome_post_v2"
+    if _setting_row(db, marker):
+        return
+    rewritten = 0
+    for post in db.query(NewsPost).filter(NewsPost.author_id == "system",
+                                          NewsPost.title == _OLD_WELCOME_TITLE).all():
+        if (post.content or "") != _OLD_WELCOME_CONTENT:
+            continue
+        post.title = WELCOME_POST_TITLE
+        post.content = WELCOME_POST_CONTENT
+        post.content_html = render_markdown(WELCOME_POST_CONTENT)
+        post.pinned = False
+        rewritten += 1
+    if _finish_migration(db, marker, "One-time rewrite of the seeded welcome post for members"):
+        logger.info("Welcome post migration: %d post(s) rewritten", rewritten)
+
+
 def seed_default_news(db: Session) -> None:
     """Seed default news posts for fresh installs. Guarded by migration marker."""
     from sqlalchemy.exc import IntegrityError
@@ -543,20 +599,9 @@ def seed_default_news(db: Session) -> None:
 
     posts = [
         {
-            "title": "Welcome to WebServarr",
-            "content": (
-                "## Welcome to WebServarr\n\n"
-                "WebServarr is your self-hosted media server portal. Here's what you can do:\n\n"
-                "- **Plex Streams** — Monitor active streams and playback quality in real time\n"
-                "- **Service Health** — Status tiles powered by Uptime Kuma\n"
-                "- **System Gauges** — CPU, RAM, and network stats from Netdata\n"
-                "- **Media Requests** — Search and request movies and TV shows via Seerr\n"
-                "- **Release Calendar** — Upcoming movies and episodes from Radarr and Sonarr\n"
-                "- **Notifications** — In-app and browser push notifications\n"
-                "- **Theme Engine** — Colors, fonts, logos, and custom CSS\n\n"
-                "Head to **Settings** to connect your integrations and get started."
-            ),
-            "pinned": True,
+            "title": WELCOME_POST_TITLE,
+            "content": WELCOME_POST_CONTENT,
+            "pinned": False,
         },
         {
             "title": "[Example] Server Maintenance Notice",

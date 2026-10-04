@@ -277,7 +277,7 @@ var NewsEditor = (function () {
     var state = el('p', 'flex items-center gap-2 text-[13px] text-frosted-blue/70');
     if (post) {
       state.appendChild(el('span', 'ws-light ' + (post.published ? 'ws-light-ok' : 'ws-light-unconfigured')));
-      state.appendChild(el('span', '', post.published ? 'Published — live on the site.' : 'Draft — only admins can see it.'));
+      state.appendChild(el('span', '', post.published ? 'Published and live on the site.' : 'Draft. Only admins can see it.'));
       wrap.appendChild(state);
     }
 
@@ -327,7 +327,7 @@ var NewsEditor = (function () {
         // "Your text is still here" holds only while this panel is on screen.
         // Once another post's panel replaced it, say which post (the title this
         // save sent, shown as text) and how to get back to it.
-        if (current === s) UI.toast('The post wasn’t saved. Your text is still here — try again.', 'err');
+        if (current === s) UI.toast('The post wasn’t saved. Your text is still here, so try again.', 'err');
         else if (!s.id) UI.toast('Your new post “' + payload.title + '” wasn’t saved. Open New post and try again.', 'err');
         else UI.toast('“' + payload.title + '” wasn’t saved. Open it again and retry.', 'err');
       }).then(function () { publish.disabled = draft.disabled = cancel.disabled = false; });

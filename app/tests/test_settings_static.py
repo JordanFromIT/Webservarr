@@ -1966,7 +1966,7 @@ class InPlaceNews(unittest.TestCase):
             r"if \(current === s\) UI\.toast\('[^']*', '[^']*'\);\s*"
             r"else if \(!s\.id\) UI\.toast\('[^']*' \+ payload\.title \+ '[^']*', '[^']*'\);\s*"
             r"else UI\.toast\('[^']*' \+ payload\.title \+ '[^']*', '[^']*'\);\s*\}\)")
-        for text in (r"'The post wasn’t saved\. Your text is still here — try again\.'",
+        for text in (r"'The post wasn’t saved\. Your text is still here, so try again\.'",
                      r"'Your new post “' \+ payload\.title \+ '” wasn’t saved\. Open New post and try again\.'",
                      r"'“' \+ payload\.title \+ '” wasn’t saved\. Open it again and retry\.'"):
             self.assertEqual(len(live_matches(src, text)), 1, text)
