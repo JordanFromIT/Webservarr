@@ -130,19 +130,35 @@ async def _all_series(client: httpx.AsyncClient, base: str, headers: dict) -> li
     return series
 
 
-def _authors(writers) -> str:
+def _plain_name(name: str) -> str:
+    return re.sub(r"[^\w]+", " ", name.casefold()).strip()
+
+
+def _authors(writers, folder: str = "") -> str:
     """The author from a list of Kavita writers (people with the Writer role):
     the first one, or "" when there is none worth naming. Two things in what
-    Kavita holds are not names: the calibre placeholder "authors_sort", and a
-    "Last, First" author that Kavita has split at the comma into two writers
-    ("Maas", "Sarah J."), which is put back together as "Sarah J. Maas"."""
+    Kavita holds are not names. One is the calibre placeholder "authors_sort".
+    The other is a "Last, First" author that Kavita has split at the comma into
+    two writers ("King", "Stephen"), which is put back together as "Stephen
+    King". Two writers are one split name when the first is a single word and
+    the second looks like a given name (a single word, or one with an initial:
+    "Sarah J."), or the author's folder in the library is named for the joined
+    name; they are two people (writer and translator, co-authors) when the
+    folder is named for either of them, or the first has a space, or the second
+    is a full name ("Homer", "Emily Wilson") and the folder doesn't say
+    otherwise. `folder` is the name of the folder the series is kept in."""
     names = []
     for w in writers or []:
         name = str(w.get("name") or "").strip() if isinstance(w, dict) else ""
         if name and name.casefold() not in PLACEHOLDER_WRITERS:
             names.append(name)
-    if len(names) == 2 and " " not in names[0] and (" " in names[1] or names[1].endswith(".")):
-        return f"{names[1]} {names[0]}"
+    if len(names) == 2 and " " not in names[0]:
+        last, first = names
+        joined = _plain_name(f"{first} {last}")
+        named_for = _plain_name(folder)
+        given = " " not in first or any(len(t.strip(".")) == 1 or t.endswith(".") for t in first.split())
+        if named_for == joined or (given and named_for not in (_plain_name(last), _plain_name(first))):
+            return f"{first} {last}"
     return names[0] if names else ""
 
 
@@ -235,10 +251,11 @@ async def list_books() -> list:
             detail = await get("/api/Series/series-detail", seriesId=series["id"])
             units = _book_units(detail)
             chapters = await asyncio.gather(*(get("/api/Series/chapter", chapterId=c["id"]) for _, c in units))
-            authors = [_authors(c.get("writers")) for c in chapters]
+            folder = str(series.get("folderPath") or "").replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+            authors = [_authors(c.get("writers"), folder) for c in chapters]
             if units and not all(authors):
                 # A book that names no writer takes its series'.
-                fallback = _authors((await get("/api/Series/metadata", seriesId=series["id"])).get("writers"))
+                fallback = _authors((await get("/api/Series/metadata", seriesId=series["id"])).get("writers"), folder)
                 authors = [a or fallback for a in authors]
             name = str(series.get("name") or "").strip()
             library = series.get("libraryId") if isinstance(series.get("libraryId"), int) else None

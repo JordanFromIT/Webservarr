@@ -304,13 +304,18 @@ class KeepLastGood(CatalogCase):
                 self.assertEqual(self.live(), self.before)
                 setattr(self.sources, down, False)
 
-    def test_a_new_audiobook_pairs_with_an_ebook_held_from_a_failed_read(self):
+    def test_a_new_audiobook_waits_for_an_ebook_held_from_a_failed_read(self):
         self.sources.kavita_down = True
         self.sources.audiobooks.append(audiobook("50:1", "Emma", "Jane Austen"))
         self.rebuild()
         live = self.live()
-        self.assertNotIn((2, None), live)
-        self.assertEqual(self.book(self.before[(2, None)]).merged_into, live[(2, "50:1")])
+        self.assertEqual(live[(2, None)], self.before[(2, None)])        # the held ebook stays as it is
+        self.assertIn((None, "50:1"), live)
+        self.sources.kavita_down = False
+        self.rebuild()
+        live = self.live()
+        self.assertEqual(self.book(self.before[(2, None)]).merged_into, live[(2, "50:1")])   # and pairs once Kavita is back
+        self.assertNotIn((None, "50:1"), live)
 
     def test_a_successful_read_removes_only_what_that_source_lost(self):
         self.sources.ebooks = [ebook(1, "Dune")]       # Emma is gone from Kavita
@@ -403,13 +408,18 @@ class IdPolicy(CatalogCase):
 
     def test_an_ebook_joining_an_audiobook_that_already_has_a_row_merges_its_row_in(self):
         self.sources.ebooks.append(ebook(2, "Dune"))
-        self.rebuild()
-        dune_e = self.live()[(2, None)]
         self.sources.audiobooks.append(audiobook("20:1", "Dune"))
+        self.override(2, "20:1", "apart")
         self.rebuild()
-        dune_a = self.live()[(2, "20:1")]
-        self.assertNotEqual(dune_e, dune_a)
-        self.assertEqual(self.book(dune_e).merged_into, dune_a)
+        dune_e, dune_a = self.live()[(2, None)], self.live()[(None, "20:1")]
+        db = self.db()
+        try:
+            book_catalog.remove_override(db, 2, "20:1")
+        finally:
+            db.close()
+        self.rebuild()
+        self.assertEqual(self.live()[(2, "20:1")], dune_a)           # the audiobook's row is kept
+        self.assertEqual(self.book(dune_e).merged_into, dune_a)      # and the ebook's finds it
 
     def test_a_ghost_whose_book_is_gone_goes_with_it(self):
         self.override(1, "10:1", "pair")
@@ -571,6 +581,8 @@ class Migration(unittest.TestCase):
             "series": ("kavita_series_id INTEGER, narrator VARCHAR(200)", "kavita_series_id INTEGER NOT NULL"),
             # the ebook is one book, but a book holds one audiobook and its narrator
             "one audiobook": ("kavita_chapter_id INTEGER, narrator VARCHAR(200)", "kavita_chapter_id INTEGER NOT NULL"),
+            # editions, but no work key of its own on an ebook or an edition
+            "no own keys": ("kavita_chapter_id INTEGER, plex_book_key VARCHAR(64)", "kavita_chapter_id INTEGER NOT NULL"),
         }
         for shape, (book_columns, override_key) in shapes.items():
             with self.subTest(shape=shape), tempfile.TemporaryDirectory() as tmp:
@@ -584,6 +596,10 @@ class Migration(unittest.TestCase):
                     conn.execute(text(f"CREATE TABLE book_pair_overrides (id INTEGER PRIMARY KEY, {override_key}, "
                                       "plex_book_key VARCHAR(64) NOT NULL, action VARCHAR(8) NOT NULL, "
                                       "created_by VARCHAR(255) NOT NULL, created_at DATETIME NOT NULL)"))
+                    if shape == "no own keys":
+                        conn.execute(text("CREATE TABLE book_audio_editions (id INTEGER PRIMARY KEY, "
+                                          "book_id INTEGER NOT NULL, plex_book_key VARCHAR(64) NOT NULL UNIQUE, "
+                                          "narrator VARCHAR(200) NOT NULL, added_at DATETIME)"))
                     conn.execute(text("INSERT INTO book_pair_overrides VALUES (1, 7, '10:1', 'apart', 'a', "
                                       "'2026-01-01 00:00:00')"))
 
@@ -592,8 +608,9 @@ class Migration(unittest.TestCase):
                 columns = {t: {c["name"] for c in inspect(engine).get_columns(t)}
                            for t in ("books", "book_pair_overrides")}
                 self.assertIn("book_audio_editions", tables)
-                self.assertLessEqual({"kavita_chapter_id", "kavita_volume_id", "kavita_series_id", "plex_book_key"},
-                                     columns["books"])
+                self.assertLessEqual({"kavita_chapter_id", "kavita_volume_id", "kavita_series_id", "plex_book_key",
+                                       "ebook_work_key"}, columns["books"])
+                self.assertIn("work_key", {c["name"] for c in inspect(engine).get_columns("book_audio_editions")})
                 self.assertNotIn("narrator", columns["books"])
                 self.assertIn("kavita_chapter_id", columns["book_pair_overrides"])
 
@@ -608,7 +625,7 @@ class Migration(unittest.TestCase):
                 engine.dispose()
                 self.assertEqual(kept, "Kept")
                 # An override already keyed on the chapter survives; one keyed on a series can't mean anything.
-                self.assertEqual(overrides, 1 if shape == "one audiobook" else 0)
+                self.assertEqual(overrides, 0 if shape == "series" else 1)
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -770,13 +787,14 @@ class Editions(CatalogCase):
         self.assertEqual(self.live(), {(1, "11:1"): book_id})
         self.assertEqual(set(self.editions(book_id)), {"11:1"})
 
-    def test_a_new_edition_of_a_book_with_only_an_ebook_gets_it_a_book_and_the_old_id_redirects(self):
+    def test_the_first_editions_of_a_book_with_only_an_ebook_get_a_row_of_their_own_and_the_old_id_redirects(self):
         self.sources.ebooks = [ebook(1, "Dune")]
         self.rebuild()
         ebook_id = self.live()[(1, None)]
         self.sources.audiobooks = [self.brick, self.vance]
         self.rebuild()
         book_id = self.live()[(1, "10:1")]
+        self.assertNotEqual(book_id, ebook_id)
         self.assertEqual(self.book(ebook_id).merged_into, book_id)
 
     def test_an_apart_override_keeps_one_edition_out_and_removing_it_brings_it_back(self):
@@ -851,6 +869,393 @@ class Editions(CatalogCase):
             self.rebuild()
             self.assertEqual(self.live(), before)
         self.assertEqual({b: self.book(b).updated_at for b in before.values()}, stamps)
+
+
+class SplitKeepsIdentity(CatalogCase):
+    """When a book splits, each row goes to the work it is, so an old id never
+    opens a different work."""
+
+    def test_removing_a_mistaken_pair_gives_each_work_its_own_id_back(self):
+        emma = audiobook("10:1", "Emma", "Jane Austen", narrator="Juliet Stevenson")
+        dune_e, dune_a = ebook(1, "Dune"), audiobook("20:1", "Dune")
+        self.sources.audiobooks = [emma]
+        self.rebuild()
+        emma_id = self.live()[(None, "10:1")]
+        self.sources.ebooks, self.sources.audiobooks = [dune_e], [emma, dune_a]
+        self.rebuild()
+        dune_id = self.live()[(1, "20:1")]
+        self.override(1, "10:1", "pair")                         # the admin pairs Emma with the Dune ebook by mistake
+        self.rebuild()
+        self.assertEqual(len(self.live()), 1)
+        self.override(1, "10:1", "apart")                        # and takes it back
+        self.rebuild()
+        self.assertEqual(self.live(), {(None, "10:1"): emma_id, (1, "20:1"): dune_id})
+        self.assertEqual(self.book(emma_id).title, "Emma")
+        self.assertEqual(self.book(dune_id).title, "Dune")
+        self.assertIsNone(self.book(emma_id).merged_into)
+        self.assertIsNone(self.book(dune_id).merged_into)
+
+    def test_removing_the_override_instead_of_overriding_apart_gives_the_same_ids_back(self):
+        emma = audiobook("10:1", "Emma", "Jane Austen")
+        self.sources.ebooks, self.sources.audiobooks = [ebook(1, "Dune")], [emma, audiobook("20:1", "Dune")]
+        self.rebuild()
+        before = self.live()
+        self.override(1, "10:1", "pair")
+        self.rebuild()
+        db = self.db()
+        try:
+            book_catalog.remove_override(db, 1, "10:1")
+        finally:
+            db.close()
+        self.rebuild()
+        self.assertEqual(self.live(), before)
+        for book_id in before.values():
+            self.assertIsNone(self.book(book_id).merged_into)
+
+    def test_a_mistagged_album_that_leaves_a_book_does_not_take_its_row(self):
+        dune = audiobook("20:1", "Dune", added_at=1_700_000_000)
+        self.sources.audiobooks = [dune]
+        self.rebuild()
+        dune_id = self.live()[(None, "20:1")]
+        mistagged = audiobook("10:1", "Dune", narrator="Simon Vance", added_at=1_800_000_000)
+        self.sources.audiobooks = [dune, mistagged]
+        self.rebuild()
+        self.assertEqual(self.live(), {(None, "20:1"): dune_id})        # one book, two editions
+        messiah = audiobook("10:1", "Dune Messiah", narrator="Simon Vance", added_at=1_800_000_000)
+        self.sources.audiobooks = [dune, messiah]
+        self.rebuild()
+        live = self.live()
+        self.assertEqual(live[(None, "20:1")], dune_id)                 # Dune keeps its id, not the lower key
+        self.assertEqual(self.book(dune_id).title, "Dune")
+        self.assertEqual(self.editions(dune_id), {"20:1": "Scott Brick"})
+        self.assertEqual(self.book(live[(None, "10:1")]).title, "Dune Messiah")
+
+    def test_the_primary_edition_stays_while_it_is_there_even_if_an_earlier_one_joins(self):
+        late = audiobook("20:1", "Dune", added_at=1_800_000_000)
+        self.sources.audiobooks = [late]
+        self.rebuild()
+        book_id = self.live()[(None, "20:1")]
+        self.sources.audiobooks = [late, audiobook("10:1", "Dune", narrator="Simon Vance", added_at=1_600_000_000)]
+        self.rebuild()
+        self.assertEqual(self.live(), {(None, "20:1"): book_id})
+
+
+class Outage(CatalogCase):
+    """A source that cannot be read leaves its items exactly where they are: in
+    their books, with their text, rebuild after rebuild."""
+
+    def state(self):
+        db = self.db()
+        try:
+            editions = {}
+            for e in db.query(book_catalog.BookAudioEdition):
+                editions.setdefault(e.book_id, []).append(e.plex_book_key)
+            return {b.id: (b.title, b.author, b.kavita_chapter_id, b.plex_book_key, tuple(sorted(editions.get(b.id, []))),
+                           b.merged_into, b.kavita_library_id)
+                    for b in db.query(book_catalog.Book)}
+        finally:
+            db.close()
+
+    def paired_with_a_differently_keyed_edition(self):
+        dune_e = ebook(1, "Dune", library_id=3, series_id=77)
+        full_cast = audiobook("10:1", "Dune: A Full-Cast Dramatisation", narrator="Full Cast", added_at=1_600_000_000)
+        brick = audiobook("20:1", "Dune", narrator="Scott Brick", added_at=1_700_000_000)
+        self.sources.ebooks, self.sources.audiobooks = [dune_e], [full_cast, brick]
+        self.override(1, "10:1", "pair")
+        self.rebuild()
+        return self.state()
+
+    def test_plex_down_does_not_move_an_edition_that_was_paired_by_override(self):
+        before = self.paired_with_a_differently_keyed_edition()
+        self.assertEqual(len(self.live()), 1)
+        self.sources.plex_down = True
+        self.rebuild()
+        self.assertEqual(self.state(), before)
+        self.sources.plex_down = False
+        self.rebuild()
+        self.assertEqual(self.state(), before)
+
+    def test_kavita_down_keeps_editions_paired_by_override_in_one_book(self):
+        before = self.paired_with_a_differently_keyed_edition()
+        for _ in range(3):
+            self.sources.kavita_down = True
+            self.rebuild()
+            self.assertEqual(self.state(), before)
+        self.sources.kavita_down = False
+        self.rebuild()
+        self.assertEqual(self.state(), before)
+
+    def test_an_ebook_held_through_an_outage_is_not_mistaken_for_its_audiobook(self):
+        before = self.paired_with_a_differently_keyed_edition()
+        book = self.live()[(1, "10:1")]
+        self.sources.kavita_down = True
+        self.sources.audiobooks = []                       # Plex, up, no longer lists either edition
+        self.rebuild()
+        self.assertEqual(self.live(), {(1, None): book})   # the ebook, held from Kavita, stands alone
+        db = self.db()
+        try:
+            row = db.get(book_catalog.Book, book)
+            self.assertEqual(row.work_key, row.ebook_work_key)
+            self.assertEqual(row.ebook_work_key, plex_player.work_key("Frank Herbert", "Dune"))
+        finally:
+            db.close()
+        self.assertEqual(self.state()[book][1], before[book][1])
+
+    def test_an_override_added_during_an_outage_waits_for_it(self):
+        self.sources.ebooks = [ebook(1, "Dune", library_id=3, series_id=77)]
+        self.sources.audiobooks = [audiobook("20:1", "Dune")]
+        self.rebuild()
+        before = self.state()
+        audio_id = self.live()[(1, "20:1")]
+        self.override(1, "20:1", "apart")
+        self.sources.kavita_down = True
+        self.rebuild()
+        after = self.state()
+        self.assertEqual(after, before)                    # no "Untitled" ebook, no lost author or library
+        self.sources.kavita_down = False
+        self.rebuild()
+        live = self.live()
+        self.assertEqual(live[(None, "20:1")], audio_id)
+        self.assertEqual(self.book(live[(1, None)]).title, "Dune")
+        self.assertEqual(self.book(live[(1, None)]).kavita_library_id, 3)
+
+    def test_repeated_rebuilds_through_a_plex_outage_change_nothing(self):
+        rowling = "J. K. Rowling"
+        us = ebook(1, "Harry Potter and the Sorcerer's Stone", rowling)
+        fry = audiobook("10:1", "Harry Potter and the Philosopher's Stone", rowling, narrator="Stephen Fry",
+                        added_at=1_600_000_000)
+        dale = audiobook("20:1", "Harry Potter and the Sorcerer's Stone", rowling, narrator="Jim Dale",
+                         added_at=1_700_000_000)
+        self.sources.audiobooks = [fry]
+        self.rebuild()                                     # Fry's own book first
+        self.sources.ebooks, self.sources.audiobooks = [us], [fry, dale]
+        self.rebuild()
+        self.override(1, "10:1", "pair")                   # the admin pairs Fry with the ebook
+        self.sources.plex_down = True
+        before = self.state()
+        for _ in range(3):
+            self.rebuild()
+            self.assertEqual(self.state(), before)
+        self.sources.plex_down = False
+        self.rebuild()
+        live = self.live()
+        self.assertEqual(len(live), 1)
+        self.assertEqual(set(self.editions(next(iter(live.values())))), {"10:1", "20:1"})
+        settled = self.state()
+        self.rebuild()
+        self.assertEqual(self.state(), settled)
+
+    def test_repeated_rebuilds_through_a_kavita_outage_change_nothing(self):
+        rowling = "J. K. Rowling"
+        us = ebook(1, "Harry Potter and the Sorcerer's Stone", rowling)
+        fry = audiobook("10:1", "Harry Potter and the Philosopher's Stone", rowling, narrator="Stephen Fry",
+                        added_at=1_600_000_000)
+        dale = audiobook("20:1", "Harry Potter and the Sorcerer's Stone", rowling, narrator="Jim Dale",
+                         added_at=1_700_000_000)
+        self.sources.ebooks, self.sources.audiobooks = [us], [fry, dale]
+        self.override(1, "10:1", "pair")
+        self.rebuild()
+        before = self.state()
+        self.assertEqual(len(self.live()), 1)
+        self.sources.kavita_down = True
+        for _ in range(3):
+            self.rebuild()
+            self.assertEqual(self.state(), before)
+        self.sources.kavita_down = False
+        self.rebuild()
+        self.assertEqual(self.state(), before)
+
+    def test_a_new_audiobook_waits_for_the_ebook_it_would_pair_with_until_kavita_is_back(self):
+        self.sources.ebooks = [ebook(1, "Dune")]
+        self.rebuild()
+        ebook_row = self.live()[(1, None)]
+        self.sources.kavita_down = True
+        self.sources.audiobooks = [audiobook("10:1", "Dune"), audiobook("20:1", "Emma", "Jane Austen")]
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(1, None), (None, "10:1"), (None, "20:1")})
+        self.assertEqual(self.live()[(1, None)], ebook_row)
+        self.sources.kavita_down = False
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(1, "10:1"), (None, "20:1")})
+
+
+class Fuzz(CatalogCase):
+    """Random histories: items come and go, are retagged, sources fail and
+    come back, overrides are added and removed. After every rebuild the
+    catalog must be sound, a second identical rebuild must change nothing, an
+    item of a failed source must not move, and an old id must still lead to
+    the book that holds what it was first made for."""
+
+    TITLES = ["Dune", "Emma", "Dune Messiah", "Ulysses"]
+    AUTHORS = {"Dune": "Frank Herbert", "Dune Messiah": "Frank Herbert", "Emma": "Jane Austen",
+               "Ulysses": "James Joyce"}
+    EBOOKS = [1, 2, 3, 4]
+    EDITIONS = ["10:1", "20:1", "30:1", "40:1", "50:1", "60:1"]
+
+    def snapshot(self):
+        db = self.db()
+        try:
+            books = {b.id: b for b in db.query(book_catalog.Book)}
+            for b in books.values():
+                db.expunge(b)
+            editions = {e.plex_book_key: e.book_id for e in db.query(book_catalog.BookAudioEdition)}
+            return books, editions
+        finally:
+            db.close()
+
+    @staticmethod
+    def shape(books, editions):
+        by_book = {}
+        for key, book_id in editions.items():
+            by_book.setdefault(book_id, []).append(key)
+        return {i: (b.title, b.author, b.kavita_chapter_id, b.plex_book_key, tuple(sorted(by_book.get(i, []))),
+                    b.merged_into, b.work_key, b.ebook_work_key, b.updated_at) for i, b in books.items()}
+
+    @staticmethod
+    def resolve(books, book_id):
+        for _ in range(60):
+            row = books.get(book_id)
+            if row is None or row.merged_into is None:
+                return row
+            book_id = row.merged_into
+        raise AssertionError("a chain of ghosts")
+
+    def holder(self, books, editions, item):
+        """The id of the live book that holds the item."""
+        if item[0] == "k":
+            return next((i for i, b in books.items() if b.merged_into is None and b.kavita_chapter_id == item[1]), None)
+        owner = editions.get(item[1])
+        return owner if owner in books and books[owner].merged_into is None else None
+
+    def check(self, seed, step, present, identities, before, outage, titles):
+        books, editions = self.snapshot()
+        where = f"seed {seed} step {step}"
+        live = {i: b for i, b in books.items() if b.merged_into is None}
+        by_book = {}
+        for key, book_id in editions.items():
+            self.assertIn(book_id, live, f"{where}: an edition is in a book that is not live")
+            by_book.setdefault(book_id, []).append(key)
+        # Every item is in exactly one live book; no live book is empty or has lost its text.
+        for item in present:
+            self.assertIsNotNone(self.holder(books, editions, item), f"{where}: {item} is in no book")
+        for i, b in live.items():
+            self.assertTrue(b.kavita_chapter_id is not None or by_book.get(i), f"{where}: book {i} holds nothing")
+            self.assertNotEqual(b.title, "Untitled", where)
+            self.assertTrue(b.author, f"{where}: book {i} lost its author")
+        self.assertEqual(sorted(c for c in (b.kavita_chapter_id for b in live.values()) if c is not None),
+                         sorted(i[1] for i in present if i[0] == "k"), where)
+        self.assertEqual(sorted(editions), sorted(i[1] for i in present if i[0] == "p"), where)
+        for i, b in books.items():
+            if b.merged_into is not None:
+                self.assertIn(b.merged_into, live, f"{where}: a ghost points at a book that is not live")
+        # An id leads to a book that holds some of what it held when it was last
+        # a live book, for as long as any of it is still there. (Where a book
+        # was split, which side keeps the id is checked exactly by
+        # SplitKeepsIdentity.)
+        # A ghost remembers only its primary edition, else its ebook, so that is
+        # all that is asked of it.
+        for i, (items, primary) in list(identities.items()):
+            here = [x for x in (items if i in live else {primary}) if x in present]
+            if not here:
+                del identities[i]
+                continue
+            row = self.resolve(books, i)
+            self.assertIsNotNone(row, f"{where}: id {i} is gone though {here} is still there")
+            held = {x for x in present if self.holder(books, editions, x) == row.id}
+            self.assertTrue(held & set(here), f"{where}: id {i} opens another work")
+        for i, b in live.items():
+            items = frozenset(([("k", b.kavita_chapter_id)] if b.kavita_chapter_id is not None else [])
+                              + [("p", k) for k, owner in editions.items() if owner == i])
+            identities[i] = (items, ("p", b.plex_book_key) if b.plex_book_key else ("k", b.kavita_chapter_id))
+        # What a failed source holds does not move.
+        for item, book_id in before.items():
+            if item in outage and item in present:
+                self.assertEqual(self.holder(books, editions, item), book_id, f"{where}: {item} moved in an outage")
+        # A second rebuild with nothing changed changes nothing.
+        first = self.shape(books, editions)
+        self.rebuild()
+        books2, editions2 = self.snapshot()
+        self.assertEqual(self.shape(books2, editions2), first, f"{where}: a repeated rebuild changed the catalog")
+
+    def dump(self):
+        books, editions = self.snapshot()
+        return {i: (b.title, b.kavita_chapter_id, b.plex_book_key, sorted(k for k, v in editions.items() if v == i),
+                    b.merged_into) for i, b in sorted(books.items())}
+
+    def test_random_histories(self):
+        import random
+        for seed in range(30):
+            with self.subTest(seed=seed):
+                self.run_history(random.Random(seed), seed)
+
+    def run_history(self, rnd, seed):
+        db = self.db()
+        try:
+            for model in (book_catalog.Book, book_catalog.BookAudioEdition, book_catalog.BookPairOverride,
+                          book_catalog.BookCatalogMeta):
+                db.query(model).delete()
+            db.commit()
+        finally:
+            db.close()
+        titles_e, titles_a = {}, {}
+        identities, before, history = {}, {}, []
+        self.sources.kavita_down = self.sources.plex_down = False
+        for step in range(22):
+            self.sources.kavita_down = rnd.random() < 0.25
+            self.sources.plex_down = rnd.random() < 0.25
+            for _ in range(rnd.randint(1, 3)):
+                op = rnd.choice(["ebook", "edition", "retag", "pair", "apart", "unoverride"])
+                if op == "ebook" and not self.sources.kavita_down:
+                    c = rnd.choice(self.EBOOKS)
+                    if c in titles_e:
+                        del titles_e[c]
+                    else:
+                        titles_e[c] = rnd.choice(self.TITLES)
+                elif op == "edition" and not self.sources.plex_down:
+                    k = rnd.choice(self.EDITIONS)
+                    if k in titles_a:
+                        del titles_a[k]
+                    else:
+                        titles_a[k] = rnd.choice(self.TITLES)
+                elif op == "retag":
+                    if rnd.random() < 0.5 and titles_e and not self.sources.kavita_down:
+                        titles_e[rnd.choice(sorted(titles_e))] = rnd.choice(self.TITLES)
+                    elif titles_a and not self.sources.plex_down:
+                        titles_a[rnd.choice(sorted(titles_a))] = rnd.choice(self.TITLES)
+                elif op in ("pair", "apart"):
+                    c, k = rnd.choice(self.EBOOKS), rnd.choice(self.EDITIONS)
+                    self.override(c, k, op)
+                    history.append(f"override {op} {c} {k}")
+                else:
+                    d = self.db()
+                    try:
+                        rows = d.query(book_catalog.BookPairOverride).all()
+                        if rows:
+                            o = rnd.choice(rows)
+                            book_catalog.remove_override(d, o.kavita_chapter_id, o.plex_book_key)
+                    finally:
+                        d.close()
+            self.sources.ebooks = [ebook(c, t, self.AUTHORS[t]) for c, t in sorted(titles_e.items())]
+            self.sources.audiobooks = [audiobook(k, t, self.AUTHORS[t], narrator=f"N{k}",
+                                                 added_at=1_600_000_000 + 1000 * int(k[:2]))
+                                       for k, t in sorted(titles_a.items())]
+            outage = set()
+            if self.sources.kavita_down:
+                outage |= {("k", c) for c in titles_e}
+            if self.sources.plex_down:
+                outage |= {("p", k) for k in titles_a}
+            present = {("k", c) for c in titles_e} | {("p", k) for k in titles_a}
+            self.rebuild()
+            history.append((step, sorted(titles_e.items()), sorted(titles_a.items()),
+                            "kavita down" if self.sources.kavita_down else "", "plex down" if self.sources.plex_down else "",
+                            self.dump()))
+            try:
+                self.check(seed, step, present, identities, before, outage,
+                       {**{('k', c): t for c, t in titles_e.items()}, **{('p', k): t for k, t in titles_a.items()}})
+            except AssertionError as exc:
+                raise AssertionError(f"{exc}\n" + "\n".join(map(str, history[-8:]))) from None
+            books, editions = self.snapshot()
+            before = {item: self.holder(books, editions, item) for item in present}
 
 
 class PairingTitle(unittest.TestCase):
@@ -1023,6 +1428,29 @@ class KavitaRead(unittest.TestCase):
         for cid, number, writers in books:
             self.chapters[cid] = {"id": cid, "titleName": f"{name} {number}", "createdUtc": "2026-01-01T00:00:00",
                                   "summary": "", "writers": [{"name": w} for w in writers]}
+
+    def authors(self, writers, folder="/ebooks/Somewhere"):
+        self.add_series(80, "Standalone", folder, [(801, 1, writers)])
+        return self.read()[801]["author"]
+
+    def test_a_last_first_author_that_kavita_split_is_put_back_together(self):
+        self.assertEqual(self.authors(["King", "Stephen"]), "Stephen King")
+        self.assertEqual(self.authors(["Maas", "Sarah J."]), "Sarah J. Maas")
+
+    def test_two_people_are_never_glued_together(self):
+        self.assertEqual(self.authors(["Neil Gaiman", "Terry Pratchett"]), "Neil Gaiman")      # co-authors
+        self.assertEqual(self.authors(["Homer", "Emily Wilson"]), "Homer")                      # writer and translator
+        self.assertEqual(self.authors(["J. K. Rowling", "Jim Dale"]), "J. K. Rowling")
+        self.assertEqual(self.authors(["Ann Author", "Bo", "Cy Dee"]), "Ann Author")
+
+    def test_the_authors_folder_settles_what_the_names_cannot(self):
+        # A given name of two plain words looks like a second person, until the folder is named for the joined name.
+        self.assertEqual(self.authors(["Maas", "Sarah Jane"], "/ebooks/Sarah Jane Maas"), "Sarah Jane Maas")
+        self.assertEqual(self.authors(["Maas", "Sarah Jane"], "/ebooks/Misc"), "Maas")
+        # Two single words are a split name, unless the folder is named for one of them: then they are two people.
+        self.assertEqual(self.authors(["Plato", "Aristotle"], "/ebooks/Misc"), "Aristotle Plato")
+        self.assertEqual(self.authors(["Plato", "Aristotle"], "/ebooks/Plato"), "Plato")
+        self.assertEqual(self.authors(["Homer", "Emily Wilson"], "/ebooks/Homer"), "Homer")
 
     def test_a_book_with_no_writer_takes_the_author_its_series_agrees_on(self):
         self.add_series(70, "Saga", "/ebooks/Saga", [(701, 1, ["Ann Author"]), (702, 2, []), (703, 3, ["ann author"])])

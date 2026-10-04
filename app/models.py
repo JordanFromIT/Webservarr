@@ -427,6 +427,10 @@ class Book(Base):
 
     id = Column(Integer, primary_key=True)
     work_key = Column(String(32), nullable=True)
+    # The ebook's own work key (work_key is the primary edition's when there is
+    # one), kept so an ebook held through a Kavita outage is not mistaken for
+    # its audiobook.
+    ebook_work_key = Column(String(32), nullable=True)
     title = Column(String(300), nullable=False)
     sort_title = Column(String(300), nullable=False, default="")
     author = Column(String(200), nullable=False, default="")
@@ -469,6 +473,7 @@ class BookAudioEdition(Base):
     book_id = Column(Integer, nullable=False)
     plex_book_key = Column(String(64), nullable=False, unique=True)
     narrator = Column(String(200), nullable=False, default="")
+    work_key = Column(String(32), nullable=True)                    # this edition's own key
     added_at = Column(DateTime, nullable=True)                      # naive UTC
 
     def __repr__(self):

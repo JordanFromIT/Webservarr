@@ -183,23 +183,24 @@ def migrate_listening_book_fields(db: Session) -> None:
 
 def migrate_books_catalog_v2(db: Session) -> None:
     """One-time migration for databases that made the Books catalog tables
-    in an earlier shape (the ebook was a whole Kavita series, or a book with
-    one audiobook's narrator on the row): `books` is remade, because a book now
-    has any number of audiobook editions (book_audio_editions, made by
-    create_all) and SQLite can't drop or re-key those columns in place;
-    `book_pair_overrides` is remade only if it is still keyed on a series.
-    The catalog is rebuilt from Kavita and Plex at the next rebuild, and
-    nothing wrote overrides before this. Guarded by PRAGMA table_info, so it
-    does nothing on a fresh database or a second run; with two workers
-    starting at once, a worker that sees the new columns leaves the tables
-    alone, and the drops are IF EXISTS.
+    in an earlier shape (the ebook was a whole Kavita series; a book held one
+    audiobook's narrator; an item had no work key of its own): `books` and
+    `book_audio_editions` are remade, because a book has any number of
+    audiobook editions each with its own key and SQLite can't drop or add
+    those in place; `book_pair_overrides` is remade only if it is still keyed
+    on a series. The catalog is rebuilt from Kavita and Plex at the next
+    rebuild, and nothing wrote overrides before this. Guarded by PRAGMA
+    table_info, so it does nothing on a fresh database or a second run; with
+    two workers starting at once, a worker that sees the new columns leaves the
+    tables alone, and the drops are IF EXISTS.
     """
     from sqlalchemy import text
 
     columns = {row[1] for row in db.execute(text("PRAGMA table_info(books)"))}
-    if not columns or ("kavita_chapter_id" in columns and "narrator" not in columns):
+    if not columns or ("kavita_chapter_id" in columns and "ebook_work_key" in columns
+                       and "narrator" not in columns):
         return
-    drop = ["books"]
+    drop = ["book_audio_editions", "books"]
     override_columns = {row[1] for row in db.execute(text("PRAGMA table_info(book_pair_overrides)"))}
     if "kavita_chapter_id" not in override_columns:
         drop.append("book_pair_overrides")

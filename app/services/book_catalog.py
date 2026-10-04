@@ -62,7 +62,7 @@ REBUILD_INTERVAL = 900
 ACTIONS = ("pair", "apart")
 
 _FIELD_LIMITS = (("title", 300), ("sort_title", 300), ("author", 200), ("series", 200), ("description", None))
-_COLUMNS = ("work_key", "title", "sort_title", "author", "series", "series_number", "description",
+_COLUMNS = ("work_key", "ebook_work_key", "title", "sort_title", "author", "series", "series_number", "description",
             "kavita_chapter_id", "kavita_volume_id", "kavita_series_id", "kavita_library_id", "plex_book_key",
             "added_at", "ebook_added_at", "audio_added_at", "cover_source", "merged_into")
 
@@ -207,6 +207,35 @@ def _groups(ebooks: Dict[int, _Item], editions: Dict[str, _Item], overrides: lis
     return groups
 
 
+def _groups_in_outage(ebooks: Dict[int, _Item], editions: Dict[str, _Item], overrides: list, live: list,
+                      stored: Dict[str, BookAudioEdition], ebooks_stale: bool) -> List[tuple]:
+    """The books while one source could not be read. What that source gave is
+    held as stored, so nothing it holds may move: every book that holds an item
+    of the failed side stays exactly as it is (with the items of the other
+    side that are still there), whatever the keys or the overrides now say.
+    That is also why a rebuild repeated through the outage changes nothing for
+    the failed side. Only items outside those books are paired afresh; the new
+    pairings reach the held items when the source is back."""
+    keys_of: Dict[int, List[str]] = {}
+    for key, edition in stored.items():
+        keys_of.setdefault(edition.book_id, []).append(key)
+    groups: List[tuple] = []
+    taken_e, taken_a = set(), set()
+    for row in live:
+        held_editions = [k for k in sorted(keys_of.get(row.id, [])) if k in editions]
+        has_stale = row.kavita_chapter_id is not None if ebooks_stale else bool(keys_of.get(row.id))
+        if not has_stale:
+            continue
+        ebook = ebooks.get(row.kavita_chapter_id) if row.kavita_chapter_id is not None else None
+        groups.append((ebook, [editions[k] for k in held_editions]))
+        if ebook is not None:
+            taken_e.add(ebook.id)
+        taken_a.update(held_editions)
+    rest = _groups({k: v for k, v in ebooks.items() if k not in taken_e},
+                   {k: v for k, v in editions.items() if k not in taken_a}, overrides)
+    return groups + rest
+
+
 # --- Writing the catalog ------------------------------------------------------------
 
 def _new_book(db, now: datetime) -> Book:
@@ -231,7 +260,10 @@ def _fill(book: Book, ebook: Optional[_Item], editions: List[_Item], stored: Dic
     failed) stands as the row has it."""
     before = {c: getattr(book, c) for c in _COLUMNS}
     ordered = sorted(editions, key=lambda i: (_edition_date(i, stored) is None, _edition_date(i, stored), str(i.id)))
-    primary = ordered[0] if ordered else None
+    # The primary edition is the row's identity, so it stays while it is there;
+    # otherwise the earliest added.
+    primary = next((i for i in ordered if i.id == book.plex_book_key), ordered[0] if ordered else None)
+    ordered = ([primary] + [i for i in ordered if i is not primary]) if primary else []
     items = ordered + ([ebook] if ebook else [])
 
     def text(name: str) -> str:
@@ -254,6 +286,7 @@ def _fill(book: Book, ebook: Optional[_Item], editions: List[_Item], stored: Dic
     book.series_number = number
 
     book.work_key = (primary or ebook).key
+    book.ebook_work_key = ebook.key if ebook else None
     book.kavita_chapter_id = ebook.id if ebook else None
     book.plex_book_key = primary.id if primary else None
     if ebook and ebook.fields is not None:
@@ -307,22 +340,23 @@ def _apply(reason: str, ebooks: Optional[list], audiobooks: Optional[list], erro
                 live_by_k.setdefault(r.kavita_chapter_id, r)
         held_by: Dict[str, Book] = {k: live_by_id[e.book_id] for k, e in stored.items() if e.book_id in live_by_id}
 
-        # A source that failed stands as its live rows have it.
+        # A source that failed stands as its live rows have it, each item with
+        # its own work key.
         if ebooks is not None:
             names = tuple(sorted({b["series"] for b in ebooks if b["series"]}, key=lambda n: (-len(n), n)))
             e_items = {i.id: i for i in (_ebook_item(b, names) for b in ebooks)}
         else:
-            e_items = {k: _Item("k", k, r.work_key, None) for k, r in live_by_k.items()}
+            e_items = {k: _Item("k", k, r.ebook_work_key, None) for k, r in live_by_k.items()}
         if audiobooks is not None:
             a_items = {i.id: i for i in map(_audiobook_item, audiobooks)}
         else:
-            a_items = {k: _Item("p", k, r.work_key, None) for k, r in held_by.items()}
+            a_items = {k: _Item("p", k, stored[k].work_key, None) for k in held_by}
 
-        groups = _groups(e_items, a_items, db.query(BookPairOverride).order_by(BookPairOverride.id).all())
-        # Books with the most editions pick their row first, then those with an
-        # ebook: a split leaves the row with the larger side.
-        groups.sort(key=lambda g: (-len(g[1]), g[0] is None, str(g[1][0].id) if g[1] else "",
-                                   str(g[0].id) if g[0] else ""))
+        overrides = db.query(BookPairOverride).order_by(BookPairOverride.id).all()
+        if (ebooks is None) != (audiobooks is None):
+            groups = _groups_in_outage(e_items, a_items, overrides, live, stored, ebooks is None)
+        else:
+            groups = _groups(e_items, a_items, overrides)
 
         used: set = set()
         assigned: List[tuple] = []
@@ -336,10 +370,39 @@ def _apply(reason: str, ebooks: Optional[list], audiobooks: Optional[list], erro
                 ghost.merged_into = None
             return ghost
 
-        for ebook, editions in groups:
+        # A row goes first to the book that holds what the row is: its primary
+        # edition, else its ebook. So when a book splits, each side keeps the
+        # row of the work it is, and an old id never opens a different work.
+        owner: Dict[tuple, int] = {}
+        for n, (ebook, editions) in enumerate(groups):
+            if ebook is not None:
+                owner[("k", ebook.id)] = n
+            for i in editions:
+                owner[("p", i.id)] = n
+        row_of: Dict[int, Book] = {}
+        # A row that was only an ebook does not become a book with audio: when an
+        # edition joins its ebook, the edition's row (or a new one) is the book's
+        # and this one stays behind as a ghost of it, so an id never changes
+        # from the ebook it was made for to an audiobook, or back.
+        for which in (0, 1):                  # every row's edition first, then the ebook of those left
+            for r in live:
+                item = (("p", r.plex_book_key), ("k", r.kavita_chapter_id))[which]
+                n = owner.get(item) if item[1] is not None and r.id not in used else None
+                if n is not None and which == 1 and r.plex_book_key is None and groups[n][1]:
+                    n = None
+                if n is not None and n not in row_of:
+                    row_of[n] = r
+                    used.add(r.id)
+
+        # Then, books with the most editions first, then those with an ebook.
+        order = sorted(range(len(groups)), key=lambda n: (
+            -len(groups[n][1]), groups[n][0] is None, str(groups[n][1][0].id) if groups[n][1] else "",
+            str(groups[n][0].id) if groups[n][0] else ""))
+        for n in order:
+            ebook, editions = groups[n]
             keys = {i.id for i in editions}
-            row = None
-            if editions:
+            row = row_of.get(n)
+            if row is None and editions:
                 held = sorted({held_by[k] for k in keys if k in held_by}, key=lambda r: r.id)
                 row = next((r for r in held if r.id not in used), None)
                 if row is None and ebook is not None:
@@ -350,20 +413,26 @@ def _apply(reason: str, ebooks: Optional[list], audiobooks: Optional[list], erro
                         row = own
                 if row is None:
                     row = revive(lambda g: g.plex_book_key in keys)
-            else:
+            elif row is None:
                 own = live_by_k.get(ebook.id)
                 if own is not None and own.id not in used:
                     row = own
                 else:
                     # The ebook has left an audiobook's book (a split) or has none:
                     # its earlier row comes back, else it is a new book.
-                    row = (revive(lambda g: g.kavita_chapter_id == ebook.id and own is not None
-                                  and g.merged_into == own.id)
-                           or revive(lambda g: g.kavita_chapter_id == ebook.id))
+                    # (A ghost that was an audiobook's row is its edition's, not the ebook's,
+                    # while that edition is still there.)
+                    def was_ebook(g):
+                        return g.kavita_chapter_id == ebook.id and g.plex_book_key not in a_items
+                    row = (revive(lambda g: was_ebook(g) and own is not None and g.merged_into == own.id)
+                           or revive(was_ebook))
             if row is None:
                 row = _new_book(db, now)
                 fresh.add(row.id)
+            row_of[n] = row
             used.add(row.id)
+        for n, (ebook, editions) in enumerate(groups):
+            row = row_of[n]
             assigned.append((ebook, editions, row))
             if ebook is not None:
                 home[("k", ebook.id)] = row
@@ -375,7 +444,8 @@ def _apply(reason: str, ebooks: Optional[list], audiobooks: Optional[list], erro
         for r in live:
             if r.id in used:
                 continue
-            items = [("k", r.kavita_chapter_id)] + [("p", k) for k, e in stored.items() if e.book_id == r.id]
+            items = ([("p", r.plex_book_key)] + [("p", k) for k, e in stored.items() if e.book_id == r.id]
+                     + [("k", r.kavita_chapter_id)])
             target = next((home[i] for i in items if i in home), None)
             if target is not None:
                 r.merged_into = target.id
@@ -384,7 +454,7 @@ def _apply(reason: str, ebooks: Optional[list], audiobooks: Optional[list], erro
                 db.delete(r)
         for g in ghosts:
             # A ghost follows its items to where they are now.
-            target = home.get(("k", g.kavita_chapter_id)) or home.get(("p", g.plex_book_key))
+            target = home.get(("p", g.plex_book_key)) or home.get(("k", g.kavita_chapter_id))
             if target is not None and target.id != g.id:
                 g.merged_into = target.id
 
@@ -402,6 +472,7 @@ def _apply(reason: str, ebooks: Optional[list], audiobooks: Optional[list], erro
             edition.book_id = row.id
             if item.fields is not None:
                 edition.narrator = str(item.fields.get("narrator") or "")[:200]
+                edition.work_key = item.key
                 edition.added_at = item.fields.get("added_at")
 
         for ebook, editions, row in assigned:
