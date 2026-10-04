@@ -320,7 +320,7 @@ export async function mount(ctx) {
     if (signal.aborted) return;
     state.connectProblem = true;
     // Before the first books are drawn it waits for commitFrame.
-    if (state.committed) $('connectState').classList.remove('hidden');
+    if (state.committed) { $('connectState').classList.remove('hidden'); syncConnect(); }
     renderNotes();
   }
 
@@ -332,6 +332,17 @@ export async function mount(ctx) {
     if (!need) return;
     state.reconnectTried = true;
     reconnectKavita();
+  }
+
+  /** The connect message: shown once the hand-off was refused. While a "not
+      connected" note is in the answer (even a kept copy of one) its room is
+      held, unseen, so the message coming in after the books are drawn moves
+      nothing. */
+  function syncConnect() {
+    const box = $('connectState');
+    const wants = state.notes.library.concat(state.notes.continue).some(function (n) { return n && n.reason === 'not_connected'; });
+    box.classList.toggle('hidden', !(state.connectProblem || wants));
+    box.classList.toggle('invisible', wants && !state.connectProblem);
   }
 
   function renderNotes() {
@@ -349,6 +360,7 @@ export async function mount(ctx) {
       box.appendChild(noteLine(n.text));
     });
     box.classList.toggle('hidden', !box.firstChild);
+    syncConnect();
   }
 
   function setNotes(which, notes) {
@@ -379,7 +391,6 @@ export async function mount(ctx) {
     state.committed = true;
     $('toolbarSkel').classList.add('hidden');
     $('toolbar').classList.remove('hidden');
-    $('connectState').classList.toggle('hidden', !state.connectProblem);
     renderNotes();
     applyContinue();
   }
@@ -494,10 +505,10 @@ export async function mount(ctx) {
 
   function renderLibrary(data) {
     if (signal.aborted) return;
-    commitFrame();
-    state.renderGen++;
     const items = (data && Array.isArray(data.items)) ? data.items : [];
     setNotes('library', data && data.notes);
+    commitFrame();
+    state.renderGen++;
     $('libraryGrid').textContent = '';
     state.building = false;
     if (items.length) {

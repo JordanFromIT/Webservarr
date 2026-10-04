@@ -694,7 +694,7 @@ await run('not connected: the hand-off runs once, from a fresh answer, and the p
   await t.mount();
   check('the existing Kavita hand-off was asked for, once', t.kav.reconnect.length === 1, t.kav.reconnect.length);
   check('the audiobooks are on screen meanwhile', t.cards('libraryGrid').length === 1 && t.qa('#continueHost li').length === 2);
-  check('no problem is shown while the hand-off is under way', t.hidden('#connectState'));
+  check('no problem is shown while the hand-off is under way (its room is held, unseen)', t.q('#connectState').classList.contains('invisible'));
   check('and the missing sign-in is not repeated as a note', t.hidden('#notes'));
   t.click('#formatChips [data-format="audio"]');
   await t.clock.advance(50);
@@ -938,6 +938,28 @@ await run('T3H5: the toolbar, notes, connect message and Continue come in one wr
   const v = make({ routes: usual({ library: () => ({ status: 503, body: {} }) }) });
   await v.mount();
   check('an error brings the toolbar in with its message', !v.hidden('#toolbar') && !v.hidden('#errorState'));
+});
+
+await run('T3H5: a kept "not connected" answer holds the connect message\'s room, so it comes in without moving the books', async (make) => {
+  const lib = () => ({ body: { items: [audio(3, 'The Hobbit', 'Tolkien')], next_cursor: null, notes: NOT_CONNECTED, building: false } });
+  const live = deferred();
+  const t = make({ routes: (net) => { usual()(net); net.on('/api/books?', () => live.promise.then(lib)); } });
+  t.kav.blockNext = true;
+  t.WS.cache.set('books:list:all:added', lib().body);
+  t.WS.cache.set('books:continue', { items: [], notes: [] });
+  const m = t.mount();
+  await flush();
+  const box = t.q('#connectState');
+  check('from the kept copy: its room is held (in the layout, unseen)', !box.classList.contains('hidden') && box.classList.contains('invisible'), box.className);
+  check('and the books are already there', t.cards('libraryGrid').length === 1);
+  live.resolve();
+  await t.clock.advance(100);
+  await m;
+  check('the live answer shows it in the room already held', !box.classList.contains('hidden') && !box.classList.contains('invisible'));
+  // No such note: no room held.
+  const u = make({ routes: usual() });
+  await u.mount();
+  check('without the note nothing is held', u.hidden('#connectState'));
 });
 
 await run('T3H6: with the Seerr embed as the Requests source there is no request link', async (make) => {
