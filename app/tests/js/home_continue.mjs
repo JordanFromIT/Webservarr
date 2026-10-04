@@ -268,7 +268,7 @@ await run('the section is the first to arrive, hidden until a visit says otherwi
   check('it is the first section in the arrival order', t.qa('[data-arrive]')[0] === host && host.getAttribute('data-arrive') === 'continue');
   check('it is hidden in the markup (the stack\'s gap skips it)', host.hidden === true);
   const skel = host.querySelector('[aria-hidden="true"]');
-  check('its skeleton is the row\'s shape: a heading, six compact cards, a room for a note', skel.querySelector('h2') && skel.querySelectorAll('.w-28').length === 6 && skel.querySelector('[data-note-slot]'));
+  check('its skeleton is the row\'s shape: a heading (with its icon\'s room), six compact cards, a room for a note', skel.querySelector('h2') && skel.querySelector('h2').previousElementSibling.textContent === 'auto_stories' && skel.querySelector('h2').parentNode.className === 'flex items-center gap-3 mb-4' && skel.querySelectorAll('.w-28').length === 6 && skel.querySelector('[data-note-slot]'));
   check('a card is a cover and two lines', Array.from(skel.querySelectorAll('.w-28')).every((c) => c.children.length === 3));
 });
 
@@ -278,7 +278,7 @@ await run('a row in progress: the compact row replaces the skeleton and is shown
   const host = t.host();
   const row = host.querySelector('[data-continue]');
   check('the row is there', !!row && row.getAttribute('aria-label') === 'Continue');
-  check('compact: narrow cards and a small heading', row.querySelectorAll('li > a.w-28, li > button.w-28').length === 2 && /text-\[17px\]/.test(row.querySelector('h2').className));
+  check('compact: narrow cards, and a heading like the other sections\' (an icon, then the title)', row.querySelectorAll('li > a.w-28, li > button.w-28').length === 2 && /text-xl/.test(row.querySelector('h2').className) && row.querySelector('h2').previousElementSibling.textContent === 'auto_stories');
   check('the skeleton is gone and the section is shown', !host.querySelector('.skel') && host.hidden === false && host.getAttribute('aria-busy') === 'false');
   check('an ebook resumes in the reader', row.querySelector('li > a').getAttribute('href') === '/reader?seriesId=4&chapterId=9');
   check('it asked for the person\'s Continue, once, on the page\'s signal', t.net.urls('/api/books/continue').length === 1 && t.net.calls.find((c) => c.url === '/api/books/continue').init.signal === t.ctl.signal);

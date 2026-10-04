@@ -23,6 +23,7 @@
  *                                                       null when nothing is in progress
  *   coverBox(url, formats, signal, { badges, eager })  the 2:3 cover frame (the book page's: badges off, eager)
  *   noteLine(text)                                     a quiet line about a source that is down
+ *   rememberContinue(user)                             a book was just started: the next visit holds the row's room
  * They touch no DOM at import time.
  */
 
@@ -84,6 +85,16 @@ const CHIP_OFF = 'inline-flex items-center h-10 px-4 rounded-full text-[15px] fo
 const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue';
 
 function isAbort(e) { return !!e && e.name === 'AbortError'; }
+
+/**
+ * Say that this person now has a Continue row, before its answer does. Books and
+ * Home hold the row's room from the first frame for a person who had one last
+ * time, so a book started here (the book page's Listen) is told to them at once:
+ * the next visit does not meet a row it had no room for.
+ */
+export function rememberContinue(user) {
+  try { localStorage.setItem(CONTINUE_KEY + (user || ''), '1'); } catch (e) { /* private mode: nothing is kept */ }
+}
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -257,7 +268,15 @@ export function renderContinueRow(items, notes, opts) {
   const section = el('section', '');
   section.setAttribute('aria-label', 'Continue');
   section.setAttribute('data-continue', '');
-  section.appendChild(el('h2', 'mb-3 font-bold leading-snug text-frosted-blue ' + (o.compact ? 'text-[17px]' : 'text-xl'), 'Continue'));
+  if (o.compact) {
+    // Home's own section heading (an icon, then the title), so it reads as one of its sections.
+    const head = el('div', 'flex items-center gap-3 mb-4');
+    head.appendChild(icon('auto_stories', 'text-steel-blue'));
+    head.appendChild(el('h2', 'text-xl font-bold text-frosted-blue', 'Continue'));
+    section.appendChild(head);
+  } else {
+    section.appendChild(el('h2', 'mb-3 font-bold leading-snug text-xl text-frosted-blue', 'Continue'));
+  }
   const row = el('ul', 'books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1');
   list.forEach(function (item) {
     const li = el('li', 'shrink-0');

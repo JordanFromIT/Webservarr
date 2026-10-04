@@ -92,7 +92,8 @@ export async function mount(ctx) {
   const root = ctx.root;
   const signal = ctx.signal;
   const $ = function (id) { return root.querySelector('#' + id); };
-  const { coverBox } = await import(root.getAttribute('data-ws-dep') || './books.js');
+  const { coverBox, rememberContinue } = await import(root.getAttribute('data-ws-dep') || './books.js');
+  const who = ((ctx.data || {}).user || {}).username || '';
 
   const state = {
     id: bookId(ctx.url.pathname),
@@ -215,7 +216,10 @@ export async function mount(ctx) {
     // notices); open() rejects only when the saved place is not in the book.
     const key = edition.plex_book_key;
     state.opening = key;
-    Promise.resolve(p.open(key, { autoplay: true })).catch(function (e) {
+    Promise.resolve(p.open(key, { autoplay: true })).then(function () {
+      // A place now exists, so the next Books or Home visit has a Continue row: it is told now.
+      rememberContinue(who);
+    }, function (e) {
       if (signal.aborted) return;
       console.warn('The player could not open ' + key, e);
     }).then(function () {
