@@ -9,11 +9,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet"/>
 <link href="/static/css/app.css?v=1" rel="stylesheet"/>
 <link href="/static/css/theme.css?v=12" rel="stylesheet"/>
-<style>
-.filter-tab, .cat-filter-tab { background: rgb(var(--color-accent) / 0.1); color: rgb(var(--color-text) / 0.8); border: 1px solid transparent; }
-.filter-tab.active, .cat-filter-tab.active { background: rgb(var(--color-primary) / 0.2); color: rgb(var(--color-text)); border-color: rgb(var(--color-primary) / 0.3); }
-.filter-tab:hover, .cat-filter-tab:hover { background: rgb(var(--color-accent) / 0.2); }
-</style>
 </head>
 <body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
 <!-- ws:sidebar -->
@@ -25,65 +20,65 @@
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
 
-<!-- Stat Cards -->
-<div class="grid grid-cols-4 gap-3 mb-6" data-arrive="counts">
-<div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-frosted-blue" id="statTotal"><span class="skel skel-num" aria-hidden="true"></span></p>
-<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1 [overflow-wrap:anywhere]">Total</p>
-</div>
-<div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-frosted-blue" id="statOpen"><span class="skel skel-num" aria-hidden="true"></span></p>
-<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1 [overflow-wrap:anywhere]">Open</p>
-</div>
-<div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-frosted-blue" id="statInProgress"><span class="skel skel-num" aria-hidden="true"></span></p>
-<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1 [overflow-wrap:anywhere]">In Progress</p>
-</div>
-<div class="glass-card rounded-xl p-4 text-center">
-<p class="text-2xl font-bold text-frosted-blue" id="statResolved"><span class="skel skel-num" aria-hidden="true"></span></p>
-<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mt-1 [overflow-wrap:anywhere]">Resolved</p>
-</div>
-</div>
-
 <!-- Page intro. Paired with the same block on /issues so the two help pages
      each say what they are for and point at the other. -->
-<div class="mb-5">
-<h1 class="text-2xl lg:text-3xl font-bold text-frosted-blue leading-tight">Tickets</h1>
-<p class="text-sm text-steel-blue mt-1">
+<div class="mb-6">
+<h1 class="text-h2 sm:text-h1 font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue">Tickets</h1>
+<p class="mt-2 text-body text-frosted-blue/70 max-w-[65ch]">
 Questions, account trouble, requests, or anything that isn&rsquo;t about one specific title.
 For a problem with a particular movie or show, use <a href="/issues" class="text-frosted-blue underline hover:no-underline font-semibold">Issues</a>.
 </p>
 </div>
 
+<!-- Counts -->
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8" data-arrive="counts">
+<div class="rounded-card bg-frosted-blue/[0.04] p-4 text-center">
+<p class="text-h2 font-bold text-frosted-blue tabular-nums" id="statTotal"><span class="skel skel-num" aria-hidden="true"></span></p>
+<p class="text-label text-frosted-blue/70 font-semibold mt-1 break-words">Total</p>
+</div>
+<div class="rounded-card bg-frosted-blue/[0.04] p-4 text-center">
+<p class="text-h2 font-bold text-frosted-blue tabular-nums" id="statOpen"><span class="skel skel-num" aria-hidden="true"></span></p>
+<p class="text-label text-frosted-blue/70 font-semibold mt-1 break-words">Open</p>
+</div>
+<div class="rounded-card bg-frosted-blue/[0.04] p-4 text-center">
+<p class="text-h2 font-bold text-frosted-blue tabular-nums" id="statInProgress"><span class="skel skel-num" aria-hidden="true"></span></p>
+<p class="text-label text-frosted-blue/70 font-semibold mt-1 break-words">In progress</p>
+</div>
+<div class="rounded-card bg-frosted-blue/[0.04] p-4 text-center">
+<p class="text-h2 font-bold text-frosted-blue tabular-nums" id="statResolved"><span class="skel skel-num" aria-hidden="true"></span></p>
+<p class="text-label text-frosted-blue/70 font-semibold mt-1 break-words">Resolved</p>
+</div>
+</div>
+
 <!-- Contextual wiki pointer. Renders only when an admin has chosen a page in
      the wiki page editor; otherwise it stays hidden and takes no space. -->
-<div id="wikiHookTickets" class="hidden mb-5"></div>
+<div id="wikiHookTickets" class="hidden mb-6"></div>
 
-<!-- New Ticket Button + Filter Tabs -->
-<div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
-<button data-action="open-create" class="px-4 py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all flex items-center gap-2 shrink-0">
-<span class="material-symbols-outlined text-sm">add</span> New message
+<!-- New ticket + status filter -->
+<div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-2">
+<button type="button" data-action="open-create" class="ws-lift self-start shrink-0 inline-flex items-center gap-2 h-10 px-4 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors">
+<span class="material-symbols-outlined text-xl" aria-hidden="true">add</span>New ticket
 </button>
-<div class="flex flex-wrap gap-2">
-<button data-action="filter" data-filter="all" class="filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All</button>
-<button data-action="filter" data-filter="open" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Open</button>
-<button data-action="filter" data-filter="in_progress" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">In Progress</button>
-<button data-action="filter" data-filter="resolved" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Resolved</button>
-<button data-action="filter" data-filter="closed" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Closed</button>
+<div class="flex flex-wrap gap-2" role="group" aria-label="Show by status">
+<button type="button" data-action="filter" data-filter="all" aria-pressed="true" class="filter-tab ws-filter">All</button>
+<button type="button" data-action="filter" data-filter="open" aria-pressed="false" class="filter-tab ws-filter">Open</button>
+<button type="button" data-action="filter" data-filter="in_progress" aria-pressed="false" class="filter-tab ws-filter">In progress</button>
+<button type="button" data-action="filter" data-filter="resolved" aria-pressed="false" class="filter-tab ws-filter">Resolved</button>
+<button type="button" data-action="filter" data-filter="closed" aria-pressed="false" class="filter-tab ws-filter">Closed</button>
 </div>
 </div>
 
-<!-- Category Filter -->
-<div class="flex flex-wrap gap-2 mb-4">
-<button data-action="cat-filter" data-catfilter="all" class="cat-filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All Types</button>
-<button data-action="cat-filter" data-catfilter="media_request" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Media Request</button>
-<button data-action="cat-filter" data-catfilter="playback_issue" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Playback Issue</button>
-<button data-action="cat-filter" data-catfilter="account_issue" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Account Issue</button>
-<button data-action="cat-filter" data-catfilter="feature_suggestion" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Feature</button>
-<button data-action="cat-filter" data-catfilter="other" class="cat-filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Other</button>
+<!-- Category filter -->
+<div class="flex flex-wrap gap-2 mb-4" role="group" aria-label="Show by kind">
+<button type="button" data-action="cat-filter" data-catfilter="all" aria-pressed="true" class="cat-filter-tab ws-filter">All kinds</button>
+<button type="button" data-action="cat-filter" data-catfilter="media_request" aria-pressed="false" class="cat-filter-tab ws-filter">Media request</button>
+<button type="button" data-action="cat-filter" data-catfilter="playback_issue" aria-pressed="false" class="cat-filter-tab ws-filter">Playback problem</button>
+<button type="button" data-action="cat-filter" data-catfilter="account_issue" aria-pressed="false" class="cat-filter-tab ws-filter">Account problem</button>
+<button type="button" data-action="cat-filter" data-catfilter="feature_suggestion" aria-pressed="false" class="cat-filter-tab ws-filter">Suggestion</button>
+<button type="button" data-action="cat-filter" data-catfilter="other" aria-pressed="false" class="cat-filter-tab ws-filter">Other</button>
 </div>
 
-<!-- Ticket List -->
+<!-- Ticket list -->
 <div id="ticketList" class="space-y-2" data-arrive="list">
 <div class="skel skel-row" aria-hidden="true"></div>
 <div class="skel skel-row" aria-hidden="true"></div>
@@ -92,86 +87,88 @@ For a problem with a particular movie or show, use <a href="/issues" class="text
 
 <!-- Pagination -->
 <div id="pagination" class="hidden flex items-center justify-center gap-4 mt-6">
-<button data-action="prev-page" id="prevBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
-<span class="material-symbols-outlined text-sm align-middle">chevron_left</span> Prev
+<button type="button" data-action="prev-page" id="prevBtn" class="inline-flex items-center gap-1 h-10 pl-2 pr-4 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>Previous
 </button>
-<span id="pageInfo" class="text-sm text-steel-blue font-bold"></span>
-<button data-action="next-page" id="nextBtn" class="px-4 py-2 rounded-lg bg-frosted-blue/5 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:border-primary/40 transition-all text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed">
-Next <span class="material-symbols-outlined text-sm align-middle">chevron_right</span>
+<span id="pageInfo" class="text-body text-frosted-blue/70 tabular-nums"></span>
+<button type="button" data-action="next-page" id="nextBtn" class="inline-flex items-center gap-1 h-10 pl-4 pr-2 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+Next<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
 </button>
 </div>
 
-<!-- Empty State -->
-<div id="emptyState" class="hidden text-center text-steel-blue py-12">
-<span class="material-symbols-outlined text-5xl mb-3 block opacity-30">confirmation_number</span>
-<p class="text-sm mb-1">No messages yet</p>
-<p class="text-xs opacity-60">Click &ldquo;New message&rdquo; to reach the server admin</p>
+<!-- Empty state -->
+<div id="emptyState" class="hidden py-10 max-w-xl">
+<p class="text-lead font-semibold text-frosted-blue">No tickets yet</p>
+<p class="mt-1 text-body text-frosted-blue/70">Use New ticket to ask the server admin anything. Replies show up here.</p>
 </div>
 
 </div>
 
-<!-- Create Ticket Modal -->
-<div id="createModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+<!-- New ticket: a dialog (WSUI.modal in pages/tickets.js) -->
+<div id="createModal" class="fixed inset-0 z-50 hidden flex items-end sm:items-center justify-center p-4">
 <div class="absolute inset-0 ws-scrim backdrop-blur-sm" data-action="close-create"></div>
-<div class="relative w-full max-w-md rounded-xl glass-card p-5">
-<button data-action="close-create" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue transition-colors">
-<span class="material-symbols-outlined">close</span>
+<form id="createForm" data-dialog-box aria-labelledby="createTitleHeading" novalidate class="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-card border border-frosted-blue/10 bg-background-dark shadow-2xl p-6 custom-scrollbar">
+<button type="button" data-action="close-create" class="absolute top-3 right-3 grid place-items-center size-10 rounded-btn text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors" aria-label="Close">
+<span class="material-symbols-outlined" aria-hidden="true">close</span>
 </button>
-<h3 class="text-lg font-bold text-frosted-blue mb-1">Message support</h3>
-<p class="text-xs text-steel-blue mb-4">Goes straight to the server admin. You&rsquo;ll get replies right here.</p>
+<h2 id="createTitleHeading" class="text-h3 font-bold text-frosted-blue mb-1 pr-10">New ticket</h2>
+<p class="text-body text-frosted-blue/70 mb-5">It goes straight to the server admin, and you&rsquo;ll see the replies here.</p>
 
-<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Title</label>
-<input id="createTitle" type="text" maxlength="200" placeholder="What do you need help with?"
-  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"/>
+<label for="createTitle" class="block text-label font-semibold text-frosted-blue/70 mb-1.5">Subject</label>
+<input id="createTitle" type="text" maxlength="200" placeholder="What do you need help with?" aria-describedby="createTitleError"
+  class="w-full px-3.5 py-2.5 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"/>
+<p id="createTitleError" class="hidden text-label font-semibold text-status-err-text mt-1.5">Give the ticket a subject.</p>
 
-<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Category</label>
+<label for="createCategory" class="block text-label font-semibold text-frosted-blue/70 mb-1.5 mt-4">Kind</label>
 <select id="createCategory"
-  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3">
-<option value="media_request">Media Request</option>
-<option value="playback_issue">Playback Issue</option>
-<option value="account_issue">Account Issue</option>
-<option value="feature_suggestion">Feature Suggestion</option>
+  class="w-full px-3.5 py-2.5 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue text-body focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors">
+<option value="media_request">Media request</option>
+<option value="playback_issue">Playback problem</option>
+<option value="account_issue">Account problem</option>
+<option value="feature_suggestion">Suggestion</option>
 <option value="other">Other</option>
 </select>
-<p id="playbackRedirectHint" class="hidden text-xs text-frosted-blue/80 bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3">
-<span class="material-symbols-outlined text-[14px] align-text-bottom mr-1">info</span>
+<p id="playbackRedirectHint" class="hidden text-body text-frosted-blue/80 bg-frosted-blue/[0.04] rounded-inner px-3 py-2 mt-3">
 If this is about one specific movie or show, <a href="/issues" class="text-frosted-blue underline hover:no-underline font-semibold">Issues</a> gets it to the right place faster.
 </p>
-<div id="wikiHookPlayback" class="hidden mb-3"></div>
+<div id="wikiHookPlayback" class="hidden mt-3"></div>
 
-<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Description</label>
-<textarea id="createDescription" rows="4" placeholder="Give us the details — what you tried, what happened, and which device you were on."
-  class="w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-3"></textarea>
+<label for="createDescription" class="block text-label font-semibold text-frosted-blue/70 mb-1.5 mt-4">Details</label>
+<textarea id="createDescription" rows="4" aria-describedby="createDescriptionError" placeholder="What you tried, what happened, and which device you were on."
+  class="w-full px-3.5 py-2.5 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"></textarea>
+<p id="createDescriptionError" class="hidden text-label font-semibold text-status-err-text mt-1.5">Add a few details, so the admin can help.</p>
 
-<label class="text-[10px] text-steel-blue font-bold uppercase tracking-wider block mb-1">Screenshot (optional)</label>
+<label for="createImage" class="block text-label font-semibold text-frosted-blue/70 mb-1.5 mt-4">Screenshot (optional)</label>
 <input id="createImage" type="file" accept="image/png,image/jpeg,image/webp"
-  class="w-full text-sm text-steel-blue file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-primary/20 file:text-frosted-blue hover:file:bg-primary/30 transition-all mb-4"/>
+  class="w-full text-body text-frosted-blue/70 file:mr-3 file:py-2 file:px-4 file:rounded-btn file:border-0 file:text-body file:font-semibold file:bg-frosted-blue/[0.07] file:text-frosted-blue hover:file:bg-frosted-blue/10 transition-colors mb-5"/>
 
-<button data-action="submit-ticket" id="createSubmitBtn" class="w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed">
-Send to support
+<button type="submit" id="createSubmitBtn" class="ws-lift w-full py-2.5 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+Send ticket
 </button>
-</div>
+</form>
 </div>
 
-<!-- Ticket Detail Modal -->
-<div id="detailModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+<!-- Ticket detail: a dialog (WSUI.modal in pages/tickets.js) -->
+<div id="detailModal" class="fixed inset-0 z-50 hidden flex items-end sm:items-center justify-center p-4">
 <div class="absolute inset-0 ws-scrim backdrop-blur-sm" data-action="close-detail"></div>
-<div class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl glass-card p-5 custom-scrollbar">
-<button data-action="close-detail" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue transition-colors z-10">
-<span class="material-symbols-outlined">close</span>
+<div data-dialog-box aria-labelledby="ticketDetailTitle" class="relative w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-card border border-frosted-blue/10 bg-background-dark shadow-2xl p-6 custom-scrollbar">
+<button type="button" data-action="close-detail" class="absolute top-3 right-3 grid place-items-center size-10 rounded-btn text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors z-10" aria-label="Close">
+<span class="material-symbols-outlined" aria-hidden="true">close</span>
 </button>
 <div id="detailContent">
-<div class="text-center text-steel-blue py-8">
-<span class="material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin">progress_activity</span>
-<p>Loading...</p>
-</div>
+<p id="ticketDetailTitle" class="text-frosted-blue/70 text-body py-8 text-center">Loading the ticket&hellip;</p>
 </div>
 </div>
 </div>
 
-<!-- Image Lightbox -->
-<div id="lightbox" class="fixed inset-0 z-[60] hidden items-center justify-center bg-background-dark/90 cursor-pointer" data-action="close-lightbox">
-<img id="lightboxImg" src="" class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"/>
+<!-- Image lightbox: a dialog over the ticket (WSUI.modal in pages/tickets.js) -->
+<div id="lightbox" class="fixed inset-0 z-[60] hidden items-center justify-center bg-background-dark/90 p-4" data-action="close-lightbox">
+<div data-dialog-box aria-label="Attached image" class="relative">
+<img id="lightboxImg" src="" alt="" class="max-w-[90vw] max-h-[85vh] object-contain rounded-btn shadow-2xl"/>
+<button type="button" data-action="close-lightbox" class="absolute -top-3 -right-3 grid place-items-center size-10 rounded-full bg-background-dark text-frosted-blue border border-frosted-blue/20 hover:bg-frosted-blue/10 transition-colors" aria-label="Close the image">
+<span class="material-symbols-outlined" aria-hidden="true">close</span>
+</button>
+</div>
 </div>
 </div>
 </main>

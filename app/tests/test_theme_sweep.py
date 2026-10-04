@@ -380,18 +380,18 @@ class RequestStatusCollapseMarkup(unittest.TestCase):
         for rid in ids:
             at = section.index(f'<div id="{rid}" class="discover-row ')
             row = section[at:section.index("</div>\n    <button", at)]
-            self.assertEqual(row.count('<div class="skel shrink-0 w-28 '), 8, rid)
-        # The skeleton card is the real card's box: its border, poster, badge and title lines.
-        skel = re.search(r'<div class="skel shrink-0 w-28 [^\n]*', section).group(0)
+            self.assertEqual(row.count('<div class="skel shrink-0 w-32 '), 8, rid)
+        # The skeleton card is the real card's box: the 128px poster, then two
+        # 20px lines of 13px text (the title, then the type and status).
+        skel = re.search(r'<div class="skel shrink-0 w-32 [^\n]*', section).group(0)
         card = re.search(r"function buildDiscoverCard\([^)]*\) \{(.*?)\n\}", REQUESTS_JS, re.S).group(1)
-        for token in ("shrink-0 w-28 rounded-xl", "aspect-[2/3]", "p-1.5",
-                      "flex items-center gap-1 min-w-0 mb-1",
-                      "shrink-0 text-[8px] font-bold px-1 py-0.5 rounded",
-                      "text-[11px] font-medium leading-tight truncate"):
+        for token in ("shrink-0 w-32", "rounded-inner", "aspect-[2/3]", "pt-2", "text-label leading-5"):
             self.assertIn(token, skel, token)
             self.assertIn(token, card, token)
-        self.assertIn("border border-transparent", skel)   # the glass card's 1px border
-        self.assertIn("glass-card", card)
+        self.assertEqual(skel.count("text-label leading-5"), 2)
+        self.assertEqual(card.count("text-label leading-5"), 2)
+        self.assertNotIn("border", skel)          # no glass card, no border to hold
+        self.assertNotIn("glass-card", card)
 
 
 class PageStylesAreInTheHead(unittest.TestCase):
@@ -399,9 +399,12 @@ class PageStylesAreInTheHead(unittest.TestCase):
     the server writes last, so the operator's CSS wins at equal specificity."""
 
     def test_no_style_block_in_the_body(self):
+        # Issues has no page style since its chips became theme.css's
+        # .ws-filter (audit 2026-10-04); it still keeps none in the body.
         for name, text in (("requests", REQUESTS), ("issues", ISSUES)):
             head, body = text.split("</head>", 1)
-            self.assertIn("<style>", head, name)
+            if name == "requests":
+                self.assertIn("<style>", head, name)
             self.assertNotIn("<style", body, name)
 
 
@@ -481,10 +484,13 @@ class BrightTextOnlyOnPrimary(unittest.TestCase):
     def test_the_modal_close_buttons(self):
         tickets = (STATIC / "tickets.html").read_text(encoding="utf-8")
         calendar = (STATIC / "calendar.html").read_text(encoding="utf-8")
-        for page, call in ((ISSUES, 'data-action="close-modal" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
-                           (tickets, 'data-action="close-create" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
-                           (tickets, 'data-action="close-detail" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue'),
-                           (calendar, 'id="closePanelBtn" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue')):
+        # Theme text on the page's own surface, never bright; each is a named
+        # 40px icon button (audit 2026-10-04, M5/M6).
+        quiet = 'grid place-items-center size-10 rounded-btn text-frosted-blue/70 hover:text-frosted-blue'
+        for page, call in ((ISSUES, 'data-action="close-modal" class="absolute top-3 right-3 ' + quiet),
+                           (tickets, 'data-action="close-create" class="absolute top-3 right-3 ' + quiet),
+                           (tickets, 'data-action="close-detail" class="absolute top-3 right-3 ' + quiet),
+                           (calendar, 'id="closePanelBtn" class="absolute top-2 right-2 ' + quiet)):
             self.assertIn(call, page)
 
 
@@ -555,22 +561,22 @@ class TicketDraftsSurvive(unittest.TestCase):
 
 class EscapeClosesTheModals(unittest.TestCase):
     """R161: Escape closes the issue and ticket modals like every other
-    overlay: only the topmost, and never under a WSUI dialog."""
+    overlay: only the topmost, and never under a WSUI dialog. Since the audit
+    of 2026-10-04 (M5) every one is a WSUI.modal, on the one dialog stack
+    that answers Escape for the topmost (ui.js onKey), so the pages carry no
+    Escape listener of their own."""
 
     def test_issues(self):
-        m = re.search(r"document\.addEventListener\('keydown', function \(e\) \{(.*?)\n  \}, \{ signal: signal \}\);", ISSUES_JS, re.S)
-        self.assertIsNotNone(m)
-        self.assertIn("e.key !== 'Escape' || e.isComposing || document.querySelector('.ws-dialog')", m.group(1))
-        self.assertIn("closeModal()", m.group(1))
+        self.assertIn("_dialog = WSUI.modal(modal, { onClose: function () { modal.classList.add('hidden'); _dialog = null; } });", ISSUES_JS)
+        self.assertNotIn("'Escape'", ISSUES_JS)
 
     def test_tickets_topmost_first(self):
-        m = re.search(r"document\.addEventListener\('keydown', function\(e\) \{(.*?)\n  \}, \{ signal: signal \}\);", TICKETS, re.S)
-        self.assertIsNotNone(m)
-        body = m.group(1)
-        self.assertIn("e.key !== 'Escape' || e.isComposing || document.querySelector('.ws-dialog')", body)
-        order = [body.index(c) for c in ("closeLightbox()", "closeDetailModal()", "closeCreateModal()")]
-        self.assertEqual(order, sorted(order))
-        self.assertEqual(body.count("else if"), 2)   # one overlay per key press
+        self.assertIn("_dialogs[id] = WSUI.modal(overlay, {", TICKETS)
+        for oid in ("createModal", "detailModal", "lightbox"):
+            self.assertIn(f"openDialog('{oid}'", TICKETS)
+        self.assertNotIn("'Escape'", TICKETS)
+        ui = (STATIC / "js" / "ui.js").read_text(encoding="utf-8")
+        self.assertIn("if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); d.close(d.dismiss); return; }", ui)
 
 
 class TicketSendsSurviveAReopen(unittest.TestCase):
@@ -614,7 +620,7 @@ class TicketSendsSurviveAReopen(unittest.TestCase):
         self.assertLess(guard, ok.index("resetCreateForm();"))
         self.assertLess(guard, ok.index("closeCreateModal();"))
         self.assertIn("$('createDescription').value.trim() === description", ok)
-        self.assertIn("showToast('Ticket submitted!', 'success');", ok)
+        self.assertIn("showToast('Ticket sent', 'success');", ok)
 
 
 class IssueCommentSendsSurviveAReopen(unittest.TestCase):
@@ -651,7 +657,7 @@ class IssueCommentSendsSurviveAReopen(unittest.TestCase):
                                  r"setCommentBtn\(\$\('addCommentBtn'\), true\);")
         btn = ISSUES_JS[ISSUES_JS.index("function setCommentBtn("):ISSUES_JS.index("export async function mount(")]
         self.assertIn("btn.disabled = sending;", btn)
-        self.assertIn("btn.textContent = sending ? 'Sending...' : 'Add Comment';", btn)
+        self.assertIn("btn.textContent = sending ? 'Sending...' : 'Post comment';", btn)
 
     def test_the_send_is_guarded_and_settles(self):
         send = self.add_comment()

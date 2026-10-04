@@ -42,24 +42,27 @@ class DiscoverCardStatusLabel(unittest.TestCase):
             self.assertNotIn(gone, self.card, gone)
 
     def test_the_label_sits_in_the_badge_row_after_the_type(self):
-        row = re.search(r"'<div class=\"flex items-center gap-1 min-w-0 mb-1\">' \+(.*?)'</div>'", self.card, re.S)
-        self.assertIsNotNone(row, "the badge row")
+        # The card's second line: the type in its media colour, then the
+        # status (audit 2026-10-04: 13px, no 8px badges).
+        row = re.search(r"'<span class=\"flex items-center gap-1\.5 min-w-0 text-label leading-5\">' \+(.*?)'</span>' \+\s*'</span>'", self.card, re.S)
+        self.assertIsNotNone(row, "the type and status line")
         inner = row.group(1)
         badge = inner.index("typeBadge + '</span>'")
-        self.assertLess(badge, inner.index("statusHtml"), "the status follows the type badge")
-        self.assertIn("shrink-0 text-[8px] font-bold px-1 py-0.5 rounded", inner)
+        self.assertLess(badge, inner.index("statusHtml"), "the status follows the type")
+        self.assertIn("shrink-0 font-semibold ' + mediaTypeNounColor(mediaType)", inner)
         self.assertTrue(live_matches(self.card, r"\bstatusHtml\s*=\s*discoverStatusLabel\(\s*status\s*\)"))
 
     def test_the_label_matches_the_badge_and_gives_way(self):
-        # Same type size and box as the badge, so the row keeps its height; it
-        # truncates rather than wrapping or pushing the type out.
-        self.assertIn("min-w-0 truncate text-[8px] font-bold px-1 py-0.5 rounded", self.label)
-        self.assertIn("flex items-center gap-1 min-w-0 mb-1", self.card)
+        # The line's own type size, so the card keeps its height; it truncates
+        # rather than wrapping or pushing the type out.
+        self.assertIn("min-w-0 truncate text-frosted-blue/70", self.label)
+        self.assertIn("flex items-center gap-1.5 min-w-0 text-label leading-5", self.card)
         self.assertNotIn("flex-wrap", self.card)
 
-    def test_words_and_tones_are_the_shared_vocabulary(self):
+    def test_words_are_the_shared_vocabulary(self):
+        # The words come from WS.requestStatus; on the card the status is
+        # quiet text, no tone (status colour only where the state is the point).
         self.assertTrue(live_matches(self.label, r"\bWS\.requestStatus\(\s*status\s*\)"))
-        self.assertTrue(live_matches(self.label, r"\bSTATUS_TONE_CLASSES\["))
         self.assertTrue(live_matches(self.label, r"\bescapeHtml\(\s*known\.label\s*\)"))
 
     def test_no_status_means_no_label(self):
@@ -83,13 +86,11 @@ class DiscoverCardStatusLabel(unittest.TestCase):
         self.assertNotIn("Partial'", shell)
 
     def test_the_skeleton_card_carries_the_same_row(self):
-        skel = re.search(r'<div class="skel shrink-0 w-28 [^\n]*', REQUESTS_HTML).group(0)
-        for token in ("flex items-center gap-1 min-w-0 mb-1",
-                      "shrink-0 text-[8px] font-bold px-1 py-0.5 rounded",
-                      "text-[11px] font-medium leading-tight truncate"):
+        skel = re.search(r'<div class="skel shrink-0 w-32 [^\n]*', REQUESTS_HTML).group(0)
+        for token in ("aspect-[2/3]", "pt-2", "text-label leading-5"):
             self.assertIn(token, skel, token)
             self.assertIn(token, self.card, token)
-
+        self.assertEqual(skel.count("text-label leading-5"), self.card.count("text-label leading-5"))
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class BookFormatStatus(unittest.TestCase):

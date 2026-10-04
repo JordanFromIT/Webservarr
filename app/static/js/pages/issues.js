@@ -10,8 +10,10 @@
  * ctx.signal. One delegated click listener on ctx.root serves every control
  * (data-action), including the cards and the comment button rebuilt from
  * strings; one capturing error listener hides a poster that fails to load.
- * The detail modal lives inside #wsPage, so leaving the page takes it away
- * with the rest. The wiki pointer is wiki-hook.js (a page helper script,
+ * Every card and search result is a button, so the page works from the
+ * keyboard. The detail is a dialog (WSUI.modal: focus in, Tab kept inside,
+ * Escape, focus back); it lives inside #wsPage, so leaving the page takes it
+ * away with the rest. The wiki pointer is wiki-hook.js (a page helper script,
  * data-ws-page-script), started from mount with the same ctx.
  */
 
@@ -28,28 +30,31 @@ function showToast(message, type) {
 function buildSearchResultItem(item, index) {
   // The row names its place in this search's results; the click listener
   // reads the item from there, so nothing about the title goes into markup
-  // that runs.
+  // that runs. A button, so a title can be picked from the keyboard.
   var title = item.title || 'Unknown';
   var year = item.year ? String(item.year) : '';
-  var mediaTypeLabel = item.media_type === 'tv' ? 'TV Show' : 'Movie';
+  var mediaTypeLabel = item.media_type === 'tv' ? 'TV show' : 'Movie';
   var typeBadgeColor = item.media_type === 'tv' ? 'badge-media-tv' : 'badge-media-movie';
   var posterUrl = item.poster_url || '';
 
-  var row = document.createElement('div');
-  row.className = 'flex items-center gap-3 p-2 rounded-lg hover:bg-frosted-blue/5 cursor-pointer transition-all border border-transparent hover:border-steel-blue/20';
+  var li = document.createElement('li');
+  var row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'w-full text-left flex items-center gap-3 p-2 rounded-inner hover:bg-frosted-blue/[0.07] transition-colors';
   row.setAttribute('data-action', 'select-media');
   row.setAttribute('data-index', String(index));
+  li.appendChild(row);
 
   if (posterUrl) {
     // A poster that fails to load gives way to the placeholder after it
     // (the page's error listener).
     var img = document.createElement('img');
     img.src = posterUrl;
-    img.alt = title;
-    img.className = 'w-10 h-[60px] rounded object-cover shrink-0';
+    img.alt = '';
+    img.className = 'w-10 h-[60px] rounded-md object-cover shrink-0';
     img.setAttribute('data-poster', '');
     var fallback = document.createElement('div');
-    fallback.className = 'w-10 h-[60px] rounded bg-frosted-blue/5 items-center justify-center shrink-0';
+    fallback.className = 'w-10 h-[60px] rounded-md bg-frosted-blue/5 items-center justify-center shrink-0';
     fallback.style.display = 'none';
     fallback.setAttribute('data-poster-fallback', '');
     fallback.innerHTML = '<span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span>';
@@ -57,7 +62,7 @@ function buildSearchResultItem(item, index) {
     row.appendChild(fallback);
   } else {
     var placeholder = document.createElement('div');
-    placeholder.className = 'w-10 h-[60px] rounded bg-frosted-blue/5 flex items-center justify-center shrink-0';
+    placeholder.className = 'w-10 h-[60px] rounded-md bg-frosted-blue/5 flex items-center justify-center shrink-0';
     placeholder.innerHTML = '<span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span>';
     row.appendChild(placeholder);
   }
@@ -65,30 +70,33 @@ function buildSearchResultItem(item, index) {
   var info = document.createElement('div');
   info.className = 'flex-1 min-w-0';
 
-  var titleP = document.createElement('p');
-  titleP.className = 'text-frosted-blue text-sm font-medium truncate';
+  var titleP = document.createElement('span');
+  titleP.className = 'block text-frosted-blue text-body font-semibold truncate';
   titleP.textContent = title;
   info.appendChild(titleP);
 
-  var metaRow = document.createElement('div');
+  var metaRow = document.createElement('span');
   metaRow.className = 'flex items-center gap-2 mt-0.5';
   if (year) {
     var yearSpan = document.createElement('span');
-    yearSpan.className = 'text-steel-blue text-[11px]';
+    yearSpan.className = 'text-frosted-blue/70 text-label tabular-nums';
     yearSpan.textContent = year;
     metaRow.appendChild(yearSpan);
   }
   var typeSpan = document.createElement('span');
-  typeSpan.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor;
+  typeSpan.className = CHIP + ' ' + typeBadgeColor;
   typeSpan.textContent = mediaTypeLabel;
   metaRow.appendChild(typeSpan);
   info.appendChild(metaRow);
 
   row.appendChild(info);
-  return row;
+  return li;
 }
 
 // ---- Badges ----
+
+// One chip, as the Books pages draw it: sentence case, 13px, fully rounded.
+var CHIP = 'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-label font-semibold';
 
 function getIssueTypeBadge(type) {
   // One neutral chip: the icon and the word say which kind of problem it
@@ -100,47 +108,49 @@ function getIssueTypeBadge(type) {
     'other':     { bg: 'bg-frosted-blue/10', text: 'text-frosted-blue', icon: 'more_horiz', label: 'Other' },
   };
   var c = configs[type] || configs['other'];
-  return '<span class="px-2 py-0.5 rounded ' + c.bg + ' ' + c.text + ' text-[9px] font-bold uppercase tracking-wider inline-flex items-center gap-1">' +
-    '<span class="material-symbols-outlined text-[10px]">' + c.icon + '</span>' + c.label + '</span>';
+  return '<span class="' + CHIP + ' ' + c.bg + ' ' + c.text + '">' +
+    '<span class="material-symbols-outlined text-[15px]" aria-hidden="true">' + c.icon + '</span>' + c.label + '</span>';
 }
 
 // Status colour only on deviation: an open issue is waiting on someone, so it
 // takes the warning tint and status-text words; a resolved one is quiet.
 function getIssueStatusBadge(status) {
   if (status === 'open') {
-    return '<span class="px-2 py-0.5 rounded bg-status-warn/10 text-status-warn-text text-[9px] font-bold uppercase tracking-wider">Open</span>';
+    return '<span class="' + CHIP + ' bg-status-warn/10 text-status-warn-text">Open</span>';
   }
-  return '<span class="px-2 py-0.5 rounded bg-frosted-blue/10 text-frosted-blue/80 text-[9px] font-bold uppercase tracking-wider">Resolved</span>';
+  return '<span class="' + CHIP + ' bg-frosted-blue/10 text-frosted-blue/80">Resolved</span>';
 }
 
 function buildIssueCard(issue) {
   var title = escapeHtml(issue.media_title || 'Unknown');
   var posterUrl = issue.poster_url || '';
 
-  // A poster that fails to load gives way to the placeholder after it.
+  // A poster that fails to load gives way to the placeholder after it. The
+  // title is the button's name, so the poster's alt stays empty.
   var posterHtml = posterUrl
-    ? '<img src="' + escapeHtml(posterUrl) + '" alt="' + title + '" class="w-12 h-[72px] rounded object-cover shrink-0" data-poster/>' +
-      '<div class="w-12 h-[72px] rounded bg-frosted-blue/5 items-center justify-center shrink-0" style="display:none" data-poster-fallback><span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span></div>'
-    : '<div class="w-12 h-[72px] rounded bg-frosted-blue/5 flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-xl text-steel-blue/30">movie</span></div>';
+    ? '<img src="' + escapeHtml(posterUrl) + '" alt="" class="w-12 h-[72px] rounded-md object-cover shrink-0" data-poster/>' +
+      '<span class="w-12 h-[72px] rounded-md bg-frosted-blue/5 items-center justify-center shrink-0" style="display:none" data-poster-fallback><span class="material-symbols-outlined text-xl text-steel-blue/30" aria-hidden="true">movie</span></span>'
+    : '<span class="w-12 h-[72px] rounded-md bg-frosted-blue/5 flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-xl text-steel-blue/30" aria-hidden="true">movie</span></span>';
 
-  var dateStr = issue.created_date ? getTimeAgo(new Date(issue.created_date)) : '';
+  var dateStr = issue.created_date ? getTimeAgo(issue.created_date, true) : '';
 
-  return '<div class="glass-card rounded-xl p-3 flex gap-3 items-start cursor-pointer hover:border-primary/40 transition-all" data-action="view-issue" data-issue-id="' + escapeHtml(String(issue.id)) + '">' +
+  // A button: the whole card opens the detail, from a click or the keyboard.
+  return '<button type="button" class="w-full text-left rounded-inner bg-frosted-blue/[0.04] hover:bg-frosted-blue/[0.07] p-3 flex gap-3 items-start transition-colors" data-action="view-issue" data-issue-id="' + escapeHtml(String(issue.id)) + '">' +
     posterHtml +
-    '<div class="flex-1 min-w-0">' +
-      '<p class="text-frosted-blue text-sm font-bold truncate">' + title + '</p>' +
-      '<div class="flex flex-wrap items-center gap-1.5 mt-1">' +
+    '<span class="flex-1 min-w-0">' +
+      '<span class="block text-frosted-blue text-body font-semibold truncate">' + title + '</span>' +
+      '<span class="flex flex-wrap items-center gap-1.5 mt-1">' +
         getIssueTypeBadge(issue.issue_type) +
         getIssueStatusBadge(issue.status) +
-      '</div>' +
-      (dateStr ? '<p class="text-[10px] text-frosted-blue/70 mt-1.5">' + dateStr + '</p>' : '') +
-    '</div>' +
-  '</div>';
+      '</span>' +
+      (dateStr ? '<span class="block text-label text-frosted-blue/70 mt-1.5">' + escapeHtml(dateStr) + '</span>' : '') +
+    '</span>' +
+  '</button>';
 }
 
 function setCommentBtn(btn, sending) {
   btn.disabled = sending;
-  btn.textContent = sending ? 'Sending...' : 'Add Comment';
+  btn.textContent = sending ? 'Sending...' : 'Post comment';
   btn.classList.toggle('opacity-60', sending);
 }
 
@@ -168,6 +178,7 @@ export async function mount(ctx) {
   // offering a second send.
   var _commentSending = {};
   var _detailIssueId = null;
+  var _dialog = null;          // the open detail (WSUI.modal), or null
 
   if (window.WikiHook) WikiHook.init(ctx, { container: 'wikiHookIssues', hook: 'issues', lead: 'Might this help first?' });
 
@@ -182,9 +193,8 @@ export async function mount(ctx) {
     section.classList.remove('hidden');
     emptyState.classList.add('hidden');
 
-    list.innerHTML = '<div class="text-center text-steel-blue py-4">' +
-      '<span class="material-symbols-outlined text-2xl mb-1 block opacity-50 animate-spin">progress_activity</span>' +
-      '<p class="text-xs">Searching...</p></div>';
+    $('searchResultCount').textContent = '';
+    list.innerHTML = '<li class="text-frosted-blue/70 text-body py-3 px-2">Searching&hellip;</li>';
 
     try {
       var resp = await fetch('/api/integrations/seerr-search?query=' + encodeURIComponent(query) + '&page=1', { signal: signal });
@@ -196,14 +206,13 @@ export async function mount(ctx) {
         return item.media_info_id;
       });
 
-      $('searchResultCount').textContent = results.length + ' in library';
+      $('searchResultCount').textContent = results.length === 1 ? '1 title in the library' : results.length + ' titles in the library';
 
       if (results.length === 0) {
         _searchResults = [];
-        list.innerHTML = '<div class="text-center text-steel-blue py-4">' +
-          '<span class="material-symbols-outlined text-2xl mb-1 block opacity-50">search_off</span>' +
-          '<p class="text-xs">No library items found for "' + escapeHtml(query) + '"</p>' +
-          '<p class="text-[10px] text-frosted-blue/70 mt-1">Only titles already in the library can be reported here</p></div>';
+        list.innerHTML = '<li class="py-3 px-2">' +
+          '<p class="text-body text-frosted-blue">Nothing in the library matches \u201c' + escapeHtml(query) + '\u201d.</p>' +
+          '<p class="text-label text-frosted-blue/70 mt-1">Only titles already in the library can be reported here.</p></li>';
         return;
       }
 
@@ -226,9 +235,8 @@ export async function mount(ctx) {
     } catch (error) {
       if (signal.aborted || isAbort(error)) return;   // left the page: not an error
       console.error('Search error:', error);
-      list.innerHTML = '<div class="text-center text-frosted-blue/70 py-4">' +
-        '<span class="material-symbols-outlined text-2xl mb-1 block text-status-err-text">error</span>' +
-        '<p class="text-xs">Error searching. Is Seerr configured?</p></div>';
+      list.innerHTML = '<li class="py-3 px-2 text-body text-frosted-blue/70">' +
+        'Search isn\u2019t working right now. Try again in a minute.</li>';
     }
   }
 
@@ -255,7 +263,7 @@ export async function mount(ctx) {
 
     // Populate selected media display
     $('selectedMediaTitle').textContent = item.title;
-    $('selectedMediaYear').textContent = (item.year || '') + ' - ' + (item.media_type === 'tv' ? 'TV Show' : 'Movie');
+    $('selectedMediaYear').textContent = (item.year ? item.year + ', ' : '') + (item.media_type === 'tv' ? 'TV show' : 'Movie');
     var poster = $('selectedMediaPoster');
     if (item.poster_url) {
       poster.src = item.poster_url;
@@ -266,8 +274,9 @@ export async function mount(ctx) {
 
     // Reset form
     $('issueMessage').value = '';
+    clearInvalid();
     root.querySelectorAll('.issue-type-btn').forEach(function (btn) {
-      btn.classList.remove('active');
+      btn.setAttribute('aria-pressed', 'false');
     });
   }
 
@@ -283,32 +292,40 @@ export async function mount(ctx) {
   function selectIssueType(type) {
     _selectedIssueType = type;
     root.querySelectorAll('.issue-type-btn').forEach(function (btn) {
-      if (parseInt(btn.getAttribute('data-type'), 10) === type) {
-        btn.classList.add('active');
-      } else {
-        btn.classList.remove('active');
-      }
+      btn.setAttribute('aria-pressed', parseInt(btn.getAttribute('data-type'), 10) === type ? 'true' : 'false');
     });
+    markInvalid('issueTypeField', 'issueTypeError', false);
   }
 
-  // ---- Submit Issue ----
+  // ---- Validation: the field says what is missing, not a toast ----
+
+  // Settings' pattern (.ws-invalid): the field takes the error ring, the line
+  // under it says what to do, and the first one missing takes the focus.
+  function markInvalid(fieldId, errorId, bad) {
+    var field = $(fieldId);
+    field.classList.toggle('ws-invalid', bad);
+    if (field.tagName !== 'FIELDSET') field.setAttribute('aria-invalid', bad ? 'true' : 'false');
+    $(errorId).classList.toggle('hidden', !bad);
+  }
+
+  function clearInvalid() {
+    markInvalid('issueTypeField', 'issueTypeError', false);
+    markInvalid('issueMessage', 'issueMessageError', false);
+  }
+
+  // ---- Send the report ----
 
   async function submitIssue() {
     if (!_selectedMedia) return;
-    if (!_selectedIssueType) {
-      showToast('Please select an issue type', 'error');
-      return;
-    }
     var message = $('issueMessage').value.trim();
-    if (!message) {
-      showToast('Please describe the issue', 'error');
-      return;
-    }
+    markInvalid('issueTypeField', 'issueTypeError', !_selectedIssueType);
+    markInvalid('issueMessage', 'issueMessageError', !message);
+    if (!_selectedIssueType) { root.querySelector('.issue-type-btn').focus(); return; }
+    if (!message) { $('issueMessage').focus(); return; }
 
     var submitBtn = $('submitIssueBtn');
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span>';
-    submitBtn.classList.add('opacity-60');
+    submitBtn.textContent = 'Sending\u2026';
 
     try {
       var resp = await fetch('/api/integrations/issues', {
@@ -326,7 +343,7 @@ export async function mount(ctx) {
         throw new Error(err.detail || 'Failed to create issue');
       }
 
-      showToast('Issue reported successfully!', 'success');
+      showToast('Report sent for ' + _selectedMedia.title, 'success');
       deselectMedia();
       ctx.setTimeout(function () { loadIssueCounts(); loadIssues(); }, 1500);
 
@@ -336,8 +353,7 @@ export async function mount(ctx) {
       showToast(error.message, 'error');
     } finally {
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Submit Issue';
-      submitBtn.classList.remove('opacity-60');
+      submitBtn.textContent = 'Send report';
     }
   }
 
@@ -353,14 +369,14 @@ export async function mount(ctx) {
         $('statTotal').textContent = counts.total || 0;
         $('statOpen').textContent = counts.open || 0;
         $('statClosed').textContent = counts.closed || 0;
-        $('issuesTotalCount').textContent = '(' + (counts.total || 0) + ')';
+        $('issuesTotalCount').textContent = String(counts.total || 0);
       });
     }, {
       onError: function (err) {
         if (signal.aborted || isAbort(err)) return;   // left the page: not an error
-        console.log('Issue counts not available');
+        // No figure to show: the box keeps its height with a blank line.
         WS.arrive('counts', function () {
-          ['statTotal', 'statOpen', 'statClosed'].forEach(function (id) { $(id).textContent = '–'; });
+          ['statTotal', 'statOpen', 'statClosed'].forEach(function (id) { $(id).textContent = '\u00a0'; });
         });
       }
     });
@@ -382,9 +398,7 @@ export async function mount(ctx) {
         console.error('Error loading issues:', err);
         WS.arrive('list', function () {
           WS.setHTML($('issuesList'),
-            '<div class="text-center text-steel-blue py-8">' +
-            '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">report_problem</span>' +
-            '<p>Could not load issues</p></div>');
+            '<p class="text-body text-frosted-blue/70 py-6">Reported problems can\u2019t be shown right now. Try again in a minute.</p>');
         });
       }
     });
@@ -408,11 +422,9 @@ export async function mount(ctx) {
     }
 
     if (filtered.length === 0) {
-      var msg = 'No issues found';
-      if (_currentStatusFilter !== 'all' || _currentTypeFilter !== 'all') msg = 'No matching issues';
-      WS.setHTML(list, '<div class="text-center text-steel-blue py-8">' +
-        '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50">check_circle</span>' +
-        '<p>' + msg + '</p></div>');
+      var msg = 'Nothing has been reported yet.';
+      if (_currentStatusFilter !== 'all' || _currentTypeFilter !== 'all') msg = 'Nothing matches those filters.';
+      WS.setHTML(list, '<p class="text-body text-frosted-blue/70 py-6">' + msg + '</p>');
       return;
     }
 
@@ -426,11 +438,7 @@ export async function mount(ctx) {
   function setStatusFilter(filter) {
     _currentStatusFilter = filter;
     root.querySelectorAll('.status-filter-tab').forEach(function (tab) {
-      if (tab.getAttribute('data-sfilter') === filter) {
-        tab.classList.add('active');
-      } else {
-        tab.classList.remove('active');
-      }
+      tab.setAttribute('aria-pressed', tab.getAttribute('data-sfilter') === filter ? 'true' : 'false');
     });
     renderIssues();
   }
@@ -438,11 +446,7 @@ export async function mount(ctx) {
   function setTypeFilter(filter) {
     _currentTypeFilter = filter;
     root.querySelectorAll('.type-filter-tab').forEach(function (tab) {
-      if (tab.getAttribute('data-tfilter') === filter) {
-        tab.classList.add('active');
-      } else {
-        tab.classList.remove('active');
-      }
+      tab.setAttribute('aria-pressed', tab.getAttribute('data-tfilter') === filter ? 'true' : 'false');
     });
     renderIssues();
   }
@@ -457,11 +461,11 @@ export async function mount(ctx) {
     _detailIssueId = String(issueId);
     var modal = $('issueModal');
     var content = $('modalContent');
-    modal.classList.remove('hidden');
-
-    content.innerHTML = '<div class="text-center text-steel-blue py-8">' +
-      '<span class="material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin">progress_activity</span>' +
-      '<p>Loading issue...</p></div>';
+    content.innerHTML = '<p id="issueDetailTitle" class="text-frosted-blue/70 text-body py-8 text-center">Loading the report\u2026</p>';
+    if (!_dialog) {
+      modal.classList.remove('hidden');
+      _dialog = WSUI.modal(modal, { onClose: function () { modal.classList.add('hidden'); _dialog = null; } });
+    }
 
     try {
       var resp = await fetch('/api/integrations/issues/' + issueId, { signal: signal });
@@ -470,9 +474,7 @@ export async function mount(ctx) {
       renderIssueDetail(issue);
     } catch (error) {
       if (signal.aborted || isAbort(error)) return;   // left the page: not an error
-      content.innerHTML = '<div class="text-center text-frosted-blue/70 py-8">' +
-        '<span class="material-symbols-outlined text-4xl mb-2 block text-status-err-text">error</span>' +
-        '<p>Could not load issue details</p></div>';
+      content.innerHTML = '<p id="issueDetailTitle" class="text-frosted-blue/70 text-body py-8 text-center">This report can\u2019t be shown right now. Try again in a minute.</p>';
     }
   }
 
@@ -480,44 +482,46 @@ export async function mount(ctx) {
     var content = $('modalContent');
     var posterUrl = issue.poster_url || '';
     var title = escapeHtml(issue.media_title || 'Unknown');
-    var dateStr = issue.created_date ? getTimeAgo(new Date(issue.created_date)) : '';
+    var dateStr = issue.created_date ? getTimeAgo(issue.created_date) : '';
 
     var posterHtml = posterUrl
-      ? '<img src="' + escapeHtml(posterUrl) + '" alt="' + title + '" class="w-16 h-24 rounded object-cover shrink-0"/>'
-      : '<div class="w-16 h-24 rounded bg-frosted-blue/5 flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-2xl text-steel-blue/30">movie</span></div>';
+      ? '<img src="' + escapeHtml(posterUrl) + '" alt="" class="w-16 h-24 rounded-btn object-cover shrink-0"/>'
+      : '<div class="w-16 h-24 rounded-btn bg-frosted-blue/5 flex items-center justify-center shrink-0"><span class="material-symbols-outlined text-2xl text-steel-blue/30" aria-hidden="true">movie</span></div>';
 
     // Comments
     var comments = issue.comments || [];
     var commentsHtml = comments.map(function (c) {
-      var commentDate = c.created_date ? getTimeAgo(new Date(c.created_date)) : '';
-      return '<div class="p-3 rounded-lg bg-frosted-blue/5 border border-steel-blue/10">' +
-        (commentDate ? '<p class="text-[10px] text-frosted-blue/70 mb-1.5">' + commentDate + '</p>' : '') +
-        '<p class="text-sm text-frosted-blue/80 whitespace-pre-wrap">' + escapeHtml(c.message || '') + '</p>' +
+      var commentDate = c.created_date ? getTimeAgo(c.created_date, true) : '';
+      return '<div class="p-3 rounded-inner bg-frosted-blue/[0.04]">' +
+        (commentDate ? '<p class="text-label text-frosted-blue/70 mb-1.5">' + escapeHtml(commentDate) + '</p>' : '') +
+        '<p class="text-body text-frosted-blue/80 whitespace-pre-wrap">' + escapeHtml(c.message || '') + '</p>' +
       '</div>';
     }).join('');
 
     content.innerHTML = '' +
       // Header: poster + title + badges
-      '<div class="flex gap-4 mb-4">' +
+      '<div class="flex gap-4 mb-5 pr-10">' +
         posterHtml +
         '<div class="flex-1 min-w-0">' +
-          '<p class="text-frosted-blue text-base font-bold">' + title + '</p>' +
+          '<h2 id="issueDetailTitle" class="text-frosted-blue text-lead font-bold">' + title + '</h2>' +
           '<div class="flex flex-wrap items-center gap-1.5 mt-1.5">' +
             getIssueTypeBadge(issue.issue_type) +
             getIssueStatusBadge(issue.status) +
           '</div>' +
-          (dateStr ? '<p class="text-xs text-frosted-blue/70 mt-2">' + dateStr + '</p>' : '') +
+          (dateStr ? '<p class="text-label text-frosted-blue/70 mt-2">Reported ' + escapeHtml(dateStr) + '</p>' : '') +
         '</div>' +
       '</div>' +
       // Comments
-      '<div class="border-t border-steel-blue/20 pt-4">' +
-        '<p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-3">Comments (' + comments.length + ')</p>' +
-        (commentsHtml ? '<div class="space-y-2 mb-4">' + commentsHtml + '</div>' : '<p class="text-sm text-frosted-blue/70 mb-4">No comments yet</p>') +
+      '<div class="border-t border-frosted-blue/10 pt-4">' +
+        '<h3 class="text-body font-semibold text-frosted-blue mb-3">' + (comments.length === 1 ? '1 comment' : comments.length + ' comments') + '</h3>' +
+        (commentsHtml ? '<div class="space-y-2 mb-4">' + commentsHtml + '</div>' : '<p class="text-body text-frosted-blue/70 mb-4">No comments yet.</p>') +
       '</div>' +
       // Add comment form
-      '<div class="border-t border-steel-blue/20 pt-4">' +
-        '<textarea id="commentMessage" placeholder="Add a comment..." class="w-full p-3 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm resize-none h-20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"></textarea>' +
-        '<button id="addCommentBtn" data-action="add-comment" data-issue-id="' + escapeHtml(String(issue.id)) + '" class="w-full py-2 mt-2 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all">Add Comment</button>' +
+      '<div class="border-t border-frosted-blue/10 pt-4">' +
+        '<label for="commentMessage" class="block text-label font-semibold text-frosted-blue/70 mb-1.5">Add a comment</label>' +
+        '<textarea id="commentMessage" aria-describedby="commentError" class="w-full p-3 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body resize-none h-24 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"></textarea>' +
+        '<p id="commentError" class="hidden text-label font-semibold text-status-err-text mt-1.5">Write something first.</p>' +
+        '<button type="button" id="addCommentBtn" data-action="add-comment" data-issue-id="' + escapeHtml(String(issue.id)) + '" class="ws-lift w-full py-2.5 mt-2 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors">Post comment</button>' +
       '</div>';
 
     // The draft is kept by the page's delegated input listener.
@@ -531,11 +535,12 @@ export async function mount(ctx) {
 
   async function addComment(issueId) {
     if (Object.prototype.hasOwnProperty.call(_commentSending, issueId)) return;
-    var message = $('commentMessage').value.trim();
-    if (!message) {
-      showToast('Please enter a comment', 'error');
-      return;
-    }
+    var box = $('commentMessage');
+    var message = box.value.trim();
+    box.classList.toggle('ws-invalid', !message);
+    box.setAttribute('aria-invalid', message ? 'false' : 'true');
+    $('commentError').classList.toggle('hidden', !!message);
+    if (!message) { box.focus(); return; }
 
     setCommentBtn($('addCommentBtn'), true);
     _commentSending[issueId] = message;
@@ -555,7 +560,7 @@ export async function mount(ctx) {
       // Newer text typed meanwhile stays; only the sent text is cleared,
       // compared trimmed as it was posted (a stray space is not new text).
       if ((_commentDrafts[issueId] || '').trim() === message) delete _commentDrafts[issueId];
-      showToast('Comment added!', 'success');
+      showToast('Comment posted', 'success');
       // Reload the issue detail, unless it was closed or another one opened
       if (issueShowing(issueId)) viewIssue(issueId);
 
@@ -571,7 +576,7 @@ export async function mount(ctx) {
   }
 
   function closeModal() {
-    $('issueModal').classList.add('hidden');
+    if (_dialog) _dialog.close();
   }
 
   // ---- Wiring: one listener per kind, on the page or with its signal ----
@@ -585,7 +590,6 @@ export async function mount(ctx) {
       case 'close-modal': closeModal(); break;
       case 'deselect': deselectMedia(); break;
       case 'issue-type': selectIssueType(parseInt(el.getAttribute('data-type'), 10)); break;
-      case 'submit': submitIssue(); break;
       case 'status-filter': setStatusFilter(el.getAttribute('data-sfilter')); break;
       case 'type-filter': setTypeFilter(el.getAttribute('data-tfilter')); break;
       case 'select-media': {
@@ -622,19 +626,21 @@ export async function mount(ctx) {
       ctx.setTimeout(function () {
         if (seq === _searchSeq) performSearch(query);
       }, SEARCH_DELAY_MS);
+    } else if (t.id === 'issueMessage') {
+      if (t.value.trim()) markInvalid('issueMessage', 'issueMessageError', false);
     } else if (t.id === 'commentMessage') {
+      if (t.value.trim()) { t.classList.remove('ws-invalid'); $('commentError').classList.add('hidden'); }
       var id = t.getAttribute('data-issue-id');
       if (t.value) _commentDrafts[id] = t.value;
       else delete _commentDrafts[id];
     }
   }, { signal: signal });
 
-  // Escape closes the issue detail, like every other overlay, but not while an
-  // input method is composing. A WSUI dialog answers its own Escape first; the
-  // check is the belt to that.
-  document.addEventListener('keydown', function (e) {
-    if (e.key !== 'Escape' || e.isComposing || document.querySelector('.ws-dialog')) return;
-    if (!$('issueModal').classList.contains('hidden')) closeModal();
+  // The report form sends on submit (its button, or Enter in the search-free
+  // fields); Escape on the detail is WSUI.modal's.
+  $('issueFormSection').addEventListener('submit', function (e) {
+    e.preventDefault();
+    submitIssue();
   }, { signal: signal });
 
   ctx.poll(function () {

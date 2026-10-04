@@ -44,7 +44,7 @@ class ModalRequestPassesTheIdThrough(unittest.TestCase):
         self.assertTrue(live_matches(
             self.modal, r"\bmediaId\s*=\s*buttonEl\.getAttribute\(\s*'data-media-id'\s*\)\s*;"))
         self.assertTrue(live_matches(
-            self.modal, r"\brequestMedia\(\s*mediaType\s*,\s*mediaId\s*,\s*false\s*,\s*buttonEl\s*\)"))
+            self.modal, r"\brequestMedia\(\s*mediaType\s*,\s*mediaId\s*,\s*false\s*,\s*buttonEl\s*,"))
 
     def test_the_modal_button_reaches_request_from_modal(self):
         # Built with the id in data-media-id and handed, as itself, to

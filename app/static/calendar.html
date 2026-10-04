@@ -17,38 +17,39 @@
 <!-- ws:header -->
 <!-- Scrollable Content: the page (spec 4.1), swapped by the router -->
 <div id="wsPage" data-ws-module="/static/js/pages/calendar.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-hidden relative">
-<h1 class="sr-only">Calendar</h1>
-
-<!-- Calendar area — fills full viewport height -->
+<!-- Calendar area: fills the viewport height on a wide screen -->
 <div class="flex flex-col flex-1 min-h-0 p-4 lg:p-8">
 
-<!-- Calendar Header: nav + month label -->
-<div class="glass-card rounded-xl p-4 mb-4 shrink-0">
-<div class="flex items-center justify-between">
-<div class="flex items-center gap-2">
-<button id="prevMonthBtn" class="p-2 rounded-lg hover:bg-frosted-blue/10 transition-colors text-steel-blue hover:text-frosted-blue" title="Previous month" data-action="prev-month">
-<span class="material-symbols-outlined">chevron_left</span>
-</button>
-<button id="nextMonthBtn" class="p-2 rounded-lg hover:bg-frosted-blue/10 transition-colors text-steel-blue hover:text-frosted-blue" title="Next month" data-action="next-month">
-<span class="material-symbols-outlined">chevron_right</span>
-</button>
-<h2 id="monthLabel" class="text-lg lg:text-xl font-bold text-frosted-blue ml-2"></h2>
+<div class="mb-5 shrink-0">
+<h1 class="text-h2 sm:text-h1 font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue">Calendar</h1>
+<p class="mt-2 text-body text-frosted-blue/70">Movies and episodes coming to the server. Pick a day to see what&rsquo;s on it.</p>
 </div>
-<button id="todayBtn" data-action="today" class="px-3 py-1.5 rounded-lg bg-primary/20 border border-primary/30 text-frosted-blue text-xs font-bold uppercase tracking-wider hover:bg-primary/30 transition-colors">
+
+<!-- Month: the arrows, its name, and the way back to today -->
+<div class="flex items-center justify-between gap-3 mb-3 shrink-0">
+<div class="flex items-center gap-1">
+<button type="button" id="prevMonthBtn" class="grid place-items-center size-10 rounded-btn hover:bg-frosted-blue/[0.07] transition-colors text-frosted-blue/70 hover:text-frosted-blue" aria-label="Previous month" data-action="prev-month">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+</button>
+<button type="button" id="nextMonthBtn" class="grid place-items-center size-10 rounded-btn hover:bg-frosted-blue/[0.07] transition-colors text-frosted-blue/70 hover:text-frosted-blue" aria-label="Next month" data-action="next-month">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+</button>
+<h2 id="monthLabel" class="text-lead sm:text-h3 font-bold text-frosted-blue ml-2 whitespace-nowrap" aria-live="polite"></h2>
+</div>
+<button type="button" id="todayBtn" data-action="today" class="h-10 px-4 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue text-body font-semibold hover:bg-frosted-blue/10 transition-colors">
 Today
 </button>
 </div>
-</div>
 
 <!-- Day-of-week headers -->
-<div id="dayHeaders" class="hidden lg:grid grid-cols-7 gap-px shrink-0">
-<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Sun</div>
-<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Mon</div>
-<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Tue</div>
-<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Wed</div>
-<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Thu</div>
-<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Fri</div>
-<div class="text-center text-[10px] lg:text-xs font-bold uppercase tracking-wider text-steel-blue py-2">Sat</div>
+<div id="dayHeaders" class="hidden lg:grid grid-cols-7 gap-px shrink-0" aria-hidden="true">
+<div class="text-center text-label font-semibold text-frosted-blue/70 py-2">Sun</div>
+<div class="text-center text-label font-semibold text-frosted-blue/70 py-2">Mon</div>
+<div class="text-center text-label font-semibold text-frosted-blue/70 py-2">Tue</div>
+<div class="text-center text-label font-semibold text-frosted-blue/70 py-2">Wed</div>
+<div class="text-center text-label font-semibold text-frosted-blue/70 py-2">Thu</div>
+<div class="text-center text-label font-semibold text-frosted-blue/70 py-2">Fri</div>
+<div class="text-center text-label font-semibold text-frosted-blue/70 py-2">Sat</div>
 </div>
 
 <!-- Calendar grid — fills remaining height -->
@@ -92,14 +93,16 @@ Today
 
 </div>
 
-<!-- Day Detail Panel — overlays bottom of viewport, doesn't affect grid size -->
-<div id="dayDetailPanel" class="hidden absolute bottom-0 left-0 right-0 mx-4 lg:mx-8 mb-4 lg:mb-8 glass-card rounded-xl p-4 lg:p-5 max-h-[40vh] overflow-y-auto custom-scrollbar z-20 shadow-2xl border border-steel-blue/20">
-<button id="closePanelBtn" class="absolute top-3 right-3 text-steel-blue hover:text-frosted-blue transition-colors z-10" data-action="close-panel">
-<span class="material-symbols-outlined">close</span>
+<!-- Day detail: overlays the bottom of the viewport, so the grid keeps its
+     size. A real overlay, so it keeps the blur. Not modal: the grid stays
+     usable beside it, Escape closes it and focus goes back to the day. -->
+<section id="dayDetailPanel" aria-labelledby="detailDateLabel" class="hidden absolute bottom-0 left-0 right-0 mx-4 lg:mx-8 mb-4 lg:mb-8 glass-card rounded-card p-4 lg:p-5 max-h-[40vh] overflow-y-auto custom-scrollbar z-20 shadow-2xl">
+<button type="button" id="closePanelBtn" class="absolute top-2 right-2 grid place-items-center size-10 rounded-btn text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors z-10" data-action="close-panel" aria-label="Close this day">
+<span class="material-symbols-outlined" aria-hidden="true">close</span>
 </button>
-<h3 id="detailDateLabel" class="text-lg font-bold text-frosted-blue mb-4"></h3>
+<h3 id="detailDateLabel" tabindex="-1" class="text-lead font-bold text-frosted-blue mb-4 pr-10 focus:outline-none"></h3>
 <div id="detailReleasesList" class="space-y-3"></div>
-</div>
+</section>
 
 </div>
 

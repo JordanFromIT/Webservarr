@@ -277,9 +277,13 @@ class TicketsPage(unittest.TestCase):
         self.assertNotRegex(code, r"\bdocument\.getElementById\(", "lookups stay inside ctx.root")
 
     def test_the_tab_styles_are_a_page_style(self):
-        # Injected by script they would pile up in <head>, one per visit.
+        # Injected by script they would pile up in <head>, one per visit. The
+        # chips are theme.css's .ws-filter now (audit 2026-10-04), keyed on
+        # aria-pressed, so the page carries no style of its own for them.
         h = read("tickets")
-        self.assertIn(".filter-tab.active, .cat-filter-tab.active {", h[:h.index("</head>")])
+        self.assertIn('class="filter-tab ws-filter"', h)
+        theme = (STATIC / "css" / "theme.css").read_text(encoding="utf-8")
+        self.assertIn('.ws-filter[aria-pressed="true"] {', theme)
         self.assertNotIn("createElement('style')", module_source("tickets"))
 
     def test_wiki_pointers_start_from_mount(self):
@@ -1047,7 +1051,7 @@ class RequestsPage(unittest.TestCase):
         at = body.index(guard)
         self.assertLess(body.index("var data = await resp.json();"), at)
         for write in ("_totalSearchPages =", "_searchResults = screenResults;", "$('searchResultCount')",
-                      "renderSearchPage();", "updateSearchPagination();", "grid.textContent = '';\n        var emptyDiv"):
+                      "renderSearchPage();", "updateSearchPagination();", "grid.textContent = '';\n        var emptyP"):
             later = body.index(write, body.index("var data = await resp.json();"))
             self.assertLess(at, later, write)
         # The late book merge answers only to the newest search as well.

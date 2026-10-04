@@ -12,8 +12,10 @@
  * ctx.signal. One delegated click listener on ctx.root serves the static
  * controls and the rebuilt cards (data-action); a poster that fails to load is
  * swapped for its placeholder by one capturing error listener, not an inline
- * handler. The modal lives inside #wsPage, so leaving the page takes it away,
- * open or not. The discover rows and their skeletons are markup in
+ * handler (a trending book whose cover fails leaves its row instead). Every
+ * discover poster is a button, so the shelves work from the keyboard. The
+ * modal is a dialog (WSUI.modal) and lives inside #wsPage, so leaving the
+ * page takes it away, open or not. The discover rows and their skeletons are markup in
  * requests.html, so they are in the first paint.
  *
  * When the operator chose the Seerr embed as the Requests source, /requests
@@ -47,15 +49,15 @@ function isAbort(e) { return !!e && e.name === 'AbortError'; }
 //
 // Answers "where is the thing I asked for" for every outstanding request. The
 // classification arrives pre-computed from /api/request-status; everything here
-// is presentation. No arr vocabulary anywhere in the copy — the audience has
+// is presentation. No arr vocabulary anywhere in the copy: the audience has
 // never opened those applications.
 
 const RS_REASONS = {
-  ALREADY_AVAILABLE: 'Ready to watch — your app may need a refresh',
+  ALREADY_AVAILABLE: 'Ready to watch, your app may need a refresh',
   DOWNLOADING:       'Downloading now',
-  DOWNLOAD_STALLED:  'That copy stalled — looking for another',
+  DOWNLOAD_STALLED:  'That copy stalled, looking for another',
   IMPORT_BLOCKED:    'Downloaded, but couldn’t be added to the library',
-  NO_RELEASE_FOUND:  'No copy online yet — still checking',
+  NO_RELEASE_FOUND:  'No copy online yet, still checking',
   TV_PARTIAL:        'Some episodes here, rest still coming',
   NOT_RELEASED_YET:  'Not released yet',
   AWAITING_APPROVAL: 'Waiting to be approved',
@@ -140,12 +142,12 @@ function rsReasonText(r) {
       return have + ' of ' + total + ' episodes here, ' + short + ' still being looked for';
     }
     if (r.reason_code === 'NO_RELEASE_FOUND' && have === 0) {
-      return 'No episodes found online yet — still checking';
+      return 'No episodes found online yet, still checking';
     }
   }
   if (r.media_type === 'movie' && r.reason_code === 'DOWNLOADING') {
     return r.percent ? 'Downloading, ' + Math.round(r.percent) + '% done'
-                     : 'Found a copy — waiting for the download to start';
+                     : 'Found a copy, waiting for the download to start';
   }
   return RS_REASONS[r.reason_code] || 'Being looked at';
 }
@@ -160,8 +162,9 @@ function rsWaitedText(d) {
   if (d === 1) return '1 day';
   if (d < 30) return d + ' days';
   var m = Math.round(d / 30);
+  var y = Math.round(d / 365);
   return m < 12 ? m + (m === 1 ? ' month' : ' months')
-                : Math.round(d / 365) + 'y';
+                : y + (y === 1 ? ' year' : ' years');
 }
 function rsScopeText(r) {
   var p = [];
@@ -170,10 +173,10 @@ function rsScopeText(r) {
     var s = r.seasons.slice().sort(function (a, b) { return a - b; });
     if (s.length === 1) p.push(s[0] === 0 ? 'Specials' : 'Season ' + s[0]);
     else if (s.indexOf(0) === -1 && s[s.length - 1] - s[0] === s.length - 1)
-      p.push('Seasons ' + s[0] + '–' + s[s.length - 1]);
+      p.push('Seasons ' + s[0] + ' to ' + s[s.length - 1]);
     else p.push(s.length + ' seasons');
   }
-  return p.join(' · ');
+  return p.join(', ');
 }
 
 function rsCellValue(r, key) {
@@ -221,9 +224,9 @@ function mediaTypeBadgeColor(mediaType) {
  * Colour for the media-type noun inside a Request button.
  *
  * The shipped defaults are measured against the button's #125793 fill - cyan
- * 5.16, amber 5.18, purple 5.49, all clearing 4.5:1. The button's 11px bold
- * counts as normal text for contrast rather than large, which is why the
- * obvious purple-300 (4.23) was not good enough. An admin picking their own
+ * 5.16, amber 5.18, purple 5.49, all clearing 4.5:1. The button's 13px
+ * semibold counts as normal text for contrast rather than large, which is why
+ * the obvious purple-300 (4.23) was not good enough. An admin picking their own
  * accents owns that tradeoff.
  */
 function mediaTypeNounColor(mediaType) {
@@ -256,20 +259,20 @@ const STATUS_TONE_CLASSES = {
  * Home's Recent Requests says for the same state. Words rather than a coloured
  * dot on the poster, which nobody could decode without a key. Nothing is shown
  * for a title no one has asked for, or for Seerr's "unknown": no label, never
- * the word "Unknown". Same type size as the badge, so the row keeps its height.
+ * the word "Unknown". It shares the card's second line with the type, so the
+ * card is one height whether a title has a status or not.
  */
-// Card-only short words, for labels that cannot fit beside the type badge on
-// a 112px card: "Partly Available" beside "TV Show" always ended "Partly Av…".
+// Card-only short words, for labels that cannot fit beside the type on a
+// 128px card: "Partly Available" beside "TV show" always ended "Partly Av…".
 // The full shared label stays in the title, and everywhere else says it whole.
 const DISCOVER_SHORT_LABELS = { partially_available: 'Partial' };
 
 function discoverStatusLabel(status) {
   if (!status || status === 'unknown') return '';
   var known = WS.requestStatus(status);
-  var tone = STATUS_TONE_CLASSES[known.tone] || STATUS_TONE_CLASSES.wait;
   var shown = DISCOVER_SHORT_LABELS[status] || known.label;
   return '<span data-discover-status title="' + escapeHtml(known.label) + '" ' +
-    'class="min-w-0 truncate text-[8px] font-bold px-1 py-0.5 rounded ' + tone.bg + ' ' + tone.text + '">' +
+    'class="min-w-0 truncate text-frosted-blue/70">' +
     escapeHtml(shown) + '</span>';
 }
 
@@ -291,32 +294,32 @@ function buildDiscoverCard(item, rowId, index) {
   var title = escapeHtml(item.title || 'Unknown');
   var mediaType = item.media_type || 'movie';
   var typeBadge = mediaTypeLabel(mediaType);
-  var typeBadgeColor = mediaTypeBadgeColor(mediaType);
   var posterUrl = item.poster_url || '';
   var status = item.media_status ? item.media_status.toLowerCase() : null;
   var statusHtml = discoverStatusLabel(status);
 
-  var posterHtml = posterMarkup(posterUrl, escapeHtml(item.title || 'Unknown'),
-    'absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105',
-    'text-3xl', mediaType);
+  // The title names the button, so the poster's alt stays empty.
+  var posterHtml = posterMarkup(posterUrl, '', 'absolute inset-0 w-full h-full object-cover', 'text-3xl', mediaType);
 
+  // A button, as the Books covers are links: the poster, then two lines (the
+  // title, then the type and any status), the same box as the skeleton in
+  // requests.html. ws-lift on the card: the card is what is clicked.
   return (
-    '<div class="shrink-0 w-28 rounded-xl overflow-hidden glass-card ws-lift cursor-pointer group" ' +
+    '<button type="button" class="shrink-0 w-32 text-left rounded-inner ws-lift group" ' +
         'data-action="open-media" data-row="' + escapeHtml(rowId) + '" data-index="' + index + '">' +
-      '<div class="aspect-[2/3] relative overflow-hidden">' +
+      '<span class="block aspect-[2/3] relative overflow-hidden rounded-inner bg-frosted-blue/[0.04]">' +
         posterHtml +
-        '<div class="absolute inset-0 bg-gradient-to-t from-background-dark/60 via-transparent to-transparent"></div>' +
-      '</div>' +
-      '<div class="p-1.5">' +
-        // One row that never wraps: the type keeps its width and the status
+      '</span>' +
+      '<span class="block pt-2">' +
+        '<span class="block text-label leading-5 font-semibold text-frosted-blue truncate">' + title + '</span>' +
+        // One line that never wraps: the type keeps its width and the status
         // gives way, ending in an ellipsis on the longest label.
-        '<div class="flex items-center gap-1 min-w-0 mb-1">' +
-          '<span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
+        '<span class="flex items-center gap-1.5 min-w-0 text-label leading-5">' +
+          '<span class="shrink-0 font-semibold ' + mediaTypeNounColor(mediaType) + '">' + typeBadge + '</span>' +
           statusHtml +
-        '</div>' +
-        '<p class="text-frosted-blue text-[11px] font-medium leading-tight truncate">' + title + '</p>' +
-      '</div>' +
-    '</div>'
+        '</span>' +
+      '</span>' +
+    '</button>'
   );
 }
 
@@ -381,15 +384,15 @@ function getStatusBlock(status, mediaType, typeLabel, item) {
   // 48 of 62 Episodes" overflows the block at this width.
   if (s.selfDescribing) typeLabel = '';
   var prefix = typeLabel ? typeLabel + ' ' : '';
-  return '<div class="w-full py-2 px-1 rounded-lg border text-center text-[11px] font-bold ' +
+  return '<div class="w-full py-2 px-1 rounded-btn border text-center text-label font-semibold ' +
     s.bg + ' ' + s.text + ' ' + s.border + '">' + prefix + s.label + '</div>';
 }
 
-/** Compact pill, for overlays on request cards and the detail modal. */
+/** Compact pill, for request cards and the detail modal: the one chip. */
 function getStatusBadge(status, mediaType) {
   var s = getStatusPresentation(status, mediaType);
-  return '<span class="px-2 py-1 rounded ' + s.bg + ' ' + s.text +
-    ' text-[9px] font-bold uppercase tracking-wider">' + s.label + '</span>';
+  return '<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold ' + s.bg + ' ' + s.text + '">' +
+    s.label + '</span>';
 }
 
 function buildSearchCard(item) {
@@ -402,9 +405,8 @@ function buildSearchCard(item) {
   var status4k = item.media_status_4k ? item.media_status_4k.toLowerCase() : null;
   var mediaId = item.id;
 
-  var posterHtml = posterMarkup(posterUrl, title,
-    'absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110',
-    'text-4xl', mediaType);
+  // The card is not a link, so its poster does not zoom on hover.
+  var posterHtml = posterMarkup(posterUrl, title, 'absolute inset-0 w-full h-full object-cover', 'text-4xl', mediaType);
 
   // Request button or status badge (combined standard + 4K: show best available status)
   var combinedStatus = status;
@@ -432,7 +434,7 @@ function buildSearchCard(item) {
     // border-transparent so the button matches the status block's height
     // exactly - otherwise the card jumps 2px depending on its state.
     // ws-lift on the button, not the card: the button is what is clicked.
-    stdHtml = '<button type="button" data-action="request-media" data-request-type="' + escapeHtml(mediaType) + '" data-request-id="' + escapeHtml(String(mediaId)) + '" class="ws-lift w-full py-2 px-1 rounded-lg border border-transparent bg-primary hover:bg-primary/80 text-bright text-[11px] font-bold transition-all">Request <span class="' + mediaTypeNounColor(mediaType) + '">' + typeBadge + '</span></button>';
+    stdHtml = '<button type="button" data-action="request-media" data-request-type="' + escapeHtml(mediaType) + '" data-request-id="' + escapeHtml(String(mediaId)) + '" data-request-title="' + title + '" class="ws-lift w-full py-2 px-1 rounded-btn border border-transparent bg-primary hover:bg-primary/90 text-bright text-label font-semibold transition-colors">Request <span class="' + mediaTypeNounColor(mediaType) + '">' + typeBadge + '</span></button>';
   } else {
     // Same rectangle as the button, so the card keeps its shape. The type
     // is carried here too, since there is no button to state it.
@@ -442,18 +444,17 @@ function buildSearchCard(item) {
   // No type pill on the card: the media type is carried by the action itself
   // ("Request eBook"), which states it where the decision is made and keeps
   // the card free of a floating label.
-  return '<div class="glass-card rounded-xl overflow-hidden group flex flex-col">' +
+  return '<div class="rounded-card bg-frosted-blue/[0.04] overflow-hidden flex flex-col">' +
     '<div class="aspect-[2/3] relative overflow-hidden">' +
       posterHtml +
-      '<div class="absolute inset-0 bg-gradient-to-t from-background-dark via-transparent to-transparent"></div>' +
     '</div>' +
     '<div class="p-3 flex flex-col gap-2 flex-1">' +
       '<div class="flex-1">' +
-        '<p class="text-frosted-blue text-sm font-bold leading-tight line-clamp-2">' + title + '</p>' +
+        '<p class="text-frosted-blue text-body font-semibold leading-tight line-clamp-2">' + title + '</p>' +
         // Books have no cover art (Chaptarr's are behind its UI login),
         // so the author does the work the artwork would have done.
-        (item.author ? '<p class="text-frosted-blue/70 text-[11px] mt-0.5 truncate">' + escapeHtml(item.author) + '</p>' : '') +
-        (year ? '<p class="text-frosted-blue/70 text-[11px] mt-0.5">' + year + '</p>' : '') +
+        (item.author ? '<p class="text-frosted-blue/70 text-label mt-0.5 truncate">' + escapeHtml(item.author) + '</p>' : '') +
+        (year ? '<p class="text-frosted-blue/70 text-label mt-0.5 tabular-nums">' + year + '</p>' : '') +
       '</div>' +
       '<div class="space-y-1.5">' + stdHtml + '</div>' +
     '</div>' +
@@ -467,27 +468,25 @@ function buildRequestCard(req) {
   var typeBadgeColor = mediaTypeBadgeColor(mediaType);
   var posterUrl = req.poster_url || '';
   var status = (req.status || 'pending').toLowerCase();
-  var requestedDate = req.requested_date ? getTimeAgo(new Date(req.requested_date)) : '';
+  var requestedDate = req.requested_date ? getTimeAgo(req.requested_date, true) : '';
 
-  var posterHtml = posterMarkup(posterUrl, title,
-    'absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110',
-    'text-4xl', mediaType);
+  // The card is not a link, so its poster does not zoom on hover.
+  var posterHtml = posterMarkup(posterUrl, title, 'absolute inset-0 w-full h-full object-cover', 'text-4xl', mediaType);
 
-  return '<div class="glass-card rounded-xl overflow-hidden group" data-status="' + status + '">' +
+  return '<div class="rounded-card bg-frosted-blue/[0.04] overflow-hidden" data-status="' + status + '">' +
     '<div class="aspect-[2/3] relative overflow-hidden">' +
       posterHtml +
-      '<div class="absolute inset-0 bg-gradient-to-t from-background-dark via-transparent to-transparent"></div>' +
     '</div>' +
     // Status sits below the artwork rather than over it. As an overlay it
     // read as a watermark stamped across the cover, and it obscured the
     // part of the poster people recognise a title by.
     '<div class="p-3 space-y-1">' +
       '<div class="flex items-center gap-1.5 flex-wrap">' +
-        '<span class="inline-block text-[9px] font-bold px-1.5 py-0.5 rounded ' + typeBadgeColor + '">' + typeBadge + '</span>' +
+        '<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold ' + typeBadgeColor + '">' + typeBadge + '</span>' +
         getStatusBadge(status, mediaType) +
       '</div>' +
-      '<p class="text-frosted-blue text-sm font-bold leading-tight line-clamp-2">' + title + '</p>' +
-      (requestedDate ? '<p class="text-[10px] text-frosted-blue/70 font-medium uppercase">' + requestedDate + '</p>' : '') +
+      '<p class="text-frosted-blue text-body font-semibold leading-tight line-clamp-2">' + title + '</p>' +
+      (requestedDate ? '<p class="text-label text-frosted-blue/70">' + escapeHtml(requestedDate) + '</p>' : '') +
     '</div>' +
   '</div>';
 }
@@ -684,6 +683,7 @@ export async function mount(ctx) {
   var _searchBarPosition = 'home';
   var _searchMoveRaf = null;
   var _scrollLockFailsafe = 0;
+  var _dialog = null;               // the open media detail (WSUI.modal), or null
 
   // -------------------------------------------------------------------------
   // Request Status grid
@@ -733,7 +733,7 @@ export async function mount(ctx) {
                  (c.key === 'title' ? ' rs-sticky' : '') + '" style="min-width:' + c.min + 'px">' +
           '<button type="button" class="rs-sort" data-sort="' + c.key + '">' +
             escapeHtml(c.label) +
-            '<span class="material-symbols-outlined text-[14px] ' + (active ? 'text-frosted-blue' : 'opacity-40') + '">' + arrow + '</span>' +
+            '<span class="material-symbols-outlined text-[15px] ' + (active ? 'text-frosted-blue' : 'opacity-40') + '" aria-hidden="true">' + arrow + '</span>' +
           '</button>' +
           '<span class="rs-resizer" data-resize="' + c.key + '"></span>' +
         '</th>';
@@ -744,7 +744,7 @@ export async function mount(ctx) {
       var rows = visible();
       var body = $('rsBody');
       var empty = $('rsEmpty');
-      $('rsCount').textContent = rows.length;
+      $('rsCount').textContent = String(rows.length);
 
       if (!rows.length) {
         body.innerHTML = '';
@@ -767,27 +767,26 @@ export async function mount(ctx) {
           '<tr class="rs-row" data-id="' + escapeHtml(id) + '">' +
             '<td class="rs-td rs-sticky">' +
               '<div class="flex items-center gap-2 min-w-0">' +
-                '<span class="material-symbols-outlined text-frosted-blue/70 text-[18px] shrink-0 rs-only-sm">' +
+                '<span class="material-symbols-outlined text-frosted-blue/70 text-lg shrink-0 rs-only-sm" aria-hidden="true">' +
                   (open ? 'expand_less' : 'expand_more') + '</span>' +
                 '<div class="min-w-0">' +
                   '<span class="font-bold text-frosted-blue break-words">' + escapeHtml(rsCellValue(r, 'title')) + '</span>' +
-                  (r.year ? ' <span class="text-frosted-blue/70 text-xs">' + escapeHtml(String(r.year)) + '</span>' : '') +
-                  (scope ? '<span class="block text-[10px] uppercase tracking-wider text-steel-blue">' + escapeHtml(scope) + '</span>' : '') +
+                  (r.year ? ' <span class="text-frosted-blue/70 text-label tabular-nums">' + escapeHtml(String(r.year)) + '</span>' : '') +
+                  (scope ? '<span class="block text-label text-frosted-blue/70">' + escapeHtml(scope) + '</span>' : '') +
                 '</div>' +
               '</div>' +
             '</td>' +
             '<td class="rs-td"><span class="rs-chip ' + st.cls + '">' + escapeHtml(st.label) + '</span></td>' +
             '<td class="rs-td rs-hide-sm text-frosted-blue/75">' + escapeHtml(rsCellValue(r, 'why')) + '</td>' +
-            '<td class="rs-td rs-hide-sm text-steel-blue whitespace-nowrap">' + escapeHtml(rsWaitedText(rsDaysWaiting(r.requested_at))) + '</td>' +
-            '<td class="rs-td rs-hide-sm text-steel-blue">' + escapeHtml(rsCellValue(r, 'type')) + '</td>' +
+            '<td class="rs-td rs-hide-sm text-frosted-blue/70 whitespace-nowrap">' + escapeHtml(rsWaitedText(rsDaysWaiting(r.requested_at))) + '</td>' +
+            '<td class="rs-td rs-hide-sm text-frosted-blue/70">' + escapeHtml(rsCellValue(r, 'type')) + '</td>' +
           '</tr>';
         // Phone-only detail row: everything the narrow layout drops, revealed on tap.
         var detail = open
           ? '<tr class="rs-detail rs-only-sm-row"><td class="rs-td" colspan="5">' +
               '<p class="text-sm text-frosted-blue/75">' + escapeHtml(rsCellValue(r, 'why')) + '</p>' +
-              '<p class="text-[11px] text-steel-blue mt-1">' +
-                'Waiting ' + escapeHtml(rsWaitedText(rsDaysWaiting(r.requested_at))) +
-                ' · ' + escapeHtml(rsCellValue(r, 'type')) +
+              '<p class="text-label text-frosted-blue/70 mt-1">' +
+                escapeHtml(rsCellValue(r, 'type')) + ', waiting ' + escapeHtml(rsWaitedText(rsDaysWaiting(r.requested_at))) +
               '</p>' +
             '</td></tr>'
           : '';
@@ -925,7 +924,7 @@ export async function mount(ctx) {
 
         var mins = Math.floor((Date.now() - new Date(_snapshot.generated_at).getTime()) / 60000);
         $('rsFresh').textContent =
-          (isFinite(mins) && mins >= 30) ? 'checked ' + (mins < 60 ? mins + 'm' : Math.floor(mins / 60) + 'h') + ' ago' : '';
+          (isFinite(mins) && mins >= 30) ? 'Checked ' + getTimeAgo(_snapshot.generated_at) : '';
 
         renderFilters();
         renderHead();
@@ -980,12 +979,19 @@ export async function mount(ctx) {
     }));
   }
 
+  // The book shelves show covers only: a trending book with no cover is left
+  // out, and one whose cover fails to load leaves the row (dropCover below).
+  // A shelf of blank tiles read as an unfinished page.
+  function coversOnly(rowId) { return rowId === 'trendingBooksRow' || rowId === 'trendingAudiobooksRow'; }
+
   function renderDiscoverRow(rowId, items) {
     var row = discoverRow(rowId);
     if (!row) return;
+    if (items && coversOnly(rowId)) items = items.filter(function (it) { return !!it.poster_url; });
     if (!items || items.length === 0) {
+      holdHeight(row);
       _discoverItems[rowId] = [];
-      row.innerHTML = '<p class="text-frosted-blue/70 text-xs py-4 px-2 italic">Nothing to show</p>';
+      row.innerHTML = '<p class="text-frosted-blue/70 text-body py-4">Nothing to show here right now.</p>';
       updateDiscoverArrows(row);
       return;
     }
@@ -996,11 +1002,18 @@ export async function mount(ctx) {
     updateDiscoverArrows(row);
   }
 
+  // A shelf that ends up with a line instead of posters keeps the height it
+  // had (its skeleton's), so the shelves below it do not move up.
+  function holdHeight(row) {
+    if (!row.style.minHeight && row.offsetHeight) row.style.minHeight = row.offsetHeight + 'px';
+  }
+
   function renderDiscoverRowError(rowId) {
     var row = discoverRow(rowId);
     if (!row) return;
+    holdHeight(row);
     _discoverItems[rowId] = [];
-    row.innerHTML = '<p class="text-frosted-blue/70 text-xs py-4 px-2 italic">Could not load</p>';
+    row.innerHTML = '<p class="text-frosted-blue/70 text-body py-4">This shelf isn\u2019t available right now.</p>';
     // A failed row has nothing to scroll, so it should not offer to.
     updateDiscoverArrows(row);
   }
@@ -1056,16 +1069,10 @@ export async function mount(ctx) {
 
     // Show loading
     grid.textContent = '';
-    var loadingDiv = document.createElement('div');
-    loadingDiv.className = 'text-center text-steel-blue py-8 col-span-full';
-    var spinner = document.createElement('span');
-    spinner.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin';
-    spinner.textContent = 'progress_activity';
     var loadingP = document.createElement('p');
-    loadingP.textContent = 'Searching...';
-    loadingDiv.appendChild(spinner);
-    loadingDiv.appendChild(loadingP);
-    grid.appendChild(loadingDiv);
+    loadingP.className = 'text-body text-frosted-blue/70 py-4 col-span-full';
+    loadingP.textContent = 'Searching\u2026';
+    grid.appendChild(loadingP);
 
     try {
       // Films/TV and books are searched together. Books are a separate
@@ -1097,7 +1104,8 @@ export async function mount(ctx) {
         _searchDisplayPage = 1;
       }
 
-      $('searchResultCount').textContent = '(' + (data.totalResults || 0) + ' results)';
+      var found = data.totalResults || 0;
+      $('searchResultCount').textContent = found === 1 ? '1 result' : found + ' results';
 
       if (screenResults.length) {
         renderSearchPage();
@@ -1105,16 +1113,10 @@ export async function mount(ctx) {
         // Books may still land here, so this says "nothing yet" rather
         // than being the final word.
         grid.textContent = '';
-        var emptyDiv = document.createElement('div');
-        emptyDiv.className = 'text-center text-steel-blue py-8 col-span-full';
-        var emptyIcon = document.createElement('span');
-        emptyIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
-        emptyIcon.textContent = 'search_off';
         var emptyP = document.createElement('p');
-        emptyP.textContent = 'No results found for "' + query + '"';
-        emptyDiv.appendChild(emptyIcon);
-        emptyDiv.appendChild(emptyP);
-        grid.appendChild(emptyDiv);
+        emptyP.className = 'text-body text-frosted-blue/70 py-4 col-span-full';
+        emptyP.textContent = 'Nothing matches \u201c' + query + '\u201d.';
+        grid.appendChild(emptyP);
       }
       updateSearchPagination();
 
@@ -1148,16 +1150,10 @@ export async function mount(ctx) {
       if (searchCtl !== ctl) return;                   // a newer search owns the grid
       console.error('Search error:', error);
       grid.textContent = '';
-      var errDiv = document.createElement('div');
-      errDiv.className = 'text-center text-frosted-blue/70 py-8 col-span-full';
-      var errIcon = document.createElement('span');
-      errIcon.className = 'material-symbols-outlined text-4xl mb-2 block text-status-err-text';
-      errIcon.textContent = 'error';
       var errP = document.createElement('p');
-      errP.textContent = 'Error searching. Is Seerr configured?';
-      errDiv.appendChild(errIcon);
-      errDiv.appendChild(errP);
-      grid.appendChild(errDiv);
+      errP.className = 'text-body text-frosted-blue/70 py-4 col-span-full';
+      errP.textContent = 'Search isn\u2019t working right now. Try again in a minute.';
+      grid.appendChild(errP);
     }
   }
 
@@ -1198,9 +1194,6 @@ export async function mount(ctx) {
     pagination.classList.remove('hidden');
     // Show current display page info
     var pageLabel = 'Page ' + _searchDisplayPage + ' of ' + totalDisplayPages;
-    if (_totalSearchPages > 1) {
-      pageLabel += ' (batch ' + _currentSearchPage + '/' + _totalSearchPages + ')';
-    }
     $('searchPageInfo').textContent = pageLabel;
     // Prev disabled if on first display page of first API page
     $('searchPrevBtn').disabled = (_searchDisplayPage <= 1 && _currentSearchPage <= 1);
@@ -1236,11 +1229,11 @@ export async function mount(ctx) {
 
   // ---- Request Media ----
 
-  async function requestMedia(mediaType, mediaId, is4k, buttonEl) {
+  async function requestMedia(mediaType, mediaId, is4k, buttonEl, title) {
     // Disable button immediately
     buttonEl.disabled = true;
     var origHtml = buttonEl.innerHTML;
-    buttonEl.innerHTML = '<span class="material-symbols-outlined text-xs animate-spin">progress_activity</span>';
+    buttonEl.textContent = 'Requesting\u2026';
     buttonEl.classList.add('opacity-60', 'cursor-not-allowed');
 
     try {
@@ -1271,10 +1264,8 @@ export async function mount(ctx) {
       // shape and the click reads as the same element changing state.
       buttonEl.outerHTML = getStatusBlock('pending', mediaType, mediaTypeLabel(mediaType));
 
-      showToast(
-        mediaType === 'book' ? 'Book requested - searching for it now' : 'Request submitted successfully!',
-        'success'
-      );
+      // Plain past tense naming the thing: "Requested Dune".
+      showToast(title ? 'Requested ' + title : 'Requested', 'success');
 
       // Refresh existing requests after a short delay
       ctx.setTimeout(function () {
@@ -1288,7 +1279,7 @@ export async function mount(ctx) {
       buttonEl.disabled = false;
       buttonEl.innerHTML = origHtml;
       buttonEl.classList.remove('opacity-60', 'cursor-not-allowed');
-      showToast(error.message || 'Failed to submit request', 'error');
+      showToast(error.message || 'The request didn\u2019t go through. Try again.', 'error');
     }
   }
 
@@ -1504,10 +1495,10 @@ export async function mount(ctx) {
       if (!resp.ok) throw new Error('API error');
       var counts = await resp.json();
       if (signal.aborted) return;
-      $('requestsTotalCount').textContent = '(' + (counts.total || 0) + ')';
+      $('requestsTotalCount').textContent = String(counts.total || 0);
     } catch (e) {
+      // No count: the heading simply has none beside it.
       if (signal.aborted || isAbort(e)) return;
-      console.log('Request counts not available');
     }
   }
 
@@ -1547,7 +1538,17 @@ export async function mount(ctx) {
       $('stat4kEpisodes').textContent = formatCount(qe['4k']);
     } catch (e) {
       if (signal.aborted || isAbort(e)) return;
-      console.log('Library summary not available');
+      // Labels with no figures beside them say nothing: one line instead,
+      // over the panel's own box (kept, unseen), so nothing below it moves.
+      var row = $('statsRow');
+      if (row.querySelector('[data-stats-note]')) return;
+      row.classList.add('relative');
+      if (row.firstElementChild) row.firstElementChild.classList.add('invisible');
+      var note = document.createElement('p');
+      note.className = 'absolute inset-0 text-body text-frosted-blue/70';
+      note.setAttribute('data-stats-note', '');
+      note.textContent = 'Library figures aren\u2019t available right now.';
+      row.appendChild(note);
     }
   }
 
@@ -1569,16 +1570,10 @@ export async function mount(ctx) {
       if (signal.aborted || isAbort(error)) return;   // left the page: not an error
       console.error('Error loading requests:', error);
       grid.textContent = '';
-      var errDiv = document.createElement('div');
-      errDiv.className = 'text-center text-steel-blue py-8 col-span-full';
-      var errIcon = document.createElement('span');
-      errIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
-      errIcon.textContent = 'shopping_cart';
       var errP = document.createElement('p');
-      errP.textContent = 'Seerr not configured';
-      errDiv.appendChild(errIcon);
-      errDiv.appendChild(errP);
-      grid.appendChild(errDiv);
+      errP.className = 'text-body text-frosted-blue/70 py-4 col-span-full';
+      errP.textContent = 'Requests can\u2019t be shown right now. Try again in a minute.';
+      grid.appendChild(errP);
       updateRequestsPagination(0);
     }
   }
@@ -1597,18 +1592,12 @@ export async function mount(ctx) {
     }
 
     if (filtered.length === 0) {
-      var msg = _currentFilter === 'all' ? 'No requests yet' : 'No ' + _currentFilter + ' requests';
+      var msg = _currentFilter === 'all' ? 'Nothing has been requested yet.' : 'Nothing matches that filter.';
       grid.textContent = '';
-      var emptyDiv = document.createElement('div');
-      emptyDiv.className = 'text-center text-steel-blue py-8 col-span-full';
-      var emptyIcon = document.createElement('span');
-      emptyIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
-      emptyIcon.textContent = 'shopping_cart';
       var emptyP = document.createElement('p');
+      emptyP.className = 'text-body text-frosted-blue/70 py-4 col-span-full';
       emptyP.textContent = msg;
-      emptyDiv.appendChild(emptyIcon);
-      emptyDiv.appendChild(emptyP);
-      grid.appendChild(emptyDiv);
+      grid.appendChild(emptyP);
       updateRequestsPagination(0);
       return;
     }
@@ -1655,7 +1644,7 @@ export async function mount(ctx) {
     _currentFilter = filter;
     _requestsDisplayPage = 1;
     root.querySelectorAll('.filter-tab').forEach(function (tab) {
-      tab.classList.toggle('active', tab.getAttribute('data-filter') === filter);
+      tab.setAttribute('aria-pressed', tab.getAttribute('data-filter') === filter ? 'true' : 'false');
     });
     renderRequests();
   }
@@ -1668,7 +1657,7 @@ export async function mount(ctx) {
     var mediaType = item.media_type || 'movie';
     var status = item.media_status ? item.media_status.toLowerCase() : null;
 
-    // Poster — reset error fallback state each time
+    // Poster: reset the error fallback each time
     var poster = $('modalPoster');
     poster.style.display = '';
     if (poster.nextElementSibling) poster.nextElementSibling.style.display = 'none';
@@ -1684,12 +1673,12 @@ export async function mount(ctx) {
     // identically here and in the grid - and so books are not labelled "Movie".
     var typeBadge = $('modalTypeBadge');
     typeBadge.textContent = mediaTypeLabel(mediaType);
-    typeBadge.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded ' + mediaTypeBadgeColor(mediaType);
+    typeBadge.className = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold ' + mediaTypeBadgeColor(mediaType);
 
     // Rating
     var ratingEl = $('modalRating');
     ratingEl.textContent = (item.vote_average && item.vote_average > 0)
-      ? '★ ' + item.vote_average.toFixed(1)
+      ? 'Rated ' + item.vote_average.toFixed(1) + ' of 10'
       : '';
 
     // Action area: Request button (the page's click listener sends it,
@@ -1700,7 +1689,8 @@ export async function mount(ctx) {
         '<button type="button" id="modalRequestBtn" data-action="request-from-modal" ' +
           'data-media-type="' + escapeHtml(mediaType) + '" ' +
           'data-media-id="' + escapeHtml(String(item.id)) + '" ' +
-          'class="w-full py-2 rounded-lg bg-primary hover:bg-primary/80 text-bright text-xs font-bold transition-all">' +
+          'data-request-title="' + escapeHtml(item.title || '') + '" ' +
+          'class="ws-lift w-full py-2.5 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors">' +
           'Request <span class="' + mediaTypeNounColor(mediaType) + '">' + mediaTypeLabel(mediaType) + '</span>' +
         '</button>';
     } else {
@@ -1710,17 +1700,22 @@ export async function mount(ctx) {
         '</div>';
     }
 
+    if (_dialog) return;
     modal.classList.remove('hidden');
     modal.classList.add('flex');
+    _dialog = WSUI.modal(modal, {
+      onClose: function () {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        // Clear action area to prevent stale button state on next open
+        $('modalActionArea').innerHTML = '';
+        _dialog = null;
+      }
+    });
   }
 
   function closeMediaModal() {
-    var modal = $('mediaModal');
-    if (modal.classList.contains('hidden')) return;
-    modal.classList.add('hidden');
-    modal.classList.remove('flex');
-    // Clear action area to prevent stale button state on next open
-    $('modalActionArea').innerHTML = '';
+    if (_dialog) _dialog.close();
   }
 
   function requestFromModal(buttonEl) {
@@ -1728,9 +1723,9 @@ export async function mount(ctx) {
     // Passed through as the string it is: book ids look like "gr:3634639", and
     // the server turns a film or show's "550" into a number, as for search cards.
     var mediaId = buttonEl.getAttribute('data-media-id');
-    // Reuse existing requestMedia — passes buttonEl so its built-in
-    // spinner/success/error handling works inside the modal action area.
-    requestMedia(mediaType, mediaId, false, buttonEl);
+    // Reuse existing requestMedia: passes buttonEl so its built-in
+    // progress/success/error handling works inside the modal action area.
+    requestMedia(mediaType, mediaId, false, buttonEl, buttonEl.getAttribute('data-request-title'));
   }
 
   // ---- Poster fallbacks ----
@@ -1751,13 +1746,28 @@ export async function mount(ctx) {
 
   // ---- Wiring: one listener per kind, on the page or with its signal ----
 
+  // On a covers-only shelf (the trending books) a failed cover takes its card
+  // out of the row instead; a shelf left empty says so in one line.
+  function dropCover(img) {
+    var card = img.closest('[data-action="open-media"]');
+    var row = card && card.parentNode;
+    if (!row || !coversOnly(row.id)) return false;
+    holdHeight(row);
+    row.removeChild(card);
+    if (!row.querySelector('[data-action="open-media"]')) {
+      row.innerHTML = '<p class="text-frosted-blue/70 text-body py-4">Nothing to show here right now.</p>';
+    }
+    updateDiscoverArrows(row);
+    return true;
+  }
+
   root.addEventListener('error', function (e) {
     var img = posterOf(e);
-    if (img) showPosterFallback(img);
+    if (img && !dropCover(img)) showPosterFallback(img);
   }, { capture: true, signal: signal });
   root.addEventListener('load', function (e) {
     var img = posterOf(e);
-    if (img && img.naturalWidth === 0) showPosterFallback(img);
+    if (img && img.naturalWidth === 0 && !dropCover(img)) showPosterFallback(img);
   }, { capture: true, signal: signal });
 
   root.addEventListener('click', function (e) {
@@ -1775,7 +1785,8 @@ export async function mount(ctx) {
         openMediaModal((_discoverItems[el.getAttribute('data-row')] || [])[Number(el.getAttribute('data-index'))]);
         break;
       case 'request-media':
-        requestMedia(el.getAttribute('data-request-type'), el.getAttribute('data-request-id'), false, el);
+        requestMedia(el.getAttribute('data-request-type'), el.getAttribute('data-request-id'), false, el,
+          el.getAttribute('data-request-title'));
         break;
       case 'request-from-modal': requestFromModal(el); break;
       case 'close-modal': closeMediaModal(); break;
@@ -1787,11 +1798,8 @@ export async function mount(ctx) {
     }
   }, { signal: signal });
 
-  // Escape closes the media modal. Not while an input method is composing
-  // (Escape then cancels the composition).
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !e.isComposing) closeMediaModal();
-  }, { signal: signal });
+  // Escape closes the media detail: WSUI.modal answers it (not while an
+  // input method is composing).
 
   // Widening the window can make a row fit entirely, which retires both arrows.
   window.addEventListener('resize', function () {

@@ -59,15 +59,15 @@
   backdrop-filter: blur(8px);
   text-align: left; white-space: nowrap;
   padding: 0.6rem 0.9rem;
-  border-bottom: 1px solid rgb(var(--color-accent) / 0.25);
-  font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-  color: rgb(var(--color-accent));
+  border-bottom: 1px solid rgb(var(--color-text) / 0.1);
+  font-size: 13px; font-weight: 600;
+  color: rgb(var(--color-text) / 0.7);
 }
 .rs-sort {
   display: inline-flex; align-items: center; gap: 0.3rem;
   color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer;
 }
-.rs-sort:hover { color: rgb(var(--color-primary)); }
+.rs-sort:hover { color: rgb(var(--color-text)); }
 .rs-resizer {
   position: absolute; top: 0; right: 0; width: 7px; height: 100%;
   cursor: col-resize; user-select: none;
@@ -101,8 +101,8 @@ body.rs-resizing { cursor: col-resize; user-select: none; }
 }
 .rs-chip {
   display: inline-block; white-space: nowrap;
-  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
-  padding: 0.2rem 0.5rem; border-radius: 9999px;
+  font-size: 13px; font-weight: 600;
+  padding: 0.125rem 0.625rem; border-radius: 9999px;
 }
 .rs-chip-ready { background: rgb(var(--color-primary) / 0.22); color: rgb(var(--color-text)); }
 .rs-chip-go    { background: rgb(var(--color-text) / 0.14);    color: rgb(var(--color-text)); }
@@ -116,32 +116,6 @@ body.rs-resizing { cursor: col-resize; user-select: none; }
   font-size: 0.8125rem; color: rgb(var(--color-text));
 }
 .rs-select:focus { outline: none; border-color: rgb(var(--color-primary) / 0.6); }
-.rs-tab {
-  background: rgb(var(--color-accent) / 0.1);
-  color: rgb(var(--color-text) / 0.8);
-  border: 1px solid transparent;
-}
-.rs-tab.active {
-  background: rgb(var(--color-primary) / 0.2);
-  color: rgb(var(--color-text));
-  border-color: rgb(var(--color-primary) / 0.3);
-}
-.rs-tab:hover { background: rgb(var(--color-accent) / 0.2); }
-
-.filter-tab {
-  background: rgba(var(--color-accent) / 0.1);
-  border: 1px solid rgba(var(--color-accent) / 0.2);
-  color: rgb(var(--color-text) / 0.8);
-}
-.filter-tab:hover {
-  background: rgba(var(--color-accent) / 0.2);
-  color: rgb(var(--color-text));
-}
-.filter-tab.active {
-  background: rgb(var(--color-primary));
-  border-color: rgb(var(--color-primary));
-  color: rgb(var(--color-text-secondary));
-}
 .poster-placeholder {
   background: linear-gradient(135deg, rgba(var(--color-primary) / 0.3), rgba(var(--color-secondary) / 0.15));
 }
@@ -164,8 +138,8 @@ body.rs-resizing { cursor: col-resize; user-select: none; }
   top: 50%;
   transform: translateY(-60%);
   z-index: 10;
-  width: 2rem;
-  height: 2rem;
+  width: 2.5rem;
+  height: 2.5rem;
   border-radius: 9999px;
   background: rgb(var(--color-primary) / 0.85);
   color: rgb(var(--color-text-secondary));
@@ -183,9 +157,13 @@ body.rs-resizing { cursor: col-resize; user-select: none; }
 }
 .discover-scroll-btn.left { left: -0.5rem; }
 .discover-scroll-btn.right { right: -0.5rem; }
-.discover-row-wrapper:hover .discover-scroll-btn {
+/* Shown to the mouse on hover, and to the keyboard while a card in the row
+   (or the arrow itself) has the focus. */
+.discover-row-wrapper:hover .discover-scroll-btn,
+.discover-row-wrapper:focus-within .discover-scroll-btn {
   opacity: 1;
 }
+@media (prefers-reduced-motion: reduce) { .discover-scroll-btn { transition: none; } }
 /* An arrow that cannot scroll anywhere is a promise the row does not keep, so
    it is removed rather than dimmed - the row is already at that end, and there
    is nothing for a disabled-looking control to explain. */
@@ -209,7 +187,10 @@ html[data-rs-empty] #rsSection { display: none; }
 <div id="wsPage" data-ws-module="/static/js/pages/requests.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-hidden">
 <!-- Scrollable Content -->
 <div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
-<h1 class="sr-only">Requests</h1>
+<div class="mb-6">
+<h1 class="text-h2 sm:text-h1 font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue">Requests</h1>
+<p class="mt-2 text-body text-frosted-blue/70 max-w-[65ch]">Ask for a movie, show or book that isn&rsquo;t on the server yet, and see where earlier requests stand.</p>
+</div>
 
 <!-- Zero-height host: the bar floats in the empty space to the right of the
      first "Trending" heading, so nothing on the page is displaced by it.
@@ -247,174 +228,153 @@ html[data-rs-empty] #rsSection { display: none; }
      ones pages/requests.js fills (DISCOVER_ROWS); the arrows are data-actions
      on the page's one click listener. -->
 <div id="discoverSection" class="mb-8">
-<div class="mb-6">
-  <div class="flex items-center gap-2 mb-3">
-    <span class="material-symbols-outlined text-steel-blue text-xl">trending_up</span>
-    <h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">Trending</h2>
-  </div>
+<section class="mb-6" aria-labelledby="trendingTitle">
+  <h2 id="trendingTitle" class="text-lead font-bold text-frosted-blue mb-3">Trending</h2>
   <div class="discover-row-wrapper relative">
     <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
-      <span class="material-symbols-outlined text-sm">chevron_left</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
     </button>
     <div id="trendingRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
     </div>
     <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
-      <span class="material-symbols-outlined text-sm">chevron_right</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
     </button>
   </div>
-</div>
-<div class="mb-6">
-  <div class="flex items-center gap-2 mb-3">
-    <span class="material-symbols-outlined text-steel-blue text-xl">movie</span>
-    <h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">Popular Movies</h2>
-  </div>
+</section>
+<section class="mb-6" aria-labelledby="popularMoviesTitle">
+  <h2 id="popularMoviesTitle" class="text-lead font-bold text-frosted-blue mb-3">Popular movies</h2>
   <div class="discover-row-wrapper relative">
     <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
-      <span class="material-symbols-outlined text-sm">chevron_left</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
     </button>
     <div id="popularMoviesRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
     </div>
     <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
-      <span class="material-symbols-outlined text-sm">chevron_right</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
     </button>
   </div>
-</div>
-<div class="mb-6">
-  <div class="flex items-center gap-2 mb-3">
-    <span class="material-symbols-outlined text-steel-blue text-xl">upcoming</span>
-    <h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">Upcoming Movies</h2>
-  </div>
+</section>
+<section class="mb-6" aria-labelledby="upcomingMoviesTitle">
+  <h2 id="upcomingMoviesTitle" class="text-lead font-bold text-frosted-blue mb-3">Upcoming movies</h2>
   <div class="discover-row-wrapper relative">
     <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
-      <span class="material-symbols-outlined text-sm">chevron_left</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
     </button>
     <div id="upcomingMoviesRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
     </div>
     <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
-      <span class="material-symbols-outlined text-sm">chevron_right</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
     </button>
   </div>
-</div>
-<div class="mb-6">
-  <div class="flex items-center gap-2 mb-3">
-    <span class="material-symbols-outlined text-steel-blue text-xl">live_tv</span>
-    <h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">Popular Series</h2>
-  </div>
+</section>
+<section class="mb-6" aria-labelledby="popularSeriesTitle">
+  <h2 id="popularSeriesTitle" class="text-lead font-bold text-frosted-blue mb-3">Popular TV shows</h2>
   <div class="discover-row-wrapper relative">
     <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
-      <span class="material-symbols-outlined text-sm">chevron_left</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
     </button>
     <div id="popularSeriesRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
     </div>
     <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
-      <span class="material-symbols-outlined text-sm">chevron_right</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
     </button>
   </div>
-</div>
-<div class="mb-6">
-  <div class="flex items-center gap-2 mb-3">
-    <span class="material-symbols-outlined text-steel-blue text-xl">calendar_month</span>
-    <h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">Upcoming Series</h2>
-  </div>
+</section>
+<section class="mb-6" aria-labelledby="upcomingSeriesTitle">
+  <h2 id="upcomingSeriesTitle" class="text-lead font-bold text-frosted-blue mb-3">Upcoming TV shows</h2>
   <div class="discover-row-wrapper relative">
     <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
-      <span class="material-symbols-outlined text-sm">chevron_left</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
     </button>
     <div id="upcomingSeriesRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
     </div>
     <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
-      <span class="material-symbols-outlined text-sm">chevron_right</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
     </button>
   </div>
-</div>
-<div class="mb-6">
-  <div class="flex items-center gap-2 mb-3">
-    <span class="material-symbols-outlined text-steel-blue text-xl">menu_book</span>
-    <h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">Trending Books</h2>
-  </div>
+</section>
+<section class="mb-6" aria-labelledby="trendingBooksTitle">
+  <h2 id="trendingBooksTitle" class="text-lead font-bold text-frosted-blue mb-3">Trending books</h2>
   <div class="discover-row-wrapper relative">
     <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
-      <span class="material-symbols-outlined text-sm">chevron_left</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
     </button>
     <div id="trendingBooksRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
     </div>
     <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
-      <span class="material-symbols-outlined text-sm">chevron_right</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
     </button>
   </div>
-</div>
-<div class="mb-6">
-  <div class="flex items-center gap-2 mb-3">
-    <span class="material-symbols-outlined text-steel-blue text-xl">headphones</span>
-    <h2 class="text-sm font-bold text-frosted-blue uppercase tracking-wider">Trending Audiobooks</h2>
-  </div>
+</section>
+<section class="mb-6" aria-labelledby="trendingAudiobooksTitle">
+  <h2 id="trendingAudiobooksTitle" class="text-lead font-bold text-frosted-blue mb-3">Trending audiobooks</h2>
   <div class="discover-row-wrapper relative">
     <button type="button" class="discover-scroll-btn left" aria-label="Scroll left" data-action="discover-scroll" data-dir="-1">
-      <span class="material-symbols-outlined text-sm">chevron_left</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
     </button>
     <div id="trendingAudiobooksRow" class="discover-row flex gap-3 overflow-x-auto scroll-smooth pb-2">
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
-      <div class="skel shrink-0 w-28 rounded-xl border border-transparent" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="p-1.5 invisible"><div class="flex items-center gap-1 min-w-0 mb-1"><span class="shrink-0 text-[8px] font-bold px-1 py-0.5 rounded">Movie</span></div><p class="text-[11px] font-medium leading-tight truncate">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
+      <div class="skel shrink-0 w-32 rounded-inner" aria-hidden="true"><div class="aspect-[2/3]"></div><div class="pt-2 invisible"><p class="text-label leading-5">&nbsp;</p><p class="text-label leading-5">&nbsp;</p></div></div>
     </div>
     <button type="button" class="discover-scroll-btn right" aria-label="Scroll right" data-action="discover-scroll" data-dir="1">
-      <span class="material-symbols-outlined text-sm">chevron_right</span>
+      <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
     </button>
   </div>
-</div>
+</section>
 </div>
 
 <!-- Library summary. Also the scroll anchor for the search bar's move: the view
@@ -430,60 +390,60 @@ html[data-rs-empty] #rsSection { display: none; }
      moving, COMPLETENESS is how much of what was wanted actually arrived -
      which is why Requests Fulfilled sits with the completeness figures and
      Added This Month with the queue, rather than the other way round. -->
-<div id="statsRow" class="mb-6">
-  <div class="glass-card rounded-xl px-5 py-4 flex flex-col gap-5 lg:flex-row lg:gap-8">
+<div id="statsRow" class="mb-8">
+  <div class="flex flex-col gap-6 lg:flex-row lg:gap-10">
 
     <section class="flex-1 min-w-0">
-      <p class="text-sm text-steel-blue font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Library</p>
+      <h2 class="text-body font-semibold text-frosted-blue pb-2 mb-3 border-b border-frosted-blue/10">Library</h2>
       <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statSize"><span class="skel skel-num" style="width:5ch" aria-hidden="true"></span></span>
-        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">On Disk</span>
+        <span class="text-h1 font-bold text-frosted-blue tabular-nums leading-none" id="statSize"><span class="skel skel-num" style="width:5ch" aria-hidden="true"></span></span>
+        <span class="text-label text-frosted-blue/70 font-semibold">On disk</span>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statMovies"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Movies</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statMovies"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">Movies</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statShows"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">TV Shows</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statShows"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">TV shows</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statEpisodes"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Episodes</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statEpisodes"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">Episodes</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statEbooks"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">eBooks</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statEbooks"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">Ebooks</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statAudiobooks"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Audiobooks</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statAudiobooks"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">Audiobooks</p>
         </div>
       </div>
     </section>
 
     <section class="flex-1 min-w-0">
-      <p class="text-sm text-steel-blue font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Queue</p>
+      <h2 class="text-body font-semibold text-frosted-blue pb-2 mb-3 border-b border-frosted-blue/10">Queue</h2>
       <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statWait"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
-        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Typical Wait</span>
+        <span class="text-h1 font-bold text-frosted-blue tabular-nums leading-none" id="statWait"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
+        <span class="text-label text-frosted-blue/70 font-semibold">Typical wait</span>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statInProgress"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">In Progress</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statInProgress"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">In progress</p>
         </div>
         <!-- Kept apart from In Progress: a film awaiting its cinema release is
              not a stuck request, and counting it as one makes the queue look
              broken. -->
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statUnreleased"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Not Yet Released</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statUnreleased"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">Not out yet</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statAdded"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Added This Month</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statAdded"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">Added this month</p>
         </div>
       </div>
     </section>
@@ -492,40 +452,40 @@ html[data-rs-empty] #rsSection { display: none; }
          better, because that is the question behind "is this a good library" -
          the per-bucket counts underneath answer "how much 4K have you got". -->
     <section class="flex-1 min-w-0">
-      <p class="text-sm text-steel-blue font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Quality</p>
+      <h2 class="text-body font-semibold text-frosted-blue pb-2 mb-3 border-b border-frosted-blue/10">Quality</h2>
       <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statHdPct"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
-        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">HD or Better</span>
+        <span class="text-h1 font-bold text-frosted-blue tabular-nums leading-none" id="statHdPct"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
+        <span class="text-label text-frosted-blue/70 font-semibold">HD or better</span>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kMovies"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">4K Movies</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kMovies"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">4K movies</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kEpisodes"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">4K Episodes</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="stat4kEpisodes"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">4K episodes</p>
         </div>
       </div>
     </section>
 
     <section class="flex-1 min-w-0">
-      <p class="text-sm text-steel-blue font-bold uppercase tracking-widest pb-2 mb-3 border-b border-steel-blue/20">Completeness</p>
+      <h2 class="text-body font-semibold text-frosted-blue pb-2 mb-3 border-b border-frosted-blue/10">Completeness</h2>
       <div class="flex items-baseline gap-2 mb-3">
-        <span class="text-4xl font-bold text-frosted-blue tabular-nums leading-none" id="statFulfilled"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
-        <span class="text-[10px] text-steel-blue font-bold uppercase tracking-wider">Requests Fulfilled</span>
+        <span class="text-h1 font-bold text-frosted-blue tabular-nums leading-none" id="statFulfilled"><span class="skel skel-num" style="width:3ch" aria-hidden="true"></span></span>
+        <span class="text-label text-frosted-blue/70 font-semibold">Requests fulfilled</span>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
         <!-- Shows and seasons answer different questions - a show counts only
              when every one of its seasons does - so both are given rather than
              one standing in for the other. -->
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statComplete"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Complete Shows</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statComplete"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">Complete shows</p>
         </div>
         <div class="min-w-0">
-          <p class="text-lg font-bold text-frosted-blue tabular-nums leading-tight" id="statSeasons"><span class="skel skel-num" aria-hidden="true"></span></p>
-          <p class="text-[10px] text-steel-blue font-bold uppercase tracking-wider leading-tight">Complete Seasons</p>
+          <p class="text-lead font-bold text-frosted-blue tabular-nums leading-tight" id="statSeasons"><span class="skel skel-num" aria-hidden="true"></span></p>
+          <p class="text-label text-frosted-blue/70 leading-tight">Complete seasons</p>
         </div>
       </div>
     </section>
@@ -538,13 +498,12 @@ html[data-rs-empty] #rsSection { display: none; }
      already asked for", which is the question people arrive with, and it would
      be buried under discover + stats + search anywhere lower. -->
 <section id="rsSection" class="mb-8">
-  <div class="flex flex-wrap items-center gap-3 mb-3">
-    <span class="material-symbols-outlined text-steel-blue">pending_actions</span>
-    <h3 class="text-lg font-bold text-frosted-blue">Request Status</h3>
-    <span id="rsCount" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-steel-blue/20 text-frosted-blue"></span>
-    <span id="rsFresh" class="ml-auto text-[11px] text-frosted-blue/70"></span>
+  <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1">
+    <h2 class="text-h3 font-bold text-frosted-blue">Where requests stand</h2>
+    <span id="rsCount" class="text-body text-frosted-blue/70 tabular-nums"></span>
+    <span id="rsFresh" class="ml-auto text-label text-frosted-blue/70"></span>
   </div>
-  <p class="text-xs text-frosted-blue/70 mb-3">
+  <p class="text-body text-frosted-blue/70 mb-4 max-w-[65ch]">
     Everything that&rsquo;s been asked for and isn&rsquo;t on the server yet, and why.
     Once something arrives it drops off this list.
   </p>
@@ -552,12 +511,13 @@ html[data-rs-empty] #rsSection { display: none; }
   <!-- Search + per-column filters -->
   <div class="flex flex-wrap items-center gap-2 mb-3">
     <div class="relative flex-1 min-w-[200px]">
-      <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-lg">search</span>
-      <input id="rsSearch" type="text" placeholder="Search titles…"
-        class="w-full pl-10 pr-3 py-2 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all"/>
+      <label for="rsSearch" class="sr-only">Find a request</label>
+      <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 text-lg pointer-events-none" aria-hidden="true">search</span>
+      <input id="rsSearch" type="search" placeholder="Find a title"
+        class="w-full pl-10 pr-3 py-2 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors"/>
     </div>
-    <select id="rsFilterStatus" class="rs-select"><option value="">All statuses</option></select>
-    <select id="rsFilterType" class="rs-select">
+    <select id="rsFilterStatus" class="rs-select" aria-label="Status"><option value="">All statuses</option></select>
+    <select id="rsFilterType" class="rs-select" aria-label="Kind">
       <option value="">Movies &amp; shows</option>
       <option value="movie">Movies</option>
       <option value="tv">Shows</option>
@@ -565,7 +525,7 @@ html[data-rs-empty] #rsSection { display: none; }
   </div>
 
   <!-- The grid. Scrolls inside itself; the page never scrolls sideways. -->
-  <div id="rsScroll" class="rs-scroll glass-card rounded-xl">
+  <div id="rsScroll" class="rs-scroll rounded-card border border-frosted-blue/10">
     <table class="rs-grid" id="rsGrid">
       <thead>
         <tr id="rsHead"></tr>
@@ -573,31 +533,30 @@ html[data-rs-empty] #rsSection { display: none; }
       <tbody id="rsBody"></tbody>
     </table>
   </div>
-  <p id="rsEmpty" class="hidden text-center text-steel-blue text-sm py-10"></p>
+  <p id="rsEmpty" class="hidden text-body text-frosted-blue/70 py-6"></p>
 </section>
 
 <!-- Two-column layout: Search (left) + Requests (right) on desktop, stacked on mobile -->
-<div class="flex flex-col lg:flex-row gap-6">
+<div class="flex flex-col lg:flex-row gap-10 lg:gap-12">
 
 <!-- Left column: Search -->
-<div class="w-full lg:w-1/2 min-w-0 rounded-xl glass-card p-4 lg:p-5">
+<section class="w-full lg:w-1/2 min-w-0" aria-labelledby="searchTitle">
 <!-- Where the search bar lands once a search is under way -->
 <div id="searchDock" class="mb-4">
 <!-- Movable search bar. Starts life here so it inherits the dock's width, then
      is floated up to the trending heading on load. -->
 <div id="searchBar" class="relative w-full">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-steel-blue text-xl">search</span>
-<input id="searchInput" type="text" placeholder="Search movies, TV shows and books..."
-  class="w-full pl-10 pr-4 py-2.5 bg-cornflower-ocean/25 backdrop-blur-xl border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all text-sm shadow-lg shadow-black/30"/>
+<label for="searchInput" class="sr-only">Search movies, TV shows and books</label>
+<!-- z-10: the field's backdrop blur makes it a layer of its own, painted over an icon without one. -->
+<span class="material-symbols-outlined absolute z-10 left-3 top-1/2 -translate-y-1/2 text-frosted-blue/70 text-xl pointer-events-none" aria-hidden="true">search</span>
+<input id="searchInput" type="search" autocomplete="off" placeholder="Search movies, TV shows and books"
+  class="w-full pl-10 pr-4 py-2.5 bg-cornflower-ocean/25 backdrop-blur-xl border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors text-body shadow-lg shadow-black/30"/>
 </div>
 </div>
-<div class="space-y-1.5 mb-4 text-[11px] leading-relaxed text-frosted-blue/70">
-<p><strong class="text-steel-blue">Requests</strong> are processed automatically and should be available within an hour, though there is no guarantee the content is available.</p>
-</div>
-<div class="flex items-center gap-3 mb-4 pb-3 border-b border-steel-blue/30">
-<span class="material-symbols-outlined text-steel-blue">manage_search</span>
-<h3 class="text-lg font-bold text-frosted-blue">Search Results</h3>
-<span id="searchResultCount" class="text-sm text-steel-blue font-medium"></span>
+<p class="mb-5 text-label leading-relaxed text-frosted-blue/70">Requests are handled automatically and usually arrive within an hour, though not everything can be found.</p>
+<div class="flex items-baseline gap-2 mb-4">
+<h2 id="searchTitle" class="text-h3 font-bold text-frosted-blue">Search results</h2>
+<span id="searchResultCount" class="text-body text-frosted-blue/70 tabular-nums"></span>
 </div>
 <!-- Search Results Section (hidden by default) -->
 <section id="searchResultsSection" class="hidden">
@@ -605,87 +564,85 @@ html[data-rs-empty] #rsSection { display: none; }
 </div>
 <!-- Search pagination -->
 <div id="searchPagination" class="flex items-center justify-center gap-3 mt-6 hidden">
-<button id="searchPrevBtn" type="button" data-action="search-prev" class="px-4 py-2 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:bg-frosted-blue/10 transition-all text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed">
-<span class="material-symbols-outlined text-sm align-middle">chevron_left</span> Prev
+<button id="searchPrevBtn" type="button" data-action="search-prev" class="inline-flex items-center gap-1 h-10 pl-2 pr-4 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>Previous
 </button>
-<span id="searchPageInfo" class="text-sm text-steel-blue font-medium"></span>
-<button id="searchNextBtn" type="button" data-action="search-next" class="px-4 py-2 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:bg-frosted-blue/10 transition-all text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed">
-Next <span class="material-symbols-outlined text-sm align-middle">chevron_right</span>
+<span id="searchPageInfo" class="text-body text-frosted-blue/70 tabular-nums"></span>
+<button id="searchNextBtn" type="button" data-action="search-next" class="inline-flex items-center gap-1 h-10 pl-4 pr-2 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+Next<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
 </button>
 </div>
 </section>
 
-<!-- Search Empty State (visible by default) -->
-<div id="searchEmptyState" class="text-center text-steel-blue py-10">
-<span class="material-symbols-outlined text-5xl mb-3 block opacity-40">search</span>
-<p class="text-sm">Search above to find content to request</p>
+<!-- Search empty state (shown by default) -->
+<div id="searchEmptyState" class="text-frosted-blue/70 py-6">
+<p class="text-body">Search above for something to request.</p>
 </div>
-</div>
+</section>
 
-<!-- Right column: Existing Requests -->
-<div class="w-full lg:w-1/2 min-w-0 rounded-xl glass-card p-4 lg:p-5">
-<div class="flex items-center gap-3 mb-4 pb-3 border-b border-steel-blue/30">
-<span class="material-symbols-outlined text-steel-blue">shopping_cart</span>
-<h3 class="text-lg font-bold text-frosted-blue">Recent Requests</h3>
-<span id="requestsTotalCount" class="text-sm text-steel-blue font-medium"></span>
+<!-- Right column: recent requests -->
+<section class="w-full lg:w-1/2 min-w-0" aria-labelledby="recentTitle">
+<div class="flex items-baseline gap-2 mb-4">
+<h2 id="recentTitle" class="text-h3 font-bold text-frosted-blue">Recent requests</h2>
+<span id="requestsTotalCount" class="text-body text-frosted-blue/70 tabular-nums"></span>
 </div>
-<section>
-<!-- Filter Tabs -->
-<div class="flex flex-wrap gap-2 mb-4">
-<button type="button" data-action="filter" data-filter="all" class="filter-tab active px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">All</button>
-<button type="button" data-action="filter" data-filter="pending" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Pending</button>
-<button type="button" data-action="filter" data-filter="approved" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Approved</button>
-<button type="button" data-action="filter" data-filter="available" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Available</button>
-<button type="button" data-action="filter" data-filter="declined" class="filter-tab px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all">Declined</button>
+<div>
+<!-- Filter chips -->
+<div class="flex flex-wrap gap-2 mb-4" role="group" aria-label="Show by status">
+<button type="button" data-action="filter" data-filter="all" aria-pressed="true" class="filter-tab ws-filter">All</button>
+<button type="button" data-action="filter" data-filter="pending" aria-pressed="false" class="filter-tab ws-filter">Requested</button>
+<button type="button" data-action="filter" data-filter="approved" aria-pressed="false" class="filter-tab ws-filter">Approved</button>
+<button type="button" data-action="filter" data-filter="available" aria-pressed="false" class="filter-tab ws-filter">Available</button>
+<button type="button" data-action="filter" data-filter="declined" aria-pressed="false" class="filter-tab ws-filter">Declined</button>
 </div>
 
 <!-- Requests Grid -->
 <div id="requestsGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-<div class="skel rounded-xl h-24" aria-hidden="true"></div>
-<div class="skel rounded-xl h-24" aria-hidden="true"></div>
-<div class="skel rounded-xl h-24" aria-hidden="true"></div>
+<div class="skel rounded-card h-24" aria-hidden="true"></div>
+<div class="skel rounded-card h-24" aria-hidden="true"></div>
+<div class="skel rounded-card h-24" aria-hidden="true"></div>
 </div>
 <!-- Requests pagination -->
 <div id="requestsPagination" class="flex items-center justify-center gap-3 mt-6 hidden">
-<button id="requestsPrevBtn" type="button" data-action="requests-prev" class="px-4 py-2 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:bg-frosted-blue/10 transition-all text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed">
-<span class="material-symbols-outlined text-sm align-middle">chevron_left</span> Prev
+<button id="requestsPrevBtn" type="button" data-action="requests-prev" class="inline-flex items-center gap-1 h-10 pl-2 pr-4 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+<span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>Previous
 </button>
-<span id="requestsPageInfo" class="text-sm text-steel-blue font-medium"></span>
-<button id="requestsNextBtn" type="button" data-action="requests-next" class="px-4 py-2 rounded-lg bg-steel-blue/10 border border-steel-blue/20 text-steel-blue hover:text-frosted-blue hover:bg-frosted-blue/10 transition-all text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed">
-Next <span class="material-symbols-outlined text-sm align-middle">chevron_right</span>
+<span id="requestsPageInfo" class="text-body text-frosted-blue/70 tabular-nums"></span>
+<button id="requestsNextBtn" type="button" data-action="requests-next" class="inline-flex items-center gap-1 h-10 pl-4 pr-2 rounded-btn bg-frosted-blue/[0.07] text-frosted-blue hover:bg-frosted-blue/10 transition-colors text-body font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+Next<span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
 </button>
+</div>
 </div>
 </section>
-</div>
 
 </div>
 </div>
-<!-- Media Detail Modal. Inside #wsPage, so leaving the page takes it away,
-     open or not; <main> is no stacking context at rest, so it covers the
-     phone's top bar from here. -->
-<div id="mediaModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4">
+<!-- Media detail: a dialog (WSUI.modal in pages/requests.js). Inside
+     #wsPage, so leaving the page takes it away, open or not; <main> is no
+     stacking context at rest, so it covers the phone's top bar from here. -->
+<div id="mediaModal" class="fixed inset-0 z-50 hidden items-end sm:items-center justify-center p-4">
   <div class="absolute inset-0 ws-scrim backdrop-blur-sm" data-action="close-modal"></div>
-  <div class="relative z-10 glass-card rounded-2xl w-full max-w-lg overflow-hidden">
-    <button type="button" data-action="close-modal" class="absolute top-3 right-3 z-10 text-steel-blue hover:text-frosted-blue transition-colors">
-      <span class="material-symbols-outlined">close</span>
+  <div data-dialog-box aria-labelledby="modalTitle" class="relative z-10 rounded-card border border-frosted-blue/10 bg-background-dark shadow-2xl w-full max-w-lg overflow-hidden">
+    <button type="button" data-action="close-modal" class="absolute top-2 right-2 z-10 grid place-items-center size-10 rounded-btn text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors" aria-label="Close">
+      <span class="material-symbols-outlined" aria-hidden="true">close</span>
     </button>
     <div class="flex gap-4 p-5">
       <div class="w-28 shrink-0">
-        <div class="aspect-[2/3] rounded-lg overflow-hidden bg-frosted-blue/[0.04] relative">
+        <div class="aspect-[2/3] rounded-inner overflow-hidden bg-frosted-blue/[0.04] relative">
           <img id="modalPoster" src="" alt="" class="absolute inset-0 w-full h-full object-cover" data-fallback/>
           <div class="absolute inset-0 items-center justify-center poster-placeholder" style="display:none">
             <span class="material-symbols-outlined text-4xl text-steel-blue/40">movie</span>
           </div>
         </div>
       </div>
-      <div class="flex-1 min-w-0 pr-6">
-        <h2 id="modalTitle" class="text-frosted-blue font-bold text-lg leading-tight mb-1"></h2>
+      <div class="flex-1 min-w-0 pr-8">
+        <h2 id="modalTitle" class="text-frosted-blue font-bold text-lead leading-tight mb-1"></h2>
         <div class="flex items-center flex-wrap gap-2 mb-3">
-          <span id="modalYear" class="text-steel-blue text-sm"></span>
-          <span id="modalTypeBadge" class="text-[9px] font-bold px-1.5 py-0.5 rounded"></span>
-          <span id="modalRating" class="text-[11px] text-frosted-blue/70 font-medium"></span>
+          <span id="modalYear" class="text-frosted-blue/70 text-label tabular-nums"></span>
+          <span id="modalTypeBadge" class="inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold"></span>
+          <span id="modalRating" class="text-label text-frosted-blue/70 tabular-nums"></span>
         </div>
-        <p id="modalOverview" class="text-frosted-blue/70 text-xs leading-relaxed line-clamp-4 mb-4"></p>
+        <p id="modalOverview" class="text-frosted-blue/70 text-label leading-relaxed line-clamp-4 mb-4"></p>
         <div id="modalActionArea"></div>
       </div>
     </div>

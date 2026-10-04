@@ -10,8 +10,10 @@
  * ctx.signal. One delegated click listener on ctx.root serves the static
  * controls and the rebuilt ticket cards and attachments (data-action); the
  * detail's form controls are built with their own listeners, on the same
- * signal. The three overlays live inside #wsPage, so leaving the page takes
- * them away, open or not. The wiki pointers are wiki-hook.js (a page helper
+ * signal. The ticket cards are buttons, so the list works from the keyboard.
+ * The three overlays are dialogs (WSUI.modal: focus in, Tab kept inside,
+ * Escape closes the topmost, focus back) and live inside #wsPage, so leaving
+ * the page takes them away, open or not. The wiki pointers are wiki-hook.js (a page helper
  * script, data-ws-page-script), started from mount with the same ctx.
  */
 
@@ -20,12 +22,16 @@ const PAGE_SIZE = 12;
 
 // ---- Category display config ----
 const CATEGORY_LABELS = {
-  media_request: 'Media Request',
-  playback_issue: 'Playback Issue',
-  account_issue: 'Account Issue',
-  feature_suggestion: 'Feature',
+  media_request: 'Media request',
+  playback_issue: 'Playback problem',
+  account_issue: 'Account problem',
+  feature_suggestion: 'Suggestion',
   other: 'Other'
 };
+const STATUS_LABELS = { open: 'Open', in_progress: 'In progress', resolved: 'Resolved', closed: 'Closed' };
+const PRIORITY_LABELS = { low: 'Low priority', medium: 'Medium priority', high: 'High priority', urgent: 'Urgent' };
+// One chip, as the Books pages draw it: sentence case, 13px, fully rounded.
+const CHIP = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-label font-semibold ';
 // Theme colours only. The category is a neutral chip (its words say which);
 // the status uses the request tones the home and requests pages use
 // (resolved on a primary tint, in progress in the text colour, open on the
@@ -51,7 +57,7 @@ const PRIORITY_COLORS = {
   urgent: 'bg-status-err/10 text-status-err-text'
 };
 
-const OFF_NOTICE = 'Messages have been turned off, so this can’t be sent right now.';
+const OFF_NOTICE = 'Tickets have been turned off, so this can’t be sent right now.';
 // The ticket API's 403 detail while Tickets is switched off (app/routers/tickets.py).
 const TICKETS_OFF_DETAIL = 'The ticket system is turned off';
 
@@ -66,17 +72,8 @@ function createEl(tag, classes, text) {
   return el;
 }
 
-function timeAgo(isoString) {
-  if (!isoString) return '';
-  var seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
-  if (seconds < 0) seconds = 0;
-  if (seconds < 5) return 'just now';
-  if (seconds < 60) return seconds + 's ago';
-  if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
-  if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
-  if (seconds < 604800) return Math.floor(seconds / 86400) + 'd ago';
-  return new Date(isoString).toLocaleDateString();
-}
+// The site's one relative date (auth.js), in sentence case: it stands alone.
+function timeAgo(isoString) { return getTimeAgo(isoString, true); }
 
 // The site's one toast (ui.js): theme colours, a status light for the tone.
 function showToast(message, type) {
@@ -97,6 +94,25 @@ export async function mount(ctx) {
   var _total = 0;
   var _isAdmin = !!(ctx.data && ctx.data.user && ctx.data.user.is_admin);
   var _stopRefresh = null;
+  // The open dialogs (WSUI.modal), by overlay id.
+  var _dialogs = {};
+
+  function openDialog(id, opts) {
+    if (_dialogs[id]) return;
+    var overlay = $(id);
+    overlay.classList.remove('hidden');
+    if (id === 'lightbox') overlay.classList.add('flex');
+    _dialogs[id] = WSUI.modal(overlay, {
+      initial: opts && opts.initial,
+      onClose: function () {
+        overlay.classList.add('hidden');
+        if (id === 'lightbox') overlay.classList.remove('flex');
+        delete _dialogs[id];
+        if (opts && opts.onClose) opts.onClose();
+      }
+    });
+  }
+  function closeDialog(id) { if (_dialogs[id]) _dialogs[id].close(); }
 
   // ---- Filter tabs ----
 
@@ -104,7 +120,7 @@ export async function mount(ctx) {
     _currentFilter = status;
     _currentPage = 0;
     root.querySelectorAll('.filter-tab').forEach(function(btn) {
-      btn.classList.toggle('active', btn.getAttribute('data-filter') === status);
+      btn.setAttribute('aria-pressed', btn.getAttribute('data-filter') === status ? 'true' : 'false');
     });
     loadTickets();
   }
@@ -113,7 +129,7 @@ export async function mount(ctx) {
     _currentCatFilter = cat;
     _currentPage = 0;
     root.querySelectorAll('.cat-filter-tab').forEach(function(btn) {
-      btn.classList.toggle('active', btn.getAttribute('data-catfilter') === cat);
+      btn.setAttribute('aria-pressed', btn.getAttribute('data-catfilter') === cat ? 'true' : 'false');
     });
     loadTickets();
   }
@@ -194,7 +210,7 @@ export async function mount(ctx) {
     sendBtn.disabled = true;
     var prev = sendBtn.previousElementSibling;
     if (prev && prev.hasAttribute('data-off-notice')) return;
-    var notice = createEl('p', 'text-xs text-frosted-blue/80 bg-steel-blue/10 border border-steel-blue/25 rounded-lg px-3 py-2 mb-3', OFF_NOTICE);
+    var notice = createEl('p', 'text-body text-frosted-blue/80 bg-frosted-blue/[0.04] rounded-inner px-3 py-2 mb-3', OFF_NOTICE);
     notice.setAttribute('data-off-notice', '');
     notice.setAttribute('role', 'status');
     sendBtn.parentNode.insertBefore(notice, sendBtn);
@@ -259,8 +275,9 @@ export async function mount(ctx) {
     }, {
       onError: function (err) {
         if (signal.aborted || isAbort(err)) return;
+        // No figure to show: the box keeps its height with a blank line.
         WS.arrive('counts', function () {
-          ['statTotal', 'statOpen', 'statInProgress', 'statResolved'].forEach(function (id) { $(id).textContent = '–'; });
+          ['statTotal', 'statOpen', 'statInProgress', 'statResolved'].forEach(function (id) { $(id).textContent = '\u00a0'; });
         });
       }
     });
@@ -284,38 +301,39 @@ export async function mount(ctx) {
     empty.classList.add('hidden');
 
     _tickets.forEach(function(ticket) {
-      // The page's click listener opens it (data-action).
-      var card = createEl('div', 'glass-card rounded-xl p-4 cursor-pointer hover:border-primary/40 transition-all border border-transparent');
+      // A button, so the whole card opens the ticket from a click or the
+      // keyboard; the page's click listener opens it (data-action).
+      var card = createEl('button', 'block w-full text-left rounded-inner bg-frosted-blue/[0.04] hover:bg-frosted-blue/[0.07] p-4 transition-colors');
+      card.type = 'button';
       card.setAttribute('data-action', 'open-ticket');
       card.setAttribute('data-ticket-id', String(ticket.id));
 
       // Top row: title + badges (stacked on mobile, side-by-side on desktop)
-      var topRow = createEl('div', 'flex flex-col lg:flex-row lg:items-start lg:justify-between gap-1 lg:gap-3 mb-2');
+      var topRow = createEl('span', 'flex flex-col lg:flex-row lg:items-start lg:justify-between gap-1.5 lg:gap-3 mb-2');
 
-      var titleDiv = createEl('div', 'flex-1 min-w-0');
-      var titleEl = createEl('p', 'text-frosted-blue font-bold text-sm truncate', ticket.title);
+      var titleDiv = createEl('span', 'block flex-1 min-w-0');
+      var titleEl = createEl('span', 'block text-frosted-blue font-semibold text-body truncate', ticket.title);
       titleDiv.appendChild(titleEl);
 
       // Creator (admin only)
       if (_isAdmin && ticket.creator_username) {
-        var creatorEl = createEl('p', 'text-[10px] text-steel-blue mt-0.5', '@' + ticket.creator_username);
+        var creatorEl = createEl('span', 'block text-label text-frosted-blue/70 mt-0.5', '@' + ticket.creator_username);
         titleDiv.appendChild(creatorEl);
       }
 
-      var badgeDiv = createEl('div', 'flex items-center gap-1.5 flex-wrap lg:shrink-0 lg:justify-end');
+      var badgeDiv = createEl('span', 'flex items-center gap-1.5 flex-wrap lg:shrink-0 lg:justify-end');
 
       // Category badge
-      var catBadge = createEl('span', 'px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ' + (CATEGORY_COLORS[ticket.category] || CATEGORY_COLORS.other), CATEGORY_LABELS[ticket.category] || ticket.category);
+      var catBadge = createEl('span', CHIP + (CATEGORY_COLORS[ticket.category] || CATEGORY_COLORS.other), CATEGORY_LABELS[ticket.category] || ticket.category);
       badgeDiv.appendChild(catBadge);
 
       // Status badge
-      var statusLabel = (ticket.status || 'open').replace('_', ' ');
-      var statusBadge = createEl('span', 'px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ' + (STATUS_COLORS[ticket.status] || STATUS_COLORS.open), statusLabel);
+      var statusBadge = createEl('span', CHIP + (STATUS_COLORS[ticket.status] || STATUS_COLORS.open), STATUS_LABELS[ticket.status] || STATUS_LABELS.open);
       badgeDiv.appendChild(statusBadge);
 
       // Priority badge (if set)
       if (ticket.priority) {
-        var priBadge = createEl('span', 'px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ' + (PRIORITY_COLORS[ticket.priority] || ''), ticket.priority);
+        var priBadge = createEl('span', CHIP + (PRIORITY_COLORS[ticket.priority] || ''), PRIORITY_LABELS[ticket.priority] || ticket.priority);
         badgeDiv.appendChild(priBadge);
       }
 
@@ -324,9 +342,9 @@ export async function mount(ctx) {
       card.appendChild(topRow);
 
       // Bottom row: description snippet + time
-      var bottomRow = createEl('div', 'flex items-center justify-between gap-3');
-      var descSnippet = createEl('p', 'text-xs text-steel-blue truncate flex-1', ticket.description);
-      var timeEl = createEl('span', 'text-[10px] text-frosted-blue/70 shrink-0', timeAgo(ticket.created_at));
+      var bottomRow = createEl('span', 'flex items-center justify-between gap-3');
+      var descSnippet = createEl('span', 'text-label text-frosted-blue/70 truncate flex-1', ticket.description);
+      var timeEl = createEl('span', 'text-label text-frosted-blue/70 shrink-0', timeAgo(ticket.created_at));
       bottomRow.appendChild(descSnippet);
       bottomRow.appendChild(timeEl);
       card.appendChild(bottomRow);
@@ -341,7 +359,7 @@ export async function mount(ctx) {
   // until the ticket is actually sent: opening again shows the draft, and only
   // a successful submit clears the form.
   function openCreateModal() {
-    $('createModal').classList.remove('hidden');
+    openDialog('createModal', { initial: $('createTitle'), onClose: function () { if (_ticketsOff) goHome(); } });
   }
 
   function resetCreateForm() {
@@ -351,11 +369,24 @@ export async function mount(ctx) {
     cat.value = 'media_request';
     cat.dispatchEvent(new Event('change'));   // the playback hint follows the category
     $('createImage').value = '';
+    clearInvalid();
   }
 
-  function closeCreateModal() {
-    $('createModal').classList.add('hidden');
-    if (_ticketsOff) goHome();
+  function closeCreateModal() { closeDialog('createModal'); }
+
+  // ---- Validation: the field says what is missing, not a toast ----
+
+  // Settings' pattern (.ws-invalid): the field takes the error ring and the
+  // line under it says what to do; the first one missing takes the focus.
+  function markInvalid(id, bad) {
+    var field = $(id);
+    field.classList.toggle('ws-invalid', bad);
+    field.setAttribute('aria-invalid', bad ? 'true' : 'false');
+    $(id + 'Error').classList.toggle('hidden', !bad);
+  }
+  function clearInvalid() {
+    markInvalid('createTitle', false);
+    markInvalid('createDescription', false);
   }
 
   function submitNewTicket() {
@@ -365,8 +396,10 @@ export async function mount(ctx) {
     var category = $('createCategory').value;
     var imageInput = $('createImage');
 
-    if (!title) { showToast('Title is required', 'error'); return; }
-    if (!description) { showToast('Description is required', 'error'); return; }
+    markInvalid('createTitle', !title);
+    markInvalid('createDescription', !description);
+    if (!title) { $('createTitle').focus(); return; }
+    if (!description) { $('createDescription').focus(); return; }
 
     var formData = new FormData();
     formData.append('title', title);
@@ -378,7 +411,7 @@ export async function mount(ctx) {
 
     var btn = $('createSubmitBtn');
     btn.disabled = true;
-    btn.textContent = 'Submitting...';
+    btn.textContent = 'Sending\u2026';
 
     postTicketForm('/api/tickets', formData, btn)
       .then(function() {
@@ -389,12 +422,12 @@ export async function mount(ctx) {
           resetCreateForm();
           closeCreateModal();
         }
-        showToast('Ticket submitted!', 'success');
+        showToast('Ticket sent', 'success');
         loadTickets();
         loadCounts();
       })
       .catch(function(e) { if (e !== TICKETS_OFF && !isAbort(e)) showToast(e.message, 'error'); })
-      .finally(function() { btn.disabled = _ticketsOff; btn.textContent = 'Submit Ticket'; });
+      .finally(function() { btn.disabled = _ticketsOff; btn.textContent = 'Send ticket'; });
   }
 
   // ---- Ticket detail modal ----
@@ -410,20 +443,18 @@ export async function mount(ctx) {
   var _detailTicketId = null;
 
   function detailShowing(ticketId) {
-    return !$('detailModal').classList.contains('hidden') && _detailTicketId === String(ticketId);
+    return !!_dialogs.detailModal && _detailTicketId === String(ticketId);
   }
 
   function openDetailModal(ticketId) {
     _detailTicketId = String(ticketId);
-    $('detailModal').classList.remove('hidden');
     var content = $('detailContent');
     // Show loading
     while (content.firstChild) content.removeChild(content.firstChild);
-    var loadingDiv = createEl('div', 'text-center text-steel-blue py-8');
-    var spinner = createEl('span', 'material-symbols-outlined text-4xl mb-2 block opacity-50 animate-spin', 'progress_activity');
-    loadingDiv.appendChild(spinner);
-    loadingDiv.appendChild(createEl('p', '', 'Loading...'));
-    content.appendChild(loadingDiv);
+    var loading = createEl('p', 'text-frosted-blue/70 text-body py-8 text-center', 'Loading the ticket\u2026');
+    loading.id = 'ticketDetailTitle';
+    content.appendChild(loading);
+    openDialog('detailModal', { onClose: function () { if (_ticketsOff) goHome(); } });
 
     ticketsJSON('/api/tickets/' + ticketId)
       .then(function(data) { renderDetailContent(data, data.comments || []); })
@@ -433,75 +464,71 @@ export async function mount(ctx) {
       });
   }
 
-  function closeDetailModal() {
-    $('detailModal').classList.add('hidden');
-    if (_ticketsOff) goHome();
-  }
+  function closeDetailModal() { closeDialog('detailModal'); }
 
   function renderDetailContent(ticket, comments) {
     var content = $('detailContent');
     while (content.firstChild) content.removeChild(content.firstChild);
 
     // Title
-    content.appendChild(createEl('h3', 'text-lg font-bold text-frosted-blue mb-1 pr-8', ticket.title));
+    var heading = createEl('h2', 'text-h3 font-bold text-frosted-blue mb-1 pr-10', ticket.title);
+    heading.id = 'ticketDetailTitle';
+    content.appendChild(heading);
 
     // Creator (admin or own)
     if (ticket.creator_username) {
-      content.appendChild(createEl('p', 'text-xs text-steel-blue mb-3', 'by @' + ticket.creator_username + ' · ' + timeAgo(ticket.created_at)));
+      content.appendChild(createEl('p', 'text-label text-frosted-blue/70 mb-3', 'From @' + ticket.creator_username + ', ' + getTimeAgo(ticket.created_at)));
     } else {
-      content.appendChild(createEl('p', 'text-xs text-steel-blue mb-3', timeAgo(ticket.created_at)));
+      content.appendChild(createEl('p', 'text-label text-frosted-blue/70 mb-3', timeAgo(ticket.created_at)));
     }
 
     // Badges row
     var badgeRow = createEl('div', 'flex flex-wrap gap-2 mb-4');
-    var catBadge = createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ' + (CATEGORY_COLORS[ticket.category] || ''), CATEGORY_LABELS[ticket.category] || ticket.category);
+    var catBadge = createEl('span', CHIP + (CATEGORY_COLORS[ticket.category] || ''), CATEGORY_LABELS[ticket.category] || ticket.category);
     badgeRow.appendChild(catBadge);
-    var statusLabel = (ticket.status || 'open').replace('_', ' ');
-    var statusBadge = createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ' + (STATUS_COLORS[ticket.status] || ''), statusLabel);
+    var statusBadge = createEl('span', CHIP + (STATUS_COLORS[ticket.status] || ''), STATUS_LABELS[ticket.status] || STATUS_LABELS.open);
     badgeRow.appendChild(statusBadge);
     if (ticket.priority) {
-      var priBadge = createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ' + (PRIORITY_COLORS[ticket.priority] || ''), ticket.priority);
+      var priBadge = createEl('span', CHIP + (PRIORITY_COLORS[ticket.priority] || ''), PRIORITY_LABELS[ticket.priority] || ticket.priority);
       badgeRow.appendChild(priBadge);
     }
     if (ticket.is_public) {
-      badgeRow.appendChild(createEl('span', 'px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-primary/20 text-frosted-blue', 'Public'));
+      badgeRow.appendChild(createEl('span', CHIP + 'bg-primary/20 text-frosted-blue', 'Public'));
     }
     content.appendChild(badgeRow);
 
     // Description
-    content.appendChild(createEl('p', 'text-sm text-frosted-blue mb-4 whitespace-pre-wrap', ticket.description));
+    content.appendChild(createEl('p', 'text-body text-frosted-blue mb-4 whitespace-pre-wrap', ticket.description));
 
-    // Image: the page's click listener opens it in the lightbox (data-action).
+    // Image: a button around it opens it in the lightbox (data-action), so
+    // the larger view is reachable from the keyboard too.
     if (ticket.image_path) {
-      var img = document.createElement('img');
-      img.src = ticket.image_path;
-      img.className = 'w-full max-h-48 object-contain rounded-lg mb-4 cursor-pointer hover:opacity-80 transition-opacity';
-      img.alt = 'Ticket attachment';
-      img.setAttribute('data-action', 'lightbox');
-      content.appendChild(img);
+      content.appendChild(attachmentButton(ticket.image_path, 'Attached screenshot', 'w-full max-h-48 object-contain', 'block w-full mb-4'));
     }
 
     // Admin controls
     if (_isAdmin) {
-      var controlsDiv = createEl('div', 'flex flex-wrap gap-2 mb-4 p-3 rounded-lg bg-frosted-blue/5 border border-steel-blue/20');
+      var controlsDiv = createEl('div', 'flex flex-wrap items-center gap-2 mb-4 p-3 rounded-inner bg-frosted-blue/[0.04]');
 
       // Status dropdown
       var statusSelect = document.createElement('select');
-      statusSelect.className = 'px-2 py-1.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue text-xs focus:outline-none focus:ring-1 focus:ring-primary/30';
+      statusSelect.setAttribute('aria-label', 'Status');
+      statusSelect.className = 'h-10 pl-3 pr-9 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue text-label focus:outline-none focus:ring-2 focus:ring-primary';
       ['open', 'in_progress', 'resolved', 'closed'].forEach(function(s) {
         var opt = document.createElement('option');
         opt.value = s;
-        opt.textContent = s.replace('_', ' ').replace(/\b\w/g, function(l) { return l.toUpperCase(); });
+        opt.textContent = STATUS_LABELS[s];
         if (s === ticket.status) opt.selected = true;
         statusSelect.appendChild(opt);
       });
 
       // Priority dropdown
       var prioritySelect = document.createElement('select');
-      prioritySelect.className = 'px-2 py-1.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue text-xs focus:outline-none focus:ring-1 focus:ring-primary/30';
+      prioritySelect.setAttribute('aria-label', 'Priority');
+      prioritySelect.className = 'h-10 pl-3 pr-9 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue text-label focus:outline-none focus:ring-2 focus:ring-primary';
       var noneOpt = document.createElement('option');
       noneOpt.value = '';
-      noneOpt.textContent = 'No Priority';
+      noneOpt.textContent = 'No priority';
       if (!ticket.priority) noneOpt.selected = true;
       prioritySelect.appendChild(noneOpt);
       ['low', 'medium', 'high', 'urgent'].forEach(function(p) {
@@ -513,7 +540,7 @@ export async function mount(ctx) {
       });
 
       // Public toggle
-      var pubLabel = createEl('label', 'flex items-center gap-2 text-xs text-steel-blue cursor-pointer');
+      var pubLabel = createEl('label', 'flex items-center gap-2 text-label text-frosted-blue/80 cursor-pointer');
       var pubCheck = document.createElement('input');
       pubCheck.type = 'checkbox';
       pubCheck.checked = ticket.is_public;
@@ -522,7 +549,8 @@ export async function mount(ctx) {
       pubLabel.appendChild(document.createTextNode('Public'));
 
       // Save button
-      var saveBtn = createEl('button', 'px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-xs font-bold transition-all ml-auto', 'Save');
+      var saveBtn = createEl('button', 'h-10 px-4 rounded-btn bg-primary hover:bg-primary/90 text-bright text-label font-semibold transition-colors ml-auto', 'Save');
+      saveBtn.type = 'button';
       saveBtn.addEventListener('click', function() {
         fetch('/api/admin/tickets/' + ticket.id, {
           method: 'PUT',
@@ -551,7 +579,8 @@ export async function mount(ctx) {
       }, { signal: signal });
 
       // Delete button
-      var delBtn = createEl('button', 'px-3 py-1.5 rounded-lg bg-frosted-blue/[0.06] hover:bg-frosted-blue/10 text-frosted-blue ring-1 ring-inset ring-[rgb(var(--ws-status-err))] text-xs font-bold transition-all', 'Delete');
+      var delBtn = createEl('button', 'h-10 px-4 rounded-btn bg-frosted-blue/[0.06] hover:bg-frosted-blue/10 text-frosted-blue ring-1 ring-inset ring-[rgb(var(--ws-status-err))] text-label font-semibold transition-colors', 'Delete');
+      delBtn.type = 'button';
       delBtn.addEventListener('click', function() {
         window.WSUI.confirm({
           title: 'Delete this ticket?',
@@ -587,46 +616,33 @@ export async function mount(ctx) {
     }
 
     // Separator
-    content.appendChild(createEl('div', 'border-t border-steel-blue/20 my-4'));
+    content.appendChild(createEl('div', 'border-t border-frosted-blue/10 my-4'));
 
     // Comments header
-    content.appendChild(createEl('p', 'text-[10px] text-steel-blue font-bold uppercase tracking-wider mb-3', 'Comments (' + comments.length + ')'));
+    content.appendChild(createEl('h3', 'text-body font-semibold text-frosted-blue mb-3', comments.length === 1 ? '1 comment' : comments.length + ' comments'));
 
     // Comments list
     if (comments.length === 0) {
-      content.appendChild(createEl('p', 'text-sm text-frosted-blue/70 italic mb-4', 'No comments yet'));
+      content.appendChild(createEl('p', 'text-body text-frosted-blue/70 mb-4', 'No comments yet.'));
     } else {
       var commentsList = createEl('div', 'space-y-3 mb-4');
       comments.forEach(function(comment) {
-        var cDiv = createEl('div', 'p-3 rounded-lg ' + (comment.is_admin ? 'bg-primary/10 border border-primary/20' : 'bg-frosted-blue/5 border border-steel-blue/10'));
+        var cDiv = createEl('div', 'p-3 rounded-inner ' + (comment.is_admin ? 'bg-primary/10' : 'bg-frosted-blue/[0.04]'));
 
         // Author + time
-        var cHeader = createEl('div', 'flex items-center justify-between mb-1.5');
+        var cHeader = createEl('div', 'flex items-center justify-between gap-3 mb-1.5');
         var authorText = comment.is_admin ? 'Admin' : (comment.author_name || 'You');
-        var cAuthor = createEl('span', 'text-xs font-bold ' + 'text-frosted-blue', authorText);
-        if (comment.is_admin) {
-          var adminBadge = createEl('span', 'ml-1.5 px-1.5 py-0.5 rounded text-[8px] font-bold bg-primary/20 text-frosted-blue uppercase', 'Staff');
-          var authorWrap = createEl('div', 'flex items-center');
-          authorWrap.appendChild(cAuthor);
-          authorWrap.appendChild(adminBadge);
-          cHeader.appendChild(authorWrap);
-        } else {
-          cHeader.appendChild(cAuthor);
-        }
-        cHeader.appendChild(createEl('span', 'text-[10px] text-frosted-blue/70', timeAgo(comment.created_at)));
+        var cAuthor = createEl('span', 'text-label font-semibold text-frosted-blue', authorText);
+        cHeader.appendChild(cAuthor);
+        cHeader.appendChild(createEl('span', 'text-label text-frosted-blue/70', timeAgo(comment.created_at)));
         cDiv.appendChild(cHeader);
 
         // Message
-        cDiv.appendChild(createEl('p', 'text-sm text-frosted-blue whitespace-pre-wrap', comment.message));
+        cDiv.appendChild(createEl('p', 'text-body text-frosted-blue whitespace-pre-wrap', comment.message));
 
         // Image (opens in the lightbox, like the ticket's)
         if (comment.image_path) {
-          var cImg = document.createElement('img');
-          cImg.src = comment.image_path;
-          cImg.className = 'mt-2 max-h-32 rounded-lg cursor-pointer hover:opacity-80 transition-opacity';
-          cImg.alt = 'Comment attachment';
-          cImg.setAttribute('data-action', 'lightbox');
-          cDiv.appendChild(cImg);
+          cDiv.appendChild(attachmentButton(comment.image_path, 'Attached image', 'max-h-32', 'mt-2 inline-block'));
         }
 
         commentsList.appendChild(cDiv);
@@ -636,24 +652,32 @@ export async function mount(ctx) {
 
     // Add comment form (only if own ticket or admin)
     if (ticket.is_own || _isAdmin) {
-      var formDiv = createEl('div', 'border-t border-steel-blue/20 pt-4');
+      var formDiv = createEl('div', 'border-t border-frosted-blue/10 pt-4');
+      var commentLabel = createEl('label', 'block text-label font-semibold text-frosted-blue/70 mb-1.5', 'Add a comment');
+      commentLabel.htmlFor = 'commentInput';
+      formDiv.appendChild(commentLabel);
       var textarea = document.createElement('textarea');
       textarea.id = 'commentInput';
-      textarea.placeholder = 'Write a comment...';
       textarea.rows = 3;
+      textarea.setAttribute('aria-describedby', 'commentInputError');
+      var commentError = createEl('p', 'hidden text-label font-semibold text-status-err-text -mt-1 mb-2', 'Write something first.');
+      commentError.id = 'commentInputError';
       textarea.value = _commentDrafts[ticket.id] || '';
       textarea.addEventListener('input', function() {
         if (textarea.value) _commentDrafts[ticket.id] = textarea.value;
         else delete _commentDrafts[ticket.id];
+        if (textarea.value.trim()) { textarea.classList.remove('ws-invalid'); commentError.classList.add('hidden'); }
       }, { signal: signal });
-      textarea.className = 'w-full px-3 py-2.5 bg-frosted-blue/[0.04] border border-steel-blue/20 rounded-lg text-frosted-blue placeholder-frosted-blue/70 text-sm resize-none focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/30 transition-all mb-2';
+      textarea.className = 'w-full px-3.5 py-2.5 bg-frosted-blue/[0.04] border border-frosted-blue/10 rounded-btn text-frosted-blue placeholder-frosted-blue/70 text-body resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors mb-2';
 
       var fileInput = document.createElement('input');
       fileInput.type = 'file';
       fileInput.accept = 'image/png,image/jpeg,image/webp';
-      fileInput.className = 'w-full text-sm text-steel-blue file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-primary/20 file:text-frosted-blue hover:file:bg-primary/30 transition-all mb-2';
+      fileInput.setAttribute('aria-label', 'Attach an image (optional)');
+      fileInput.className = 'w-full text-body text-frosted-blue/70 file:mr-3 file:py-1.5 file:px-3 file:rounded-btn file:border-0 file:text-label file:font-semibold file:bg-frosted-blue/[0.07] file:text-frosted-blue hover:file:bg-frosted-blue/10 transition-colors mb-2';
 
-      var sendBtn = createEl('button', 'w-full py-2.5 rounded-lg bg-primary hover:bg-primary/80 text-bright text-sm font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed', 'Add Comment');
+      var sendBtn = createEl('button', 'ws-lift w-full py-2.5 rounded-btn bg-primary hover:bg-primary/90 text-bright text-body font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed', 'Post comment');
+      sendBtn.type = 'button';
       sendBtn.id = 'commentSendBtn';
       sendBtn.setAttribute('data-ticket-id', String(ticket.id));
       if (Object.prototype.hasOwnProperty.call(_commentSending, ticket.id)) {
@@ -664,7 +688,10 @@ export async function mount(ctx) {
         if (_ticketsOff) return;
         if (Object.prototype.hasOwnProperty.call(_commentSending, ticket.id)) return;
         var msg = textarea.value.trim();
-        if (!msg) { showToast('Comment cannot be empty', 'error'); return; }
+        textarea.classList.toggle('ws-invalid', !msg);
+        textarea.setAttribute('aria-invalid', msg ? 'false' : 'true');
+        commentError.classList.toggle('hidden', !!msg);
+        if (!msg) { textarea.focus(); return; }
 
         var formData = new FormData();
         formData.append('message', msg);
@@ -681,22 +708,23 @@ export async function mount(ctx) {
             // Newer text typed meanwhile stays; only the sent text is cleared,
             // compared trimmed as it was posted (a stray space is not new text).
             if ((_commentDrafts[ticket.id] || '').trim() === msg) delete _commentDrafts[ticket.id];
-            showToast('Comment added', 'success');
+            showToast('Comment posted', 'success');
             if (detailShowing(ticket.id)) openDetailModal(ticket.id); // Refresh detail
           })
           .catch(function(e) { if (e !== TICKETS_OFF && !isAbort(e)) showToast(e.message, 'error'); })
-          .finally(function() { sendBtn.disabled = _ticketsOff; sendBtn.textContent = 'Add Comment';
+          .finally(function() { sendBtn.disabled = _ticketsOff; sendBtn.textContent = 'Post comment';
             delete _commentSending[ticket.id];
             // The box on screen for this ticket may be a rebuilt one.
             var live = $('commentSendBtn');
             if (live && live !== sendBtn && live.getAttribute('data-ticket-id') === String(ticket.id)) {
               live.disabled = _ticketsOff;
-              live.textContent = 'Add Comment';
+              live.textContent = 'Post comment';
             }
           });
       }, { signal: signal });
 
       formDiv.appendChild(textarea);
+      formDiv.appendChild(commentError);
       formDiv.appendChild(fileInput);
       formDiv.appendChild(sendBtn);
       content.appendChild(formDiv);
@@ -705,16 +733,29 @@ export async function mount(ctx) {
 
   // ---- Lightbox ----
 
-  function openLightbox(src) {
-    $('lightboxImg').src = src;
-    $('lightbox').classList.remove('hidden');
-    $('lightbox').classList.add('flex');
+  // An attached image as a button that opens it larger. The button carries
+  // the name; the picture inside is described by it, so its alt is empty.
+  function attachmentButton(src, label, imgClass, btnClass) {
+    var btn = createEl('button', btnClass + ' rounded-btn overflow-hidden hover:opacity-80 transition-opacity');
+    btn.type = 'button';
+    btn.setAttribute('data-action', 'lightbox');
+    btn.setAttribute('data-src', src);
+    btn.setAttribute('aria-label', label + ', open it larger');
+    var img = document.createElement('img');
+    img.src = src;
+    img.alt = '';
+    img.className = imgClass + ' rounded-btn';
+    btn.appendChild(img);
+    return btn;
   }
 
-  function closeLightbox() {
-    $('lightbox').classList.add('hidden');
-    $('lightbox').classList.remove('flex');
+  function openLightbox(src, label) {
+    $('lightboxImg').src = src;
+    $('lightboxImg').alt = label || 'Attached image';
+    openDialog('lightbox');
   }
+
+  function closeLightbox() { closeDialog('lightbox'); }
 
   // ---- Wiring: one listener per kind, on the page or with its signal ----
 
@@ -726,30 +767,27 @@ export async function mount(ctx) {
     switch (el.getAttribute('data-action')) {
       case 'open-create': openCreateModal(); break;
       case 'close-create': closeCreateModal(); break;
-      case 'submit-ticket': submitNewTicket(); break;
       case 'filter': setFilter(el.getAttribute('data-filter')); break;
       case 'cat-filter': setCategoryFilter(el.getAttribute('data-catfilter')); break;
       case 'prev-page': prevPage(); break;
       case 'next-page': nextPage(); break;
       case 'open-ticket': openDetailModal(parseInt(el.getAttribute('data-ticket-id'), 10)); break;
       case 'close-detail': closeDetailModal(); break;
-      case 'lightbox': openLightbox(el.getAttribute('src')); break;
+      case 'lightbox': openLightbox(el.getAttribute('data-src'), (el.getAttribute('aria-label') || '').replace(/, open it larger$/, '')); break;
       case 'close-lightbox': closeLightbox(); break;
     }
   }, { signal: signal });
 
-  // Escape closes the topmost of this page's overlays: the image lightbox,
-  // then the ticket, then the new-ticket form. Not while an input method is
-  // composing (Escape then cancels the composition). A WSUI dialog (the
-  // delete confirmation) answers its own Escape first and stops it reaching
-  // here; the check below is the belt to that.
-  document.addEventListener('keydown', function(e) {
-    if (e.key !== 'Escape' || e.isComposing || document.querySelector('.ws-dialog')) return;
-    var shown = function(id) { return !$(id).classList.contains('hidden'); };
-    if (shown('lightbox')) closeLightbox();
-    else if (shown('detailModal')) closeDetailModal();
-    else if (shown('createModal')) closeCreateModal();
+  // Escape closes the topmost of this page's overlays (the image lightbox,
+  // then the ticket, then the new-ticket form): WSUI.modal's stack answers it.
+  // The form sends on submit, so Enter in the subject sends too.
+  $('createForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    submitNewTicket();
   }, { signal: signal });
+  ['createTitle', 'createDescription'].forEach(function (id) {
+    $(id).addEventListener('input', function () { if ($(id).value.trim()) markInvalid(id, false); }, { signal: signal });
+  });
 
   // Show the cross-link hint only while Playback Issue is selected - it is the
   // one ticket category that belongs on the other help page more often than not.

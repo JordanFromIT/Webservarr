@@ -162,8 +162,8 @@ MUTATIONS = [
      check_post_routes_only_the_off_403),
     ("detail drifts from the API", "const TICKETS_OFF_DETAIL = 'The ticket system is turned off';",
      "const TICKETS_OFF_DETAIL = 'Ticket system is disabled';", check_off_detail_matches_the_api),
-    ("submit reset re-enables", "btn.disabled = _ticketsOff; btn.textContent = 'Submit Ticket';",
-     "btn.disabled = false; btn.textContent = 'Submit Ticket';", check_toast_and_reset_respect_the_off_flow),
+    ("submit reset re-enables", "btn.disabled = _ticketsOff; btn.textContent = 'Send ticket';",
+     "btn.disabled = false; btn.textContent = 'Send ticket';", check_toast_and_reset_respect_the_off_flow),
     ("comment toasts the off-flow", ".catch(function(e) { if (e !== TICKETS_OFF && !isAbort(e)) showToast(e.message, 'error'); })\n"
      "          .finally(function() { sendBtn",
      ".catch(function(e) { showToast(e.message, 'error'); })\n          .finally(function() { sendBtn",
