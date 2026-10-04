@@ -559,7 +559,7 @@ await run('search with no match offers "Can\'t find it? Request it"', async (mak
   check('the link says what it does', link.textContent === 'Can\'t find it? Request it', link.textContent);
   check('and goes to Requests with the search filled in', link.getAttribute('href') === '/requests?q=zzzz%20book', link.getAttribute('href'));
   check('the message names what was searched', t.text('#searchEmptyTitle') === 'No books match “zzzz book”');
-  check('the status line says there were none', t.text('#searchStatus') === 'No matches');
+  check('the status line says there were none, to a screen reader only (the message says it on screen)', t.text('#searchStatus') === 'No matches' && t.q('#searchStatus').classList.contains('sr-only'));
 });
 
 await run('search: only a Requests address from the server is used, and the words are text', async (make) => {
@@ -606,7 +606,7 @@ await run('the Continue row: cover, format badge, progress, and a way back in', 
   const fill = (c) => c.querySelector('.bg-frosted-blue.h-full');
   check('the bar is as full as the percent', fill(cards[0]).style.width === '43%' && fill(cards[1]).style.width === '60%', [fill(cards[0]).style.width, fill(cards[1]).style.width]);
   check('a place with no percent has no bar', !fill(cards[2]));
-  check('the bar is not read out (the label is)', cards[0].querySelector('.h-1').getAttribute('aria-hidden') === 'true');
+  check('the bar is not read out (the label is)', cards[0].querySelector('.h-1\\.5').getAttribute('aria-hidden') === 'true');
   check('the Continue skeleton is replaced', !t.q('#continueHost .skel'));
   check('the section is shown for the next first paint', t.doc.documentElement.hasAttribute('data-books-continue'));
   check('and remembered for this person', t.win.localStorage.getItem('webservarr_books_continue:sam') === '1');

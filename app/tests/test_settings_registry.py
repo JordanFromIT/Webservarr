@@ -455,6 +455,7 @@ class DerivedDefaults(unittest.TestCase):
         from app.routers import branding
         expected = dict(reg.public_defaults())
         expected["integration.kavita.url"] = reg.REGISTRY["integration.kavita.url"].default
+        expected["integration.plex.audiobook_library"] = reg.REGISTRY["integration.plex.audiobook_library"].default
         self.assertEqual(branding.DEFAULTS, expected)
         # The builder must find every key it reads.
         payload = branding.build_branding({}, {}, None, dict(branding.EMPTY_WIKI_HOOKS))

@@ -1442,8 +1442,13 @@ class LibrarySetting(unittest.TestCase):
         self.assertFalse(d.public, "admin-only: never in the public branding payload")
         self.assertFalse(d.secret)
         self.assertEqual(reg.seed_defaults()[LIB_KEY][0], "")
+        # The branding builder reads it (Books shows when there is an audiobook library) but only as a
+        # yes or no: the number itself is never in the payload every page carries.
+        import json
         from app.routers import branding
-        self.assertNotIn(LIB_KEY, branding.DEFAULTS)
+        payload = branding.build_branding({LIB_KEY: "7351"}, {}, None, dict(branding.EMPTY_WIKI_HOOKS))
+        self.assertTrue(payload["features"]["books_configured"])
+        self.assertNotIn("7351", json.dumps(payload))
 
     def test_validation(self):
         for ok in ("", "1", "5", "123456"):

@@ -130,7 +130,7 @@ export function renderBookCard(card, opts) {
   cover.appendChild(coverBox(card.cover_url, card.formats, signal));
   a.appendChild(cover);
   const title = series ? card.series : card.title;
-  a.appendChild(el('span', 'mt-2 block text-[15px] font-semibold leading-snug text-frosted-blue line-clamp-2 min-h-[2.75em]', title || 'Untitled'));
+  a.appendChild(el('span', 'mt-2 text-[15px] font-semibold leading-snug text-frosted-blue line-clamp-2 min-h-[2.75em]', title || 'Untitled'));
   const sub = series ? card.count + (card.count === 1 ? ' book' : ' books') : card.author;
   a.appendChild(el('span', 'block text-[13px] leading-5 text-frosted-blue/70 truncate min-h-5', sub || ''));
   return a;
@@ -169,7 +169,8 @@ function continueCard(item, compact, signal) {
   const box = coverBox(item.cover_url, [item.format], signal);
   if (typeof item.percent === 'number') {
     // The bar is drawn from CSSOM (no style attribute in markup).
-    const track = el('span', 'absolute inset-x-0 bottom-0 block h-1 bg-frosted-blue/25');
+    // On a dark track, so it reads over any cover.
+    const track = el('span', 'absolute inset-x-0 bottom-0 block h-1.5 bg-background-dark/70');
     const fill = el('span', 'block h-full bg-frosted-blue');
     fill.style.width = clamp(item.percent, 0, 100) + '%';
     track.setAttribute('aria-hidden', 'true');
@@ -177,7 +178,7 @@ function continueCard(item, compact, signal) {
     box.appendChild(track);
   }
   node.appendChild(box);
-  node.appendChild(el('span', 'mt-2 block text-[15px] font-semibold leading-snug text-frosted-blue ' +
+  node.appendChild(el('span', 'mt-2 text-[15px] font-semibold leading-snug text-frosted-blue ' +
     (compact ? 'line-clamp-1' : 'line-clamp-2 min-h-[2.75em]'), item.title || 'Untitled'));
   node.appendChild(el('span', 'block text-[13px] leading-5 text-frosted-blue/70 truncate min-h-5', item.progress_label || ''));
   return node;
@@ -538,6 +539,14 @@ export async function mount(ctx) {
     SEARCH_PARTS.forEach(function (id) { $(id).classList.toggle('hidden', id !== which); });
   }
 
+  // The count a screen reader hears. With no match the empty message says it
+  // for everyone else, so the line is then for the screen reader alone.
+  function setStatus(text, readerOnly) {
+    const line = $('searchStatus');
+    line.textContent = text;
+    line.classList.toggle('sr-only', !!readerOnly);
+  }
+
   function setSearching(on) {
     state.searching = on;
     $('browseArea').classList.toggle('hidden', on);
@@ -560,7 +569,7 @@ export async function mount(ctx) {
     const gen = ++state.searchGen;
     state.query = query;
     setSearching(true);
-    $('searchStatus').textContent = 'Searching…';
+    setStatus('Searching\u2026', false);
     showSkeleton($('searchSkeleton'), 6);
     showSearchPart('searchSkeleton');
     readLive('/api/books/search?q=' + encodeURIComponent(query) + '&limit=' + SEARCH_LIMIT).then(function (data) {
@@ -571,17 +580,17 @@ export async function mount(ctx) {
       grid.textContent = '';
       if (items.length) {
         appendCards(grid, items);
-        $('searchStatus').textContent = items.length === 1 ? '1 book found' : items.length + ' books found';
+        setStatus(items.length === 1 ? '1 book found' : items.length + ' books found', false);
         showSearchPart('searchGrid');
         return;
       }
-      $('searchStatus').textContent = 'No matches';
+      setStatus('No matches', true);
       $('searchEmptyTitle').textContent = 'No books match “' + query + '”';
       $('searchRequest').href = requestHref(data, query);
       showSearchPart('searchEmpty');
     }, function (err) {
       if (gen !== state.searchGen || quiet(err)) return;
-      $('searchStatus').textContent = '';
+      setStatus('', false);
       showSearchPart('searchError');
     });
   }
