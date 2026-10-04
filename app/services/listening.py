@@ -44,7 +44,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import and_, case, exists, or_
+from sqlalchemy import and_, case, exists, func, or_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -860,6 +860,10 @@ PLAYING_EVENTS = ("play", "checkin", "seek", "jump")
 LISTEN_GAP = timedelta(seconds=30)
 # Internal row, as PRUNED_AT_KEY: the last UTC day listening_daily holds.
 ROLLED_THROUGH_KEY = "listening.rolled_through"
+# Internal row too: the highest log id the last rollup saw. A row above it on
+# a day already rolled up came in late (listening synced after the fact), and
+# the next rollup adds what it changes (late_changes).
+ROLLED_LOG_ID_KEY = "listening.rolled_log_id"
 # A day is rolled up only once its last row's gap can no longer be followed by a new row.
 ROLL_MARGIN = timedelta(minutes=1)
 
@@ -899,22 +903,99 @@ def rolled_through(db: Session):
         return None
 
 
+def rolled_log_id(db: Session) -> Optional[int]:
+    """The highest log id the last rollup saw, or None before a rollup has kept one."""
+    row = db.query(Setting.value).filter(Setting.key == ROLLED_LOG_ID_KEY).first()
+    try:
+        return int(row[0]) if row else None
+    except ValueError:
+        return None
+
+
+def _put_marker(db: Session, key: str, value: str, description: str) -> None:
+    marker = db.query(Setting).filter(Setting.key == key).first()
+    if marker is None:
+        db.add(Setting(key=key, value=value, description=description))
+    else:
+        marker.value = value
+
+
+def _daily_totals(rows) -> dict:
+    """{day: [ms, books]} for one listener's log rows, given as (at, event,
+    book_key) in time order; days with no time listened are left out."""
+    days: dict = {}
+    for at, book, ms in listened_spans(rows):
+        if ms:
+            day = days.setdefault(at.date(), [0, set()])
+            day[0] += ms
+            day[1].add(book)
+    return days
+
+
+def late_changes(db: Session, done, seen: Optional[int], identity: Optional[str] = None) -> dict:
+    """{(identity, day): (ms, books)}: what the log rows above `seen` (a
+    rolled_log_id) change on the days rolled up through `done`, for one
+    listener or (identity None) all of them. `ms` is the change to the
+    day's total: the time the day's log shows now less the time from the
+    rows the rollup saw. Adding the difference, rather than recounting the
+    day, keeps what was rolled up from rows pruned since. `books` is how
+    many books the day's log shows now. A late row also changes the day
+    before it when it closes the gap after that day's last row. Empty
+    without both markers."""
+    if done is None or seen is None:
+        return {}
+    L = ListeningLog
+    end = datetime.combine(done + timedelta(days=1), datetime.min.time())
+    late = db.query(L.identity, L.at).filter(L.id > seen, L.at < end + LISTEN_GAP)
+    if identity is not None:
+        late = late.filter(L.identity == identity)
+    touched: dict = {}
+    for who, at in late:
+        for day in {at.date(), (at - LISTEN_GAP).date()}:
+            if day <= done:
+                touched.setdefault(who, set()).add(day)
+    changes = {}
+    for who, days in touched.items():
+        start = datetime.combine(min(days), datetime.min.time())
+        stop = datetime.combine(max(days) + timedelta(days=1), datetime.min.time()) + LISTEN_GAP
+        rows = (db.query(L.id, L.at, L.event, L.book_key)
+                .filter(L.identity == who, L.at >= start, L.at < stop).order_by(L.at, L.id).all())
+        now_totals = _daily_totals((at, event, book) for _id, at, event, book in rows)
+        seen_totals = _daily_totals((at, event, book) for row_id, at, event, book in rows if row_id <= seen)
+        for day in days:
+            if day in now_totals or day in seen_totals:
+                ms, books = now_totals.get(day, (0, ()))
+                changes[(who, day)] = (ms - seen_totals.get(day, (0, ()))[0], len(books))
+    return changes
+
+
 def roll_up(db: Session, now: Optional[datetime] = None) -> int:
     """Add every complete UTC day not yet rolled up to listening_daily: per
-    listener and day, the time listened and the books it was in. A day once
-    rolled up is never written again (the log under it may be pruned).
-    Returns how many rows were added. Safe with two workers: the first
-    statement is a write, so SQLite's write lock is held before the marker
-    is read, and the rows go in with INSERT OR IGNORE."""
+    listener and day, the time listened and the books it was in. A day
+    already rolled up changes only by what log rows that came in after it
+    change (late_changes), so what was rolled up from rows pruned since is
+    kept. Returns how many day rows were added or changed. Safe with two
+    workers: the first statement is a write, so SQLite's write lock is held
+    before the markers are read, new days go in with INSERT OR IGNORE, and
+    the late rows are added in the same transaction that moves the log id
+    marker past them, so they are added once."""
     from app.models import ListeningDaily
 
     now = _naive_utc(now)
     last_day = (now - ROLL_MARGIN).date() - timedelta(days=1)
     db.query(ListeningDaily).filter(ListeningDaily.id < 0).delete(synchronize_session=False)
     done = rolled_through(db)
+    late = late_changes(db, done, rolled_log_id(db))
+    for (identity, day), (ms, books) in late.items():
+        db.execute(sqlite_insert(ListeningDaily).values(identity=identity, day=day, ms=ms, books_touched=books)
+                   .on_conflict_do_update(index_elements=[ListeningDaily.identity, ListeningDaily.day],
+                                          set_={"ms": ListeningDaily.ms + ms,
+                                                "books_touched": func.max(ListeningDaily.books_touched, books)}))
+    top = db.query(func.max(ListeningLog.id)).scalar() or 0
+    _put_marker(db, ROLLED_LOG_ID_KEY, str(top), "Listening log rolled up through id (internal)")
     if done is not None and done >= last_day:
         db.commit()
-        return 0
+        return len(late)
     if done is None:
         oldest = db.query(ListeningLog.at).order_by(ListeningLog.at).first()
         first_day = oldest[0].date() if oldest else last_day + timedelta(days=1)
@@ -940,14 +1021,9 @@ def roll_up(db: Session, now: Optional[datetime] = None) -> int:
         db.execute(sqlite_insert(ListeningDaily).values(identity=identity, day=day, ms=ms,
                                                        books_touched=len(books))
                    .on_conflict_do_nothing())
-    stamp = last_day.isoformat()
-    marker = db.query(Setting).filter(Setting.key == ROLLED_THROUGH_KEY).first()
-    if marker is None:
-        db.add(Setting(key=ROLLED_THROUGH_KEY, value=stamp, description="Listening rolled up through (internal)"))
-    else:
-        marker.value = stamp
+    _put_marker(db, ROLLED_THROUGH_KEY, last_day.isoformat(), "Listening rolled up through (internal)")
     db.commit()
-    return len(totals)
+    return len(totals) + len(late)
 
 
 def prune_log(db: Session, now: Optional[datetime] = None) -> int:
@@ -961,6 +1037,13 @@ def prune_log(db: Session, now: Optional[datetime] = None) -> int:
     kept_from = datetime.combine(done + timedelta(days=1), datetime.min.time()) if done else datetime.min
     cutoff = min(cutoff, kept_from)
     n = db.query(ListeningLog).filter(ListeningLog.at < cutoff).delete(synchronize_session=False)
+    # SQLite numbers a new row one above the highest id left, so once the
+    # newest rows are gone, ids at or below the log id marker come round
+    # again: lower it, or roll_up would take those rows for ones it had seen.
+    top = db.query(func.max(ListeningLog.id)).scalar() or 0
+    seen = rolled_log_id(db)
+    if seen is not None and seen > top:
+        _put_marker(db, ROLLED_LOG_ID_KEY, str(top), "Listening log rolled up through id (internal)")
     db.commit()
     return n
 

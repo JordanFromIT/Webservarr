@@ -223,7 +223,10 @@ def stats(db: Session, identity: str, zone=timezone.utc, now: Optional[datetime]
 
     Time is wall time from the log (listening.listened_spans); the log keeps
     LOG_DAYS, and all-time adds the days rolled up into listening_daily
-    before they were pruned. Days and weeks (Monday first) are in `zone`.
+    before they were pruned, with what check-ins logged after their day was
+    rolled up change (listening.late_changes) until the next rollup takes
+    them in, so all-time is never less than six months. Days and weeks
+    (Monday first) are in `zone`.
     The streak is the run of days with listening up to today, or up to
     yesterday while today has none yet. Books finished are lifetime (places
     are never pruned), one per catalog book however many editions. Top
@@ -239,6 +242,7 @@ def stats(db: Session, identity: str, zone=timezone.utc, now: Optional[datetime]
     rolled = (db.query(func.coalesce(func.sum(ListeningDaily.ms), 0))
               .filter(ListeningDaily.identity == identity).scalar())
     unrolled = sum(ms for at, _key, ms in spans if after_rolled is None or at >= after_rolled)
+    late = sum(ms for ms, _books in listening.late_changes(db, done, listening.rolled_log_id(db), identity).values())
 
     per_day: Dict[date, int] = {}
     per_book: Dict[str, int] = {}
@@ -267,7 +271,7 @@ def stats(db: Session, identity: str, zone=timezone.utc, now: Optional[datetime]
             weekly[start] += ms
 
     return {"listened_ms_6mo": sum(ms for _at, _key, ms in recent_spans),
-            "listened_ms_all": int(rolled or 0) + unrolled,
+            "listened_ms_all": int(rolled or 0) + unrolled + late,
             "finished": _finished(db, identity),
             "streak_days": streak,
             "weekly": [{"week": w.isoformat(), "ms": weekly[w]} for w in weeks],

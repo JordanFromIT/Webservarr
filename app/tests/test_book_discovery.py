@@ -415,6 +415,7 @@ class Rollup(unittest.TestCase):
     def test_the_marker_is_not_an_operator_setting(self):
         from app import settings_registry as reg
         self.assertIsNone(reg.get_def(listening.ROLLED_THROUGH_KEY))
+        self.assertIsNone(reg.get_def(listening.ROLLED_LOG_ID_KEY))
         self.assertIsNone(reg.get_def(book_discovery.ANNOUNCE_BASELINE_KEY))
 
     def test_two_workers_rolling_up_at_once_count_each_day_once(self):
@@ -431,30 +432,126 @@ class Rollup(unittest.TestCase):
             for n in range(30):
                 log_session(db, ME, "14:1", self.NOW - timedelta(days=n + 1), 300)
             db.close()
-            barrier, errors = threading.Barrier(2), []
+            errors = []
 
-            def worker():
+            def both_roll_up(now):
+                barrier = threading.Barrier(2)
+
+                def worker():
+                    s = Session()
+                    try:
+                        barrier.wait()
+                        listening.roll_up(s, now)
+                    except Exception as exc:  # noqa: BLE001
+                        errors.append(exc)
+                    finally:
+                        s.close()
+
+                threads = [threading.Thread(target=worker) for _ in range(2)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
                 s = Session()
                 try:
-                    barrier.wait()
-                    listening.roll_up(s, self.NOW)
-                except Exception as exc:  # noqa: BLE001
-                    errors.append(exc)
+                    return s.query(ListeningDaily).count(), sum(r.ms for r in s.query(ListeningDaily))
                 finally:
                     s.close()
 
-            threads = [threading.Thread(target=worker) for _ in range(2)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
+            total = both_roll_up(self.NOW)
+            # Listening on five of those days reaches the log late: both workers see it, it is added once.
             db = Session()
-            total = db.query(ListeningDaily).count(), sum(r.ms for r in db.query(ListeningDaily))
-            self.assertEqual(listening.roll_up(db, self.NOW), 0, "nothing left to roll up")
+            for n in range(5):
+                log_session(db, ME, "14:1", self.NOW - timedelta(days=n + 1, hours=-6), 120)
+            db.close()
+            late_total = both_roll_up(self.NOW + timedelta(hours=1))
+            db = Session()
+            self.assertEqual(listening.roll_up(db, self.NOW + timedelta(hours=1)), 0, "nothing left to roll up")
             db.close()
             engine.dispose()
         self.assertEqual(errors, [])
         self.assertEqual(total, (30, 30 * 300_000))
+        self.assertEqual(late_total, (30, 30 * 300_000 + 5 * 120_000))
+
+    def test_listening_logged_after_its_day_was_rolled_up_counts_all_time(self):
+        log_session(self.db, ME, "14:1", datetime(2026, 9, 20, 8), 600)
+        listening.roll_up(self.db, self.NOW)                            # through the 27th
+        # A device that was offline sends its listening on the 20th and the 25th only now.
+        log_session(self.db, ME, "14:1", datetime(2026, 9, 20, 20), 300)
+        log_session(self.db, ME, "13:1", datetime(2026, 9, 25, 8), 120)
+        body = book_discovery.stats(self.db, ME, now=self.NOW)
+        self.assertEqual((body["listened_ms_6mo"], body["listened_ms_all"]), (1_020_000, 1_020_000),
+                         "counted all-time before the next rollup too")
+        later = self.NOW + timedelta(hours=1)
+        listening.roll_up(self.db, later)
+        listening.roll_up(self.db, later)                               # a second pass adds nothing
+        rows = {r.day.isoformat(): (r.ms, r.books_touched) for r in self.db.query(ListeningDaily)}
+        self.assertEqual(rows, {"2026-09-20": (900_000, 1), "2026-09-25": (120_000, 1)})
+        self.assertEqual(self.all_time(), 1_020_000)
+        # Once the log under those days is pruned, the rollup alone holds them.
+        far = self.NOW + timedelta(days=200)
+        listening.prune_log(self.db, now=far)
+        self.assertEqual(self.db.query(ListeningLog).count(), 0)
+        self.assertEqual(book_discovery.stats(self.db, ME, now=far)["listened_ms_all"], 1_020_000)
+
+    def test_a_late_check_in_between_rolled_ones_counts_the_gaps_it_closes(self):
+        start = datetime(2026, 9, 20, 8)
+        for seconds, event in ((0, "checkin"), (50, "checkin"), (60, "pause")):
+            self.db.add(ListeningLog(identity=ME, book_key="14:1", track_key="t", offset_ms=0, device="d",
+                                     event=event, at=start + timedelta(seconds=seconds)))
+        self.db.commit()
+        listening.roll_up(self.db, self.NOW)
+        self.assertEqual(self.all_time(), 10_000, "a 50 s gap is not listening")
+        self.db.add(ListeningLog(identity=ME, book_key="14:1", track_key="t", offset_ms=0, device="d",
+                                 event="checkin", at=start + timedelta(seconds=25)))
+        self.db.commit()
+        self.assertEqual(self.all_time(), 60_000)
+        listening.roll_up(self.db, self.NOW + timedelta(hours=1))
+        self.assertEqual([r.ms for r in self.db.query(ListeningDaily)], [60_000])
+        self.assertEqual(self.all_time(), 60_000)
+
+    def test_a_late_check_in_just_after_midnight_counts_on_the_rolled_day_before(self):
+        self.db.add(ListeningLog(identity=ME, book_key="14:1", track_key="t", offset_ms=0, device="d",
+                                 event="checkin", at=datetime(2026, 9, 20, 23, 59, 50)))
+        self.db.commit()
+        listening.roll_up(self.db, self.NOW)
+        self.assertEqual(self.all_time(), 0)
+        for at, event in ((datetime(2026, 9, 21, 0, 0, 5), "checkin"), (datetime(2026, 9, 21, 0, 0, 15), "pause")):
+            self.db.add(ListeningLog(identity=ME, book_key="14:1", track_key="t", offset_ms=0, device="d",
+                                     event=event, at=at))
+        self.db.commit()
+        self.assertEqual(self.all_time(), 25_000)
+        listening.roll_up(self.db, self.NOW + timedelta(hours=1))
+        rows = {r.day.isoformat(): r.ms for r in self.db.query(ListeningDaily)}
+        self.assertEqual(rows, {"2026-09-20": 15_000, "2026-09-21": 10_000})
+        self.assertEqual(self.all_time(), 25_000)
+
+    def test_a_late_check_in_on_a_pruned_day_adds_to_what_was_rolled_up(self):
+        day = self.NOW - timedelta(days=200)
+        log_session(self.db, ME, "14:1", day, 600)
+        listening.prune_log(self.db, now=self.NOW)
+        self.assertEqual(self.db.query(ListeningLog).count(), 0)
+        # The log is empty, so SQLite numbers the next rows from 1 again, below every id rolled up before.
+        log_session(self.db, ME, "14:1", day + timedelta(hours=1), 60)
+        self.assertEqual(min(r.id for r in self.db.query(ListeningLog)), 1)
+        self.assertEqual(self.all_time(), 660_000)
+        listening.roll_up(self.db, self.NOW + timedelta(hours=1))
+        self.assertEqual([r.ms for r in self.db.query(ListeningDaily)], [660_000])
+        self.assertEqual(self.all_time(), 660_000)
+
+    def test_a_rollup_from_before_the_log_mark_counts_nothing_twice(self):
+        log_session(self.db, ME, "14:1", datetime(2026, 9, 20, 8), 600)
+        listening.roll_up(self.db, self.NOW)
+        # A database rolled up by the release before the mark existed.
+        self.db.query(Setting).filter(Setting.key == listening.ROLLED_LOG_ID_KEY).delete()
+        self.db.commit()
+        listening.roll_up(self.db, self.NOW + timedelta(hours=1))
+        self.assertEqual([r.ms for r in self.db.query(ListeningDaily)], [600_000])
+        self.assertEqual(self.all_time(), 600_000)
+        log_session(self.db, ME, "14:1", datetime(2026, 9, 21, 8), 60)       # late, after the mark is set
+        listening.roll_up(self.db, self.NOW + timedelta(hours=2))
+        self.assertEqual(sorted(r.ms for r in self.db.query(ListeningDaily)), [60_000, 600_000])
+        self.assertEqual(self.all_time(), 660_000)
 
 
 class Follows(DiscoveryBase):
