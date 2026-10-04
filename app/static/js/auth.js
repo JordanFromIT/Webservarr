@@ -72,21 +72,26 @@ function escapeHtml(text) {
 }
 
 /**
- * Relative time string from a date.
+ * The site's one relative date: "just now", "5 minutes ago", "3 hours ago",
+ * "yesterday", "4 days ago", then the date itself. Words, not "5m" or "4d",
+ * in lower case so it reads inside a sentence ("Checked 5 minutes ago"); pass
+ * sentence=true where it stands alone ("Yesterday"). Takes a Date or an ISO
+ * string; nothing in, nothing out.
  */
-function getTimeAgo(date) {
-  var seconds = Math.floor((new Date() - date) / 1000);
-  if (seconds < 5) return 'just now';
-  if (seconds < 60) return seconds + 's ago';
-  if (seconds < 3600) {
-    var mins = Math.floor(seconds / 60);
-    var secs = seconds % 60;
-    return mins + 'm ' + secs + 's ago';
-  }
-  if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
-  if (seconds < 172800) return 'yesterday';
-  if (seconds < 604800) return Math.floor(seconds / 86400) + 'd ago';
-  return date.toLocaleDateString();
+function getTimeAgo(date, sentence) {
+  if (!date) return '';
+  if (!(date instanceof Date)) date = new Date(date);
+  if (isNaN(date.getTime())) return '';
+  var seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  function ago(count, unit) { return count + ' ' + unit + (count === 1 ? '' : 's') + ' ago'; }
+  var text;
+  if (seconds < 60) text = 'just now';
+  else if (seconds < 3600) text = ago(Math.floor(seconds / 60), 'minute');
+  else if (seconds < 86400) text = ago(Math.floor(seconds / 3600), 'hour');
+  else if (seconds < 172800) text = 'yesterday';
+  else if (seconds < 604800) text = ago(Math.floor(seconds / 86400), 'day');
+  else text = date.toLocaleDateString();
+  return sentence ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 }
 
 /**

@@ -55,21 +55,6 @@
   }
 
   /**
-   * Relative time: "2s ago", "5m ago", "3h ago", "2d ago".
-   */
-  function timeAgo(isoString) {
-    if (!isoString) return '';
-    var seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
-    if (seconds < 0) seconds = 0;
-    if (seconds < 5) return 'just now';
-    if (seconds < 60) return seconds + 's ago';
-    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
-    if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
-    if (seconds < 604800) return Math.floor(seconds / 86400) + 'd ago';
-    return new Date(isoString).toLocaleDateString();
-  }
-
-  /**
    * Convert VAPID base64 URL-safe string to Uint8Array for PushManager.subscribe().
    */
   function urlBase64ToUint8Array(base64String) {
@@ -128,7 +113,7 @@
     for (var i = 0; i < _bellButtons.length; i++) {
       var badge = createEl('span',
         'absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center ' +
-        'rounded-full bg-primary text-bright text-[10px] font-bold leading-none px-1 pointer-events-none'
+        'rounded-full bg-primary text-bright text-xs font-bold leading-none px-1 pointer-events-none'
       );
       badge.style.display = 'none';
       _bellButtons[i].appendChild(badge);
@@ -222,7 +207,7 @@
     var header = createEl('div', 'flex items-center justify-between px-4 py-3 border-b border-steel-blue/20');
     var title = createEl('span', 'text-sm font-bold text-frosted-blue', 'Notifications');
     var headerActions = createEl('div', 'flex items-center gap-3');
-    var markAllBtn = createEl('button', 'text-[11px] text-steel-blue hover:text-frosted-blue transition-colors cursor-pointer', 'Mark all read');
+    var markAllBtn = createEl('button', 'text-label text-frosted-blue/70 hover:text-frosted-blue transition-colors cursor-pointer', 'Mark all read');
     markAllBtn.addEventListener('click', function(e) {
       e.stopPropagation();
       markAllRead().then(function() {
@@ -230,7 +215,7 @@
         loadDropdownItems();
       });
     });
-    var clearAllBtn = createEl('button', 'text-[11px] text-steel-blue hover:text-frosted-blue transition-colors cursor-pointer', 'Clear all');
+    var clearAllBtn = createEl('button', 'text-label text-frosted-blue/70 hover:text-frosted-blue transition-colors cursor-pointer', 'Clear all');
     clearAllBtn.addEventListener('click', function(e) {
       e.stopPropagation();
       fetch('/api/notifications', { method: 'DELETE' })
@@ -252,7 +237,7 @@
 
     // Footer
     var footer = createEl('div', 'px-4 py-3 border-t border-steel-blue/20');
-    var prefsLink = createEl('button', 'text-[11px] text-steel-blue hover:text-frosted-blue transition-colors cursor-pointer w-full text-center', 'Notification settings');
+    var prefsLink = createEl('button', 'text-label text-frosted-blue/70 hover:text-frosted-blue transition-colors cursor-pointer w-full text-center', 'Notification settings');
     prefsLink.addEventListener('click', function(e) {
       e.stopPropagation();
       closeDropdown();
@@ -316,14 +301,14 @@
     // Title row
     var titleRow = createEl('div', 'flex items-center gap-2');
     var titleEl = createEl('span', 'text-xs font-bold text-frosted-blue truncate', n.title || 'Notification');
-    var timeEl = createEl('span', 'text-[10px] text-frosted-blue/70 shrink-0 ml-auto', timeAgo(n.created_at));
+    var timeEl = createEl('span', 'text-label text-frosted-blue/70 shrink-0 ml-auto', getTimeAgo(n.created_at, true));
     titleRow.appendChild(titleEl);
     titleRow.appendChild(timeEl);
     content.appendChild(titleRow);
 
     // Body (truncated)
     if (n.body) {
-      var bodyEl = createEl('p', 'text-[11px] text-frosted-blue/70 mt-0.5 line-clamp-2');
+      var bodyEl = createEl('p', 'text-label text-frosted-blue/70 mt-0.5 line-clamp-2');
       bodyEl.textContent = n.body.length > 100 ? n.body.substring(0, 100) + '...' : n.body;
       content.appendChild(bodyEl);
     }
@@ -469,7 +454,7 @@
     // Push notification toggle (conditional)
     if ('serviceWorker' in navigator && 'PushManager' in window) {
       var divider = createEl('div', 'border-t border-steel-blue/20 pt-4 mt-2');
-      var pushLabel = createEl('p', 'text-[11px] text-frosted-blue/70 uppercase font-bold tracking-wider mb-3', 'Push Notifications');
+      var pushLabel = createEl('p', 'text-label text-frosted-blue/70 font-semibold mb-3', 'Push notifications');
       divider.appendChild(pushLabel);
 
       var pushRow = createEl('div', 'flex items-center justify-between py-2');

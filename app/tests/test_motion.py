@@ -110,10 +110,15 @@ class StatusPill(unittest.TestCase):
         # The label is theme text; a status colour tints it only on warn or err.
         self.assertRegex(HEADER, r'data-status-text class="ws-pill-label text-frosted-blue\b')
 
-    def test_only_online_pings_and_the_ring_never_touches_layout(self):
-        ring = css_rule(THEME, '#systemStatus[data-state="ok"] .ws-status-dot::after')
-        self.assertRegex(ring, r"animation:\s*ws-ping\s+2\.\d+s")
-        self.assertNotRegex(THEME, r'data-state="(?:warn|err|unknown)"\]\s*\.ws-status-dot::after')
+    def test_only_a_change_pings_and_the_ring_never_touches_layout(self):
+        # Audit M11 (2026-10-04): healthy is quiet. The ring leaves the dot
+        # once, when the state turns to warn or err; an ok dot never moves.
+        selector = '#systemStatus[data-state="err"] .ws-status-dot::after'
+        rule = re.search(r'#systemStatus\[data-state="warn"\] \.ws-status-dot::after,\s*' + re.escape(selector) +
+                         r'\s*\{([^}]*)\}', THEME)
+        self.assertIsNotNone(rule)
+        self.assertRegex(rule.group(1), r"animation:\s*ws-ping\s+1\.\d+s\s+cubic-bezier\([^)]*\)\s+1;")
+        self.assertNotRegex(THEME, r'data-state="(?:ok|unknown)"\]\s*\.ws-status-dot::after')
         self.assertEqual(keyframe_properties(THEME, "ws-ping"), {"transform", "opacity"})
         dot = css_rule(THEME, ".ws-status-dot")
         self.assertIn("width: .5rem", dot)
@@ -121,7 +126,7 @@ class StatusPill(unittest.TestCase):
         self.assertRegex(HEADER, r'data-status-dot class="ws-status-dot"')
         # The guard must carry the ping rule's own selector: a shorter one
         # (.ws-status-dot::after) has less specificity and never applies.
-        self.assertTrue(stilled(THEME, '#systemStatus[data-state="ok"] .ws-status-dot::after', "animation"))
+        self.assertTrue(stilled(THEME, selector, "animation"))
 
     def test_script_sets_the_state_and_the_words_only(self):
         self.assertRegex(SHELL_JS, r"PILL_LABEL\s*=\s*\{[^}]*\bok:[^}]*\bwarn:[^}]*\berr:")
@@ -401,10 +406,11 @@ class HoverLift(unittest.TestCase):
             (STATIC / "js" / "pages" / "requests.js").read_text(encoding="utf-8")   # its cards
         self.assertNotIn("ws-lift", index)
         self.assertNotIn("ws-lift", news)
-        self.assertEqual(len(re.findall(r'class="[^"]*\bws-lift\b', requests)), 2)   # in markup, not in comments
-        self.assertIn('glass-card ws-lift cursor-pointer group"', requests)                      # discover poster
-        self.assertRegex(requests, r'data-request-id="[^"]*" class="ws-lift w-full')          # search card button
-        self.assertNotRegex(requests, r'<div class="glass-card ws-lift')                       # no inert card
+        self.assertEqual(len(re.findall(r'class="[^"]*\bws-lift\b', requests)), 3)   # in markup, not in comments
+        self.assertIn('<button type="button" class="shrink-0 w-32 text-left rounded-inner ws-lift group"', requests)  # discover poster
+        self.assertRegex(requests, r'data-request-title="[^"]*" class="ws-lift w-full')       # search card button
+        self.assertIn("'class=\"ws-lift w-full py-2.5 rounded-btn bg-primary", requests)     # the detail's Request button
+        self.assertNotRegex(requests, r'<div class="[^"]*\bws-lift')                           # no inert card
         self.assertIn("'ws-lift scroll-mt-6 rounded-2xl", INTEGRATIONS_JS)
         self.assertTrue(live_matches(INTEGRATIONS_JS, r"""root\.classList\.toggle\(\s*['"]ws-lift['"]\s*,\s*!open\s*\)"""))
         for btn in ("btnPrimary", "btnGhost", "btnDanger"):

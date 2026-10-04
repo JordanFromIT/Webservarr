@@ -48,6 +48,25 @@ module.exports = {
       fontFamily: {
         "display": ["var(--font-display)", "sans-serif"],
       },
+      // The design contract's type scale (UI design review, Part 5). Font
+      // size alone, like the text-[Npx] literals they replace, so swapping a
+      // literal for its step never changes a line height.
+      fontSize: {
+        "label": "13px",
+        "body": "15px",
+        "lead": "17px",
+        "h3": "20px",
+        "h2": "24px",
+        "h1": "32px",
+        "hero": "44px",
+      },
+      // The contract's radius scale: cards, the boxes inside them, buttons
+      // and fields. Chips are rounded-full.
+      borderRadius: {
+        "card": "16px",
+        "inner": "12px",
+        "btn": "10px",
+      },
     },
   },
   plugins: [

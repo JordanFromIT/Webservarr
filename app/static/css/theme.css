@@ -103,6 +103,21 @@ input:where([type='checkbox'], [type='radio']) {
 }
 input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); }
 
+/* ---- One focus ring ----
+ *
+ * Every link, button and focusable card shows the same ring the Books pages
+ * draw: 2px in the text colour (it contrasts with the page by construction,
+ * where the primary blue on black does not reach 3:1), 2px clear of the box.
+ * Before this, the v1 pages fell back to the browser's 1px default. :where()
+ * keeps the rule at zero specificity, so a control's own ring (Settings tabs,
+ * the player, a Tailwind focus-visible: utility) still wins. Fields keep
+ * their focus ring from the block above.
+ */
+:where(a[href], button, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid rgb(var(--color-text));
+  outline-offset: 2px;
+}
+
 /* An icon is one glyph, one em wide. Until the icon font arrives, its name
  * ("notifications") is laid out as a word in the fallback font (display=block
  * hides it but keeps its width), then snaps to one glyph and pulls everything
@@ -116,6 +131,23 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   overflow: clip;
   flex-shrink: 0;
 }
+
+/* ---- Filter chips ----
+ *
+ * The Books page's filter chip (pages/books.js CHIP_ON / CHIP_OFF), for the
+ * pages written before it (Issues, Tickets, Requests): sentence case at 15px,
+ * a 40px target, the primary fill when chosen. The chosen chip is the button
+ * with aria-pressed="true", so what a screen reader hears is what is drawn.
+ */
+.ws-filter {
+  display: inline-flex; align-items: center; height: 2.5rem; padding-inline: 1rem;
+  border-radius: 9999px; font-size: 15px; font-weight: 600; white-space: nowrap;
+  background: rgb(var(--color-text) / .07); color: rgb(var(--color-text) / .7);
+  transition: background-color .15s ease-out, color .15s ease-out;
+}
+.ws-filter:hover { background: rgb(var(--color-text) / .1); color: rgb(var(--color-text)); }
+.ws-filter[aria-pressed="true"] { background: rgb(var(--color-primary)); color: rgb(var(--color-text-secondary)); }
+@media (prefers-reduced-motion: reduce) { .ws-filter { transition: none; } }
 
 /* ---- Media Type Accents ----
  *
@@ -233,9 +265,12 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
      glyphs stay sharp because the peak of the throb is scale(1): the browser
      rasterises an animated transform at its largest keyframe scale, so every
      other frame is a downscale of a full-resolution raster, never a blow-up. */
+  /* Three rounds when the page loads, then the flag rests: a flag that never
+     stops moving stops meaning anything. The throb holds its last frame, so
+     it does not snap to the resting scale when it stops. */
   animation:
-    nav-new-shine 3.2s ease-in-out infinite,
-    nav-new-throb 1.7s ease-in-out infinite;
+    nav-new-shine 3.2s ease-in-out 3,
+    nav-new-throb 1.7s ease-in-out 3 forwards;
 }
 
 @keyframes nav-new-shine {
@@ -403,11 +438,12 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
  * .ws-pill is the reusable part (the Appearance preview wears it too);
  * #systemStatus adds the unknown state and the live ring.
  *
- * "Online" reads as live: a soft ring leaves the dot every 2.8s and is gone
- * by half way, so the pill rests longer than it moves. The ring is the dot's
- * own pseudo-element scaled up in place, so the dot's box, and the header,
- * never change size. Degraded and issues are steady dots: a calm, repeating
- * signal is for good news only. Unknown paints nothing at all.
+ * Healthy is quiet: an "ok" dot never moves. A ring leaves the dot ONCE when
+ * the state turns to warn or err (the attribute change starts the animation;
+ * the same state written again does not restart it), so motion means that
+ * something changed. The ring is the dot's own pseudo-element scaled up in
+ * place, so the dot's box, and the header, never change size. Unknown paints
+ * nothing at all.
  */
 #systemStatus[data-state="unknown"] { visibility: hidden; }
 .ws-pill { --ws-pill: var(--ws-status-off); background: rgb(var(--ws-pill) / .10); border-color: rgb(var(--ws-pill) / .30); }
@@ -427,9 +463,11 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
   content: ""; position: absolute; inset: 0; border-radius: 9999px; opacity: 0;
   background: color-mix(in srgb, rgb(var(--ws-pill, var(--ws-status-off))) 75%, rgb(var(--color-text)));
 }
-/* The login page's status badge is a .ws-pill too, with the same live ring. */
-#loginSystemStatus[data-state="ok"] .ws-status-dot::after,
-#systemStatus[data-state="ok"] .ws-status-dot::after { animation: ws-ping 2.8s cubic-bezier(0, 0, .2, 1) infinite; }
+/* The login page's status badge is a .ws-pill too, with the same one ring. */
+#loginSystemStatus[data-state="warn"] .ws-status-dot::after,
+#loginSystemStatus[data-state="err"] .ws-status-dot::after,
+#systemStatus[data-state="warn"] .ws-status-dot::after,
+#systemStatus[data-state="err"] .ws-status-dot::after { animation: ws-ping 1.4s cubic-bezier(0, 0, .2, 1) 1; }
 @keyframes ws-ping {
   0%        { transform: scale(1);   opacity: .55; }
   45%, 100% { transform: scale(2.4); opacity: 0; }
@@ -437,8 +475,10 @@ input::placeholder, textarea::placeholder { color: rgb(var(--color-text) / .7); 
 
 /* The same selector as the rule it stills: a shorter one loses to it. */
 @media (prefers-reduced-motion: reduce) {
-  #loginSystemStatus[data-state="ok"] .ws-status-dot::after,
-  #systemStatus[data-state="ok"] .ws-status-dot::after { animation: none; }
+  #loginSystemStatus[data-state="warn"] .ws-status-dot::after,
+  #loginSystemStatus[data-state="err"] .ws-status-dot::after,
+  #systemStatus[data-state="warn"] .ws-status-dot::after,
+  #systemStatus[data-state="err"] .ws-status-dot::after { animation: none; }
 }
 
 /* The dashboard's gauge block is static markup so it reserves its space from

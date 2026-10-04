@@ -252,6 +252,52 @@
     });
   }
 
+  // A page's own overlay (static markup it shows by dropping `hidden`) run as
+  // a dialog, on the same stack as confirm(): its box gets the dialog role,
+  // focus moves in, Tab stays inside, Escape closes it (the topmost only), and
+  // focus goes back to what opened it. The page keeps drawing and hiding it.
+  // opts: { box: the dialog box (default the overlay's [data-dialog-box]),
+  //         initial: what takes focus first (default the first control),
+  //         onClose: hides the overlay; runs on Escape, on close(), and when
+  //         the router closes every dialog before a soft navigation }.
+  // Returns { close() }; closing twice does nothing.
+  function modal(overlay, opts) {
+    opts = opts || {};
+    var box = opts.box || overlay.querySelector('[data-dialog-box]') || overlay;
+    var previous = document.activeElement;
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    if (!box.hasAttribute('tabindex')) box.setAttribute('tabindex', '-1');
+    var entry = { box: box, close: close, dismiss: false };
+    var done = false;
+    function close() {
+      if (done) return;
+      done = true;
+      var wasTop = topDialog() === entry;
+      stack.splice(stack.indexOf(entry), 1);
+      if (!stack.length) {
+        document.removeEventListener('keydown', onKey, true);
+        document.removeEventListener('focusin', onFocusIn, true);
+      }
+      if (typeof opts.onClose === 'function') opts.onClose();
+      if (wasTop) {
+        var under = topDialog();
+        var back = previous && previous.focus && document.contains(previous) &&
+          (!under || under.box.contains(previous)) ? previous : null;
+        if (!back && under) back = focusables(under.box)[0] || null;
+        if (back) back.focus({ preventScroll: true });
+      }
+    }
+    if (!stack.length) {
+      document.addEventListener('keydown', onKey, true);
+      document.addEventListener('focusin', onFocusIn, true);
+    }
+    stack.push(entry);
+    var first = opts.initial || focusables(box)[0] || box;
+    first.focus({ preventScroll: true });
+    return { close: close };
+  }
+
   function isDialogOpen() { return stack.length > 0; }
 
   // Every open dialog, topmost first, answered as Escape would answer it
@@ -264,6 +310,6 @@
     }
   }
 
-  window.WSUI = { el: el, icon: icon, toast: toast, confirm: confirm, cls: cls, isDialogOpen: isDialogOpen,
-                  closeDialogs: closeDialogs };
+  window.WSUI = { el: el, icon: icon, toast: toast, confirm: confirm, modal: modal, cls: cls,
+                  isDialogOpen: isDialogOpen, closeDialogs: closeDialogs };
 })();
