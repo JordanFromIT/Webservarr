@@ -33,6 +33,11 @@
  * Move later and Remove) and My list (newest first). Each is hidden while it
  * is empty, and held from the first paint for a person who had it last time,
  * exactly as Continue is (localStorage and an <html> flag each).
+ *
+ * Under them, two discovery shelves (books 3c), held and drawn the same way:
+ * Recently added (the newest books, with New on those added since the
+ * person's previous visit; loading it records this visit) and Popular on the
+ * server (books several people listened to, with the server's rounded label).
  */
 
 const PAGE_SIZE = 36;
@@ -47,8 +52,13 @@ const CONTINUE_KEY = 'webservarr_books_continue:';
 // The person's own rows: where each one's memory is, its <html> flag and its host.
 const ROWS = {
   upnext: { key: 'webservarr_books_upnext:', flag: 'data-books-upnext', host: 'upnextHost', url: '/api/books/me/queue', cache: 'books:me:queue' },
-  mylist: { key: 'webservarr_books_mylist:', flag: 'data-books-mylist', host: 'mylistHost', url: '/api/books/me/list', cache: 'books:me:list' }
+  mylist: { key: 'webservarr_books_mylist:', flag: 'data-books-mylist', host: 'mylistHost', url: '/api/books/me/list', cache: 'books:me:list' },
+  // The discovery shelves (books 3c): held and drawn the same way.
+  recent: { key: 'webservarr_books_recent:', flag: 'data-books-recent', host: 'recentHost', url: '/api/books/recent', cache: 'books:recent' },
+  popular: { key: 'webservarr_books_popular:', flag: 'data-books-popular', host: 'popularHost', url: '/api/books/popular', cache: 'books:popular' }
 };
+// Every row above the library, top to bottom.
+const ROW_ORDER = ['continue', 'upnext', 'mylist', 'recent', 'popular'];
 const MOVE_MS = 200;               // a card trading places with its neighbour
 const GUIDE_KEY = 'webservarr_books_guide_seen:';
 // The cards have their covers by then, so the first spotlight sits on something drawn.
@@ -207,9 +217,25 @@ export function coverBox(url, formats, signal, opts) {
 }
 
 /**
+ * A mark on the top left of a cover (where Up next puts a book's place):
+ * "New" in the accent, or a quiet one such as a listener count. Its words
+ * are part of the card's link text.
+ */
+function coverMark(text, opts) {
+  const o = opts || {};
+  const mark = el('span', 'absolute left-2 top-2 inline-flex h-6 max-w-[calc(100%-1rem)] items-center gap-1 rounded-full px-2 text-[13px] font-semibold leading-none ' +
+    (o.accent ? 'bg-primary text-bright' : 'bg-background-dark/80 text-frosted-blue'));
+  if (o.icon) mark.appendChild(icon(o.icon, 'text-[16px]'));
+  mark.appendChild(el('span', 'truncate', text));
+  if (o.data) mark.setAttribute(o.data, '');
+  return mark;
+}
+
+/**
  * A library card: the cover, the title (two lines of room whatever it is, so
  * every row is one height and lands on its skeleton) and one quiet line under
- * it, the author or, for a series, how many books it holds.
+ * it, the author or, for a series, how many books it holds. opts.mark puts a
+ * coverMark on the cover ({ text, accent, icon, data }).
  */
 export function renderBookCard(card, opts) {
   const signal = opts && opts.signal;
@@ -226,7 +252,9 @@ export function renderBookCard(card, opts) {
     cover.appendChild(back);
     cover.appendChild(mid);
   }
-  cover.appendChild(coverBox(card.cover_url, card.formats, signal));
+  const box = coverBox(card.cover_url, card.formats, signal);
+  if (opts && opts.mark && opts.mark.text) box.appendChild(coverMark(opts.mark.text, opts.mark));
+  cover.appendChild(box);
   a.appendChild(cover);
   const title = series ? card.series : card.title;
   a.appendChild(el('span', 'mt-2 text-[15px] font-semibold leading-snug text-frosted-blue line-clamp-2 min-h-[2.75em]', title || 'Untitled'));
@@ -419,7 +447,7 @@ export async function mount(ctx) {
   function rowKey(name) {
     return (name === 'continue' ? CONTINUE_KEY : ROWS[name].key) + user;
   }
-  ['continue', 'upnext', 'mylist'].forEach(function (name) {
+  ROW_ORDER.forEach(function (name) {
     const hint = storageGet(rowKey(name));
     markRow(name, hint === '1');
     if (hint === null) state.unsettled[name] = true;
@@ -612,22 +640,47 @@ export async function mount(ctx) {
     return list;
   }
 
-  /** My list: the person's books, newest first, as library cards. Null when empty. */
-  function myListRow(items) {
+  /** A row of library cards under a heading (My list and the discovery
+      shelves). markOf(card) gives a card its cover mark, or nothing. Null when empty. */
+  function cardRow(label, data, items, markOf) {
     if (!items.length) return null;
     const section = el('section', '');
-    section.setAttribute('aria-label', 'My list');
-    section.setAttribute('data-mylist', '');
-    section.appendChild(rowHead('My list'));
+    section.setAttribute('aria-label', label);
+    section.setAttribute(data, '');
+    section.appendChild(rowHead(label));
     const list = rowList('ul');
     items.forEach(function (card) {
       const li = el('li', 'w-36 shrink-0');
-      li.appendChild(renderBookCard(card, { signal: signal }));
+      li.appendChild(renderBookCard(card, { signal: signal, mark: markOf ? markOf(card) : null }));
       list.appendChild(li);
     });
     section.appendChild(list);
     return section;
   }
+
+  /** My list: the person's books, newest first. */
+  function myListRow(items) {
+    return cardRow('My list', 'data-mylist', items, null);
+  }
+
+  /** Recently added: the newest books, those added since the person's last
+      visit marked New (the server decides; never on a first visit). */
+  function recentRow(items) {
+    return cardRow('Recently added', 'data-recent', items, function (card) {
+      return card.is_new === true ? { text: 'New', accent: true, data: 'data-new' } : null;
+    });
+  }
+
+  /** Popular on the server: books several people listened to, each with the
+      server's rounded label ("5+ listeners"), never a count of its own. */
+  function popularRow(items) {
+    return cardRow('Popular on the server', 'data-popular', items, function (card) {
+      return typeof card.listeners_label === 'string' && card.listeners_label
+        ? { text: card.listeners_label, icon: 'headphones', data: 'data-listeners' } : null;
+    });
+  }
+
+  const BUILD_ROW = { mylist: myListRow, recent: recentRow, popular: popularRow };
 
   // Class strings are written out whole: Tailwind only builds what it can read.
   const ROW_BTN = 'ws-lift inline-flex h-10 min-w-0 items-center justify-center gap-1 rounded-[10px] px-2 text-[15px] font-semibold ' + LINK_FOCUS;
@@ -816,7 +869,7 @@ export async function mount(ctx) {
 
   /** After the last card of a row goes: the next thing on the page, so the focus is never lost. */
   function focusAfterRows() {
-    const next = root.querySelector('#mylistHost a, #formatChips button');
+    const next = root.querySelector('#mylistHost a, #recentHost a, #popularHost a, #formatChips button');
     if (next) next.focus();
   }
 
@@ -935,7 +988,7 @@ export async function mount(ctx) {
     if (signal.aborted) return;
     const items = (data && Array.isArray(data.items)) ? data.items : [];
     if (name === 'upnext' && state.moving) return;    // the person is reordering: theirs is newer
-    placeRow(name, name === 'upnext' ? upNextRow(items) : myListRow(items), !fromCache && !failed);
+    placeRow(name, name === 'upnext' ? upNextRow(items) : BUILD_ROW[name](items), !fromCache && !failed);
   }
 
   function loadMine(name) {
@@ -1300,7 +1353,8 @@ export async function mount(ctx) {
   // remembers), and the message shows when the answer says they are not connected.
   if (window.WSKavita && typeof window.WSKavita.arrivedFromFailedConnect === 'function') window.WSKavita.arrivedFromFailedConnect();
 
-  const first = Promise.all([loadContinue(), loadMine('upnext'), loadMine('mylist'), loadLibrary(false)]);
+  // Recently added records this visit on the server (its New marks are against the visit before).
+  const first = Promise.all([loadContinue(), loadMine('upnext'), loadMine('mylist'), loadMine('recent'), loadMine('popular'), loadLibrary(false)]);
   // A library that never answers does not keep the toolbar a skeleton for ever.
   ctx.setTimeout(commitFrame, 4000);
   if (Object.keys(state.unsettled).length) ctx.setTimeout(function () { settleRow(null); }, CONTINUE_WAIT_MS);
@@ -1314,8 +1368,6 @@ export async function mount(ctx) {
   ]);
 
   return function () {
-    markRow('continue', false);
-    markRow('upnext', false);
-    markRow('mylist', false);
+    ROW_ORDER.forEach(function (name) { markRow(name, false); });
   };
 }

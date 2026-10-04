@@ -63,6 +63,7 @@ class OffMeansOff(PageRoutesBase):
         ("/books/7", "sidebar.enabled_library"),
         ("/books/person?role=author&name=X", "sidebar.enabled_library"),
         ("/books/series?name=X", "sidebar.enabled_library"),
+        ("/books/stats", "sidebar.enabled_library"),
         ("/reader", "sidebar.enabled_library"),
     ]
 
@@ -129,6 +130,17 @@ class MovedRoutes(PageRoutesBase):
         self.assertIn("<title>WebServarr - Book</title>", r.text)
         self.assertIn('data-ws-module="/static/js/pages/book.js?v=', r.text)
         self.assertRegex(r.text, r'<a[^>]*href="/books"[^>]*aria-current="page"')
+
+    def test_your_stats_is_its_own_page_under_books_in_the_nav(self):
+        values = {"integration.kavita.url": "http://192.168.1.50:5000"}
+        r = self.get("/books/stats", MEMBER_SESSION, values)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('data-page="books-stats"', r.text)
+        self.assertIn("<title>WebServarr - Your stats</title>", r.text)
+        self.assertIn('data-ws-module="/static/js/pages/books-stats.js?v=', r.text)
+        self.assertRegex(r.text, r'<a[^>]*href="/books"[^>]*aria-current="page"')
+        r = self.get("/books/stats", None, values)
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/login"))
 
     def test_the_person_and_series_pages_run_the_list_module(self):
         values = {"integration.kavita.url": "http://192.168.1.50:5000"}

@@ -84,6 +84,7 @@ PAGE_NAV = {
     "book": "library",
     "books-person": "library",
     "books-series": "library",
+    "books-stats": "library",
     "wiki": "wiki",
     "settings": "settings",
 }

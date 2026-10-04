@@ -20,6 +20,10 @@
   #upnextHost, #mylistHost { display: none; }
   html[data-books-upnext] #upnextHost { display: block; }
   html[data-books-mylist] #mylistHost { display: block; }
+  /* The discovery shelves (books 3c): Recently added and Popular on the server. */
+  #recentHost, #popularHost { display: none; }
+  html[data-books-recent] #recentHost { display: block; }
+  html[data-books-popular] #popularHost { display: block; }
 
   /* The Continue row scrolls sideways under a finger or a dragged mouse; its
      scrollbar would only take a strip of height from the cards. */
@@ -41,18 +45,25 @@
 <h1 class="sr-only">Books</h1>
 
   <!-- Search. Everything below it steps aside while there is a search. The help
-       button next to it runs the first-visit guide again (pages/books.js). -->
-  <div class="flex items-center gap-2 max-w-[calc(36rem+3.5rem)]">
-    <div class="relative min-w-0 flex-1">
-      <label for="booksSearch" class="sr-only">Search books</label>
-      <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-frosted-blue/70 pointer-events-none" aria-hidden="true">search</span>
-      <input id="booksSearch" type="search" maxlength="100" autocomplete="off" placeholder="Title, author or narrator"
-             class="w-full h-12 rounded-xl border-0 bg-frosted-blue/[0.07] pl-12 pr-4 text-[17px] text-ellipsis text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
+       button next to it runs the first-visit guide again (pages/books.js). Your
+       stats sits at the far end of the row (its words only from sm up). -->
+  <div class="flex items-center gap-2">
+    <div class="flex min-w-0 flex-1 items-center gap-2 max-w-[calc(36rem+3.5rem)]">
+      <div class="relative min-w-0 flex-1">
+        <label for="booksSearch" class="sr-only">Search books</label>
+        <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-frosted-blue/70 pointer-events-none" aria-hidden="true">search</span>
+        <input id="booksSearch" type="search" maxlength="100" autocomplete="off" placeholder="Title, author or narrator"
+               class="w-full h-12 rounded-xl border-0 bg-frosted-blue/[0.07] pl-12 pr-4 text-[17px] text-ellipsis text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
+      </div>
+      <button id="helpBtn" type="button" title="How Books works" aria-label="How Books works"
+              class="shrink-0 grid place-items-center size-12 rounded-xl text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
+        <span class="material-symbols-outlined" aria-hidden="true">help</span>
+      </button>
     </div>
-    <button id="helpBtn" type="button" title="How Books works" aria-label="How Books works"
-            class="shrink-0 grid place-items-center size-12 rounded-xl text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
-      <span class="material-symbols-outlined" aria-hidden="true">help</span>
-    </button>
+    <a id="statsLink" href="/books/stats"
+       class="ml-auto shrink-0 inline-flex items-center justify-center gap-2 h-12 min-w-12 px-3 rounded-xl text-[15px] font-semibold text-frosted-blue/70 hover:text-frosted-blue hover:bg-frosted-blue/[0.07] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
+      <span class="material-symbols-outlined" aria-hidden="true">insights</span><span class="sr-only sm:not-sr-only">Your stats</span>
+    </a>
   </div>
 
   <div id="browseArea">
@@ -79,6 +90,21 @@
       </div>
       <div id="mylistHost" class="mb-8" aria-busy="true">
         <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">My list</span></h2>
+        <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
+          <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+        </div>
+      </div>
+      <!-- The discovery shelves (pages/books.js, books 3c): the newest books, with New on
+           those added since the last visit, and the books several people listened to.
+           Held like the rows above and written in the same frame. -->
+      <div id="recentHost" class="mb-8" aria-busy="true">
+        <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Recently added</span></h2>
+        <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
+          <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+        </div>
+      </div>
+      <div id="popularHost" class="mb-8" aria-busy="true">
+        <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Popular on the server</span></h2>
         <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
           <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
         </div>

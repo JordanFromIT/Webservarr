@@ -16,6 +16,12 @@
  * Drawn in one write over a skeleton with the same shape: the heading stays
  * and everything after it is a new element, so nothing already on screen moves.
  *
+ * A series page has Follow (books 3c): a person who follows a series hears
+ * when a new book of it arrives. The answer says whether they follow it
+ * already (a book of it on My list, listening to one, reading one, or a
+ * Follow); the button changes at once, is sent through books.js sendBooks,
+ * and goes back (with a toast) when the server refuses.
+ *
  * The card helpers come from books.js, loaded by the address the server wrote
  * (and stamped with that file's content hash) in #wsPage's data-ws-dep: so a
  * cached old books.js is never paired with a new page. No import statement.
@@ -27,11 +33,15 @@
 const KEEP_MS = 2 * 60 * 1000;      // a kept copy older than this is not painted: places move
 const MOUNT_WAIT_MS = 1500;         // the page is on screen (or its skeleton) before mount resolves
 const NAME_MAX = 200;               // the API's own limit on a name
+const FOLLOW_URL = '/api/books/series/follow';
 
 const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue';
 // Class strings are written out whole: Tailwind only builds what it can read.
 const GRID = 'mt-6 grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6';
 const ROW = 'group grid grid-cols-[1.5rem_3.75rem_minmax(0,1fr)] items-center gap-3 rounded-2xl bg-frosted-blue/[0.04] p-2.5 transition-colors hover:bg-frosted-blue/[0.07] sm:grid-cols-[2rem_4.5rem_minmax(0,1fr)] sm:gap-4 sm:p-3 ' + LINK_FOCUS;
+const FOLLOW_BTN = 'ws-lift inline-flex h-11 shrink-0 items-center gap-2 rounded-[10px] px-4 text-[15px] font-semibold text-frosted-blue ' + LINK_FOCUS;
+const FOLLOW_OFF = ' bg-frosted-blue/[0.07] hover:bg-frosted-blue/10';
+const FOLLOW_ON = ' bg-frosted-blue/[0.15] hover:bg-frosted-blue/20';
 const FORMAT_INFO = {
   ebook: { icon: 'menu_book', label: 'Ebook' },
   audio: { icon: 'headphones', label: 'Audiobook' }
@@ -76,7 +86,7 @@ export async function mount(ctx) {
   const root = ctx.root;
   const signal = ctx.signal;
   const $ = function (id) { return root.querySelector('#' + id); };
-  const { renderBookCard, coverBox, noteLine } = await import(root.getAttribute('data-ws-dep') || './books.js');
+  const { renderBookCard, coverBox, noteLine, sendBooks } = await import(root.getAttribute('data-ws-dep') || './books.js');
 
   const kind = root.getAttribute('data-kind') === 'series' ? 'series' : 'person';
   const params = ctx.url.searchParams;
@@ -89,7 +99,7 @@ export async function mount(ctx) {
     if (role !== 'author' && role !== 'narrator') return null;
     return { url: '/api/books/person?role=' + role + '&name=' + encodeURIComponent(name), key: 'books:person:' + role + ':' + name };
   })();
-  const state = { gen: 0, reconnectTried: false, connectProblem: false, connectView: false };
+  const state = { gen: 0, reconnectTried: false, connectProblem: false, connectView: false, following: false, followBusy: false, series: '' };
 
   const skeleton = {
     title: Array.prototype.slice.call($('listTitle').childNodes).map(function (n) { return n.cloneNode(true); }),
@@ -185,11 +195,82 @@ export async function mount(ctx) {
       : count(n, 'book', 'books') + ' by this author';
   }
 
+  // ---- Follow (a series page) ----
+
+  function toast(text) {
+    if (window.WSUI && typeof window.WSUI.toast === 'function') window.WSUI.toast(text, 'err');
+  }
+
+  // What a press did, for a screen reader (the button's own words change too).
+  function say(text) {
+    const line = root.querySelector('#followSaid');
+    if (line) line.textContent = text;
+  }
+
+  function syncFollow() {
+    const b = root.querySelector('[data-follow]');
+    if (!b) return;
+    const on = state.following;
+    b.className = FOLLOW_BTN + (on ? FOLLOW_ON : FOLLOW_OFF);
+    b.querySelector('[data-icon]').textContent = on ? 'check' : 'add';
+    b.querySelector('[data-label]').textContent = on ? 'Following' : 'Follow series';
+  }
+
+  /** Follow or stop following: shown at once, sent, put back (with a toast)
+      when refused. One at a time; a press meanwhile waits for the answer. */
+  function toggleFollow() {
+    if (state.followBusy) return;
+    const next = !state.following;
+    state.followBusy = true;
+    state.following = next;
+    syncFollow();
+    say(next ? 'Following ' + state.series : 'Stopped following ' + state.series);
+    // The kept copy of this page says the old answer now.
+    if (typeof WS.dropCache === 'function') WS.dropCache(target.key);
+    sendBooks(next ? 'PUT' : 'DELETE', FOLLOW_URL, { series: state.series }).then(function () {
+      state.followBusy = false;
+    }, function (err) {
+      state.followBusy = false;
+      if (signal.aborted) return;
+      state.following = !next;
+      syncFollow();
+      say('');
+      toast(err && err.status === 403 ? 'This account can’t follow series.'
+        : next ? 'Couldn’t follow this series. Try again.' : 'Couldn’t stop following this series. Try again.');
+    });
+  }
+
+  /** The button and what it is for, under the descriptor. */
+  function followBlock(data) {
+    // A press still being sent is newer than any answer drawn meanwhile.
+    if (!state.followBusy) state.following = data.following === true;
+    state.series = data.name || name;
+    const box = el('div', 'mt-4 flex flex-wrap items-center gap-x-4 gap-y-2');
+    box.setAttribute('data-follow-block', '');
+    const b = el('button', FOLLOW_BTN + FOLLOW_OFF);
+    b.type = 'button';
+    b.setAttribute('data-follow', '');
+    b.appendChild(icon('add', 'text-[22px] shrink-0'));
+    b.lastChild.setAttribute('data-icon', '');
+    b.appendChild(el('span', '', ''));
+    b.lastChild.setAttribute('data-label', '');
+    b.addEventListener('click', toggleFollow, { signal: signal });
+    box.appendChild(b);
+    box.appendChild(el('p', 'min-w-0 text-[13px] leading-5 text-frosted-blue/70', 'Get a notification when a new book in this series arrives.'));
+    const said = el('p', 'sr-only', '');
+    said.id = 'followSaid';
+    said.setAttribute('role', 'status');
+    said.setAttribute('aria-live', 'polite');
+    box.appendChild(said);
+    return box;
+  }
+
   function buildRest(data) {
     const rest = el('div', '');
     rest.id = 'listRest';
     rest.setAttribute('data-ready', 'true');
     rest.appendChild(el('p', 'mt-2 text-[15px] leading-6 text-frosted-blue/70', descriptor(data)));
+    if (kind === 'series') rest.appendChild(followBlock(data));
     // A source that is down, said once and quietly; "not connected" is the hand-off's.
     const seen = {};
     data.notes.forEach(function (n) {
@@ -236,6 +317,7 @@ export async function mount(ctx) {
     const shown = data.name || name;
     $('listTitle').textContent = shown;
     swapRest(buildRest(data));
+    syncFollow();
     done(shown);
   }
 
@@ -310,7 +392,7 @@ export async function mount(ctx) {
   }
 
   function tidy(data) {
-    return { name: typeof data.name === 'string' ? data.name : '', role: data.role, items: data.items, notes: Array.isArray(data.notes) ? data.notes : [] };
+    return { name: typeof data.name === 'string' ? data.name : '', role: data.role, items: data.items, notes: Array.isArray(data.notes) ? data.notes : [], following: data.following === true };
   }
 
   /** The list, from the server. Its notes decide the hand-off, so they are

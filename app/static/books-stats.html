@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>WebServarr - Your stats</title>
+<link rel="icon" href="/static/webservarr.svg"/>
+<script src="/static/js/theme-loader.js?v=1"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet"/>
+<link href="/static/css/app.css?v=1" rel="stylesheet"/>
+<link href="/static/css/theme.css?v=12" rel="stylesheet"/>
+<style>
+  /* The weekly bars grow from the baseline once, as the stats arrive (a
+     transform, so nothing around them moves). Reduced motion: drawn still. */
+  .stats-bar { transform-origin: bottom; }
+  @media (prefers-reduced-motion: no-preference) {
+    .stats-bar { animation: stats-grow 250ms ease-out both; }
+  }
+  @keyframes stats-grow { from { transform: scaleY(0); } }
+</style>
+</head>
+<body class="bg-background-dark text-frosted-blue min-h-screen flex flex-col lg:flex-row lg:overflow-hidden">
+<!-- ws:sidebar -->
+
+<main class="flex-1 flex flex-col min-h-0 lg:h-screen lg:overflow-hidden">
+<!-- ws:header -->
+<!-- The person's own listening and reading, swapped by the router (pages/books-stats.js). -->
+<div id="wsPage" data-ws-module="/static/js/pages/books-stats.js?v=1" data-ws-dep="/static/js/pages/books.js?v=1" class="flex-1 flex flex-col min-h-0 lg:overflow-hidden">
+<div class="flex-1 lg:overflow-y-auto p-4 lg:p-8 custom-scrollbar">
+<div class="max-w-[1200px] w-full mx-auto min-w-0">
+
+  <a id="backLink" href="/books" class="-ml-2 inline-flex items-center h-10 pl-1 pr-3 rounded-[10px] text-[15px] font-semibold text-frosted-blue/70 hover:text-frosted-blue focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">
+    <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>Books
+  </a>
+
+  <!-- The heading and its line stay; everything after them arrives in one
+       write (pages/books-stats.js), over a skeleton of the same shape, so
+       nothing already on screen moves. -->
+  <section id="statsView" data-arrive="stats" aria-busy="true" class="mt-4">
+    <h1 class="text-[24px] sm:text-[32px] font-extrabold leading-[1.1] tracking-[-0.02em] text-frosted-blue">Your stats</h1>
+    <p class="mt-2 text-[15px] leading-6 text-frosted-blue/70">Only you can see these.</p>
+    <div id="statsRest" aria-hidden="true">
+      <div class="mt-8 grid grid-cols-2 gap-x-8 gap-y-6 sm:flex sm:flex-wrap sm:items-end sm:gap-x-12">
+        <div class="col-span-2"><div class="skel h-10 sm:h-12 w-56 rounded-[10px]"></div><div class="skel mt-2 h-5 w-64 max-w-full"></div><div class="mt-1 h-5"></div></div>
+        <div><div class="skel h-8 w-12 rounded-[10px]"></div><div class="skel mt-2 h-5 w-28"></div></div>
+        <div><div class="skel h-8 w-24 rounded-[10px]"></div><div class="skel mt-2 h-5 w-32"></div></div>
+      </div>
+      <div class="mt-12 max-w-3xl">
+        <div class="skel h-7 w-32"></div>
+        <div class="skel mt-2 h-5 w-56 max-w-full"></div>
+        <div class="skel mt-4 h-40 rounded-xl"></div>
+        <div class="mt-2 h-5"></div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</div>
+</div>
+</main>
+
+<script src="/static/js/auth.js?v=1"></script>
+<script src="/static/js/shell.js?v=1"></script>
+<script src="/static/js/notifications.js?v=3"></script>
+</body></html>

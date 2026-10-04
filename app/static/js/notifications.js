@@ -22,21 +22,24 @@
     issue: 'report_problem',
     service: 'health_metrics',
     news: 'newspaper',
-    ticket: 'confirmation_number'
+    ticket: 'confirmation_number',
+    books: 'menu_book'
   };
   var CATEGORY_URLS = {
     request: '/requests',
     issue: '/issues',
     service: '/',
     news: '/',
-    ticket: '/tickets'
+    ticket: '/tickets',
+    books: '/books'
   };
   var CATEGORY_LABELS = {
     request: 'Requests',
     issue: 'Issues',
     service: 'Service Status',
     news: 'Announcements',
-    ticket: 'Ticket replies and updates'
+    ticket: 'Ticket replies and updates',
+    books: 'New books in your series'
   };
 
   // ---- Helpers ----
@@ -429,8 +432,11 @@
     body.id = 'notifPrefsBody';
 
     // Category toggles: every category the server sends (NOTIFICATION_CATEGORIES)
-    var categories = ['request', 'issue', 'service', 'news', 'ticket'];
+    var categories = ['request', 'issue', 'service', 'news', 'ticket', 'books'];
+    // Books only on a site that has books (features.books_configured).
+    var features = (((window.WS_DATA || {}).branding || {}).features) || {};
     categories.forEach(function(cat) {
+      if (cat === 'books' && features.books_configured === false) return;
       var row = createEl('div', 'flex items-center justify-between py-2');
 
       var labelArea = createEl('div', 'flex items-center gap-3');

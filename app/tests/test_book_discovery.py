@@ -783,6 +783,15 @@ class Preference(unittest.TestCase):
         finally:
             db.close()
 
+    def test_the_preferences_modal_is_told_about_books(self):
+        # 3c Task 2: "books" is a listed category, so GET returns it and the modal shows its switch.
+        with mock.patch("app.routers.setup.is_setup_completed", return_value=True):
+            r = self.client.get("/api/notifications/preferences")
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertIs(r.json().get("books"), True)
+            self.client.put("/api/notifications/preferences", json={"books": False})
+            self.assertIs(self.client.get("/api/notifications/preferences").json().get("books"), False)
+
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class Integrations(unittest.TestCase):

@@ -15,7 +15,7 @@ from app.tests.test_shell_contract import STATIC, js_code_only, live_matches, ma
 
 # Pages converted to soft navigation, in conversion order.
 CONVERTED = ["news", "settings", "calendar", "issues", "tickets", "wiki", "index", "books", "reader",
-             "requests", "requests-embed", "player-test", "book", "books-person", "books-series"]
+             "requests", "requests-embed", "player-test", "book", "books-person", "books-series", "books-stats"]
 
 # Loaded once with the shell and never re-run, so a page never declares them.
 SHELL_SCRIPTS = {"theme-loader.js", "auth.js", "shell.js", "ui.js", "notifications.js", "router.js"}
@@ -714,6 +714,25 @@ class BooksPage(unittest.TestCase):
         self.assertLess(section.index('id="continueHost"'), section.index('id="upnextHost"'))
         self.assertLess(section.index('id="upnextHost"'), section.index('id="mylistHost"'))
 
+    def test_the_discovery_shelves_are_held_like_the_rows_above(self):
+        # Books 3c: Recently added and Popular on the server, after My list and before the toolbar.
+        loader = (STATIC / "js" / "theme-loader.js").read_text(encoding="utf-8")
+        self.assertIn("['recent', 'data-books-recent']", loader)
+        self.assertIn("['popular', 'data-books-popular']", loader)
+        h = read("books")
+        self.assertIn("#recentHost, #popularHost { display: none; }", h)
+        self.assertIn("html[data-books-recent] #recentHost { display: block; }", h)
+        self.assertIn("html[data-books-popular] #popularHost { display: block; }", h)
+        src = module_source("books")
+        self.assertIn("key: 'webservarr_books_recent:'", src)
+        self.assertIn("key: 'webservarr_books_popular:'", src)
+        self.assertIn("const ROW_ORDER = ['continue', 'upnext', 'mylist', 'recent', 'popular'];", src)
+        section = h[h.index('id="librarySection"'):h.index('id="toolbar"')]
+        self.assertLess(section.index('id="mylistHost"'), section.index('id="recentHost"'))
+        self.assertLess(section.index('id="recentHost"'), section.index('id="popularHost"'))
+        # Your stats is a plain link at the end of the search row.
+        self.assertIn('<a id="statsLink" href="/books/stats"', h)
+
     def test_the_first_visit_guide_is_the_shared_engine_started_once(self):
         # Jordan 2026-10-03: the guide is rebuilt for Books on tour.js (the reader's engine), runs on a
         # person's first visit only, starts when the books are drawn, and the help button runs it again.
@@ -742,7 +761,8 @@ class BookPages(unittest.TestCase):
     only as a query value, encoded."""
 
     def sources(self):
-        return {"book": module_source("book"), "books-list": module_source("books-list")}
+        return {"book": module_source("book"), "books-list": module_source("books-list"),
+                "books-stats": module_source("books-stats")}
 
     def test_every_request_is_on_the_pages_signal(self):
         for name, src in self.sources().items():
@@ -751,7 +771,8 @@ class BookPages(unittest.TestCase):
                 self.assertNotRegex(code, r"(?<![.\w])fetch\(", "every read goes through WS.getJSON")
                 self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 1)
                 self.assertTrue("WS.getJSON('/api/books/' + encodeURIComponent(String(state.id)), { signal: signal })" in src
-                                or "WS.getJSON(target.url, { signal: signal })" in src)
+                                or "WS.getJSON(target.url, { signal: signal })" in src
+                                or "WS.getJSON(url, { signal: signal })" in src)
                 self.assertRegex(function_body(code, "quiet"), r"return signal\.aborted \|\| isAbort\(err\)")
 
     def test_timers_are_the_pages(self):
@@ -766,13 +787,13 @@ class BookPages(unittest.TestCase):
             with self.subTest(name):
                 self.assertNotRegex(js_code_only(src), r"innerHTML|outerHTML|insertAdjacentHTML|createContextualFragment|document\.write")
                 self.assertNotRegex(js_code_only(src), r"\bdocument\.getElementById\(", "lookups stay inside ctx.root")
-        for name in ("book", "books-person", "books-series"):
+        for name in ("book", "books-person", "books-series", "books-stats"):
             with self.subTest(name):
                 self.assertNotIn("onerror", read(name))
 
     def test_each_page_is_one_section_that_arrives_at_once(self):
         for name, key, src in (("book", "book", "book"), ("books-person", "list", "books-list"),
-                               ("books-series", "list", "books-list")):
+                               ("books-series", "list", "books-list"), ("books-stats", "stats", "books-stats")):
             with self.subTest(name):
                 h = read(name)
                 page = h[h.index('<div id="wsPage"'):h.index("</main>")]
@@ -815,7 +836,11 @@ class BookPages(unittest.TestCase):
         for name in ("book", "books-person", "books-series"):
             with self.subTest(name):
                 self.assertIn('<script src="/static/js/kavita-connect.js?v=1" data-ws-page-script></script>', read(name))
-        for src in self.sources().values():
+        # (Your stats runs no hand-off: its reading note sends the person to Books, which does.)
+        for name, src in self.sources().items():
+            if name == "books-stats":
+                self.assertNotIn("WSKavita", src)
+                continue
             self.assertIn("window.WSKavita.init()", src)
             self.assertIn("window.WSKavita.arrivedFromFailedConnect()", src)
             self.assertIn("helper.reconnect(connectProblem)", src)
@@ -836,13 +861,13 @@ class BookPages(unittest.TestCase):
         # T4C2: no import statement (a bare './books.js' is not stamped, so a cached
         # old file could pair with a new module); the page names the file, the
         # server stamps it with that file's own content hash (test_page_gating).
-        for name in ("book", "books-list"):
+        for name in ("book", "books-list", "books-stats"):
             with self.subTest(name):
                 src = module_source(name)
                 self.assertNotRegex(js_code_only(src), r"(?m)^\s*import\b[^(]")
                 self.assertNotIn("./books.js'", src.replace("|| './books.js'", ""))
                 self.assertIn("await import(root.getAttribute('data-ws-dep') || './books.js')", src)
-        for name in ("book", "books-person", "books-series"):
+        for name in ("book", "books-person", "books-series", "books-stats"):
             with self.subTest(name):
                 self.assertIn('data-ws-dep="/static/js/pages/books.js?v=1"', read(name))
 

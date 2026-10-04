@@ -30,9 +30,7 @@ class PreferencesUpdate(BaseModel):
     service: Optional[bool] = None
     news: Optional[bool] = None
     ticket: Optional[bool] = None
-    # "New in your series" (app/services/book_discovery.py). Listed in
-    # NOTIFICATION_CATEGORIES together with its toggle in the preferences
-    # modal (3c Task 2); until then it is stored and honoured, default on.
+    # "New in your series" (app/services/book_discovery.py).
     books: Optional[bool] = None
 
 
@@ -62,7 +60,7 @@ class PushSubscribeRequest(BaseModel):
 
 # --- Helpers ---
 
-NOTIFICATION_CATEGORIES = ("request", "issue", "service", "news", "ticket")
+NOTIFICATION_CATEGORIES = ("request", "issue", "service", "news", "ticket", "books")
 
 
 def _email_hash(email: str) -> str:

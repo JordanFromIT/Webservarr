@@ -107,6 +107,7 @@ jobs:
           node app/tests/js/player_findplace.mjs
           node app/tests/js/books_page.mjs
           node app/tests/js/book_page.mjs
+          node app/tests/js/books_stats.mjs
           node app/tests/js/home_continue.mjs
           node app/tests/js/settings_books.mjs
 

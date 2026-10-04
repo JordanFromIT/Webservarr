@@ -606,6 +606,19 @@ async def books_series_page(
     return render_page("books-series", request, user, gate="library")
 
 
+@app.get("/books/stats", response_class=HTMLResponse, tags=["Pages"])
+async def books_stats_page(
+    request: Request,
+    session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name),
+):
+    """Serve Your stats: the person's own listening and reading (the page asks
+    /api/books/me/stats, which answers for the session's account only)."""
+    user = await _require_session(session_id)
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    return render_page("books-stats", request, user, gate="library")
+
+
 @app.get("/books/{book_id:int}", response_class=HTMLResponse, tags=["Pages"])
 async def book_page(
     request: Request,

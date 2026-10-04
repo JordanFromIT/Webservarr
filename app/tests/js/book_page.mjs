@@ -954,6 +954,120 @@ await run('the series page: not found and error', async (make) => {
   check('error with Try again', !!u.q('[data-state="error"]') && !!u.q('#retryBtn'));
 });
 
+// ---- Books 3c: Follow on a series page ----
+
+// The series answer, and a follow endpoint that records every write; status makes it refuse.
+function followServer(o = {}) {
+  const srv = { following: !!o.following, writes: [], status: o.status || 200, hold: o.hold || null };
+  srv.routes = (net) => {
+    net.on('/api/books/', () => ({ body: seriesAnswer({ following: srv.following }) }));
+    net.on('/api/books/series/follow', (url, init) => {
+      srv.writes.push({ method: init && init.method, body: init && init.body ? JSON.parse(init.body) : null, credentials: init && init.credentials, type: init && init.headers && init.headers['Content-Type'] });
+      const answer = () => {
+        if (srv.status !== 200) return { status: srv.status, body: { detail: 'no' } };
+        srv.following = init.method === 'PUT';
+        return { body: { following: srv.following } };
+      };
+      return srv.hold ? srv.hold.promise.then(answer) : answer();
+    });
+  };
+  return srv;
+}
+async function openSeries(make, srv, o = {}) {
+  const t = make('series', Object.assign({ routes: srv.routes }, o));
+  const m = t.mount();
+  await t.clock.advance(1600);
+  await m;
+  return t;
+}
+const followBtn = (t) => t.q('[data-follow]');
+const followWords = (t) => rr(t.text('[data-follow] [data-label]'));
+
+await run('3c: a series page has Follow under its descriptor, and says what it is for', async (make) => {
+  const t = await openSeries(make, followServer());
+  const b = followBtn(t);
+  check('a real button', !!b && b.tagName === 'BUTTON' && b.getAttribute('type') === 'button');
+  check('not following: Follow series', followWords(t) === 'Follow series' && t.text('[data-follow] [data-icon]') === 'add', followWords(t));
+  check('right after the descriptor, before the books', (() => {
+    const kids = Array.from(t.q('#listRest').children);
+    const block = t.q('[data-follow-block]');
+    return kids.indexOf(block) === 1 && kids.indexOf(block) < kids.indexOf(t.q('#seriesList'));
+  })());
+  check('one line says what following does', /notification when a new book in this series arrives/.test(t.text('[data-follow-block]')));
+  check('a 44px target with a focus ring', /\bh-11\b/.test(b.className) && /focus-visible:outline-2/.test(b.className));
+  const u = await openSeries(make, followServer({ following: true }));
+  check('following already (from My list, listening, reading or a Follow): Following, with a check', followWords(u) === 'Following' && u.text('[data-follow] [data-icon]') === 'check' && /bg-frosted-blue\/\[0\.15\]/.test(followBtn(u).className));
+  const v = await openList(make, 'person', personAnswer());
+  check('a person page has no Follow', !v.q('[data-follow]'));
+  check('the series skeleton holds the button\'s room', (() => {
+    const doc = new v.win.DOMParser().parseFromString(HTML.series, 'text/html');
+    return !!doc.querySelector('#listRest .skel.h-11') && !new v.win.DOMParser().parseFromString(HTML.person, 'text/html').querySelector('#listRest .skel.h-11');
+  })());
+});
+
+await run('3c: Follow and Unfollow: the button changes at once, the server is told, a screen reader hears it', async (make) => {
+  const srv = followServer();
+  const t = await openSeries(make, srv);
+  t.WS.cache.set('books:series:Harry Potter', { name: 'Harry Potter', items: [], following: false, notes: [] });
+  const b = followBtn(t);
+  b.focus();
+  b.click();
+  check('at once: Following', followWords(t) === 'Following');
+  check('said', t.text('#followSaid') === 'Following Harry Potter');
+  check('the kept copy of the page is dropped', !t.WS.cache.has('books:series:Harry Potter'));
+  await t.clock.advance(10);
+  check('PUT /api/books/series/follow {series}, same-origin JSON', srv.writes.length === 1 && srv.writes[0].method === 'PUT' && srv.writes[0].body.series === 'Harry Potter' &&
+    srv.writes[0].credentials === 'same-origin' && srv.writes[0].type === 'application/json', srv.writes);
+  check('the focus stays on the button', t.doc.activeElement === followBtn(t));
+  followBtn(t).click();
+  await t.clock.advance(10);
+  check('again: DELETE, and back to Follow series', srv.writes.length === 2 && srv.writes[1].method === 'DELETE' && srv.writes[1].body.series === 'Harry Potter' && followWords(t) === 'Follow series');
+  check('said', t.text('#followSaid') === 'Stopped following Harry Potter');
+  check('no toast', t.toasts.length === 0);
+});
+
+await run('3c: a refused Follow goes back, with a toast that says what to do; one press at a time', async (make) => {
+  const hold = deferred();
+  const srv = followServer({ status: 503, hold });
+  const t = await openSeries(make, srv);
+  followBtn(t).click();
+  followBtn(t).click();
+  check('a second press while the first is sent does nothing', followWords(t) === 'Following' && srv.writes.length <= 1);
+  hold.resolve();
+  await t.clock.advance(10);
+  check('refused: back to Follow series', followWords(t) === 'Follow series' && srv.writes.length === 1);
+  check('a toast', t.toasts.length === 1 && t.toasts[0][0] === 'Couldn’t follow this series. Try again.' && t.toasts[0][1] === 'err', t.toasts);
+  const u = await openSeries(make, followServer({ following: true, status: 503 }));
+  followBtn(u).click();
+  await u.clock.advance(10);
+  check('a refused Unfollow: back to Following, with its own toast', followWords(u) === 'Following' && u.toasts[0][0] === 'Couldn’t stop following this series. Try again.');
+  const v = await openSeries(make, followServer({ status: 403 }));
+  followBtn(v).click();
+  await v.clock.advance(10);
+  check('an account that keeps no books of its own is told so', followWords(v) === 'Follow series' && v.toasts[0][0] === 'This account can’t follow series.');
+});
+
+await run('3c: a series name with punctuation is sent whole, as the page shows it', async (make) => {
+  const name = 'Fae & Alchemy: "Book" 1/2';
+  const srv = followServer();
+  srv.routes = ((inner) => (net) => { inner(net); net.on('/api/books/series?', () => ({ body: seriesAnswer({ name, following: false }) })); })(srv.routes);
+  const t = await openSeries(make, srv, { url: 'https://ws.test/books/series?name=' + encodeURIComponent(name) });
+  followBtn(t).click();
+  await t.clock.advance(10);
+  check('the body carries exactly the name', srv.writes.length === 1 && srv.writes[0].body.series === name, srv.writes);
+});
+
+await run('3c: leaving the page: a late refusal changes nothing', async (make) => {
+  const hold = deferred();
+  const srv = followServer({ status: 503, hold });
+  const t = await openSeries(make, srv);
+  followBtn(t).click();
+  t.ctl.abort();
+  hold.resolve();
+  await t.clock.advance(10);
+  check('no toast after leaving', t.toasts.length === 0);
+});
+
 await run('FR1: a person or series page of ebooks for someone not connected runs the hand-off once and comes back to it', async (make) => {
   const nc = { status: 404, body: { detail: 'Connect to your ebook library to see ebooks', reason: 'not_connected', notes: [{ source: 'kavita', reason: 'not_connected', text: 'Connect to your ebook library to see ebooks' }] } };
   for (const [kind, url] of [['series', 'https://ws.test/books/series?name=Fae%20%26%20Alchemy'], ['person', 'https://ws.test/books/person?role=author&name=Callie%20Hart']]) {

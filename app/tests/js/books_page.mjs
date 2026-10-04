@@ -267,6 +267,9 @@ function usual(over = {}) {
     net.on('/api/books/continue', () => ({ body: over.continue || { items: [], notes: [] } }));
     net.on('/api/books/search', () => ({ body: over.search || { items: [], request_url: '/requests?q=x', notes: [] } }));
     net.on('/api/books?', over.library || (() => ({ body: { items: SHELF, next_cursor: null, notes: [], building: false } })));
+    // The discovery shelves (books 3c): empty, as on a server with nothing new or popular.
+    net.on('/api/books/recent', over.recent || (() => ({ body: { items: [] } })));
+    net.on('/api/books/popular', over.popular || (() => ({ body: { items: [] } })));
   };
 }
 
@@ -829,6 +832,9 @@ await run('a visit comes back from the cache at once and corrects itself', async
   // (Up next and My list, kept too: every row above the books has a kept answer.)
   t.WS.cache.set('books:me:queue', { items: [] });
   t.WS.cache.set('books:me:list', { items: [] });
+  // (And the discovery shelves, books 3c.)
+  t.WS.cache.set('books:recent', { items: [] });
+  t.WS.cache.set('books:popular', { items: [] });
   const m = t.mount();
   check('the last list shows before the network answers', t.cards('libraryGrid').length === 5 && t.hidden('#gridSkeleton'));
   await m;
@@ -1312,6 +1318,147 @@ await run('3b: a page that was left draws nothing more and sends nothing it was 
   p.change({ book: '14:1', playing: true });
   await t.clock.advance(10);
   check('left before it played: the player watch ended, nothing removed', p.listeners.length === 0 && srv.writes.length === 0);
+});
+
+// ---- Books 3c: Recently added, Popular on the server, Your stats ----
+
+const RECENT = [Object.assign(both(1, 'Dune', 'Frank Herbert'), { is_new: true }), Object.assign(ebook(2, 'Emma', 'Jane Austen'), { is_new: false }),
+  Object.assign(audio(3, 'The Hobbit', 'J. R. R. Tolkien'), { is_new: true })];
+const POPULAR = [Object.assign(audio(3, 'The Hobbit', 'J. R. R. Tolkien'), { listeners_label: '5+ listeners' }),
+  Object.assign(both(1, 'Dune', 'Frank Herbert'), { listeners_label: '3+ listeners' })];
+const shelves = (recent, popular) => usual({ recent: () => ({ body: { items: recent } }), popular: () => ({ body: { items: popular } }) });
+
+await run('3c: Recently added and Popular on the server: two shelves under My list, above the library', async (make) => {
+  const t = make({ routes: shelves(RECENT, POPULAR) });
+  await t.mount();
+  const recent = t.q('#recentHost [data-recent]');
+  const popular = t.q('#popularHost [data-popular]');
+  check('Recently added is a section with its heading', !!recent && recent.getAttribute('aria-label') === 'Recently added' && recent.querySelector('h2').textContent === 'Recently added');
+  check('Popular on the server too', !!popular && popular.getAttribute('aria-label') === 'Popular on the server' && popular.querySelector('h2').textContent === 'Popular on the server');
+  check('the cards in the order sent, each a link to its book', t.qa('#recentHost li > a').map((a) => a.getAttribute('href')).join() === '/books/1,/books/2,/books/3' &&
+    t.qa('#popularHost li > a').map((a) => a.getAttribute('href')).join() === '/books/3,/books/1');
+  check('library cards: a cover with its format badges, the title and the author', /The Hobbit/.test(t.q('#popularHost li > a').textContent) && /Tolkien/.test(t.q('#popularHost li > a').textContent) && !!t.q('#recentHost [data-format="audio"]'));
+  check('in order: Continue, Up next, My list, Recently added, Popular, then the toolbar', (() => {
+    const kids = Array.from(t.q('#librarySection').children).map((c) => c.id);
+    const at = (id) => kids.indexOf(id);
+    return at('continueHost') < at('upnextHost') && at('upnextHost') < at('mylistHost') && at('mylistHost') < at('recentHost') && at('recentHost') < at('popularHost') && at('popularHost') < at('toolbar');
+  })());
+  check('both shown, and remembered for the next first paint', t.doc.documentElement.hasAttribute('data-books-recent') && t.doc.documentElement.hasAttribute('data-books-popular') &&
+    t.win.localStorage.getItem('webservarr_books_recent:sam') === '1' && t.win.localStorage.getItem('webservarr_books_popular:sam') === '1');
+  check('asked once each, on the visit\'s signal', t.net.urls('/api/books/recent').length === 1 && t.net.urls('/api/books/popular').length === 1 &&
+    t.net.calls.filter((c) => /\/api\/books\/(recent|popular)/.test(c.url)).every((c) => c.init && c.init.signal === t.ctl.signal));
+  check('no overflow at 320: the shelves scroll sideways inside the page gutter, as Continue does', t.qa('#recentHost ul.books-row.-mx-4.px-4, #popularHost ul.books-row.-mx-4.px-4').length === 2);
+  check('each shelf is handed to the shell\'s drag-to-scroll', t.WS.drags.filter((d) => d.el.closest('#recentHost, #popularHost')).length === 2);
+  check('each card keeps the library card\'s width', t.qa('#recentHost li, #popularHost li').every((li) => /\bw-36\b/.test(li.className) && /\bshrink-0\b/.test(li.className)));
+});
+
+await run('3c: New marks only the books the server says are new since the last visit', async (make) => {
+  const t = make({ routes: shelves(RECENT, []) });
+  await t.mount();
+  const marked = t.qa('#recentHost [data-new]').map((m) => m.closest('a').getAttribute('href'));
+  check('New on books 1 and 3, not 2', marked.join() === '/books/1,/books/3', marked);
+  const mark = t.q('#recentHost [data-new]');
+  check('it says New, in the accent, on the cover\'s top left', mark.textContent === 'New' && /\bbg-primary\b/.test(mark.className) && /\btext-bright\b/.test(mark.className) &&
+    /\babsolute\b/.test(mark.className) && /\bleft-2\b/.test(mark.className) && /\btop-2\b/.test(mark.className) && !!mark.closest('.aspect-\\[2\\/3\\]'));
+  check('and it is part of the link\'s words (a screen reader hears it)', mark.getAttribute('aria-hidden') === null && !mark.closest('[aria-hidden]') && mark.closest('a').textContent.indexOf('New') !== -1);
+  check('the mark takes no room of its own: the card is the library card\'s shape', t.q('#recentHost li > a').children.length === t.cards('libraryGrid')[0].children.length);
+  // A first visit (the server marks none), and anything but true, mark nothing.
+  const odd = RECENT.map((c, i) => Object.assign({}, c, { is_new: [false, 'true', 1][i] }));
+  const u = make({ routes: shelves(odd, []) });
+  await u.mount();
+  check('a first visit: no New anywhere', u.qa('[data-new]').length === 0 && !!u.q('#recentHost [data-recent]'));
+});
+
+await run('3c: a quick revisit keeps the marks: the kept copy and the live answer both draw them', async (make) => {
+  const t = make({ routes: shelves(RECENT, []) });
+  t.WS.cache.set('books:recent', { items: RECENT });
+  const m = t.mount();
+  await t.clock.advance(10);
+  check('marked from the kept copy', t.qa('#recentHost [data-new]').length === 2);
+  await t.clock.advance(1600);
+  await m;
+  check('still marked after the live answer', t.qa('#recentHost [data-new]').length === 2);
+});
+
+await run('3c: Popular says only the server\'s rounded label, never a count of its own', async (make) => {
+  const t = make({ routes: shelves([], POPULAR) });
+  await t.mount();
+  const labels = t.qa('#popularHost [data-listeners]').map((m) => m.lastElementChild.textContent);
+  check('each card carries its label', JSON.stringify(labels) === JSON.stringify(['5+ listeners', '3+ listeners']), labels);
+  check('quiet, with a headphones mark, not the accent', !/\bbg-primary\b/.test(t.q('#popularHost [data-listeners]').className) && t.q('#popularHost [data-listeners] .material-symbols-outlined').textContent === 'headphones');
+  check('no New on Popular', t.qa('#popularHost [data-new]').length === 0);
+  const raw = POPULAR.map((c) => Object.assign({}, c, { listeners_label: undefined, listeners: 7 }));
+  const u = make({ routes: shelves([], raw) });
+  await u.mount();
+  check('an answer without a label shows no number at all', u.qa('#popularHost [data-listeners]').length === 0 && !/7/.test(u.q('#popularHost').textContent));
+});
+
+await run('3c: empty shelves are hidden (Popular while nothing qualifies), a failure keeps the memory', async (make) => {
+  const t = make({ storage: { 'webservarr_books_recent:sam': '1', 'webservarr_books_popular:sam': '1' }, routes: shelves([], []) });
+  const m = t.mount();
+  check('remembered shelves are held before the first await', t.doc.documentElement.hasAttribute('data-books-recent') && t.doc.documentElement.hasAttribute('data-books-popular'));
+  await t.clock.advance(1600);
+  await m;
+  check('empty: released, nothing drawn', !t.doc.documentElement.hasAttribute('data-books-recent') && !t.doc.documentElement.hasAttribute('data-books-popular') && !t.q('#recentHost section') && !t.q('#popularHost section'));
+  check('and remembered as none', t.win.localStorage.getItem('webservarr_books_recent:sam') === '0' && t.win.localStorage.getItem('webservarr_books_popular:sam') === '0');
+  const u = make({ storage: { 'webservarr_books_popular:sam': '1' }, routes: usual({ recent: () => ({ status: 403, body: {} }), popular: () => ({ status: 503, body: {} }) }) });
+  await u.mount();
+  check('failed reads: no shelves, the library still shows', !u.q('#recentHost section') && !u.q('#popularHost section') && !u.hidden('#libraryGrid'));
+  check('and a failure does not forget that they had one', u.win.localStorage.getItem('webservarr_books_popular:sam') === '1' && u.win.localStorage.getItem('webservarr_books_recent:sam') === null);
+  check('no toast for a shelf that could not load', u.toasts.length === 0);
+  const v = make({ routes: shelves(RECENT, POPULAR) });
+  const leave = await v.mount();
+  leave();
+  check('leaving the page takes the flags off', !v.doc.documentElement.hasAttribute('data-books-recent') && !v.doc.documentElement.hasAttribute('data-books-popular'));
+});
+
+await run('3c: CLS: on a first visit the books wait for the shelves, and a remembered shelf lands in its held room', async (make) => {
+  const hold = deferred();
+  const known = { 'webservarr_books_continue:sam': '0', 'webservarr_books_upnext:sam': '0', 'webservarr_books_mylist:sam': '0' };
+  const t = make({ storage: Object.assign({ 'webservarr_books_popular:sam': '0' }, known),
+    routes: usual({ recent: () => hold.promise.then(() => ({ body: { items: RECENT } })) }) });
+  const m = t.mount();
+  await t.clock.advance(900);
+  check('Recently added not answered yet (no memory of it): the books wait', t.hidden('#libraryGrid') && !t.hidden('#toolbarSkel'));
+  hold.resolve();
+  await t.clock.advance(50);
+  await m;
+  check('then the shelf and the books come together', !t.hidden('#libraryGrid') && !!t.q('#recentHost [data-recent]') && t.hidden('#toolbarSkel'));
+  const lib = deferred();
+  const u = make({ storage: Object.assign({ 'webservarr_books_recent:sam': '1', 'webservarr_books_popular:sam': '1' }, known),
+    routes: (net) => { shelves(RECENT, POPULAR)(net); net.on('/api/books?', () => lib.promise); } });
+  const m2 = u.mount();
+  await u.clock.advance(100);
+  check('the room is held by a skeleton, the shelves wait for the books', u.doc.documentElement.hasAttribute('data-books-recent') && u.doc.documentElement.hasAttribute('data-books-popular') &&
+    !!u.q('#recentHost .skel') && !!u.q('#popularHost .skel') && !u.q('#recentHost [data-recent]'));
+  lib.resolve({ body: { items: SHELF, next_cursor: null, notes: [], building: false } });
+  await u.clock.advance(100);
+  await m2;
+  check('both land with the books, in the room held for them', !!u.q('#recentHost [data-recent]') && !!u.q('#popularHost [data-popular]') && !u.hidden('#libraryGrid') && !u.q('#recentHost .skel') && !u.q('#popularHost .skel'));
+  const doc = new u.win.DOMParser().parseFromString(BOOKS_HTML, 'text/html');
+  for (const id of ['recentHost', 'popularHost']) {
+    const cards = Array.from(doc.querySelectorAll(`#${id} .books-row > div`));
+    check(`${id}: the skeleton is a heading and the cards' own shape (w-36: a cover and two lines)`, !!doc.querySelector(`#${id} h2`) &&
+      cards.length >= 6 && cards.every((d) => /\bw-36\b/.test(d.className) && d.children.length === 3) && /-mx-4 px-4/.test(doc.querySelector(`#${id} .books-row`).className));
+  }
+});
+
+await run('3c: Your stats is one link at the end of the search row, named even where its words are hidden', async (make) => {
+  const t = make({ routes: usual() });
+  await t.mount();
+  const a = t.q('#statsLink');
+  check('a real link to /books/stats', !!a && a.tagName === 'A' && a.getAttribute('href') === '/books/stats');
+  check('its words are there for everyone (screen reader only on a phone)', /Your stats/.test(a.textContent) && /\bsr-only\b/.test(a.lastElementChild.className) && /\bsm:not-sr-only\b/.test(a.lastElementChild.className));
+  check('a 48px target with a focus ring', /\bh-12\b/.test(a.className) && /\bmin-w-12\b/.test(a.className) && /focus-visible:outline-2/.test(a.className));
+  check('it does not shrink, and the search keeps the room', /\bshrink-0\b/.test(a.className) && /\bmin-w-0\b/.test(a.previousElementSibling.className));
+});
+
+await run('3c: shelves write titles as text, never markup', async (make) => {
+  const nasty = '<img src=x onerror=alert(1)>';
+  const t = make({ routes: shelves([Object.assign(ebook(9, nasty, nasty), { is_new: true })], [Object.assign(audio(8, nasty, nasty), { listeners_label: nasty })]) });
+  await t.mount();
+  check('as typed', t.q('#recentHost li > a').textContent.indexOf(nasty) !== -1 && t.q('#popularHost [data-listeners]').lastElementChild.textContent === nasty);
+  check('no element made from it', !t.q('#wsPage [onerror]'));
 });
 
 // ---- Markup safety ----

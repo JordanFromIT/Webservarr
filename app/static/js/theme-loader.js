@@ -202,7 +202,9 @@
   if (data.page !== 'books') return;
   // Up next and My list (books 3b) are held the same way: webservarr_books_upnext:<name>
   // and webservarr_books_mylist:<name> show #upnextHost and #mylistHost.
-  var rows = [['continue', 'data-books-continue'], ['upnext', 'data-books-upnext'], ['mylist', 'data-books-mylist']];
+  // The discovery shelves (books 3c) too: webservarr_books_recent:<name> and webservarr_books_popular:<name>.
+  var rows = [['continue', 'data-books-continue'], ['upnext', 'data-books-upnext'], ['mylist', 'data-books-mylist'],
+    ['recent', 'data-books-recent'], ['popular', 'data-books-popular']];
   try {
     var name = (data.user || {}).username || '';
     for (var i = 0; i < rows.length; i++) {
