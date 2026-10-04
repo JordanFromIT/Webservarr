@@ -659,6 +659,99 @@ class TestConnection(unittest.TestCase):
             restore()
 
 
+class _KavitaClient(_FakeClient):
+    """_FakeClient that also takes the key exchange (POST /api/Plugin/authenticate)."""
+
+    async def post(self, url, headers=None, params=None):
+        self.calls.append({"url": url, "headers": headers or {}, "params": params or {}, "method": "POST"})
+        for fragment, action in self.routes.items():
+            if fragment in url:
+                return action
+        return _Resp(200, {"token": "t"})
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class KavitaKeyTest(unittest.TestCase):
+    """Test (and the light) also try Kavita's API key, so a wrong key is not "Connected"."""
+    URL = "http://192.168.1.8:5000"
+    KEY = "SYNTH-KAVITA-KEY-9a1f"
+    REFUSED = "Connected, but the API key was refused"
+
+    def setUp(self):
+        self.Session = helpers.make_sessionmaker()
+        self.db = self.Session()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        self.client = helpers.api_client(self.Session)
+
+    def tearDown(self):
+        helpers.reset_overrides()
+        self.setup_patch.stop()
+        self.db.close()
+
+    def post(self, routes, **body):
+        calls = []
+        with mock.patch.object(health.httpx, "AsyncClient", lambda **kw: _KavitaClient(routes, calls)):
+            r = self.client.post("/api/admin/test-connection", json=dict({"service": "kavita", "url": self.URL}, **body))
+        return r, calls
+
+    def test_a_typed_key_the_server_refuses(self):
+        r, calls = self.post({"Plugin/authenticate": _Resp(401)}, credentials=self.KEY)
+        self.assertEqual(r.json(), {"success": False, "state": "warn", "message": self.REFUSED})
+        self.assertEqual([c["url"] for c in calls], [self.URL + "/api/health", self.URL + "/api/Plugin/authenticate"])
+        self.assertEqual(calls[1]["params"]["apiKey"], self.KEY)
+
+    def test_the_key_is_never_echoed(self):
+        for answer in (_Resp(401), _Resp(200, {}), _Resp(200, {"token": ""}), _Resp(500)):
+            with self.subTest(answer=answer.status_code):
+                r, _ = self.post({"Plugin/authenticate": answer}, credentials=self.KEY)
+                self.assertNotIn(self.KEY, r.text)
+                self.assertEqual(r.json()["message"], self.REFUSED)
+
+    def test_a_key_the_server_takes(self):
+        r, calls = self.post({"Plugin/authenticate": _Resp(200, {"token": "jwt"})}, credentials=self.KEY)
+        self.assertEqual(r.json(), {"success": True, "state": "ok", "message": "Connected"})
+        self.assertNotIn("jwt", r.text)
+
+    def test_no_key_is_the_addresses_own_answer(self):
+        r, calls = self.post({})
+        self.assertEqual(r.json()["message"], "Connected")
+        self.assertEqual(len(calls), 1, "no key, so no exchange")
+
+    def test_an_address_that_does_not_answer_is_not_asked_for_the_key(self):
+        r, calls = self.post({"/api/health": _Resp(500)}, credentials=self.KEY)
+        self.assertEqual(r.json()["state"], "warn")
+        self.assertEqual(len(calls), 1)
+
+    def test_the_saved_key_is_tried_for_the_saved_address(self):
+        helpers.put(self.db, "integration.kavita.url", self.URL)
+        helpers.put(self.db, "integration.kavita.api_key", self.KEY)
+        r, calls = self.post({"Plugin/authenticate": _Resp(401)}, credentials="***masked***")
+        self.assertEqual(r.json()["message"], self.REFUSED)
+        self.assertEqual(calls[1]["params"]["apiKey"], self.KEY)
+        self.assertNotIn(self.KEY, r.text)
+
+    def test_the_saved_key_never_goes_to_a_new_address(self):
+        helpers.put(self.db, "integration.kavita.url", self.URL)
+        helpers.put(self.db, "integration.kavita.api_key", self.KEY)
+        r, calls = self.post({}, url="http://203.0.113.9:5000", credentials="***masked***")
+        self.assertEqual(r.json(), {"success": False, "state": "warn", "message": "Enter the key again to test a new address"})
+        self.assertEqual(calls, [])
+
+    def test_the_status_light_agrees(self):
+        calls = []
+        values = {"integration.kavita.url": self.URL, "integration.kavita.api_key": self.KEY}
+        with mock.patch.object(health.httpx, "AsyncClient",
+                               lambda **kw: _KavitaClient({"Plugin/authenticate": _Resp(403)}, calls)):
+            result = asyncio.run(health.probe_one("kavita", values))
+        self.assertEqual((result["state"], result["reason"]), ("warn", self.REFUSED))
+
+    def test_a_key_with_spaces_is_named_not_tried(self):
+        r, calls = self.post({}, credentials=" " + self.KEY)
+        self.assertEqual(r.json()["state"], "warn")
+        self.assertEqual(len(calls), 1)
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class ChaptarrOptions(unittest.TestCase):
     def setUp(self):

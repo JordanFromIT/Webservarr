@@ -45,6 +45,14 @@
     return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   }
 
+  /* A key aimed at a place where people type (the arrow keys belong to the caret there). */
+  function inField(t) {
+    if (!t || t.nodeType !== 1) return false;
+    var tag = t.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!t.isContentEditable ||
+      (t.getAttribute && t.getAttribute('contenteditable') !== null && t.getAttribute('contenteditable') !== 'false');
+  }
+
   /* One layer serves every tour on the page; it is built once, on first init. */
   function ensureLayer() {
     var existing = document.getElementById('tourLayer');
@@ -318,6 +326,8 @@
     // capture: the reader turns pages on the arrow keys too
     document.addEventListener('keydown', function (e) {
       if (!active || playerOpen()) return;
+      // Typing is the person's: the arrow keys move the caret in a field, they do not turn a step.
+      if (inField(e.target)) { if (e.key === 'Escape') finish(); return; }
       if (e.key === 'Escape') { finish(); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); next(); }
       else if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); back(); }

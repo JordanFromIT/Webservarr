@@ -98,6 +98,8 @@ function makeServer(over = {}) {
     running: false,
     as: 'admin',            // admin | member | signedout
     broken: new Set(),      // paths that answer 503
+    failWrites: false,      // POST and DELETE on /overrides answer 503
+    testAnswer: { success: false, state: 'warn', message: 'Connected, but the API key was refused' },
     slowRebuild: null,
     stamp
   };
@@ -146,6 +148,7 @@ function installFetch(server, win) {
     });
     if (path === '/api/admin/settings' && u.search.indexOf('view=registry') !== -1) return reply(200, server.registry());
     if (path === '/api/admin/integrations/health') return reply(200, { integrations: {} });
+    if (path === '/api/admin/test-connection' && method === 'POST') return reply(200, server.testAnswer);
     if (path === '/api/admin/chaptarr/options') return reply(503, { detail: 'Chaptarr did not answer' });
     if (path === '/api/admin/settings/bulk' && method === 'PUT') return server.bulk(JSON.parse(init.body), reply);
     if (path.indexOf('/api/admin/books') !== 0) return reply(404, {});
@@ -159,6 +162,7 @@ function installFetch(server, win) {
     if (sub === '/unpaired') return reply(200, server.unpaired());
     if (sub === '/paired') return reply(200, server.paired());
     if (sub === '/overrides' && method === 'GET') return reply(200, { overrides: server.overrides.map((o) => server.shape(o)) });
+    if (server.failWrites && sub === '/overrides' && method !== 'GET') return reply(503, { detail: 'The override could not be saved right now' });
     if (sub === '/overrides' && method === 'POST') {
       const body = JSON.parse(init.body);
       if (!server.ebooks.some((e) => e.id === body.kavita_chapter_id) || !server.audio.some((a) => a.key === body.plex_book_key)) {
@@ -519,6 +523,40 @@ await run('leaving the page ends its requests and listeners', async (make) => {
   check('every request carried the visit\'s signal', t.server.calls.filter((c) => c.url.indexOf('/api/admin/books') === 0).every((c) => c.init.signal === t.ctl.signal));
 });
 
+await run('T5H1: a pair hint with a very long title wraps (it cannot push a phone wider)', async (make) => {
+  const t = await make();
+  t.server.ebooks[2].title = 'Averyveryverylongtitlewithnospacesatall'.repeat(2);
+  await t.open();
+  const hint = t.q('#booksPair').parentNode.querySelector('p');
+  check('the hint may break inside a word and shrink', /\bbreak-words\b/.test(hint.className) && /\bmin-w-0\b/.test(hint.className), hint.className);
+  const pick = (g, v) => { const i = t.q(`${panel} input[name="${g}"][value="${v}"]`); i.checked = true; i.dispatchEvent(new t.win.Event('change', { bubbles: true })); };
+  pick('booksPickEbook', '201');
+  pick('booksPickAudio', '31:1');
+  await flush();
+  check('with the long title in it', hint.textContent.indexOf('Averyvery') !== -1);
+  check('the matched and choice rows break words too', /\bbreak-words\b/.test(t.q('#booksMatched div div').className));
+});
+
+await run('T5H4: a Keep apart or Remove that fails leaves a working button, not a disabled one', async (make) => {
+  const t = await make();
+  t.server.overrides = [{ kavita_chapter_id: 201, plex_book_key: '31:1', action: 'pair', created_at: t.server.stamp() }];
+  t.server.rebuild();
+  await t.open();
+  t.server.failWrites = true;
+  const keep = t.qa('#booksMatched button')[0];
+  await t.press(keep);
+  check('the failure was told', t.toasts.some((x) => x[1] === 'err'), t.toasts);
+  const again = t.qa('#booksMatched button')[0];
+  check('Keep apart is pressable again (aria-disabled is not true)', again.getAttribute('aria-disabled') !== 'true', again.getAttribute('aria-disabled'));
+  const remove = t.q('#booksChoices button');
+  await t.press(remove);
+  check('Remove too', remove.getAttribute('aria-disabled') === 'false', remove.getAttribute('aria-disabled'));
+  t.server.failWrites = false;
+  const sent = t.calls('POST', '/api/admin/books/overrides').length + t.calls('DELETE', '/api/admin/books/overrides').length;
+  await t.press(t.qa('#booksMatched button')[0]);
+  check('and a second try goes out', t.calls('POST', '/api/admin/books/overrides').length + t.calls('DELETE', '/api/admin/books/overrides').length === sent + 1);
+});
+
 await run('the tab writes text only', async () => {
   const src = readFileSync(join(STATIC, 'js/settings/books.js'), 'utf8');
   check('no innerHTML, outerHTML or insertAdjacentHTML', !/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(src));
@@ -561,6 +599,18 @@ await run('the Kavita card has a write-only API key that goes with its address',
   check('typing the key again clears the message on the address', !/Enter the key again for the new address/.test(card.textContent));
   check('and stages the key with the address', t.text('#settingsSaveBar').indexOf('2 unsaved changes') !== -1, t.text('#settingsSaveBar'));
   check('the typed key is in a password field, never shown', key.type === 'password');
+});
+
+await run('the Kavita card\'s Test sends the key on screen (or the saved one) and shows the answer, a wrong key included', async (make) => {
+  const t = await make({ url: 'https://ws.test/settings#integrations' });
+  await t.open();
+  const card = t.q('#integration-card-kavita');
+  const test = Array.from(card.querySelectorAll('button')).find((b) => b.textContent.indexOf('Test') !== -1);
+  await t.press(test);
+  const sent = t.calls('POST', '/api/admin/test-connection')[0];
+  const body = sent && JSON.parse(sent.init.body);
+  check('it asked for Kavita with its address and the saved key as the mask, never a value', body && body.service === 'kavita' && body.url === 'http://192.168.1.20:5000' && body.credentials === MASK, body);
+  check('the answer is shown in the card, in the server\'s words', /Connected, but the API key was refused/.test(card.textContent), card.textContent.slice(-200));
 });
 
 await run('the Chaptarr webhook: this page\'s own address, never typed in', async (make) => {

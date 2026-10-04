@@ -189,7 +189,7 @@ function visit(o = {}) {
   const net = network();
   const ctl = new win.AbortController();
   const WS = fakeShell(win, doc, clock, net);
-  const kav = { init: 0, reconnect: [], retry: 0, failed: false, blockNext: false };
+  const kav = { init: 0, reconnect: [], retry: 0, failed: false, blockNext: false, leaving: false };
   const toasts = [];
   const polls = [];
   const g = globalThis;
@@ -209,7 +209,8 @@ function visit(o = {}) {
       init() { kav.init += 1; },
       reconnect(cb) { kav.reconnect.push(cb); if (kav.blockNext) cb(); },
       retry() { kav.retry += 1; },
-      arrivedFromFailedConnect() { return kav.failed; }
+      arrivedFromFailedConnect() { return kav.failed; },
+      isLeaving() { return kav.leaving; }
     };
   }
   if (o.player !== false) {
@@ -1192,6 +1193,62 @@ await run('the guide: reduced motion jumps to each step instead of gliding', asy
   t.win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
   t.q('#helpBtn').click();
   check('with motion allowed it glides', behaviours.join() === 'auto,smooth', behaviours);
+});
+
+await run('T5H2: typing in the search box during the guide is the person\'s: the arrow keys move the caret and do not turn a step', async (make) => {
+  const t = withTour(make({ routes: usual() }));
+  const mounted = t.mount();
+  await t.clock.advance(2600);
+  await mounted;
+  check('the guide is on its first step', tourOn(t) && tourTitle(t) === 'Find a book');
+  const input = t.q('#booksSearch');
+  input.focus();
+  for (const key of ['ArrowRight', 'ArrowLeft']) {
+    const e = new t.win.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    input.dispatchEvent(e);
+    check(key + ' in the box is left to the box (not prevented)', e.defaultPrevented === false);
+  }
+  check('and the step did not move', tourTitle(t) === 'Find a book');
+  const textarea = t.doc.createElement('textarea');
+  t.doc.body.appendChild(textarea);
+  const e2 = new t.win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+  textarea.dispatchEvent(e2);
+  check('a textarea, a select and an editable box are left alone too', e2.defaultPrevented === false && tourTitle(t) === 'Find a book');
+  const editable = t.doc.createElement('div');
+  editable.setAttribute('contenteditable', 'true');
+  t.doc.body.appendChild(editable);
+  const e3 = new t.win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+  editable.dispatchEvent(e3);
+  check('an editable box too', e3.defaultPrevented === false && tourTitle(t) === 'Find a book');
+  // Everywhere else the arrows still turn the guide (the reader's guide works the same).
+  const e4 = new t.win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true });
+  t.doc.body.dispatchEvent(e4);
+  check('on the page the right arrow goes on a step and is taken', e4.defaultPrevented === true && tourTitle(t) === 'Pick up where you left off', tourTitle(t));
+  const e5 = new t.win.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true });
+  t.doc.body.dispatchEvent(e5);
+  check('and the left arrow goes back', tourTitle(t) === 'Find a book');
+  input.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  check('Escape still ends it, from the box too', !tourOn(t));
+});
+
+await run('T5H3: the guide is not offered, or marked seen, while a Kavita hand-off is leaving the page', async (make) => {
+  const t = withTour(make({ routes: usual() }));
+  t.kav.leaving = true;
+  const mounted = t.mount();
+  await t.clock.advance(2600);
+  await mounted;
+  check('not shown', !tourOn(t));
+  check('and not marked seen, so it comes when the person is back', t.win.localStorage.getItem(GUIDE_FLAG) === null);
+  const back = withTour(make({ routes: usual() }));
+  const m = back.mount();
+  await back.clock.advance(2600);
+  await m;
+  check('back on the page (no hand-off) it is shown', tourOn(back) && back.win.localStorage.getItem(GUIDE_FLAG) === '1');
+  const going = withTour(make({ routes: usual({ continue: { items: [], notes: NOT_CONNECTED }, library: () => ({ body: { items: [audio(3, 'The Hobbit', 'Tolkien')], next_cursor: null, notes: NOT_CONNECTED } }) }) }));
+  const g = going.mount();
+  await going.clock.advance(2600);
+  await g;
+  check('a hand-off the page itself just started is the same: no guide, not seen', going.kav.reconnect.length === 1 && !tourOn(going) && going.win.localStorage.getItem(GUIDE_FLAG) === null);
 });
 
 await run('Home: the "not connected" note becomes a link to Books, the other notes stay plain', async (make) => {

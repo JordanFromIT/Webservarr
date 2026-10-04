@@ -36,7 +36,16 @@ CACHE_KEY = "webservarr:cache:integration-health"
 CACHE_TTL = 30
 
 
+KAVITA_KEY = "integration.kavita.api_key"
+KEY_REFUSED = "Connected, but the API key was refused"
+
+
 def credential_key(service: str) -> Optional[str]:
+    """The setting that holds the service's secret. Kavita's is the Books catalog's API key, which
+    has no place in CREDENTIAL_KEYS (its address check sends no key) but is tied to its address
+    and tested with it (see _kavita_key)."""
+    if service == "kavita":
+        return KAVITA_KEY
     return integration_config.CREDENTIAL_KEYS.get(service)
 
 
@@ -188,10 +197,33 @@ async def _probe(service: str, values: Dict[str, str], client) -> dict:
                 body = resp.json()
             except ValueError:
                 body = None
-        return _result(*map_response(service, resp.status_code, body, values))
+        result = map_response(service, resp.status_code, body, values)
+        if service == "kavita" and result[0] == OK:
+            result = await _kavita_key(client, values)
+        return _result(*result)
     finally:
         if own:
             await client.aclose()
+
+
+async def _kavita_key(client, values: Dict[str, str]) -> Tuple[str, str]:
+    """The address answers; does it take the key? The catalog exchanges the API key for a token on
+    every rebuild, so a wrong key is a catalog that never fills. The reason is fixed text: it never
+    carries the key. No key set is not a fault of the address, so the address's own answer stands."""
+    key = values.get(KAVITA_KEY) or ""
+    if not key:
+        return OK, "Connected"
+    if integration_config.padded(key):
+        return _spaced("API key")
+    base = integration_config.base_url("kavita", values) or ""
+    response = await client.post(f"{base}/api/Plugin/authenticate", params={"apiKey": key, "pluginName": "WebServarr"})
+    token = None
+    if response.status_code == 200:
+        try:
+            token = (response.json() or {}).get("token")
+        except (ValueError, AttributeError):
+            token = None
+    return (OK, "Connected") if token else (WARN, KEY_REFUSED)
 
 
 async def check_all(values: Dict[str, str], only: Optional[str] = None) -> Dict[str, dict]:

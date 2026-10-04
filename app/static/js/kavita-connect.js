@@ -113,5 +113,6 @@
     leave();
   }
 
-  window.WSKavita = { init: init, reconnect: reconnect, retry: retry, arrivedFromFailedConnect: arrivedFromFailedConnect };
+  window.WSKavita = { init: init, reconnect: reconnect, retry: retry, arrivedFromFailedConnect: arrivedFromFailedConnect,
+                      isLeaving: function () { return leaving; } };
 })();

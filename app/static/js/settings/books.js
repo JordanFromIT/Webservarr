@@ -218,7 +218,7 @@
       pairBtn.id = 'booksPair';
       pairBtn.appendChild(icon('link', 'text-base'));
       pairBtn.appendChild(document.createTextNode('Pair these two'));
-      var pairHint = el('p', 'min-w-0 flex-1 basis-60 text-[13px] leading-5 text-frosted-blue/70 min-h-10');
+      var pairHint = el('p', 'min-w-0 flex-1 basis-60 break-words text-[13px] leading-5 text-frosted-blue/70 min-h-10');
       pairHint.setAttribute('aria-live', 'polite');
       pairRow.appendChild(pairBtn);
       pairRow.appendChild(pairHint);
@@ -585,7 +585,12 @@
         btn.setAttribute('aria-disabled', 'true');
         setOverride({ kavita_chapter_id: book.kavita_chapter_id, plex_book_key: edition.plex_book_key, action: 'apart' }, function () {
           afterChange('Kept apart. It shows after the next rebuild.');
-        }).then(function () { busy = false; if (!signal.aborted) matchedBox.focus({ preventScroll: true }); });
+        }).then(function (ok) {
+          busy = false;
+          // A failed press leaves the button as it was: working, and pressable again.
+          if (!ok) btn.setAttribute('aria-disabled', 'false');
+          if (!signal.aborted) matchedBox.focus({ preventScroll: true });
+        });
       }
 
       function removeChoice(o, btn) {
@@ -603,7 +608,11 @@
         }).catch(function (e) {
           if (window.console) console.error(e);
           WSSettings.toast('That couldn’t be removed. Try again.', 'err');
-        }).then(function () { busy = false; });
+        }).then(function () {
+          busy = false;
+          // Success redraws the list (this button is gone); a failure leaves it, working again.
+          btn.setAttribute('aria-disabled', 'false');
+        });
       }
 
       // The row that was pressed is gone after a repaint: focus goes to the next Remove, or the list.

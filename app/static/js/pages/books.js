@@ -605,6 +605,8 @@ export async function mount(ctx) {
     state.guideOffered = true;
     ctx.setTimeout(function () {
       if (signal.aborted || state.searching || state.connectProblem) return;
+      // Off to sign in to Kavita: the page comes back and the guide is then shown (not marked seen now).
+      if (state.reconnectTried || (window.WSKavita && typeof window.WSKavita.isLeaving === 'function' && window.WSKavita.isLeaving())) return;
       const first = !guide.hasBeenSeen();
       guide.maybeStart();
       // Seen as soon as it has been shown, not only when it is finished: a person who
