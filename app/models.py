@@ -410,8 +410,8 @@ class PlayerPrefs(Base):
 
 
 class Book(Base):
-    """One work in the Books catalog: an ebook (Kavita), an audiobook (Plex)
-    or both as one entry. Rebuilt from the two sources by
+    """One work in the Books catalog: an ebook (Kavita), its audiobook editions
+    (Plex, one or several narrations) or both as one entry. Rebuilt from the two sources by
     app/services/book_catalog.py; nothing per person is kept here.
 
     A row keeps its id while its Kavita chapter id or Plex key is unchanged. When two
@@ -430,7 +430,6 @@ class Book(Base):
     title = Column(String(300), nullable=False)
     sort_title = Column(String(300), nullable=False, default="")
     author = Column(String(200), nullable=False, default="")
-    narrator = Column(String(200), nullable=False, default="")     # audiobook only
     series = Column(String(200), nullable=False, default="")
     series_number = Column(Float, nullable=True)
     description = Column(Text, nullable=False, default="")
@@ -442,7 +441,12 @@ class Book(Base):
     kavita_volume_id = Column(Integer, nullable=True)
     kavita_series_id = Column(Integer, nullable=True)
     kavita_library_id = Column(Integer, nullable=True)
-    plex_book_key = Column(String(64), nullable=True)               # album or album:disc, as the player uses
+    # The primary audiobook edition (the earliest added): its key, as the
+    # player uses it (album or album:disc). The row's text comes from it first.
+    # The editions themselves, with their narrators, are in book_audio_editions
+    # (narrator lives only there). A retired row (merged_into set) keeps the
+    # key it had, so a later split can give it back.
+    plex_book_key = Column(String(64), nullable=True)
     added_at = Column(DateTime, nullable=True)                      # naive UTC; the earlier of the two sources
     ebook_added_at = Column(DateTime, nullable=True)
     audio_added_at = Column(DateTime, nullable=True)
@@ -454,11 +458,28 @@ class Book(Base):
         return f"<Book(id={self.id}, title='{self.title}')>"
 
 
+class BookAudioEdition(Base):
+    """One audiobook of a Book: a Plex book (album or album:disc) and its
+    narrator. A book has none or several; each key is in exactly one book, so
+    the player's place for an edition (kept by plex key) stays with it."""
+    __tablename__ = "book_audio_editions"
+    __table_args__ = (Index("ix_book_audio_editions_book_id", "book_id"),)
+
+    id = Column(Integer, primary_key=True)
+    book_id = Column(Integer, nullable=False)
+    plex_book_key = Column(String(64), nullable=False, unique=True)
+    narrator = Column(String(200), nullable=False, default="")
+    added_at = Column(DateTime, nullable=True)                      # naive UTC
+
+    def __repr__(self):
+        return f"<BookAudioEdition(book_id={self.book_id}, key='{self.plex_book_key}')>"
+
+
 class BookPairOverride(Base):
     """An admin's decision about one Kavita book (its chapter id, see Book)
-    and one Plex book: `pair`
-    joins them whatever their work keys say, `apart` keeps them separate even
-    when the keys match. Always wins, and survives every rebuild."""
+    and one audiobook edition (its Plex key): `pair` joins that edition to the
+    ebook whatever their work keys say, `apart` keeps it out of the ebook's
+    book even when the keys match. Always wins, and survives every rebuild."""
     __tablename__ = "book_pair_overrides"
     __table_args__ = (
         UniqueConstraint("kavita_chapter_id", "plex_book_key", name="uq_book_pair_overrides_pair"),

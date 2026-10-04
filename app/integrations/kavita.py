@@ -182,6 +182,30 @@ def _book_units(detail: dict) -> list:
     return units
 
 
+def _inherit_authors(books: list, folders: dict) -> None:
+    """A book that names no writer takes the author its neighbours agree on:
+    the other books of its series, or failing that the other books kept in
+    the same folder (a library laid out by author keeps one author's books,
+    series or not, in one folder, and a standalone book is its own series).
+    They must name exactly one author between them; two, or none, change
+    nothing. Only the authors Kavita gave are used, so it never chains."""
+    named = [(b, b["author"]) for b in books if b["author"]]
+
+    def agreed(others) -> str:
+        names: dict = {}
+        for _, name in others:
+            names.setdefault(name.casefold(), name)
+        return next(iter(names.values())) if len(names) == 1 else ""
+
+    for book in books:
+        if book["author"]:
+            continue
+        same_series = [(b, a) for b, a in named if b["series_id"] == book["series_id"]]
+        folder = folders.get(book["series_id"], "")
+        same_folder = [(b, a) for b, a in named if folder and folders.get(b["series_id"]) == folder]
+        book["author"] = agreed(same_series) or agreed(same_folder)
+
+
 async def list_books() -> list:
     """Every book in every Kavita library, one per volume (or per chapter
     where Kavita holds a standalone book as a chapter):
@@ -193,7 +217,8 @@ async def list_books() -> list:
     a numbered volume. `series` is the Kavita series name ("" for a series
     that is just this book), `series_number` the volume number (None when it
     has none), `author` the first writer of the book, else of its series
-    ("" when none, see _authors), `description` the summary as plain text and
+    ("" when none, see _authors; a book with none takes the author its
+    series or folder agree on, see _inherit_authors), `description` the summary as plain text and
     `added_at` a naive UTC datetime (None when Kavita gives none). Raises
     KavitaUnavailable."""
     base, key = _config()
@@ -243,4 +268,7 @@ async def list_books() -> list:
     for result in results:
         if isinstance(result, BaseException):
             raise result
-    return [book for books in results for book in books]
+    books = [book for books in results for book in books]
+    folders = {s["id"]: str(s.get("folderPath") or "").strip() for s in series}
+    _inherit_authors(books, folders)
+    return books

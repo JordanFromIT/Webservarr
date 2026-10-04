@@ -32,44 +32,79 @@ find a book, see what formats exist, and pick up where they left off in either o
 
 ## 3. Catalog
 
+A **book** is one work: at most one ebook and any number of audiobook editions (the same book
+narrated more than once). Listen offers the narrators of its editions; a person's place stays
+per edition, as the player keeps it.
+
+- **The ebook is one book in Kavita, not a Kavita series.** A series can hold a whole run of
+  books. The unit is a numbered volume, or a chapter where Kavita keeps a standalone book as one
+  (a special or a loose chapter). Its id is the **chapter** that is read (a volume's first), the
+  id the catalog follows and the reader opens. The Kavita series name is the book's `series`
+  (empty when it is just this book) and the volume number its `series_number`.
+- **An edition is one Plex book** (album or album:disc, as the player keys it).
+
 ### 3.1 Table `books`
 
 Each row is one work. Columns:
 - `id`
-- `work_key`
+- `work_key`: the primary edition's key, else the ebook's
 - `title`
 - `sort_title`
 - `author`
-- `narrator` (audiobook only)
 - `series`
 - `series_number` (nullable, decimal)
 - `description`
+- `kavita_chapter_id` (nullable): the ebook, as above
+- `kavita_volume_id` (nullable): its numbered volume, null for a standalone book
 - `kavita_series_id` (nullable)
 - `kavita_library_id` (nullable)
-- `plex_book_key` (nullable; album or album:disc, as the player uses)
-- `added_at`: the earliest of the two sources
+- `plex_book_key` (nullable): the primary edition, the earliest added. The row's text comes from
+  it first. Narrators are not on the row: they are on the editions.
+- `added_at`: the earliest of all sources
 - `ebook_added_at`
-- `audio_added_at`
+- `audio_added_at`: the earliest edition
 - `cover_source`: kavita or plex
 - `updated_at`
+- `merged_into` (nullable): see Stable ids
 
-At least one of the Kavita and Plex keys is set.
+At least one of `kavita_chapter_id` and an edition is set on a live book.
+
+### 3.1.1 Table `book_audio_editions`
+
+Each row holds:
+- `book_id`
+- `plex_book_key` (unique: an edition is in exactly one book)
+- `narrator`
+- `added_at`
 
 ### 3.2 Table `book_pair_overrides`
 
 Each row holds:
-- `kavita_series_id`
-- `plex_book_key`
+- `kavita_chapter_id`
+- `plex_book_key` (one edition)
 - `action`: `pair` or `apart`
 - `created_by`
 - `created_at`
 
 Rules:
-- It is unique per (kavita_series_id, plex_book_key).
-- A `pair` override joins two items whatever their work keys say.
-- An `apart` override keeps them separate even when the keys match.
-- An item can be in at most one `pair` override. A new pair for the same item replaces the old
-  one.
+- It is unique per (kavita_chapter_id, plex_book_key).
+- A `pair` override joins one edition to an ebook whatever their work keys say.
+- An `apart` override keeps one edition out of that ebook's book even when the keys match.
+- An edition is in at most one `pair` override: a new pair for the same edition replaces the old
+  one. An ebook may be paired with several editions.
+
+### 3.2.1 Pairing
+
+- An ebook takes **every** edition whose work key equals its own, when it is the only ebook with
+  that key. Two ebooks with one key are too uncertain: neither takes the editions.
+- Editions with the same work key and no ebook are one book with several editions.
+- An edition an override names never joins by key; the rest follow the rules above.
+- Kavita titles carry the series in ways audiobook titles do not. Before the work key is made, a
+  leading "<series> NN - " or "<series> Book N: " and a trailing ": <series>" or "(<series> #N)"
+  come off the ebook's title (the title shown is unchanged).
+- A Kavita book with no writer takes the author its series' other books agree on, or failing
+  that the other books kept in the same folder. Kavita's "authors_sort" placeholder is not an
+  author, and an author Kavita split at the comma ("Maas", "Sarah J.") is put back together.
 
 ### 3.3 Rebuild
 
@@ -78,8 +113,8 @@ Rules:
   - right after a Chaptarr import webhook;
   - on demand from Settings ("Rebuild now").
 - **How it runs:**
-  1. It reads the full Kavita library list and the Plex audiobook section listing, using the
-     player's `list_books`.
+  1. It reads every book in Kavita (volumes and chapters, with their writers) and the Plex
+     audiobook section listing (the player's books, with the player's work key for each).
   2. It computes work keys with the same matcher the player uses.
   3. It applies the overrides and writes the result in one transaction.
 - **Only one rebuild runs at a time** across the two workers, using a lock row or an advisory
@@ -87,8 +122,13 @@ Rules:
 - **Keep the last good catalog.** If either source fails, its side of the catalog is left as it
   was. Rows from that source are never deleted on a failed read. Only a successful read of a
   source may remove that source's rows that have gone.
-- **Stable ids.** A work keeps its `books.id` across rebuilds whenever its Kavita id or Plex key
-  is unchanged. Links and the Continue row depend on this.
+- **Stable ids.** A book keeps its `books.id` across rebuilds whenever its Kavita chapter id or
+  one of its editions' Plex keys is unchanged. Links and the Continue row depend on this.
+  - When items that were in different rows become one book, the row that held an edition (the
+    lowest id) is kept. The others stay behind as ghosts (`merged_into` set to the survivor, the
+    ebook or edition key they held remembered), so an old link redirects to the right book.
+  - When a book splits, the side that leaves gets its ghost back (revived), or a new row if it
+    has none. A ghost whose book is gone goes with it. Ghosts never show as books.
 
 ## 4. Pages
 

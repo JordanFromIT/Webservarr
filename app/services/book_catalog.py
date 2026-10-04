@@ -3,27 +3,30 @@ The Books catalog: one stored list of works, ebooks from Kavita and
 audiobooks from Plex, rebuilt every 15 minutes, after a Chaptarr import and on
 demand (spec 2026-10-03-books-page-core-design.md, section 3).
 
-Pairing is automatic and exact: an ebook and an audiobook are one entry only
-when their work keys (plex_player.work_key, the key the player stores) are
-equal and no other item has that key on either side. Anything uncertain stays
-two entries. An admin's override (BookPairOverride) always wins: `pair` joins
-two items whatever their keys say, `apart` keeps them separate.
+A work is one book: at most one ebook and any number of audiobook editions
+(the same book narrated more than once). The ebook is one book in Kavita: a
+numbered volume, or a chapter where Kavita keeps a standalone book as one
+(never a whole series, which can hold a dozen books); its id is the chapter
+that is read. An edition is one Plex book (album or album:disc).
+
+Pairing is automatic and exact: an ebook takes every edition whose work key
+(plex_player.work_key, the key the player stores) equals its own, if no other
+ebook has that key; editions of one key with no ebook are one book of several
+editions. Anything uncertain stays apart. An admin's override
+(BookPairOverride) always wins: `pair` joins one edition to an ebook whatever
+their keys say, `apart` keeps one edition out of that ebook's book.
 
 A rebuild reads both sources first and writes once, in one transaction. A
 source that fails to read keeps its side of the catalog exactly as it was (its
 rows, their ids and counts); only a successful read removes what has gone.
 
-The ebook side is one book in Kavita: a numbered volume, or a chapter where
-Kavita keeps a standalone book as one (never a whole series, which can hold a
-dozen books). Its id is the chapter that is read.
-
-Ids. A book is found again by its Kavita chapter id or its Plex key, never by title,
-so a book keeps its `books.id`. The audiobook's row is the one that is kept
-when a pair forms; the ebook's row stays behind as a ghost (merged_into set to
-the survivor, its Kavita chapter id kept), so an old link still finds the book. When
-the pair splits, the ebook gets its ghost back (or a new row if it has none)
-and the audiobook keeps the row. Ghosts never show as books: only rows with
-merged_into null do.
+Ids. A book is found again by its Kavita chapter id or its editions' Plex
+keys, never by title, so a book keeps its `books.id`. When items that were in
+different rows become one book, the row that held an edition (the lowest id) is
+kept and the others stay behind as ghosts (merged_into set to the survivor,
+what they held remembered), so an old link still finds the book. When a book
+splits, the side that leaves gets its ghost back, or a new row if it has none.
+Ghosts never show as books: only rows with merged_into null do.
 
 Nothing is held in this module between calls (two uvicorn workers): one
 rebuild at a time is a Redis lock with an expiry, the same lease the
@@ -33,6 +36,7 @@ BookCatalogMeta row.
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -42,7 +46,7 @@ import redis.asyncio as aioredis
 from app.config import settings
 from app.database import SessionLocal
 from app.integrations import kavita, plex_player
-from app.models import Book, BookCatalogMeta, BookPairOverride
+from app.models import Book, BookAudioEdition, BookCatalogMeta, BookPairOverride
 from app.services.notification_poller import LeaderLease
 
 logger = logging.getLogger(__name__)
@@ -57,9 +61,8 @@ REBUILD_INTERVAL = 900
 
 ACTIONS = ("pair", "apart")
 
-_FIELD_LIMITS = (("title", 300), ("sort_title", 300), ("author", 200), ("narrator", 200),
-                 ("series", 200), ("description", None))
-_COLUMNS = ("work_key", "title", "sort_title", "author", "narrator", "series", "series_number", "description",
+_FIELD_LIMITS = (("title", 300), ("sort_title", 300), ("author", 200), ("series", 200), ("description", None))
+_COLUMNS = ("work_key", "title", "sort_title", "author", "series", "series_number", "description",
             "kavita_chapter_id", "kavita_volume_id", "kavita_series_id", "kavita_library_id", "plex_book_key",
             "added_at", "ebook_added_at", "audio_added_at", "cover_source", "merged_into")
 
@@ -97,11 +100,43 @@ async def _read(fetch, name: str) -> tuple:
         return None, f"{name} could not be read"
 
 
-def _ebook_item(book: dict) -> _Item:
+_NUMBER = r"(?:(?:book|vol(?:ume)?\.?|#)\s*)?#?\d+"
+
+
+def _pairing_title(title: str, series: str) -> str:
+    """The title the ebook's work key is made from. Kavita's titles carry the
+    series in ways an audiobook's title does not: a leading "<series> 02 - " or
+    "<series> Book 2: ", and a trailing ": <series>" or "(<series> #2)". They
+    come off here (never from the title shown), so "Harry Potter 02 - Harry
+    Potter and the Chamber of Secrets" and "A Storm of Swords: A Song of Ice
+    and Fire" are the titles the audiobooks have. Nothing is taken off a book
+    that is not in a series, or if nothing would be left."""
+    if not series:
+        return title
+    name = re.escape(series.strip())
+    patterns = (
+        rf"^\s*{name}\s*,?\s*{_NUMBER}\s*[-:–—]\s*",
+        rf"\s*[:\-–—]\s*{name}\s*$",
+        rf"\s*[\(\[]\s*(?:the\s+)?{name}(?:\s+series)?\s*,?\s*(?:{_NUMBER})?\s*[\)\]]\s*$",
+    )
+    for pattern in patterns:
+        stripped = re.sub(pattern, "", title, count=1, flags=re.IGNORECASE)
+        if stripped.strip():
+            title = stripped
+    return title
+
+
+def _ebook_item(book: dict, known_series: tuple = ()) -> _Item:
+    """`known_series`: the series names Kavita has for other books. A book Kavita
+    keeps as a series of its own ("Harry Potter 03 - Harry Potter and ...")
+    names no series, but the title may start with one that its neighbours have."""
     key = None
     if book["author"] and book["title"]:
         try:
-            key = plex_player.work_key(book["author"], book["title"])
+            title = book["title"]
+            for series in ([book["series"]] if book["series"] else known_series):
+                title = _pairing_title(title, series)
+            key = plex_player.work_key(book["author"], title)
         except Exception as exc:  # noqa: BLE001 - no key means no automatic pair, as for the player
             logger.warning("No work key could be made of an ebook's title: %s", type(exc).__name__)
     return _Item("k", book["id"], key, {
@@ -123,72 +158,81 @@ def _audiobook_item(book: dict) -> _Item:
 
 # --- Pairing ------------------------------------------------------------------------
 
-def _effective_pairs(overrides: list) -> Dict[int, str]:
-    """{kavita_chapter_id: plex_book_key} for the `pair` overrides. An item is in
-    at most one: where two overrides name the same item, the newer wins."""
-    pairs: Dict[int, str] = {}
-    taken: Dict[str, int] = {}
+def _effective_pairs(overrides: list) -> Dict[str, int]:
+    """{plex_book_key: kavita_chapter_id} for the `pair` overrides. An edition
+    is in at most one: where two overrides name the same edition, the newer
+    wins. (An ebook may be named by several: it takes each edition named.)"""
+    pairs: Dict[str, int] = {}
     for o in sorted((o for o in overrides if o.action == "pair"), key=lambda o: (o.created_at, o.id)):
-        old_key = pairs.pop(o.kavita_chapter_id, None)
-        if old_key is not None:
-            taken.pop(old_key, None)
-        old_series = taken.pop(o.plex_book_key, None)
-        if old_series is not None:
-            pairs.pop(old_series, None)
-        pairs[o.kavita_chapter_id] = o.plex_book_key
-        taken[o.plex_book_key] = o.kavita_chapter_id
+        pairs[o.plex_book_key] = o.kavita_chapter_id
     return pairs
 
 
-def _groups(ebooks: Dict[int, _Item], audiobooks: Dict[str, _Item], overrides: list) -> List[tuple]:
-    """Every book as (ebook or None, audiobook or None), paired as the
-    overrides and then the work keys say."""
+def _groups(ebooks: Dict[int, _Item], editions: Dict[str, _Item], overrides: list) -> List[tuple]:
+    """Every book as (ebook or None, [audiobook editions]).
+
+    An ebook takes every edition an override pairs with it, and every edition
+    with its work key when it is the only ebook with that key (two ebooks of
+    one key are too uncertain: their editions stay apart from both). An edition
+    an override names never joins by key, and an `apart` override keeps one
+    edition out of one ebook's book. Editions left over that share a work key
+    are one book of several editions; the rest are a book each."""
     pairs = _effective_pairs(overrides)
     apart = {(o.kavita_chapter_id, o.plex_book_key) for o in overrides if o.action == "apart"}
-    groups: List[tuple] = []
-    joined_e, joined_a = set(), set()
-    for kavita_id, plex_key in sorted(pairs.items()):
-        if kavita_id in ebooks and plex_key in audiobooks:
-            groups.append((ebooks[kavita_id], audiobooks[plex_key]))
-            joined_e.add(kavita_id)
-            joined_a.add(plex_key)
-    # An item an override names does not pair by key as well, even when its
-    # partner is gone: the admin has said who it goes with.
-    named_e, named_a = set(pairs), set(pairs.values())
-    by_key_e: Dict[str, list] = {}
-    by_key_a: Dict[str, list] = {}
+    members: Dict[int, List[str]] = {cid: [] for cid in ebooks}
+    placed = set()
+    for plex_key, chapter_id in pairs.items():
+        if chapter_id in ebooks and plex_key in editions:
+            members[chapter_id].append(plex_key)
+            placed.add(plex_key)
+    ebooks_by_key: Dict[str, List[int]] = {}
     for item in ebooks.values():
-        if item.key and item.id not in named_e:
-            by_key_e.setdefault(item.key, []).append(item)
-    for item in audiobooks.values():
-        if item.key and item.id not in named_a:
-            by_key_a.setdefault(item.key, []).append(item)
-    for key, es in by_key_e.items():
-        as_ = by_key_a.get(key, [])
-        if len(es) == 1 and len(as_) == 1 and (es[0].id, as_[0].id) not in apart:
-            groups.append((es[0], as_[0]))
-            joined_e.add(es[0].id)
-            joined_a.add(as_[0].id)
-    groups += [(i, None) for i in ebooks.values() if i.id not in joined_e]
-    groups += [(None, i) for i in audiobooks.values() if i.id not in joined_a]
+        if item.key:
+            ebooks_by_key.setdefault(item.key, []).append(item.id)
+    for item in editions.values():
+        owners = ebooks_by_key.get(item.key, []) if item.key and item.id not in pairs else []
+        if len(owners) == 1 and (owners[0], item.id) not in apart:
+            members[owners[0]].append(item.id)
+            placed.add(item.id)
+    groups: List[tuple] = [(ebooks[cid], [editions[k] for k in sorted(set(members[cid]))]) for cid in sorted(ebooks)]
+    alone: Dict[str, List[_Item]] = {}
+    for item in editions.values():
+        if item.id in placed:
+            continue
+        if item.key:
+            alone.setdefault(item.key, []).append(item)
+        else:
+            groups.append((None, [item]))
+    groups += [(None, sorted(items, key=lambda i: i.id)) for items in alone.values()]
     return groups
 
 
 # --- Writing the catalog ------------------------------------------------------------
 
 def _new_book(db, now: datetime) -> Book:
-    book = Book(title="", sort_title="", author="", narrator="", series="", description="",
+    book = Book(title="", sort_title="", author="", series="", description="",
                 cover_source="plex", updated_at=now)
     db.add(book)
     db.flush()      # the id is needed to point ghosts at it
     return book
 
 
-def _fill(book: Book, ebook: Optional[_Item], audiobook: Optional[_Item], now: datetime, fresh_row: bool) -> None:
-    """Set the book's columns from its items. The audiobook's text wins where
-    both have it. A stale item (its source failed) stands as the row has it."""
+def _edition_date(item: _Item, stored: Dict[str, BookAudioEdition]) -> Optional[datetime]:
+    if item.fields is not None:
+        return item.fields.get("added_at")
+    held = stored.get(item.id)
+    return held.added_at if held else None
+
+
+def _fill(book: Book, ebook: Optional[_Item], editions: List[_Item], stored: Dict[str, BookAudioEdition],
+          now: datetime, fresh_row: bool) -> None:
+    """Set the book's columns from its items. The primary edition's text wins,
+    then the other editions', then the ebook's. A stale item (its source
+    failed) stands as the row has it."""
     before = {c: getattr(book, c) for c in _COLUMNS}
-    items = [i for i in (audiobook, ebook) if i is not None]
+    ordered = sorted(editions, key=lambda i: (_edition_date(i, stored) is None, _edition_date(i, stored), str(i.id)))
+    primary = ordered[0] if ordered else None
+    items = ordered + ([ebook] if ebook else [])
 
     def text(name: str) -> str:
         for item in items:
@@ -209,22 +253,21 @@ def _fill(book: Book, ebook: Optional[_Item], audiobook: Optional[_Item], now: d
             break
     book.series_number = number
 
-    def stamp(item: Optional[_Item], current):
-        if item is None:
-            return None
-        return current if item.fields is None else item.fields.get("added_at")
-
-    book.work_key = (audiobook or ebook).key
+    book.work_key = (primary or ebook).key
     book.kavita_chapter_id = ebook.id if ebook else None
-    book.plex_book_key = audiobook.id if audiobook else None
+    book.plex_book_key = primary.id if primary else None
     if ebook and ebook.fields is not None:
         book.kavita_library_id = ebook.fields.get("library_id")
         book.kavita_series_id = ebook.fields.get("series_id")
         book.kavita_volume_id = ebook.fields.get("volume_id")
     elif not ebook:
         book.kavita_library_id = book.kavita_series_id = book.kavita_volume_id = None
-    book.ebook_added_at = stamp(ebook, book.ebook_added_at)
-    book.audio_added_at = stamp(audiobook, book.audio_added_at)
+    if not ebook:
+        book.ebook_added_at = None
+    elif ebook.fields is not None:
+        book.ebook_added_at = ebook.fields.get("added_at")
+    audio_dates = [d for d in (_edition_date(i, stored) for i in ordered) if d is not None]
+    book.audio_added_at = min(audio_dates) if audio_dates else None
     dates = [d for d in (book.ebook_added_at, book.audio_added_at) if d is not None]
     book.added_at = min(dates) if dates else (book.added_at or now)
     book.cover_source = "kavita" if ebook else "plex"
@@ -255,80 +298,114 @@ def _apply(reason: str, ebooks: Optional[list], audiobooks: Optional[list], erro
 
         rows = db.query(Book).order_by(Book.id).all()
         live = [r for r in rows if r.merged_into is None]
+        live_by_id = {r.id: r for r in live}
         ghosts = [r for r in rows if r.merged_into is not None]
+        stored = {e.plex_book_key: e for e in db.query(BookAudioEdition).order_by(BookAudioEdition.id)}
         live_by_k: Dict[int, Book] = {}
-        live_by_p: Dict[str, Book] = {}
         for r in live:
             if r.kavita_chapter_id is not None:
                 live_by_k.setdefault(r.kavita_chapter_id, r)
-            if r.plex_book_key is not None:
-                live_by_p.setdefault(r.plex_book_key, r)
-        ghosts_by_k: Dict[int, List[Book]] = {}
-        for g in ghosts:
-            if g.kavita_chapter_id is not None:
-                ghosts_by_k.setdefault(g.kavita_chapter_id, []).append(g)
+        held_by: Dict[str, Book] = {k: live_by_id[e.book_id] for k, e in stored.items() if e.book_id in live_by_id}
 
         # A source that failed stands as its live rows have it.
         if ebooks is not None:
-            e_items = {i.id: i for i in map(_ebook_item, ebooks)}
+            names = tuple(sorted({b["series"] for b in ebooks if b["series"]}, key=lambda n: (-len(n), n)))
+            e_items = {i.id: i for i in (_ebook_item(b, names) for b in ebooks)}
         else:
             e_items = {k: _Item("k", k, r.work_key, None) for k, r in live_by_k.items()}
         if audiobooks is not None:
             a_items = {i.id: i for i in map(_audiobook_item, audiobooks)}
         else:
-            a_items = {k: _Item("p", k, r.work_key, None) for k, r in live_by_p.items()}
+            a_items = {k: _Item("p", k, r.work_key, None) for k, r in held_by.items()}
 
         groups = _groups(e_items, a_items, db.query(BookPairOverride).order_by(BookPairOverride.id).all())
-        # Audiobooks claim their rows first: an audiobook's row is the book's.
-        groups.sort(key=lambda g: (g[1] is None, str(g[1].id) if g[1] else "", str(g[0].id) if g[0] else ""))
+        # Books with the most editions pick their row first, then those with an
+        # ebook: a split leaves the row with the larger side.
+        groups.sort(key=lambda g: (-len(g[1]), g[0] is None, str(g[1][0].id) if g[1] else "",
+                                   str(g[0].id) if g[0] else ""))
 
         used: set = set()
-        retired: set = set()
         assigned: List[tuple] = []
         fresh: set = set()
-        for ebook, audiobook in groups:
-            if audiobook is not None:
-                row = live_by_p.get(audiobook.id)
-                if row is None or row.id in used:
-                    row = _new_book(db, now)
-                    fresh.add(row.id)
+        home: Dict[tuple, Book] = {}          # ("k", chapter id) or ("p", plex key) -> the book it is in now
+
+        def revive(match) -> Optional[Book]:
+            ghost = next((g for g in ghosts if match(g)), None)
+            if ghost is not None:
+                ghosts.remove(ghost)
+                ghost.merged_into = None
+            return ghost
+
+        for ebook, editions in groups:
+            keys = {i.id for i in editions}
+            row = None
+            if editions:
+                held = sorted({held_by[k] for k in keys if k in held_by}, key=lambda r: r.id)
+                row = next((r for r in held if r.id not in used), None)
+                if row is None and ebook is not None:
+                    # An ebook's row that already had audio is the book's row even
+                    # if its editions changed; one that was only an ebook is not.
+                    own = live_by_k.get(ebook.id)
+                    if own is not None and own.id not in used and own.plex_book_key is not None:
+                        row = own
+                if row is None:
+                    row = revive(lambda g: g.plex_book_key in keys)
             else:
-                row = live_by_k.get(ebook.id)
-                if row is None or row.id in used:
-                    # The ebook has left an audiobook's row (a split) or has
-                    # none: its ghost comes back, else it is a new book.
-                    pool = ghosts_by_k.get(ebook.id, [])
-                    ghost = next((g for g in pool if row is not None and g.merged_into == row.id), None) \
-                        or (pool[0] if pool else None)
-                    if ghost is not None:
-                        pool.remove(ghost)
-                        ghost.merged_into = None
-                        row = ghost
-                    else:
-                        row = _new_book(db, now)
-                        fresh.add(row.id)
+                own = live_by_k.get(ebook.id)
+                if own is not None and own.id not in used:
+                    row = own
+                else:
+                    # The ebook has left an audiobook's book (a split) or has none:
+                    # its earlier row comes back, else it is a new book.
+                    row = (revive(lambda g: g.kavita_chapter_id == ebook.id and own is not None
+                                  and g.merged_into == own.id)
+                           or revive(lambda g: g.kavita_chapter_id == ebook.id))
+            if row is None:
+                row = _new_book(db, now)
+                fresh.add(row.id)
             used.add(row.id)
-            assigned.append((ebook, audiobook, row))
+            assigned.append((ebook, editions, row))
+            if ebook is not None:
+                home[("k", ebook.id)] = row
+            for i in editions:
+                home[("p", i.id)] = row
 
-        for ebook, audiobook, row in assigned:
-            if ebook is None or audiobook is None:
+        # A live row no book took is gone, or its items moved to another book
+        # and it stays behind as a ghost of it.
+        for r in live:
+            if r.id in used:
                 continue
-            # The ebook joined an audiobook: its own earlier row becomes a
-            # ghost of this one, unless that row is another book's.
-            earlier = live_by_k.get(ebook.id)
-            if earlier is not None and earlier.id not in used and earlier.id not in retired:
-                earlier.merged_into = row.id
-                earlier.plex_book_key = None
-                retired.add(earlier.id)
-            for g in ghosts_by_k.get(ebook.id, []):
-                g.merged_into = row.id
+            items = [("k", r.kavita_chapter_id)] + [("p", k) for k, e in stored.items() if e.book_id == r.id]
+            target = next((home[i] for i in items if i in home), None)
+            if target is not None:
+                r.merged_into = target.id
+                ghosts.append(r)
+            else:
+                db.delete(r)
+        for g in ghosts:
+            # A ghost follows its items to where they are now.
+            target = home.get(("k", g.kavita_chapter_id)) or home.get(("p", g.plex_book_key))
+            if target is not None and target.id != g.id:
+                g.merged_into = target.id
 
-        for row in live:
-            if row.id not in used and row.id not in retired:
-                db.delete(row)
+        # Editions: each key is in exactly one book, the one it is paired into.
+        wanted = {i.id: (row, i) for _, editions, row in assigned for i in editions}
+        for key, edition in stored.items():
+            if key not in wanted:
+                db.delete(edition)
+        for key, (row, item) in wanted.items():
+            edition = stored.get(key)
+            if edition is None:
+                edition = BookAudioEdition(plex_book_key=key, narrator="")
+                db.add(edition)
+                stored[key] = edition
+            edition.book_id = row.id
+            if item.fields is not None:
+                edition.narrator = str(item.fields.get("narrator") or "")[:200]
+                edition.added_at = item.fields.get("added_at")
 
-        for ebook, audiobook, row in assigned:
-            _fill(row, ebook, audiobook, now, row.id in fresh)
+        for ebook, editions, row in assigned:
+            _fill(row, ebook, editions, stored, now, row.id in fresh)
         db.flush()
 
         # Every ghost points at a live book, not at another ghost; one whose
@@ -434,16 +511,15 @@ async def catalog_status() -> dict:
 # --- Pairing overrides --------------------------------------------------------------
 
 def set_override(db, kavita_chapter_id: int, plex_book_key: str, action: str, created_by: str) -> BookPairOverride:
-    """Record the admin's decision about one Kavita book (its chapter id) and one Plex book.
-    A new `pair` for either item replaces that item's earlier pair. The change
-    shows at the next rebuild."""
+    """Record the admin's decision about one Kavita book (its chapter id) and
+    one audiobook edition. A new `pair` for an edition replaces that edition's
+    earlier pair (an ebook may take several editions). The change shows at the
+    next rebuild."""
     if action not in ACTIONS:
         raise ValueError("action must be 'pair' or 'apart'")
     if action == "pair":
-        for old in db.query(BookPairOverride).filter(
-                BookPairOverride.action == "pair",
-                (BookPairOverride.kavita_chapter_id == kavita_chapter_id)
-                | (BookPairOverride.plex_book_key == plex_book_key)).all():
+        for old in db.query(BookPairOverride).filter(BookPairOverride.action == "pair",
+                                                     BookPairOverride.plex_book_key == plex_book_key).all():
             db.delete(old)
         db.flush()
     row = db.query(BookPairOverride).filter(

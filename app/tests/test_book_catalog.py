@@ -104,6 +104,15 @@ class CatalogCase(unittest.TestCase):
         finally:
             db.close()
 
+    def editions(self, book_id):
+        """{plex key: narrator} of the book's audiobook editions."""
+        db = self.db()
+        try:
+            return {e.plex_book_key: e.narrator for e in
+                    db.query(book_catalog.BookAudioEdition).filter(book_catalog.BookAudioEdition.book_id == book_id)}
+        finally:
+            db.close()
+
     def book(self, book_id):
         db = self.db()
         try:
@@ -137,18 +146,30 @@ class Pairing(CatalogCase):
         self.assertEqual(out["books"], 2)
         self.assertEqual(set(self.live()), {(1, None), (None, "10:1")})
 
-    def test_a_key_more_than_one_item_has_is_too_uncertain_to_pair(self):
-        self.sources.ebooks = [ebook(1, "Dune")]
-        self.sources.audiobooks = [audiobook("10:1", "Dune"), audiobook("11:1", "Dune", narrator="Simon Vance")]
+    def test_two_ebooks_of_one_key_are_too_uncertain_to_take_the_edition(self):
+        self.sources.ebooks = [ebook(1, "Dune"), ebook(2, "Dune")]
+        self.sources.audiobooks = [audiobook("10:1", "Dune")]
         self.rebuild()
-        self.assertEqual(set(self.live()), {(1, None), (None, "10:1"), (None, "11:1")})
+        self.assertEqual(set(self.live()), {(1, None), (2, None), (None, "10:1")})
+
+    def test_a_book_kept_as_a_series_of_its_own_takes_a_series_prefix_its_neighbours_name(self):
+        rowling = "J. K. Rowling"
+        self.sources.ebooks = [
+            ebook(1, "Harry Potter 03 - Harry Potter and the Prisoner of Azkaban", rowling, series=""),
+            ebook(2, "Harry Potter and the Chamber of Secrets", rowling, series="Harry Potter", series_number=2),
+        ]
+        self.sources.audiobooks = [audiobook("10:1", "Harry Potter and the Prisoner of Azkaban", rowling)]
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(1, "10:1"), (2, None)})
 
     def test_a_paired_book_shows_the_audiobook_title_and_both_dates(self):
         self.sources.ebooks = [ebook(1, "Dune", description="An ebook summary", added_at=datetime(2026, 8, 1))]
         self.sources.audiobooks = [audiobook("10:1", "Dune", description="", added_at=1_700_000_000)]
         self.rebuild()
-        row = self.book(self.live()[(1, "10:1")])
-        self.assertEqual((row.title, row.narrator, row.description), ("Dune", "Scott Brick", "An ebook summary"))
+        book_id = self.live()[(1, "10:1")]
+        row = self.book(book_id)
+        self.assertEqual((row.title, row.description), ("Dune", "An ebook summary"))
+        self.assertEqual(self.editions(book_id), {"10:1": "Scott Brick"})
         self.assertEqual(row.ebook_added_at, datetime(2026, 8, 1))
         self.assertEqual(row.audio_added_at, datetime(2023, 11, 14, 22, 13, 20))
         self.assertEqual(row.added_at, row.audio_added_at)
@@ -174,19 +195,29 @@ class Overrides(CatalogCase):
         self.rebuild()
         self.assertEqual(set(self.live()), {(1, None), (2, None), (None, "10:1"), (None, "20:1")})
 
-    def test_a_new_pair_for_the_same_item_replaces_the_old_one(self):
+    def test_a_new_pair_for_the_same_edition_replaces_the_old_one(self):
         self.override(1, "10:1", "pair")
-        self.override(1, "20:1", "pair")      # the ebook moves to the other audiobook
-        self.override(2, "20:1", "pair")      # and that audiobook moves again
+        self.override(2, "10:1", "pair")      # the edition moves to the other ebook
         db = self.db()
         try:
             rows = [(o.kavita_chapter_id, o.plex_book_key, o.action)
                     for o in db.query(book_catalog.BookPairOverride).all()]
         finally:
             db.close()
-        self.assertEqual(rows, [(2, "20:1", "pair")])
+        self.assertEqual(rows, [(2, "10:1", "pair")])
         self.rebuild()
-        self.assertEqual(set(self.live()), {(2, "20:1"), (1, None), (None, "10:1")})
+        live = self.live()
+        self.assertIn((1, None), live)
+        self.assertEqual(set(self.editions(live[(2, "10:1")])), {"10:1", "20:1"})
+
+    def test_an_ebook_can_be_paired_with_several_editions(self):
+        self.sources.audiobooks.append(audiobook("30:1", "Another Title", "George R. R. Martin"))
+        self.override(1, "10:1", "pair")
+        self.override(1, "30:1", "pair")
+        self.rebuild()
+        live = self.live()
+        self.assertEqual(set(self.editions(live[(1, "10:1")])), {"10:1", "30:1"})
+        self.assertEqual(len(live), 2)
 
     def test_a_stale_second_pair_in_the_table_loses_to_the_newer_one(self):
         db = self.db()
@@ -194,14 +225,16 @@ class Overrides(CatalogCase):
             db.add_all([
                 book_catalog.BookPairOverride(kavita_chapter_id=1, plex_book_key="10:1", action="pair",
                                               created_by="a", created_at=datetime(2026, 1, 1)),
-                book_catalog.BookPairOverride(kavita_chapter_id=1, plex_book_key="20:1", action="pair",
+                book_catalog.BookPairOverride(kavita_chapter_id=2, plex_book_key="10:1", action="pair",
                                               created_by="a", created_at=datetime(2026, 2, 1)),
             ])
             db.commit()
         finally:
             db.close()
         self.rebuild()
-        self.assertEqual(set(self.live()), {(1, "20:1"), (2, None), (None, "10:1")})
+        live = self.live()
+        self.assertIn((1, None), live)
+        self.assertEqual(set(self.editions(live[(2, "10:1")])), {"10:1", "20:1"})
 
     def test_an_override_survives_every_rebuild(self):
         self.override(1, "10:1", "pair")
@@ -527,40 +560,55 @@ class Migration(unittest.TestCase):
         self.assertEqual(kept, "Kept")
 
 
-    def test_two_workers_remake_catalog_tables_that_were_keyed_on_a_series(self):
+    def test_two_workers_remake_catalog_tables_made_in_an_earlier_shape(self):
         from sqlalchemy import inspect, text
 
         from app import models  # noqa: F401 - registers the tables
         from app.database import Base, make_engine
 
-        with tempfile.TemporaryDirectory() as tmp:
-            url = f"sqlite:///{tmp}/old.db"
-            engine = make_engine(url)
-            Base.metadata.create_all(bind=engine, tables=[t for t in Base.metadata.sorted_tables
-                                                          if t.name not in ("books", "book_pair_overrides")])
-            with engine.begin() as conn:
-                conn.execute(text("CREATE TABLE books (id INTEGER PRIMARY KEY, title VARCHAR(300) NOT NULL, "
-                                  "kavita_series_id INTEGER)"))
-                conn.execute(text("CREATE TABLE book_pair_overrides (id INTEGER PRIMARY KEY, "
-                                  "kavita_series_id INTEGER NOT NULL, plex_book_key VARCHAR(64) NOT NULL)"))
+        shapes = {
+            # the ebook was a whole Kavita series
+            "series": ("kavita_series_id INTEGER, narrator VARCHAR(200)", "kavita_series_id INTEGER NOT NULL"),
+            # the ebook is one book, but a book holds one audiobook and its narrator
+            "one audiobook": ("kavita_chapter_id INTEGER, narrator VARCHAR(200)", "kavita_chapter_id INTEGER NOT NULL"),
+        }
+        for shape, (book_columns, override_key) in shapes.items():
+            with self.subTest(shape=shape), tempfile.TemporaryDirectory() as tmp:
+                url = f"sqlite:///{tmp}/old.db"
+                engine = make_engine(url)
+                Base.metadata.create_all(bind=engine, tables=[t for t in Base.metadata.sorted_tables if t.name not in (
+                    "books", "book_pair_overrides", "book_audio_editions")])
+                with engine.begin() as conn:
+                    conn.execute(text(f"CREATE TABLE books (id INTEGER PRIMARY KEY, title VARCHAR(300) NOT NULL, "
+                                      f"{book_columns})"))
+                    conn.execute(text(f"CREATE TABLE book_pair_overrides (id INTEGER PRIMARY KEY, {override_key}, "
+                                      "plex_book_key VARCHAR(64) NOT NULL, action VARCHAR(8) NOT NULL, "
+                                      "created_by VARCHAR(255) NOT NULL, created_at DATETIME NOT NULL)"))
+                    conn.execute(text("INSERT INTO book_pair_overrides VALUES (1, 7, '10:1', 'apart', 'a', "
+                                      "'2026-01-01 00:00:00')"))
 
-            self.assertEqual(run_together([STARTUP_CHILD, STARTUP_CHILD], url), ["started", "started"])
-            columns = {t: {c["name"] for c in inspect(engine).get_columns(t)}
-                       for t in ("books", "book_pair_overrides")}
-            self.assertLessEqual({"kavita_chapter_id", "kavita_volume_id", "kavita_series_id"}, columns["books"])
-            self.assertIn("kavita_chapter_id", columns["book_pair_overrides"])
-            self.assertNotIn("kavita_series_id", columns["book_pair_overrides"])
+                self.assertEqual(run_together([STARTUP_CHILD, STARTUP_CHILD], url), ["started", "started"])
+                tables = set(inspect(engine).get_table_names())
+                columns = {t: {c["name"] for c in inspect(engine).get_columns(t)}
+                           for t in ("books", "book_pair_overrides")}
+                self.assertIn("book_audio_editions", tables)
+                self.assertLessEqual({"kavita_chapter_id", "kavita_volume_id", "kavita_series_id", "plex_book_key"},
+                                     columns["books"])
+                self.assertNotIn("narrator", columns["books"])
+                self.assertIn("kavita_chapter_id", columns["book_pair_overrides"])
 
-            now = "2026-01-01 00:00:00"
-            with engine.begin() as conn:
-                conn.execute(text("INSERT INTO books (title, sort_title, author, narrator, series, description, "
-                                  "cover_source, updated_at, kavita_chapter_id) "
-                                  f"VALUES ('Kept', '', '', '', '', '', 'kavita', '{now}', 7)"))
-            run_together([STARTUP_CHILD], url)             # a later start leaves the new tables alone
-            with engine.connect() as conn:
-                kept = conn.execute(text("SELECT title FROM books WHERE kavita_chapter_id = 7")).scalar()
-            engine.dispose()
-        self.assertEqual(kept, "Kept")
+                with engine.begin() as conn:
+                    conn.execute(text("INSERT INTO books (title, sort_title, author, series, description, "
+                                      "cover_source, updated_at, kavita_chapter_id) "
+                                      "VALUES ('Kept', '', '', '', '', 'kavita', '2026-01-01 00:00:00', 7)"))
+                run_together([STARTUP_CHILD], url)             # a later start leaves the new tables alone
+                with engine.connect() as conn:
+                    kept = conn.execute(text("SELECT title FROM books WHERE kavita_chapter_id = 7")).scalar()
+                    overrides = conn.execute(text("SELECT COUNT(*) FROM book_pair_overrides")).scalar()
+                engine.dispose()
+                self.assertEqual(kept, "Kept")
+                # An override already keyed on the chapter survives; one keyed on a series can't mean anything.
+                self.assertEqual(overrides, 1 if shape == "one audiobook" else 0)
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -674,6 +722,171 @@ class Volumes(CatalogCase):
         self.rebuild()
         row = self.book(next(iter(self.live().values())))
         self.assertEqual((row.series, row.series_number, row.kavita_volume_id), ("", None, None))
+
+
+class Editions(CatalogCase):
+    """A work narrated more than once is one book with several editions."""
+
+    def setUp(self):
+        super().setUp()
+        self.brick = audiobook("10:1", "Dune", narrator="Scott Brick")
+        self.vance = audiobook("11:1", "Dune", narrator="Simon Vance", added_at=1_800_000_000)
+
+    def test_an_ebook_takes_every_edition_with_its_work_key(self):
+        self.sources.ebooks = [ebook(1, "Dune")]
+        self.sources.audiobooks = [self.brick, self.vance]
+        out = self.rebuild()
+        self.assertEqual((out["ebooks"], out["audiobooks"], out["books"]), (1, 2, 1))
+        live = self.live()
+        self.assertEqual(self.editions(live[(1, "10:1")]),
+                         {"10:1": "Scott Brick", "11:1": "Simon Vance"})
+        self.assertEqual(self.book(live[(1, "10:1")]).audio_added_at, datetime(2023, 11, 14, 22, 13, 20))
+
+    def test_editions_with_no_ebook_and_one_work_key_are_one_book(self):
+        self.sources.audiobooks = [self.brick, self.vance, audiobook("12:1", "Emma", "Jane Austen")]
+        out = self.rebuild()
+        self.assertEqual((out["audiobooks"], out["books"]), (3, 2))
+        live = self.live()
+        self.assertEqual(set(self.editions(live[(None, "10:1")])), {"10:1", "11:1"})
+        self.assertEqual(set(self.editions(live[(None, "12:1")])), {"12:1"})
+
+    def test_a_new_edition_joins_its_book_and_the_book_keeps_its_id(self):
+        self.sources.ebooks = [ebook(1, "Dune")]
+        self.sources.audiobooks = [self.brick]
+        self.rebuild()
+        book_id = self.live()[(1, "10:1")]
+        self.sources.audiobooks = [self.brick, self.vance]
+        self.rebuild()
+        self.assertEqual(self.live(), {(1, "10:1"): book_id})
+        self.assertEqual(set(self.editions(book_id)), {"10:1", "11:1"})
+
+    def test_an_edition_going_leaves_the_book_and_its_id(self):
+        self.sources.ebooks = [ebook(1, "Dune")]
+        self.sources.audiobooks = [self.brick, self.vance]
+        self.rebuild()
+        book_id = self.live()[(1, "10:1")]
+        self.sources.audiobooks = [self.vance]
+        self.rebuild()
+        self.assertEqual(self.live(), {(1, "11:1"): book_id})
+        self.assertEqual(set(self.editions(book_id)), {"11:1"})
+
+    def test_a_new_edition_of_a_book_with_only_an_ebook_gets_it_a_book_and_the_old_id_redirects(self):
+        self.sources.ebooks = [ebook(1, "Dune")]
+        self.rebuild()
+        ebook_id = self.live()[(1, None)]
+        self.sources.audiobooks = [self.brick, self.vance]
+        self.rebuild()
+        book_id = self.live()[(1, "10:1")]
+        self.assertEqual(self.book(ebook_id).merged_into, book_id)
+
+    def test_an_apart_override_keeps_one_edition_out_and_removing_it_brings_it_back(self):
+        self.sources.ebooks = [ebook(1, "Dune")]
+        self.sources.audiobooks = [self.brick, self.vance]
+        self.rebuild()
+        book_id = self.live()[(1, "10:1")]
+        self.override(1, "11:1", "apart")
+        self.rebuild()
+        live = self.live()
+        self.assertEqual(live[(1, "10:1")], book_id)           # the book keeps its row
+        vance_id = live[(None, "11:1")]
+        self.assertNotEqual(vance_id, book_id)
+        self.assertEqual(self.editions(book_id), {"10:1": "Scott Brick"})
+        self.assertEqual(self.editions(vance_id), {"11:1": "Simon Vance"})
+
+        db = self.db()
+        try:
+            book_catalog.remove_override(db, 1, "11:1")
+        finally:
+            db.close()
+        self.rebuild()
+        self.assertEqual(self.live(), {(1, "10:1"): book_id})
+        self.assertEqual(self.book(vance_id).merged_into, book_id)    # the old id still finds the book
+        self.assertEqual(set(self.editions(book_id)), {"10:1", "11:1"})
+
+        self.override(1, "11:1", "apart")                      # and splitting again revives it
+        self.rebuild()
+        self.assertEqual(self.live(), {(1, "10:1"): book_id, (None, "11:1"): vance_id})
+        self.assertIsNone(self.book(vance_id).merged_into)
+
+    def test_a_pair_override_takes_one_edition_only(self):
+        self.sources.ebooks = [ebook(1, "A Different Title")]
+        self.sources.audiobooks = [self.brick, self.vance]
+        self.override(1, "10:1", "pair")
+        self.rebuild()
+        live = self.live()
+        self.assertEqual(self.editions(live[(1, "10:1")]), {"10:1": "Scott Brick"})
+        self.assertEqual(self.editions(live[(None, "11:1")]), {"11:1": "Simon Vance"})
+
+    def test_editions_are_held_while_plex_is_down(self):
+        self.sources.ebooks = [ebook(1, "Dune")]
+        self.sources.audiobooks = [self.brick, self.vance]
+        self.rebuild()
+        book_id = self.live()[(1, "10:1")]
+        self.sources.plex_down = True
+        self.sources.audiobooks = []
+        out = self.rebuild()
+        self.assertEqual((out["audiobooks"], out["books"]), (2, 1))
+        self.assertEqual(self.editions(book_id), {"10:1": "Scott Brick", "11:1": "Simon Vance"})
+
+    def test_two_audiobook_books_that_become_one_and_split_again_keep_both_ids(self):
+        other = audiobook("20:1", "Dune Messiah")
+        self.sources.audiobooks = [self.brick, other]
+        self.rebuild()
+        first, second = self.live()[(None, "10:1")], self.live()[(None, "20:1")]
+        other["work_key"] = self.brick["work_key"]          # the second is found to be a narration of the first
+        self.rebuild()
+        self.assertEqual(self.live(), {(None, "10:1"): min(first, second)})
+        self.assertEqual(self.book(max(first, second)).merged_into, min(first, second))
+        other["work_key"] = plex_player.work_key("Frank Herbert", "Dune Messiah", "Scott Brick")
+        self.rebuild()
+        self.assertEqual(self.live(), {(None, "10:1"): first, (None, "20:1"): second})
+
+    def test_ids_are_stable_over_three_rebuilds_with_editions(self):
+        self.sources.ebooks = [ebook(1, "Dune")]
+        self.sources.audiobooks = [self.brick, self.vance]
+        self.rebuild()
+        before = self.live()
+        stamps = {b: self.book(b).updated_at for b in before.values()}
+        for _ in range(3):
+            self.rebuild()
+            self.assertEqual(self.live(), before)
+        self.assertEqual({b: self.book(b).updated_at for b in before.values()}, stamps)
+
+
+class PairingTitle(unittest.TestCase):
+    CASES = [
+        # (Kavita title, Kavita series, the title the work key is made from)
+        ("Harry Potter 02 - Harry Potter and the Chamber of Secrets", "Harry Potter",
+         "Harry Potter and the Chamber of Secrets"),
+        ("A Storm of Swords: A Song of Ice and Fire", "A Song of Ice and Fire", "A Storm of Swords"),
+        ("Quicksilver (The Fae & Alchemy Series Book 1)", "Fae & Alchemy", "Quicksilver"),
+        ("The Gate (Dungeon Crawler Carl #4)", "Dungeon Crawler Carl", "The Gate"),
+        ("Dungeon Crawler Carl Book 2: Carl's Doomsday Scenario", "Dungeon Crawler Carl", "Carl's Doomsday Scenario"),
+        ("Harry Potter and the Sorcerer's Stone", "Harry Potter", "Harry Potter and the Sorcerer's Stone"),
+        ("Catch-22", "", "Catch-22"),
+        ("Harry Potter 3", "Harry Potter", "Harry Potter 3"),       # nothing would be left
+    ]
+
+    @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+    def test_the_series_comes_off_the_title_before_the_key_is_made(self):
+        for title, series, want in self.CASES:
+            with self.subTest(title=title):
+                self.assertEqual(book_catalog._pairing_title(title, series), want)
+
+    @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+    def test_kavita_titles_with_the_series_in_them_pair_with_the_audiobooks(self):
+        martin = "George R.R. Martin"
+        sources = FakeSources()
+        sources.ebooks = [
+            ebook(1, "Harry Potter 02 - Harry Potter and the Chamber of Secrets", "J. K. Rowling",
+                  series="Harry Potter", series_number=2),
+            ebook(2, "A Storm of Swords: A Song of Ice and Fire", martin, series="A Song of Ice and Fire",
+                  series_number=3),
+        ]
+        items = [book_catalog._ebook_item(e) for e in sources.ebooks]
+        self.assertEqual(items[0].key, plex_player.work_key("J.K. Rowling", "Harry Potter and the Chamber of Secrets"))
+        self.assertEqual(items[1].key, plex_player.work_key(martin, "A Storm of Swords"))
+        self.assertEqual(book_catalog._ebook_item(ebook(3, "Catch-22", "Joseph Heller")).fields["title"], "Catch-22")
 
 
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
@@ -800,6 +1013,38 @@ class KavitaRead(unittest.TestCase):
         self.read()
         asked = [r.url.params["seriesId"] for r in self.requests if r.url.path == "/api/Series/metadata"]
         self.assertEqual(asked, ["5"])
+
+    def add_series(self, series_id, name, folder, books):
+        """books: [(chapter id, volume number, writers)] as numbered volumes."""
+        self.series.append({"id": series_id, "name": name, "libraryId": 1, "folderPath": folder})
+        self.detail[series_id] = {"volumes": [
+            {"id": 1000 + cid, "name": f"{name} {number}", "minNumber": number, "chapters": [{"id": cid}]}
+            for cid, number, _ in books]}
+        for cid, number, writers in books:
+            self.chapters[cid] = {"id": cid, "titleName": f"{name} {number}", "createdUtc": "2026-01-01T00:00:00",
+                                  "summary": "", "writers": [{"name": w} for w in writers]}
+
+    def test_a_book_with_no_writer_takes_the_author_its_series_agrees_on(self):
+        self.add_series(70, "Saga", "/ebooks/Saga", [(701, 1, ["Ann Author"]), (702, 2, []), (703, 3, ["ann author"])])
+        books = self.read()
+        self.assertEqual(books[702]["author"], "Ann Author")
+
+    def test_a_book_in_a_series_whose_authors_disagree_stays_without_one(self):
+        self.add_series(71, "Mixed", "/ebooks/Mixed", [(711, 1, ["Ann Author"]), (712, 2, []), (713, 3, ["Bo Co"])])
+        self.assertEqual(self.read()[712]["author"], "")
+
+    def test_a_book_with_no_writer_takes_the_author_of_the_other_books_in_its_folder(self):
+        # Kavita holds a standalone book as a series of its own: its neighbours are in the author's folder.
+        self.add_series(72, "Odd Standalone Title", "/ebooks/J.K. Rowling", [(721, 1, ["authors_sort"])])
+        self.add_series(73, "Harry Potter", "/ebooks/J.K. Rowling", [(731, 1, ["J. K. Rowling"]), (732, 2, ["J. K. Rowling"])])
+        self.series_writers[72] = ["authors_sort"]
+        self.assertEqual(self.read()[721]["author"], "J. K. Rowling")
+
+    def test_a_folder_that_holds_two_authors_gives_no_author(self):
+        self.add_series(74, "Alone", "/ebooks", [(741, 1, [])])
+        self.add_series(75, "Other One", "/ebooks", [(751, 1, ["Ann Author"])])
+        self.add_series(76, "Other Two", "/ebooks", [(761, 1, ["Bo Co"])])
+        self.assertEqual(self.read()[741]["author"], "")
 
     def test_summary_is_plain_text_and_the_date_is_utc(self):
         book = self.read()[11]
