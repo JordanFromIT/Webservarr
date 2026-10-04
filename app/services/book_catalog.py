@@ -549,7 +549,15 @@ async def rebuild(reason: str) -> dict:
         if not await lease.refresh():
             return await asyncio.to_thread(_stored_result, True)
         try:
-            return await _run(reason)
+            result = await _run(reason)
+            # New books in followed series are announced under the same lock,
+            # so two rebuilds never announce at once. It never fails the rebuild.
+            from app.services import book_discovery
+            try:
+                await book_discovery.announce(SessionLocal, rebuild_ok=result["ok"])
+            except Exception as exc:  # noqa: BLE001 - a notification problem is not a catalog problem
+                logger.warning("New books could not be announced: %s", type(exc).__name__)
+            return result
         finally:
             await lease.release()
     finally:

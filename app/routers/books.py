@@ -54,7 +54,7 @@ from app.limiter import limiter
 from app.routers import kavita_proxy
 from app.routers.player import Text, require_encodable_body, require_same_origin, session_rate_key
 from app.routers.tickets import account_identity
-from app.services import book_catalog, book_personal, listening
+from app.services import book_catalog, book_discovery, book_personal, listening
 from app.services.book_catalog import CatalogRow
 from app.utils import utc_iso
 
@@ -450,8 +450,10 @@ async def series(request: Request,
                  who: Scope = Depends(caller), db: Session = Depends(get_db)):
     """One series in reading order, books without a number last: {"name",
     "items": [BookCard + series_number + progress {"ebook", "audio"}],
-    "notes"}. Progress is the caller's own, null for a format they have not
-    started or cannot reach. 404 when the caller can see none of its books."""
+    "following", "notes"}. Progress is the caller's own, null for a format
+    they have not started or cannot reach; `following` is whether the caller
+    follows the series (book_discovery.followers). 404 when the caller can
+    see none of its books."""
     wanted = book_catalog.name_key(name)
     if not wanted:
         raise HTTPException(status_code=422, detail="Give a name")
@@ -470,7 +472,9 @@ async def series(request: Request,
     items = [{**_book_card(r), "series_number": r.series_number,
               "progress": {"ebook": ebook.get(r.kavita_chapter_id) if r.ebook else None,
                            "audio": audio.get(r.id)}} for r in found]
-    return {"name": found[0].series, "items": items, "notes": who.notes + ([note] if note else [])}
+    following = book_discovery.is_following(db, who.identity, found[0].series)
+    return {"name": found[0].series, "items": items, "following": following,
+            "notes": who.notes + ([note] if note else [])}
 
 
 # --- Progress ---------------------------------------------------------------------------
@@ -613,14 +617,24 @@ async def continue_row(request: Request, who: Scope = Depends(caller), db: Sessi
             note = _note("kavita", "not_connected", EBOOKS_NOT_CONNECTED)
         except kavita.KavitaUnavailable:
             note = _note("kavita", "unavailable", EBOOKS_DOWN)
+    reading = []
     for chapter_id, place in ebook_places.items():
         progress = _ebook_progress(place)
         if progress["finished"] or chapter_id not in chapters:
             continue
         book_id = chapters[chapter_id]
+        reading.append(rows[book_id].series)
         offer(book_id, {"book_id": book_id, "format": "ebook", "at": place["at"] or datetime.min,
                         "progress": progress, "chapter_id": chapter_id, "place": place,
                         "resume": {"read_url": _read_url(rows[book_id])}})
+    if who.identity and any(reading):
+        # Reading a series in Kavita follows it (spec 3c 2.5): seen only here,
+        # through the person's own link, so it is noted while it can be.
+        try:
+            book_discovery.note_reading(db, who.identity, reading)
+        except SQLAlchemyError as exc:
+            db.rollback()
+            logger.warning("A series follow from reading could not be saved: %s", type(exc).__name__)
 
     newest = sorted(candidates.values(), key=lambda i: (i["at"], i["book_id"]), reverse=True)[:CONTINUE_MAX]
     # The chapter number is read from the book's contents: only for what is shown.

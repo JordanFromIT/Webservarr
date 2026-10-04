@@ -658,6 +658,41 @@ async def _library() -> list:
     return [b[1:] for b in books]
 
 
+HISTORY_PAGE = 500
+HISTORY_MAX = 20000          # plays one read goes through at most
+
+
+async def play_history(since: datetime) -> list:
+    """Every track play in the audiobook library since `since` (naive UTC),
+    from Plex's own history (the web player's timeline writes and every Plex
+    app), read with the admin token: [(Plex account id, book key)]. The
+    account ids only ever count people for Books' Popular shelf; they are
+    never shown or sent anywhere. Newest first, paged until the plays are
+    older than `since`. Raises PlayerOff or PlayerUnavailable."""
+    admin = _configured()
+    floor = int(since.replace(tzinfo=timezone.utc).timestamp())
+    plays = []
+    async with _pms_client() as client:
+        for start in range(0, HISTORY_MAX, HISTORY_PAGE):
+            container = await _pms_get(client, admin, admin["token"], "/status/sessions/history/all", {
+                "librarySectionID": admin["section"], "sort": "viewedAt:desc",
+                "X-Plex-Container-Start": start, "X-Plex-Container-Size": HISTORY_PAGE})
+            items = _items(container) if container is not None else []
+            older = False
+            for item in items:
+                if _int(item.get("viewedAt")) < floor:
+                    older = True
+                    continue
+                album = str(item.get("parentRatingKey") or "")
+                account = item.get("accountID")
+                if item.get("type") != "track" or not _RATING_KEY.fullmatch(album) or account in (None, ""):
+                    continue
+                plays.append((str(account), f"{album}:{_int(item.get('parentIndex')) or 1}"))
+            if older or len(items) < HISTORY_PAGE:
+                break
+    return plays
+
+
 async def list_books() -> list:
     """Every book in the audiobook library, read with the admin token:
     [{key, title, author, series, narrator, cover, duration_ms, shape}].

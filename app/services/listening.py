@@ -848,9 +848,118 @@ def put_prefs(db: Session, identity: str, **fields) -> dict:
     return get_prefs(db, identity)
 
 
+# --- Time listened, and the daily rollup that outlives the log ------------------------
+#
+# Check-ins land every 10 s while audio plays. Time listened is wall time: a
+# row of a playing event counts the gap to the listener's next row (whatever
+# its book or device) when that gap is at most LISTEN_GAP. Ordering by the
+# listener alone, not by book, means two devices playing at once are not
+# counted twice, and a rejected check-in (logged too) only splits a gap.
+
+PLAYING_EVENTS = ("play", "checkin", "seek", "jump")
+LISTEN_GAP = timedelta(seconds=30)
+# Internal row, as PRUNED_AT_KEY: the last UTC day listening_daily holds.
+ROLLED_THROUGH_KEY = "listening.rolled_through"
+# A day is rolled up only once its last row's gap can no longer be followed by a new row.
+ROLL_MARGIN = timedelta(minutes=1)
+
+
+def listened_spans(rows) -> list:
+    """[(at, book_key, ms)] for one listener's log rows, given as (at,
+    event, book_key) in time order: each playing row with the time it
+    counts (0 for none)."""
+    rows = list(rows)
+    spans = []
+    for i, (at, event, book) in enumerate(rows):
+        ms = 0
+        if event in PLAYING_EVENTS and i + 1 < len(rows):
+            gap = rows[i + 1][0] - at
+            if timedelta(0) <= gap <= LISTEN_GAP:
+                ms = int(gap.total_seconds() * 1000)
+        spans.append((at, book, ms))
+    return spans
+
+
+def log_rows(db: Session, identity: str, since: Optional[datetime] = None) -> list:
+    """This listener's log as (at, event, book_key) in time order, from
+    `since` on (all of it for None). Scoped by identity."""
+    L = ListeningLog
+    q = db.query(L.at, L.event, L.book_key).filter(L.identity == identity)
+    if since is not None:
+        q = q.filter(L.at >= since)
+    return q.order_by(L.at, L.id).all()
+
+
+def rolled_through(db: Session):
+    """The last UTC day (a date) listening_daily holds, or None before the first rollup."""
+    row = db.query(Setting.value).filter(Setting.key == ROLLED_THROUGH_KEY).first()
+    try:
+        return datetime.strptime(row[0], "%Y-%m-%d").date() if row else None
+    except ValueError:
+        return None
+
+
+def roll_up(db: Session, now: Optional[datetime] = None) -> int:
+    """Add every complete UTC day not yet rolled up to listening_daily: per
+    listener and day, the time listened and the books it was in. A day once
+    rolled up is never written again (the log under it may be pruned).
+    Returns how many rows were added. Safe with two workers: the first
+    statement is a write, so SQLite's write lock is held before the marker
+    is read, and the rows go in with INSERT OR IGNORE."""
+    from app.models import ListeningDaily
+
+    now = _naive_utc(now)
+    last_day = (now - ROLL_MARGIN).date() - timedelta(days=1)
+    db.query(ListeningDaily).filter(ListeningDaily.id < 0).delete(synchronize_session=False)
+    done = rolled_through(db)
+    if done is not None and done >= last_day:
+        db.commit()
+        return 0
+    if done is None:
+        oldest = db.query(ListeningLog.at).order_by(ListeningLog.at).first()
+        first_day = oldest[0].date() if oldest else last_day + timedelta(days=1)
+    else:
+        first_day = done + timedelta(days=1)
+    start = datetime.combine(first_day, datetime.min.time())
+    end = datetime.combine(last_day + timedelta(days=1), datetime.min.time())
+    L = ListeningLog
+    rows = (db.query(L.identity, L.at, L.event, L.book_key)
+            .filter(L.at >= start, L.at < end + LISTEN_GAP)
+            .order_by(L.identity, L.at, L.id).all())
+    totals: dict = {}
+    by_identity: dict = {}
+    for identity, at, event, book in rows:
+        by_identity.setdefault(identity, []).append((at, event, book))
+    for identity, mine in by_identity.items():
+        for at, book, ms in listened_spans(mine):
+            if ms and at < end:
+                day = totals.setdefault((identity, at.date()), [0, set()])
+                day[0] += ms
+                day[1].add(book)
+    for (identity, day), (ms, books) in totals.items():
+        db.execute(sqlite_insert(ListeningDaily).values(identity=identity, day=day, ms=ms,
+                                                       books_touched=len(books))
+                   .on_conflict_do_nothing())
+    stamp = last_day.isoformat()
+    marker = db.query(Setting).filter(Setting.key == ROLLED_THROUGH_KEY).first()
+    if marker is None:
+        db.add(Setting(key=ROLLED_THROUGH_KEY, value=stamp, description="Listening rolled up through (internal)"))
+    else:
+        marker.value = stamp
+    db.commit()
+    return len(totals)
+
+
 def prune_log(db: Session, now: Optional[datetime] = None) -> int:
-    """Delete log rows older than LOG_DAYS; returns how many. Positions stay."""
-    cutoff = _naive_utc(now) - timedelta(days=LOG_DAYS)
+    """Delete log rows older than LOG_DAYS; returns how many. Positions stay.
+    The days about to go are rolled up first (roll_up), and nothing after
+    the last rolled-up day is ever deleted, so all-time totals survive."""
+    now = _naive_utc(now)
+    roll_up(db, now)
+    cutoff = now - timedelta(days=LOG_DAYS)
+    done = rolled_through(db)
+    kept_from = datetime.combine(done + timedelta(days=1), datetime.min.time()) if done else datetime.min
+    cutoff = min(cutoff, kept_from)
     n = db.query(ListeningLog).filter(ListeningLog.at < cutoff).delete(synchronize_session=False)
     db.commit()
     return n

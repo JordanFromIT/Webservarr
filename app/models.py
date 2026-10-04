@@ -2,7 +2,7 @@
 Database models for WebServarr.
 """
 
-from sqlalchemy import CheckConstraint, Column, Integer, String, Text, Boolean, DateTime, Enum, Float, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import CheckConstraint, Column, Date, Integer, String, Text, Boolean, DateTime, Enum, Float, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.sql import func
 from datetime import datetime
 from app.database import Base
@@ -570,6 +570,86 @@ class BookRating(Base):
 
     def __repr__(self):
         return f"<BookRating(identity='{self.identity}', book_id={self.book_id}, stars={self.stars})>"
+
+
+# ---- Books discovery (app/services/book_discovery.py) ----
+# Keyed by account identity like the rest of Books. Nothing here is ever sent
+# to anyone but the person it belongs to, except popularity, which is a count
+# per book (never who) and never below book_discovery.POPULAR_MIN.
+
+class BookVisit(Base):
+    """When one person last opened Books, and the visit before that (the New
+    badges compare against prev_seen_at). `email` is their session's email,
+    the address a "New in your series" notification goes to."""
+    __tablename__ = "book_visits"
+
+    identity = Column(String(255), primary_key=True)
+    email = Column(String(255), nullable=True)
+    seen_at = Column(DateTime, nullable=False)                      # naive UTC
+    prev_seen_at = Column(DateTime, nullable=True)                  # null until a second visit
+
+    def __repr__(self):
+        return f"<BookVisit(identity='{self.identity}')>"
+
+
+class BookPopularity(Base):
+    """How many different people listened to a book lately, recomputed at
+    most hourly. Only books at or above the floor have a row."""
+    __tablename__ = "book_popularity"
+
+    book_id = Column(Integer, primary_key=True)
+    listeners = Column(Integer, nullable=False)
+    computed_at = Column(DateTime, nullable=False)                  # naive UTC
+
+    def __repr__(self):
+        return f"<BookPopularity(book_id={self.book_id}, listeners={self.listeners})>"
+
+
+class ListeningDaily(Base):
+    """One person's listening on one UTC day, rolled up from listening_log
+    before the log is pruned, so all-time totals outlive the log."""
+    __tablename__ = "listening_daily"
+    __table_args__ = (UniqueConstraint("identity", "day", name="uq_listening_daily_identity_day"),)
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    day = Column(Date, nullable=False)
+    ms = Column(Integer, nullable=False, default=0)
+    books_touched = Column(Integer, nullable=False, default=0)
+
+    def __repr__(self):
+        return f"<ListeningDaily(identity='{self.identity}', day={self.day})>"
+
+
+class BookFollow(Base):
+    """One person's choice about one series (book_catalog.name_key of its
+    name): followed by hand (`manual`), followed because the Continue row saw
+    them reading it (`read`), or unfollowed (`off`), which also stops their
+    list and their listening from following it. Following because of My list
+    or listening (`list`, `listen`) is worked out when needed, not stored."""
+    __tablename__ = "book_follows"
+    __table_args__ = (UniqueConstraint("identity", "series", name="uq_book_follows_identity_series"),)
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    series = Column(String(255), nullable=False)
+    source = Column(String(10), nullable=False)
+    created_at = Column(DateTime, nullable=False)                   # naive UTC
+
+    def __repr__(self):
+        return f"<BookFollow(identity='{self.identity}', series='{self.series}', source='{self.source}')>"
+
+
+class BookAnnounced(Base):
+    """A catalog book that "New in your series" has already dealt with
+    (announced, or passed over silently)."""
+    __tablename__ = "book_announced"
+
+    book_id = Column(Integer, primary_key=True)
+    announced_at = Column(DateTime, nullable=False)                 # naive UTC
+
+    def __repr__(self):
+        return f"<BookAnnounced(book_id={self.book_id})>"
 
 
 class BookCatalogMeta(Base):

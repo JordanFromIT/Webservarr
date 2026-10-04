@@ -252,6 +252,47 @@ def migrate_listening_claims(db: Session) -> None:
     logger.info("Gave %d earlier-copy link(s) their claim", filled)
 
 
+BOOK_ANNOUNCED_MARKER = "migration.book_announced_v1"
+
+
+def migrate_book_announced(db: Session) -> None:
+    """One-time migration: every book already in the catalog counts as
+    announced, so "New in your series" never announces the library that was
+    there before it existed. When there were books, announcing's baseline
+    (book_discovery.ANNOUNCE_BASELINE_KEY) is set too, so a book that arrives
+    at the first rebuild after the upgrade is announced; on a fresh database
+    the first rebuild sets it and passes over its books silently.
+
+    create_all makes the table. Idempotent and safe with two workers: the
+    fill is the transaction's first statement (a write, so the write lock is
+    taken before anything is decided), and the marker goes in the same commit;
+    the worker that loses the race to it rolls back."""
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+    from app.services.book_discovery import ANNOUNCE_BASELINE_KEY
+
+    for table in ("book_announced", "books", "settings"):
+        if not list(db.execute(text(f"PRAGMA table_info({table})"))):
+            return  # no tables yet: create_all makes them
+    if _setting_row(db, BOOK_ANNOUNCED_MARKER):
+        return
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    filled = db.execute(text("INSERT OR IGNORE INTO book_announced (book_id, announced_at) "
+                             "SELECT id, :now FROM books"), {"now": now}).rowcount
+    db.add(Setting(key=BOOK_ANNOUNCED_MARKER, value="done",
+                   description="One-time: the catalog's books before new-in-series announcements"))
+    if filled and not _setting_row(db, ANNOUNCE_BASELINE_KEY):
+        db.add(Setting(key=ANNOUNCE_BASELINE_KEY, value=now.isoformat(),
+                       description="New-in-series announcements started (internal)"))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # the other worker ran it first
+        return
+    logger.info("Counted %d existing book(s) as announced", filled)
+
+
 def migrate_user_uid(db: Session) -> None:
     """One-time migration: add users.uid (unique) and give every existing
     user a permanent random one.

@@ -934,6 +934,18 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
         except Exception as exc:
             logger.warning("Poller: book rating retries failed: %s", type(exc).__name__)
 
+    # Books discovery: popularity (Plex's play history and the player's own
+    # data) and the listening rollup, at most hourly, in a task of its own.
+    from app.services import book_discovery
+    last_discovery = -book_discovery.POPULARITY_INTERVAL
+    discovery_task: Optional[asyncio.Task] = None
+
+    async def _refresh_discovery() -> None:
+        try:
+            await book_discovery.refresh()
+        except Exception as exc:
+            logger.warning("Poller: books discovery refresh failed: %s", type(exc).__name__)
+
     while not _stop_event.is_set():
         try:
             await asyncio.wait_for(_stop_event.wait(), timeout=TICK_SECONDS)
@@ -1010,6 +1022,12 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
                 last_ratings = now
                 ratings_task = asyncio.create_task(_retry_ratings())
 
+            # --- Books discovery: popularity and the listening rollup ---
+            if (lease.held and now - last_discovery >= book_discovery.POPULARITY_INTERVAL
+                    and (discovery_task is None or discovery_task.done())):
+                last_discovery = now
+                discovery_task = asyncio.create_task(_refresh_discovery())
+
         except Exception as exc:
             logger.error("Poller: unexpected error in main loop: %s", exc)
 
@@ -1017,6 +1035,8 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
         books_task.cancel()
     if ratings_task is not None and not ratings_task.done():
         ratings_task.cancel()
+    if discovery_task is not None and not discovery_task.done():
+        discovery_task.cancel()
     logger.info("Notification poller stopped.")
 
 

@@ -482,6 +482,23 @@ async def in_progress_series_ids(base: str, token: str) -> list:
             {"comparison": COMPARE_LESS_THAN, "field": FILTER_READ_PROGRESS, "value": str(FINISHED_FROM)}])
 
 
+async def reading_stats(base: str, token: str) -> dict:
+    """This person's own reading totals, as Kavita counts them for them:
+    {"pages", "words", "hours"}. Their account id comes from their own
+    account (/api/Account, of which only the id is read), and Kavita answers
+    only for that id with their token."""
+    async with _user_client() as client:
+        account = await _as_user(client, base, token, "GET", "/api/Account")
+        user_id = account.get("id") if isinstance(account, dict) else None
+        if not isinstance(user_id, int) or isinstance(user_id, bool):
+            raise KavitaUnavailable("Kavita's answer could not be read")
+        stats = await _as_user(client, base, token, "GET", "/api/Stats/user-read", params={"userId": user_id})
+    if not isinstance(stats, dict):
+        raise KavitaUnavailable("Kavita's answer could not be read")
+    return {"pages": _whole(stats.get("totalPagesRead")), "words": _whole(stats.get("totalWordsRead")),
+            "hours": _whole(stats.get("timeSpentReading"))}
+
+
 def _volume_place(chapters: list, progress: list) -> Optional[dict]:
     """One place for a whole volume: the pages read and the pages in all its
     chapters (a finished chapter counts whole), when they last read it, and the
