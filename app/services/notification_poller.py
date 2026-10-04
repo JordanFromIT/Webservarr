@@ -921,6 +921,19 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
         except Exception as exc:
             logger.warning("Poller: books catalog rebuild failed: %s", type(exc).__name__)
 
+    # Book ratings still to be written to Kavita or Plex are tried again in a
+    # task of their own too (each try is a call to Kavita or Plex as that
+    # person).
+    from app.services import book_personal
+    last_ratings = -book_personal.RETRY_INTERVAL
+    ratings_task: Optional[asyncio.Task] = None
+
+    async def _retry_ratings() -> None:
+        try:
+            await book_personal.retry_due(r)
+        except Exception as exc:
+            logger.warning("Poller: book rating retries failed: %s", type(exc).__name__)
+
     while not _stop_event.is_set():
         try:
             await asyncio.wait_for(_stop_event.wait(), timeout=TICK_SECONDS)
@@ -991,11 +1004,19 @@ async def _poll_forever(r: aioredis.Redis, lease: "LeaderLease") -> None:
                 last_books = now
                 books_task = asyncio.create_task(_rebuild_books())
 
+            # --- Book rating write-through retries ---
+            if (lease.held and now - last_ratings >= book_personal.RETRY_INTERVAL
+                    and (ratings_task is None or ratings_task.done())):
+                last_ratings = now
+                ratings_task = asyncio.create_task(_retry_ratings())
+
         except Exception as exc:
             logger.error("Poller: unexpected error in main loop: %s", exc)
 
     if books_task is not None and not books_task.done():
         books_task.cancel()
+    if ratings_task is not None and not ratings_task.done():
+        ratings_task.cancel()
     logger.info("Notification poller stopped.")
 
 

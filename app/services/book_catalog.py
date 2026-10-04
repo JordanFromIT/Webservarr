@@ -242,8 +242,11 @@ def _groups_in_outage(ebooks: Dict[int, _Item], editions: Dict[str, _Item], over
 # --- Writing the catalog ------------------------------------------------------------
 
 def _new_book(db, now: datetime) -> Book:
-    book = Book(title="", sort_title="", author="", series="", description="",
-                cover_source="plex", updated_at=now)
+    from app.services import book_personal
+    # Never an id a person's list, queue or rating still names (a book that
+    # left the catalog): their row would turn up on a different book.
+    book = Book(id=book_personal.next_book_id(db), title="", sort_title="", author="", series="",
+                description="", cover_source="plex", updated_at=now)
     db.add(book)
     db.flush()      # the id is needed to point ghosts at it
     return book
@@ -485,6 +488,7 @@ def _apply(reason: str, ebooks: Optional[list], audiobooks: Optional[list], erro
         # Every ghost points at a live book, not at another ghost; one whose
         # book is gone goes with it.
         ghost_rows = {g.id: g for g in db.query(Book).filter(Book.merged_into.isnot(None)).all()}
+        merged: Dict[int, int] = {}
         for g in ghost_rows.values():
             target, hops = g.merged_into, 0
             while target in ghost_rows and hops < 50:
@@ -493,6 +497,13 @@ def _apply(reason: str, ebooks: Optional[list], audiobooks: Optional[list], erro
                 db.delete(g)
             else:
                 g.merged_into = target
+                merged[g.id] = target
+        db.flush()
+
+        # What people keep about a merged book moves with it, in this
+        # transaction (a deleted ghost's rows stay, hidden, with its id).
+        from app.services import book_personal
+        book_personal.follow_merges(db, merged)
 
         meta.ebook_count = len(e_items)
         meta.audiobook_count = len(a_items)

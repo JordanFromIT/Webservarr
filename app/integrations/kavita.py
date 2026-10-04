@@ -574,6 +574,32 @@ async def chapter_number_at(base: str, token: str, chapter_id: int, page: int) -
     return int(found.group(1)) if found else None
 
 
+class KavitaRefused(KavitaUnavailable):
+    """Kavita answered, and said no (a 400, 403 or 404): the same write will
+    not do better by being sent again soon."""
+
+
+async def rate_chapter(base: str, token: str, series_id: int, chapter_id: int, stars: int) -> None:
+    """Set this person's rating of a book (its chapter, the one the catalog
+    keeps; Kavita's own volume page rates the same one) to `stars`, 1 to 5,
+    or clear it with 0, Kavita's "not rated". Made with their own token, so
+    it is their rating. KavitaTokenRefused for a 401, KavitaRefused when
+    Kavita says no, KavitaUnavailable when it does not answer."""
+    body = {"seriesId": int(series_id), "chapterId": int(chapter_id), "userRating": int(stars)}
+    try:
+        async with _user_client() as client:
+            response = await client.post(f"{base}/api/rating/chapter", json=body,
+                                         headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError as exc:
+        raise KavitaUnavailable("Kavita did not answer") from exc
+    if response.status_code == 401:
+        raise KavitaTokenRefused("Kavita no longer accepts this sign-in")
+    if response.status_code in (400, 403, 404):
+        raise KavitaRefused(f"Kavita refused the rating (HTTP {response.status_code})")
+    if response.status_code not in (200, 204):
+        raise KavitaUnavailable(f"Kavita answered HTTP {response.status_code}")
+
+
 async def chapter_cover(chapter_id: int) -> tuple:
     """(image bytes, content type) of a book's cover, read with the server's
     key (Kavita's image routes take a key in the query string, never a token).

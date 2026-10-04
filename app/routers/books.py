@@ -37,7 +37,7 @@ from datetime import datetime
 from typing import Annotated, Dict, List, Literal, Optional, Tuple
 from urllib.parse import quote
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from redis.exceptions import RedisError
@@ -54,7 +54,7 @@ from app.limiter import limiter
 from app.routers import kavita_proxy
 from app.routers.player import Text, require_encodable_body, require_same_origin, session_rate_key
 from app.routers.tickets import account_identity
-from app.services import book_catalog, listening
+from app.services import book_catalog, book_personal, listening
 from app.services.book_catalog import CatalogRow
 from app.utils import utc_iso
 
@@ -651,6 +651,18 @@ def _read_url(book) -> str:
     return f"/reader?seriesId={book.kavita_series_id}&chapterId={book.kavita_chapter_id}"
 
 
+def preferred_edition(editions: list, places: dict):
+    """The edition to open (`editions` primary first, `places` the caller's
+    places by key): the newest place still being listened to, else the newest
+    place (all finished), else the primary edition."""
+    def newest(started: list):
+        return max(started, key=lambda e: places[e.plex_book_key]["updated_at"], default=None)
+
+    started = [e for e in editions if e.plex_book_key in places]
+    return (newest([e for e in started if not places[e.plex_book_key]["finished"]])
+            or newest(started) or editions[0])
+
+
 def _redirect_to_book(book_id: int, suffix: str = "") -> RedirectResponse:
     """To the book an old id was merged into. Temporary and never stored: a
     later split gives the old id its own book back, and a browser that kept a
@@ -662,11 +674,17 @@ def _redirect_to_book(book_id: int, suffix: str = "") -> RedirectResponse:
 @router.get("/{book_id}")
 @_limit(LIST_LIMIT, "book")
 @_db_503
-async def book_detail(request: Request, book_id: BookId, who: Scope = Depends(caller),
-                      db: Session = Depends(get_db)):
+async def book_detail(request: Request, book_id: BookId, background: BackgroundTasks,
+                      who: Scope = Depends(caller), db: Session = Depends(get_db),
+                      user: dict = Depends(get_current_user),
+                      session_id: Optional[str] = Cookie(None, alias=settings.session_cookie_name)):
     """One book: {"book", "formats": {"ebook": {available, progress, read_url}
     or null, "audio": {available, editions: [{plex_book_key, narrator,
-    progress, in_progress}], preferred} or null}, "request_links", "notes"}.
+    progress, in_progress}], preferred} or null}, "request_links", "notes",
+    "my_list", "queue_position", "my_rating"}. The last three are the
+    caller's own (app/services/book_personal.py): whether it is on their list,
+    its place among the queued books they can see (null when not queued) and
+    their stars (null when not rated).
 
     A null format is one the caller cannot reach (or the book lacks).
     `preferred` is the edition with the caller's newest unfinished place, else
@@ -717,19 +735,25 @@ async def book_detail(request: Request, book_id: BookId, who: Scope = Depends(ca
             listed.append({"plex_book_key": edition.plex_book_key, "narrator": edition.narrator or "",
                            "progress": _audio_progress(place) if place else None,
                            "in_progress": bool(place) and not place["finished"]})
-        # The edition to open: the newest place still being listened to, else
-        # the newest place (all finished), else the primary edition.
-        def newest(started: list):
-            return max(started, key=lambda e: places[e.plex_book_key]["updated_at"], default=None)
-
-        started = [e for e in editions if e.plex_book_key in places]
-        preferred = (newest([e for e in started if not places[e.plex_book_key]["finished"]])
-                     or newest(started) or editions[0])
-        formats["audio"] = {"available": True, "editions": listed, "preferred": preferred.plex_book_key}
+        formats["audio"] = {"available": True, "editions": listed,
+                            "preferred": preferred_edition(editions, places).plex_book_key}
 
     ask = f"{book.title} {book.author}".strip()
     narrators = [e["narrator"] for e in (formats["audio"] or {}).get("editions", []) if e["narrator"]]
+    mine = {"my_list": False, "queue_position": None, "my_rating": None}
+    if who.identity:
+        visible = {r.id for r in book_catalog.visible_rows(db, who.series, who.audio)}
+        queued = [b for b in book_personal.queue_ids(db, who.identity) if b in visible]
+        rating = book_personal.get_rating(db, who.identity, book.id)
+        mine = {"my_list": book_personal.on_list(db, who.identity, book.id),
+                "queue_position": queued.index(book.id) if book.id in queued else None,
+                "my_rating": book_personal.shown_rating(rating)}
+        if book_personal.due_on_visit(rating):
+            # A rating still to be written to Kavita or Plex is tried again
+            # now, as this person, after the answer is sent.
+            background.add_task(book_personal.push_rating, who.identity, book.id, dict(user), session_id)
     return {
+        **mine,
         "book": {"id": book.id, "title": book.title, "author": book.author, "series": book.series,
                  "series_number": book.series_number, "description": book.description,
                  "narrators": list(dict.fromkeys(narrators)), "cover_url": _cover_url(book.id, book.updated_at),

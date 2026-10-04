@@ -1753,6 +1753,52 @@ async def plex_position(session: dict, key: str, session_id: Optional[str] = Non
     }
 
 
+CLEAR_RATING = -1               # what /:/rate takes to remove a rating
+
+
+class RatingRefused(PlayerUnavailable):
+    """Plex answered /:/rate, and said no (not a 401): sending the same
+    rating again soon will not help."""
+
+
+async def rate(session: dict, keys, rating: int, session_id: Optional[str] = None) -> None:
+    """Set the listener's own rating of each book (album or album:disc; the
+    album is what Plex rates, so the discs of one album share one) to
+    `rating`, 0 to 10 (10 is five stars), or CLEAR_RATING to remove it. Made
+    with their server token, so it is theirs alone.
+
+    Raises NoServerAccess without a usable token, TokenRejected for a 401 (the
+    cached access is dropped), RatingRefused when Plex says no, and
+    PlayerUnavailable when Plex does not answer. NotInLibrary for a malformed
+    key, before any call."""
+    if not (rating == CLEAR_RATING or 0 <= rating <= 10):
+        raise ValueError("rating must be 0 to 10, or CLEAR_RATING")
+    albums = list(dict.fromkeys(parse_key(k)[0] for k in keys))
+    admin = _configured(need_section=False)
+    access = await server_access(session, session_id=session_id)
+    async with _pms_client() as client:
+        for album in albums:
+            try:
+                resp = await client.put(
+                    f"{admin['url']}/:/rate",
+                    params={"key": album, "identifier": "com.plexapp.plugins.library", "rating": rating},
+                    headers={**_client_headers(session), "X-Plex-Token": access["token"]},
+                )
+            except httpx.HTTPError as exc:
+                logger.warning("Plex rate failed: %s", type(exc).__name__)
+                raise PlayerUnavailable("Plex is unavailable") from None
+            if resp.status_code == 401:
+                logger.warning("Plex rate refused the server token (HTTP 401); access will be fetched again")
+                await forget_access(session, session_id)
+                raise TokenRejected("Plex refused the token")
+            if resp.status_code in (400, 403, 404):
+                logger.info("Plex refused a rating (HTTP %d)", resp.status_code)
+                raise RatingRefused("Plex refused the rating")
+            if resp.status_code not in (200, 204):
+                logger.warning("Plex rate returned HTTP %d", resp.status_code)
+                raise PlayerUnavailable("Plex is unavailable")
+
+
 async def timeline(session: dict, track_key: str, state: str, time_ms: int, duration_ms: int,
                    session_id: Optional[str] = None) -> None:
     """Report playback to Plex's /:/timeline with the listener's server token,

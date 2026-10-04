@@ -502,6 +502,76 @@ class BookPairOverride(Base):
         return f"<BookPairOverride({self.kavita_chapter_id}, '{self.plex_book_key}', '{self.action}')>"
 
 
+class BookListEntry(Base):
+    """One book on one person's My list (app/services/book_personal.py). Kept
+    when the book leaves the catalog or the person cannot see it for a while,
+    and shown again when it is back; follows a merge (merged_into)."""
+    __tablename__ = "book_list"
+    __table_args__ = (
+        UniqueConstraint("identity", "book_id", name="uq_book_list_identity_book"),
+        Index("ix_book_list_book_id", "book_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    book_id = Column(Integer, nullable=False)
+    added_at = Column(DateTime, nullable=False)                     # naive UTC
+
+    def __repr__(self):
+        return f"<BookListEntry(identity='{self.identity}', book_id={self.book_id})>"
+
+
+class BookQueueEntry(Base):
+    """One book in one person's Up next queue. Positions are dense from 0 per
+    identity and unique; every change renumbers the person's whole queue."""
+    __tablename__ = "book_queue"
+    __table_args__ = (
+        UniqueConstraint("identity", "book_id", name="uq_book_queue_identity_book"),
+        UniqueConstraint("identity", "position", name="uq_book_queue_identity_position"),
+        Index("ix_book_queue_book_id", "book_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    book_id = Column(Integer, nullable=False)
+    position = Column(Integer, nullable=False)
+    added_at = Column(DateTime, nullable=False)                     # naive UTC
+
+    def __repr__(self):
+        return f"<BookQueueEntry(identity='{self.identity}', book_id={self.book_id}, position={self.position})>"
+
+
+class BookRating(Base):
+    """One person's 1 to 5 star rating of one book: the record the site shows.
+    It is also written through to Kavita (the book's chapter rating) and Plex
+    (each audiobook edition); each target's state is ok, pending or
+    failed:<reason>. A cleared rating keeps its row (stars null) until the
+    clear has been written to both, then the row goes. `version` counts
+    changes, so a write that finishes after a newer change never marks it
+    written; `attempts` and `retry_at` are the retry backoff."""
+    __tablename__ = "book_ratings"
+    __table_args__ = (
+        UniqueConstraint("identity", "book_id", name="uq_book_ratings_identity_book"),
+        CheckConstraint("stars IS NULL OR (stars >= 1 AND stars <= 5)", name="ck_book_ratings_stars"),
+        Index("ix_book_ratings_book_id", "book_id"),
+        Index("ix_book_ratings_retry_at", "retry_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    identity = Column(String(255), nullable=False)
+    book_id = Column(Integer, nullable=False)
+    stars = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=False)                   # naive UTC
+    kavita_state = Column(String(40), nullable=False, default="pending")
+    plex_state = Column(String(40), nullable=False, default="pending")
+    version = Column(Integer, nullable=False, default=1)
+    attempts = Column(Integer, nullable=False, default=0)
+    retry_at = Column(DateTime, nullable=True)                      # naive UTC
+
+    def __repr__(self):
+        return f"<BookRating(identity='{self.identity}', book_id={self.book_id}, stars={self.stars})>"
+
+
 class BookCatalogMeta(Base):
     """How the last rebuild went. One row, id 1."""
     __tablename__ = "book_catalog_meta"
