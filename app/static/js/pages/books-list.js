@@ -29,7 +29,7 @@ const NAME_MAX = 200;               // the API's own limit on a name
 const LINK_FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue';
 // Class strings are written out whole: Tailwind only builds what it can read.
 const GRID = 'mt-6 grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-6';
-const ROW = 'group grid grid-cols-[2rem_4.5rem_minmax(0,1fr)] items-center gap-4 rounded-2xl bg-frosted-blue/[0.04] p-3 transition-colors hover:bg-frosted-blue/[0.07] ' + LINK_FOCUS;
+const ROW = 'group grid grid-cols-[1.5rem_3.75rem_minmax(0,1fr)] items-center gap-3 rounded-2xl bg-frosted-blue/[0.04] p-2.5 transition-colors hover:bg-frosted-blue/[0.07] sm:grid-cols-[2rem_4.5rem_minmax(0,1fr)] sm:gap-4 sm:p-3 ' + LINK_FOCUS;
 const FORMAT_INFO = {
   ebook: { icon: 'menu_book', label: 'Ebook' },
   audio: { icon: 'headphones', label: 'Audiobook' }
@@ -156,12 +156,12 @@ export async function mount(ctx) {
   function seriesRow(item) {
     const a = el('a', ROW);
     a.href = '/books/' + encodeURIComponent(String(item.id));
-    const number = el('span', 'text-center text-[20px] font-bold leading-none tabular-nums text-frosted-blue/70', numberText(item.series_number));
+    const number = el('span', 'text-center text-[17px] font-bold leading-none tabular-nums text-frosted-blue/70 sm:text-[20px]', numberText(item.series_number));
     number.setAttribute('data-number', '');
     a.appendChild(number);
     a.appendChild(coverBox(item.cover_url, item.formats, signal, { badges: false }));
     const text = el('span', 'block min-w-0');
-    text.appendChild(el('span', 'block text-[17px] font-semibold leading-snug text-frosted-blue line-clamp-2', item.title || 'Untitled'));
+    text.appendChild(el('span', 'block text-[15px] font-semibold leading-snug text-frosted-blue line-clamp-3 sm:text-[17px] sm:line-clamp-2', item.title || 'Untitled'));
     if (item.author) text.appendChild(el('span', 'block truncate text-[13px] leading-5 text-frosted-blue/70', item.author));
     const chips = el('span', 'mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5');
     const progress = item.progress || {};
@@ -197,7 +197,7 @@ export async function mount(ctx) {
     });
     if (state.connectProblem) rest.appendChild(connectLine());
     if (kind === 'series') {
-      const list = el('ol', 'mt-6 space-y-3');
+      const list = el('ol', 'mt-6 max-w-3xl space-y-3');
       list.id = 'seriesList';
       data.items.forEach(function (item) {
         const li = el('li', '');

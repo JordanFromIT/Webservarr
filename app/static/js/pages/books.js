@@ -95,8 +95,10 @@ export function coverBox(url, formats, signal, opts) {
   const audioOnly = list.length === 1 && list[0] === 'audio';
   // Spans, so a cover is valid inside a button too.
   const box = el('span', 'relative block aspect-[2/3] overflow-hidden rounded-xl bg-frosted-blue/[0.07]');
-  box.appendChild(icon(audioOnly ? 'headphones' : 'menu_book',
-    'absolute inset-0 grid place-items-center text-[32px] text-frosted-blue/45'));
+  // A flex frame, not the icon itself: the icon font's own display rule would beat a grid class on it.
+  const mark = el('span', 'absolute inset-0 flex items-center justify-center');
+  mark.appendChild(icon(audioOnly ? 'headphones' : 'menu_book', 'text-[32px] text-frosted-blue/45'));
+  box.appendChild(mark);
   if (url) {
     const img = el('img', audioOnly ? 'absolute inset-0 h-full w-full object-contain' : 'absolute inset-0 h-full w-full object-cover');
     img.alt = '';

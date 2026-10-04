@@ -181,7 +181,9 @@ export async function mount(ctx) {
     const playing = mine && !!st.playing && !loading;
     btn.querySelector('[data-icon]').textContent = playing ? 'pause' : 'play_arrow';
     btn.querySelector('[data-label]').textContent = loading ? 'Opening…' : playing ? 'Pause' : 'Listen';
-    btn.querySelector('[data-sub]').textContent = edition.progress ? edition.progress.label : 'Not started';
+    // A place made just now (by this page's own Listen) is not in the answer yet.
+    const begun = mine && (playing || (typeof st.bookMs === 'number' && st.bookMs > 0));
+    btn.querySelector('[data-sub]').textContent = edition.progress ? edition.progress.label : begun ? 'In progress' : 'Not started';
     btn.disabled = loading;
   }
 

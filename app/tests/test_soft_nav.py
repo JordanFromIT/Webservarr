@@ -675,7 +675,8 @@ class BookPages(unittest.TestCase):
                 code = js_code_only(src)
                 self.assertNotRegex(code, r"(?<![.\w])fetch\(", "every read goes through WS.getJSON")
                 self.assertEqual(len(re.findall(r"\bgetJSON\(", code)), 1)
-                self.assertRegex(src, r"WS\.getJSON\([^)]*\{ signal: signal \}\)")
+                self.assertTrue("WS.getJSON('/api/books/' + encodeURIComponent(String(state.id)), { signal: signal })" in src
+                                or "WS.getJSON(target.url, { signal: signal })" in src)
                 self.assertRegex(function_body(code, "quiet"), r"return signal\.aborted \|\| isAbort\(err\)")
 
     def test_timers_are_the_pages(self):
