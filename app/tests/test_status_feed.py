@@ -58,6 +58,13 @@ def kuma_time(dt):
     return dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
+def signed_up(case):
+    """The setup redirect (main.py) reads the real database, which CI does not have."""
+    p = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+    p.start()
+    case.addCleanup(p.stop)
+
+
 def add_row(Session, **fields):
     values = dict(title="t", message="t", update_type="note", severity="info", author_id="",
                   author_name="", active=True, source="admin", important=False, created_at=T0)
@@ -384,6 +391,7 @@ class Words(unittest.TestCase):
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class FeedApi(unittest.TestCase):
     def setUp(self):
+        signed_up(self)
         self.Session = helpers.make_sessionmaker()
         self.client = helpers.api_client(self.Session, helpers.ADMIN)
         self.addCleanup(helpers.reset_overrides)
@@ -523,7 +531,6 @@ class FeedApi(unittest.TestCase):
         self.assertEqual(self.feed()["open"][0]["text"], "Media is down")
 
     def test_a_database_that_cannot_be_written_is_a_503(self):
-        self.feed()        # the setup check (main.py) reads the database once per process: before the patch
         with mock.patch.object(SASession, "commit", side_effect=OperationalError("x", {}, Exception("locked"))):
             r = self.send("POST", "/api/status/notes", {"text": "hi"})
         self.assertEqual(r.status_code, 503)
@@ -545,6 +552,7 @@ class StatusSummary(unittest.TestCase):
 
     def setUp(self):
         # The route takes no session at all; the client's override is unused.
+        signed_up(self)
         self.Session = helpers.make_sessionmaker()
         self.client = helpers.api_client(self.Session)
         self.addCleanup(helpers.reset_overrides)
@@ -583,6 +591,7 @@ class Preferences(unittest.TestCase):
         self.assertNotIn("service", NOTIFICATION_CATEGORIES)
 
     def test_status_is_on_by_default_and_can_be_turned_off(self):
+        signed_up(self)
         Session = helpers.make_sessionmaker()
         client = helpers.api_client(Session, helpers.MEMBER)
         self.addCleanup(helpers.reset_overrides)
