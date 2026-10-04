@@ -925,7 +925,7 @@ await run('T3H5: the toolbar, notes, connect message and Continue come in one wr
   await t.clock.advance(100);
   await m;
   check('with the books: toolbar, notes, connect message and Continue all there', t.hidden('#toolbarSkel') && !t.hidden('#toolbar') && !t.hidden('#notes') && !t.hidden('#connectState') && !!t.q('#continueHost [data-continue]') && t.doc.documentElement.hasAttribute('data-books-continue'));
-  check('all of it sits above the books in the library section', (() => { const sec = t.q('#librarySection'); const kids = Array.from(sec.children).map((c) => c.id); return kids.indexOf('toolbar') < kids.indexOf('connectState') && kids.indexOf('connectState') < kids.indexOf('notes') && kids.indexOf('notes') < kids.indexOf('libraryGrid'); })());
+  check('all of it, Continue included, sits above the books inside the library section (no element already shown has to move)', (() => { const sec = t.q('#librarySection'); const kids = Array.from(sec.children).map((c) => c.id); return kids.indexOf('continueHost') !== -1 && kids.indexOf('continueHost') < kids.indexOf('toolbar') && kids.indexOf('toolbar') < kids.indexOf('connectState') && kids.indexOf('connectState') < kids.indexOf('notes') && kids.indexOf('notes') < kids.indexOf('libraryGrid'); })());
   // A library that never answers does not keep the page a skeleton for ever.
   const never = deferred();
   const u = make({ routes: (net) => { usual()(net); net.on('/api/books?', () => never.promise); } });

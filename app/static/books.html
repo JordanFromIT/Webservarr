@@ -44,17 +44,20 @@
            class="w-full h-12 rounded-xl border-0 bg-frosted-blue/[0.07] pl-12 pr-4 text-[17px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
   </div>
 
-  <div id="browseArea" class="space-y-8">
+  <div id="browseArea">
 
-    <div id="continueHost" data-arrive="continue" aria-busy="true">
-      <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Continue</span></h2>
-      <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
-        <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
-      </div>
-    </div>
+    <!-- Only the order: Continue answers first, then everything is drawn in one write (pages/books.js commitFrame). -->
+    <div data-arrive="continue" class="hidden" aria-hidden="true"></div>
 
     <section id="librarySection" data-arrive="library" aria-labelledby="libraryTitle">
       <h2 id="libraryTitle" class="sr-only">Library</h2>
+      <!-- Inside the section, above the toolbar: it comes in with the toolbar and the books, so nothing already shown moves. -->
+      <div id="continueHost" class="mb-8" aria-busy="true">
+        <h2 class="mb-3 text-xl font-bold leading-snug text-frosted-blue"><span class="skel-text">Continue</span></h2>
+        <div class="books-row -mx-4 px-4 lg:mx-0 lg:px-0 flex gap-4 py-1" aria-hidden="true">
+          <div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div><div class="w-36 shrink-0"><div class="skel aspect-[2/3] rounded-xl"></div><p class="mt-2 text-[15px] leading-snug min-h-[2.75em]">&nbsp;</p><p class="text-[13px] leading-5 min-h-5">&nbsp;</p></div>
+        </div>
+      </div>
       <!-- The toolbar, the notes and Continue all arrive in one write with the first
            books (pages/books.js commitFrame), so nothing already on screen moves.
            Until then the toolbar is this skeleton, the controls' own size. -->
