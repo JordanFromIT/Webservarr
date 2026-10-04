@@ -29,6 +29,7 @@ const SEARCH_WAIT_MS = 300;
 const SEARCH_LIMIT = 60;
 const SKELETON_CARDS = 12;
 const BUILDING_POLL_MS = 10000;
+const CONTINUE_WAIT_MS = 1500;
 
 const VIEW_KEY = 'webservarr_books_view:';
 const CONTINUE_KEY = 'webservarr_books_continue:';
@@ -258,6 +259,10 @@ export async function mount(ctx) {
     // The first books drawn: the toolbar, the notes and Continue are written
     // in that one frame (commitFrame), so nothing already on screen moves.
     committed: false, pendingContinue: null,
+    // A first ever visit has no memory of a Continue row, so the books wait for
+    // its answer (up to CONTINUE_WAIT_MS): a row that comes in after them would
+    // push them down. Later visits know (and reserve its room), so they do not wait.
+    continueSettled: false, waiting: [],
     // Counts every redraw of page 1, so a next page asked for before one is dropped.
     renderGen: 0, building: false,
     embed: ((ctx.data || {}).branding || {}).requests_source === 'seerr_embed'
@@ -290,7 +295,9 @@ export async function mount(ctx) {
     if (on) html.setAttribute('data-books-continue', '');
     else html.removeAttribute('data-books-continue');
   }
-  markContinue(storageGet(CONTINUE_KEY + user) === '1');
+  const hint = storageGet(CONTINUE_KEY + user);
+  markContinue(hint === '1');
+  state.continueSettled = hint !== null;
 
   // ---- Showing one body at a time ----
 
@@ -406,6 +413,19 @@ export async function mount(ctx) {
     markContinue(!!held.row);
   }
 
+  /** Continue has answered (or has waited long enough): what waited for it goes on. */
+  function settleContinue() {
+    state.continueSettled = true;
+    const go = state.waiting;
+    state.waiting = [];
+    go.forEach(function (fn) { fn(); });
+  }
+
+  function afterContinue(fn) {
+    if (state.continueSettled) fn();
+    else state.waiting.push(fn);
+  }
+
   function renderContinue(data, fromCache, failed) {
     if (signal.aborted) return;
     const items = (data && Array.isArray(data.items)) ? data.items : [];
@@ -415,6 +435,7 @@ export async function mount(ctx) {
     state.pendingContinue = { row: row };
     if (state.committed) applyContinue();
     if (!fromCache && !failed) storageSet(CONTINUE_KEY + user, row ? '1' : '0');
+    settleContinue();
   }
 
   function loadContinue() {
@@ -564,13 +585,15 @@ export async function mount(ctx) {
     }, function (data) {
       if (gen !== state.gen || signal.aborted) return;
       WS.arrive('library', function () {
-        if (gen !== state.gen || signal.aborted) return;
-        renderLibrary(data);
+        afterContinue(function () {
+          if (gen !== state.gen || signal.aborted) return;
+          renderLibrary(data);
+        });
       });
     }, {
       onError: function (err) {
         if (gen !== state.gen || quiet(err)) return;
-        WS.arrive('library', function () { failedLibrary(err); });
+        WS.arrive('library', function () { afterContinue(function () { failedLibrary(err); }); });
       }
     }).then(function () {
       // swr keeps every answer it draws; an empty one from a first build is not worth keeping.
@@ -738,6 +761,7 @@ export async function mount(ctx) {
   const first = Promise.all([loadContinue(), loadLibrary(false)]);
   // A library that never answers does not keep the toolbar a skeleton for ever.
   ctx.setTimeout(commitFrame, 4000);
+  if (!state.continueSettled) ctx.setTimeout(settleContinue, CONTINUE_WAIT_MS);
 
   // The sections are on screen (or their skeletons, which have their shape)
   // before mount resolves, so Back and Forward restore the scroll onto them. A

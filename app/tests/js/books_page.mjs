@@ -332,7 +332,15 @@ await run('sections arrive top-down: the library waits for Continue', async (mak
   await u.clock.advance(100);
   check('Continue still waiting: the grid waits', u.hidden('#libraryGrid'));
   await u.clock.advance(300);
-  check('after the gate the library shows without it', !u.hidden('#libraryGrid') && u.WS.arrived.join(',') === 'library', u.WS.arrived);
+  check('a first ever visit holds the books a little longer for it (a row coming in after them would push them down)', u.hidden('#libraryGrid'));
+  await u.clock.advance(1200);
+  check('but not for ever: the library shows without it', !u.hidden('#libraryGrid') && u.WS.arrived.join(',') === 'library', u.WS.arrived);
+
+  // A person who has been before is not held up: the row's room (or its absence) is already known.
+  const k = make({ storage: { 'webservarr_books_continue:sam': '0' }, routes: (net) => { usual()(net); net.on('/api/books/continue', () => never.promise); } });
+  k.mount();
+  await k.clock.advance(400);
+  check('a repeat visit shows the books after the short gate', !k.hidden('#libraryGrid'));
 });
 
 await run('the chips filter the library and are remembered', async (make) => {
@@ -938,6 +946,18 @@ await run('T3H5: the toolbar, notes, connect message and Continue come in one wr
   const v = make({ routes: usual({ library: () => ({ status: 503, body: {} }) }) });
   await v.mount();
   check('an error brings the toolbar in with its message', !v.hidden('#toolbar') && !v.hidden('#errorState'));
+});
+
+await run('T3H5: on a first visit a Continue row slower than the gate still comes in with the books', async (make) => {
+  const cont = deferred();
+  const t = make({ routes: (net) => { usual()(net); net.on('/api/books/continue', () => cont.promise.then(() => ({ body: { items: CONT, notes: [] } }))); } });
+  const m = t.mount();
+  await t.clock.advance(900);
+  check('the books wait, not drawn without the row', t.hidden('#libraryGrid') && !t.q('#continueHost [data-continue]'));
+  cont.resolve();
+  await t.clock.advance(50);
+  await m;
+  check('then the row and the books come together', !t.hidden('#libraryGrid') && !!t.q('#continueHost [data-continue]') && t.hidden('#toolbarSkel'));
 });
 
 await run('T3H5: a kept "not connected" answer holds the connect message\'s room, so it comes in without moving the books', async (make) => {
