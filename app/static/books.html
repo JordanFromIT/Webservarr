@@ -44,18 +44,6 @@
            class="w-full h-12 rounded-xl border-0 bg-frosted-blue/[0.07] pl-12 pr-4 text-[17px] text-frosted-blue placeholder:text-frosted-blue/70 focus:outline-none focus:ring-2 focus:ring-frosted-blue"/>
   </div>
 
-  <!-- The ebook sign-in failed, or was just tried and still doesn't work (see
-       /static/js/kavita-connect.js). The audiobooks still show; this says why
-       the ebooks don't. -->
-  <div id="connectState" class="hidden flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-frosted-blue/[0.07] p-4" role="status">
-    <span class="material-symbols-outlined text-frosted-blue/70" aria-hidden="true">link_off</span>
-    <p class="min-w-0 flex-1 text-[15px] text-frosted-blue">We couldn't connect you to the eBook library right now. Please try again in a few minutes.</p>
-    <button id="connectRetry" type="button" class="ws-lift shrink-0 h-10 px-4 rounded-[10px] bg-primary text-bright text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Try again</button>
-  </div>
-
-  <!-- Quiet notes about a source that is not answering: written by the page. -->
-  <div id="notes" class="hidden space-y-2" role="status"></div>
-
   <div id="browseArea" class="space-y-8">
 
     <div id="continueHost" data-arrive="continue" aria-busy="true">
@@ -67,7 +55,18 @@
 
     <section id="librarySection" data-arrive="library" aria-labelledby="libraryTitle">
       <h2 id="libraryTitle" class="sr-only">Library</h2>
-      <div class="mb-6 flex flex-wrap items-center gap-3">
+      <!-- The toolbar, the notes and Continue all arrive in one write with the first
+           books (pages/books.js commitFrame), so nothing already on screen moves.
+           Until then the toolbar is this skeleton, the controls' own size. -->
+      <div id="toolbarSkel" class="mb-6 flex flex-wrap items-center gap-3" aria-hidden="true">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="skel h-10 w-[3.25rem] rounded-full"></div>
+          <div class="skel h-10 w-[5rem] rounded-full"></div>
+          <div class="skel h-10 w-[6.5rem] rounded-full"></div>
+        </div>
+        <div class="skel h-10 w-44 rounded-[10px] lg:ml-auto"></div>
+      </div>
+      <div id="toolbar" class="hidden mb-6 flex flex-wrap items-center gap-3">
         <div id="formatChips" class="flex flex-wrap items-center gap-2" role="group" aria-label="Show">
           <button type="button" data-format="all" aria-pressed="true" class="inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-primary text-bright">All</button>
           <button type="button" data-format="ebook" aria-pressed="false" class="inline-flex items-center h-10 px-4 rounded-full text-[15px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue bg-frosted-blue/[0.07] text-frosted-blue/70 hover:bg-frosted-blue/10 hover:text-frosted-blue">Ebooks</button>
@@ -83,6 +82,18 @@
           <span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-frosted-blue/70 pointer-events-none" aria-hidden="true">expand_more</span>
         </div>
       </div>
+
+      <!-- The ebook sign-in failed, or was just tried and still doesn't work (see
+           /static/js/kavita-connect.js). The audiobooks still show; this says why
+           the ebooks don't. -->
+      <div id="connectState" class="hidden mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-frosted-blue/[0.07] p-4" role="status">
+        <span class="material-symbols-outlined text-frosted-blue/70" aria-hidden="true">link_off</span>
+        <p class="min-w-0 flex-1 text-[15px] text-frosted-blue">We couldn't connect you to the eBook library right now. Please try again in a few minutes.</p>
+        <button id="connectRetry" type="button" class="ws-lift shrink-0 h-10 px-4 rounded-[10px] bg-primary text-bright text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Try again</button>
+      </div>
+
+      <!-- Quiet notes about a source that is not answering: written by the page. -->
+      <div id="notes" class="hidden mb-6 space-y-2" role="status"></div>
 
       <!-- One of these shows at a time (pages/books.js showBody). The skeleton
            is the grid's own shape: same columns, a cover and two lines of text. -->
@@ -133,7 +144,7 @@
     <div id="searchEmpty" class="hidden py-12 text-center">
       <span class="material-symbols-outlined text-4xl text-frosted-blue/70" aria-hidden="true">search_off</span>
       <p id="searchEmptyTitle" class="mt-3 text-[17px] font-semibold text-frosted-blue break-words">No matches</p>
-      <p class="mt-1 text-[15px] text-frosted-blue/70">Check the spelling, or ask for it.</p>
+      <p id="searchEmptyText" class="mt-1 text-[15px] text-frosted-blue/70 break-words">Check the spelling, or ask for it.</p>
       <a id="searchRequest" href="/requests" class="ws-lift mt-4 inline-flex items-center h-10 px-4 rounded-[10px] bg-primary text-bright text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-frosted-blue">Can't find it? Request it</a>
     </div>
     <div id="searchError" class="hidden py-12 text-center">

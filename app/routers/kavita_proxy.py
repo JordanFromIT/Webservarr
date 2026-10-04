@@ -422,6 +422,14 @@ def force_query_response_mode(location: str) -> str:
     return parsed._replace(query=urlencode(params)).geturl()
 
 
+def _connect_failed() -> RedirectResponse:
+    """The hand-off could not start (Kavita down, or it answered something
+    unexpected). The person is sent back to Books, which says so quietly and
+    keeps what it already shows, instead of leaving them on a raw JSON error.
+    The failure flag also stops the page asking again (kavita-connect.js)."""
+    return RedirectResponse("/books?kavita=error", status_code=302)
+
+
 @router.get("/kavita/connect", include_in_schema=False)
 @limiter.limit("30/minute")
 async def kavita_connect(
@@ -446,20 +454,18 @@ async def kavita_connect(
             upstream = await client.get(f"{base}/oidc/login", headers=origin_headers(host))
     except httpx.RequestError as exc:
         logger.warning("Kavita connect failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Kavita is unavailable")
+        return _connect_failed()
 
     location = upstream.headers.get("location")
     if not location:
         logger.warning("Kavita /oidc/login did not redirect (HTTP %d)", upstream.status_code)
-        # 503, not 502: Cloudflare replaces 502/504/520-526 response bodies
-        # with its own generic error page regardless of what origin sends.
-        raise HTTPException(status_code=503, detail="Kavita did not start the login flow")
+        return _connect_failed()
 
     # Relaying the upstream Location unchecked would be an open redirect (M8):
     # confine it to the Authentik authorize endpoint (or Kavita itself).
     if not _location_allowed(location, base):
         logger.warning("Kavita /oidc/login redirected to an unexpected origin")
-        raise HTTPException(status_code=503, detail="Kavita login redirected somewhere unexpected")
+        return _connect_failed()
 
     location = force_query_response_mode(location)
     response = RedirectResponse(location, status_code=302)

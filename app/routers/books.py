@@ -319,7 +319,7 @@ async def library(request: Request,
     formats}. `format` keeps the books that have it (a book in both still
     lists both badges).
 
-    `building` is true only for an empty first page of the whole library while
+    `building` is true only for an empty first page (whatever the format) while
     the catalog itself is empty and has never been built or is being built
     now: the page says it is being put together instead of "no books"."""
     after = _decode_cursor(cursor, sort) if cursor else None
@@ -330,7 +330,7 @@ async def library(request: Request,
     page = cards[:limit]
     more = len(cards) > limit
     building = False
-    if not page and after is None and format == "all":
+    if not page and after is None:
         status_ = await book_catalog.catalog_status()
         building = status_["counts"]["books"] == 0 and (status_["running"] or status_["last_ok_at"] is None)
     return {"items": [card for _key, card in page],

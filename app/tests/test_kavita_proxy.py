@@ -169,5 +169,70 @@ class HandshakeLandsOnBooks(unittest.TestCase):
         self.update.assert_called_once()
 
 
+class _DownKavita(_FakeKavita):
+    async def get(self, *args, **kwargs):
+        import httpx
+        raise httpx.ConnectError("down")
+
+
+class _SilentKavita(_FakeKavita):
+    """Answers /oidc/login without a redirect."""
+    async def get(self, *args, **kwargs):
+        r = _FakeResponse({})
+        r.headers = {}
+        return r
+
+
+class _ElsewhereKavita(_FakeKavita):
+    async def get(self, *args, **kwargs):
+        r = _FakeResponse({})
+        r.headers = {"location": "https://evil.example/authorize"}
+        return r
+
+
+@unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
+class ConnectFailureLandsOnBooks(unittest.TestCase):
+    """The hand-off that cannot start sends the person back to Books with the
+    failure flag (which stops it asking again), not to a raw 503 that would
+    lose what Books already shows."""
+
+    def setUp(self):
+        from app.tests import helpers
+        self.helpers = helpers
+        self.Session = helpers.make_sessionmaker()
+        self.setup_patch = mock.patch("app.routers.setup.is_setup_completed", return_value=True)
+        self.setup_patch.start()
+        helpers.set_rate_limits(False)
+
+    def tearDown(self):
+        self.helpers.reset_overrides()
+        self.setup_patch.stop()
+        self.helpers.set_rate_limits(True)
+
+    def connect(self, fake):
+        client = self.helpers.api_client(self.Session, self.helpers.MEMBER)
+        with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=KAVITA), \
+             mock.patch.object(kavita_proxy.httpx, "AsyncClient", fake):
+            return client.get("/kavita/connect", follow_redirects=False)
+
+    def test_kavita_not_answering(self):
+        r = self.connect(_DownKavita)
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/books?kavita=error"))
+
+    def test_no_redirect_from_the_login(self):
+        r = self.connect(_SilentKavita)
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/books?kavita=error"))
+
+    def test_a_redirect_to_another_origin(self):
+        r = self.connect(_ElsewhereKavita)
+        self.assertEqual((r.status_code, r.headers["location"]), (302, "/books?kavita=error"))
+
+    def test_not_configured_is_still_a_503(self):
+        client = self.helpers.api_client(self.Session, self.helpers.MEMBER)
+        with mock.patch.object(kavita_proxy, "kavita_url_for", return_value=None):
+            r = client.get("/kavita/connect", follow_redirects=False)
+        self.assertEqual(r.status_code, 503)
+
+
 if __name__ == "__main__":
     unittest.main()

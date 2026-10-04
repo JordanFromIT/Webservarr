@@ -206,8 +206,13 @@ class Library(BooksBase):
         self.assertIs(self.ok("/api/books")["building"], True)
         self.stage(0, running=True)                                      # a rebuild is running now
         self.assertIs(self.ok("/api/books")["building"], True)
-        # Only the whole library's first page can be "building": not a filter, not a later page.
-        self.assertIs(self.ok("/api/books", format="ebook")["building"], False)
+        # Every format says so on its first page (a chip tapped during the first build must not look empty)...
+        self.assertIs(self.ok("/api/books", format="ebook")["building"], True)
+        self.assertIs(self.ok("/api/books", format="audio")["building"], True)
+        # ...but a later page never does, and a built catalog never does.
+        cursor = base64.urlsafe_b64encode("\x00".join(["added", "0", "", "b:1"]).encode()).decode().rstrip("=")
+        self.assertIs(self.ok("/api/books", cursor=cursor)["building"], False)
+        self.stage(0)
         self.assertIs(self.ok("/api/books", format="audio")["building"], False)
 
     def test_a_caller_who_sees_nothing_of_a_built_catalog_is_not_told_it_is_building(self):

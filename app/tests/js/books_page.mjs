@@ -144,6 +144,9 @@ function fakeShell(win, doc, clock, net) {
       });
     },
     leaveTo(url) { WS.left.push(url); },
+    dropCache(prefix) { for (const k of Array.from(store.keys())) if (k.indexOf(prefix) === 0) store.delete(k); },
+    drags: [],
+    dragScroll(el, opts) { WS.drags.push({ el, opts }); },
     left: [],
     cache: store
   };
@@ -198,6 +201,7 @@ function visit(o = {}) {
   set('IntersectionObserver', o.IntersectionObserver);
   set('WS', WS);
   win.WS = WS;
+  if (o.branding) WS.data.branding = o.branding;
   win.WSUI = { toast(m, kind) { toasts.push([m, kind]); } };
   set('WSUI', win.WSUI);
   if (o.kavita !== false) {
@@ -428,6 +432,7 @@ await run('the next page loads as the button nears the screen, when the browser 
   class FakeIO {
     constructor(cb, opts) { this.cb = cb; this.opts = opts; this.watched = []; this.gone = false; observers.push(this); }
     observe(n) { this.watched.push(n); }
+    unobserve() {}
     disconnect() { this.gone = true; }
   }
   const t = make({ IntersectionObserver: FakeIO, routes: (net) => {
@@ -813,6 +818,144 @@ await run('a visit comes back from the cache at once and corrects itself', async
   await m;
   await t.clock.advance(20);
   check('then the fresh one', t.cards('libraryGrid').length === 1);
+});
+
+// ---- Fix round 1 ----
+
+await run('T3H2: the Continue row is dragged by a mouse and a wheel moves it sideways', async (make) => {
+  const many = Array.from({ length: 12 }, (_, i) => Object.assign({}, CONT[1], { book_id: 100 + i, title: 'Book ' + i, resume: { plex_book_key: i + ':1' } }));
+  const t = make({ routes: usual({ continue: { items: many, notes: [] } }) });
+  await t.mount();
+  const row = t.q('#continueHost ul');
+  check('the row was handed to the shell\'s drag-to-scroll with the visit\'s signal', t.WS.drags.length === 1 && t.WS.drags[0].el === row && t.WS.drags[0].opts.signal === t.ctl.signal);
+  Object.defineProperty(row, 'scrollWidth', { value: 2000, configurable: true });
+  Object.defineProperty(row, 'clientWidth', { value: 1000, configurable: true });
+  const wheel = (init) => { const e = new t.win.WheelEvent('wheel', Object.assign({ bubbles: true, cancelable: true }, init)); if (init.shiftKey) Object.defineProperty(e, 'shiftKey', { value: true }); row.dispatchEvent(e); return e; };
+  row.scrollLeft = 0;
+  let e = wheel({ deltaY: 300 });
+  check('a vertical wheel moves it sideways and the page does not scroll', row.scrollLeft === 300 && e.defaultPrevented, row.scrollLeft);
+  e = wheel({ deltaY: 5000 });
+  check('as far as the end', row.scrollLeft === 1000 && e.defaultPrevented);
+  e = wheel({ deltaY: 300 });
+  check('at the end the wheel is the page\'s again', !e.defaultPrevented && row.scrollLeft === 1000);
+  row.scrollLeft = 500;
+  e = wheel({ deltaY: -9000 });
+  check('and back to the start', row.scrollLeft === 0 && e.defaultPrevented);
+  e = wheel({ deltaY: -300 });
+  check('where it is the page\'s again', !e.defaultPrevented);
+  e = wheel({ deltaX: 200, deltaY: 10 });
+  check('a sideways swipe is left to the browser', !e.defaultPrevented);
+  e = wheel({ deltaY: 100, shiftKey: true });
+  check('so is shift + wheel', !e.defaultPrevented);
+  Object.defineProperty(row, 'scrollWidth', { value: 900, configurable: true });
+  e = wheel({ deltaY: 100 });
+  check('a row that fits scrolls nothing and never takes the wheel', !e.defaultPrevented);
+  t.ctl.abort();
+  row.scrollLeft = 0;
+  Object.defineProperty(row, 'scrollWidth', { value: 2000, configurable: true });
+  e = wheel({ deltaY: 100 });
+  check('leaving the page ends it', !e.defaultPrevented && row.scrollLeft === 0);
+});
+
+await run('T3H3: a fresh page 1 over the kept copy drops a next page asked for meanwhile', async (make) => {
+  const B = (i) => ebook(i, 'Book ' + i, 'A');
+  const range = (a, b) => Array.from({ length: b - a + 1 }, (_, k) => B(a + k));
+  for (const variant of ['io-only', 'io-then-click']) {
+    const observers = [];
+    // As a browser's: observing reports where the element is now.
+    class FakeIO { constructor(cb) { this.cb = cb; observers.push(this); } observe() { Promise.resolve().then(() => this.cb([{ isIntersecting: true }])); } unobserve() {} disconnect() {} }
+    const fresh = deferred(); const old = deferred(); const newer = deferred();
+    const t = make({ IntersectionObserver: FakeIO, routes: (net) => {
+      net.on('/api/books/continue', () => ({ body: { items: [], notes: [] } }));
+      net.on('/api/books?', (url) => url.indexOf('cursor=c36') !== -1 ? old.promise : url.indexOf('cursor=c35') !== -1 ? newer.promise : fresh.promise);
+    } });
+    t.WS.cache.set('books:list:all:added', { items: range(1, 36), next_cursor: 'c36', notes: [], building: false });
+    t.WS.cache.set('books:continue', { items: [], notes: [] });
+    const m = t.mount();
+    await flush();
+    fresh.resolve({ body: { items: [ebook(99, 'New Book', 'A')].concat(range(1, 35)), next_cursor: 'c35', notes: [], building: false } });
+    await t.clock.advance(400);
+    if (variant === 'io-then-click') { t.click('#moreBtn'); await flush(); }
+    old.resolve({ body: { items: range(37, 40), next_cursor: null, notes: [] } });
+    newer.resolve({ body: { items: range(36, 40), next_cursor: null, notes: [] } });
+    await t.clock.advance(2000);
+    await m;
+    const ids = t.cards('libraryGrid').map((a) => a.querySelector('span.line-clamp-2').textContent);
+    const dupes = ids.filter((x, i) => ids.indexOf(x) !== i);
+    const missing = range(1, 40).map((b) => b.title).filter((x) => ids.indexOf(x) === -1);
+    check(variant + ': nothing twice, nothing missing', dupes.length === 0 && missing.length === 0 && ids.length === 41, { dupes, missing, n: ids.length });
+  }
+});
+
+await run('T3H4: a chip tapped while the catalog is first built shows building and is not kept', async (make) => {
+  let building = true;
+  const t = make({ routes: (net) => {
+    usual()(net);
+    net.on('/api/books?', () => ({ body: building ? { items: [], next_cursor: null, notes: [], building: true } : { items: [audio(3, 'The Hobbit', 'Tolkien')], next_cursor: null, notes: [], building: false } }));
+  } });
+  await t.mount();
+  check('All: building, polling', !t.hidden('#buildingState') && t.polls.filter((p) => !p.stopped).length === 1);
+  check('nothing is saved as this person\'s view', t.win.localStorage.getItem('webservarr_books_view:sam') === null, t.win.localStorage.getItem('webservarr_books_view:sam'));
+  t.click('#formatChips [data-format="audio"]');
+  await t.clock.advance(50);
+  check('Audiobooks: building too, not "no audiobooks"', !t.hidden('#buildingState') && t.hidden('#emptyState'));
+  check('one poll again after the chip', t.polls.filter((p) => !p.stopped).length === 1);
+  check('the empty answer is not kept for the next visit', !t.WS.cache.has('books:list:audio:added') && !t.WS.cache.has('books:list:all:added'), Array.from(t.WS.cache.keys()));
+  check('still nothing saved', t.win.localStorage.getItem('webservarr_books_view:sam') === null);
+  building = false;
+  t.polls.filter((p) => !p.stopped)[0].fn();
+  await t.clock.advance(50);
+  check('when the books arrive they show, and the view is kept then', t.cards('libraryGrid').length === 1 && t.win.localStorage.getItem('webservarr_books_view:sam') === '{"format":"audio","sort":"added"}');
+});
+
+await run('T3H5: the toolbar, notes, connect message and Continue come in one write with the books', async (make) => {
+  const lib = deferred();
+  const down = [{ source: 'kavita', reason: 'unavailable', text: 'Ebooks are unavailable right now' }];
+  const t = make({ routes: (net) => {
+    usual({ continue: { items: CONT, notes: down } })(net);
+    net.on('/api/books?', () => lib.promise);
+  } });
+  t.kav.blockNext = true;
+  const m = t.mount();
+  await t.clock.advance(100);
+  check('before the books: the toolbar is its skeleton, the real one waits', !t.hidden('#toolbarSkel') && t.hidden('#toolbar'));
+  check('Continue has not moved in (its slot, if any, is untouched)', !!t.q('#continueHost .skel') && !t.q('#continueHost [data-continue]') && !t.doc.documentElement.hasAttribute('data-books-continue'));
+  check('and no notes or connect message have appeared', t.hidden('#notes') && t.hidden('#connectState'));
+  lib.resolve({ body: { items: SHELF, next_cursor: null, notes: down.concat(NOT_CONNECTED), building: false } });
+  await t.clock.advance(100);
+  await m;
+  check('with the books: toolbar, notes, connect message and Continue all there', t.hidden('#toolbarSkel') && !t.hidden('#toolbar') && !t.hidden('#notes') && !t.hidden('#connectState') && !!t.q('#continueHost [data-continue]') && t.doc.documentElement.hasAttribute('data-books-continue'));
+  check('all of it sits above the books in the library section', (() => { const sec = t.q('#librarySection'); const kids = Array.from(sec.children).map((c) => c.id); return kids.indexOf('toolbar') < kids.indexOf('connectState') && kids.indexOf('connectState') < kids.indexOf('notes') && kids.indexOf('notes') < kids.indexOf('libraryGrid'); })());
+  // A library that never answers does not keep the page a skeleton for ever.
+  const never = deferred();
+  const u = make({ routes: (net) => { usual()(net); net.on('/api/books?', () => never.promise); } });
+  u.mount();
+  await u.clock.advance(3900);
+  check('4 s: still waiting', !u.hidden('#toolbarSkel'));
+  await u.clock.advance(200);
+  check('after 4 s the controls and Continue come in anyway', u.hidden('#toolbarSkel') && !u.hidden('#toolbar'));
+  // The error path is a write of its own too.
+  const v = make({ routes: usual({ library: () => ({ status: 503, body: {} }) }) });
+  await v.mount();
+  check('an error brings the toolbar in with its message', !v.hidden('#toolbar') && !v.hidden('#errorState'));
+});
+
+await run('T3H6: with the Seerr embed as the Requests source there is no request link', async (make) => {
+  const t = make({ branding: { requests_source: 'seerr_embed' }, routes: usual() });
+  await t.mount();
+  t.type('zzzz');
+  await t.clock.advance(350);
+  check('the empty search says it is not in the library, with no link', t.text('#searchEmptyTitle') === 'Not in the library yet' && t.q('#searchRequest').classList.contains('hidden'), t.text('#searchEmptyTitle'));
+  check('and the words name the search, without telling them to ask', /zzzz/.test(t.text('#searchEmptyText')) && !/ask/i.test(t.text('#searchEmptyText')));
+  const u = make({ branding: { requests_source: 'seerr_embed' }, routes: usual({ library: () => ({ body: { items: [], next_cursor: null, notes: [], building: false } }) }) });
+  await u.mount();
+  check('an empty library has no Request a book either', u.q('#emptyRequest').classList.contains('hidden') && !/request/i.test(u.text('#emptyText')));
+  // And the usual source still has them.
+  const v = make({ branding: { requests_source: 'native' }, routes: usual() });
+  await v.mount();
+  v.type('zzzz');
+  await v.clock.advance(350);
+  check('native Requests keeps the link', !v.q('#searchRequest').classList.contains('hidden') && v.text('#searchEmptyTitle') === 'No books match “zzzz”');
 });
 
 // ---- Markup safety ----

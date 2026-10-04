@@ -213,6 +213,19 @@ export function renderContinueRow(items, notes, opts) {
     li.appendChild(continueCard(item, !!o.compact, o.signal));
     row.appendChild(li);
   });
+  // A mouse drags the row, and a plain wheel moves it sideways until it can go
+  // no further (then the page scrolls on); a trackpad's sideways swipe and a
+  // finger already work natively.
+  if (window.WS && typeof window.WS.dragScroll === 'function') window.WS.dragScroll(row, { signal: o.signal });
+  row.addEventListener('wheel', function (e) {
+    if (e.ctrlKey || e.shiftKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    const max = row.scrollWidth - row.clientWidth;
+    if (max <= 1) return;
+    const next = clamp(row.scrollLeft + (e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY), 0, max);
+    if (next === row.scrollLeft) return;
+    row.scrollLeft = next;
+    e.preventDefault();
+  }, { passive: false, signal: o.signal });
   section.appendChild(row);
   const seen = {};
   (notes || []).forEach(function (n) {
@@ -241,7 +254,13 @@ export async function mount(ctx) {
     cursor: null, moreBusy: false,
     notes: { library: [], continue: [] },
     reconnectTried: false, connectProblem: false,
-    stopBuildingPoll: null
+    stopBuildingPoll: null,
+    // The first books drawn: the toolbar, the notes and Continue are written
+    // in that one frame (commitFrame), so nothing already on screen moves.
+    committed: false, pendingContinue: null,
+    // Counts every redraw of page 1, so a next page asked for before one is dropped.
+    renderGen: 0, building: false,
+    embed: ((ctx.data || {}).branding || {}).requests_source === 'seerr_embed'
   };
 
   // ---- What the last visit left ----
@@ -300,7 +319,8 @@ export async function mount(ctx) {
   function showConnectProblem() {
     if (signal.aborted) return;
     state.connectProblem = true;
-    $('connectState').classList.remove('hidden');
+    // Before the first books are drawn it waits for commitFrame.
+    if (state.committed) $('connectState').classList.remove('hidden');
     renderNotes();
   }
 
@@ -315,6 +335,7 @@ export async function mount(ctx) {
   }
 
   function renderNotes() {
+    if (!state.committed) return;
     const box = $('notes');
     box.textContent = '';
     const seen = {};
@@ -348,16 +369,40 @@ export async function mount(ctx) {
 
   // ---- Continue ----
 
+  /** The one write that brings in everything above the books: the toolbar
+      (until then its skeleton), the connect message, the notes and Continue.
+      Everything under them is replaced in the same frame, so nothing that was
+      already on screen moves, with or without a Continue row, notes or a
+      failed sign-in. */
+  function commitFrame() {
+    if (state.committed) return;
+    state.committed = true;
+    $('toolbarSkel').classList.add('hidden');
+    $('toolbar').classList.remove('hidden');
+    $('connectState').classList.toggle('hidden', !state.connectProblem);
+    renderNotes();
+    applyContinue();
+  }
+
+  function applyContinue() {
+    const held = state.pendingContinue;
+    if (!held) return;
+    state.pendingContinue = null;
+    const host = $('continueHost');
+    host.textContent = '';
+    host.setAttribute('aria-busy', 'false');
+    if (held.row) host.appendChild(held.row);
+    markContinue(!!held.row);
+  }
+
   function renderContinue(data, fromCache, failed) {
     if (signal.aborted) return;
-    const host = $('continueHost');
     const items = (data && Array.isArray(data.items)) ? data.items : [];
     setNotes('continue', data && data.notes);
     const row = renderContinueRow(items, [], { signal: signal });
-    host.textContent = '';
-    host.setAttribute('aria-busy', 'false');
-    if (row) host.appendChild(row);
-    markContinue(!!row);
+    // Shown with the first books (commitFrame), or at once when they are already in.
+    state.pendingContinue = { row: row };
+    if (state.committed) applyContinue();
     if (!fromCache && !failed) storageSet(CONTINUE_KEY + user, row ? '1' : '0');
   }
 
@@ -415,7 +460,13 @@ export async function mount(ctx) {
     btn.disabled = false;
     btn.textContent = 'Show more';
     $('moreWrap').classList.toggle('hidden', !state.cursor);
+    // A watcher only reports a change; asking it again reports where the button
+    // is now, so a page that was dropped (or one that left the button still in
+    // reach) is followed by the next.
+    if (state.cursor && watcher) { watcher.unobserve($('moreWrap')); watcher.observe($('moreWrap')); }
   }
+
+  let watcher = null;
 
   function stopBuildingPoll() {
     if (state.stopBuildingPoll) { state.stopBuildingPoll(); state.stopBuildingPoll = null; }
@@ -432,32 +483,42 @@ export async function mount(ctx) {
       title = 'No books to show right now';
       text = 'Check back in a moment.';
     }
+    if (state.embed && !filtered && !hasNotes) text = 'Books show up here once they’re added.';
     $('emptyTitle').textContent = title;
     $('emptyText').textContent = text;
     $('emptyReset').classList.toggle('hidden', !filtered);
-    $('emptyRequest').classList.toggle('hidden', filtered);
+    // Requests is Seerr's own page then, which cannot ask for a book.
+    $('emptyRequest').classList.toggle('hidden', filtered || state.embed);
     showBody('emptyState');
   }
 
   function renderLibrary(data) {
     if (signal.aborted) return;
+    commitFrame();
+    state.renderGen++;
     const items = (data && Array.isArray(data.items)) ? data.items : [];
     setNotes('library', data && data.notes);
     $('libraryGrid').textContent = '';
+    state.building = false;
     if (items.length) {
       stopBuildingPoll();
+      saveView();
       appendCards($('libraryGrid'), items);
       showBody('libraryGrid');
       setMore(data.next_cursor);
       return;
     }
     if (data && data.building) {
+      // Not saved as this person's view, and not kept by the cache: an empty
+      // answer from a first build is not what the chip looks like.
+      state.building = true;
       showBody('buildingState');
       // A catalog still being built: look again every few seconds, on the visit's poll.
       if (!state.stopBuildingPoll) state.stopBuildingPoll = ctx.poll(function () { loadLibrary(true); }, BUILDING_POLL_MS);
       return;
     }
     stopBuildingPoll();
+    saveView();
     showEmpty(state.notes.library.length > 0);
   }
 
@@ -468,6 +529,7 @@ export async function mount(ctx) {
 
   function failedLibrary(err) {
     if (quiet(err)) return;
+    commitFrame();
     showBody('errorState');
   }
 
@@ -499,6 +561,9 @@ export async function mount(ctx) {
         if (gen !== state.gen || quiet(err)) return;
         WS.arrive('library', function () { failedLibrary(err); });
       }
+    }).then(function () {
+      // swr keeps every answer it draws; an empty one from a first build is not worth keeping.
+      if (gen === state.gen && state.building && typeof WS.dropCache === 'function') WS.dropCache('books:list:');
     });
   }
 
@@ -506,15 +571,18 @@ export async function mount(ctx) {
     if (state.moreBusy || !state.cursor || signal.aborted) return;
     state.moreBusy = true;
     const gen = state.gen;
+    const page = state.renderGen;
     const btn = $('moreBtn');
     btn.disabled = true;
     btn.textContent = 'Loading…';
     WS.getJSON(libraryUrl(state.cursor), { signal: signal }).then(function (data) {
-      if (gen !== state.gen || signal.aborted) return;
+      // Page 1 was drawn again meanwhile (a fresh answer over the kept copy):
+      // this page followed the old one and would repeat or skip books.
+      if (gen !== state.gen || page !== state.renderGen || signal.aborted) return;
       appendCards($('libraryGrid'), (data && Array.isArray(data.items)) ? data.items : []);
       setMore(data && data.next_cursor);
     }, function (err) {
-      if (gen !== state.gen || quiet(err)) return;
+      if (gen !== state.gen || page !== state.renderGen || quiet(err)) return;
       // The button stays, to try again.
       state.moreBusy = false;
       btn.disabled = false;
@@ -527,7 +595,6 @@ export async function mount(ctx) {
     state.format = format;
     state.sort = sort;
     syncControls();
-    saveView();
     stopBuildingPoll();
     loadLibrary(false);
   }
@@ -585,8 +652,17 @@ export async function mount(ctx) {
         return;
       }
       setStatus('No matches', true);
-      $('searchEmptyTitle').textContent = 'No books match “' + query + '”';
-      $('searchRequest').href = requestHref(data, query);
+      if (state.embed) {
+        // Requests is Seerr's own page, which cannot ask for a book and drops the search.
+        $('searchEmptyTitle').textContent = 'Not in the library yet';
+        $('searchEmptyText').textContent = 'No books match “' + query + '”. Check the spelling.';
+        $('searchRequest').classList.add('hidden');
+      } else {
+        $('searchEmptyTitle').textContent = 'No books match “' + query + '”';
+        $('searchEmptyText').textContent = 'Check the spelling, or ask for it.';
+        $('searchRequest').classList.remove('hidden');
+        $('searchRequest').href = requestHref(data, query);
+      }
       showSearchPart('searchEmpty');
     }, function (err) {
       if (gen !== state.searchGen || quiet(err)) return;
@@ -629,7 +705,7 @@ export async function mount(ctx) {
   // The next page comes in as the button nears the screen; the button is
   // still there for a keyboard or a browser without the observer.
   if (typeof IntersectionObserver === 'function') {
-    const watcher = new IntersectionObserver(function (entries) {
+    watcher = new IntersectionObserver(function (entries) {
       if (entries.some(function (e) { return e.isIntersecting; })) loadMore();
     }, { rootMargin: '600px 0px' });
     watcher.observe($('moreWrap'));
@@ -649,6 +725,8 @@ export async function mount(ctx) {
   if (window.WSKavita && typeof window.WSKavita.arrivedFromFailedConnect === 'function') window.WSKavita.arrivedFromFailedConnect();
 
   const first = Promise.all([loadContinue(), loadLibrary(false)]);
+  // A library that never answers does not keep the toolbar a skeleton for ever.
+  ctx.setTimeout(commitFrame, 4000);
 
   // The sections are on screen (or their skeletons, which have their shape)
   // before mount resolves, so Back and Forward restore the scroll onto them. A
