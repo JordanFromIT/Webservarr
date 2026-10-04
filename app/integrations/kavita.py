@@ -4,8 +4,10 @@ Kavita, read by the server for the Books catalog.
 app/routers/kavita_proxy.py is the browser's way into Kavita and acts as the
 signed-in person. This is the server's own read of the whole library, made
 with one API key (setting integration.kavita.api_key): it exchanges the key
-for a short-lived token, lists every series and reads each one's metadata for
-its author and summary.
+for a short-lived token, lists every series and reads each one's volumes and
+chapters. A series can hold many books, so the unit it gives is the book: a
+volume, or a chapter where Kavita keeps a standalone book as one. Author,
+title and summary come from the book's own chapter metadata.
 
 The key travels in the query string of the one exchange call (Kavita's
 Plugin/authenticate takes it nowhere else), so no error raised here carries a
@@ -34,6 +36,8 @@ TIMEOUT = 20.0
 PAGE_SIZE = 200
 MAX_PAGES = 500              # a runaway Pagination header can't keep the loop going
 METADATA_CONCURRENCY = 5     # Kavita is one small server across the tunnel
+LOOSE_NUMBER = 100000        # Kavita numbers loose chapters -100000 and specials 100000
+PLACEHOLDER_WRITERS = {"authors_sort", "author_sort"}   # calibre artefacts, not people
 PLUGIN_NAME = "WebServarr"
 
 _TAGS = re.compile(r"<[^>]*>")
@@ -67,8 +71,8 @@ def plain_text(value) -> str:
 
 
 def _when(value) -> Optional[datetime]:
-    """Kavita's naive timestamp; it is its server's own clock and, for the
-    catalog's "recently added" order, close enough to UTC."""
+    """A Kavita timestamp as a naive datetime. The createdUtc fields are UTC;
+    the plain ones are the server's own clock, which is as good for ordering."""
     try:
         return datetime.fromisoformat(str(value)).replace(tzinfo=None)
     except ValueError:
@@ -126,40 +130,117 @@ async def _all_series(client: httpx.AsyncClient, base: str, headers: dict) -> li
     return series
 
 
-async def list_series() -> list:
-    """Every series in every Kavita library:
-    [{id, library_id, title, sort_title, author, description, added_at}].
+def _authors(writers) -> str:
+    """The author from a list of Kavita writers (people with the Writer role):
+    the first one, or "" when there is none worth naming. Two things in what
+    Kavita holds are not names: the calibre placeholder "authors_sort", and a
+    "Last, First" author that Kavita has split at the comma into two writers
+    ("Maas", "Sarah J."), which is put back together as "Sarah J. Maas"."""
+    names = []
+    for w in writers or []:
+        name = str(w.get("name") or "").strip() if isinstance(w, dict) else ""
+        if name and name.casefold() not in PLACEHOLDER_WRITERS:
+            names.append(name)
+    if len(names) == 2 and " " not in names[0] and (" " in names[1] or names[1].endswith(".")):
+        return f"{names[1]} {names[0]}"
+    return names[0] if names else ""
 
-    `author` is the series' first writer ("" when it has none), `description`
-    its summary as plain text and `added_at` a naive datetime (None when
-    Kavita gives none). Raises KavitaUnavailable."""
+
+def _numbered(volume: dict) -> bool:
+    """A real volume (1, 2, ...), as opposed to Kavita's holders for loose
+    chapters (-100000) and specials (100000)."""
+    number = volume.get("minNumber")
+    return isinstance(number, (int, float)) and not isinstance(number, bool) and abs(number) < LOOSE_NUMBER
+
+
+def _book_units(detail: dict) -> list:
+    """[(volume or None, chapter)] for one series, one per book. A numbered
+    volume is one book (its first chapter is the one that is read); a book
+    Kavita keeps as a chapter outside a numbered volume (a loose chapter or a
+    special, which is how a standalone book is usually held) is one book
+    each."""
+    units, seen = [], set()
+
+    def add(volume, chapter):
+        if isinstance(chapter, dict) and isinstance(chapter.get("id"), int) and chapter["id"] not in seen:
+            seen.add(chapter["id"])
+            units.append((volume, chapter))
+
+    for volume in detail.get("volumes") or []:
+        if not isinstance(volume, dict):
+            continue
+        chapters = [c for c in volume.get("chapters") or [] if isinstance(c, dict) and isinstance(c.get("id"), int)]
+        if _numbered(volume) and chapters:
+            add(volume, chapters[0])
+            seen.update(c["id"] for c in chapters)
+        else:
+            for chapter in chapters:
+                add(None, chapter)
+    for part in ("specials", "chapters", "storylineChapters"):
+        for chapter in detail.get(part) or []:
+            add(None, chapter)
+    return units
+
+
+async def list_books() -> list:
+    """Every book in every Kavita library, one per volume (or per chapter
+    where Kavita holds a standalone book as a chapter):
+    [{id, series_id, volume_id, library_id, title, sort_title, author, series,
+    series_number, description, added_at}].
+
+    `id` is the chapter that is read (a volume's first), the id the catalog
+    follows and the reader opens; `volume_id` is None for a book that is not
+    a numbered volume. `series` is the Kavita series name ("" for a series
+    that is just this book), `series_number` the volume number (None when it
+    has none), `author` the first writer of the book, else of its series
+    ("" when none, see _authors), `description` the summary as plain text and
+    `added_at` a naive UTC datetime (None when Kavita gives none). Raises
+    KavitaUnavailable."""
     base, key = _config()
     async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
         headers = {"Authorization": f"Bearer {await _token(client, base, key)}"}
-        series = await _all_series(client, base, headers)
         gate = asyncio.Semaphore(METADATA_CONCURRENCY)
 
-        async def metadata(item: dict) -> dict:
+        async def get(path: str, **params):
             async with gate:
-                data, _ = await _get_json(client, "GET", f"{base}/api/Series/metadata", headers,
-                                          params={"seriesId": item["id"]})
+                data, _ = await _get_json(client, "GET", f"{base}{path}", headers, params=params)
             return data if isinstance(data, dict) else {}
 
-        metas = await asyncio.gather(*(metadata(s) for s in series), return_exceptions=True)
-    for meta in metas:
-        if isinstance(meta, BaseException):
-            raise meta
-    books = []
-    for item, meta in zip(series, metas):
-        writers = [w.get("name") for w in (meta.get("writers") or []) if isinstance(w, dict) and w.get("name")]
-        title = str(item.get("name") or "").strip()
-        books.append({
-            "id": item["id"],
-            "library_id": item.get("libraryId") if isinstance(item.get("libraryId"), int) else None,
-            "title": title,
-            "sort_title": str(item.get("sortName") or "").strip() or title,
-            "author": str(writers[0]).strip() if writers else "",
-            "description": plain_text(meta.get("summary")),
-            "added_at": _when(item.get("created")),
-        })
-    return books
+        async def books_of(series: dict) -> list:
+            detail = await get("/api/Series/series-detail", seriesId=series["id"])
+            units = _book_units(detail)
+            chapters = await asyncio.gather(*(get("/api/Series/chapter", chapterId=c["id"]) for _, c in units))
+            authors = [_authors(c.get("writers")) for c in chapters]
+            if units and not all(authors):
+                # A book that names no writer takes its series'.
+                fallback = _authors((await get("/api/Series/metadata", seriesId=series["id"])).get("writers"))
+                authors = [a or fallback for a in authors]
+            name = str(series.get("name") or "").strip()
+            library = series.get("libraryId") if isinstance(series.get("libraryId"), int) else None
+            out = []
+            for (volume, unit), chapter, author in zip(units, chapters, authors):
+                volume_name = str((volume or {}).get("name") or "").strip()
+                title = (str(chapter.get("titleName") or "").strip()
+                         or (volume_name if not volume_name.isdigit() else "") or name)
+                number = volume.get("minNumber") if volume else None
+                out.append({
+                    "id": unit["id"],
+                    "series_id": series["id"],
+                    "volume_id": volume["id"] if volume and isinstance(volume.get("id"), int) else None,
+                    "library_id": library,
+                    "title": title,
+                    "sort_title": title,
+                    "author": author,
+                    "series": "" if name.casefold() == title.casefold() else name,
+                    "series_number": number if _numbered(volume or {}) else None,
+                    "description": plain_text(chapter.get("summary")),
+                    "added_at": _when(chapter.get("createdUtc")) or _when(chapter.get("created")),
+                })
+            return out
+
+        series = await _all_series(client, base, headers)
+        results = await asyncio.gather(*(books_of(s) for s in series), return_exceptions=True)
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+    return [book for books in results for book in books]

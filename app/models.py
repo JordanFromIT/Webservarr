@@ -414,13 +414,13 @@ class Book(Base):
     or both as one entry. Rebuilt from the two sources by
     app/services/book_catalog.py; nothing per person is kept here.
 
-    A row keeps its id while its Kavita id or Plex key is unchanged. When two
+    A row keeps its id while its Kavita chapter id or Plex key is unchanged. When two
     rows become one, the losing row stays with merged_into set to the
     survivor, so an old link still finds the book, and a later split revives
     it. Only rows with merged_into null are live books."""
     __tablename__ = "books"
     __table_args__ = (
-        Index("ix_books_kavita_series_id", "kavita_series_id"),
+        Index("ix_books_kavita_chapter_id", "kavita_chapter_id"),
         Index("ix_books_plex_book_key", "plex_book_key"),
         Index("ix_books_merged_into", "merged_into"),
     )
@@ -434,6 +434,12 @@ class Book(Base):
     series = Column(String(200), nullable=False, default="")
     series_number = Column(Float, nullable=True)
     description = Column(Text, nullable=False, default="")
+    # The ebook is one book in Kavita: a numbered volume, or a chapter where
+    # Kavita keeps a standalone book as one. The chapter is the one that is
+    # read (a volume's first) and what the catalog follows; the volume is
+    # null for a book that is not a numbered volume.
+    kavita_chapter_id = Column(Integer, nullable=True)
+    kavita_volume_id = Column(Integer, nullable=True)
     kavita_series_id = Column(Integer, nullable=True)
     kavita_library_id = Column(Integer, nullable=True)
     plex_book_key = Column(String(64), nullable=True)               # album or album:disc, as the player uses
@@ -449,24 +455,25 @@ class Book(Base):
 
 
 class BookPairOverride(Base):
-    """An admin's decision about one Kavita series and one Plex book: `pair`
+    """An admin's decision about one Kavita book (its chapter id, see Book)
+    and one Plex book: `pair`
     joins them whatever their work keys say, `apart` keeps them separate even
     when the keys match. Always wins, and survives every rebuild."""
     __tablename__ = "book_pair_overrides"
     __table_args__ = (
-        UniqueConstraint("kavita_series_id", "plex_book_key", name="uq_book_pair_overrides_pair"),
+        UniqueConstraint("kavita_chapter_id", "plex_book_key", name="uq_book_pair_overrides_pair"),
         CheckConstraint("action IN ('pair', 'apart')", name="ck_book_pair_overrides_action"),
     )
 
     id = Column(Integer, primary_key=True)
-    kavita_series_id = Column(Integer, nullable=False)
+    kavita_chapter_id = Column(Integer, nullable=False)
     plex_book_key = Column(String(64), nullable=False)
     action = Column(String(8), nullable=False)
     created_by = Column(String(255), nullable=False, default="")
     created_at = Column(DateTime, nullable=False)                   # naive UTC
 
     def __repr__(self):
-        return f"<BookPairOverride({self.kavita_series_id}, '{self.plex_book_key}', '{self.action}')>"
+        return f"<BookPairOverride({self.kavita_chapter_id}, '{self.plex_book_key}', '{self.action}')>"
 
 
 class BookCatalogMeta(Base):

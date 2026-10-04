@@ -181,6 +181,31 @@ def migrate_listening_book_fields(db: Session) -> None:
             db.commit()
 
 
+def migrate_books_ebook_unit_v1(db: Session) -> None:
+    """One-time migration for databases that made the Books catalog tables
+    while its ebook unit was a whole Kavita series: books and
+    book_pair_overrides are remade, because the ebook is now one book (a
+    chapter id, see app/models.py Book) and SQLite can't change a NOT NULL
+    key column in place. The catalog is rebuilt from Kavita and Plex at the
+    next rebuild; the overrides table could hold nothing yet (no route wrote
+    to it before this change). Guarded by PRAGMA table_info, so it does
+    nothing on a fresh database or a second run; with two workers starting at
+    once, a worker that sees the new columns leaves the tables alone, and the
+    drop is IF EXISTS.
+    """
+    from sqlalchemy import text
+
+    columns = {row[1] for row in db.execute(text("PRAGMA table_info(books)"))}
+    if not columns or "kavita_chapter_id" in columns:
+        return
+    for table in ("book_pair_overrides", "books"):
+        db.execute(text(f"DROP TABLE IF EXISTS {table}"))
+    db.commit()
+    from app.database import create_tables
+    create_tables(db.get_bind())
+    logger.info("Remade the Books catalog tables for one ebook per book")
+
+
 LISTENING_CLAIMS_MARKER = "migration.listening_claims_v1"
 
 

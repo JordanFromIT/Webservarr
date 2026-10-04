@@ -13,10 +13,14 @@ A rebuild reads both sources first and writes once, in one transaction. A
 source that fails to read keeps its side of the catalog exactly as it was (its
 rows, their ids and counts); only a successful read removes what has gone.
 
-Ids. A book is found again by its Kavita id or its Plex key, never by title,
+The ebook side is one book in Kavita: a numbered volume, or a chapter where
+Kavita keeps a standalone book as one (never a whole series, which can hold a
+dozen books). Its id is the chapter that is read.
+
+Ids. A book is found again by its Kavita chapter id or its Plex key, never by title,
 so a book keeps its `books.id`. The audiobook's row is the one that is kept
 when a pair forms; the ebook's row stays behind as a ghost (merged_into set to
-the survivor, its Kavita id kept), so an old link still finds the book. When
+the survivor, its Kavita chapter id kept), so an old link still finds the book. When
 the pair splits, the ebook gets its ghost back (or a new row if it has none)
 and the audiobook keeps the row. Ghosts never show as books: only rows with
 merged_into null do.
@@ -56,13 +60,13 @@ ACTIONS = ("pair", "apart")
 _FIELD_LIMITS = (("title", 300), ("sort_title", 300), ("author", 200), ("narrator", 200),
                  ("series", 200), ("description", None))
 _COLUMNS = ("work_key", "title", "sort_title", "author", "narrator", "series", "series_number", "description",
-            "kavita_series_id", "kavita_library_id", "plex_book_key", "added_at", "ebook_added_at",
-            "audio_added_at", "cover_source", "merged_into")
+            "kavita_chapter_id", "kavita_volume_id", "kavita_series_id", "kavita_library_id", "plex_book_key",
+            "added_at", "ebook_added_at", "audio_added_at", "cover_source", "merged_into")
 
 
 @dataclass
 class _Item:
-    """One thing in a source: an ebook (side "k", id a Kavita series id) or an
+    """One thing in a source: an ebook (side "k", id a Kavita chapter id) or an
     audiobook (side "p", id a Plex book key). `fields` is None when the source
     could not be read: the item stands as its row has it."""
     side: str
@@ -93,17 +97,18 @@ async def _read(fetch, name: str) -> tuple:
         return None, f"{name} could not be read"
 
 
-def _ebook_item(series: dict) -> _Item:
+def _ebook_item(book: dict) -> _Item:
     key = None
-    if series["author"] and series["title"]:
+    if book["author"] and book["title"]:
         try:
-            key = plex_player.work_key(series["author"], series["title"])
+            key = plex_player.work_key(book["author"], book["title"])
         except Exception as exc:  # noqa: BLE001 - no key means no automatic pair, as for the player
             logger.warning("No work key could be made of an ebook's title: %s", type(exc).__name__)
-    return _Item("k", series["id"], key, {
-        "title": series["title"], "sort_title": series["sort_title"], "author": series["author"],
-        "narrator": "", "series": "", "series_number": None, "description": series["description"],
-        "added_at": series["added_at"], "library_id": series["library_id"],
+    return _Item("k", book["id"], key, {
+        "title": book["title"], "sort_title": book["sort_title"], "author": book["author"],
+        "narrator": "", "series": book["series"], "series_number": book["series_number"],
+        "description": book["description"], "added_at": book["added_at"],
+        "library_id": book["library_id"], "series_id": book["series_id"], "volume_id": book["volume_id"],
     })
 
 
@@ -119,19 +124,19 @@ def _audiobook_item(book: dict) -> _Item:
 # --- Pairing ------------------------------------------------------------------------
 
 def _effective_pairs(overrides: list) -> Dict[int, str]:
-    """{kavita_series_id: plex_book_key} for the `pair` overrides. An item is in
+    """{kavita_chapter_id: plex_book_key} for the `pair` overrides. An item is in
     at most one: where two overrides name the same item, the newer wins."""
     pairs: Dict[int, str] = {}
     taken: Dict[str, int] = {}
     for o in sorted((o for o in overrides if o.action == "pair"), key=lambda o: (o.created_at, o.id)):
-        old_key = pairs.pop(o.kavita_series_id, None)
+        old_key = pairs.pop(o.kavita_chapter_id, None)
         if old_key is not None:
             taken.pop(old_key, None)
         old_series = taken.pop(o.plex_book_key, None)
         if old_series is not None:
             pairs.pop(old_series, None)
-        pairs[o.kavita_series_id] = o.plex_book_key
-        taken[o.plex_book_key] = o.kavita_series_id
+        pairs[o.kavita_chapter_id] = o.plex_book_key
+        taken[o.plex_book_key] = o.kavita_chapter_id
     return pairs
 
 
@@ -139,7 +144,7 @@ def _groups(ebooks: Dict[int, _Item], audiobooks: Dict[str, _Item], overrides: l
     """Every book as (ebook or None, audiobook or None), paired as the
     overrides and then the work keys say."""
     pairs = _effective_pairs(overrides)
-    apart = {(o.kavita_series_id, o.plex_book_key) for o in overrides if o.action == "apart"}
+    apart = {(o.kavita_chapter_id, o.plex_book_key) for o in overrides if o.action == "apart"}
     groups: List[tuple] = []
     joined_e, joined_a = set(), set()
     for kavita_id, plex_key in sorted(pairs.items()):
@@ -210,12 +215,14 @@ def _fill(book: Book, ebook: Optional[_Item], audiobook: Optional[_Item], now: d
         return current if item.fields is None else item.fields.get("added_at")
 
     book.work_key = (audiobook or ebook).key
-    book.kavita_series_id = ebook.id if ebook else None
+    book.kavita_chapter_id = ebook.id if ebook else None
     book.plex_book_key = audiobook.id if audiobook else None
     if ebook and ebook.fields is not None:
         book.kavita_library_id = ebook.fields.get("library_id")
+        book.kavita_series_id = ebook.fields.get("series_id")
+        book.kavita_volume_id = ebook.fields.get("volume_id")
     elif not ebook:
-        book.kavita_library_id = None
+        book.kavita_library_id = book.kavita_series_id = book.kavita_volume_id = None
     book.ebook_added_at = stamp(ebook, book.ebook_added_at)
     book.audio_added_at = stamp(audiobook, book.audio_added_at)
     dates = [d for d in (book.ebook_added_at, book.audio_added_at) if d is not None]
@@ -252,14 +259,14 @@ def _apply(reason: str, ebooks: Optional[list], audiobooks: Optional[list], erro
         live_by_k: Dict[int, Book] = {}
         live_by_p: Dict[str, Book] = {}
         for r in live:
-            if r.kavita_series_id is not None:
-                live_by_k.setdefault(r.kavita_series_id, r)
+            if r.kavita_chapter_id is not None:
+                live_by_k.setdefault(r.kavita_chapter_id, r)
             if r.plex_book_key is not None:
                 live_by_p.setdefault(r.plex_book_key, r)
         ghosts_by_k: Dict[int, List[Book]] = {}
         for g in ghosts:
-            if g.kavita_series_id is not None:
-                ghosts_by_k.setdefault(g.kavita_series_id, []).append(g)
+            if g.kavita_chapter_id is not None:
+                ghosts_by_k.setdefault(g.kavita_chapter_id, []).append(g)
 
         # A source that failed stands as its live rows have it.
         if ebooks is not None:
@@ -356,7 +363,7 @@ def _result(meta: BookCatalogMeta, ok: bool, skipped: bool = False) -> dict:
 
 async def _run(reason: str) -> dict:
     (ebooks, kavita_error), (audiobooks, plex_error) = await asyncio.gather(
-        _read(kavita.list_series, "Kavita"), _read(plex_player.catalog_books, "Plex"))
+        _read(kavita.list_books, "Kavita"), _read(plex_player.catalog_books, "Plex"))
     errors = {"kavita": kavita_error, "plex": plex_error}
     result = await asyncio.to_thread(_apply, reason, ebooks, audiobooks, errors)
     logger.info("Books catalog rebuilt (%s): %d ebooks, %d audiobooks, %d books%s", reason,
@@ -426,8 +433,8 @@ async def catalog_status() -> dict:
 
 # --- Pairing overrides --------------------------------------------------------------
 
-def set_override(db, kavita_series_id: int, plex_book_key: str, action: str, created_by: str) -> BookPairOverride:
-    """Record the admin's decision about one Kavita series and one Plex book.
+def set_override(db, kavita_chapter_id: int, plex_book_key: str, action: str, created_by: str) -> BookPairOverride:
+    """Record the admin's decision about one Kavita book (its chapter id) and one Plex book.
     A new `pair` for either item replaces that item's earlier pair. The change
     shows at the next rebuild."""
     if action not in ACTIONS:
@@ -435,15 +442,15 @@ def set_override(db, kavita_series_id: int, plex_book_key: str, action: str, cre
     if action == "pair":
         for old in db.query(BookPairOverride).filter(
                 BookPairOverride.action == "pair",
-                (BookPairOverride.kavita_series_id == kavita_series_id)
+                (BookPairOverride.kavita_chapter_id == kavita_chapter_id)
                 | (BookPairOverride.plex_book_key == plex_book_key)).all():
             db.delete(old)
         db.flush()
     row = db.query(BookPairOverride).filter(
-        BookPairOverride.kavita_series_id == kavita_series_id,
+        BookPairOverride.kavita_chapter_id == kavita_chapter_id,
         BookPairOverride.plex_book_key == plex_book_key).first()
     if row is None:
-        row = BookPairOverride(kavita_series_id=kavita_series_id, plex_book_key=plex_book_key)
+        row = BookPairOverride(kavita_chapter_id=kavita_chapter_id, plex_book_key=plex_book_key)
         db.add(row)
     row.action = action
     row.created_by = created_by
@@ -452,10 +459,10 @@ def set_override(db, kavita_series_id: int, plex_book_key: str, action: str, cre
     return row
 
 
-def remove_override(db, kavita_series_id: int, plex_book_key: str) -> bool:
+def remove_override(db, kavita_chapter_id: int, plex_book_key: str) -> bool:
     """Drop the decision about the pair; True when there was one."""
     removed = db.query(BookPairOverride).filter(
-        BookPairOverride.kavita_series_id == kavita_series_id,
+        BookPairOverride.kavita_chapter_id == kavita_chapter_id,
         BookPairOverride.plex_book_key == plex_book_key).delete()
     db.commit()
     return bool(removed)

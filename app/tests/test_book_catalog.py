@@ -3,7 +3,7 @@ The Books catalog (sub-project 3a, task 1): the combined ebook and audiobook
 store, its rebuild, its pairing overrides, the Chaptarr import webhook and the
 server-side Kavita read.
 
-Kavita and Plex are faked at the integration boundary (kavita.list_series and
+Kavita and Plex are faked at the integration boundary (kavita.list_books and
 plex_player.catalog_books). The lock and the start-up migration are tested
 with real processes: the lock on one SQLite file and the suite's Redis
 database, the migration on a copy of a database from before the catalog.
@@ -37,9 +37,11 @@ if HAVE_APP:
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def ebook(series_id, title, author="Frank Herbert", **kw):
-    return {"id": series_id, "library_id": 1, "title": title, "sort_title": title, "author": author,
-            "description": "", "added_at": datetime(2026, 8, 1), **kw}
+def ebook(chapter_id, title, author="Frank Herbert", **kw):
+    """A book as kavita.list_books gives it (its id is the chapter that is read)."""
+    return {"id": chapter_id, "series_id": 100 + chapter_id, "volume_id": None, "library_id": 1, "title": title,
+            "sort_title": title, "author": author, "series": "", "series_number": None, "description": "",
+            "added_at": datetime(2026, 8, 1), **kw}
 
 
 def audiobook(key, title, author="Frank Herbert", narrator="Scott Brick", **kw):
@@ -57,7 +59,7 @@ class FakeSources:
         self.kavita_down = False
         self.plex_down = False
 
-    async def list_series(self):
+    async def list_books(self):
         if self.kavita_down:
             raise kavita.KavitaUnavailable("Kavita did not answer")
         return [dict(e) for e in self.ebooks]
@@ -75,7 +77,7 @@ class CatalogCase(unittest.TestCase):
         self.sources = FakeSources()
         for patcher in (
             mock.patch.object(book_catalog, "SessionLocal", self.Session),
-            mock.patch.object(kavita, "list_series", self.sources.list_series),
+            mock.patch.object(kavita, "list_books", self.sources.list_books),
             mock.patch.object(plex_player, "catalog_books", self.sources.catalog_books),
         ):
             patcher.start()
@@ -94,10 +96,10 @@ class CatalogCase(unittest.TestCase):
         return self.Session()
 
     def live(self):
-        """{(kavita id, plex key): book id} for the live books."""
+        """{(kavita chapter id, plex key): book id} for the live books."""
         db = self.db()
         try:
-            return {(b.kavita_series_id, b.plex_book_key): b.id
+            return {(b.kavita_chapter_id, b.plex_book_key): b.id
                     for b in db.query(book_catalog.Book).filter(book_catalog.Book.merged_into.is_(None))}
         finally:
             db.close()
@@ -178,7 +180,7 @@ class Overrides(CatalogCase):
         self.override(2, "20:1", "pair")      # and that audiobook moves again
         db = self.db()
         try:
-            rows = [(o.kavita_series_id, o.plex_book_key, o.action)
+            rows = [(o.kavita_chapter_id, o.plex_book_key, o.action)
                     for o in db.query(book_catalog.BookPairOverride).all()]
         finally:
             db.close()
@@ -190,9 +192,9 @@ class Overrides(CatalogCase):
         db = self.db()
         try:
             db.add_all([
-                book_catalog.BookPairOverride(kavita_series_id=1, plex_book_key="10:1", action="pair",
+                book_catalog.BookPairOverride(kavita_chapter_id=1, plex_book_key="10:1", action="pair",
                                               created_by="a", created_at=datetime(2026, 1, 1)),
-                book_catalog.BookPairOverride(kavita_series_id=1, plex_book_key="20:1", action="pair",
+                book_catalog.BookPairOverride(kavita_chapter_id=1, plex_book_key="20:1", action="pair",
                                               created_by="a", created_at=datetime(2026, 2, 1)),
             ])
             db.commit()
@@ -336,7 +338,7 @@ class IdPolicy(CatalogCase):
         self.rebuild()
         self.assertEqual(self.live(), {(1, None): self.e_id, (None, "10:1"): self.a_id})
         self.assertIsNone(self.book(self.e_id).merged_into)
-        self.assertIsNone(self.book(self.a_id).kavita_series_id)
+        self.assertIsNone(self.book(self.a_id).kavita_chapter_id)
 
     def test_a_split_of_a_pair_that_was_never_two_rows_makes_a_new_row_for_the_ebook(self):
         self.sources.ebooks = [ebook(2, "Dune")]
@@ -448,7 +450,7 @@ async def slow_kavita():
 async def no_books():
     return []
 
-kavita.list_series = slow_kavita
+kavita.list_books = slow_kavita
 plex_player.catalog_books = no_books
 print("ready", flush=True)
 sys.stdin.readline()
@@ -525,6 +527,42 @@ class Migration(unittest.TestCase):
         self.assertEqual(kept, "Kept")
 
 
+    def test_two_workers_remake_catalog_tables_that_were_keyed_on_a_series(self):
+        from sqlalchemy import inspect, text
+
+        from app import models  # noqa: F401 - registers the tables
+        from app.database import Base, make_engine
+
+        with tempfile.TemporaryDirectory() as tmp:
+            url = f"sqlite:///{tmp}/old.db"
+            engine = make_engine(url)
+            Base.metadata.create_all(bind=engine, tables=[t for t in Base.metadata.sorted_tables
+                                                          if t.name not in ("books", "book_pair_overrides")])
+            with engine.begin() as conn:
+                conn.execute(text("CREATE TABLE books (id INTEGER PRIMARY KEY, title VARCHAR(300) NOT NULL, "
+                                  "kavita_series_id INTEGER)"))
+                conn.execute(text("CREATE TABLE book_pair_overrides (id INTEGER PRIMARY KEY, "
+                                  "kavita_series_id INTEGER NOT NULL, plex_book_key VARCHAR(64) NOT NULL)"))
+
+            self.assertEqual(run_together([STARTUP_CHILD, STARTUP_CHILD], url), ["started", "started"])
+            columns = {t: {c["name"] for c in inspect(engine).get_columns(t)}
+                       for t in ("books", "book_pair_overrides")}
+            self.assertLessEqual({"kavita_chapter_id", "kavita_volume_id", "kavita_series_id"}, columns["books"])
+            self.assertIn("kavita_chapter_id", columns["book_pair_overrides"])
+            self.assertNotIn("kavita_series_id", columns["book_pair_overrides"])
+
+            now = "2026-01-01 00:00:00"
+            with engine.begin() as conn:
+                conn.execute(text("INSERT INTO books (title, sort_title, author, narrator, series, description, "
+                                  "cover_source, updated_at, kavita_chapter_id) "
+                                  f"VALUES ('Kept', '', '', '', '', '', 'kavita', '{now}', 7)"))
+            run_together([STARTUP_CHILD], url)             # a later start leaves the new tables alone
+            with engine.connect() as conn:
+                kept = conn.execute(text("SELECT title FROM books WHERE kavita_chapter_id = 7")).scalar()
+            engine.dispose()
+        self.assertEqual(kept, "Kept")
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class Webhook(unittest.TestCase):
     SECRET = "s3cret-for-the-test"
@@ -597,27 +635,94 @@ class Webhook(unittest.TestCase):
         self.rebuild.assert_not_awaited()
 
 
+class Volumes(CatalogCase):
+    """The ebook unit is one book, not a Kavita series."""
+
+    def test_each_volume_of_a_series_pairs_with_its_own_audiobook(self):
+        martin = "George R. R. Martin"
+        self.sources.ebooks = [
+            ebook(11, "A Game of Thrones", martin, series="A Song of Ice and Fire", series_number=1,
+                  series_id=1, volume_id=10),
+            ebook(21, "A Clash of Kings", martin, series="A Song of Ice and Fire", series_number=2,
+                  series_id=1, volume_id=20),
+        ]
+        self.sources.audiobooks = [audiobook("50:1", "A Game of Thrones", martin),
+                                   audiobook("60:1", "A Clash of Kings", martin)]
+        out = self.rebuild()
+        self.assertEqual((out["ebooks"], out["audiobooks"], out["books"]), (2, 2, 2))
+        self.assertEqual(set(self.live()), {(11, "50:1"), (21, "60:1")})
+        row = self.book(self.live()[(21, "60:1")])
+        self.assertEqual((row.kavita_series_id, row.kavita_volume_id, row.kavita_library_id), (1, 20, 1))
+        self.assertEqual((row.series, row.series_number), ("A Song of Ice and Fire", 2))
+
+    def test_volumes_with_no_audiobook_stay_separate_ebooks_of_one_series(self):
+        self.sources.ebooks = [ebook(11, "Book One", series="Saga", series_number=1, series_id=1, volume_id=10),
+                               ebook(21, "Book Two", series="Saga", series_number=2, series_id=1, volume_id=20)]
+        self.assertEqual(self.rebuild()["books"], 2)
+        self.assertEqual({r.series_number for r in map(self.book, self.live().values())}, {1, 2})
+
+    def test_an_override_names_one_volume_not_its_series(self):
+        self.sources.ebooks = [ebook(11, "Book One", series_id=1, volume_id=10),
+                               ebook(21, "Book Two", series_id=1, volume_id=20)]
+        self.sources.audiobooks = [audiobook("50:1", "Something Else")]
+        self.override(21, "50:1", "pair")
+        self.rebuild()
+        self.assertEqual(set(self.live()), {(11, None), (21, "50:1")})
+
+    def test_a_standalone_book_is_not_a_series(self):
+        self.sources.ebooks = [ebook(5, "Catch-22", "Joseph Heller")]
+        self.rebuild()
+        row = self.book(next(iter(self.live().values())))
+        self.assertEqual((row.series, row.series_number, row.kavita_volume_id), ("", None, None))
+
+
 @unittest.skipUnless(HAVE_APP, "app import needs the container's dependencies")
 class KavitaRead(unittest.TestCase):
-    """kavita.list_series against a fake Kavita."""
+    """kavita.list_books against a fake Kavita holding the shapes the real one does:
+    a multi-volume series, a single-volume series, standalone books kept as
+    specials and loose chapters, and authors as Kavita stores them."""
     KEY = "kavita-key-for-the-test"
 
     def setUp(self):
         self.requests = []
+
+        def chapter(cid, title, writers, created="2026-08-14T22:52:23.5081475", summary=""):
+            return {"id": cid, "titleName": title, "createdUtc": created, "summary": summary,
+                    "writers": [{"name": w} for w in writers]}
+
         self.series = [
-            {"id": 7, "name": "Dune", "sortName": "Dune", "libraryId": 1, "created": "2026-08-14T18:52:23.5081475"},
-            {"id": 8, "name": "Emma", "sortName": "", "libraryId": 2, "created": "bad"},
+            {"id": 1, "name": "A Song of Ice and Fire", "libraryId": 1},
+            {"id": 2, "name": "Catch-22", "libraryId": 1},
+            {"id": 3, "name": "Throne of Glass", "libraryId": 2},
+            {"id": 4, "name": "Odds and Ends", "libraryId": 1},
+            {"id": 5, "name": "Harry Potter 03", "libraryId": 1},
         ]
-        self.metadata = {7: {"summary": "A <b>desert</b> planet.<br>Spice &amp; sand.",
-                             "writers": [{"name": "Frank Herbert"}, {"name": "Someone Else"}]},
-                         8: {"summary": None, "writers": []}}
+        self.detail = {
+            1: {"volumes": [
+                {"id": 10, "name": "A Game of Thrones", "minNumber": 1, "chapters": [{"id": 11}]},
+                {"id": 20, "name": "A Clash of Kings", "minNumber": 2, "chapters": [{"id": 21}, {"id": 22}]}]},
+            2: {"volumes": [{"id": 30, "name": "1", "minNumber": 1, "chapters": [{"id": 31}]}]},
+            3: {"volumes": [], "specials": [{"id": 41}]},
+            4: {"volumes": [{"id": 50, "name": "Loose", "minNumber": -100000, "chapters": [{"id": 51}]}],
+                "chapters": [{"id": 52}, {"id": 53}], "storylineChapters": [{"id": 52}], "specials": []},
+            5: {"volumes": [], "specials": [{"id": 61}]},
+        }
+        self.chapters = {
+            11: chapter(11, "A Game of Thrones", ["George R. R. Martin"], summary="A <b>big</b> book.<br>Winter &amp; war."),
+            21: chapter(21, "A Clash of Kings", ["George R. R. Martin"]),
+            22: chapter(22, "Never read", ["Someone"]),
+            31: chapter(31, "Catch-22", ["Joseph Heller"]),
+            41: chapter(41, "Throne of Glass", ["Maas", "Sarah J."]),
+            51: chapter(51, "Loose One", ["Ann Author"]),
+            52: chapter(52, "Loose Two", ["Ann Author"]),
+            53: chapter(53, "Loose Three", ["Ann Author", "Bo Co"], created="bad"),
+            61: chapter(61, "Harry Potter and the Prisoner of Azkaban", ["authors_sort"]),
+        }
+        self.series_writers = {5: ["authors_sort", "J. K. Rowling"]}
         self.answers = {"authenticate": 200, "series": 200}
         self.real_client = httpx.AsyncClient
-        patchers = [
-            mock.patch.object(kavita.integration_config, "read", self.read_settings),
-            mock.patch.object(kavita.httpx, "AsyncClient", self.client),
-        ]
-        for p in patchers:
+        for p in (mock.patch.object(kavita.integration_config, "read", self.read_settings),
+                  mock.patch.object(kavita.httpx, "AsyncClient", self.client)):
             p.start()
             self.addCleanup(p.stop)
         self.settings = {kavita.URL_KEY: "http://kavita.test:5000/", kavita.API_KEY: self.KEY}
@@ -630,9 +735,9 @@ class KavitaRead(unittest.TestCase):
 
     def handle(self, request):
         self.requests.append(request)
-        path = request.url.path
+        path, params = request.url.path, request.url.params
         if path == "/api/Plugin/authenticate":
-            if self.answers["authenticate"] != 200 or request.url.params.get("apiKey") != self.KEY:
+            if self.answers["authenticate"] != 200 or params.get("apiKey") != self.KEY:
                 return httpx.Response(401)
             return httpx.Response(200, json={"token": "jwt"})
         if request.headers.get("authorization") != "Bearer jwt":
@@ -642,27 +747,70 @@ class KavitaRead(unittest.TestCase):
                 return httpx.Response(self.answers["series"])
             return httpx.Response(200, json=self.series,
                                   headers={"Pagination": json.dumps({"currentPage": 1, "totalPages": 1})})
+        if path == "/api/Series/series-detail":
+            return httpx.Response(200, json=self.detail[int(params["seriesId"])])
+        if path == "/api/Series/chapter":
+            return httpx.Response(200, json=self.chapters[int(params["chapterId"])])
         if path == "/api/Series/metadata":
-            return httpx.Response(200, json=self.metadata[int(request.url.params["seriesId"])])
+            return httpx.Response(200, json={"writers": [{"name": w} for w in
+                                                         self.series_writers.get(int(params["seriesId"]), [])]})
         return httpx.Response(404)
 
     def read(self):
-        return asyncio.run(kavita.list_series())
+        return {b["id"]: b for b in asyncio.run(kavita.list_books())}
 
-    def test_it_lists_every_series_with_author_and_plain_summary(self):
+    def test_a_multi_volume_series_is_one_book_per_volume(self):
         books = self.read()
-        self.assertEqual([b["id"] for b in books], [7, 8])
-        self.assertEqual(books[0]["author"], "Frank Herbert")
-        self.assertEqual(books[0]["description"], "A desert planet.\nSpice & sand.")
-        self.assertEqual((books[0]["title"], books[0]["library_id"]), ("Dune", 1))
-        self.assertEqual(books[0]["added_at"], datetime(2026, 8, 14, 18, 52, 23, 508147))
-        self.assertEqual((books[1]["sort_title"], books[1]["author"], books[1]["added_at"]), ("Emma", "", None))
-        self.assertTrue(all(str(r.url).startswith("http://kavita.test:5000/") for r in self.requests))
+        got, clash = books[11], books[21]
+        self.assertEqual((got["title"], got["series"], got["series_number"]), ("A Game of Thrones", "A Song of Ice and Fire", 1))
+        self.assertEqual((got["series_id"], got["volume_id"], got["library_id"]), (1, 10, 1))
+        self.assertEqual((clash["title"], clash["series_number"], clash["volume_id"]), ("A Clash of Kings", 2, 20))
+        self.assertNotIn(1, books)                         # the series itself is not a book
+        self.assertNotIn(22, books)                        # a volume's second file is part of the same book
+
+    def test_a_single_volume_series_stays_one_book_and_is_not_a_series(self):
+        book = self.read()[31]
+        self.assertEqual((book["title"], book["series"], book["series_number"], book["volume_id"]),
+                         ("Catch-22", "", 1, 30))
+
+    def test_a_standalone_book_kept_as_a_special_is_a_book_by_its_chapter(self):
+        book = self.read()[41]
+        self.assertEqual((book["title"], book["volume_id"], book["series_number"], book["library_id"]),
+                         ("Throne of Glass", None, None, 2))
+        self.assertEqual(book["series_id"], 3)
+
+    def test_loose_chapters_are_one_book_each_without_duplicates(self):
+        books = self.read()
+        self.assertEqual([books[i]["title"] for i in (51, 52, 53)], ["Loose One", "Loose Two", "Loose Three"])
+        self.assertTrue(all(books[i]["volume_id"] is None and books[i]["series_number"] is None for i in (51, 52, 53)))
+        self.assertEqual(len([b for b in books.values() if b["series_id"] == 4]), 3)
+
+    def test_authors_are_the_books_writers(self):
+        books = self.read()
+        self.assertEqual(books[11]["author"], "George R. R. Martin")
+        self.assertEqual(books[53]["author"], "Ann Author")             # the first of two writers
+        self.assertEqual(books[41]["author"], "Sarah J. Maas")          # "Maas, Sarah J." split by Kavita
+
+    def test_a_placeholder_writer_is_not_an_author_and_the_series_writer_stands_in(self):
+        self.assertEqual(self.read()[61]["author"], "J. K. Rowling")
+        self.series_writers = {5: ["authors_sort"]}
+        self.assertEqual(self.read()[61]["author"], "")
+
+    def test_the_series_writers_are_read_only_when_a_book_has_none(self):
+        self.read()
+        asked = [r.url.params["seriesId"] for r in self.requests if r.url.path == "/api/Series/metadata"]
+        self.assertEqual(asked, ["5"])
+
+    def test_summary_is_plain_text_and_the_date_is_utc(self):
+        book = self.read()[11]
+        self.assertEqual(book["description"], "A big book.\nWinter & war.")
+        self.assertEqual(book["added_at"], datetime(2026, 8, 14, 22, 52, 23, 508147))
+        self.assertIsNone(self.read()[53]["added_at"])
 
     def test_it_pages_through_a_long_library(self):
-        self.series = [{"id": i, "name": f"B{i}", "libraryId": 1} for i in range(1, 4)]
-        self.metadata = {i: {} for i in range(1, 4)}
-        pages = {1: self.series[:2], 2: self.series[2:]}
+        self.series = [{"id": 1, "name": "A Song of Ice and Fire", "libraryId": 1},
+                       {"id": 2, "name": "Catch-22", "libraryId": 1}]
+        pages = {1: self.series[:1], 2: self.series[1:]}
         original = self.handle
 
         def paged(request):
@@ -673,7 +821,7 @@ class KavitaRead(unittest.TestCase):
             return original(request)
 
         self.handle = paged
-        self.assertEqual([b["id"] for b in self.read()], [1, 2, 3])
+        self.assertEqual(set(self.read()), {11, 21, 31})
 
     def test_a_refused_key_says_so_without_the_key(self):
         self.answers["authenticate"] = 401
@@ -695,6 +843,18 @@ class KavitaRead(unittest.TestCase):
         with self.assertRaises(kavita.KavitaUnavailable) as ctx:
             self.read()
         self.assertEqual(str(ctx.exception), "Kavita answered HTTP 503")
+
+    def test_a_failure_part_way_through_is_unavailable_not_a_partial_library(self):
+        original = self.handle
+
+        def broken(request):
+            if request.url.path == "/api/Series/chapter" and request.url.params["chapterId"] == "31":
+                return httpx.Response(500)
+            return original(request)
+
+        self.handle = broken
+        with self.assertRaises(kavita.KavitaUnavailable):
+            self.read()
 
     def test_missing_settings_are_named(self):
         for settings_, message in (({}, "Kavita is not set up"),

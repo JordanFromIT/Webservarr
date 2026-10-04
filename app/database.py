@@ -94,7 +94,7 @@ def init_db():
         migrate_user_uid, migrate_local_usernames_snapshot, migrate_listening_device_id,
         migrate_listening_book_fields, migrate_listening_claims, migrate_no_email_identity,
         migrate_tickets_page_switch_v1,
-        migrate_ebooks_page_switch_v1, migrate_requests_source_v1,
+        migrate_ebooks_page_switch_v1, migrate_requests_source_v1, migrate_books_ebook_unit_v1,
     )
     db = SessionLocal()
     try:
@@ -111,6 +111,7 @@ def init_db():
         migrate_listening_book_fields(db)
         # One successor per earlier copy: the links rows hold get their claims.
         migrate_listening_claims(db)
+        migrate_books_ebook_unit_v1(db)
         migrate_requests_rename(db)
         migrate_overseerr_to_seerr(db)
         seed_default_settings(db)
