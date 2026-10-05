@@ -1009,9 +1009,15 @@ class ServiceTilesFitTheirNames(unittest.TestCase):
         self.assertIsNotNone(link)
         self.assertEqual(link.group(2), "Make a request")
         classes = link.group(1).split()
-        for cls in ("text-[15px]", "font-semibold", "text-steel-blue", "whitespace-nowrap"):
+        # The site's primary button, as "Turn on" on the push card: the same
+        # fill, text, radius, size and focus ring; one line high in the row.
+        turn_on = re.search(r'<button type="button" data-push-prompt-enable class="([^"]*)"', page).group(1).split()
+        shared = [c for c in turn_on if c not in ("flex-1", "sm:flex-none", "py-2", "disabled:opacity-50")]
+        for cls in shared:
             self.assertIn(cls, classes)
-        for cls in ("uppercase", "tracking-wider", "text-xs", "font-bold"):
+        for cls in ("py-1", "whitespace-nowrap"):
+            self.assertIn(cls, classes)
+        for cls in ("uppercase", "tracking-wider", "text-xs", "font-bold", "text-steel-blue"):
             self.assertNotIn(cls, classes)
 
 
