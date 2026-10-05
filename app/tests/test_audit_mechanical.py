@@ -5,9 +5,9 @@ Each class below names the finding it guards. They read the shipped files
 (and, for the welcome post, run the migration against a scratch database), so
 a regression shows up here rather than in the next audit.
 
-Home (index.html, pages/home.js) and the shell (partials, shell.js, the nav in
-app/pages.py) are being rebuilt separately; they are left out by name below
-and their findings are carried by that work.
+Home (index.html, pages/home.js) and the shell partials are left out of the
+type-floor and caps guards only (DEFERRED): their small type and caps labels
+are visible design, decided separately. Every other guard covers them.
 """
 import re
 import unittest
@@ -22,19 +22,20 @@ except Exception:  # pragma: no cover
 
 STATIC = Path(__file__).resolve().parents[1] / "static"
 
-# Rebuilt elsewhere (Home and the shell); not judged here.
-DEFERRED = {"index.html", "js/pages/home.js", "js/shell.js", "partials/shell-sidebar.html",
-            "partials/shell-header.html", "partials/shell-brand.html"}
+# Small type and caps labels still on Home and in the shell (nav sublabels,
+# caps links, chips): visible design, left out of the type-floor and caps
+# guards only.
+DEFERRED = {"index.html", "js/pages/home.js", "partials/shell-sidebar.html", "partials/shell-header.html"}
 
 
 def read(rel: str) -> str:
     return (STATIC / rel).read_text(encoding="utf-8")
 
 
-def static_files():
+def static_files(skip=frozenset()):
     for path in sorted(STATIC.rglob("*")):
         rel = path.relative_to(STATIC).as_posix()
-        if path.suffix not in (".js", ".html") or rel in DEFERRED or rel.startswith("css/"):
+        if path.suffix not in (".js", ".html") or rel in skip or rel.startswith("css/"):
             continue
         yield rel, path.read_text(encoding="utf-8")
 
@@ -129,7 +130,7 @@ class TypeFloorAndSentenceCase(unittest.TestCase):
 
     def test_nothing_below_twelve_pixels(self):
         tiny = re.compile(r"text-\[(?:[0-9]|1[01])(?:\.\d+)?px\]|font-size:\s*(?:[0-9]|1[01])px")
-        hits = [f"{rel}: {m.group(0)}" for rel, src in static_files() for m in tiny.finditer(src)]
+        hits = [f"{rel}: {m.group(0)}" for rel, src in static_files(DEFERRED) for m in tiny.finditer(src)]
         self.assertEqual(hits, [], "\n".join(hits))
 
     def test_no_uppercase_labels(self):
@@ -137,7 +138,7 @@ class TypeFloorAndSentenceCase(unittest.TestCase):
         # design decision); the settings hex field is a colour code.
         allowed = {("login.html", 2), ("js/settings/kit.js", 1)}
         counts = {}
-        for rel, src in static_files():
+        for rel, src in static_files(DEFERRED):
             n = len(re.findall(r"(?<![-\w:])uppercase(?![-\w])", src)) + \
                 len(re.findall(r"text-transform:\s*uppercase", src))
             if n:
@@ -235,6 +236,17 @@ class OneFocusRing(unittest.TestCase):
         self.assertIn(".discover-row-wrapper:focus-within .discover-scroll-btn", read("requests.html"))
 
 
+class OneHeadingPerPage(unittest.TestCase):
+    """M2: the site name in the sidebar is not a heading, so a page's own h1
+    is its only one. It keeps the classes it had as an h1, so it looks the same."""
+
+    def test_the_brand_is_not_a_heading(self):
+        brand = read("partials/shell-brand.html")
+        self.assertNotRegex(brand, r"<h[1-6]\b")
+        self.assertIn('<p class="text-frosted-blue font-bold text-lg leading-none text-center {{app_name_cls}}">'
+                      '{{app_name}}</p>', brand)
+
+
 class QuietMotion(unittest.TestCase):
     """M11: the healthy dot never moves and the New! flag rests."""
 
@@ -255,15 +267,19 @@ class PlainCopy(unittest.TestCase):
 
     def test_no_vendor_or_setup_blame(self):
         for rel in ("js/pages/requests.js", "js/pages/issues.js", "js/pages/tickets.js", "js/pages/calendar.js",
-                    "js/login.js"):
+                    "js/login.js", "js/pages/home.js"):
             src = "\n".join(js_strings(read(rel)))
             self.assertNotRegex(src, r"not configured|Is Seerr|Systems Online|Degraded Performance|Issues Detected", rel)
+        # Home's failures say what can't be shown, not which product failed.
+        home = "\n".join(js_strings(read("js/pages/home.js")))
+        self.assertNotRegex(home, r"(?:Plex|Seerr|Sonarr|Radarr)(?:/\w+)? not|No services configured")
 
     def test_toasts_and_buttons(self):
         everything = "\n".join(read(r) for r in ("js/pages/requests.js", "js/pages/issues.js",
-                                                 "js/pages/tickets.js", "issues.html", "tickets.html", "login.html"))
+                                                 "js/pages/tickets.js", "issues.html", "tickets.html", "login.html",
+                                                 "partials/shell-header.html", "partials/shell-sidebar.html"))
         for bad in ("successfully", "Comment added!", "Ticket submitted!", "Submit Issue", "Add Comment",
-                    "Sign In", "All Types", "In Progress"):
+                    "Sign In", "Sign Out", "All Types", "In Progress"):
             self.assertFalse(bad in everything, bad)
         self.assertIn("showToast(title ? 'Requested ' + title : 'Requested', 'success');", read("js/pages/requests.js"))
 
@@ -294,7 +310,7 @@ class SmallTells(unittest.TestCase):
             self.assertIn("getTimeAgo(", src, rel)
 
     def test_no_console_log_and_dark_pages(self):
-        for rel in ("js/pages/issues.js", "js/pages/requests.js"):
+        for rel in ("js/pages/issues.js", "js/pages/requests.js", "js/pages/home.js"):
             self.assertNotIn("console.log(", read(rel), rel)
         for rel in ("login.html", "setup.html"):
             self.assertIn('<html class="dark" lang="en">', read(rel), rel)

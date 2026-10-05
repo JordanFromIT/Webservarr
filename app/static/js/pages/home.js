@@ -608,10 +608,6 @@ function buildReleases(container, releases) {
             if (dayReleases.length === 0) {
                 empty = document.createElement('div');
                 empty.className = 'flex-1 flex items-center justify-center';
-                var dash = document.createElement('span');
-                dash.className = 'text-steel-blue/20 text-xs';
-                dash.textContent = '—';
-                empty.appendChild(dash);
                 cell.appendChild(empty);
             } else {
                 var rlist = document.createElement('div');
@@ -664,7 +660,7 @@ function releasesError(container) {
     errIcon.className = 'material-symbols-outlined text-4xl mb-2 block opacity-50';
     errIcon.textContent = 'calendar_month';
     var errText = document.createElement('p');
-    errText.textContent = 'Sonarr/Radarr not configured';
+    errText.textContent = 'The release calendar isn’t available right now';
     errDiv.appendChild(errIcon);
     errDiv.appendChild(errText);
     container.appendChild(errDiv);
@@ -1555,7 +1551,7 @@ export async function mount(ctx) {
                 if (_lastStreams && _lastStreams.length > 0) return;
                 WS.arrive('streams', function () {
                     byId('streamChevrons').classList.add('hidden');
-                    WS.setHTML(byId('streamsContainer'), streamsStateRow('Plex not configured'));
+                    WS.setHTML(byId('streamsContainer'), streamsStateRow('Can’t show what’s playing right now'));
                 });
             }
         });
@@ -1611,7 +1607,7 @@ export async function mount(ctx) {
                 if (signal.aborted || isAbort(error)) return;   // left the page: not an error
                 console.error('Error loading recent requests:', error);
                 WS.arrive('requests', function () {
-                    WS.setHTML(byId('requestsBody'), requestsStateRow('Seerr not configured'));
+                    WS.setHTML(byId('requestsBody'), requestsStateRow('Requests can’t be shown right now'));
                 });
             }
         });
@@ -1650,7 +1646,7 @@ export async function mount(ctx) {
 
         WS.arrive('services', function () {
             if (services.length === 0) {
-                WS.setHTML(servicesContainer, '<div class="text-center text-steel-blue py-8 col-span-full w-full"><span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span><p>No services configured yet.</p></div>');
+                WS.setHTML(servicesContainer, '<div class="text-center text-steel-blue py-8 col-span-full w-full"><span class="material-symbols-outlined text-4xl mb-2 block opacity-50">dns</span><p>No services to show right now.</p></div>');
                 return;
             }
 
@@ -1686,7 +1682,6 @@ export async function mount(ctx) {
         return WS.swr('releases:7', function () { return WS.getJSON('/api/integrations/upcoming-releases?days=7', { signal: signal }); }, renderUpcomingReleases, {
             onError: function (error) {
                 if (signal.aborted || isAbort(error)) return;   // left the page: not an error
-                console.log('Upcoming releases not available');
                 WS.arrive('releases', function () { releasesError(byId('releasesContainer')); });
             }
         });
@@ -1788,7 +1783,6 @@ export async function mount(ctx) {
         } catch (error) {
             if (signal.aborted || isAbort(error)) return;   // left the page: not an error
             addHeaderGauges();   // with its empty readings, as without a reading
-            console.log('System stats not available');
         }
     }
 

@@ -561,10 +561,10 @@ class ShellRendering(unittest.TestCase):
         self.assertIn("<title>Control Center</title>", out)
         self.assertNotIn('property="og:site_name"', out)
         body = out.split("<body>")[1]
-        self.assertRegex(body, r'<h1 class="[^"]*\bhidden\b[^"]*"></h1>')
+        self.assertRegex(body, r'<p class="[^"]*\bhidden\b[^"]*"></p>')
         self.assertNotIn(">WebServarr<", body)
         # The default name still renders normally.
-        self.assertIn(">WebServarr</h1>", render().split("<body>")[1])
+        self.assertIn(">WebServarr</p>", render().split("<body>")[1])
 
     def test_empty_site_name_leaves_no_stray_separator_anywhere(self):
         # Every place the name reaches: the tab title (with and without a page
@@ -593,7 +593,7 @@ class ShellRendering(unittest.TestCase):
                             self.assertNotIn("og:title", head)
                             self.assertNotIn("twitter:title", head)
                         body = out.split("<body>")[1]
-                        self.assertEqual(len(re.findall(r'<h1 class="[^"]*\bhidden\b[^"]*"></h1>', body)), 1)
+                        self.assertEqual(len(re.findall(r'<p class="[^"]*\bhidden\b[^"]*"></p>', body)), 1)
                         self.assertNotIn("WebServarr", body)
 
     def test_only_a_missing_name_falls_back_to_the_default(self):
@@ -601,13 +601,13 @@ class ShellRendering(unittest.TestCase):
         out = render(b=b)
         self.assertIn("<title>WebServarr - Control Center</title>", out)
         self.assertIn('property="og:site_name" content="WebServarr"', out)
-        self.assertIn(">WebServarr</h1>", out.split("<body>")[1])
+        self.assertIn(">WebServarr</p>", out.split("<body>")[1])
         self.assertEqual(pages._preview_meta({}, "", "")[0], "WebServarr")
         # A named site keeps its name everywhere, trimmed, with nothing hidden.
         out = render(b=branding(**{"branding.app_name": "  My Server  "}))
         self.assertIn("<title>My Server - Control Center</title>", out)
-        self.assertIn(">My Server</h1>", out)
-        self.assertNotRegex(out.split("<body>")[1], r'<h1 class="[^"]*\bhidden\b')
+        self.assertIn(">My Server</p>", out)
+        self.assertNotRegex(out.split("<body>")[1], r'<p class="text-frosted-blue font-bold text-lg[^"]*\bhidden\b')
 
     def test_login_name_is_in_the_first_html(self):
         # R56: the name (or its absence) is served, not patched in by a script
@@ -721,7 +721,7 @@ class ShellFragment(unittest.TestCase):
         self.assertEqual(pages.fill("{{{a}}}|{{b}}", {"a": "{{b}}", "b": "<x>"}), "{{b}}|&lt;x&gt;")
         b = branding(**{"branding.app_name": "{{user_name}}"})
         out = render(b=b)
-        self.assertIn(">{{user_name}}</h1>", out)
+        self.assertIn(">{{user_name}}</p>", out)
 
 
 class NavModel(unittest.TestCase):
