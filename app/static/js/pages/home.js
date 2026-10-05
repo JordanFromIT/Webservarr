@@ -378,9 +378,11 @@ function renderRequestRow(req) {
 
 // ---- Service health ----
 
-// Homelab icon mapping — service name substring → selfh.st icon slug
+// Homelab icon mapping: service name substring → selfh.st icon slug. The
+// longest substring in the name wins, so "Plex Requests" is a request app.
 const HOMELAB_ICONS = {
     'plex': 'plex', 'radarr': 'radarr', 'sonarr': 'sonarr', 'seerr': 'seerr',
+    'requests': 'seerr', 'overseerr': 'seerr', 'jellyseerr': 'seerr',
     'tautulli': 'tautulli', 'jellyfin': 'jellyfin', 'emby': 'emby', 'lidarr': 'lidarr',
     'prowlarr': 'prowlarr', 'bazarr': 'bazarr', 'readarr': 'readarr', 'sabnzbd': 'sabnzbd',
     'qbittorrent': 'qbittorrent', 'transmission': 'transmission', 'deluge': 'deluge',
@@ -397,12 +399,11 @@ const HOMELAB_ICONS = {
 
 function getServiceIconUrl(name) {
     var lower = name.toLowerCase();
+    var best = '';
     for (var key in HOMELAB_ICONS) {
-        if (lower.indexOf(key) !== -1) {
-            return 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/' + HOMELAB_ICONS[key] + '.svg';
-        }
+        if (key.length > best.length && lower.indexOf(key) !== -1) best = key;
     }
-    return null;
+    return best ? 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/' + HOMELAB_ICONS[best] + '.svg' : null;
 }
 
 function renderServiceTile(service) {
