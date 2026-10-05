@@ -259,7 +259,8 @@ await run('the section sits right above Service Health, with Home\'s heading and
   check('it arrives just before Service Health', keys.indexOf('feed') === keys.indexOf('services') - 1, keys);
   check('the next section is Service Health', t.section.nextElementSibling && t.section.nextElementSibling.getAttribute('data-arrive') === 'services');
   const h = t.section.querySelector('h3');
-  check('the heading is "Event log", styled like the other sections', h && h.textContent === 'Event log' && h.className === 'text-xl font-bold text-frosted-blue' && h.parentNode.className === 'flex items-center gap-3 mb-4');
+  check('the heading is "Event log", styled like the other sections, closer to its wheel', h && h.textContent === 'Event log' && h.className === 'text-xl font-bold text-frosted-blue' && h.parentNode.className === 'flex items-center gap-3 mb-2');
+  check('a compact section: less room below it than between the other sections', t.section.className === '-mb-3');
   const icon = h.previousElementSibling;
   check('its icon follows the section icons setting', icon && icon.classList.contains('ws-section-icon') && icon.getAttribute('aria-hidden') === 'true');
   check('labelled by its heading', t.section.getAttribute('aria-labelledby') === h.id);
