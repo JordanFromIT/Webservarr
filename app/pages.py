@@ -184,6 +184,37 @@ def font_links(branding: dict) -> str:
     )
 
 
+ICON_FONT = "/static/fonts/material-symbols-outlined.woff2"
+
+
+def icon_font_head() -> str:
+    """
+    The icon font: a trimmed, self-hosted Material Symbols Outlined
+    (scripts/build_icon_font.py), preloaded because every page draws icons in
+    its first screen (the nav, the scroll hint).
+
+    Its address carries the file's content stamp, written here rather than by
+    the ?v= rewrite, which never reaches a url() inside CSS: the preload and
+    the @font-face must name the same address or the browser fetches it twice.
+    The class rules are Google's own for this family, and come before app.css
+    as Google's stylesheet did, so a utility on an icon (font-bold on the logo
+    stand-in) still wins. font-display: block, as before: the file is small,
+    and a ligature painted in a fallback font is a word, not an icon.
+    """
+    href = html.escape(f"{ICON_FONT}?v={asset_stamp(ICON_FONT)}", quote=True)
+    return (
+        f'<link rel="preload" href="{href}" as="font" type="font/woff2" crossorigin>'
+        "<style>"
+        "@font-face{font-family:'Material Symbols Outlined';font-style:normal;font-weight:400 700;"
+        f"font-display:block;src:url({href}) format('woff2')}}"
+        ".material-symbols-outlined{font-family:'Material Symbols Outlined';font-weight:normal;"
+        "font-style:normal;font-size:24px;line-height:1;letter-spacing:normal;text-transform:none;"
+        "display:inline-block;white-space:nowrap;word-wrap:normal;direction:ltr;"
+        "-webkit-font-feature-settings:'liga';-webkit-font-smoothing:antialiased}"
+        "</style>"
+    )
+
+
 def font_href(branding: dict) -> str:
     """The display font's stylesheet address (#ws-font; font_links)."""
     family = _safe_font(branding.get("font"))
@@ -815,7 +846,7 @@ def _inject_head(content: str, branding: dict, user: Optional[dict], version: st
     # falls back to the tagline (or nothing) rather than a dangling " - ".
     bare_title = app_name or (branding.get("tagline") or "").strip()
     extra = "\n".join([tags, app_head_links(branding), theme_style(branding), font_links(branding),
-                       data_block(branding, user, version, name, setup)])
+                       icon_font_head(), data_block(branding, user, version, name, setup)])
 
     def _rewrite(match):
         inner = match.group(0)[len("<title>"):-len("</title>")]

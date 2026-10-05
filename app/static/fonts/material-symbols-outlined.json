@@ -1,0 +1,18 @@
+{
+  "source_url": "https://fonts.gstatic.com/s/materialsymbolsoutlined/v375/kJEPBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oDMzBwG-RpA6RzaxHMPdY40KH8nGzv3fzfVJO1Q.woff2",
+  "source_sha256": "7c6337e6f0b5d48cbc966d768d67bc160d33c8e84f332d1d1c984064e547e9c9",
+  "icons": 176,
+  "names_sha256": "1087e23ac853bfaa486120af7915405823303743bdf51b9d1b44e8a7656fc667",
+  "woff2_sha256": "a80a0c4371bbafecd34b3aafae948ad64cc22dbe8c64a2a4aabe2960fb9c5192",
+  "woff2_bytes": 33652,
+  "axes": {
+    "FILL": [
+      0.0,
+      1.0
+    ],
+    "wght": [
+      400.0,
+      700.0
+    ]
+  }
+}

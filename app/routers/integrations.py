@@ -18,6 +18,7 @@ from app.auth import session_manager
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin, require_same_origin
+from app.icons import drawable
 from app.integrations import plex, uptime_kuma, seerr, netdata, sonarr, radarr, chaptarr, openlibrary, nyt
 from app.limiter import limiter
 
@@ -135,7 +136,9 @@ def _get_monitor_preferences(db: Session, monitor_id: int) -> dict:
     icon_row = db.query(Setting).filter(Setting.key == f"monitor.{monitor_id}.icon").first()
     return {
         "enabled": enabled_row.value.lower() != "false" if enabled_row else True,
-        "icon": icon_row.value if icon_row else "",
+        # A name the trimmed icon font cannot draw reads as unset, which Home
+        # shows as its default service icon (app/icons.py).
+        "icon": icon_row.value if icon_row and drawable(icon_row.value) else "",
     }
 
 

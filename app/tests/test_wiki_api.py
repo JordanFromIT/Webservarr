@@ -49,10 +49,15 @@ class CategoryWrites(unittest.TestCase):
             db.close()
 
     def test_symbol_names_are_accepted(self):
-        for i, name in enumerate(("folder", "play_circle", "looks_3", "a" * 64)):
+        # Any symbol-shaped name is stored; one the site's trimmed icon font
+        # cannot draw (app/icons.py) is served as "no icon", which the pages
+        # show as a folder, rather than painting as letters.
+        for i, (name, served) in enumerate((("folder", "folder"), ("play_circle", "play_circle"),
+                                            ("looks_3", None), ("a" * 64, None))):
             r = self.client.post("/api/wiki/categories", json={"name": f"Cat {i}", "icon": name, "sort_order": 10})
             self.assertEqual(r.status_code, 201, (name, r.text))
-            self.assertEqual(r.json()["icon"], name)
+            self.assertEqual(r.json()["icon"], served)
+            self.assertEqual(self.category(r.json()["slug"])["icon"], name)
 
     def test_no_icon_and_an_empty_icon_both_mean_none(self):
         r = self.client.post("/api/wiki/categories", json={"name": "Plain", "sort_order": 10})

@@ -28,7 +28,9 @@
   var TABS = ['general', 'pages', 'appearance', 'sign-in', 'integrations', 'books', 'notifications'];
   var TITLES = { general: 'General', pages: 'Pages', appearance: 'Appearance', 'sign-in': 'Sign-in',
                  integrations: 'Integrations', books: 'Books', notifications: 'Notifications' };
-  // Choices for the icon picker. Any Material Symbols name can also be typed.
+  // Choices for the icon picker. A name can also be typed, but the site's icon
+  // font only draws the names in app/static/fonts/material-symbols-outlined.icons.txt;
+  // any other shows as the setting's default icon (app/icons.py).
   var ICONS = [
     'home', 'settings', 'movie', 'tv', 'play_circle', 'download', 'upload', 'monitor_heart', 'newspaper',
     'calendar_month', 'report_problem', 'dns', 'movie_filter', 'monitoring',
@@ -210,7 +212,7 @@
     var body = el('div');
     var search = el('input', cls.input);
     search.type = 'search';
-    search.placeholder = 'Search, or type any Material Symbols name';
+    search.placeholder = 'Search, or type an icon name';
     search.setAttribute('aria-label', 'Search icons');
     var grid = el('div', 'mt-3 grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-[45vh] overflow-y-auto');
     function render() {

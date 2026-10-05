@@ -24,6 +24,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.content import render_markdown
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin, require_same_origin
+from app.icons import drawable
 from app.limiter import limiter
 from app.models import Setting, WikiCategory, WikiPage
 from app.settings_registry import REGISTRY, validate_value
@@ -202,7 +203,9 @@ def _category_dict(cat: WikiCategory, page_count: int, draft_count: int) -> dict
         "name": cat.name,
         "slug": cat.slug,
         "description": cat.description,
-        "icon": cat.icon,
+        # A name the trimmed icon font cannot draw reads as "no icon", which
+        # the pages show as a folder (app/icons.py).
+        "icon": cat.icon if drawable(cat.icon) else None,
         "sort_order": cat.sort_order,
         "page_count": page_count,
         "draft_count": draft_count,

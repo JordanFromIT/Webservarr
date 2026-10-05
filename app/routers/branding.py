@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user_optional
+from app.icons import icon_or
 from app.limiter import limiter
 from app.models import Setting
 from app.settings_registry import (
@@ -145,10 +146,16 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
 
     pages = SIDEBAR_PAGE_IDS
     source = get("requests.source")
-    icons = {"nav_" + p: get("icon.nav_" + p) for p in pages}
-    icons["sidebar_logo"] = get("icon.sidebar_logo")
+
+    def icon(key: str) -> str:
+        # A typed-in name the trimmed icon font cannot draw would paint as
+        # letters; that slot shows its default icon instead (app/icons.py).
+        return icon_or(get(key), DEFAULTS[key])
+
+    icons = {"nav_" + p: icon("icon.nav_" + p) for p in pages}
+    icons["sidebar_logo"] = icon("icon.sidebar_logo")
     for sid in HOME_SECTION_IDS:
-        icons["section_" + sid] = get("icon.section_" + sid)
+        icons["section_" + sid] = icon("icon.section_" + sid)
 
     return {
         "app_name": get("branding.app_name"),
