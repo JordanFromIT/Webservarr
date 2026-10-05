@@ -254,12 +254,13 @@ const QUIET_OK = answer('ok', [], [
 
 // ---------------------------------------------------------------------------
 
-await run('the section sits right above Service Health, with Home\'s heading and a wheel that holds its room', async (make) => {
+await run('the section sits right above News and Service Health, with Home\'s heading and a wheel that holds its room', async (make) => {
   const t = make({ answer: QUIET_OK });
   const order = t.doc.querySelectorAll('[data-arrive]');
   const keys = Array.from(order).map((n) => n.getAttribute('data-arrive'));
-  check('it arrives just before Service Health', keys.indexOf('feed') === keys.indexOf('services') - 1, keys);
-  check('the next section is Service Health', t.section.nextElementSibling && t.section.nextElementSibling.getAttribute('data-arrive') === 'services');
+  check('in the document it comes just before News, then Service Health', keys.indexOf('feed') === keys.indexOf('news') - 1 && keys.indexOf('news') === keys.indexOf('services') - 1, keys);
+  const grid = t.section.nextElementSibling;
+  check('the next thing is the grid that holds them, News first', grid && grid.hasAttribute('data-home-pair') && grid.firstElementChild && grid.firstElementChild.getAttribute('data-arrive') === 'news' && grid.firstElementChild.nextElementSibling.getAttribute('data-arrive') === 'services');
   const h = t.section.querySelector('h3');
   check('the heading is "Event log", styled like the other sections, closer to its wheel', h && h.textContent === 'Event log' && h.className === 'text-xl font-bold text-frosted-blue' && h.parentNode.className === 'flex items-center gap-3 mb-2');
   check('a compact section: less room below it than between the other sections', t.section.classList.contains('-mb-3'));

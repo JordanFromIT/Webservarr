@@ -2044,7 +2044,7 @@ class InPlaceNews(unittest.TestCase):
         self.assertIsNotNone(view_all)
         self.assertIn("invisible", view_all.group(1).split())
         self.assertNotIn("hidden", view_all.group(1).split())
-        row = home[home.index('<section data-arrive="news">'):home.index('id="newsViewAll"')]
+        row = home[home.index('<section data-arrive="news" class="lg:order-3">'):home.index('id="newsViewAll"')]
         self.assertIn('<div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">', row)
         # Home renders its news in its page module (soft navigation).
         script = (STATIC / "js" / "pages" / "home.js").read_text(encoding="utf-8")

@@ -20,7 +20,7 @@
  *   WS.applyShell(parts)          bring the branded shell and <head> up to date (see below)
  *   WS.clearPageCache()           drop the router's hover-prefetched pages (sign-out, a save)
  *   WS.dropCache(prefix)          forget this user's swr copies whose key starts with prefix
- *   WS.arrive(key, write)         reveal sections top-down, in document order
+ *   WS.arrive(key, write)         reveal sections top-down, as they are laid out
  *   WS.arriveReset()              start the order again for a newly mounted page (router.js)
  *   WS.swr(key, fetcher, render)  stale-while-revalidate page data
  *   WS.getJSON(url, { signal })   fetch JSON; rejects on non-2xx (err.status, err.body); signal optional
@@ -138,7 +138,7 @@
     return true;
   }
 
-  // ---- Arrival: sections reveal top-down, in document order ----
+  // ---- Arrival: sections reveal top-down, in the order they are laid out ----
   //
   // Every fetch on a page fires at once; without this, sections appear in
   // whatever order the network answers. Sections are marked data-arrive="key"
@@ -148,14 +148,35 @@
   // already arrived run at once with no animation - polls use the same path.
   var arr = { order: [], done: {}, queue: {}, gate: false, last: 0, painted: false };
 
+  // Top-down means as laid out: top to bottom, then left to right along a
+  // row. That is document order except where a breakpoint places a section
+  // out of it (Home's News is written before Service Health for the phone's
+  // single column, and from lg sits beside Recent Requests under it). A
+  // section that is not displayed keeps its place in document order.
+  function arriveOrder() {
+    var els = Array.prototype.slice.call(document.querySelectorAll('[data-arrive]'));
+    var box = els.map(function (el) {
+      if (typeof el.getClientRects !== 'function' || !el.getClientRects().length) return null;
+      var r = el.getBoundingClientRect();
+      return { top: Math.round(r.top), left: Math.round(r.left) };
+    });
+    var laid = [];
+    for (var i = 0; i < els.length; i++) if (box[i]) laid.push(i);
+    var sorted = laid.slice().sort(function (a, b) {
+      return (box[a].top - box[b].top) || (box[a].left - box[b].left) || (a - b);
+    });
+    var next = 0;
+    return els.map(function (el, i) {
+      return els[box[i] ? sorted[next++] : i].getAttribute('data-arrive');
+    });
+  }
+
   // Also runs for each page the router mounts (WS.arriveReset): the new
   // page's sections start their order afresh, and a timer from the page
   // before is ignored (each run is a generation of its own).
   function arriveInit() {
     var run = arr = { order: [], done: {}, queue: {}, gate: false, last: 0, painted: false };
-    run.order = Array.prototype.map.call(document.querySelectorAll('[data-arrive]'), function (el) {
-      return el.getAttribute('data-arrive');
-    });
+    run.order = arriveOrder();
     // Ordering is only worth a short wait. Answers that land within this
     // window reveal top-down; anything slower reveals as it comes, so one
     // slow integration never holds the page.

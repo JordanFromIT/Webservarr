@@ -123,12 +123,45 @@
 <button type="button" class="ws-wheel-latest" data-event-latest data-action="event-latest" hidden>Latest</button>
 <p class="sr-only" data-event-announce aria-live="polite" aria-atomic="true"></p>
 </section>
-<!-- Service Health: one strip across the page. The server's gauges are not
-     in it: they sit in whichever header is on screen, beside the status pill
-     from lg and between the page title and the bell on a phone or tablet.
-     pages/home.js puts a copy of #homeHeaderGauges in each and takes them out
-     again when Home is left (both headers are the shell's). -->
-<section data-arrive="services">
+<!-- News & Updates, Service Health and Recent Requests. Below lg they are one
+     column in the order written here, so on a phone the news comes straight
+     after the event log and Tab meets each section where it is seen. From lg
+     the grid order puts Service Health in a strip across the page and Recent
+     Requests and News side by side under it, and reading-flow takes Tab
+     through them in that order where the browser has it. A section that is
+     switched off is not displayed, so it takes no cell and no gap (theme.css,
+     "Home sections switched off"). -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start lg:[reading-flow:grid-order]" data-home-pair>
+<!-- News & Updates -->
+<section data-arrive="news" class="lg:order-3">
+<div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">
+<span id="iconSectionNews" class="ws-section-icon material-symbols-outlined text-steel-blue">newspaper</span>
+<h3 class="text-xl font-bold text-frosted-blue">News &amp; Updates</h3>
+<div class="ml-auto flex items-center gap-4">
+<a href="/news" class="ws-admin-only inline-flex items-center gap-1 text-sm font-bold text-steel-blue hover:text-frosted-blue transition-colors">
+Manage news<span class="material-symbols-outlined text-sm">edit</span>
+</a>
+<a href="/news" id="newsViewAll" class="invisible inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors">
+View all<span class="material-symbols-outlined text-sm">chevron_right</span>
+</a>
+</div>
+</div>
+<!-- Skeleton cards are renderNewsCard's collapsed card with nothing in it
+     (the title, two lines on a phone and one from sm, a two-line excerpt
+     and Read more), so an older post lands on its
+     skeleton exactly. A pinned or new post opens in full and is as tall as
+     it is written, which no skeleton can know. -->
+<div id="newsContainer" class="grid gap-3">
+<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
+</div>
+</section>
+<!-- Service Health: from lg one strip across the page. The server's gauges
+     are not in it: they sit in whichever header is on screen, beside the
+     status pill from lg and between the page title and the bell on a phone or
+     tablet. pages/home.js puts a copy of #homeHeaderGauges in each and takes
+     them out again when Home is left (both headers are the shell's). -->
+<section data-arrive="services" class="lg:order-1 lg:col-span-full">
 <div class="flex items-center gap-3 mb-4">
 <span id="iconSectionServices" class="ws-section-icon material-symbols-outlined text-steel-blue">health_metrics</span>
 <h3 class="text-xl font-bold text-frosted-blue">Service Health</h3>
@@ -197,10 +230,8 @@
 <div class="skel rounded-xl border border-transparent flex flex-col sm:w-36" aria-hidden="true"><div class="h-11"></div><div class="py-0.5 text-[10px]">&nbsp;</div></div>
 </div>
 </section>
-<!-- Recent Requests + News side by side -->
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start" data-home-pair>
 <!-- Recent Requests, compact -->
-<section data-arrive="requests">
+<section data-arrive="requests" class="lg:order-2">
 <!-- Wraps only on the narrowest phones (320px), where the heading and the
      link cannot share a line: the link then sits under the heading. The link
      is the site's primary button (as "Turn on" on the push card), one line
@@ -250,30 +281,6 @@
 <tr aria-hidden="true"><td colspan="3" class="px-3 py-2.5"><div class="flex items-center gap-3 min-w-0"><div class="skel size-8 rounded shrink-0"></div><div class="min-w-0 flex-1"><p class="truncate"><span class="skel skel-line inline-block w-1/2 align-middle"></span></p><div class="@md:hidden mt-1"><span class="skel inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold leading-none"><span class="material-symbols-outlined text-[13px] leading-none invisible">movie</span><span class="invisible">Movie</span></span></div></div></div></td></tr>
 </tbody>
 </table>
-</div>
-</section>
-<!-- News & Updates -->
-<section data-arrive="news">
-<div class="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">
-<span id="iconSectionNews" class="ws-section-icon material-symbols-outlined text-steel-blue">newspaper</span>
-<h3 class="text-xl font-bold text-frosted-blue">News &amp; Updates</h3>
-<div class="ml-auto flex items-center gap-4">
-<a href="/news" class="ws-admin-only inline-flex items-center gap-1 text-sm font-bold text-steel-blue hover:text-frosted-blue transition-colors">
-Manage news<span class="material-symbols-outlined text-sm">edit</span>
-</a>
-<a href="/news" id="newsViewAll" class="invisible inline-flex items-center gap-1 text-xs font-bold text-steel-blue hover:text-frosted-blue transition-colors">
-View all<span class="material-symbols-outlined text-sm">chevron_right</span>
-</a>
-</div>
-</div>
-<!-- Skeleton cards are renderNewsCard's collapsed card with nothing in it
-     (the title, two lines on a phone and one from sm, a two-line excerpt
-     and Read more), so an older post lands on its
-     skeleton exactly. A pinned or new post opens in full and is as tall as
-     it is written, which no skeleton can know. -->
-<div id="newsContainer" class="grid gap-3">
-<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
-<div class="skel rounded-xl p-4 flex items-start gap-4 border border-l-4 border-transparent min-w-0" aria-hidden="true"><span class="size-6 mt-0.5 shrink-0"></span><div class="flex-1 min-w-0 invisible"><p class="font-bold min-h-12 sm:min-h-0">&nbsp;</p><p class="text-sm mt-1 min-h-10">&nbsp;</p><div class="mt-2 flex items-center gap-1 text-[11px] font-bold"><span>Read more</span><span class="material-symbols-outlined text-sm">expand_more</span></div></div></div>
 </div>
 </section>
 </div>

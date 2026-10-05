@@ -514,8 +514,10 @@ class ShellRendering(unittest.TestCase):
         for sid in ("requests", "news"):
             self.assertEqual(rules.get(f'html[data-home-hide~="{sid}"] [data-home-pair]', {})
                              .get("grid-template-columns"), "minmax(0, 1fr)", sid)
-        self.assertEqual(rules.get('html[data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair]', {})
-                         .get("display"), "none")
+        # The grid holds Service Health too, so it goes away only with all three off.
+        self.assertEqual(rules.get('html[data-home-hide~="services"][data-home-hide~="requests"]'
+                                   '[data-home-hide~="news"] [data-home-pair]', {}).get("display"), "none")
+        self.assertNotIn('html[data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair]', rules)
         stack = rules.get("html[data-home-hide] [data-home-stack]", {})
         self.assertEqual((stack.get("display"), stack.get("flex-direction"), stack.get("row-gap")),
                          ("flex", "column", "2rem"))
@@ -533,13 +535,24 @@ class ShellRendering(unittest.TestCase):
         stack = re.search(r'<div class="([^"]*)" data-home-stack>', page)
         self.assertIsNotNone(stack)
         self.assertIn("space-y-8", stack.group(1).split())
-        pair = page.index("data-home-pair>")
+        pair_tag = re.search(r'<div class="([^"]*)" data-home-pair>', page)
+        self.assertIsNotNone(pair_tag)
+        pair = pair_tag.end()
         services, requests, news, streams = (page.index(f'data-arrive="{sid}"')
                                              for sid in ("services", "requests", "news", "streams"))
-        # Service Health is a strip across the top, then Recent Requests and
-        # News share the row under it.
-        self.assertTrue(stack.end() < services < pair < requests < news < streams)
-        # The pair closes before Active Streams: both sections sit inside it.
+        # Written in the phone's order: News, Service Health, Recent Requests,
+        # one column below lg (so Tab follows what is seen there).
+        self.assertTrue(stack.end() < pair < news < services < requests < streams)
+        # From lg the grid order makes Service Health a strip across the top,
+        # with Recent Requests and News sharing the row under it, as before.
+        pair_classes = pair_tag.group(1).split()
+        for cls in ("grid", "grid-cols-1", "lg:grid-cols-2", "gap-8", "items-start",
+                    "lg:[reading-flow:grid-order]"):
+            self.assertIn(cls, pair_classes, cls)
+        self.assertIn('<section data-arrive="news" class="lg:order-3">', page)
+        self.assertIn('<section data-arrive="services" class="lg:order-1 lg:col-span-full">', page)
+        self.assertIn('<section data-arrive="requests" class="lg:order-2">', page)
+        # The grid closes before Active Streams: all three sections sit inside it.
         between = page[pair:streams]
         self.assertEqual(between.count("<div") + 1, between.count("</div>"))
 
@@ -1039,11 +1052,12 @@ class EventLogNeverMovesThePage(unittest.TestCase):
         # Only Home has the section.
         self.assertNotIn("homeEventLog", render(name="index", flags={"feed_off": True}))
 
-    def test_it_sits_right_above_service_health(self):
+    def test_it_sits_right_above_news_and_service_health(self):
         page = static_text("index.html")
         order = re.findall(r'data-arrive="(\w+)"', page)
-        self.assertEqual(order[order.index("feed") + 1], "services")
-        log = page[page.index('<section id="homeEventLog"'):page.index('<section data-arrive="services">')]
+        # News comes next on a phone; from lg the grid puts Service Health first.
+        self.assertEqual(order[order.index("feed") + 1:order.index("feed") + 3], ["news", "services"])
+        log = page[page.index('<section id="homeEventLog"'):page.index('<div class="grid grid-cols-1 lg:grid-cols-2')]
         self.assertEqual(log.count("<section"), 1)
         self.assertIn('<h3 id="eventLogTitle" class="text-xl font-bold text-frosted-blue">Event log</h3>', log)
         # Focusable and named, to turn back through the history with the keys.

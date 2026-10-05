@@ -894,7 +894,7 @@ html[data-install-offer="ios"] #installCard [data-install-mode="ios"] { display:
 /* ---- Arrival ----
  *
  * A section plays one 12px fade-up when its content lands (shell.js adds
- * .ws-in in document order, 60ms apart). Polls never replay it.
+ * .ws-in top-down as laid out, 60ms apart). Polls never replay it.
  */
 [data-arrive].ws-in { animation: ws-fade-up 160ms ease-out both; }
 @keyframes ws-fade-up {
@@ -910,9 +910,10 @@ html[data-install-offer="ios"] #installCard [data-install-mode="ios"] { display:
 /* ---- Home sections switched off (Settings > Pages > Home) ----
  *
  * The server lists them on <html data-home-hide="news streams">, so a section
- * that is off is never painted and index.html never loads it. Recent Requests
- * and News share a row: with one of them off the other takes the full width,
- * with both off the row goes away.
+ * that is off is never painted and index.html never loads it. News, Service
+ * Health and Recent Requests share one grid ([data-home-pair]); from lg Recent
+ * Requests and News share a row under Service Health: with one of them off the
+ * other takes the full width, and with all three off the grid goes away.
  */
 html[data-home-hide~="services"] [data-arrive="services"],
 html[data-home-hide~="news"] [data-arrive="news"],
@@ -921,7 +922,7 @@ html[data-home-hide~="releases"] [data-arrive="releases"],
 html[data-home-hide~="requests"] [data-arrive="requests"] { display: none; }
 html[data-home-hide~="requests"] [data-home-pair],
 html[data-home-hide~="news"] [data-home-pair] { grid-template-columns: minmax(0, 1fr); }
-html[data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair] { display: none; }
+html[data-home-hide~="services"][data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair] { display: none; }
 /* space-y-8 spaces every child that follows one without the hidden attribute,
  * and a row hidden by the rules above still counts: with Service Health off,
  * the first section left would open with a stray gap. While
