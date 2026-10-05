@@ -138,6 +138,14 @@
     sec.appendChild(el('p', 'text-[15px] font-semibold text-frosted-blue', 'Sections'));
     sec.appendChild(el('p', 'text-[13px] text-frosted-blue/60 -mt-3',
       'A section that is off is left out of the home page entirely.'));
+    // In the rows' columns: an empty icon cell, so its switch lines up with theirs.
+    var iconsRow = el('div', 'flex items-center gap-3');
+    iconsRow.appendChild(el('span', 'size-10 shrink-0'));
+    var iconsCell = el('div', 'flex-1 min-w-0');
+    iconsCell.appendChild(api.toggle({ key: 'ui.section_icons', label: 'Icons beside section headings',
+      help: 'Shows each section’s icon before its name.' }));
+    iconsRow.appendChild(iconsCell);
+    sec.appendChild(iconsRow);
     SECTIONS.forEach(function (s) {
       var row = el('div', 'flex items-center gap-3');
       row.appendChild(api.iconPicker({ key: 'icon.section_' + s[0], label: s[1] + ' icon', compact: true }));

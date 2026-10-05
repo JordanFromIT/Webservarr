@@ -345,7 +345,7 @@ export function renderContinueRow(items, notes, opts) {
   if (o.compact) {
     // Home's own section heading (an icon, then the title), so it reads as one of its sections.
     const head = el('div', 'flex items-center gap-3 mb-4');
-    head.appendChild(icon('auto_stories', 'text-steel-blue'));
+    head.appendChild(icon('auto_stories', 'ws-section-icon text-steel-blue'));
     head.appendChild(el('h2', 'text-xl font-bold text-frosted-blue', 'Continue'));
     section.appendChild(head);
   } else {

@@ -1007,6 +1007,10 @@ def render_html(page_html: str, *, name: str, branding: dict, user: Optional[dic
         off = [sid for sid, on in (branding.get("home_sections") or {}).items() if on is False]
         if off:
             attrs += f' data-home-hide="{html.escape(" ".join(off), quote=True)}"'
+    if branding.get("section_icons") is True:
+        # Every page: without the mark theme.css hides .ws-section-icon from
+        # the first paint, and the router copies it on each soft navigation.
+        attrs += " data-section-icons"
     if flags.get("netdata"):
         attrs += " data-netdata"
     if safe:

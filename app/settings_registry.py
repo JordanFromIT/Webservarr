@@ -232,6 +232,11 @@ def _build() -> List[SettingDef]:
         d.append(_bool(f"home.section_{sid}", "true", f"Show {name} on the home page", public=True))
         d.append(_icon(f"icon.section_{sid}", icon, f"Home page icon for {name}", public=True))
     d += [
+        # The icon before each section heading (Home's Service Health, News &
+        # Updates, ...). Off by default: the page renderer marks <html
+        # data-section-icons> only while this is on, and theme.css hides
+        # .ws-section-icon without that mark.
+        _bool("ui.section_icons", "false", "Show an icon before each section heading", public=True),
         # Home page news window: old posts drop off the home page rather than piling
         # up forever; the /news archive still holds them all.
         _int("news.homepage_count", "3", "News posts shown on the home page", 1, 20, public=True),

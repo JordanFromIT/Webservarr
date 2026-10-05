@@ -936,6 +936,15 @@ html[data-home-hide~="requests"][data-home-hide~="news"] [data-home-pair] { disp
 html[data-home-hide] [data-home-stack] { display: flex; flex-direction: column; row-gap: 2rem; }
 html[data-home-hide] [data-home-stack] > :not([hidden]) { margin-top: 0; }
 
+/* ---- Section heading icons (Settings > Pages > Home) ----
+ *
+ * The icon before a section heading carries .ws-section-icon. The server marks
+ * <html data-section-icons> only while ui.section_icons is on, so with it off
+ * the icons are never painted. Each sits in a flex row whose gap only spaces
+ * displayed items, so the heading then starts flush with the content below.
+ */
+html:not([data-section-icons]) .ws-section-icon { display: none; }
+
 /* ---- Home's push offer on a full load ----
  *
  * theme-loader.js marks <html data-push-offer> in <head> when Home is to offer

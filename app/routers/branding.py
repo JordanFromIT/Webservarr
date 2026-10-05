@@ -184,6 +184,9 @@ def build_branding(values: dict, auth_values: dict, vapid_public_key: Optional[s
         "requests_source": source if source in ("native", "seerr_embed") else "native",
         "pages_order": normalize_page_order(get("pages.order")),
         "home_sections": {sid: get("home.section_" + sid) != "false" for sid in HOME_SECTION_IDS},
+        # Icons before section headings: the page renderer marks <html
+        # data-section-icons> by it. Off unless exactly "true", like the default.
+        "section_icons": get("ui.section_icons") == "true",
         "wiki_hooks": wiki_hooks,
         "sidebar_labels": {p: get("sidebar.label_" + p) for p in pages},
         "sidebar_sublabels": {p: get("sidebar.sublabel_" + p) for p in pages},
