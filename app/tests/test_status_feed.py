@@ -548,6 +548,34 @@ class FeedApi(unittest.TestCase):
         for days in (0, 91, "x"):
             self.assertEqual(self.client.get(f"/api/status/feed?days={days}").status_code, 422)
 
+    def test_a_resolved_outage_says_whether_it_came_back_or_stopped_being_watched(self):
+        # Home draws "no longer monitored" with the neutral tick, not the
+        # back-up green, so the item says which way it ended. Read from the
+        # line, so a row closed before the field existed is told apart too.
+        db = self.Session()
+        for mid, name in ((7, "Media"), (8, "Books")):
+            db.add(StatusUpdate(source="auto", monitor_id=mid, service_name=name, title=f"{name} is down",
+                                message=f"{name} is down", update_type="incident", severity="critical",
+                                author_id="", author_name="", active=True, important=False,
+                                started_at=self.ago(hours=3), created_at=self.ago(hours=3)))
+        db.commit()
+        self.assertIsNotNone(status_feed.close_unmonitored(db, 7, self.ago(hours=2)))
+        self.assertIsNotNone(status_feed.close_outage(db, 8, self.ago(hours=1)))
+        db.close()
+        add_row(self.Session, source="auto", monitor_id=9, service_name="Plex", update_type="resolved",
+                message="Plex is no longer monitored", active=False, started_at=self.ago(hours=5),
+                ended_at=self.ago(hours=4), resolved_at=self.ago(hours=4), created_at=self.ago(hours=5))
+        open_row = add_row(self.Session, source="auto", monitor_id=10, service_name="Kavita",
+                           message="Kavita is down", update_type="incident", started_at=self.ago(minutes=5))
+        body = self.feed()
+        got = {i["service"]: (i["text"], i.get("unmonitored")) for i in body["items"]}
+        self.assertEqual(got["Media"], ("Media is no longer monitored", True))
+        self.assertTrue(got["Books"][0].startswith("Books is back, down "), got["Books"])
+        self.assertIs(got["Books"][1], False)
+        self.assertEqual(got["Plex"], ("Plex is no longer monitored", True))
+        self.assertEqual([i["id"] for i in body["open"]], [open_row])
+        self.assertNotIn("unmonitored", body["open"][0], "an open outage has not ended either way")
+
     def test_state(self):
         # Review Focus 2: no answer from Uptime Kuma lately (or no Redis to
         # ask) is "unavailable", never "ok".

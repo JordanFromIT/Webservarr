@@ -553,6 +553,20 @@ await run('leaving the page: no turn runs afterwards', async (make) => {
 
 // ---- Library lines (Sonarr, Radarr, Chaptarr webhooks) ----
 
+await run('an outage that ends "no longer monitored": the neutral tick, not the back-up green', async (make) => {
+  const gone = Object.assign(back(30, 'Media', 50, 10), { text: 'Media is no longer monitored', unmonitored: true });
+  const up = Object.assign(back(31, 'Books', 60, 20), { unmonitored: false });
+  const t = make({ answer: answer('ok', [], [gone, up]) });
+  await t.open();
+  const types = t.slots().map((el) => el.getAttribute('data-type'));
+  check('ended as no longer monitored, then its start; back up, then its start', JSON.stringify(types) === JSON.stringify(['unmonitored', 'up', 'down', 'down']), types);
+  check('the line reads as the server wrote it', lineText(t.slots()[0]) === 'Media is no longer monitored' && !t.slots()[0].querySelector('.sr-only'));
+  const grey = THEME_CSS.match(/\.ws-wheel__line\[data-type="unmonitored"\] \.ws-wheel__mark \{ background: ([^;]+); \}/);
+  const lib = THEME_CSS.match(/\.ws-wheel__line\[data-type="library"\] \.ws-wheel__mark \{ background: ([^;]+); \}/);
+  check('the same tick as a library line', grey && lib && grey[1] === lib[1], grey && grey[1]);
+});
+
+
 
 await run('a library line: a grey tick, and a grab\'s muted "not guaranteed" in its own span', async (make) => {
   const t = make({ answer: answer('ok', [], [lib(20, 'Movie Downloading: Dune (2021)', 2, 'not guaranteed'), lib(21, 'Episode Added: Severance S02E03', 5), note(3, 'A note', 30)]) });

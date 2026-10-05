@@ -1046,6 +1046,9 @@ html[data-home-hide][data-push-offer] #pushPrompt[hidden] { margin-bottom: 0; }
 .ws-wheel__line[data-type="important"] .ws-wheel__mark { background: rgb(var(--ws-status-warn)); }
 /* A library line (Sonarr, Radarr, Chaptarr): a neutral grey tick. */
 .ws-wheel__line[data-type="library"] .ws-wheel__mark { background: rgb(var(--color-text-secondary) / 0.55); }
+/* An outage whose service is no longer monitored: nobody knows it came back,
+   so the same neutral tick, not the back-up green. */
+.ws-wheel__line[data-type="unmonitored"] .ws-wheel__mark { background: rgb(var(--color-text-secondary) / 0.55); }
 .ws-wheel__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.005em; }
 /* A grab's " · not guaranteed", muted after the title. The title gives way
    to it (ellipsis), so the note is still read on a phone. */

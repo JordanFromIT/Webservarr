@@ -747,7 +747,12 @@ function feedEvents(data) {
                 if (began !== null && typeof it.service === 'string' && it.service) {
                     out.push({ key: 'a' + it.id + ':down', type: 'down', text: it.service + ' is down', at: began });
                 }
-                if (ended !== null && text) out.push({ key: 'a' + it.id + ':up', type: 'up', text: text, at: ended });
+                // Back up: the green tick. No longer monitored (it left the
+                // status page, so nobody knows): the neutral one.
+                if (ended !== null && text) {
+                    out.push({ key: 'a' + it.id + ':up', type: it.unmonitored === true ? 'unmonitored' : 'up',
+                               text: text, at: ended });
+                }
             }
         } else if (it.source === 'library') {
             var when = feedTime(it.created_at);

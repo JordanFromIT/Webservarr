@@ -169,11 +169,19 @@ def close_outage(db: Session, monitor_id: int, now: datetime) -> Optional[Status
     return _close_outage(db, monitor_id, now, back)
 
 
+# How an outage closed when its monitor left the status page (close_unmonitored).
+UNMONITORED = " is no longer monitored"
+
+
 def close_unmonitored(db: Session, monitor_id: int, now: datetime) -> Optional[StatusUpdate]:
     """Close the monitor's open outage as "<name> is no longer monitored": it
     left Uptime Kuma's status page, so nobody can say whether it came back.
     None when there is none, or the other worker closed it first."""
-    return _close_outage(db, monitor_id, now, lambda row: f"{_service(row)} is no longer monitored")
+    return _close_outage(db, monitor_id, now, _unmonitored_line)
+
+
+def _unmonitored_line(row: StatusUpdate) -> str:
+    return f"{_service(row)}{UNMONITORED}"
 
 
 def _service(row: StatusUpdate) -> str:
@@ -252,6 +260,12 @@ def item(row: StatusUpdate) -> dict:
     }
     if row.source == LIBRARY:
         body["note"] = GRAB_NOTE if row.update_type == "grab" else ""
+    if row.source == AUTO and not row.active:
+        # A resolved outage either came back or stopped being watched; Home
+        # draws the second with a neutral tick, not the back-up green. Read
+        # from the line itself, which this module wrote, so outages closed
+        # before the field existed are told apart too.
+        body["unmonitored"] = row.message == _unmonitored_line(row)
     return body
 
 
