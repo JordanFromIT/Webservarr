@@ -755,19 +755,19 @@ async def settings_next_redirect():
 
 
 class _StaticFiles(StaticFiles):
-    """StaticFiles that never serves the files a gated route owns.
+    """StaticFiles that never serves a page's own file (any .html at the top
+    of the static directory; the shell's partials sit in partials/).
 
-    The player's test launcher (/player-test) is admins-only, but its page
-    file lives with the others so the page contract, the shell and the CSS
-    build see it. Served raw from /static, the router would mount its module
-    for anyone. `path` here is already normalised (StaticFiles.get_path), so
-    every spelling that would reach the file ("//", "./", "js/../", an
-    encoded character) is caught, and gets the 404 a missing file gets."""
-
-    GATED = frozenset({"player-test.html"})
+    Each page is rendered by its route, which applies its gate (sign-in, the
+    page switch, admin only) and fills in its data. Served raw from /static,
+    the player's test launcher would let the router mount its module for
+    anyone, and every other page would skip its gate. `path` here is already
+    normalised (StaticFiles.get_path), so every spelling that would reach the
+    file ("//", "./", "js/../", an encoded character) is caught, and gets the
+    404 a missing file gets."""
 
     async def get_response(self, path: str, scope):
-        if path in self.GATED:
+        if path.endswith(".html") and "/" not in path:
             raise StarletteHTTPException(status_code=404)
         return await super().get_response(path, scope)
 

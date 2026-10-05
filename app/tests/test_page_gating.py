@@ -390,3 +390,36 @@ class SettingsSetupFlagsRoute(PageRoutesBase):
             self.assertNotIn("setup", data_of(self.get("/", ADMIN_SESSION).text))
             self.assertEqual(called.call_count, 1)
             self.assertEqual(self.get("/settings", MEMBER_SESSION).status_code, 302)
+
+
+class RawPageFiles(PageRoutesBase):
+    """F4: a page's raw file under /static is never served. Only its route
+    renders it, with its gate (sign-in, page switch, admin) and its data; the
+    raw skeleton would skip all of that. The shell's partials and every real
+    asset are served as before."""
+
+    def test_no_page_file_is_served_from_static(self):
+        import os
+        static = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+        pages_found = sorted(name for name in os.listdir(static) if name.endswith(".html"))
+        self.assertIn("settings.html", pages_found)
+        missing = self.get("/static/no-such-file.html", None)
+        self.assertEqual(missing.status_code, 404)
+        for session in (None, MEMBER_SESSION, ADMIN_SESSION):
+            for name in pages_found:
+                for path in (f"/static/{name}", f"/static//{name}", f"/static/./{name}",
+                             f"/static/css/../{name}", f"/static/{name}?v=1", f"/static/{name.replace('.', '%2E')}"):
+                    with self.subTest(path=path, signed_in=bool(session)):
+                        r = self.get(path, session)
+                        self.assertEqual((r.status_code, r.content), (404, missing.content))
+
+    def test_partials_and_assets_are_still_served(self):
+        for path in ("/static/partials/shell-sidebar.html", "/static/partials/shell-header.html",
+                     "/static/css/app.css", "/static/js/shell.js", "/static/webservarr.svg"):
+            with self.subTest(path=path):
+                self.assertEqual(self.get(path, None).status_code, 200)
+
+    def test_the_routes_still_render_the_pages(self):
+        for path in ("/", "/news", "/tickets", "/settings"):
+            with self.subTest(path=path):
+                self.assertEqual(self.get(path, ADMIN_SESSION).status_code, 200)

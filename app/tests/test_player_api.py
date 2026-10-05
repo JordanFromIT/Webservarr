@@ -2984,8 +2984,9 @@ class LauncherPage(unittest.TestCase):
         self.assertEqual(self.get(self.ADMIN).status_code, 200)
 
     def test_every_other_static_file_is_served_as_before(self):
-        for path in ("/static/news.html", "/static/js/pages/player-test.js", "/static/css/app.css",
-                     "/static/webservarr.svg"):
+        # (No page's raw file is served at all: test_page_gating.RawPageFiles.)
+        for path in ("/static/partials/shell-header.html", "/static/js/pages/player-test.js",
+                     "/static/css/app.css", "/static/webservarr.svg"):
             with self.subTest(path):
                 self.assertEqual(self.get(None, path=path).status_code, 200)
 
